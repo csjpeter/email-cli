@@ -5,9 +5,24 @@ BUILD_DIR = build
 BIN_DIR = bin
 PROJECT_NAME = email-cli
 
-.PHONY: all build build-debug clean test-asan test-valgrind coverage
+.PHONY: all build build-debug clean test-asan test-valgrind coverage help
 
-all: build
+# Default target: show help
+all: help
+
+help:
+	@echo "email-cli build system"
+	@echo ""
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@echo "  build          Build production binary (Release)"
+	@echo "  build-debug    Build diagnostic binary (Debug + ASAN)"
+	@echo "  test-asan      Run unit tests with Address Sanitizer"
+	@echo "  test-valgrind  Run unit tests with Valgrind leak detection"
+	@echo "  coverage       Run tests and generate GCOV coverage report"
+	@echo "  clean          Remove build and bin directories"
+	@echo "  help           Show this help message"
 
 setup:
 	@mkdir -p $(BUILD_DIR)
@@ -26,22 +41,25 @@ build-debug: setup
 	@echo "Debug build (with ASAN) complete: $(BIN_DIR)/$(PROJECT_NAME)"
 
 test-asan: build-debug
-	@echo "Running tests with ASAN..."
-	@# TODO: Add test execution command here when test-runner is ready
-	@# $(BIN_DIR)/test-runner
+	@echo "Running unit tests with ASAN..."
+	@$(MAKE) -C $(BUILD_DIR) test-runner
+	@$(BUILD_DIR)/tests/unit/test-runner
 
 test-valgrind: build
-	@echo "Running tests with Valgrind..."
-	@# TODO: Add valgrind command here
-	@# valgrind --leak-check=full $(BIN_DIR)/test-runner
+	@echo "Running unit tests with Valgrind..."
+	@$(MAKE) -C $(BUILD_DIR) test-runner
+	@valgrind --leak-check=full --error-exitcode=1 $(BUILD_DIR)/tests/unit/test-runner
 
 coverage: setup
 	@cd $(BUILD_DIR) && cmake -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug ..
 	@$(MAKE) -C $(BUILD_DIR)
-	@echo "Running tests for coverage..."
-	@# TODO: Run tests and generate lcov report
-	@# lcov --capture --directory . --output-file coverage.info
-	@# genhtml coverage.info --output-directory out
+	@$(MAKE) -C $(BUILD_DIR) test-runner
+	@$(BUILD_DIR)/tests/unit/test-runner
+	@echo "Generating coverage report..."
+	@# Note: requires lcov installed
+	@lcov --capture --directory . --output-file $(BUILD_DIR)/coverage.info
+	@genhtml $(BUILD_DIR)/coverage.info --output-directory $(BUILD_DIR)/coverage_report
+	@echo "Coverage report available at $(BUILD_DIR)/coverage_report/index.html"
 
 clean:
 	@rm -rf $(BUILD_DIR)

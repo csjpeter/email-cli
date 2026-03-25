@@ -13,6 +13,7 @@ show_help() {
     echo "Usage: ./manage.sh [command]"
     echo ""
     echo "Commands:"
+    echo "  deps           Install system dependencies (supports Ubuntu 24.04, Rocky 9)"
     echo "  build          Build the project in Release mode"
     echo "  debug          Build the project in Debug mode (with ASAN)"
     echo "  run            Build and run the application"
@@ -24,7 +25,45 @@ show_help() {
     echo "  help           Show this help message"
 }
 
+install_deps() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "$ID" in
+            ubuntu)
+                if [[ "$VERSION_ID" == "24.04" ]]; then
+                    echo "Detected Ubuntu 24.04. Installing dependencies..."
+                    sudo apt-get update
+                    sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev lcov valgrind
+                else
+                    echo "Unsupported Ubuntu version: $VERSION_ID. Only 24.04 is explicitly supported."
+                    exit 1
+                fi
+                ;;
+            rocky)
+                if [[ "$VERSION_ID" == 9* ]]; then
+                    echo "Detected Rocky Linux 9. Installing dependencies..."
+                    sudo dnf groupinstall -y "Development Tools"
+                    sudo dnf install -y cmake libcurl-devel openssl-devel lcov valgrind
+                else
+                    echo "Unsupported Rocky version: $VERSION_ID. Only 9.x is explicitly supported."
+                    exit 1
+                fi
+                ;;
+            *)
+                echo "Unsupported OS: $ID. Please install dependencies manually."
+                exit 1
+                ;;
+        esac
+    else
+        echo "Could not detect OS. Please install dependencies manually."
+        exit 1
+    fi
+}
+
 case "$1" in
+    deps)
+        install_deps
+        ;;
     build)
         make build
         ;;

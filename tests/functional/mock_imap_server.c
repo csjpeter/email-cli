@@ -25,28 +25,46 @@ void handle_client(int client_sock) {
         buffer[bytes] = 0;
         printf("Client: %s", buffer);
 
+        // Extract Tag
+        char tag[16] = {0};
+        sscanf(buffer, "%15s", tag);
+
         // Simple State Machine
         if (strstr(buffer, "CAPABILITY")) {
-            const char *resp = "* CAPABILITY IMAP4rev1 AUTH=PLAIN\r\nOK CAPABILITY completed\r\n";
+            const char *resp = "* CAPABILITY IMAP4rev1\r\n";
             send(client_sock, resp, strlen(resp), 0);
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK CAPABILITY completed\r\n", tag);
+            send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "LOGIN")) {
-            const char *resp = "OK LOGIN completed\r\n";
-            send(client_sock, resp, strlen(resp), 0);
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK LOGIN completed\r\n", tag);
+            send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "SELECT")) {
-            const char *resp = "* 1 EXISTS\r\nOK [READ-WRITE] SELECT completed\r\n";
-            send(client_sock, resp, strlen(resp), 0);
+            const char *exists = "* 1 EXISTS\r\n";
+            send(client_sock, exists, strlen(exists), 0);
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK [READ-WRITE] SELECT completed\r\n", tag);
+            send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "FETCH")) {
             const char *msg = "Subject: Test Message\r\n\r\nHello from Mock Server!";
-            char resp[1024];
-            snprintf(resp, sizeof(resp), "* 1 FETCH (BODY[] {%zu}\r\n%s)\r\nOK FETCH completed\r\n", strlen(msg), msg);
-            send(client_sock, resp, strlen(resp), 0);
+            char data[1024];
+            snprintf(data, sizeof(data), "* 1 FETCH (BODY[] {%zu}\r\n%s)\r\n", strlen(msg), msg);
+            send(client_sock, data, strlen(data), 0);
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);
+            send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "LOGOUT")) {
-            const char *resp = "* BYE Mock IMAP server logging out\r\nOK LOGOUT completed\r\n";
-            send(client_sock, resp, strlen(resp), 0);
+            const char *bye = "* BYE Mock IMAP server logging out\r\n";
+            send(client_sock, bye, strlen(bye), 0);
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK LOGOUT completed\r\n", tag);
+            send(client_sock, ok, strlen(ok), 0);
             break;
         } else {
-            const char *resp = "BAD Unknown command\r\n";
-            send(client_sock, resp, strlen(resp), 0);
+            char bad[64];
+            snprintf(bad, sizeof(bad), "%s BAD Unknown command\r\n", tag);
+            send(client_sock, bad, strlen(bad), 0);
         }
     }
     close(client_sock);

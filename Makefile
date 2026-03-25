@@ -5,7 +5,7 @@ BUILD_DIR = build
 BIN_DIR = bin
 PROJECT_NAME = email-cli
 
-.PHONY: all build build-debug clean test-asan test-valgrind coverage help
+.PHONY: all build build-debug clean test-asan test-valgrind test-functional coverage help
 
 # Default target: show help
 all: help
@@ -16,13 +16,14 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build          Build production binary (Release)"
-	@echo "  build-debug    Build diagnostic binary (Debug + ASAN)"
-	@echo "  test-asan      Run unit tests with Address Sanitizer"
-	@echo "  test-valgrind  Run unit tests with Valgrind leak detection"
-	@echo "  coverage       Run tests and generate GCOV coverage report"
-	@echo "  clean          Remove build and bin directories"
-	@echo "  help           Show this help message"
+	@echo "  build           Build production binary (Release)"
+	@echo "  build-debug     Build diagnostic binary (Debug + ASAN)"
+	@echo "  test-asan       Run unit tests with Address Sanitizer"
+	@echo "  test-valgrind   Run unit tests with Valgrind leak detection"
+	@echo "  test-functional Run end-to-end tests against mock server"
+	@echo "  coverage        Run tests and generate GCOV coverage report"
+	@echo "  clean           Remove build and bin directories"
+	@echo "  help            Show this help message"
 
 setup:
 	@mkdir -p $(BUILD_DIR)
@@ -49,6 +50,10 @@ test-valgrind: build
 	@echo "Running unit tests with Valgrind..."
 	@$(MAKE) -C $(BUILD_DIR) test-runner
 	@valgrind --leak-check=full --error-exitcode=1 $(BUILD_DIR)/tests/unit/test-runner
+
+test-functional: build
+	@echo "Running functional tests..."
+	@./tests/functional/run_functional.sh
 
 coverage: setup
 	@cd $(BUILD_DIR) && cmake -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug ..

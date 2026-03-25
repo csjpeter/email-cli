@@ -8,7 +8,10 @@ include_directories(
 set(TEST_SOURCES
     test_runner.c
     test_fs_util.c
+    test_config.c
     ../../src/core/fs_util.c
+    ../../src/core/logger.c
+    ../../src/infrastructure/config_store.c
 )
 
 add_executable(test-runner ${TEST_SOURCES})

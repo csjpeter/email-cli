@@ -62,6 +62,8 @@ int logger_init(const char *log_file_path, LogLevel level) {
 
     g_log_fp = fopen(g_log_path, "a");
     if (!g_log_fp) {
+        free(g_log_path);
+        g_log_path = NULL;
         return -1;
     }
 

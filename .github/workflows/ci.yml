@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev valgrind
+
+      - name: Build (Release)
+        run: ./manage.sh build
+
+      - name: Unit tests with ASAN
+        run: ./manage.sh test
+
+      - name: Unit tests with Valgrind
+        run: ./manage.sh valgrind

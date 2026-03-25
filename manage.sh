@@ -3,11 +3,12 @@
 # email-cli management script
 # A user-friendly interface for building, testing, and running the project
 
-# Exit on error
 set -e
 
 PROJECT_NAME="email-cli"
-BIN_PATH="./bin/$PROJECT_NAME"
+BUILD_DIR="./build"
+BIN_DIR="./bin"
+BIN_PATH="$BIN_DIR/$PROJECT_NAME"
 
 show_help() {
     echo "Usage: ./manage.sh [command]"
@@ -42,6 +43,7 @@ install_deps() {
             rocky)
                 if [[ "$VERSION_ID" == 9* ]]; then
                     echo "Detected Rocky Linux 9. Installing dependencies..."
+                    sudo dnf install -y epel-release
                     sudo dnf groupinstall -y "Development Tools"
                     sudo dnf install -y cmake libcurl-devel openssl-devel lcov valgrind
                 else
@@ -60,29 +62,73 @@ install_deps() {
     fi
 }
 
+cmake_configure() {
+    local build_type="$1"
+    local extra_flags="${2:-}"
+    mkdir -p "$BUILD_DIR" "$BIN_DIR"
+    cd "$BUILD_DIR"
+    cmake -DCMAKE_BUILD_TYPE="$build_type" $extra_flags ..
+    cd ..
+}
+
+cmake_build() {
+    cmake --build "$BUILD_DIR"
+    cp "$BUILD_DIR/$PROJECT_NAME" "$BIN_DIR/"
+}
+
+build_release() {
+    cmake_configure Release
+    cmake_build
+    echo "Build complete: $BIN_PATH"
+}
+
+build_debug() {
+    cmake_configure Debug
+    cmake_build
+    echo "Debug build (with ASAN) complete: $BIN_PATH"
+}
+
+build_test_runner() {
+    cmake --build "$BUILD_DIR" --target test-runner
+}
+
 case "$1" in
     deps)
         install_deps
         ;;
     build)
-        make build
+        build_release
         ;;
     debug)
-        make build-debug
+        build_debug
         ;;
     run)
-        make build
+        build_release
         echo "Launching $PROJECT_NAME..."
         $BIN_PATH
         ;;
     test)
-        make test-asan
+        echo "Running unit tests with ASAN..."
+        build_debug
+        build_test_runner
+        "$BUILD_DIR/tests/unit/test-runner"
         ;;
     valgrind)
-        make test-valgrind
+        echo "Running unit tests with Valgrind..."
+        build_release
+        build_test_runner
+        valgrind --leak-check=full --error-exitcode=1 "$BUILD_DIR/tests/unit/test-runner"
         ;;
     coverage)
-        make coverage
+        cmake_configure Debug "-DENABLE_COVERAGE=ON"
+        cmake_build
+        build_test_runner
+        "$BUILD_DIR/tests/unit/test-runner"
+        ./tests/functional/run_functional.sh
+        echo "Generating coverage report..."
+        lcov --capture --directory . --output-file "$BUILD_DIR/coverage.info"
+        genhtml "$BUILD_DIR/coverage.info" --output-directory "$BUILD_DIR/coverage_report"
+        echo "Coverage report available at $BUILD_DIR/coverage_report/index.html"
         ;;
     clean-logs)
         if [ -f "$BIN_PATH" ]; then
@@ -94,7 +140,8 @@ case "$1" in
         fi
         ;;
     clean)
-        make clean
+        rm -rf "$BUILD_DIR" "$BIN_DIR"
+        echo "Cleaned."
         ;;
     help|*)
         show_help

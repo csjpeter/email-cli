@@ -46,6 +46,13 @@ void handle_client(int client_sock) {
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK [READ-WRITE] SELECT completed\r\n", tag);
             send(client_sock, ok, strlen(ok), 0);
+        } else if (strstr(buffer, "SEARCH")) {
+            /* Respond to "UID SEARCH ALL" – report one message exists */
+            const char *search_resp = "* SEARCH 1\r\n";
+            send(client_sock, search_resp, strlen(search_resp), 0);
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK SEARCH completed\r\n", tag);
+            send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "FETCH")) {
             const char *msg = "Subject: Test Message\r\n\r\nHello from Mock Server!";
             char data[1024];
@@ -102,11 +109,9 @@ int main() {
 
     printf("Mock IMAP Server listening on port %d\n", PORT);
 
-    while ((client_sock = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen))) {
+    while ((client_sock = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) >= 0) {
         printf("Connection accepted\n");
         handle_client(client_sock);
-        // Only handle one session for test simplicity then exit
-        break; 
     }
 
     close(server_fd);

@@ -24,7 +24,6 @@ show_help() {
     echo "  integration    Run integration test against Dovecot IMAP container"
     echo "  imap-down      Stop integration test container (preserves emails volume)"
     echo "  imap-clean     Remove integration test container and volume"
-    echo "  memory-setup   Symlink repo .claude/memory to Claude's system memory location"
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
@@ -143,23 +142,6 @@ case "$1" in
         ;;
     imap-clean)
         ./tests/integration/run_integration.sh --clean
-        ;;
-    memory-setup)
-        REPO_MEMORY="$(pwd)/.claude/memory"
-        PROJECT_KEY="$(pwd | sed 's|^/||; s|/|-|g')"
-        SYSTEM_MEMORY="$HOME/.claude/projects/-${PROJECT_KEY}/memory"
-        mkdir -p "$(dirname "$SYSTEM_MEMORY")"
-        if [ -L "$SYSTEM_MEMORY" ]; then
-            echo "Symlink already exists: $SYSTEM_MEMORY -> $(readlink "$SYSTEM_MEMORY")"
-        elif [ -d "$SYSTEM_MEMORY" ]; then
-            echo "WARNING: $SYSTEM_MEMORY is a real directory (not a symlink)."
-            echo "Move its contents to $REPO_MEMORY manually, then re-run."
-            exit 1
-        else
-            ln -s "$REPO_MEMORY" "$SYSTEM_MEMORY"
-            echo "Memory symlink created:"
-            echo "  $SYSTEM_MEMORY -> $REPO_MEMORY"
-        fi
         ;;
     clean-logs)
         if [ -f "$BIN_PATH" ]; then

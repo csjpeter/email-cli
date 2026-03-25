@@ -1,0 +1,31 @@
+---
+name: Architecture Decisions
+description: Meghozott tervezési döntések indokaik és alkalmazási területük
+type: project
+---
+
+## Makefile eltávolítva → manage.sh
+
+**Döntés:** A Makefile törlésre került; `manage.sh` közvetlenül hívja a CMake-et.
+**Why:** A manage.sh rugalmasabb bővítésre; a Makefile csak wrapper volt, duplikáció.
+**How to apply:** Minden build/test parancs `./manage.sh <cmd>` formában fut.
+
+## Dovecot a Mail-in-a-Box helyett
+
+**Döntés:** Az integrációs teszt Dovecot IMAP szervert használ, nem Mail-in-a-Box-ot.
+**Why:** MIAB systemd PID 1-et igényel, ~20 perces telepítés, nem Docker-natív.
+Dovecot = MIAB IMAP komponense, de pár másodperc alatt indul.
+**How to apply:** `./manage.sh integration` — Docker szükséges.
+
+## genbadge a Codecov helyett
+
+**Döntés:** Coverage badge önállóan generálódik lcov→Cobertura XML→SVG pipeline-on.
+**Why:** Codecov a main ágra tokent kér (regisztráció), genbadge-hez semmi sem kell.
+**How to apply:** Badge URL: `https://csjpeter.github.io/email-cli/coverage-badge.svg`
+
+## Repo-beli memória symlink-kel
+
+**Döntés:** `.claude/memory/` a repóban van; `manage.sh memory-setup` symlinkeli
+a Claude rendszer-memória helyére (`~/.claude/projects/.../memory/`).
+**Why:** Más hostról is folytatható a munka — `git pull` + `manage.sh memory-setup`.
+**How to apply:** Új gépen: `git clone ... && cd email-cli && ./manage.sh memory-setup`

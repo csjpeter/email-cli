@@ -1,0 +1,5 @@
+# Only memory/ is tracked; ignore everything else under .claude/
+*
+!.gitignore
+!memory/
+!memory/**

@@ -33,8 +33,9 @@ jobs:
 
       - name: Generate coverage badge
         run: |
-          pip install genbadge[coverage] --quiet
-          genbadge coverage -i build/coverage.info -o build/coverage_report/coverage-badge.svg
+          pip install genbadge[coverage] lcov_cobertura --quiet
+          lcov_cobertura build/coverage.info -o build/coverage.xml
+          genbadge coverage -i build/coverage.xml -o build/coverage_report/coverage-badge.svg
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -31,6 +31,12 @@ jobs:
       - name: Generate coverage report
         run: ./manage.sh coverage
 
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: build/coverage.info
+          fail_ci_if_error: false
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

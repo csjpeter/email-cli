@@ -24,6 +24,7 @@ static char* get_input(const char *prompt, int hide, FILE *stream) {
     char *line = NULL;
     size_t len = 0;
     if (getline(&line, &len, stream) == -1) {
+        free(line);
         if (hide && is_tty) tcsetattr(fileno(stream), TCSANOW, &oldt);
         return NULL;
     }

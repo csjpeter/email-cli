@@ -11,6 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./manage.sh valgrind   # Unit tests with Valgrind
 ./manage.sh coverage   # GCOV/LCOV coverage report (>90% goal for core/infra)
 ./manage.sh clean      # Remove build artifacts
+./manage.sh integration # Integration test against real Dovecot IMAP (Docker required)
+./manage.sh imap-down  # Stop integration container (volume preserved)
+./manage.sh imap-clean # Remove integration container and volume
 ./manage.sh deps       # Install system dependencies (Ubuntu 24.04 / Rocky 9)
 ```
 

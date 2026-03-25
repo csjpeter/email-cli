@@ -1,0 +1,14 @@
+Return-Path: <sender@example.com>
+Delivered-To: testuser@localhost
+From: Test Sender <sender@example.com>
+To: Test User <testuser@localhost>
+Subject: Integration Test Email 1
+Date: Wed, 25 Mar 2026 10:00:00 +0000
+Message-ID: <integration-test-1@mail.test.local>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hello from the Integration Test!
+
+This is test email number 1. If you can read this,
+the IMAP connection to Dovecot works correctly.

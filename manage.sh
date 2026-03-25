@@ -21,6 +21,9 @@ show_help() {
     echo "  test           Build and run unit tests (with ASAN)"
     echo "  valgrind       Build and run unit tests with Valgrind"
     echo "  coverage       Run tests and generate coverage report"
+    echo "  integration    Run integration test against Dovecot IMAP container"
+    echo "  imap-down      Stop integration test container (preserves emails volume)"
+    echo "  imap-clean     Remove integration test container and volume"
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
@@ -129,6 +132,16 @@ case "$1" in
         lcov --capture --directory . --output-file "$BUILD_DIR/coverage.info"
         genhtml "$BUILD_DIR/coverage.info" --output-directory "$BUILD_DIR/coverage_report"
         echo "Coverage report available at $BUILD_DIR/coverage_report/index.html"
+        ;;
+    integration)
+        build_release
+        ./tests/integration/run_integration.sh
+        ;;
+    imap-down)
+        ./tests/integration/run_integration.sh --down
+        ;;
+    imap-clean)
+        ./tests/integration/run_integration.sh --clean
         ;;
     clean-logs)
         if [ -f "$BIN_PATH" ]; then

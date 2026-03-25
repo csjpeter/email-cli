@@ -1,0 +1,13 @@
+Return-Path: <another@example.com>
+Delivered-To: testuser@localhost
+From: Another Sender <another@example.com>
+To: Test User <testuser@localhost>
+Subject: Integration Test Email 2
+Date: Wed, 25 Mar 2026 10:01:00 +0000
+Message-ID: <integration-test-2@mail.test.local>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This is test email number 2.
+
+It verifies that multiple messages exist in the mailbox.

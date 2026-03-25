@@ -45,3 +45,7 @@ No external test libraries are used. Tests use `ASSERT(condition, message)` and 
 ## Language & Standard
 
 C11 (`-std=c11`). Linked against libcurl + libssl. All public functions should have Doxygen-style comments.
+
+## Project Memory
+
+Current project status, architectural decisions, and user preferences are tracked in `.claude/memory/`. Read these files at the start of each session for context on what has been done and what comes next.

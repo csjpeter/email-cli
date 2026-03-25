@@ -23,10 +23,13 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    char log_dir[1024];
-    char log_file[1024];
-    snprintf(log_dir, sizeof(log_dir), "%s/.cache/email-cli/logs", home);
-    snprintf(log_file, sizeof(log_file), "%s/session.log", log_dir);
+    RAII_STRING char *log_dir = NULL;
+    RAII_STRING char *log_file = NULL;
+    if (asprintf(&log_dir, "%s/.cache/email-cli/logs", home) == -1 ||
+        asprintf(&log_file, "%s/session.log", log_dir) == -1) {
+        fprintf(stderr, "Fatal: Memory allocation failed.\n");
+        return EXIT_FAILURE;
+    }
 
     // 2. Handle CLI Arguments (Early)
     if (argc > 1) {

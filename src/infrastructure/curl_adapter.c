@@ -11,8 +11,8 @@ CURL* curl_adapter_init(const char *user, const char *pass) {
     // Default to verbose for debugging; can be toggled later.
     // curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     
-    // Require SSL
-    curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
+    // Use SSL if available (STARTTLS or implicit)
+    curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_TRY);
 
     return curl;
 }

@@ -20,6 +20,7 @@ This project follows **CLEAN Code** principles with a strictly layered architect
 The project includes a `manage.sh` script for a user-friendly experience:
 
 ```bash
+./manage.sh deps       # Install system dependencies (Ubuntu 24.04 / Rocky 9)
 ./manage.sh build      # Build the application (Release)
 ./manage.sh run        # Build and run
 ./manage.sh test       # Run unit tests (with ASAN)

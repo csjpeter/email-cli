@@ -4,11 +4,14 @@
 #include "config_store.h"
 
 /**
- * High-level service for fetching email data.
+ * @file email_service.h
+ * @brief High-level service for fetching email data.
  */
 
 /**
- * Fetches the raw content of the 5 most recent emails.
+ * @brief Fetches the raw content of recent emails.
+ * @param cfg Pointer to the connection configuration.
+ * @return 0 on success, -1 on failure.
  */
 int email_service_fetch_recent(const Config *cfg);
 

@@ -1,6 +1,7 @@
 #include "email_service.h"
 #include "curl_adapter.h"
 #include "raii.h"
+#include "logger.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -30,7 +31,10 @@ int email_service_fetch_recent(const Config *cfg) {
     // Simplest test: fetch message with UID 1 (if it exists).
     
     RAII_STRING char *url = NULL;
-    asprintf(&url, "%s/%s/;UID=1", cfg->host, cfg->folder);
+    if (asprintf(&url, "%s/%s/;UID=1", cfg->host, cfg->folder) == -1) {
+        logger_log(LOG_ERROR, "Memory allocation failed for URL.");
+        return -1;
+    }
     
     CURLcode res = curl_adapter_fetch(curl, url, NULL, write_to_stdout);
     if (res != CURLE_OK) {

@@ -24,7 +24,9 @@ static char* get_config_path() {
     const char *home = fs_get_home_dir();
     if (!home) return NULL;
     char *path = NULL;
-    asprintf(&path, "%s/%s/%s", home, CONFIG_REL_DIR, CONFIG_FILE);
+    if (asprintf(&path, "%s/%s/%s", home, CONFIG_REL_DIR, CONFIG_FILE) == -1) {
+        return NULL;
+    }
     return path;
 }
 

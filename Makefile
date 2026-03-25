@@ -60,6 +60,7 @@ coverage: setup
 	@$(MAKE) -C $(BUILD_DIR)
 	@$(MAKE) -C $(BUILD_DIR) test-runner
 	@$(BUILD_DIR)/tests/unit/test-runner
+	@./tests/functional/run_functional.sh
 	@echo "Generating coverage report..."
 	@# Note: requires lcov installed
 	@lcov --capture --directory . --output-file $(BUILD_DIR)/coverage.info

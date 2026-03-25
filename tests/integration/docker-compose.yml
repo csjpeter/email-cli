@@ -1,0 +1,20 @@
+services:
+  imap-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: email-cli-imap-test
+    ports:
+      - "143:143"
+    volumes:
+      - maildata:/home/testuser/Maildir
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "143"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+volumes:
+  maildata:
+    name: email-cli-maildata

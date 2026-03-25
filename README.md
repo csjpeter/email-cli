@@ -2,6 +2,9 @@
 
 A robust, modular, and memory-safe email client written in C using libcurl and GNU RAII extensions.
 
+[![CI](https://github.com/csjpeter/email-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/csjpeter/email-cli/actions/workflows/ci.yml)
+[![Coverage Report](https://img.shields.io/badge/coverage-report-blue)](https://csjpeter.github.io/email-cli/)
+
 ## Architecture
 This project follows **CLEAN Code** principles with a strictly layered architecture.
 - **Memory Safety:** Leverages GCC's `__attribute__((cleanup))` for RAII.
@@ -27,11 +30,6 @@ The project includes a `manage.sh` script for a user-friendly experience:
 ./manage.sh valgrind   # Run unit tests with Valgrind
 ./manage.sh coverage   # Generate coverage report
 ./manage.sh clean-logs # Purge log files
-```
-
-Alternatively, you can use `make` directly:
-```bash
-make help              # Show all build targets
 ```
 
 ## Setup Wizard

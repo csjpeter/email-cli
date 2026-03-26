@@ -6,13 +6,14 @@
 #include <termios.h>
 
 static char* get_input(const char *prompt, int hide, FILE *stream) {
-    if (stream == stdin) {
+    int is_tty = isatty(fileno(stream));
+    if (stream == stdin && is_tty) {
         printf("%s: ", prompt);
         fflush(stdout);
     }
 
     struct termios oldt, newt;
-    int is_tty = isatty(fileno(stream));
+    // int is_tty = isatty(fileno(stream)); // removed because moved up
 
     if (hide && is_tty) {
         tcgetattr(fileno(stream), &oldt);
@@ -43,7 +44,8 @@ static char* get_input(const char *prompt, int hide, FILE *stream) {
  * @brief Internal wizard implementation that can take any input stream.
  */
 Config* setup_wizard_run_internal(FILE *stream) {
-    if (stream == stdin) {
+    int is_tty = isatty(fileno(stream));
+    if (stream == stdin && is_tty) {
         printf("\n--- email-cli Configuration Wizard ---\n");
         printf("Please enter your email server details.\n\n");
     }
@@ -66,7 +68,7 @@ Config* setup_wizard_run_internal(FILE *stream) {
         cfg->folder = strdup("INBOX");
     }
 
-    if (stream == stdin) {
+    if (stream == stdin && is_tty) {
         printf("\nConfiguration collected. Checking connection...\n");
     }
 

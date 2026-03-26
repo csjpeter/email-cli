@@ -42,4 +42,10 @@ void logger_close(void);
  */
 int logger_clean_logs(const char *log_dir);
 
+/**
+ * @brief Enables or disables the mirroring of ERROR logs to stderr.
+ * @param enable 1 to enable, 0 to disable.
+ */
+void logger_set_stderr(int enable);
+
 #endif // LOGGER_H

@@ -54,9 +54,23 @@ void handle_client(int client_sock) {
             snprintf(ok, sizeof(ok), "%s OK SEARCH completed\r\n", tag);
             send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "FETCH")) {
-            const char *msg = "Subject: Test Message\r\n\r\nHello from Mock Server!";
+            const char *headers =
+                "From: Test User <test@example.com>\r\n"
+                "Subject: Test Message\r\n"
+                "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+                "\r\n";
+            const char *full_msg =
+                "From: Test User <test@example.com>\r\n"
+                "Subject: Test Message\r\n"
+                "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+                "\r\n"
+                "Hello from Mock Server!";
+            int is_header = strstr(buffer, "HEADER") != NULL;
+            const char *content = is_header ? headers : full_msg;
+            const char *section = is_header ? "HEADER" : "";
             char data[1024];
-            snprintf(data, sizeof(data), "* 1 FETCH (BODY[] {%zu}\r\n%s)\r\n", strlen(msg), msg);
+            snprintf(data, sizeof(data), "* 1 FETCH (BODY[%s] {%zu}\r\n%s)\r\n",
+                     section, strlen(content), content);
             send(client_sock, data, strlen(data), 0);
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);

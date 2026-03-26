@@ -18,27 +18,35 @@ int fs_mkdir_p(const char *path, mode_t mode) {
     char *p = NULL;
     size_t len;
 
+    if (!path || !*path) return -1;
+
     snprintf(tmp, sizeof(tmp), "%s", path);
     len = strlen(tmp);
-    if (tmp[len - 1] == '/')
+    if (len > 0 && tmp[len - 1] == '/')
         tmp[len - 1] = 0;
     
     for (p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = 0;
-            if (mkdir(tmp, mode) != 0 && errno != EEXIST) {
-                return -1;
+            /* Skip empty components (multiple slashes) */
+            if (strlen(tmp) > 0) {
+                if (mkdir(tmp, mode) != 0 && errno != EEXIST) {
+                    return -1;
+                }
             }
             *p = '/';
         }
     }
     
-    if (mkdir(tmp, mode) != 0 && errno != EEXIST) {
-        return -1;
+    if (strlen(tmp) > 0) {
+        if (mkdir(tmp, mode) != 0 && errno != EEXIST) {
+            return -1;
+        }
+        // Explicitly set mode in case of umask
+        return chmod(tmp, mode);
     }
     
-    // Explicitly set mode in case of umask
-    return chmod(tmp, mode);
+    return 0;
 }
 
 /**

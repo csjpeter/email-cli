@@ -14,10 +14,14 @@
  * all    0 = show UNSEEN messages only (default)
  *        1 = show ALL messages; unread ones are marked in the table
  * folder NULL = use cfg->folder; non-NULL overrides for this call only
+ * limit  Maximum number of rows to display (0 = no limit)
+ * offset 1-based index of the first message to show (0 or 1 = start)
  */
 typedef struct {
     int         all;
     const char *folder;
+    int         limit;
+    int         offset;
 } EmailListOpts;
 
 /**

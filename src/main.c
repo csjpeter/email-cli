@@ -1,12 +1,29 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
 #include "config_store.h"
 #include "setup_wizard.h"
 #include "email_service.h"
 #include "raii.h"
 #include "logger.h"
 #include "fs_util.h"
+
+/* Number of non-data lines printed around the message table */
+#define LIST_HEADER_LINES 6
+/* Default limit when stdout is not a terminal or --batch is given */
+#define BATCH_DEFAULT_LIMIT 100
+
+static int detect_page_size(int batch) {
+    if (batch || !isatty(STDOUT_FILENO))
+        return BATCH_DEFAULT_LIMIT;
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0
+            && ws.ws_row > LIST_HEADER_LINES + 2)
+        return (int)ws.ws_row - LIST_HEADER_LINES;
+    return 20; /* safe fallback */
+}
 
 /* ── Help pages ──────────────────────────────────────────────────────── */
 
@@ -31,16 +48,23 @@ static void help_list(void) {
         "Lists messages in the configured mailbox folder.\n"
         "\n"
         "Options:\n"
-        "  --all             Show all messages, not just unread ones.\n"
-        "                    Unread messages are marked with 'N' and\n"
-        "                    always appear at the top of the list.\n"
-        "  --folder <name>   Use <name> instead of the configured folder.\n"
+        "  --all              Show all messages, not just unread ones.\n"
+        "                     Unread messages are marked with 'N' and\n"
+        "                     always appear at the top of the list.\n"
+        "  --folder <name>    Use <name> instead of the configured folder.\n"
+        "  --limit <n>        Show at most <n> messages per page.\n"
+        "                     Defaults to terminal height when output is a\n"
+        "                     terminal, or %d when piped / --batch is used.\n"
+        "  --offset <n>       Start listing from the <n>-th message (1-based).\n"
+        "  --batch            Disable terminal detection; use limit=%d.\n"
         "\n"
         "Examples:\n"
         "  email-cli list\n"
         "  email-cli list --all\n"
-        "  email-cli list --folder INBOX.Sent\n"
-        "  email-cli list --all --folder INBOX.Archive\n"
+        "  email-cli list --all --offset 21\n"
+        "  email-cli list --folder INBOX.Sent --limit 50\n"
+        "  email-cli list --all --batch\n",
+        BATCH_DEFAULT_LIMIT, BATCH_DEFAULT_LIMIT
     );
 }
 
@@ -154,11 +178,13 @@ int main(int argc, char *argv[]) {
     int result = -1;
 
     if (strcmp(cmd, "list") == 0) {
-        EmailListOpts opts = {0, NULL};
-        int ok = 1;
+        EmailListOpts opts = {0, NULL, 0, 0};
+        int ok = 1, batch = 0, explicit_limit = -1;
         for (int i = 2; i < argc && ok; i++) {
             if (strcmp(argv[i], "--all") == 0) {
                 opts.all = 1;
+            } else if (strcmp(argv[i], "--batch") == 0) {
+                batch = 1;
             } else if (strcmp(argv[i], "--folder") == 0) {
                 if (i + 1 >= argc) {
                     fprintf(stderr, "Error: --folder requires a folder name.\n");
@@ -166,12 +192,44 @@ int main(int argc, char *argv[]) {
                 } else {
                     opts.folder = argv[++i];
                 }
+            } else if (strcmp(argv[i], "--limit") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --limit requires a number.\n");
+                    ok = 0;
+                } else {
+                    char *end;
+                    long v = strtol(argv[++i], &end, 10);
+                    if (*end != '\0' || v <= 0) {
+                        fprintf(stderr, "Error: --limit must be a positive integer.\n");
+                        ok = 0;
+                    } else {
+                        explicit_limit = (int)v;
+                    }
+                }
+            } else if (strcmp(argv[i], "--offset") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --offset requires a number.\n");
+                    ok = 0;
+                } else {
+                    char *end;
+                    long v = strtol(argv[++i], &end, 10);
+                    if (*end != '\0' || v < 1) {
+                        fprintf(stderr, "Error: --offset must be a positive integer.\n");
+                        ok = 0;
+                    } else {
+                        opts.offset = (int)v;
+                    }
+                }
             } else {
                 unknown_option("list", argv[i]);
                 ok = 0;
             }
         }
-        if (ok) result = email_service_list(cfg, &opts);
+        if (ok) {
+            opts.limit = (explicit_limit >= 0) ? explicit_limit
+                                               : detect_page_size(batch);
+            result = email_service_list(cfg, &opts);
+        }
 
     } else if (strcmp(cmd, "show") == 0) {
         if (argc < 3) {

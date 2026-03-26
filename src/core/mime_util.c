@@ -12,8 +12,7 @@ char *mime_get_header(const char *msg, const char *name) {
     const char *p = msg;
 
     while (p && *p) {
-        /* Stop at the blank line separating headers from body.
-         * A blank line starts with '\r' (CRLF) or '\n' (LF). */
+        /* Stop at the blank line separating headers from body. */
         if (*p == '\r' || *p == '\n')
             break;
 
@@ -148,7 +147,6 @@ static char *strip_html(const char *html) {
 
 /* ── Body helpers ───────────────────────────────────────────────────── */
 
-/** Returns pointer to the first byte of the message body (past the header block). */
 static const char *body_start(const char *msg) {
     const char *p = strstr(msg, "\r\n\r\n");
     if (p) return p + 4;
@@ -157,22 +155,17 @@ static const char *body_start(const char *msg) {
     return NULL;
 }
 
-/** Decodes a body chunk according to its transfer encoding. Caller must free. */
 static char *decode_transfer(const char *body, size_t len, const char *enc) {
     if (enc && strcasecmp(enc, "base64") == 0)
         return decode_base64(body, len);
     if (enc && strcasecmp(enc, "quoted-printable") == 0)
         return decode_qp(body, len);
-    /* 7bit / 8bit / binary / unknown: return as-is */
     return strndup(body, len);
 }
 
-/* Forward declaration for recursion */
 static char *text_from_part(const char *part);
 
-/** Finds the first text/plain body in a multipart message. */
 static char *text_from_multipart(const char *msg, const char *ctype) {
-    /* Extract boundary value */
     const char *b = strcasestr(ctype, "boundary=");
     if (!b) return NULL;
     b += strlen("boundary=");
@@ -198,17 +191,13 @@ static char *text_from_multipart(const char *msg, const char *ctype) {
 
     const char *p = strstr(msg, delim);
     while (p) {
-        /* Skip past boundary line */
         p = strchr(p + dlen, '\n');
         if (!p) break;
         p++;
 
-        /* Find end of this part */
         const char *next = strstr(p, delim);
         if (!next) break;
 
-        /* Try to extract text from this part */
-        /* Make a NUL-terminated copy of the part */
         size_t partlen = (size_t)(next - p);
         char *part = strndup(p, partlen);
         if (!part) break;
@@ -217,14 +206,13 @@ static char *text_from_multipart(const char *msg, const char *ctype) {
         if (result) return result;
 
         p = next + dlen;
-        if (p[0] == '-' && p[1] == '-') break; /* end boundary */
+        if (p[0] == '-' && p[1] == '-') break;
         p = strchr(p, '\n');
         if (p) p++;
     }
     return NULL;
 }
 
-/** Extracts readable text from one MIME part (may recurse for nested multipart). */
 static char *text_from_part(const char *part) {
     char *ctype = mime_get_header(part, "Content-Type");
     char *enc   = mime_get_header(part, "Content-Transfer-Encoding");
@@ -237,7 +225,6 @@ static char *text_from_part(const char *part) {
     } else if (strncasecmp(ctype, "multipart/", 10) == 0) {
         result = text_from_multipart(part, ctype);
     } else if (strncasecmp(ctype, "text/html", 9) == 0) {
-        /* Use HTML only as last resort — stripped of tags */
         if (body) {
             char *decoded = decode_transfer(body, strlen(body), enc);
             if (decoded) {
@@ -246,7 +233,6 @@ static char *text_from_part(const char *part) {
             }
         }
     }
-    /* Other types (image, application, etc.): skip */
 
     free(ctype);
     free(enc);
@@ -262,22 +248,21 @@ char *mime_get_text_body(const char *msg) {
 
 char *mime_extract_imap_literal(const char *response) {
     if (!response) return NULL;
-    /* Find the octet-count literal: {size}\r\n */
     const char *brace = strchr(response, '{');
     if (!brace) return NULL;
+    
     char *end = NULL;
     long size = strtol(brace + 1, &end, 10);
     if (!end || *end != '}' || size <= 0) return NULL;
-    /* Skip past }\r\n */
+    
     const char *content = end + 1;
     if (*content == '\r') content++;
     if (*content == '\n') content++;
     
-    // Safety check: ensure we don't read past the end of the response string
-    size_t remaining = strlen(content);
-    if (remaining < (size_t)size) {
-        // This can happen if the buffer was not fully populated by curl
-        return NULL;
+    // Safety check
+    size_t avail = strlen(content);
+    if (avail < (size_t)size) {
+        return strndup(content, avail);
     }
     
     return strndup(content, (size_t)size);

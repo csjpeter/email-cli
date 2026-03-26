@@ -47,4 +47,8 @@ static inline void fclose_ptr(void *ptr) {
 #define RAII_SLIST __attribute__((cleanup(curl_slist_free_all_ptr)))
 #define RAII_FILE __attribute__((cleanup(fclose_ptr)))
 
+/* To avoid circular dependencies with Config, we use a generic cleanup for it 
+ * but it must be defined in each file that uses it or we use a macro. */
+#define RAII_WITH_CLEANUP(func) __attribute__((cleanup(func)))
+
 #endif // RAII_H

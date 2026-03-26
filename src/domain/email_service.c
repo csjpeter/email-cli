@@ -29,10 +29,6 @@ static size_t buffer_append(char *ptr, size_t size, size_t nmemb, void *userdata
 
 /* ── UID list parser ─────────────────────────────────────────────────── */
 
-/**
- * Parses "* SEARCH 1 2 3 ..." from a raw IMAP SEARCH response.
- * Returns the number of UIDs found; caller must free *uids_out.
- */
 static int parse_uid_list(const char *resp, int **uids_out) {
     *uids_out = NULL;
     if (!resp) return 0;
@@ -97,28 +93,37 @@ static int search_uids(const Config *cfg, const char *criteria, int **uids_out) 
 }
 
 /**
- * Fetches the raw header block for a single UID via BODY.PEEK[HEADER].
- * Returns a heap-allocated NUL-terminated IMAP response, or NULL. Caller must free.
+ * Fetches the raw message or header identified by UID.
+ * Returns a heap-allocated NUL-terminated RFC822 message or header block, or NULL.
  */
-static char *fetch_raw_imap_response(const Config *cfg, const char *cmd_fmt, int uid) {
+static char *fetch_uid_content(const Config *cfg, int uid, int headers_only) {
     RAII_CURL CURL *curl = make_curl(cfg);
     if (!curl) return NULL;
 
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/%s", cfg->host, cfg->folder) == -1) return NULL;
+    /* Using the standard IMAP URL format for fetching a specific UID.
+     * This makes libcurl handle the FETCH command and literal extraction natively. */
+    if (asprintf(&url, "%s/%s/;UID=%d", cfg->host, cfg->folder, uid) == -1) return NULL;
 
-    RAII_STRING char *cmd = NULL;
-    if (asprintf(&cmd, cmd_fmt, uid) == -1) return NULL;
-
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
+    if (headers_only) {
+        /* Request only headers via IMAP section path */
+        RAII_STRING char *new_url = NULL;
+        if (asprintf(&new_url, "%s/;SECTION=HEADER", url) == -1) return NULL;
+        free(url);
+        url = new_url;
+        new_url = NULL; // prevent RAII double free
+    }
 
     Buffer buf = {NULL, 0};
+    /* We don't use CUSTOMREQUEST here, let libcurl use its internal FETCH handler. */
     CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
+    
     if (res != CURLE_OK) {
-        logger_log(LOG_WARN, "FETCH UID %d failed: %s", uid, curl_easy_strerror(res));
+        logger_log(LOG_WARN, "Fetch UID %d failed: %s", uid, curl_easy_strerror(res));
         free(buf.data);
         return NULL;
     }
+
     return buf.data; /* caller owns */
 }
 
@@ -151,10 +156,8 @@ int email_service_list_unseen(const Config *cfg) {
            "═══════════════════════════");
 
     for (int i = 0; i < total; i++) {
-        char *imap_resp = fetch_raw_imap_response(
-            cfg, "UID FETCH %d BODY.PEEK[HEADER]", uids[i]);
+        char *hdrs = fetch_uid_content(cfg, uids[i], 1);
 
-        char *hdrs    = imap_resp ? mime_extract_imap_literal(imap_resp) : NULL;
         char *from    = hdrs ? mime_get_header(hdrs, "From")    : NULL;
         char *subject = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
         char *date    = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
@@ -165,7 +168,6 @@ int email_service_list_unseen(const Config *cfg) {
                subject ? subject : "(no subject)",
                date    ? date    : "");
 
-        free(imap_resp);
         free(hdrs);
         free(from);
         free(subject);
@@ -183,21 +185,7 @@ int email_service_read(const Config *cfg, int uid) {
         logger_log(LOG_DEBUG, "Cache hit for UID %d in %s", uid, cfg->folder);
         raw = cache_load(cfg->folder, uid);
     } else {
-        char *imap_resp = fetch_raw_imap_response(
-            cfg, "UID FETCH %d RFC822", uid);
-        if (!imap_resp) {
-            fprintf(stderr, "Failed to fetch message UID %d.\n", uid);
-            return -1;
-        }
-
-        raw = mime_extract_imap_literal(imap_resp);
-        if (!raw) {
-            /* Server delivered bare content (no IMAP literal framing) */
-            raw = imap_resp;
-            imap_resp = NULL;
-        }
-        free(imap_resp);
-
+        raw = fetch_uid_content(cfg, uid, 0);
         if (raw)
             cache_save(cfg->folder, uid, raw, strlen(raw));
     }

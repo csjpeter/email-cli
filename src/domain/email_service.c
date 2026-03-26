@@ -325,10 +325,25 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     /* Sort: unseen first, then descending UID */
     qsort(entries, (size_t)show_count, sizeof(UIDEntry), cmp_uid_entry);
 
+    /* Apply offset/limit */
+    int start = (opts->offset > 1) ? opts->offset - 1 : 0;
+    if (start >= show_count) {
+        printf("No messages at offset %d (total: %d).\n", opts->offset, show_count);
+        free(entries);
+        return 0;
+    }
+    int end = show_count;
+    if (opts->limit > 0 && start + opts->limit < end)
+        end = start + opts->limit;
+
     /* Header */
     if (opts->all) {
-        printf("%d message(s) in %s (%d unread).\n\n",
-               show_count, folder, unseen_count);
+        if (start > 0 || end < show_count)
+            printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
+                   start + 1, end, show_count, folder, unseen_count);
+        else
+            printf("%d message(s) in %s (%d unread).\n\n",
+                   show_count, folder, unseen_count);
         printf("  S  %5s  %-30s  %-30s  %s\n",
                "UID", "From", "Subject", "Date");
         printf("  \u2550  %s  %s  %s  %s\n", "═════",
@@ -336,7 +351,11 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                "══════════════════════════════",
                "═══════════════════════════");
     } else {
-        printf("%d unread message(s) in %s.\n\n", show_count, folder);
+        if (start > 0 || end < show_count)
+            printf("%d-%d of %d unread message(s) in %s.\n\n",
+                   start + 1, end, show_count, folder);
+        else
+            printf("%d unread message(s) in %s.\n\n", show_count, folder);
         printf("  %5s  %-30s  %-30s  %s\n",
                "UID", "From", "Subject", "Date");
         printf("  %s  %s  %s  %s\n", "═════",
@@ -346,7 +365,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     }
 
     /* Rows */
-    for (int i = 0; i < show_count; i++) {
+    for (int i = start; i < end; i++) {
         char *hdrs    = fetch_uid_content_in(cfg, folder, entries[i].uid, 1);
         char *from    = hdrs ? mime_get_header(hdrs, "From")    : NULL;
         char *subject = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
@@ -369,6 +388,10 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 
         free(hdrs); free(from); free(subject); free(date);
     }
+
+    if (end < show_count)
+        printf("\n  -- %d more message(s) --  use --offset %d for next page\n",
+               show_count - end, end + 1);
 
     free(entries);
     return 0;

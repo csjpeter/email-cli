@@ -7,6 +7,12 @@
 #include <pwd.h>
 #include <errno.h>
 
+/**
+ * @brief Creates a directory and all missing parent directories.
+ * @param path  Directory path to create.
+ * @param mode  Permission bits applied to each created directory.
+ * @return 0 on success, -1 on error.
+ */
 int fs_mkdir_p(const char *path, mode_t mode) {
     char tmp[1024];
     char *p = NULL;
@@ -35,10 +41,22 @@ int fs_mkdir_p(const char *path, mode_t mode) {
     return chmod(tmp, mode);
 }
 
+/**
+ * @brief Sets the permission bits on an existing file or directory.
+ * @param path  Path to the file.
+ * @param mode  Desired permission bits.
+ * @return 0 on success, -1 on error.
+ */
 int fs_ensure_permissions(const char *path, mode_t mode) {
     return chmod(path, mode);
 }
 
+/**
+ * @brief Returns the user's home directory path.
+ *
+ * Checks the HOME environment variable first; falls back to the passwd entry.
+ * @return Pointer to the home path string, or NULL if unavailable.
+ */
 const char* fs_get_home_dir(void) {
     const char *home = getenv("HOME");
     if (!home) {

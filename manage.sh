@@ -126,6 +126,8 @@ case "$1" in
         cmake_configure Debug "-DENABLE_COVERAGE=ON"
         cmake_build
         build_test_runner
+        # Remove stale .gcda files to avoid checksum mismatch errors
+        find "$BUILD_DIR" -name "*.gcda" -delete
         "$BUILD_DIR/tests/unit/test-runner"
         ./tests/functional/run_functional.sh
         echo "Generating coverage report..."

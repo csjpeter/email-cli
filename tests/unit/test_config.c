@@ -12,7 +12,7 @@ void test_config_store(void) {
     fs_mkdir_p("/tmp/email-cli-test-home/.config/email-cli", 0700);
 
     // 1. Test Save
-    Config cfg;
+    Config cfg = {0};
     cfg.host   = strdup("imaps://imap.test.com");
     cfg.user   = strdup("test@test.com");
     cfg.pass   = strdup("password123");
@@ -48,7 +48,28 @@ void test_config_store(void) {
     loaded = config_load_from_store();
     ASSERT(loaded == NULL, "config_load_from_store should return NULL when file is missing");
 
-    // 5. Test config_free with NULL (should not crash)
+    // 5. Test Save/Load with ssl_no_verify=1
+    Config cfg2 = {0};
+    cfg2.host        = strdup("imaps://imap.test.com");
+    cfg2.user        = strdup("test@test.com");
+    cfg2.pass        = strdup("password123");
+    cfg2.folder      = strdup("INBOX");
+    cfg2.ssl_no_verify = 1;
+
+    res = config_save_to_store(&cfg2);
+    ASSERT(res == 0, "config_save_to_store with ssl_no_verify=1 should return 0");
+
+    Config *loaded2 = config_load_from_store();
+    ASSERT(loaded2 != NULL, "config_load_from_store should not return NULL");
+    ASSERT(loaded2->ssl_no_verify == 1, "ssl_no_verify should be 1 after load");
+    config_free(loaded2);
+
+    free(cfg2.host);
+    free(cfg2.user);
+    free(cfg2.pass);
+    free(cfg2.folder);
+
+    // 6. Test config_free with NULL (should not crash)
     config_free(NULL);
 
     // Cleanup

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 void test_wizard(void) {
     // 1. Full valid input
@@ -43,4 +44,28 @@ void test_wizard(void) {
     cfg = setup_wizard_run_internal(stream);
     ASSERT(cfg == NULL, "setup_wizard should return NULL when password is missing");
     fclose(stream);
+
+    // 5. Test setup_wizard_run() (stdin path) via pipe redirect
+    const char *input5 = "imaps://imap.stdin.com\nstdin@user.com\nstdinpass\nSTDIN\n";
+    int pipefd[2];
+    ASSERT(pipe(pipefd) == 0, "pipe() should succeed");
+    ssize_t written = write(pipefd[1], input5, strlen(input5));
+    ASSERT(written > 0, "write to pipe should succeed");
+    close(pipefd[1]);
+
+    int saved_stdin = dup(STDIN_FILENO);
+    dup2(pipefd[0], STDIN_FILENO);
+    close(pipefd[0]);
+
+    cfg = setup_wizard_run();
+
+    dup2(saved_stdin, STDIN_FILENO);
+    close(saved_stdin);
+
+    ASSERT(cfg != NULL, "setup_wizard_run should return config via pipe");
+    ASSERT(strcmp(cfg->host, "imaps://imap.stdin.com") == 0, "Host should match stdin input");
+    ASSERT(strcmp(cfg->user, "stdin@user.com") == 0, "User should match stdin input");
+    ASSERT(strcmp(cfg->pass, "stdinpass") == 0, "Pass should match stdin input");
+    ASSERT(strcmp(cfg->folder, "STDIN") == 0, "Folder should match stdin input");
+    config_free(cfg);
 }

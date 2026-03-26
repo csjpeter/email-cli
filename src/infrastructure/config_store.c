@@ -10,6 +10,7 @@
 #define CONFIG_REL_DIR ".config/email-cli"
 #define CONFIG_FILE "config.ini"
 
+/** @brief Trims leading and trailing whitespace from a string in-place. */
 static char* trim(char *str) {
     char *end;
     while (isspace((unsigned char)*str)) str++;
@@ -20,6 +21,7 @@ static char* trim(char *str) {
     return str;
 }
 
+/** @brief Returns a heap-allocated path to the config file. Caller must free. */
 static char* get_config_path() {
     const char *home = fs_get_home_dir();
     if (!home) return NULL;
@@ -51,6 +53,7 @@ Config* config_load_from_store(void) {
             else if (strcmp(key, "EMAIL_USER") == 0) cfg->user = strdup(val);
             else if (strcmp(key, "EMAIL_PASS") == 0) cfg->pass = strdup(val);
             else if (strcmp(key, "EMAIL_FOLDER") == 0) cfg->folder = strdup(val);
+            else if (strcmp(key, "SSL_NO_VERIFY") == 0) cfg->ssl_no_verify = atoi(val);
         }
     }
 
@@ -97,6 +100,8 @@ int config_save_to_store(const Config *cfg) {
     fprintf(fp, "EMAIL_USER=%s\n", cfg->user);
     fprintf(fp, "EMAIL_PASS=%s\n", cfg->pass);
     fprintf(fp, "EMAIL_FOLDER=%s\n", cfg->folder ? cfg->folder : "INBOX");
+    if (cfg->ssl_no_verify)
+        fprintf(fp, "SSL_NO_VERIFY=1\n");
 
     logger_log(LOG_INFO, "Config saved to %s", path);
     return 0;

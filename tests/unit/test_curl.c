@@ -7,13 +7,15 @@ void test_curl_adapter(void) {
     // libcurl must be initialized for these tests
     curl_global_init(CURL_GLOBAL_ALL);
 
-    // 1. Test Init
-    CURL *curl = curl_adapter_init("user", "pass");
+    // 1. Test Init with SSL verification enabled
+    CURL *curl = curl_adapter_init("user", "pass", 1);
     ASSERT(curl != NULL, "curl_adapter_init should return a handle");
-    
-    // We don't perform a fetch here because it needs a network/mock server,
-    // which is covered in functional tests.
-    
     curl_easy_cleanup(curl);
+
+    // 2. Test Init with SSL verification disabled (self-signed cert path)
+    curl = curl_adapter_init("user", "pass", 0);
+    ASSERT(curl != NULL, "curl_adapter_init with verify_peer=0 should return a handle");
+    curl_easy_cleanup(curl);
+
     curl_global_cleanup();
 }

@@ -14,6 +14,7 @@ static FILE *g_log_fp = NULL;
 static LogLevel g_log_level = LOG_INFO;
 static char *g_log_path = NULL;
 
+/** @brief Converts a LogLevel enum to its string representation. */
 static const char* level_to_str(LogLevel level) {
     switch (level) {
         case LOG_DEBUG: return "DEBUG";
@@ -24,6 +25,9 @@ static const char* level_to_str(LogLevel level) {
     }
 }
 
+/**
+ * @brief Rotates log files: session.log → session.log.1, dropping session.log.5.
+ */
 static void rotate_logs() {
     if (!g_log_path) return;
 

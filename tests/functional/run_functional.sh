@@ -39,11 +39,43 @@ EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
 EOF
 
-# 4. Run the client
+# 4. Run the client and capture output
 echo "Running client..."
 export HOME="$TEST_HOME"
-# We expect the client to fetch message with UID 1 from our mock server
-# Note: we use plain imap:// since mock server is simple TCP
-"$BIN_DIR/email-cli"
+OUTPUT=$("$BIN_DIR/email-cli" 2>&1)
+echo "$OUTPUT"
+
+# 5. Assertions
+PASSED=0
+FAILED=0
+
+check() {
+    local desc="$1"
+    local pattern="$2"
+    if echo "$OUTPUT" | grep -q "$pattern"; then
+        echo "  [PASS] $desc"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] $desc  (expected pattern: '$pattern')"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
+echo ""
+echo "--- Assertions ---"
+check "Fetch header printed"    "Fetching recent emails"
+check "Messages found"          "message"
+check "Message separator shown" "═══"
+check "Test email body shown"   "Hello from Mock Server"
+check "Successful completion"   "Success: Fetch complete"
+
+echo ""
+echo "--- Functional Test Results ---"
+echo "Passed: $PASSED / $((PASSED + FAILED))"
+
+if [ "$FAILED" -gt 0 ]; then
+    echo "FUNCTIONAL TEST FAILED"
+    exit 1
+fi
 
 echo "Functional test complete."

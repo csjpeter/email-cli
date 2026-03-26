@@ -11,6 +11,7 @@ typedef struct {
     char *user;
     char *pass;
     char *folder;
+    int ssl_no_verify; /**< 1 = disable SSL peer verification (for self-signed certs in test envs) */
 } Config;
 
 /**

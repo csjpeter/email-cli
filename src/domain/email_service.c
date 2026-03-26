@@ -2,6 +2,7 @@
 #include "curl_adapter.h"
 #include "cache_store.h"
 #include "mime_util.h"
+#include "imap_util.h"
 #include "raii.h"
 #include "logger.h"
 #include <stdio.h>
@@ -398,7 +399,9 @@ int email_service_list_folders(const Config *cfg, int tree) {
     const char *p = buf.data;
     while (p && *p) {
         char got_sep = '.';
-        char *name   = parse_list_line(p, &got_sep);
+        char *raw_name = parse_list_line(p, &got_sep);
+        char *name     = raw_name ? imap_utf7_decode(raw_name) : NULL;
+        free(raw_name);
         if (name) {
             sep = got_sep;
             if (count == cap) {

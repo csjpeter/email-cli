@@ -31,6 +31,7 @@ set(SOURCES
     src/core/logger.c
     src/core/fs_util.c
     src/core/mime_util.c
+    src/core/imap_util.c
     src/infrastructure/config_store.c
     src/infrastructure/setup_wizard.c
     src/infrastructure/curl_adapter.c

@@ -15,6 +15,7 @@ void test_wizard(void);
 void test_curl_adapter(void);
 void test_mime_util(void);
 void test_cache_store(void);
+void test_imap_util(void);
 
 int main() {
     printf("--- email-cli Unit Test Suite ---\n\n");
@@ -29,6 +30,7 @@ int main() {
     RUN_TEST(test_curl_adapter);
     RUN_TEST(test_mime_util);
     RUN_TEST(test_cache_store);
+    RUN_TEST(test_imap_util);
 
     printf("\n--- Test Results ---\n");
     printf("Tests Run:    %d\n", g_tests_run);

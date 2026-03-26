@@ -29,7 +29,11 @@ static int detect_page_size(int batch) {
 
 static void help_general(void) {
     printf(
-        "Usage: email-cli <command> [options]\n"
+        "Usage: email-cli [--batch] <command> [options]\n"
+        "\n"
+        "Global options:\n"
+        "  --batch           Disable interactive pager; use fixed page size (%d).\n"
+        "                    Implied when stdout is redirected to a pipe or file.\n"
         "\n"
         "Commands:\n"
         "  list              List unread messages in the configured mailbox\n"
@@ -37,7 +41,8 @@ static void help_general(void) {
         "  folders           List available IMAP folders\n"
         "  help [command]    Show this help, or detailed help for a command\n"
         "\n"
-        "Run 'email-cli help <command>' for more information.\n"
+        "Run 'email-cli help <command>' for more information.\n",
+        BATCH_DEFAULT_LIMIT
     );
 }
 
@@ -79,6 +84,9 @@ static void help_show(void) {
         "The message is fetched from the server on first access and cached\n"
         "locally at ~/.cache/email-cli/messages/<folder>/<uid>.eml.\n"
         "Subsequent reads are served from the local cache.\n"
+        "\n"
+        "Long messages are paginated automatically when output is a terminal.\n"
+        "Use --batch or pipe to a file to disable the interactive pager.\n"
     );
 }
 
@@ -129,12 +137,31 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* 2. Commands that need no logger or config */
-    const char *cmd = (argc > 1) ? argv[1] : NULL;
+    /* 2. Global flags: scan all args for --batch */
+    int batch = 0;
+    for (int i = 1; i < argc; i++)
+        if (strcmp(argv[i], "--batch") == 0) batch = 1;
+
+    /* Command: first non --batch arg */
+    const char *cmd = NULL;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--batch") != 0) { cmd = argv[i]; break; }
+    }
+
+    /* Page size / pager capability (used by list and show) */
+    int pager     = !batch && isatty(STDOUT_FILENO);
+    int page_size = detect_page_size(batch);
 
     if (!cmd || strcmp(cmd, "help") == 0) {
-        if (argc > 2) {
-            const char *topic = argv[2];
+        /* First non --batch arg after "help" is the topic */
+        const char *topic = NULL;
+        int past_help = 0;
+        for (int i = 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (!past_help) { past_help = 1; continue; } /* skip "help" itself */
+            topic = argv[i]; break;
+        }
+        if (topic) {
             if (strcmp(topic, "list")    == 0) { help_list();    return EXIT_SUCCESS; }
             if (strcmp(topic, "show")    == 0) { help_show();    return EXIT_SUCCESS; }
             if (strcmp(topic, "folders") == 0) { help_folders(); return EXIT_SUCCESS; }
@@ -178,13 +205,13 @@ int main(int argc, char *argv[]) {
     int result = -1;
 
     if (strcmp(cmd, "list") == 0) {
-        EmailListOpts opts = {0, NULL, 0, 0};
-        int ok = 1, batch = 0, explicit_limit = -1;
+        EmailListOpts opts = {0, NULL, 0, 0, pager};
+        int ok = 1, explicit_limit = -1;
         for (int i = 2; i < argc && ok; i++) {
-            if (strcmp(argv[i], "--all") == 0) {
+            if (strcmp(argv[i], "--batch") == 0) {
+                continue; /* already handled globally */
+            } else if (strcmp(argv[i], "--all") == 0) {
                 opts.all = 1;
-            } else if (strcmp(argv[i], "--batch") == 0) {
-                batch = 1;
             } else if (strcmp(argv[i], "--folder") == 0) {
                 if (i + 1 >= argc) {
                     fprintf(stderr, "Error: --folder requires a folder name.\n");
@@ -226,26 +253,34 @@ int main(int argc, char *argv[]) {
             }
         }
         if (ok) {
-            opts.limit = (explicit_limit >= 0) ? explicit_limit
-                                               : detect_page_size(batch);
+            opts.limit = (explicit_limit >= 0) ? explicit_limit : page_size;
             result = email_service_list(cfg, &opts);
         }
 
     } else if (strcmp(cmd, "show") == 0) {
-        if (argc < 3) {
+        /* UID is the first non --batch arg after "show" */
+        const char *uid_str = NULL;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            uid_str = argv[i]; break;
+        }
+        if (!uid_str) {
             fprintf(stderr, "Error: 'show' requires a UID argument.\n");
             help_show();
         } else {
-            int uid = parse_uid(argv[2]);
+            int uid = parse_uid(uid_str);
             if (!uid)
-                fprintf(stderr, "Error: UID must be a positive integer (got '%s').\n", argv[2]);
+                fprintf(stderr,
+                        "Error: UID must be a positive integer (got '%s').\n",
+                        uid_str);
             else
-                result = email_service_read(cfg, uid);
+                result = email_service_read(cfg, uid, pager, page_size);
         }
 
     } else if (strcmp(cmd, "folders") == 0) {
         int tree = 0, ok = 1;
         for (int i = 2; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
             if (strcmp(argv[i], "--tree") == 0)
                 tree = 1;
             else { unknown_option("folders", argv[i]); ok = 0; }

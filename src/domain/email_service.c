@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
 
 /* ── Internal buffer ─────────────────────────────────────────────────── */
 
@@ -54,6 +56,72 @@ static int parse_uid_list(const char *resp, int **uids_out) {
     }
     *uids_out = uids;
     return cnt;
+}
+
+/* ── Interactive pager helpers ───────────────────────────────────────── */
+
+/**
+ * Reads one keypress in raw (non-canonical) mode.
+ * Returns the character code, or -1 on error.
+ */
+static int read_pager_key(void) {
+    struct termios old, raw;
+    if (tcgetattr(STDIN_FILENO, &old) != 0) return -1;
+    raw = old;
+    raw.c_lflag &= ~(unsigned)(ICANON | ECHO | ISIG);
+    raw.c_cc[VMIN]  = 1;
+    raw.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+    int c = getchar();
+    tcsetattr(STDIN_FILENO, TCSANOW, &old);
+    return c;
+}
+
+/** Show pager prompt on stderr; returns next action: +1=next, -1=prev, 0=quit. */
+static int pager_prompt(int cur_page, int total_pages) {
+    fprintf(stderr,
+            "\033[7m-- [%d/%d] Space/Enter=next  p=prev  q=quit --\033[0m",
+            cur_page, total_pages);
+    fflush(stderr);
+    int key = read_pager_key();
+    fprintf(stderr, "\r\033[K");
+    fflush(stderr);
+    if (key == 'q' || key == 'Q' || key == 3 /* Ctrl-C */) return 0;
+    if (key == 'p' || key == 'P' || key == 'b')            return -1;
+    return 1; /* next */
+}
+
+/** Count newlines in s (= number of lines). */
+static int count_lines(const char *s) {
+    if (!s || !*s) return 0;
+    int n = 1;
+    for (const char *p = s; *p; p++)
+        if (*p == '\n') n++;
+    return n;
+}
+
+/**
+ * Print lines [from_line, from_line+line_count) from body.
+ * Lines are 0-indexed.
+ */
+static void print_body_page(const char *body, int from_line, int line_count) {
+    int line = 0;
+    const char *p = body;
+    while (*p && line < from_line) {   /* skip to from_line */
+        if (*p++ == '\n') line++;
+    }
+    int printed = 0;
+    while (*p && printed < line_count) {
+        const char *nl = strchr(p, '\n');
+        if (nl) {
+            printf("%.*s\n", (int)(nl - p), p);
+            p = nl + 1;
+        } else {
+            printf("%s\n", p);
+            break;
+        }
+        printed++;
+    }
 }
 
 /* ── IMAP helpers ────────────────────────────────────────────────────── */
@@ -105,6 +173,19 @@ static char *fetch_uid_content_in(const Config *cfg, const char *folder,
         return NULL;
     }
     return buf.data;
+}
+
+/* ── Cached header fetch ─────────────────────────────────────────────── */
+
+/** Fetches headers for uid/folder, using the header cache. Caller must free. */
+static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
+                                       int uid) {
+    if (hcache_exists(folder, uid))
+        return hcache_load(folder, uid);
+    char *hdrs = fetch_uid_content_in(cfg, folder, uid, 1);
+    if (hdrs)
+        hcache_save(folder, uid, hdrs, strlen(hdrs));
+    return hdrs;
 }
 
 /* ── List helpers ────────────────────────────────────────────────────── */
@@ -291,6 +372,9 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             fprintf(stderr, "Failed to search mailbox.\n");
             return -1;
         }
+        /* Evict headers for messages deleted from the server */
+        if (all_count > 0)
+            hcache_evict_stale(folder, all_uids, all_count);
     }
 
     int  show_count = opts->all ? all_count : unseen_count;
@@ -325,73 +409,89 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     /* Sort: unseen first, then descending UID */
     qsort(entries, (size_t)show_count, sizeof(UIDEntry), cmp_uid_entry);
 
-    /* Apply offset/limit */
-    int start = (opts->offset > 1) ? opts->offset - 1 : 0;
-    if (start >= show_count) {
-        printf("No messages at offset %d (total: %d).\n", opts->offset, show_count);
+    int limit = (opts->limit > 0) ? opts->limit : show_count;
+    int cur   = (opts->offset > 1) ? opts->offset - 1 : 0;
+    if (cur >= show_count) {
+        printf("No messages at offset %d (total: %d).\n",
+               opts->offset, show_count);
         free(entries);
         return 0;
     }
-    int end = show_count;
-    if (opts->limit > 0 && start + opts->limit < end)
-        end = start + opts->limit;
 
-    /* Header */
-    if (opts->all) {
-        if (start > 0 || end < show_count)
-            printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
-                   start + 1, end, show_count, folder, unseen_count);
-        else
-            printf("%d message(s) in %s (%d unread).\n\n",
-                   show_count, folder, unseen_count);
-        printf("  S  %5s  %-30s  %-30s  %s\n",
-               "UID", "From", "Subject", "Date");
-        printf("  \u2550  %s  %s  %s  %s\n", "═════",
-               "══════════════════════════════",
-               "══════════════════════════════",
-               "═══════════════════════════");
-    } else {
-        if (start > 0 || end < show_count)
-            printf("%d-%d of %d unread message(s) in %s.\n\n",
-                   start + 1, end, show_count, folder);
-        else
-            printf("%d unread message(s) in %s.\n\n", show_count, folder);
-        printf("  %5s  %-30s  %-30s  %s\n",
-               "UID", "From", "Subject", "Date");
-        printf("  %s  %s  %s  %s\n", "═════",
-               "══════════════════════════════",
-               "══════════════════════════════",
-               "═══════════════════════════");
-    }
+    for (int page = 0; ; page++) {
+        if (page > 0 && opts->pager)
+            printf("\033[H\033[2J"); /* clear screen */
 
-    /* Rows */
-    for (int i = start; i < end; i++) {
-        char *hdrs    = fetch_uid_content_in(cfg, folder, entries[i].uid, 1);
-        char *from    = hdrs ? mime_get_header(hdrs, "From")    : NULL;
-        char *subject = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
-        char *date    = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
+        int end = show_count;
+        if (cur + limit < end) end = cur + limit;
 
+        /* Count / status line */
         if (opts->all) {
-            printf("  %c  %5d  %-30.30s  %-30.30s  %s\n",
-                   entries[i].unseen ? 'N' : ' ',
-                   entries[i].uid,
-                   from    ? from    : "(no from)",
-                   subject ? subject : "(no subject)",
-                   date    ? date    : "");
+            if (cur > 0 || end < show_count)
+                printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
+                       cur + 1, end, show_count, folder, unseen_count);
+            else
+                printf("%d message(s) in %s (%d unread).\n\n",
+                       show_count, folder, unseen_count);
+            printf("  S  %5s  %-30s  %-30s  %s\n",
+                   "UID", "From", "Subject", "Date");
+            printf("  \u2550  %s  %s  %s  %s\n", "═════",
+                   "══════════════════════════════",
+                   "══════════════════════════════",
+                   "═══════════════════════════");
         } else {
-            printf("  %5d  %-30.30s  %-30.30s  %s\n",
-                   entries[i].uid,
-                   from    ? from    : "(no from)",
-                   subject ? subject : "(no subject)",
-                   date    ? date    : "");
+            if (cur > 0 || end < show_count)
+                printf("%d-%d of %d unread message(s) in %s.\n\n",
+                       cur + 1, end, show_count, folder);
+            else
+                printf("%d unread message(s) in %s.\n\n", show_count, folder);
+            printf("  %5s  %-30s  %-30s  %s\n",
+                   "UID", "From", "Subject", "Date");
+            printf("  %s  %s  %s  %s\n", "═════",
+                   "══════════════════════════════",
+                   "══════════════════════════════",
+                   "═══════════════════════════");
         }
 
-        free(hdrs); free(from); free(subject); free(date);
-    }
+        /* Data rows */
+        for (int i = cur; i < end; i++) {
+            char *hdrs    = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
+            char *from    = hdrs ? mime_get_header(hdrs, "From")    : NULL;
+            char *subject = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
+            char *date    = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
 
-    if (end < show_count)
-        printf("\n  -- %d more message(s) --  use --offset %d for next page\n",
-               show_count - end, end + 1);
+            if (opts->all)
+                printf("  %c  %5d  %-30.30s  %-30.30s  %s\n",
+                       entries[i].unseen ? 'N' : ' ',
+                       entries[i].uid,
+                       from    ? from    : "(no from)",
+                       subject ? subject : "(no subject)",
+                       date    ? date    : "");
+            else
+                printf("  %5d  %-30.30s  %-30.30s  %s\n",
+                       entries[i].uid,
+                       from    ? from    : "(no from)",
+                       subject ? subject : "(no subject)",
+                       date    ? date    : "");
+
+            free(hdrs); free(from); free(subject); free(date);
+        }
+
+        if (end >= show_count) break; /* last page — done */
+
+        if (opts->pager) {
+            int total_pages = (show_count + limit - 1) / limit;
+            int cur_page    = cur / limit + 1;
+            int action = pager_prompt(cur_page, total_pages);
+            if (action == 0) break;                           /* quit */
+            if (action < 0 && cur >= limit) cur -= limit;    /* prev */
+            else if (action > 0)            cur  = end;      /* next */
+        } else {
+            printf("\n  -- %d more message(s) --  use --offset %d for next page\n",
+                   show_count - end, end + 1);
+            break;
+        }
+    }
 
     free(entries);
     return 0;
@@ -458,7 +558,7 @@ int email_service_list_folders(const Config *cfg, int tree) {
     return 0;
 }
 
-int email_service_read(const Config *cfg, int uid) {
+int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
     char *raw = NULL;
 
     if (cache_exists(cfg->folder, uid)) {
@@ -488,7 +588,51 @@ int email_service_read(const Config *cfg, int uid) {
            "\u2500\n");
 
     char *body = mime_get_text_body(raw);
-    printf("%s\n", body ? body : "(no readable text body)");
+    const char *body_text = body ? body : "(no readable text body)";
+
+/* Lines taken by headers + separator already on screen */
+#define SHOW_HDR_LINES 5
+
+    if (!pager || page_size <= SHOW_HDR_LINES) {
+        printf("%s\n", body_text);
+    } else {
+        int body_lines  = count_lines(body_text);
+        int rows_avail  = page_size - SHOW_HDR_LINES;
+        int total_pages = (body_lines + rows_avail - 1) / rows_avail;
+        if (total_pages < 1) total_pages = 1;
+
+        for (int page = 0, cur_line = 0; ; page++) {
+            if (page > 0) {
+                /* Clear screen and reprint headers on pages 2+ */
+                printf("\033[H\033[2J");
+                printf("From:    %s\n", from    ? from    : "(none)");
+                printf("Subject: %s\n", subject ? subject : "(none)");
+                printf("Date:    %s\n", date    ? date    : "(none)");
+                printf("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+                       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+                       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+                       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+                       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+                       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+                       "\u2500\n");
+            }
+
+            int next_line = cur_line + rows_avail;
+            if (next_line > body_lines) next_line = body_lines;
+            print_body_page(body_text, cur_line, rows_avail);
+
+            if (next_line >= body_lines) break; /* last page */
+
+            int action = pager_prompt(page + 1, total_pages);
+            if (action == 0) break;
+            if (action < 0 && cur_line >= rows_avail) cur_line -= rows_avail;
+            else if (action > 0)                      cur_line  = next_line;
+        }
+
+        free(body); free(from); free(subject); free(date); free(raw);
+        return 0;
+    }
+#undef SHOW_HDR_LINES
 
     free(body); free(from); free(subject); free(date); free(raw);
     return 0;

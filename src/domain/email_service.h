@@ -9,26 +9,51 @@
  */
 
 /**
- * @brief Lists unread (UNSEEN) messages in the configured folder.
+ * @brief Options for email_service_list().
  *
- * Performs UID SEARCH UNSEEN, then fetches the header block for each
- * message (BODY.PEEK[HEADER]) without marking them as \Seen.
- * Prints a table of UID, From, Subject, and Date to stdout.
+ * all    0 = show UNSEEN messages only (default)
+ *        1 = show ALL messages; unread ones are marked in the table
+ * folder NULL = use cfg->folder; non-NULL overrides for this call only
+ */
+typedef struct {
+    int         all;
+    const char *folder;
+} EmailListOpts;
+
+/**
+ * @brief Lists messages in a mailbox folder.
  *
- * @param cfg  Pointer to the connection configuration.
+ * In default mode (all=0) only UNSEEN messages are shown.
+ * With all=1 all messages are shown; unread ones are prefixed with 'N'.
+ * Unread messages always appear before read ones.
+ * Prints a table of Status, UID, From, Subject and Date to stdout.
+ *
+ * @param cfg   Connection configuration.
+ * @param opts  Listing options.
  * @return 0 on success, -1 on failure.
  */
-int email_service_list_unseen(const Config *cfg);
+int email_service_list(const Config *cfg, const EmailListOpts *opts);
+
+/**
+ * @brief Lists all available IMAP folders.
+ *
+ * Issues IMAP LIST "" "*" and prints the results.
+ * With tree=1 the hierarchy is rendered using box-drawing characters.
+ *
+ * @param cfg   Connection configuration.
+ * @param tree  0 = flat list, 1 = tree view.
+ * @return 0 on success, -1 on failure.
+ */
+int email_service_list_folders(const Config *cfg, int tree);
 
 /**
  * @brief Reads and displays one message identified by its IMAP UID.
  *
- * Checks the local cache (~/.cache/email-cli/messages/<folder>/<uid>.eml)
- * first; fetches from the server only on a cache miss. The full RFC 2822
- * message is MIME-parsed and its readable plain-text body is printed.
+ * Checks the local cache first; fetches from the server on a cache miss.
+ * The full RFC 2822 message is MIME-parsed and the plain-text body printed.
  *
- * @param cfg  Pointer to the connection configuration.
- * @param uid  IMAP UID of the message to display.
+ * @param cfg  Connection configuration.
+ * @param uid  IMAP UID of the message.
  * @return 0 on success, -1 on failure.
  */
 int email_service_read(const Config *cfg, int uid);

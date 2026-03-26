@@ -101,18 +101,10 @@ static char *fetch_uid_content(const Config *cfg, int uid, int headers_only) {
     if (!curl) return NULL;
 
     RAII_STRING char *url = NULL;
-    /* Using the standard IMAP URL format for fetching a specific UID.
-     * This makes libcurl handle the FETCH command and literal extraction natively. */
-    if (asprintf(&url, "%s/%s/;UID=%d", cfg->host, cfg->folder, uid) == -1) return NULL;
-
-    if (headers_only) {
-        /* Request only headers via IMAP section path */
-        RAII_STRING char *new_url = NULL;
-        if (asprintf(&new_url, "%s/;SECTION=HEADER", url) == -1) return NULL;
-        free(url);
-        url = new_url;
-        new_url = NULL; // prevent RAII double free
-    }
+    int rc = headers_only
+        ? asprintf(&url, "%s/%s/;UID=%d/;SECTION=HEADER", cfg->host, cfg->folder, uid)
+        : asprintf(&url, "%s/%s/;UID=%d", cfg->host, cfg->folder, uid);
+    if (rc == -1) return NULL;
 
     Buffer buf = {NULL, 0};
     /* We don't use CUSTOMREQUEST here, let libcurl use its internal FETCH handler. */

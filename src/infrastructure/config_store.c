@@ -66,6 +66,19 @@ Config* config_load_from_store(void) {
         return NULL;
     }
 
+    if (strncmp(cfg->host, "imap://", 7) != 0 &&
+        strncmp(cfg->host, "imaps://", 8) != 0) {
+        fprintf(stderr,
+            "Error: EMAIL_HOST must start with imap:// or imaps://\n"
+            "  Got:      %s\n"
+            "  Example:  imaps://imap.example.com\n\n"
+            "Delete ~/.config/email-cli/config.ini and run again to reconfigure.\n",
+            cfg->host);
+        logger_log(LOG_ERROR, "Invalid EMAIL_HOST (missing protocol): %s", cfg->host);
+        config_free(cfg);
+        return NULL;
+    }
+
     return cfg;
 }
 

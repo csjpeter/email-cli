@@ -130,7 +130,8 @@ static int fetch_and_print(const Config *cfg, int uid, int index, int of_total) 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 int email_service_fetch_recent(const Config *cfg) {
-    printf("--- Fetching recent emails from %s/%s ---\n", cfg->host, cfg->folder);
+    printf("--- Fetching recent emails: %s @ %s/%s ---\n",
+           cfg->user, cfg->host, cfg->folder);
 
     int *uids = NULL;
     int total = search_all_uids(cfg, &uids);

@@ -30,9 +30,11 @@ set(SOURCES
     src/main.c
     src/core/logger.c
     src/core/fs_util.c
+    src/core/mime_util.c
     src/infrastructure/config_store.c
     src/infrastructure/setup_wizard.c
     src/infrastructure/curl_adapter.c
+    src/infrastructure/cache_store.c
     src/domain/email_service.c
 )
 

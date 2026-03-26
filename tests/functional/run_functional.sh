@@ -28,7 +28,6 @@ trap "kill $SERVER_PID || true" EXIT
 sleep 1
 
 # 3. Create a temporary config for the test
-# We bypass the wizard by providing a config.ini
 TEST_HOME="/tmp/email-cli-func-test"
 rm -rf "$TEST_HOME"
 mkdir -p "$TEST_HOME/.config/email-cli"
@@ -39,20 +38,16 @@ EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
 EOF
 
-# 4. Run the client and capture output
-echo "Running client..."
 export HOME="$TEST_HOME"
-OUTPUT=$("$BIN_DIR/email-cli" 2>&1)
-echo "$OUTPUT"
 
-# 5. Assertions
 PASSED=0
 FAILED=0
 
 check() {
     local desc="$1"
     local pattern="$2"
-    if echo "$OUTPUT" | grep -q "$pattern"; then
+    local output="$3"
+    if echo "$output" | grep -q "$pattern"; then
         echo "  [PASS] $desc"
         PASSED=$((PASSED + 1))
     else
@@ -61,13 +56,31 @@ check() {
     fi
 }
 
+# 4. Run list mode (default)
+echo "Running client (list mode)..."
+LIST_OUTPUT=$("$BIN_DIR/email-cli" 2>&1)
+echo "$LIST_OUTPUT"
+
 echo ""
-echo "--- Assertions ---"
-check "Fetch header printed"    "Fetching recent emails"
-check "Messages found"          "message"
-check "Message separator shown" "═══"
-check "Test email body shown"   "Hello from Mock Server"
-check "Successful completion"   "Success: Fetch complete"
+echo "--- List Mode Assertions ---"
+check "Fetch header printed"      "Fetching recent emails"  "$LIST_OUTPUT"
+check "Unread message count"      "unread message"          "$LIST_OUTPUT"
+check "Table separator shown"     "═══"                     "$LIST_OUTPUT"
+check "Subject in table"          "Test Message"            "$LIST_OUTPUT"
+check "Successful completion"     "Success: Fetch complete" "$LIST_OUTPUT"
+
+# 5. Run read mode
+echo ""
+echo "Running client (--read 1)..."
+READ_OUTPUT=$("$BIN_DIR/email-cli" --read 1 2>&1)
+echo "$READ_OUTPUT"
+
+echo ""
+echo "--- Read Mode Assertions ---"
+check "From header shown"         "From:"                   "$READ_OUTPUT"
+check "Subject header shown"      "Subject:"                "$READ_OUTPUT"
+check "Email body shown"          "Hello from Mock Server"  "$READ_OUTPUT"
+check "Successful completion"     "Success: Fetch complete" "$READ_OUTPUT"
 
 echo ""
 echo "--- Functional Test Results ---"

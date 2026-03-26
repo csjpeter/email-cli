@@ -1,0 +1,284 @@
+#include "mime_util.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+/* ── Header extraction ──────────────────────────────────────────────── */
+
+char *mime_get_header(const char *msg, const char *name) {
+    if (!msg || !name) return NULL;
+    size_t nlen = strlen(name);
+    const char *p = msg;
+
+    while (p && *p) {
+        /* Stop at the blank line separating headers from body.
+         * A blank line starts with '\r' (CRLF) or '\n' (LF). */
+        if (*p == '\r' || *p == '\n')
+            break;
+
+        if (strncasecmp(p, name, nlen) == 0 && p[nlen] == ':') {
+            const char *val = p + nlen + 1;
+            while (*val == ' ' || *val == '\t') val++;
+
+            size_t cap = 512, n = 0;
+            char *result = malloc(cap);
+            if (!result) return NULL;
+
+            /* Collect value, unfolding continuation lines */
+            while (*val) {
+                if (*val == '\r' || *val == '\n') {
+                    const char *next = val;
+                    if (*next == '\r') next++;
+                    if (*next == '\n') next++;
+                    if (*next == ' ' || *next == '\t') {
+                        /* Continuation line: skip CRLF and the leading whitespace */
+                        val = next;
+                        while (*val == ' ' || *val == '\t') val++;
+                        /* Add a single space to separate folded content if needed */
+                        if (n > 0 && result[n-1] != ' ') {
+                            if (n + 1 >= cap) {
+                                cap *= 2;
+                                char *tmp = realloc(result, cap);
+                                if (!tmp) { free(result); return NULL; }
+                                result = tmp;
+                            }
+                            result[n++] = ' ';
+                        }
+                        continue;
+                    } else {
+                        /* Not a continuation line: we are done with this header */
+                        break;
+                    }
+                }
+
+                if (n + 1 >= cap) {
+                    cap *= 2;
+                    char *tmp = realloc(result, cap);
+                    if (!tmp) { free(result); return NULL; }
+                    result = tmp;
+                }
+                result[n++] = *val++;
+            }
+            result[n] = '\0';
+            return result;
+        }
+
+        /* Advance to next line */
+        p = strchr(p, '\n');
+        if (p) p++;
+    }
+    return NULL;
+}
+
+/* ── Base64 decoder ─────────────────────────────────────────────────── */
+
+static int b64val(unsigned char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+static char *decode_base64(const char *in, size_t inlen) {
+    size_t max = (inlen / 4 + 1) * 3 + 4;
+    char *out = malloc(max);
+    if (!out) return NULL;
+    size_t n = 0;
+    int buf = 0, bits = 0;
+    for (size_t i = 0; i < inlen; i++) {
+        int v = b64val((unsigned char)in[i]);
+        if (v < 0) continue;
+        buf = (buf << 6) | v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out[n++] = (char)((buf >> bits) & 0xFF);
+        }
+    }
+    out[n] = '\0';
+    return out;
+}
+
+/* ── Quoted-Printable decoder ───────────────────────────────────────── */
+
+static char *decode_qp(const char *in, size_t inlen) {
+    char *out = malloc(inlen + 1);
+    if (!out) return NULL;
+    size_t n = 0, i = 0;
+    while (i < inlen) {
+        if (in[i] == '=' && i + 1 < inlen &&
+            (in[i + 1] == '\r' || in[i + 1] == '\n')) {
+            /* Soft line break — skip */
+            i++;
+            if (i < inlen && in[i] == '\r') i++;
+            if (i < inlen && in[i] == '\n') i++;
+        } else if (in[i] == '=' && i + 2 < inlen &&
+                   isxdigit((unsigned char)in[i + 1]) &&
+                   isxdigit((unsigned char)in[i + 2])) {
+            char hex[3] = { in[i + 1], in[i + 2], '\0' };
+            out[n++] = (char)strtol(hex, NULL, 16);
+            i += 3;
+        } else {
+            out[n++] = in[i++];
+        }
+    }
+    out[n] = '\0';
+    return out;
+}
+
+/* ── HTML tag stripper ──────────────────────────────────────────────── */
+
+static char *strip_html(const char *html) {
+    size_t len = strlen(html);
+    char *out = malloc(len + 1);
+    if (!out) return NULL;
+    size_t n = 0;
+    int in_tag = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (html[i] == '<')      { in_tag = 1; continue; }
+        if (html[i] == '>')      { in_tag = 0; continue; }
+        if (!in_tag) out[n++] = html[i];
+    }
+    out[n] = '\0';
+    return out;
+}
+
+/* ── Body helpers ───────────────────────────────────────────────────── */
+
+/** Returns pointer to the first byte of the message body (past the header block). */
+static const char *body_start(const char *msg) {
+    const char *p = strstr(msg, "\r\n\r\n");
+    if (p) return p + 4;
+    p = strstr(msg, "\n\n");
+    if (p) return p + 2;
+    return NULL;
+}
+
+/** Decodes a body chunk according to its transfer encoding. Caller must free. */
+static char *decode_transfer(const char *body, size_t len, const char *enc) {
+    if (enc && strcasecmp(enc, "base64") == 0)
+        return decode_base64(body, len);
+    if (enc && strcasecmp(enc, "quoted-printable") == 0)
+        return decode_qp(body, len);
+    /* 7bit / 8bit / binary / unknown: return as-is */
+    return strndup(body, len);
+}
+
+/* Forward declaration for recursion */
+static char *text_from_part(const char *part);
+
+/** Finds the first text/plain body in a multipart message. */
+static char *text_from_multipart(const char *msg, const char *ctype) {
+    /* Extract boundary value */
+    const char *b = strcasestr(ctype, "boundary=");
+    if (!b) return NULL;
+    b += strlen("boundary=");
+
+    char boundary[512] = {0};
+    if (*b == '"') {
+        b++;
+        const char *end = strchr(b, '"');
+        if (!end) return NULL;
+        snprintf(boundary, sizeof(boundary), "%.*s", (int)(end - b), b);
+    } else {
+        size_t i = 0;
+        while (*b && *b != ';' && *b != ' ' && *b != '\r' && *b != '\n' &&
+               i < sizeof(boundary) - 1)
+            boundary[i++] = *b++;
+        boundary[i] = '\0';
+    }
+    if (!boundary[0]) return NULL;
+
+    char delim[520];
+    snprintf(delim, sizeof(delim), "--%s", boundary);
+    size_t dlen = strlen(delim);
+
+    const char *p = strstr(msg, delim);
+    while (p) {
+        /* Skip past boundary line */
+        p = strchr(p + dlen, '\n');
+        if (!p) break;
+        p++;
+
+        /* Find end of this part */
+        const char *next = strstr(p, delim);
+        if (!next) break;
+
+        /* Try to extract text from this part */
+        /* Make a NUL-terminated copy of the part */
+        size_t partlen = (size_t)(next - p);
+        char *part = strndup(p, partlen);
+        if (!part) break;
+        char *result = text_from_part(part);
+        free(part);
+        if (result) return result;
+
+        p = next + dlen;
+        if (p[0] == '-' && p[1] == '-') break; /* end boundary */
+        p = strchr(p, '\n');
+        if (p) p++;
+    }
+    return NULL;
+}
+
+/** Extracts readable text from one MIME part (may recurse for nested multipart). */
+static char *text_from_part(const char *part) {
+    char *ctype = mime_get_header(part, "Content-Type");
+    char *enc   = mime_get_header(part, "Content-Transfer-Encoding");
+    const char *body = body_start(part);
+    char *result = NULL;
+
+    if (!ctype || strncasecmp(ctype, "text/plain", 10) == 0) {
+        if (body)
+            result = decode_transfer(body, strlen(body), enc);
+    } else if (strncasecmp(ctype, "multipart/", 10) == 0) {
+        result = text_from_multipart(part, ctype);
+    } else if (strncasecmp(ctype, "text/html", 9) == 0) {
+        /* Use HTML only as last resort — stripped of tags */
+        if (body) {
+            char *decoded = decode_transfer(body, strlen(body), enc);
+            if (decoded) {
+                result = strip_html(decoded);
+                free(decoded);
+            }
+        }
+    }
+    /* Other types (image, application, etc.): skip */
+
+    free(ctype);
+    free(enc);
+    return result;
+}
+
+/* ── Public API ─────────────────────────────────────────────────────── */
+
+char *mime_get_text_body(const char *msg) {
+    if (!msg) return NULL;
+    return text_from_part(msg);
+}
+
+char *mime_extract_imap_literal(const char *response) {
+    if (!response) return NULL;
+    /* Find the octet-count literal: {size}\r\n */
+    const char *brace = strchr(response, '{');
+    if (!brace) return NULL;
+    char *end = NULL;
+    long size = strtol(brace + 1, &end, 10);
+    if (!end || *end != '}' || size <= 0) return NULL;
+    /* Skip past }\r\n */
+    const char *content = end + 1;
+    if (*content == '\r') content++;
+    if (*content == '\n') content++;
+    
+    // Safety check: ensure we don't read past the end of the response string
+    size_t remaining = strlen(content);
+    if (remaining < (size_t)size) {
+        // This can happen if the buffer was not fully populated by curl
+        return NULL;
+    }
+    
+    return strndup(content, (size_t)size);
+}

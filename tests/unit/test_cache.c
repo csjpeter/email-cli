@@ -1,6 +1,7 @@
 #include "test_helpers.h"
 #include "cache_store.h"
 #include "fs_util.h"
+#include "raii.h"
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -15,8 +16,10 @@ void test_cache_store(void) {
     /* 1. Not cached initially */
     ASSERT(cache_exists(folder, uid) == 0, "cache_exists: should be 0 before save");
 
-    char *loaded = cache_load(folder, uid);
-    ASSERT(loaded == NULL, "cache_load: should return NULL before save");
+    {
+        RAII_STRING char *loaded = cache_load(folder, uid);
+        ASSERT(loaded == NULL, "cache_load: should return NULL before save");
+    }
 
     /* 2. Save and verify existence */
     const char *content = "Subject: Cache Test\r\n\r\nHello cache!";
@@ -25,19 +28,21 @@ void test_cache_store(void) {
     ASSERT(cache_exists(folder, uid) == 1, "cache_exists: should be 1 after save");
 
     /* 3. Load and verify content */
-    loaded = cache_load(folder, uid);
-    ASSERT(loaded != NULL, "cache_load: should not be NULL after save");
-    ASSERT(strcmp(loaded, content) == 0, "cache_load: content mismatch");
-    free(loaded);
+    {
+        RAII_STRING char *loaded = cache_load(folder, uid);
+        ASSERT(loaded != NULL, "cache_load: should not be NULL after save");
+        ASSERT(strcmp(loaded, content) == 0, "cache_load: content mismatch");
+    }
 
     /* 4. Overwrite with new content */
     const char *content2 = "Subject: Updated\r\n\r\nNew body.";
     rc = cache_save(folder, uid, content2, strlen(content2));
     ASSERT(rc == 0, "cache_save: overwrite should return 0");
-    loaded = cache_load(folder, uid);
-    ASSERT(loaded != NULL, "cache_load: should not be NULL after overwrite");
-    ASSERT(strcmp(loaded, content2) == 0, "cache_load: overwritten content mismatch");
-    free(loaded);
+    {
+        RAII_STRING char *loaded = cache_load(folder, uid);
+        ASSERT(loaded != NULL, "cache_load: should not be NULL after overwrite");
+        ASSERT(strcmp(loaded, content2) == 0, "cache_load: overwritten content mismatch");
+    }
 
     /* 5. Different UIDs are independent */
     ASSERT(cache_exists(folder, 99) == 0, "cache_exists: UID 99 should not exist");

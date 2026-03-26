@@ -1,6 +1,7 @@
 #include "test_helpers.h"
 #include "logger.h"
 #include "fs_util.h"
+#include "raii.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -39,10 +40,11 @@ void test_logger(void) {
     logger_log(LOG_WARN,  "This should be filtered out");
 
     // 6. Test Clean Logs
-    FILE *f = fopen("/tmp/email-cli-log-test/session.log.old", "w");
-    if (f) {
-        fprintf(f, "old data");
-        fclose(f);
+    {
+        RAII_FILE FILE *f = fopen("/tmp/email-cli-log-test/session.log.old", "w");
+        if (f) {
+            fprintf(f, "old data");
+        }
     }
     res = logger_clean_logs(test_log_dir);
     ASSERT(res == 0, "logger_clean_logs should return 0");
@@ -63,11 +65,12 @@ void test_logger(void) {
 
     // 10. Test log rotation: create a file > 5MB, then init should rotate it
     unlink(test_log_file);
-    FILE *big = fopen(test_log_file, "wb");
-    if (big) {
-        fseek(big, 5 * 1024 * 1024, SEEK_SET);
-        fputc('\0', big);
-        fclose(big);
+    {
+        RAII_FILE FILE *big = fopen(test_log_file, "wb");
+        if (big) {
+            fseek(big, 5 * 1024 * 1024, SEEK_SET);
+            fputc('\0', big);
+        }
     }
     res = logger_init(test_log_file, LOG_INFO);
     ASSERT(res == 0, "logger_init should succeed after rotating oversized log");

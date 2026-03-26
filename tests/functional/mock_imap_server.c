@@ -10,10 +10,10 @@
  * @brief Minimal IMAP server to satisfy libcurl for testing.
  */
 
-#define PORT 9993 // We'll use plain IMAP for testing simplicity or a high port
+#define PORT 9993
 
 void handle_client(int client_sock) {
-    char buffer[1024];
+    char buffer[4096];
     
     // 1. Greeting
     const char *greeting = "* OK Mock IMAP server ready\r\n";
@@ -23,11 +23,13 @@ void handle_client(int client_sock) {
         int bytes = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
         if (bytes <= 0) break;
         buffer[bytes] = 0;
-        printf("Client: %s", buffer);
+        printf("Client requested: %s", buffer);
 
         // Extract Tag
         char tag[16] = {0};
-        sscanf(buffer, "%15s", tag);
+        if (sscanf(buffer, "%15s", tag) != 1) {
+            strcpy(tag, "*");
+        }
 
         // Simple State Machine
         if (strstr(buffer, "CAPABILITY")) {
@@ -41,13 +43,12 @@ void handle_client(int client_sock) {
             snprintf(ok, sizeof(ok), "%s OK LOGIN completed\r\n", tag);
             send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "SELECT")) {
-            const char *exists = "* 1 EXISTS\r\n";
+            const char *exists = "* 1 EXISTS\r\n* 1 RECENT\r\n* OK [UIDVALIDITY 1] UIDs are valid\r\n";
             send(client_sock, exists, strlen(exists), 0);
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK [READ-WRITE] SELECT completed\r\n", tag);
             send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "SEARCH")) {
-            /* Respond to "UID SEARCH ALL" – report one message exists */
             const char *search_resp = "* SEARCH 1\r\n";
             send(client_sock, search_resp, strlen(search_resp), 0);
             char ok[64];
@@ -65,16 +66,25 @@ void handle_client(int client_sock) {
                 "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
                 "\r\n"
                 "Hello from Mock Server!";
+            
             int is_header = strstr(buffer, "HEADER") != NULL;
             const char *content = is_header ? headers : full_msg;
-            const char *section = is_header ? "HEADER" : "";
-            char data[1024];
-            snprintf(data, sizeof(data), "* 1 FETCH (BODY[%s] {%zu}\r\n%s)\r\n",
-                     section, strlen(content), content);
-            send(client_sock, data, strlen(data), 0);
+            const char *section = is_header ? "BODY[HEADER]" : "RFC822";
+            
+            char head[128];
+            snprintf(head, sizeof(head), "* 1 FETCH (%s {%zu}\r\n", section, strlen(content));
+            send(client_sock, head, strlen(head), 0);
+            
+            // Send content in chunks to be realistic
+            send(client_sock, content, strlen(content), 0);
+            
+            const char *tail = ")\r\n";
+            send(client_sock, tail, strlen(tail), 0);
+            
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);
             send(client_sock, ok, strlen(ok), 0);
+            printf("Mock server sent FETCH response for %s\n", section);
         } else if (strstr(buffer, "LOGOUT")) {
             const char *bye = "* BYE Mock IMAP server logging out\r\n";
             send(client_sock, bye, strlen(bye), 0);
@@ -124,8 +134,9 @@ int main() {
     printf("Mock IMAP Server listening on port %d\n", PORT);
 
     while ((client_sock = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) >= 0) {
-        printf("Connection accepted\n");
+        printf("Connection accepted from client\n");
         handle_client(client_sock);
+        printf("Connection closed\n");
     }
 
     close(server_fd);

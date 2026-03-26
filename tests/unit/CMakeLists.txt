@@ -14,9 +14,11 @@ set(TEST_SOURCES
     test_curl.c
     test_mime.c
     test_cache.c
+    test_imap_util.c
     ../../src/core/fs_util.c
     ../../src/core/logger.c
     ../../src/core/mime_util.c
+    ../../src/core/imap_util.c
     ../../src/infrastructure/config_store.c
     ../../src/infrastructure/setup_wizard.c
     ../../src/infrastructure/curl_adapter.c

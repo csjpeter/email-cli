@@ -76,19 +76,35 @@ HELP_SHOW=$("$BIN_DIR/email-cli" help show 2>&1)
 echo "--- help show ---"
 check "help show: usage line"     "email-cli show"          "$HELP_SHOW"
 
-# 7. Test: list command
+# 7. Test: list (unread only)
 echo ""
 echo "Running: email-cli list ..."
 LIST_OUTPUT=$("$BIN_DIR/email-cli" list 2>&1)
 echo "$LIST_OUTPUT"
 echo "--- List Assertions ---"
-check "Fetch header printed"      "Fetching recent emails"  "$LIST_OUTPUT"
+check "Fetch header printed"      "Fetching emails"         "$LIST_OUTPUT"
 check "Unread message count"      "unread message"          "$LIST_OUTPUT"
 check "Table separator shown"     "═══"                     "$LIST_OUTPUT"
 check "Subject in table"          "Test Message"            "$LIST_OUTPUT"
 check "Successful completion"     "Success: Fetch complete" "$LIST_OUTPUT"
 
-# 8. Test: show command
+# 8. Test: list --all
+echo ""
+echo "Running: email-cli list --all ..."
+ALL_OUTPUT=$("$BIN_DIR/email-cli" list --all 2>&1)
+echo "$ALL_OUTPUT"
+echo "--- List --all Assertions ---"
+check "All mode: message count"   "message(s) in"           "$ALL_OUTPUT"
+check "All mode: unread marker N" " N "                     "$ALL_OUTPUT"
+check "All mode: subject shown"   "Test Message"            "$ALL_OUTPUT"
+
+# 9. Test: list --folder
+echo ""
+echo "Running: email-cli list --folder INBOX ..."
+FOLDER_OUTPUT=$("$BIN_DIR/email-cli" list --folder INBOX 2>&1)
+check "Folder override used"      "INBOX"                   "$FOLDER_OUTPUT"
+
+# 10. Test: show command
 echo ""
 echo "Running: email-cli show 1 ..."
 SHOW_OUTPUT=$("$BIN_DIR/email-cli" show 1 2>&1)
@@ -98,6 +114,25 @@ check "From header shown"         "From:"                   "$SHOW_OUTPUT"
 check "Subject header shown"      "Subject:"                "$SHOW_OUTPUT"
 check "Email body shown"          "Hello from Mock Server"  "$SHOW_OUTPUT"
 check "Successful completion"     "Success: Fetch complete" "$SHOW_OUTPUT"
+
+# 11. Test: folders (flat)
+echo ""
+echo "Running: email-cli folders ..."
+FOLDERS_OUTPUT=$("$BIN_DIR/email-cli" folders 2>&1)
+echo "$FOLDERS_OUTPUT"
+echo "--- Folders Assertions ---"
+check "Folders: INBOX listed"     "INBOX"                   "$FOLDERS_OUTPUT"
+check "Folders: subfolder listed" "INBOX.Sent"              "$FOLDERS_OUTPUT"
+
+# 12. Test: folders --tree
+echo ""
+echo "Running: email-cli folders --tree ..."
+TREE_OUTPUT=$("$BIN_DIR/email-cli" folders --tree 2>&1)
+echo "$TREE_OUTPUT"
+echo "--- Folders Tree Assertions ---"
+check "Tree: has branch char"     "──"                      "$TREE_OUTPUT"
+check "Tree: INBOX shown"         "INBOX"                   "$TREE_OUTPUT"
+check "Tree: Sent shown"          "Sent"                    "$TREE_OUTPUT"
 
 echo ""
 echo "--- Functional Test Results ---"

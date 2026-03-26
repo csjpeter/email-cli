@@ -48,6 +48,15 @@ void handle_client(int client_sock) {
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK [READ-WRITE] SELECT completed\r\n", tag);
             send(client_sock, ok, strlen(ok), 0);
+        } else if (strstr(buffer, "LIST")) {
+            const char *list_resp =
+                "* LIST (\\HasNoChildren) \".\" \"INBOX\"\r\n"
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.Sent\"\r\n"
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.Trash\"\r\n";
+            send(client_sock, list_resp, strlen(list_resp), 0);
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK LIST completed\r\n", tag);
+            send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "SEARCH")) {
             const char *search_resp = "* SEARCH 1\r\n";
             send(client_sock, search_resp, strlen(search_resp), 0);

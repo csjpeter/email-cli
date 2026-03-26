@@ -69,7 +69,22 @@ void test_config_store(void) {
     free(cfg2.pass);
     free(cfg2.folder);
 
-    // 6. Test config_free with NULL (should not crash)
+    // 6. Test Load - host without protocol prefix → should return NULL with error
+    fp = fopen("/tmp/email-cli-test-home/.config/email-cli/config.ini", "w");
+    if (fp) {
+        fprintf(fp, "EMAIL_HOST=box.example.com\n");
+        fprintf(fp, "EMAIL_USER=test@test.com\n");
+        fprintf(fp, "EMAIL_PASS=password123\n");
+        fclose(fp);
+    }
+    logger_init("/tmp/email-cli-config-test.log", LOG_ERROR);
+    loaded = config_load_from_store();
+    ASSERT(loaded == NULL, "config_load_from_store should return NULL for host without protocol");
+    logger_close();
+    unlink("/tmp/email-cli-config-test.log");
+    unlink("/tmp/email-cli-test-home/.config/email-cli/config.ini");
+
+    // 7. Test config_free with NULL (should not crash)
     config_free(NULL);
 
     // Cleanup

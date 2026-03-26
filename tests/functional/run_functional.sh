@@ -56,31 +56,48 @@ check() {
     fi
 }
 
-# 4. Run list mode (default)
-echo "Running client (list mode)..."
-LIST_OUTPUT=$("$BIN_DIR/email-cli" 2>&1)
-echo "$LIST_OUTPUT"
+# 4. Test: help (no args)
+echo "Running: email-cli (no args) ..."
+HELP_OUTPUT=$("$BIN_DIR/email-cli" 2>&1 || true)
+echo "$HELP_OUTPUT"
+echo "--- Help Assertions ---"
+check "General help: list cmd"    "list"                    "$HELP_OUTPUT"
+check "General help: show cmd"    "show"                    "$HELP_OUTPUT"
+check "General help: help cmd"    "help"                    "$HELP_OUTPUT"
 
+# 5. Test: help list
 echo ""
-echo "--- List Mode Assertions ---"
+HELP_LIST=$("$BIN_DIR/email-cli" help list 2>&1)
+echo "--- help list ---"
+check "help list: usage line"     "email-cli list"          "$HELP_LIST"
+
+# 6. Test: help show
+HELP_SHOW=$("$BIN_DIR/email-cli" help show 2>&1)
+echo "--- help show ---"
+check "help show: usage line"     "email-cli show"          "$HELP_SHOW"
+
+# 7. Test: list command
+echo ""
+echo "Running: email-cli list ..."
+LIST_OUTPUT=$("$BIN_DIR/email-cli" list 2>&1)
+echo "$LIST_OUTPUT"
+echo "--- List Assertions ---"
 check "Fetch header printed"      "Fetching recent emails"  "$LIST_OUTPUT"
 check "Unread message count"      "unread message"          "$LIST_OUTPUT"
 check "Table separator shown"     "═══"                     "$LIST_OUTPUT"
 check "Subject in table"          "Test Message"            "$LIST_OUTPUT"
 check "Successful completion"     "Success: Fetch complete" "$LIST_OUTPUT"
 
-# 5. Run read mode
+# 8. Test: show command
 echo ""
-echo "Running client (--read 1)..."
-READ_OUTPUT=$("$BIN_DIR/email-cli" --read 1 2>&1)
-echo "$READ_OUTPUT"
-
-echo ""
-echo "--- Read Mode Assertions ---"
-check "From header shown"         "From:"                   "$READ_OUTPUT"
-check "Subject header shown"      "Subject:"                "$READ_OUTPUT"
-check "Email body shown"          "Hello from Mock Server"  "$READ_OUTPUT"
-check "Successful completion"     "Success: Fetch complete" "$READ_OUTPUT"
+echo "Running: email-cli show 1 ..."
+SHOW_OUTPUT=$("$BIN_DIR/email-cli" show 1 2>&1)
+echo "$SHOW_OUTPUT"
+echo "--- Show Assertions ---"
+check "From header shown"         "From:"                   "$SHOW_OUTPUT"
+check "Subject header shown"      "Subject:"                "$SHOW_OUTPUT"
+check "Email body shown"          "Hello from Mock Server"  "$SHOW_OUTPUT"
+check "Successful completion"     "Success: Fetch complete" "$SHOW_OUTPUT"
 
 echo ""
 echo "--- Functional Test Results ---"

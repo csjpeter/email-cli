@@ -5,9 +5,10 @@
 
 /**
  * @file cache_store.h
- * @brief Local message cache: save and load raw .eml files per folder/UID.
+ * @brief Local message/header cache for IMAP content.
  *
- * Messages are stored at ~/.cache/email-cli/messages/<folder>/<uid>.eml.
+ * Full messages: ~/.cache/email-cli/messages/<folder>/<uid>.eml
+ * Headers only:  ~/.cache/email-cli/headers/<folder>/<uid>.hdr
  */
 
 /**
@@ -35,5 +36,32 @@ int cache_save(const char *folder, int uid, const char *content, size_t len);
  * @return Heap-allocated NUL-terminated string, or NULL. Caller must free.
  */
 char *cache_load(const char *folder, int uid);
+
+/* ── Header cache (headers/<folder>/<uid>.hdr) ────────────────────────── */
+
+/** @brief Checks whether a cached header file exists. */
+int   hcache_exists(const char *folder, int uid);
+
+/** @brief Writes header content to the header cache. */
+int   hcache_save(const char *folder, int uid, const char *content, size_t len);
+
+/**
+ * @brief Reads a cached header from disk.
+ * @return Heap-allocated NUL-terminated string, or NULL. Caller must free.
+ */
+char *hcache_load(const char *folder, int uid);
+
+/**
+ * @brief Removes header cache files whose UID is not in @p keep_uids.
+ *
+ * Call this after a successful SEARCH ALL to evict headers for messages
+ * that have been deleted from the server.
+ *
+ * @param folder     Mailbox folder name.
+ * @param keep_uids  Array of UIDs that are still present on the server.
+ * @param keep_count Number of entries in @p keep_uids.
+ */
+void  hcache_evict_stale(const char *folder,
+                          const int *keep_uids, int keep_count);
 
 #endif /* CACHE_STORE_H */

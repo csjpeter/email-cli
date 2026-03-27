@@ -33,6 +33,18 @@ char *mime_get_header(const char *msg, const char *name);
 char *mime_get_text_body(const char *msg);
 
 /**
+ * @brief Formats an RFC 2822 date string as "YYYY-MM-DD HH:MM" in local timezone.
+ *
+ * Supports dates with and without the leading day-of-week field.
+ * Converts from the source timezone offset to the local system timezone.
+ * If parsing fails, returns a heap-allocated copy of the raw input string.
+ *
+ * @param date RFC 2822 date string (e.g. "Tue, 10 Mar 2026 15:07:40 +0000 (UTC)").
+ * @return Heap-allocated formatted string, or NULL if date is NULL. Caller must free.
+ */
+char *mime_format_date(const char *date);
+
+/**
  * @brief Extracts the literal content from an IMAP FETCH response.
  *
  * Parses the `{size}` octet-count literal notation produced by IMAP servers:

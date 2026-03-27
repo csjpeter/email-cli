@@ -45,6 +45,19 @@ char *mime_get_text_body(const char *msg);
 char *mime_format_date(const char *date);
 
 /**
+ * @brief Decodes RFC 2047 encoded words in a header field value.
+ *
+ * Replaces every =?charset?Q|B?text?= token with its UTF-8 decoded form.
+ * Linear whitespace between adjacent encoded words is silently removed
+ * per RFC 2047 §6.2.  Non-UTF-8 charsets are converted via iconv(3);
+ * on conversion failure the raw decoded bytes are used as a fallback.
+ *
+ * @param value Header field value string (e.g. the result of mime_get_header).
+ * @return Heap-allocated UTF-8 string, or NULL on allocation failure. Caller must free.
+ */
+char *mime_decode_words(const char *value);
+
+/**
  * @brief Extracts the literal content from an IMAP FETCH response.
  *
  * Parses the `{size}` octet-count literal notation produced by IMAP servers:

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
+#include <iconv.h>
 
 /* ── Header extraction ──────────────────────────────────────────────── */
 
@@ -238,6 +239,169 @@ static char *text_from_part(const char *part) {
     free(ctype);
     free(enc);
     return result;
+}
+
+/* ── RFC 2047 encoded-word decoder ──────────────────────────────────── */
+
+/**
+ * Decode the text portion of one encoded word and convert to UTF-8.
+ *
+ * enc == 'Q'/'q': quoted-printable variant (underscore = space).
+ * enc == 'B'/'b': base64.
+ * charset: the declared charset of the encoded bytes.
+ *
+ * Returns a malloc'd NUL-terminated UTF-8 string, or NULL on failure.
+ */
+static char *decode_encoded_word(const char *charset, char enc,
+                                  const char *text, size_t text_len) {
+    char *raw = NULL;
+
+    if (enc == 'Q' || enc == 'q') {
+        raw = malloc(text_len + 1);
+        if (!raw) return NULL;
+        size_t i = 0, j = 0;
+        while (i < text_len) {
+            if (text[i] == '_') {
+                raw[j++] = ' ';
+                i++;
+            } else if (text[i] == '=' && i + 2 < text_len &&
+                       isxdigit((unsigned char)text[i + 1]) &&
+                       isxdigit((unsigned char)text[i + 2])) {
+                char hex[3] = { text[i + 1], text[i + 2], '\0' };
+                raw[j++] = (char)strtol(hex, NULL, 16);
+                i += 3;
+            } else {
+                raw[j++] = text[i++];
+            }
+        }
+        raw[j] = '\0';
+    } else {
+        /* B encoding */
+        raw = decode_base64(text, text_len);
+        if (!raw) return NULL;
+    }
+
+    /* If the declared charset is already UTF-8, return as-is. */
+    if (strcasecmp(charset, "utf-8") == 0 || strcasecmp(charset, "utf8") == 0)
+        return raw;
+
+    /* Otherwise convert via iconv. */
+    iconv_t cd = iconv_open("UTF-8", charset);
+    if (cd == (iconv_t)-1)
+        return raw;   /* unknown charset — return raw bytes */
+
+    size_t raw_len   = strlen(raw);
+    size_t out_size  = raw_len * 4 + 1;
+    char  *utf8      = malloc(out_size);
+    if (!utf8) { iconv_close(cd); return raw; }
+
+    char   *inp      = raw;
+    char   *outp     = utf8;
+    size_t  inbytes  = raw_len;
+    size_t  outbytes = out_size - 1;
+    size_t  r        = iconv(cd, &inp, &inbytes, &outp, &outbytes);
+    iconv_close(cd);
+
+    if (r == (size_t)-1) { free(utf8); return raw; }
+
+    *outp = '\0';
+    free(raw);
+    return utf8;
+}
+
+/**
+ * Try to parse and decode one encoded word starting exactly at *pp.
+ * Format: =?charset?Q|B?encoded_text?=
+ *
+ * On success, *pp is advanced past the closing "?=" and the decoded
+ * UTF-8 string (malloc'd) is returned.
+ * On failure, *pp is unchanged and NULL is returned.
+ */
+static char *try_decode_encoded_word(const char **pp) {
+    const char *p = *pp;
+    if (p[0] != '=' || p[1] != '?') return NULL;
+    p += 2;
+
+    /* charset */
+    const char *cs = p;
+    while (*p && *p != '?') p++;
+    if (!*p) return NULL;
+    size_t cs_len = (size_t)(p - cs);
+    if (cs_len == 0 || cs_len >= 64) return NULL;
+    char charset[64];
+    memcpy(charset, cs, cs_len);
+    charset[cs_len] = '\0';
+    p++;   /* skip ? */
+
+    /* encoding indicator */
+    char enc = *p;
+    if (enc != 'Q' && enc != 'q' && enc != 'B' && enc != 'b') return NULL;
+    p++;
+    if (*p != '?') return NULL;
+    p++;   /* skip ? */
+
+    /* encoded text — ends at next ?= */
+    const char *txt = p;
+    while (*p && !(*p == '?' && p[1] == '=')) p++;
+    if (!*p) return NULL;
+    size_t txt_len = (size_t)(p - txt);
+    p += 2;   /* skip ?= */
+
+    char *decoded = decode_encoded_word(charset, enc, txt, txt_len);
+    if (!decoded) return NULL;
+    *pp = p;
+    return decoded;
+}
+
+char *mime_decode_words(const char *value) {
+    if (!value) return NULL;
+
+    size_t vlen = strlen(value);
+    /* Upper bound: each raw byte can expand to at most 4 UTF-8 bytes. */
+    size_t cap = vlen * 4 + 1;
+    char  *out = malloc(cap);
+    if (!out) return NULL;
+
+    size_t      n             = 0;
+    const char *p             = value;
+    int         prev_encoded  = 0;
+
+    while (*p) {
+        /* RFC 2047 §6.2: linear whitespace between adjacent encoded words
+         * must be ignored. */
+        if (prev_encoded && (*p == ' ' || *p == '\t')) {
+            const char *ws = p;
+            while (*ws == ' ' || *ws == '\t') ws++;
+            if (ws[0] == '=' && ws[1] == '?') {
+                p = ws;
+                continue;
+            }
+        }
+
+        if (p[0] == '=' && p[1] == '?') {
+            char *decoded = try_decode_encoded_word(&p);
+            if (decoded) {
+                size_t dlen = strlen(decoded);
+                if (n + dlen >= cap) {
+                    cap = n + dlen + vlen + 1;
+                    char *tmp = realloc(out, cap);
+                    if (!tmp) { free(decoded); break; }
+                    out = tmp;
+                }
+                memcpy(out + n, decoded, dlen);
+                n += dlen;
+                free(decoded);
+                prev_encoded = 1;
+                continue;
+            }
+        }
+
+        prev_encoded = 0;
+        out[n++] = *p++;
+    }
+
+    out[n] = '\0';
+    return out;
 }
 
 /* ── Date formatting ────────────────────────────────────────────────── */

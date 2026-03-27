@@ -371,8 +371,12 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
         return -1;
     }
 
-    char *from     = mime_get_header(raw, "From");
-    char *subject  = mime_get_header(raw, "Subject");
+    char *from_raw = mime_get_header(raw, "From");
+    char *from     = from_raw ? mime_decode_words(from_raw) : NULL;
+    free(from_raw);
+    char *subj_raw = mime_get_header(raw, "Subject");
+    char *subject  = subj_raw ? mime_decode_words(subj_raw) : NULL;
+    free(subj_raw);
     char *date_raw = mime_get_header(raw, "Date");
     char *date     = date_raw ? mime_format_date(date_raw) : NULL;
     free(date_raw);
@@ -715,8 +719,12 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         /* Data rows */
         for (int i = wstart; i < wend; i++) {
             char *hdrs     = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
-            char *from     = hdrs ? mime_get_header(hdrs, "From")    : NULL;
-            char *subject  = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
+            char *from_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
+            char *from     = from_raw ? mime_decode_words(from_raw)  : NULL;
+            free(from_raw);
+            char *subj_raw = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
+            char *subject  = subj_raw ? mime_decode_words(subj_raw)  : NULL;
+            free(subj_raw);
             char *date_raw = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
             char *date     = date_raw ? mime_format_date(date_raw)   : NULL;
             free(date_raw);
@@ -869,8 +877,12 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 
     if (!raw) { fprintf(stderr, "Could not load message UID %d.\n", uid); return -1; }
 
-    char *from     = mime_get_header(raw, "From");
-    char *subject  = mime_get_header(raw, "Subject");
+    char *from_raw = mime_get_header(raw, "From");
+    char *from     = from_raw ? mime_decode_words(from_raw) : NULL;
+    free(from_raw);
+    char *subj_raw = mime_get_header(raw, "Subject");
+    char *subject  = subj_raw ? mime_decode_words(subj_raw) : NULL;
+    free(subj_raw);
     char *date_raw = mime_get_header(raw, "Date");
     char *date     = date_raw ? mime_format_date(date_raw) : NULL;
     free(date_raw);

@@ -1,10 +1,10 @@
 #include "fs_util.h"
+#include "platform/path.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <pwd.h>
 #include <errno.h>
 
 /**
@@ -62,16 +62,9 @@ int fs_ensure_permissions(const char *path, mode_t mode) {
 /**
  * @brief Returns the user's home directory path.
  *
- * Checks the HOME environment variable first; falls back to the passwd entry.
- * @return Pointer to the home path string, or NULL if unavailable.
+ * Delegates to the platform layer (platform_home_dir()).
+ * @return Pointer to the home path string (do not free), or NULL if unavailable.
  */
 const char* fs_get_home_dir(void) {
-    const char *home = getenv("HOME");
-    if (!home) {
-        struct passwd *pw = getpwuid(getuid());
-        if (pw) {
-            home = pw->pw_dir;
-        }
-    }
-    return home;
+    return platform_home_dir();
 }

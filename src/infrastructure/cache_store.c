@@ -1,5 +1,6 @@
 #include "cache_store.h"
 #include "fs_util.h"
+#include "platform/path.h"
 #include "raii.h"
 #include "logger.h"
 #include <stdio.h>
@@ -9,11 +10,11 @@
 
 /** @brief Returns a heap-allocated path for a cached message file. Caller must free. */
 static char *cache_path(const char *folder, int uid) {
-    const char *home = fs_get_home_dir();
-    if (!home) return NULL;
+    const char *cache_base = platform_cache_dir();
+    if (!cache_base) return NULL;
     char *path = NULL;
-    if (asprintf(&path, "%s/.cache/email-cli/messages/%s/%d.eml",
-                 home, folder, uid) == -1)
+    if (asprintf(&path, "%s/email-cli/messages/%s/%d.eml",
+                 cache_base, folder, uid) == -1)
         return NULL;
     return path;
 }
@@ -26,11 +27,11 @@ int cache_exists(const char *folder, int uid) {
 }
 
 int cache_save(const char *folder, int uid, const char *content, size_t len) {
-    const char *home = fs_get_home_dir();
-    if (!home) return -1;
+    const char *cache_base = platform_cache_dir();
+    if (!cache_base) return -1;
 
     RAII_STRING char *dir = NULL;
-    if (asprintf(&dir, "%s/.cache/email-cli/messages/%s", home, folder) == -1)
+    if (asprintf(&dir, "%s/email-cli/messages/%s", cache_base, folder) == -1)
         return -1;
     if (fs_mkdir_p(dir, 0700) != 0) {
         logger_log(LOG_ERROR, "Failed to create cache directory %s", dir);
@@ -80,11 +81,11 @@ char *cache_load(const char *folder, int uid) {
 /* ── Header cache ────────────────────────────────────────────────────── */
 
 static char *hcache_path(const char *folder, int uid) {
-    const char *home = fs_get_home_dir();
-    if (!home) return NULL;
+    const char *cache_base = platform_cache_dir();
+    if (!cache_base) return NULL;
     char *path = NULL;
-    if (asprintf(&path, "%s/.cache/email-cli/headers/%s/%d.hdr",
-                 home, folder, uid) == -1)
+    if (asprintf(&path, "%s/email-cli/headers/%s/%d.hdr",
+                 cache_base, folder, uid) == -1)
         return NULL;
     return path;
 }
@@ -97,10 +98,10 @@ int hcache_exists(const char *folder, int uid) {
 }
 
 int hcache_save(const char *folder, int uid, const char *content, size_t len) {
-    const char *home = fs_get_home_dir();
-    if (!home) return -1;
+    const char *cache_base = platform_cache_dir();
+    if (!cache_base) return -1;
     RAII_STRING char *dir = NULL;
-    if (asprintf(&dir, "%s/.cache/email-cli/headers/%s", home, folder) == -1)
+    if (asprintf(&dir, "%s/email-cli/headers/%s", cache_base, folder) == -1)
         return -1;
     if (fs_mkdir_p(dir, 0700) != 0) {
         logger_log(LOG_ERROR, "Failed to create header cache dir %s", dir);
@@ -127,11 +128,11 @@ static int cmp_int_evict(const void *a, const void *b) {
 
 void hcache_evict_stale(const char *folder,
                          const int *keep_uids, int keep_count) {
-    const char *home = fs_get_home_dir();
-    if (!home) return;
+    const char *cache_base = platform_cache_dir();
+    if (!cache_base) return;
 
     RAII_STRING char *dir = NULL;
-    if (asprintf(&dir, "%s/.cache/email-cli/headers/%s", home, folder) == -1)
+    if (asprintf(&dir, "%s/email-cli/headers/%s", cache_base, folder) == -1)
         return;
 
     /* Sort a local copy for bsearch */

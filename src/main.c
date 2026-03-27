@@ -8,6 +8,7 @@
 #include "email_service.h"
 #include "curl_adapter.h"
 #include "platform/terminal.h"
+#include "platform/path.h"
 #include "raii.h"
 #include "logger.h"
 #include "fs_util.h"
@@ -127,16 +128,16 @@ int main(int argc, char *argv[]) {
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
     setlocale(LC_ALL, "");
 
-    /* 1. Determine home directory */
-    const char *home = fs_get_home_dir();
-    if (!home) {
-        fprintf(stderr, "Fatal: Could not determine home directory.\n");
+    /* 1. Determine cache directory for logs */
+    const char *cache_base = platform_cache_dir();
+    if (!cache_base) {
+        fprintf(stderr, "Fatal: Could not determine cache directory.\n");
         return EXIT_FAILURE;
     }
 
     RAII_STRING char *log_dir  = NULL;
     RAII_STRING char *log_file = NULL;
-    if (asprintf(&log_dir,  "%s/.cache/email-cli/logs", home) == -1 ||
+    if (asprintf(&log_dir,  "%s/email-cli/logs", cache_base) == -1 ||
         asprintf(&log_file, "%s/session.log", log_dir)        == -1) {
         fprintf(stderr, "Fatal: Memory allocation failed.\n");
         return EXIT_FAILURE;

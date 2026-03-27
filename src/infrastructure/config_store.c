@@ -1,5 +1,6 @@
 #include "config_store.h"
 #include "fs_util.h"
+#include "platform/path.h"
 #include "raii.h"
 #include "logger.h"
 #include <stdio.h>
@@ -7,7 +8,7 @@
 #include <string.h>
 #include <ctype.h>
 
-#define CONFIG_REL_DIR ".config/email-cli"
+#define CONFIG_APP_DIR "email-cli"
 #define CONFIG_FILE "config.ini"
 
 /** @brief Trims leading and trailing whitespace from a string in-place. */
@@ -22,11 +23,11 @@ static char* trim(char *str) {
 }
 
 /** @brief Returns a heap-allocated path to the config file. Caller must free. */
-static char* get_config_path() {
-    const char *home = fs_get_home_dir();
-    if (!home) return NULL;
+static char* get_config_path(void) {
+    const char *config_base = platform_config_dir();
+    if (!config_base) return NULL;
     char *path = NULL;
-    if (asprintf(&path, "%s/%s/%s", home, CONFIG_REL_DIR, CONFIG_FILE) == -1) {
+    if (asprintf(&path, "%s/%s/%s", config_base, CONFIG_APP_DIR, CONFIG_FILE) == -1) {
         return NULL;
     }
     return path;
@@ -83,13 +84,13 @@ Config* config_load_from_store(void) {
 }
 
 int config_save_to_store(const Config *cfg) {
-    const char *home = fs_get_home_dir();
-    if (!home) return -1;
+    const char *config_base = platform_config_dir();
+    if (!config_base) return -1;
 
     char dir_path[1024];
-    snprintf(dir_path, sizeof(dir_path), "%s/%s", home, CONFIG_REL_DIR);
-    
-    // Create directory with 0700
+    snprintf(dir_path, sizeof(dir_path), "%s/%s", config_base, CONFIG_APP_DIR);
+
+    /* Create directory with 0700 */
     if (fs_mkdir_p(dir_path, 0700) != 0) {
         logger_log(LOG_ERROR, "Failed to create config directory %s", dir_path);
         return -1;

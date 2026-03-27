@@ -8,9 +8,15 @@ include_directories(
 
 # Platform-specific sources for tests
 if(WIN32)
-    set(TEST_PLATFORM_SOURCES ../../src/platform/windows/terminal.c)
+    set(TEST_PLATFORM_SOURCES
+        ../../src/platform/windows/terminal.c
+        ../../src/platform/windows/path.c
+    )
 else()
-    set(TEST_PLATFORM_SOURCES ../../src/platform/posix/terminal.c)
+    set(TEST_PLATFORM_SOURCES
+        ../../src/platform/posix/terminal.c
+        ../../src/platform/posix/path.c
+    )
 endif()
 
 set(TEST_SOURCES

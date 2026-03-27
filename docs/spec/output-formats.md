@@ -139,9 +139,12 @@ erasure after a key is pressed.
 
 | Key | Action |
 |-----|--------|
-| Space, Enter, any other key | Next page |
-| `p`, `P`, `b` | Previous page |
-| `q`, `Q`, Ctrl-C (code 3) | Quit pager |
+| PgDn, Down-arrow, Space, Enter, any other key | Next page |
+| PgUp, Up-arrow, `p`, `P`, `b` | Previous page |
+| `q`, `Q`, ESC, Ctrl-C (code 3) | Quit pager |
+
+Multi-byte escape sequences (PgDn = `ESC[6~`, PgUp = `ESC[5~`, arrows = `ESC[A/B`)
+are fully consumed before returning so no stray bytes remain in the input buffer.
 
 ---
 

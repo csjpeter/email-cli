@@ -55,9 +55,9 @@ Pager navigation:
 
 | Key | Effect |
 |-----|--------|
-| Space / Enter / other | Advance to next page |
-| `p` / `P` / `b` | Go back one page |
-| `q` / `Q` / Ctrl-C | Exit pager immediately |
+| PgDn, Down-arrow, Space, Enter, or any other key | Advance to next page |
+| PgUp, Up-arrow, `p`, `P`, `b` | Go back one page |
+| `q`, `Q`, ESC, Ctrl-C | Exit pager immediately |
 
 Going back on the first page is a no-op (cursor stays at page 1).
 

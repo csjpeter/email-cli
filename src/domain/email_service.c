@@ -62,7 +62,14 @@ static int parse_uid_list(const char *resp, int **uids_out) {
 
 /**
  * Reads one keypress in raw (non-canonical) mode.
- * Returns the character code, or -1 on error.
+ * Recognises common escape sequences (arrow keys, PgUp/PgDn) and maps them
+ * to simple return values so callers do not need to handle multi-byte input.
+ *
+ * Mapped return values:
+ *   'p'  — PgUp, Up-arrow, or the literal 'p'/'P'/'b' keys (previous)
+ *   ' '  — PgDn, Down-arrow, Space, Enter, or any other printable key (next)
+ *   'q'  — ESC alone, 'q'/'Q', or Ctrl-C (quit)
+ *   -1   — tcgetattr failure
  */
 static int read_pager_key(void) {
     struct termios old, raw;
@@ -72,7 +79,46 @@ static int read_pager_key(void) {
     raw.c_cc[VMIN]  = 1;
     raw.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
     int c = getchar();
+
+    if (c == '\033') {
+        /* Switch to non-blocking with 100 ms timeout so we can drain the
+         * rest of the escape sequence without hanging on a bare ESC press. */
+        raw.c_cc[VMIN]  = 0;
+        raw.c_cc[VTIME] = 1;   /* 10ths of a second */
+        tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
+        int c2 = getchar();
+        if (c2 == '[') {
+            int c3 = getchar();
+            if (c3 == 'A') {          /* ESC[A — Up arrow   → prev */
+                c = 'p';
+            } else if (c3 == 'B') {   /* ESC[B — Down arrow → next */
+                c = ' ';
+            } else if (c3 == '5') {   /* ESC[5~ — PgUp      → prev */
+                getchar();            /* consume '~' */
+                c = 'p';
+            } else if (c3 == '6') {   /* ESC[6~ — PgDn      → next */
+                getchar();            /* consume '~' */
+                c = ' ';
+            } else {
+                /* Unknown CSI sequence: drain until terminator, then quit. */
+                if (c3 != EOF) {
+                    int ch;
+                    while ((ch = getchar()) != EOF) {
+                        if ((ch >= 'A' && ch <= 'Z') ||
+                            (ch >= 'a' && ch <= 'z') || ch == '~') break;
+                    }
+                }
+                c = 'q';
+            }
+        } else {
+            /* Bare ESC or unrecognised sequence → quit */
+            c = 'q';
+        }
+    }
+
     tcsetattr(STDIN_FILENO, TCSANOW, &old);
     return c;
 }
@@ -80,7 +126,7 @@ static int read_pager_key(void) {
 /** Show pager prompt on stderr; returns next action: +1=next, -1=prev, 0=quit. */
 static int pager_prompt(int cur_page, int total_pages) {
     fprintf(stderr,
-            "\033[7m-- [%d/%d] Space/Enter=next  p=prev  q=quit --\033[0m",
+            "\033[7m-- [%d/%d] PgDn/Space=next  PgUp/p=prev  q=quit --\033[0m",
             cur_page, total_pages);
     fflush(stderr);
     int key = read_pager_key();

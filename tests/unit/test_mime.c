@@ -206,6 +206,13 @@ void test_mime_util(void) {
         ASSERT(strcmp(r, "2026-01-01 10:30") == 0, "No-weekday date format mismatch");
     }
 
+    /* Timezone name instead of numeric offset */
+    {
+        RAII_STRING char *r = mime_format_date("Tue, 24 Mar 2026 16:38:21 GMT");
+        ASSERT(r != NULL, "mime_format_date: GMT date should not return NULL");
+        ASSERT(strcmp(r, "2026-03-24 16:38") == 0, "GMT timezone date format mismatch");
+    }
+
     /* Unparseable input: returns a copy of the raw string */
     {
         RAII_STRING char *r = mime_format_date("not a date");

@@ -246,8 +246,10 @@ char *mime_format_date(const char *date) {
     if (!date || !*date) return NULL;
 
     static const char * const fmts[] = {
-        "%a, %d %b %Y %T %z",  /* "Tue, 10 Mar 2026 15:07:40 +0000" */
-        "%d %b %Y %T %z",       /* "10 Mar 2026 15:07:40 +0000"      */
+        "%a, %d %b %Y %T %z",  /* "Tue, 10 Mar 2026 15:07:40 +0000"     */
+        "%d %b %Y %T %z",       /* "10 Mar 2026 15:07:40 +0000"          */
+        "%a, %d %b %Y %T %Z",  /* "Tue, 24 Mar 2026 16:38:21 GMT"       */
+        "%d %b %Y %T %Z",       /* "24 Mar 2026 16:38:21 UTC"            */
         NULL
     };
 

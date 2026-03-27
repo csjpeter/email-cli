@@ -60,20 +60,31 @@ static int parse_uid_list(const char *resp, int **uids_out) {
 
 /* ── Interactive pager helpers ───────────────────────────────────────── */
 
+/* Logical key codes returned by read_pager_key(). */
+enum PKey {
+    PKEY_QUIT      = 0,
+    PKEY_NEXT_PAGE = 1,
+    PKEY_PREV_PAGE = 2,
+    PKEY_NEXT_LINE = 3,
+    PKEY_PREV_LINE = 4,
+    PKEY_IGNORE    = 5   /* left/right arrows and other no-op sequences */
+};
+
 /**
- * Reads one keypress in raw (non-canonical) mode.
- * Recognises common escape sequences (arrow keys, PgUp/PgDn) and maps them
- * to simple return values so callers do not need to handle multi-byte input.
+ * Reads one keypress in raw (non-canonical) mode and returns a PKey code.
+ * Multi-byte escape sequences are fully consumed before returning.
  *
- * Mapped return values:
- *   'p'  — PgUp, Up-arrow, or the literal 'p'/'P'/'b' keys (previous)
- *   ' '  — PgDn, Down-arrow, Space, Enter, or any other printable key (next)
- *   'q'  — ESC alone, 'q'/'Q', or Ctrl-C (quit)
- *   -1   — tcgetattr failure
+ * Mapping:
+ *   PKEY_NEXT_PAGE — PgDn (ESC[6~), Space, Enter
+ *   PKEY_PREV_PAGE — PgUp (ESC[5~), p / P / b
+ *   PKEY_NEXT_LINE — Down-arrow (ESC[B), j
+ *   PKEY_PREV_LINE — Up-arrow   (ESC[A), k
+ *   PKEY_IGNORE    — Left/Right arrows and other unrecognised CSI sequences
+ *   PKEY_QUIT      — q / Q / ESC alone / Ctrl-C, or tcgetattr failure
  */
-static int read_pager_key(void) {
+static enum PKey read_pager_key(void) {
     struct termios old, raw;
-    if (tcgetattr(STDIN_FILENO, &old) != 0) return -1;
+    if (tcgetattr(STDIN_FILENO, &old) != 0) return PKEY_QUIT;
     raw = old;
     raw.c_lflag &= ~(unsigned)(ICANON | ECHO | ISIG);
     raw.c_cc[VMIN]  = 1;
@@ -81,29 +92,27 @@ static int read_pager_key(void) {
     tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 
     int c = getchar();
+    enum PKey result = PKEY_NEXT_PAGE;   /* default: any unlisted key = next */
 
     if (c == '\033') {
-        /* Switch to non-blocking with 100 ms timeout so we can drain the
-         * rest of the escape sequence without hanging on a bare ESC press. */
+        /* Switch to non-blocking with 100 ms timeout to drain the escape
+         * sequence without hanging on a bare ESC press. */
         raw.c_cc[VMIN]  = 0;
-        raw.c_cc[VTIME] = 1;   /* 10ths of a second */
+        raw.c_cc[VTIME] = 1;
         tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 
         int c2 = getchar();
         if (c2 == '[') {
             int c3 = getchar();
-            if (c3 == 'A') {          /* ESC[A — Up arrow   → prev */
-                c = 'p';
-            } else if (c3 == 'B') {   /* ESC[B — Down arrow → next */
-                c = ' ';
-            } else if (c3 == '5') {   /* ESC[5~ — PgUp      → prev */
-                getchar();            /* consume '~' */
-                c = 'p';
-            } else if (c3 == '6') {   /* ESC[6~ — PgDn      → next */
-                getchar();            /* consume '~' */
-                c = ' ';
-            } else {
-                /* Unknown CSI sequence: drain until terminator, then quit. */
+            switch (c3) {
+            case 'A': result = PKEY_PREV_LINE; break;  /* ESC[A — Up arrow    */
+            case 'B': result = PKEY_NEXT_LINE; break;  /* ESC[B — Down arrow  */
+            case 'C': result = PKEY_IGNORE;    break;  /* ESC[C — Right arrow */
+            case 'D': result = PKEY_IGNORE;    break;  /* ESC[D — Left arrow  */
+            case '5': getchar(); result = PKEY_PREV_PAGE; break; /* ESC[5~ PgUp */
+            case '6': getchar(); result = PKEY_NEXT_PAGE; break; /* ESC[6~ PgDn */
+            default:
+                /* Unknown CSI sequence: drain until letter or '~', then ignore. */
                 if (c3 != EOF) {
                     int ch;
                     while ((ch = getchar()) != EOF) {
@@ -111,30 +120,54 @@ static int read_pager_key(void) {
                             (ch >= 'a' && ch <= 'z') || ch == '~') break;
                     }
                 }
-                c = 'q';
+                result = PKEY_IGNORE;
+                break;
             }
         } else {
-            /* Bare ESC or unrecognised sequence → quit */
-            c = 'q';
+            result = PKEY_QUIT;   /* bare ESC */
         }
+    } else if (c == 'q' || c == 'Q' || c == 3 /* Ctrl-C */) {
+        result = PKEY_QUIT;
+    } else if (c == 'p' || c == 'P' || c == 'b') {
+        result = PKEY_PREV_PAGE;
+    } else if (c == 'j') {
+        result = PKEY_NEXT_LINE;
+    } else if (c == 'k') {
+        result = PKEY_PREV_LINE;
     }
 
     tcsetattr(STDIN_FILENO, TCSANOW, &old);
-    return c;
+    return result;
 }
 
-/** Show pager prompt on stderr; returns next action: +1=next, -1=prev, 0=quit. */
-static int pager_prompt(int cur_page, int total_pages) {
-    fprintf(stderr,
-            "\033[7m-- [%d/%d] PgDn/Space=next  PgUp/p=prev  q=quit --\033[0m",
-            cur_page, total_pages);
-    fflush(stderr);
-    int key = read_pager_key();
-    fprintf(stderr, "\r\033[K");
-    fflush(stderr);
-    if (key == 'q' || key == 'Q' || key == 3 /* Ctrl-C */) return 0;
-    if (key == 'p' || key == 'P' || key == 'b')            return -1;
-    return 1; /* next */
+/**
+ * Shows the pager prompt on stderr and waits for a meaningful key.
+ * Left/right arrows and other no-op keys redisplay the prompt.
+ *
+ * @param cur_page   1-based current page number.
+ * @param total_pages Total page count.
+ * @param page_size  Lines/entries per page (used to scale the returned delta).
+ * @return Scroll delta: 0 = quit, positive = forward N, negative = back N.
+ */
+static int pager_prompt(int cur_page, int total_pages, int page_size) {
+    for (;;) {
+        fprintf(stderr,
+                "\033[7m-- [%d/%d] PgDn/Space=page \u2193\u2191=line  PgUp/p=back  q=quit --\033[0m",
+                cur_page, total_pages);
+        fflush(stderr);
+        enum PKey key = read_pager_key();
+        fprintf(stderr, "\r\033[K");
+        fflush(stderr);
+
+        switch (key) {
+        case PKEY_QUIT:      return 0;
+        case PKEY_NEXT_PAGE: return  page_size;
+        case PKEY_PREV_PAGE: return -page_size;
+        case PKEY_NEXT_LINE: return  1;
+        case PKEY_PREV_LINE: return -1;
+        case PKEY_IGNORE:    continue;   /* redisplay prompt */
+        }
+    }
 }
 
 /** Count newlines in s (= number of lines). */
@@ -519,9 +552,11 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         return 0;
     }
 
-    for (int page = 0; ; page++) {
-        if (page > 0 && opts->pager)
+    int list_displayed = 0;
+    for (;;) {
+        if (list_displayed && opts->pager)
             printf("\033[H\033[2J"); /* clear screen */
+        list_displayed = 1;
 
         int end = show_count;
         if (cur + limit < end) end = cur + limit;
@@ -580,16 +615,18 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             free(hdrs); free(from); free(subject); free(date);
         }
 
-        if (end >= show_count) break; /* last page — done */
+        if (end >= show_count && cur == 0) break; /* only page — done */
 
         if (opts->pager) {
             int total_pages = (show_count + limit - 1) / limit;
             int cur_page    = cur / limit + 1;
-            int action = pager_prompt(cur_page, total_pages);
-            if (action == 0) break;                           /* quit */
-            if (action < 0 && cur >= limit) cur -= limit;    /* prev */
-            else if (action > 0)            cur  = end;      /* next */
+            int delta = pager_prompt(cur_page, total_pages, limit);
+            if (delta == 0) break;
+            cur += delta;
+            if (cur < 0) cur = 0;
+            if (cur >= show_count) break; /* scrolled past the end */
         } else {
+            if (end >= show_count) break;
             printf("\n  -- %d more message(s) --  use --offset %d for next page\n",
                    show_count - end, end + 1);
             break;
@@ -706,8 +743,8 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
         int total_pages = (body_lines + rows_avail - 1) / rows_avail;
         if (total_pages < 1) total_pages = 1;
 
-        for (int page = 0, cur_line = 0; ; page++) {
-            if (page > 0) {
+        for (int cur_line = 0, show_displayed = 0; ; ) {
+            if (show_displayed) {
                 /* Clear screen and reprint headers on pages 2+ */
                 printf("\033[H\033[2J");
                 printf("From:    %s\n", from    ? from    : "(none)");
@@ -721,17 +758,20 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
                        "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
                        "\u2500\n");
             }
+            show_displayed = 1;
 
             int next_line = cur_line + rows_avail;
             if (next_line > body_lines) next_line = body_lines;
             print_body_page(body_text, cur_line, rows_avail);
 
-            if (next_line >= body_lines) break; /* last page */
+            if (next_line >= body_lines && cur_line == 0) break; /* only page */
 
-            int action = pager_prompt(page + 1, total_pages);
-            if (action == 0) break;
-            if (action < 0 && cur_line >= rows_avail) cur_line -= rows_avail;
-            else if (action > 0)                      cur_line  = next_line;
+            int cur_page = cur_line / rows_avail + 1;
+            int delta = pager_prompt(cur_page, total_pages, rows_avail);
+            if (delta == 0) break;
+            cur_line += delta;
+            if (cur_line < 0) cur_line = 0;
+            if (cur_line >= body_lines) break; /* scrolled past end */
         }
 
         free(body); free(from); free(subject); free(date); free(raw);

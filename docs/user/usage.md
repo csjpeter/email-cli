@@ -1,70 +1,57 @@
 # Usage Reference
 
+For the authoritative behavioural specification see [`docs/spec/`](../spec/README.md).
+This page is a quick-reference summary for end users.
+
 ## Synopsis
 
 ```
-email-cli [options]
+email-cli [--batch] <command> [options]
 ```
+
+`--batch` disables the interactive pager and uses a fixed page size (100).
+It is implied when stdout is redirected to a pipe or file.
 
 ## Commands
 
-Running without arguments fetches the most recent emails from the configured mailbox.
-
 | Command | Description |
 |---------|-------------|
-| `email-cli` | Fetch and display up to 10 most recent emails |
-| `email-cli --clean-logs` | Delete all log files in `~/.cache/email-cli/logs/` |
-| `email-cli --help` | Show help message |
+| `email-cli list` | List unread messages in the configured folder |
+| `email-cli list --all` | List all messages (unread marked with `N`) |
+| `email-cli list --folder <name>` | Use a different folder |
+| `email-cli list --limit <n> --offset <n>` | Manual pagination |
+| `email-cli show <uid>` | Display a message by its UID |
+| `email-cli folders` | List all IMAP folders |
+| `email-cli folders --tree` | Folder hierarchy as a tree |
+| `email-cli help [command]` | Show help |
 
-## Fetch Behaviour
+## Output
 
-1. Connects to the IMAP server specified in config.
-2. Selects the configured folder (default: `INBOX`).
-3. Issues `UID SEARCH ALL` to list all message UIDs.
-4. Fetches the **10 most recent** messages (highest UIDs) and prints them to stdout.
-5. Exits with code `0` on success, `1` on any fetch error.
+- `list` prints a table: Status, UID, From, Subject, Date.
+- Dates are shown as `YYYY-MM-DD HH:MM` in the local timezone.
+- `show` prints From / Subject / Date headers, a separator, then the plain-text body.
+- `folders --tree` uses Unicode box-drawing characters.
 
-## Output Format
+## Read-status policy
 
-```
---- Fetching recent emails from imaps://imap.example.com/INBOX ---
-Showing 3 most recent of 47 message(s).
+`show` **never permanently marks a message as read**.  If a message was unread
+before viewing, it remains unread afterward.
 
-══════════════════════════════════════════
- Message 1/3  (UID 147)
-══════════════════════════════════════════
-<raw message content>
+## Caching
 
-══════════════════════════════════════════
- Message 2/3  (UID 146)
-══════════════════════════════════════════
-...
-
-Fetch complete. Success.
-
-Success: Fetch complete.
-```
-
-Message content is printed as-is from the server (raw IMAP body, including headers).
+- Headers are cached at `~/.cache/email-cli/headers/<folder>/<uid>.hdr`.
+- Full messages are cached at `~/.cache/email-cli/messages/<folder>/<uid>.eml`.
+- Stale header cache entries are evicted automatically when `list --all` is run.
 
 ## Logs
-
-Diagnostic logs are written to `~/.cache/email-cli/logs/session.log`.
-All IMAP traffic is logged at DEBUG level. Check the log file if a connection fails:
 
 ```bash
 cat ~/.cache/email-cli/logs/session.log
 ```
 
-To purge all log files:
-
-```bash
-email-cli --clean-logs
-```
-
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
-| `0` | All messages fetched successfully |
-| `1` | One or more messages failed to fetch, or fatal error |
+| 0 | Success |
+| 1 | Error (see stderr and log file) |

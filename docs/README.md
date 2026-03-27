@@ -1,5 +1,16 @@
 # Documentation
 
+## Behavioural Specification
+
+Authoritative what-and-how reference; sufficient to re-implement the program from scratch.
+
+- [Spec index](spec/README.md)
+- [Commands](spec/commands.md) — all commands, options, argument parsing, exit codes
+- [Output formats](spec/output-formats.md) — exact output for every command and mode
+- [IMAP protocol](spec/imap-protocol.md) — operations issued, flag handling, encoding
+- [Caching](spec/caching.md) — cache layout, read/write policy, eviction rules
+- [Pagination](spec/pagination.md) — terminal detection, pager, batch mode
+
 ## User Guides
 
 - [Getting Started](user/getting-started.md) — installation, first run, provider notes

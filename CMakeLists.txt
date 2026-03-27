@@ -30,10 +30,12 @@ include_directories(
 if(WIN32)
     set(PLATFORM_SOURCES
         src/platform/windows/terminal.c
+        src/platform/windows/path.c
     )
 else()
     set(PLATFORM_SOURCES
         src/platform/posix/terminal.c
+        src/platform/posix/path.c
     )
 endif()
 

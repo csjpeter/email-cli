@@ -1,0 +1,325 @@
+#include "test_helpers.h"
+#include <string.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <locale.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+/*
+ * Include the full domain source so all static helpers are visible in
+ * this translation unit.  email_service.c is NOT added to CMakeLists.txt
+ * as a separate source — the #include below is the only compilation unit
+ * that defines its symbols.
+ */
+#include "../../src/domain/email_service.c"
+
+void test_email_service(void) {
+
+    setlocale(LC_ALL, "");
+
+    /* ── parse_uid_list ──────────────────────────────────────────────── */
+
+    /* NULL input */
+    {
+        int *uids = NULL;
+        int n = parse_uid_list(NULL, &uids);
+        ASSERT(n == 0 && uids == NULL, "parse_uid_list: NULL input → 0");
+    }
+
+    /* Response has no "* SEARCH" token */
+    {
+        int *uids = NULL;
+        int n = parse_uid_list("* OK done\r\n", &uids);
+        ASSERT(n == 0 && uids == NULL, "parse_uid_list: no SEARCH line → 0");
+    }
+
+    /* Basic three-UID list */
+    {
+        int *uids = NULL;
+        int n = parse_uid_list("* SEARCH 10 20 30\r\n", &uids);
+        ASSERT(n == 3, "parse_uid_list: basic count");
+        ASSERT(uids[0] == 10 && uids[1] == 20 && uids[2] == 30,
+               "parse_uid_list: basic values");
+        free(uids);
+    }
+
+    /* 40 UIDs — triggers the realloc branch (initial cap == 32) */
+    {
+        char big[1024];
+        strcpy(big, "* SEARCH");
+        for (int i = 1; i <= 40; i++) {
+            char tmp[16];
+            snprintf(tmp, sizeof(tmp), " %d", i);
+            strcat(big, tmp);
+        }
+        int *uids = NULL;
+        int n = parse_uid_list(big, &uids);
+        ASSERT(n == 40, "parse_uid_list: 40 UIDs count");
+        ASSERT(uids[0] == 1 && uids[39] == 40, "parse_uid_list: 40 UIDs boundary values");
+        free(uids);
+    }
+
+    /* ── count_lines ─────────────────────────────────────────────────── */
+
+    ASSERT(count_lines(NULL)         == 0, "count_lines: NULL → 0");
+    ASSERT(count_lines("")           == 0, "count_lines: empty string → 0");
+    ASSERT(count_lines("abc")        == 1, "count_lines: single line → 1");
+    ASSERT(count_lines("a\nb")       == 2, "count_lines: two lines → 2");
+    ASSERT(count_lines("a\nb\nc\n")  == 4, "count_lines: trailing newline → 4");
+
+    /* ── word_wrap ───────────────────────────────────────────────────── */
+
+    /* NULL input → NULL */
+    {
+        char *r = word_wrap(NULL, 40);
+        ASSERT(r == NULL, "word_wrap: NULL input → NULL");
+    }
+
+    /* Short text that fits entirely — no wrapping needed */
+    {
+        char *r = word_wrap("Hello world", 40);
+        ASSERT(r != NULL, "word_wrap: short text not NULL");
+        ASSERT(strstr(r, "Hello world") != NULL, "word_wrap: short text passthrough");
+        free(r);
+    }
+
+    /* Word break at space (lines 169-174): width=25, long text with spaces */
+    {
+        char *r = word_wrap("The quick brown fox jumps over the lazy dog", 25);
+        ASSERT(r != NULL, "word_wrap: word break not NULL");
+        ASSERT(strstr(r, "\n") != NULL, "word_wrap: word break produces newline");
+        free(r);
+    }
+
+    /* Hard break — no spaces (lines 185-188): width=20, 25-char word */
+    {
+        char *r = word_wrap("aaaaaaaaaaaaaaaaaaaaaaaaa", 20);
+        ASSERT(r != NULL, "word_wrap: hard break not NULL");
+        ASSERT(strstr(r, "\n") != NULL, "word_wrap: hard break produces newline");
+        free(r);
+    }
+
+    /* 2-byte UTF-8 lead byte (line 143: *p < 0xE0): é = \xC3\xA9 */
+    {
+        char *r = word_wrap("\xC3\xA9\xC3\xA9\xC3\xA9 test", 40);
+        ASSERT(r != NULL, "word_wrap: 2-byte UTF-8 not NULL");
+        free(r);
+    }
+
+    /* 3-byte UTF-8 lead byte (line 144: *p < 0xF0): 中 = \xE4\xB8\xAD */
+    {
+        char *r = word_wrap("\xE4\xB8\xAD text", 40);
+        ASSERT(r != NULL, "word_wrap: 3-byte UTF-8 not NULL");
+        free(r);
+    }
+
+    /* 4-byte UTF-8 lead byte (line 145: *p < 0xF8): U+10000 = \xF0\x90\x80\x80 */
+    {
+        char *r = word_wrap("\xF0\x90\x80\x80 test", 40);
+        ASSERT(r != NULL, "word_wrap: 4-byte UTF-8 not NULL");
+        free(r);
+    }
+
+    /* Invalid lead byte < 0xC2 (line 142: continuation byte as lead) */
+    {
+        char *r = word_wrap("\x80 bad", 40);
+        ASSERT(r != NULL, "word_wrap: 0x80 lead byte not NULL");
+        free(r);
+    }
+
+    /* Invalid lead byte >= 0xF8 (line 146: else branch) */
+    {
+        char *r = word_wrap("\xFE bad", 40);
+        ASSERT(r != NULL, "word_wrap: 0xFE lead byte not NULL");
+        free(r);
+    }
+
+    /* Continuation byte mismatch (line 148): 2-byte start \xC3 + non-continuation \x41 */
+    {
+        char *r = word_wrap("\xC3\x41 bad", 40);
+        ASSERT(r != NULL, "word_wrap: truncated multibyte not NULL");
+        free(r);
+    }
+
+    /* Multi-line input — exercises the outer loop past eol */
+    {
+        char *r = word_wrap("first line\nsecond line\n", 40);
+        ASSERT(r != NULL, "word_wrap: multi-line not NULL");
+        ASSERT(strstr(r, "first line") != NULL, "word_wrap: multi-line first");
+        ASSERT(strstr(r, "second line") != NULL, "word_wrap: multi-line second");
+        free(r);
+    }
+
+    /* ── print_body_page ─────────────────────────────────────────────── */
+    /*
+     * Redirect stdout to /dev/null so the printed lines do not pollute
+     * the test runner output.  Restore after.
+     */
+    {
+        fflush(stdout);
+        int saved_fd = dup(STDOUT_FILENO);
+        int null_fd  = open("/dev/null", O_WRONLY);
+        if (null_fd >= 0) dup2(null_fd, STDOUT_FILENO);
+        if (null_fd >= 0) close(null_fd);
+
+        /* Print lines 1-2 of a 4-line body (normal newline path) */
+        print_body_page("Line 0\nLine 1\nLine 2\nLine 3\n", 1, 2);
+
+        /* Body does not end with '\n': last segment hits the else branch
+         * (printf("%s\n", p); break;) at lines 255-257 */
+        print_body_page("Line 0\nNo newline here", 1, 5);
+
+        /* from_line == 0, single print */
+        print_body_page("only line", 0, 1);
+
+        fflush(stdout);
+        dup2(saved_fd, STDOUT_FILENO);
+        close(saved_fd);
+    }
+
+    /* ── cmp_uid_entry ───────────────────────────────────────────────── */
+    {
+        UIDEntry a = {100, 1};  /* unseen */
+        UIDEntry b = {200, 0};  /* seen   */
+        /* unseen before seen (line 507-508) */
+        ASSERT(cmp_uid_entry(&a, &b) < 0, "cmp_uid_entry: unseen before seen");
+        ASSERT(cmp_uid_entry(&b, &a) > 0, "cmp_uid_entry: seen after unseen");
+    }
+    {
+        UIDEntry c = {100, 1};
+        UIDEntry d = {200, 1};
+        /* both unseen: higher UID first (line 509) */
+        ASSERT(cmp_uid_entry(&c, &d) > 0, "cmp_uid_entry: lower UID after higher");
+        ASSERT(cmp_uid_entry(&d, &c) < 0, "cmp_uid_entry: higher UID before lower");
+    }
+    {
+        UIDEntry e = {100, 0};
+        UIDEntry f = {100, 0};
+        /* equal: cmp == 0 */
+        ASSERT(cmp_uid_entry(&e, &f) == 0, "cmp_uid_entry: equal entries → 0");
+    }
+
+    /* ── parse_list_line ─────────────────────────────────────────────── */
+
+    /* Non-LIST line → NULL */
+    {
+        char sep = '.';
+        char *r = parse_list_line("* OK done", &sep);
+        ASSERT(r == NULL, "parse_list_line: non-LIST line → NULL");
+    }
+
+    /* Quoted separator + quoted mailbox */
+    {
+        char sep = '?';
+        char *r = parse_list_line(
+            "* LIST (\\HasChildren) \".\" \"INBOX.Sent\"", &sep);
+        ASSERT(r != NULL, "parse_list_line: quoted mailbox not NULL");
+        ASSERT(strcmp(r, "INBOX.Sent") == 0,
+               "parse_list_line: quoted mailbox value");
+        ASSERT(sep == '.', "parse_list_line: quoted separator value");
+        free(r);
+    }
+
+    /* Unquoted separator (line 540) + unquoted mailbox (lines 552-554) */
+    {
+        char sep = '?';
+        char *r = parse_list_line("* LIST () . INBOX", &sep);
+        ASSERT(r != NULL, "parse_list_line: unquoted mailbox not NULL");
+        ASSERT(strcmp(r, "INBOX") == 0,
+               "parse_list_line: unquoted mailbox value");
+        ASSERT(sep == '.', "parse_list_line: unquoted separator value");
+        free(r);
+    }
+
+    /* Separator field absent (space only — unquoted, *p == ' ', no sep advance) */
+    {
+        char sep = '?';
+        /* "* LIST ()  INBOX": after flags skip-spaces puts us at 'I' which
+         * is not ' ' → sep='I', p advances, rest is parsed as mailbox "NBOX" */
+        char *r = parse_list_line("* LIST ()  INBOX", &sep);
+        /* We only check it doesn't crash and returns non-NULL */
+        ASSERT(r != NULL, "parse_list_line: double-space sep does not crash");
+        free(r);
+    }
+
+    /* ── is_last_sibling ─────────────────────────────────────────────── */
+
+    /* Root-level two items: first is not last, second is */
+    {
+        char *names[] = {"A", "B"};
+        ASSERT(is_last_sibling(names, 2, 0, '.') == 0,
+               "is_last_sibling: A not last (B follows)");
+        ASSERT(is_last_sibling(names, 2, 1, '.') == 1,
+               "is_last_sibling: B is last");
+    }
+
+    /* parent_len == 0 path (line 582): root-level item with multiple followers */
+    {
+        char *names[] = {"A", "B", "C"};
+        ASSERT(is_last_sibling(names, 3, 0, '.') == 0,
+               "is_last_sibling: root level, A not last");
+    }
+
+    /* line 587: jumped to a different parent subtree → return 1 */
+    {
+        /* INBOX, INBOX.A, INBOX.B, Other — sorted */
+        char *names[] = {"INBOX", "INBOX.A", "INBOX.B", "Other"};
+        /* INBOX.A: sibling INBOX.B follows → not last */
+        ASSERT(is_last_sibling(names, 4, 1, '.') == 0,
+               "is_last_sibling: INBOX.A not last");
+        /* INBOX.B: next is Other (different parent subtree) → last */
+        ASSERT(is_last_sibling(names, 4, 2, '.') == 1,
+               "is_last_sibling: INBOX.B is last (diff parent)");
+    }
+
+    /* Single item → always last */
+    {
+        char *names[] = {"INBOX"};
+        ASSERT(is_last_sibling(names, 1, 0, '.') == 1,
+               "is_last_sibling: single item is last");
+    }
+
+    /* ── ancestor_is_last ────────────────────────────────────────────── */
+
+    /* Root-level ancestor with a sibling following: parent_len == 0, return 0 (line 630) */
+    {
+        char *names[] = {"INBOX", "INBOX.A", "INBOX.B", "Sent"};
+        /* For INBOX.A at level=0: ancestor "INBOX" is NOT the last root (Sent follows) */
+        int r = ancestor_is_last(names, 4, 1, 0, '.');
+        ASSERT(r == 0, "ancestor_is_last: INBOX not last root");
+    }
+
+    /* Root-level ancestor that IS last */
+    {
+        char *names[] = {"INBOX", "INBOX.A", "Sent"};
+        /* For Sent (index=2) at level=0: nothing after it → last */
+        int r = ancestor_is_last(names, 3, 2, 0, '.');
+        ASSERT(r == 1, "ancestor_is_last: Sent is last root");
+    }
+
+    /* level=0 with follower: parent_len==0 → return 0 (covers line 630) */
+    {
+        char *names[] = {"A.X", "A.Y", "B.Z"};
+        /* A.Y's root-level ancestor is "A"; "B.Z" follows at root → return 0 */
+        int r = ancestor_is_last(names, 3, 1, 0, '.');
+        ASSERT(r == 0, "ancestor_is_last: level=0, another root item follows → 0");
+    }
+
+    /* line 636: jumped to different parent subtree → return 1 (level > 0) */
+    {
+        /* A.B.Y's ancestor at level=1 is "A.B"; parent of "A.B" is "A".
+         * After A.B.Y's subtree, C.D has parent "C" ≠ "A" → return 1. */
+        char *names[] = {"A.B.X", "A.B.Y", "C.D"};
+        int r = ancestor_is_last(names, 3, 1, 1, '.');
+        ASSERT(r == 1, "ancestor_is_last: level=1, different grandparent → 1");
+    }
+
+    /* Only one root-level folder (INBOX) → ancestor is last */
+    {
+        char *names[] = {"INBOX.A", "INBOX.A.X", "INBOX.A.Y", "INBOX.B"};
+        /* All entries share root "INBOX"; nothing at a different root → last=1 */
+        int r = ancestor_is_last(names, 4, 2, 0, '.');
+        ASSERT(r == 1, "ancestor_is_last: INBOX is only root → 1");
+    }
+}

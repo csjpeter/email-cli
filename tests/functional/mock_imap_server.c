@@ -63,6 +63,21 @@ void handle_client(int client_sock) {
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK SEARCH completed\r\n", tag);
             send(client_sock, ok, strlen(ok), 0);
+        } else if (strstr(buffer, "FETCH") && strstr(buffer, "FLAGS")) {
+            /* FLAGS-only fetch — no literal payload, inline response */
+            char resp[64];
+            snprintf(resp, sizeof(resp), "* 1 FETCH (FLAGS ())\r\n");
+            send(client_sock, resp, strlen(resp), 0);
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);
+            send(client_sock, ok, strlen(ok), 0);
+        } else if (strstr(buffer, "STORE")) {
+            /* Flag update (e.g. restore \Seen) */
+            const char *resp = "* 1 FETCH (FLAGS ())\r\n";
+            send(client_sock, resp, strlen(resp), 0);
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK STORE completed\r\n", tag);
+            send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "FETCH")) {
             const char *headers =
                 "From: Test User <test@example.com>\r\n"
@@ -75,21 +90,21 @@ void handle_client(int client_sock) {
                 "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
                 "\r\n"
                 "Hello from Mock Server!";
-            
+
             int is_header = strstr(buffer, "HEADER") != NULL;
             const char *content = is_header ? headers : full_msg;
-            const char *section = is_header ? "BODY[HEADER]" : "RFC822";
-            
+            const char *section = is_header ? "BODY[HEADER]" : "BODY[]";
+
             char head[128];
             snprintf(head, sizeof(head), "* 1 FETCH (%s {%zu}\r\n", section, strlen(content));
             send(client_sock, head, strlen(head), 0);
-            
+
             // Send content in chunks to be realistic
             send(client_sock, content, strlen(content), 0);
-            
+
             const char *tail = ")\r\n";
             send(client_sock, tail, strlen(tail), 0);
-            
+
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);
             send(client_sock, ok, strlen(ok), 0);

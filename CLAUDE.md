@@ -46,6 +46,10 @@ No external test libraries are used. Tests use `ASSERT(condition, message)` and 
 
 C11 (`-std=c11`). Linked against libcurl + libssl. All public functions should have Doxygen-style comments.
 
+## Dependency Policy
+
+**Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libcurl, and libssl.  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
+
 ## Documentation
 
 ```

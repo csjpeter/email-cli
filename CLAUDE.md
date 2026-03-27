@@ -21,14 +21,22 @@ There is no Makefile — `manage.sh` calls CMake directly. There is no mechanism
 
 ## Architecture
 
-The project follows a strict 4-layer CLEAN architecture with zero circular dependencies:
+The project follows a strict layered CLEAN architecture with zero circular dependencies:
 
 ```
-Application  →  src/main.c
-Domain       →  src/domain/email_service.c
-Infrastructure → src/infrastructure/{config_store,curl_adapter,setup_wizard}.c
-Core         →  src/core/{logger,fs_util}.c + raii.h
+Application    →  src/main.c
+Domain         →  src/domain/email_service.c
+Infrastructure →  src/infrastructure/{config_store,curl_adapter,setup_wizard}.c
+Core           →  src/core/{logger,fs_util}.c + raii.h
+Platform       →  src/platform/{terminal,path}.h
+                    src/platform/posix/{terminal,path}.c    (Linux/macOS/Android)
+                    src/platform/windows/{terminal,path}.c  (MinGW-w64)
 ```
+
+Dependency rule: every layer may depend on layers below it; `platform/` sits
+alongside `core/` and is depended upon by `domain/` and `infrastructure/`.
+No layer may contain `#ifdef` guards for platform selection — that is the
+build system's (CMake's) responsibility.
 
 **Data flow:** `main.c` initializes logger and paths → loads config (or runs `setup_wizard` on first run) → calls `email_service_fetch_recent()` → which uses `curl_adapter` to talk to the IMAP server → results go to stdout, diagnostics to `~/.cache/email-cli/logs/`.
 
@@ -85,8 +93,43 @@ canonical RAII mechanism for this project.  MSVC is explicitly not a target.
 
 **Rules for new code:**
 - Never add a new POSIX/platform-specific call without noting it in the table above.
-- Terminal I/O (raw mode, window size, `read`/`write` on fd 0/1) must go through the future `platform/` abstraction — do not scatter it in domain or core code.
+- Platform differences are resolved by the **build system, not `#ifdef` macros**.
+  See the Platform Abstraction section below.
 - Android TUI works only inside a terminal emulator; non-interactive (batch) mode must always be functional.
+
+## Platform Abstraction
+
+Platform-specific behaviour is isolated in `src/platform/`.  The layer exposes
+a thin C header with a single canonical interface; each platform provides its
+own implementation file.  CMake selects the right source file at configure
+time — **no `#ifdef` guards in shared code**.
+
+```
+src/platform/
+  terminal.h          ← canonical interface (get_cols, set_raw, restore, …)
+  posix/terminal.c    ← termios + ioctl  (Linux, macOS, Android)
+  windows/terminal.c  ← GetConsoleMode + GetConsoleScreenBufferInfo
+
+  path.h              ← home_dir(), cache_dir(), config_dir()
+  posix/path.c        ← $HOME / XDG
+  windows/path.c      ← %USERPROFILE% / %APPDATA%
+```
+
+CMakeLists.txt pattern:
+
+```cmake
+if(WIN32)
+    target_sources(email-cli PRIVATE src/platform/windows/terminal.c
+                                     src/platform/windows/path.c)
+else()
+    target_sources(email-cli PRIVATE src/platform/posix/terminal.c
+                                     src/platform/posix/path.c)
+endif()
+```
+
+**Allowed `#ifdef` use:** only inside a platform implementation file itself
+(e.g. to distinguish Linux vs macOS within the POSIX backend), never in
+`core/`, `domain/`, `infrastructure/`, or `main.c`.
 
 ## Documentation
 

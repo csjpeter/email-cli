@@ -1,4 +1,5 @@
 #include "config_store.h"
+#include "config.h"
 #include "fs_util.h"
 #include "platform/path.h"
 #include "raii.h"
@@ -121,11 +122,3 @@ int config_save_to_store(const Config *cfg) {
     return 0;
 }
 
-void config_free(Config *cfg) {
-    if (!cfg) return;
-    free(cfg->host);
-    free(cfg->user);
-    free(cfg->pass);
-    free(cfg->folder);
-    free(cfg);
-}

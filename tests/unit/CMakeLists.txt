@@ -31,6 +31,7 @@ set(TEST_SOURCES
     test_imap_util.c
     ../../src/core/fs_util.c
     ../../src/core/logger.c
+    ../../src/core/config.c
     ../../src/core/mime_util.c
     ../../src/core/imap_util.c
     ../../src/infrastructure/config_store.c

@@ -1,7 +1,7 @@
 #ifndef SETUP_WIZARD_H
 #define SETUP_WIZARD_H
 
-#include "config_store.h"
+#include "config.h"
 
 /**
  * @file setup_wizard.h

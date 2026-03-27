@@ -1,7 +1,7 @@
 #ifndef EMAIL_SERVICE_H
 #define EMAIL_SERVICE_H
 
-#include "config_store.h"
+#include "config.h"
 
 /**
  * @file email_service.h

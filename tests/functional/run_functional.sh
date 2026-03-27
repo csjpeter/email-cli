@@ -39,6 +39,8 @@ EMAIL_FOLDER=INBOX
 EOF
 
 export HOME="$TEST_HOME"
+# Ensure XDG overrides do not redirect the binary to a different config/cache path
+unset XDG_CONFIG_HOME XDG_CACHE_HOME
 
 PASSED=0
 FAILED=0
@@ -79,7 +81,7 @@ check "help show: usage line"     "email-cli show"          "$HELP_SHOW"
 # 7. Test: list (unread only)
 echo ""
 echo "Running: email-cli list ..."
-LIST_OUTPUT=$("$BIN_DIR/email-cli" list 2>&1)
+LIST_OUTPUT=$("$BIN_DIR/email-cli" list 2>&1 || true)
 echo "$LIST_OUTPUT"
 echo "--- List Assertions ---"
 check "Fetch header printed"      "Fetching emails"         "$LIST_OUTPUT"
@@ -91,7 +93,7 @@ check "Successful completion"     "Success: Fetch complete" "$LIST_OUTPUT"
 # 8. Test: list --all
 echo ""
 echo "Running: email-cli list --all ..."
-ALL_OUTPUT=$("$BIN_DIR/email-cli" list --all 2>&1)
+ALL_OUTPUT=$("$BIN_DIR/email-cli" list --all 2>&1 || true)
 echo "$ALL_OUTPUT"
 echo "--- List --all Assertions ---"
 check "All mode: message count"   "message(s) in"           "$ALL_OUTPUT"
@@ -101,13 +103,13 @@ check "All mode: subject shown"   "Test Message"            "$ALL_OUTPUT"
 # 9. Test: list --folder
 echo ""
 echo "Running: email-cli list --folder INBOX ..."
-FOLDER_OUTPUT=$("$BIN_DIR/email-cli" list --folder INBOX 2>&1)
+FOLDER_OUTPUT=$("$BIN_DIR/email-cli" list --folder INBOX 2>&1 || true)
 check "Folder override used"      "INBOX"                   "$FOLDER_OUTPUT"
 
 # 10. Test: show command
 echo ""
 echo "Running: email-cli show 1 ..."
-SHOW_OUTPUT=$("$BIN_DIR/email-cli" show 1 2>&1)
+SHOW_OUTPUT=$("$BIN_DIR/email-cli" show 1 2>&1 || true)
 echo "$SHOW_OUTPUT"
 echo "--- Show Assertions ---"
 check "From header shown"         "From:"                   "$SHOW_OUTPUT"
@@ -118,7 +120,7 @@ check "Successful completion"     "Success: Fetch complete" "$SHOW_OUTPUT"
 # 11. Test: folders (flat)
 echo ""
 echo "Running: email-cli folders ..."
-FOLDERS_OUTPUT=$("$BIN_DIR/email-cli" folders 2>&1)
+FOLDERS_OUTPUT=$("$BIN_DIR/email-cli" folders 2>&1 || true)
 echo "$FOLDERS_OUTPUT"
 echo "--- Folders Assertions ---"
 check "Folders: INBOX listed"     "INBOX"                   "$FOLDERS_OUTPUT"
@@ -127,7 +129,7 @@ check "Folders: subfolder listed" "INBOX.Sent"              "$FOLDERS_OUTPUT"
 # 12. Test: folders --tree
 echo ""
 echo "Running: email-cli folders --tree ..."
-TREE_OUTPUT=$("$BIN_DIR/email-cli" folders --tree 2>&1)
+TREE_OUTPUT=$("$BIN_DIR/email-cli" folders --tree 2>&1 || true)
 echo "$TREE_OUTPUT"
 echo "--- Folders Tree Assertions ---"
 check "Tree: has branch char"     "──"                      "$TREE_OUTPUT"

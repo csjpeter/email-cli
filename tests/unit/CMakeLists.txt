@@ -1,9 +1,17 @@
 include_directories(
+    ../../src
     ../../src/core
     ../../src/infrastructure
     ../../src/domain
     ../common
 )
+
+# Platform-specific sources for tests
+if(WIN32)
+    set(TEST_PLATFORM_SOURCES ../../src/platform/windows/terminal.c)
+else()
+    set(TEST_PLATFORM_SOURCES ../../src/platform/posix/terminal.c)
+endif()
 
 set(TEST_SOURCES
     test_runner.c
@@ -23,6 +31,7 @@ set(TEST_SOURCES
     ../../src/infrastructure/setup_wizard.c
     ../../src/infrastructure/curl_adapter.c
     ../../src/infrastructure/cache_store.c
+    ${TEST_PLATFORM_SOURCES}
 )
 
 add_executable(test-runner ${TEST_SOURCES})

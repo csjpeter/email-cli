@@ -19,11 +19,23 @@ endif()
 find_package(CURL REQUIRED)
 
 include_directories(
+    src
     src/core
     src/infrastructure
     src/domain
     ${CURL_INCLUDE_DIRS}
 )
+
+# Platform-specific sources (CMake selects, no #ifdef in shared code)
+if(WIN32)
+    set(PLATFORM_SOURCES
+        src/platform/windows/terminal.c
+    )
+else()
+    set(PLATFORM_SOURCES
+        src/platform/posix/terminal.c
+    )
+endif()
 
 # Application Source Files
 set(SOURCES
@@ -37,6 +49,7 @@ set(SOURCES
     src/infrastructure/curl_adapter.c
     src/infrastructure/cache_store.c
     src/domain/email_service.c
+    ${PLATFORM_SOURCES}
 )
 
 add_executable(email-cli ${SOURCES})

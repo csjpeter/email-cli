@@ -59,12 +59,38 @@ Lists messages in the configured (or overridden) IMAP folder.
 3. Build a combined entry list tagged with read/unread status.
 4. Sort: **unread messages first**, then by **descending UID** within each group
    (higher UID = more recent message).
-5. Apply `--offset` (1-based, subtract 1 to get 0-based index) and `--limit`.
-6. For each message in the window: fetch headers from cache or server
+5. Apply `--offset` (1-based; convert to 0-based cursor position) and `--limit`.
+6. For each message in the visible window: fetch headers from cache or server
    (see [caching.md](caching.md)), parse `From`, `Subject`, `Date`; render table row.
 7. When `--all` and the full UID set was fetched, call `hcache_evict_stale` to
    remove cached headers for UIDs no longer present on the server.
-8. Paginate according to [pagination.md](pagination.md).
+8. Paginate / interact according to [pagination.md](pagination.md).
+
+### Interactive cursor mode (default, no `--batch`)
+
+In interactive mode `list` operates as a full-screen TUI with a persistent
+cursor:
+
+- A **highlighted row** (reverse video) marks the currently selected entry.
+- The visible window scrolls automatically to keep the cursor on screen.
+- The cursor starts at the position implied by `--offset` (default: first row).
+- **The loop never exits automatically** when the cursor reaches the first or
+  last row; the user must press `q` or `ESC` to quit.
+- Pressing **Enter** opens the selected message with `show_uid_interactive()`.
+  - If the user presses `q` inside the message view, the list also exits.
+  - If the user presses `ESC` inside the message view, control returns to the
+    list at the same cursor position.
+- A **status bar** is printed below the table on every redraw with minimal
+  key binding hints and the current position (`[cursor+1 / total]`).
+
+### Batch mode
+
+Prints the current window and exits immediately.  If more messages remain
+beyond the window a hint line is appended:
+
+```
+  -- <remaining> more message(s) --  use --offset <next> for next page
+```
 
 ### Header cache eviction
 

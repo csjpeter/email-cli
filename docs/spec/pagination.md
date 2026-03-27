@@ -30,44 +30,64 @@ supply `--limit` explicitly.
 
 ### Offset and limit
 
-- `--offset N` sets the 0-based start index to `N − 1` (1-based input).
-  If offset ≥ total message count, a "No messages at offset N" message is printed
-  and the command returns 0.
-- `--limit N` sets the page size.  Default: `page_size` (see above).
+- `--offset N` sets the initial cursor position to `N − 1` (1-based input,
+  converted to 0-based internally).
+- `--limit N` sets the window height (visible rows).  Default: `page_size`.
 
 ### Batch mode
 
-Prints the current page and exits.  If more messages remain beyond the window, a
-hint line is printed:
+Prints the current window (rows `[offset, offset+limit)`) and exits.  If more
+messages remain beyond the window, a hint line is printed:
 
 ```
   -- <remaining> more message(s) --  use --offset <next> for next page
 ```
 
-### Interactive pager mode
+### Interactive cursor mode (pager enabled)
 
-After the last row of each page (when more pages remain), the pager prompt is
-displayed on **stderr** and the program waits for a keypress.  On the next page,
-the screen is cleared with `\033[H\033[2J` before printing the table header and
-rows again.
+`list` in interactive mode uses a **cursor-based TUI**:
 
-Pager navigation:
+- `cursor` — 0-based index of the highlighted entry (initially from `--offset`).
+- `wstart` — 0-based index of the topmost visible row.
+
+**Window tracking:** before each redraw, `wstart` is adjusted so that `cursor`
+is always within `[wstart, wstart + limit)`:
+
+```
+if cursor < wstart:          wstart = cursor
+if cursor >= wstart + limit: wstart = cursor - limit + 1
+```
+
+**Never auto-exits:** the loop runs until the user explicitly presses `q`, `Q`,
+Ctrl-C, or ESC.  Reaching the first or last row with cursor movement is a no-op
+(cursor clamps).
+
+**On each iteration:**
+
+1. Clear screen (`\033[H\033[2J`).
+2. Print count/status line and column header.
+3. Print rows `[wstart, wend)`.  The row at `cursor` is highlighted.
+4. Print status bar below the table.
+5. Wait for a keypress; update `cursor` accordingly or open the selected
+   message.
+
+**Cursor movement:**
 
 | Key | Effect |
 |-----|--------|
-| PgDn, Down-arrow, Space, Enter, or any other key | Advance to next page |
-| PgUp, Up-arrow, `p`, `P`, `b` | Go back one page |
-| `q`, `Q`, ESC, Ctrl-C | Exit pager immediately |
+| ↓ / `j` | `cursor++` (clamp at `show_count − 1`) |
+| ↑ / `k` | `cursor--` (clamp at 0) |
+| PgDn / Space | `cursor += limit` (clamp at `show_count − 1`) |
+| PgUp / `p` / `P` / `b` | `cursor -= limit` (clamp at 0) |
+| Enter | Open `show_uid_interactive(uid[cursor])` |
+| `q` / `Q` / Ctrl-C / ESC | Exit list |
 
-Going back on the first page is a no-op (cursor stays at page 1).
+### Status bar
 
-### Page count display
-
-The pager prompt shows `[current/total]` where:
+Printed after the table on each redraw (dim style):
 
 ```
-total_pages = ceil(show_count / limit)
-cur_page    = cur_index / limit + 1
+  ↑↓=step  PgDn/PgUp=page  Enter=open  q=quit  [<cursor+1>/<total>]
 ```
 
 ---
@@ -88,22 +108,32 @@ rows_avail = page_size − SHOW_HDR_LINES
 `SHOW_HDR_LINES = 5` (From, Subject, Date, separator line, one blank).
 
 If `!pager || page_size <= SHOW_HDR_LINES`, the entire body is printed at once
-without pagination.
+without pagination (standalone `show` only).
 
-### First page
+### Each page (both standalone and interactive context)
 
-Headers and separator are printed once before the pager loop.  The first page of
-body text is printed; if this is also the last page, the loop exits immediately
-without showing a prompt.
-
-### Subsequent pages
-
-The screen is cleared (`\033[H\033[2J`) and headers + separator are reprinted at
-the top of each subsequent page, followed by the next `rows_avail` lines of body.
+1. Clear screen (`\033[H\033[2J`).
+2. Print headers + separator.
+3. Print `rows_avail` lines of body starting at `cur_line`.
+4. Print pager status bar to **stderr**.
+5. Wait for keypress; update `cur_line`.
 
 ### Navigation
 
-Same key bindings as `list`.  Going back on page 1 is a no-op.
+| Key | Effect |
+|-----|--------|
+| PgDn / Down / `j` / Space / Enter | `cur_line += rows_avail` |
+| PgUp / Up / `k` / `p` / `P` / `b` | `cur_line -= rows_avail` (clamp at 0) |
+| ↓ / `j` (line-by-line) | `cur_line += 1` |
+| ↑ / `k` (line-by-line) | `cur_line -= 1` (clamp at 0) |
+| ESC | Standalone: quit; from list: return to list |
+| `q` / `Q` / Ctrl-C | Quit entirely |
+
+Reaching the last line with PgDn/Enter:
+- Standalone `show`: loop exits.
+- From list (`show_uid_interactive`): returns 0 (back to list).
+
+Going back on page 1 is a no-op (`cur_line` stays at 0).
 
 ---
 

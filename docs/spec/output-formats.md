@@ -10,20 +10,22 @@ after the command returns.
 
 ```
 --- Fetching emails: <user> @ <host>/<folder> ---
-<count> unread message(s) in <folder>.
+<first>-<last> of <total> unread message(s) in <folder>.
 
   <UID-col>  <From-col>                      <Subject-col>                   <Date-col>
   ═════  ══════════════════════════════  ══════════════════════════════  ═══════════════════════════
-  <uid>  <from>                          <subject>                       <date>
+  <uid>  <from>                          <subject>                       <date>   ← normal row
+▶ <uid>  <from>                          <subject>                       <date>   ← selected row (reverse video + \033[K\033[0m)
   ...
+
+  ↑↓=step  PgDn/PgUp=page  Enter=open  q=quit  [<cursor+1>/<total>]   ← status bar (dim)
 
 Success: Fetch complete.
 ```
 
-When `--offset` or `--limit` restricts the view to a subset:
-```
-<first>-<last> of <total> unread message(s) in <folder>.
-```
+The selected row is printed with `\033[7m` (reverse video) before the row
+content and `\033[K\033[0m` after; this highlights the entire line to the
+terminal edge.  The status bar is printed in dim style (`\033[2m … \033[0m`).
 
 When the mailbox has no unread messages:
 ```
@@ -57,17 +59,20 @@ If the date cannot be parsed, the raw string is shown as-is.
 
 ```
 --- Fetching emails: <user> @ <host>/<folder> ---
-<count> message(s) in <folder> (<unread> unread).
+<first>-<last> of <total> message(s) in <folder> (<unread> unread).
 
   S  <UID-col>  <From-col>                      <Subject-col>                   <Date-col>
   ═  ═════  ══════════════════════════════  ══════════════════════════════  ═══════════════════════════
   N  <uid>  <from>                          <subject>                       <date>
      <uid>  <from>                          <subject>                       <date>
   ...
+
+  ↑↓=step  PgDn/PgUp=page  Enter=open  q=quit  [<cursor+1>/<total>]
 ```
 
 The `S` (status) column contains `N` for unread messages and a space for read ones.
 Unread messages always appear before read ones regardless of UID order.
+In interactive mode the currently selected row is highlighted (see `list` above).
 
 ---
 
@@ -77,7 +82,7 @@ Unread messages always appear before read ones regardless of UID order.
 From:    <from>
 Subject: <subject>
 Date:    <date>
-────────────────────────────────────────────────────────────────
+─────────────────────────────────────────────────────────────────
 <body text>
 
 Success: Fetch complete.
@@ -88,8 +93,26 @@ Success: Fetch complete.
 - If a header field is absent or unparseable, `(none)` is printed.
 - The body is the plain-text part extracted from the MIME structure.  If no
   plain-text part exists, `(no readable text body)` is printed.
-- When the interactive pager is active, headers and separator are reprinted at the
-  top of each page (page 2 onward is preceded by an ANSI clear-screen sequence).
+- When the interactive pager is active, each page begins with a full-screen
+  clear (`\033[H\033[2J`) followed by the headers + separator, then the body
+  page.  A pager status bar is printed to **stderr** (reverse video):
+
+  ```
+  -- [<cur>/<total>] PgDn/↓=scroll  PgUp/↑=back  ESC=list  q=quit --
+  ```
+
+  After a key is pressed, the status bar is erased with `\r\033[K`.
+
+### `show` when opened from `list` (interactive context)
+
+When `show_uid_interactive()` is called from the `list` TUI (Enter key), the
+behaviour is identical to standalone `show` with the following differences:
+
+| Key | Effect |
+|-----|--------|
+| ESC | Return to `list` at the same cursor position (return value 0) |
+| `q` / `Q` / Ctrl-C | Exit the entire program (return value 1) |
+| PgDn / Down / Enter | Scroll forward; reaching the last page returns to `list` |
 
 ---
 
@@ -126,22 +149,46 @@ Box-drawing characters used:
 
 ---
 
-## Pager prompt (stderr)
+## Pager prompt (stderr) — standalone `show`
 
 ```
--- [<current>/<total>] Space/Enter=next  p=prev  q=quit --
+-- [<current>/<total>] PgDn/↓=scroll  PgUp/↑=back  q=quit --
 ```
 
-Displayed in **reverse video** (`\033[7m` … `\033[0m`).  Rendered with `\r\033[K`
-erasure after a key is pressed.
+Displayed in **reverse video** (`\033[7m` … `\033[0m`).  Erased with `\r\033[K`
+after a key is pressed.
 
-### Pager key bindings
+## Status bar — interactive `list`
 
-| Key | Action |
-|-----|--------|
-| PgDn, Down-arrow, Space, Enter, any other key | Next page |
-| PgUp, Up-arrow, `p`, `P`, `b` | Previous page |
-| `q`, `Q`, ESC, Ctrl-C (code 3) | Quit pager |
+Printed to **stdout** below the table (dim style `\033[2m … \033[0m`):
+
+```
+  ↑↓=step  PgDn/PgUp=page  Enter=open  q=quit  [<cursor+1>/<total>]
+```
+
+## Status bar — interactive `show` (opened from list)
+
+Printed to **stderr** in reverse video:
+
+```
+-- [<cur>/<total>] PgDn/↓=scroll  PgUp/↑=back  ESC=list  q=quit --
+```
+
+### Key bindings — all interactive views
+
+| Key | `list` | `show` (standalone) | `show` (from list) |
+|-----|--------|---------------------|--------------------|
+| PgDn / Down / Space / Enter | Move cursor down / next page | Next page | Next page |
+| PgUp / Up | Move cursor up / prev page | Prev page | Prev page |
+| ↑ (Up-arrow) | Cursor up one row | Scroll up one line | Scroll up one line |
+| ↓ (Down-arrow) | Cursor down one row | Scroll down one line | Scroll down one line |
+| `j` | Cursor down one row | Scroll down one line | Scroll down one line |
+| `k` | Cursor up one row | Scroll up one line | Scroll up one line |
+| `p` / `P` / `b` | Page up | Page up | Page up |
+| Enter | Open message with `show` | Next page | Next page / return to list at end |
+| ESC | Quit list | Quit | Return to list |
+| `q` / `Q` / Ctrl-C | Quit entirely | Quit | Quit entirely |
+| Left / Right arrows | No-op (ignored) | No-op | No-op |
 
 Multi-byte escape sequences (PgDn = `ESC[6~`, PgUp = `ESC[5~`, arrows = `ESC[A/B`)
 are fully consumed before returning so no stray bytes remain in the input buffer.

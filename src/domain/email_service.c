@@ -62,25 +62,19 @@ static int parse_uid_list(const char *resp, int **uids_out) {
 
 /* Logical key codes returned by read_pager_key(). */
 enum PKey {
-    PKEY_QUIT      = 0,
-    PKEY_NEXT_PAGE = 1,
-    PKEY_PREV_PAGE = 2,
-    PKEY_NEXT_LINE = 3,
-    PKEY_PREV_LINE = 4,
-    PKEY_IGNORE    = 5   /* left/right arrows and other no-op sequences */
+    PKEY_QUIT      = 0,  /* q / Q / Ctrl-C — quit entirely            */
+    PKEY_NEXT_PAGE = 1,  /* PgDn / Space                              */
+    PKEY_PREV_PAGE = 2,  /* PgUp / p / P / b                          */
+    PKEY_NEXT_LINE = 3,  /* Down-arrow / j                            */
+    PKEY_PREV_LINE = 4,  /* Up-arrow / k                              */
+    PKEY_IGNORE    = 5,  /* Left/Right arrows and unknown sequences   */
+    PKEY_ENTER     = 6,  /* Enter / Return                            */
+    PKEY_ESC       = 7   /* Bare ESC — "go back / close current view" */
 };
 
 /**
  * Reads one keypress in raw (non-canonical) mode and returns a PKey code.
  * Multi-byte escape sequences are fully consumed before returning.
- *
- * Mapping:
- *   PKEY_NEXT_PAGE — PgDn (ESC[6~), Space, Enter
- *   PKEY_PREV_PAGE — PgUp (ESC[5~), p / P / b
- *   PKEY_NEXT_LINE — Down-arrow (ESC[B), j
- *   PKEY_PREV_LINE — Up-arrow   (ESC[A), k
- *   PKEY_IGNORE    — Left/Right arrows and other unrecognised CSI sequences
- *   PKEY_QUIT      — q / Q / ESC alone / Ctrl-C, or tcgetattr failure
  */
 static enum PKey read_pager_key(void) {
     struct termios old, raw;
@@ -95,10 +89,8 @@ static enum PKey read_pager_key(void) {
     enum PKey result = PKEY_NEXT_PAGE;   /* default: any unlisted key = next */
 
     if (c == '\033') {
-        /* Switch to non-blocking with 100 ms timeout to drain the escape
-         * sequence without hanging on a bare ESC press. */
         raw.c_cc[VMIN]  = 0;
-        raw.c_cc[VTIME] = 1;
+        raw.c_cc[VTIME] = 1;   /* 100 ms timeout for escape sequence drain */
         tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 
         int c2 = getchar();
@@ -112,7 +104,6 @@ static enum PKey read_pager_key(void) {
             case '5': getchar(); result = PKEY_PREV_PAGE; break; /* ESC[5~ PgUp */
             case '6': getchar(); result = PKEY_NEXT_PAGE; break; /* ESC[6~ PgDn */
             default:
-                /* Unknown CSI sequence: drain until letter or '~', then ignore. */
                 if (c3 != EOF) {
                     int ch;
                     while ((ch = getchar()) != EOF) {
@@ -124,8 +115,10 @@ static enum PKey read_pager_key(void) {
                 break;
             }
         } else {
-            result = PKEY_QUIT;   /* bare ESC */
+            result = PKEY_ESC;   /* bare ESC — go back */
         }
+    } else if (c == '\n' || c == '\r') {
+        result = PKEY_ENTER;
     } else if (c == 'q' || c == 'Q' || c == 3 /* Ctrl-C */) {
         result = PKEY_QUIT;
     } else if (c == 'p' || c == 'P' || c == 'b') {
@@ -141,18 +134,14 @@ static enum PKey read_pager_key(void) {
 }
 
 /**
- * Shows the pager prompt on stderr and waits for a meaningful key.
- * Left/right arrows and other no-op keys redisplay the prompt.
- *
- * @param cur_page   1-based current page number.
- * @param total_pages Total page count.
- * @param page_size  Lines/entries per page (used to scale the returned delta).
- * @return Scroll delta: 0 = quit, positive = forward N, negative = back N.
+ * Pager prompt for the standalone `show` command.
+ * PKEY_ENTER and PKEY_ESC are treated the same as next/quit respectively.
+ * Returns scroll delta: 0 = quit, positive = forward N lines, negative = back N.
  */
 static int pager_prompt(int cur_page, int total_pages, int page_size) {
     for (;;) {
         fprintf(stderr,
-                "\033[7m-- [%d/%d] PgDn/Space=page \u2193\u2191=line  PgUp/p=back  q=quit --\033[0m",
+                "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back  q=quit --\033[0m",
                 cur_page, total_pages);
         fflush(stderr);
         enum PKey key = read_pager_key();
@@ -160,12 +149,14 @@ static int pager_prompt(int cur_page, int total_pages, int page_size) {
         fflush(stderr);
 
         switch (key) {
-        case PKEY_QUIT:      return 0;
+        case PKEY_QUIT:
+        case PKEY_ESC:       return 0;           /* ESC = quit in standalone mode */
+        case PKEY_ENTER:
         case PKEY_NEXT_PAGE: return  page_size;
         case PKEY_PREV_PAGE: return -page_size;
         case PKEY_NEXT_LINE: return  1;
         case PKEY_PREV_LINE: return -1;
-        case PKEY_IGNORE:    continue;   /* redisplay prompt */
+        case PKEY_IGNORE:    continue;
         }
     }
 }
@@ -320,6 +311,107 @@ static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
     if (hdrs)
         hcache_save(folder, uid, hdrs, strlen(hdrs));
     return hdrs;
+}
+
+/* ── Show helpers ────────────────────────────────────────────────────── */
+
+#define SHOW_SEPARATOR \
+    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
+    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
+    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
+    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
+    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
+    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
+    "\u2500\u2500\u2500\u2500\u2500\n"
+
+static void print_show_headers(const char *from, const char *subject,
+                                const char *date) {
+    printf("From:    %s\n", from    ? from    : "(none)");
+    printf("Subject: %s\n", subject ? subject : "(none)");
+    printf("Date:    %s\n", date    ? date    : "(none)");
+    printf(SHOW_SEPARATOR);
+}
+
+/**
+ * Show a message in interactive pager mode.
+ * Returns 0 = ESC (go back to list), 1 = q/quit entirely, -1 = error.
+ */
+static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
+    char *raw = NULL;
+    if (cache_exists(cfg->folder, uid)) {
+        raw = cache_load(cfg->folder, uid);
+    } else {
+        raw = fetch_uid_content_in(cfg, cfg->folder, uid, 0);
+        if (raw)
+            cache_save(cfg->folder, uid, raw, strlen(raw));
+    }
+    if (!raw) {
+        fprintf(stderr, "Could not load UID %d.\n", uid);
+        return -1;
+    }
+
+    char *from     = mime_get_header(raw, "From");
+    char *subject  = mime_get_header(raw, "Subject");
+    char *date_raw = mime_get_header(raw, "Date");
+    char *date     = date_raw ? mime_format_date(date_raw) : NULL;
+    free(date_raw);
+    char *body = mime_get_text_body(raw);
+    const char *body_text = body ? body : "(no readable text body)";
+
+#define SHOW_HDR_LINES_INT 5
+    int rows_avail  = (page_size > SHOW_HDR_LINES_INT)
+                      ? page_size - SHOW_HDR_LINES_INT : 1;
+    int body_lines  = count_lines(body_text);
+    int total_pages = (body_lines + rows_avail - 1) / rows_avail;
+    if (total_pages < 1) total_pages = 1;
+
+    int result = 0;
+    for (int cur_line = 0;;) {
+        printf("\033[H\033[2J");
+        print_show_headers(from, subject, date);
+        print_body_page(body_text, cur_line, rows_avail);
+
+        int cur_page = cur_line / rows_avail + 1;
+        fprintf(stderr,
+                "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
+                "  ESC=list  q=quit --\033[0m",
+                cur_page, total_pages);
+        fflush(stderr);
+
+        enum PKey key = read_pager_key();
+        fprintf(stderr, "\r\033[K");
+        fflush(stderr);
+
+        switch (key) {
+        case PKEY_ESC:
+            result = 0;
+            goto show_int_done;
+        case PKEY_QUIT:
+            result = 1;
+            goto show_int_done;
+        case PKEY_ENTER:
+        case PKEY_NEXT_PAGE:
+            cur_line += rows_avail;
+            if (cur_line >= body_lines) { result = 0; goto show_int_done; }
+            break;
+        case PKEY_PREV_PAGE:
+            cur_line -= rows_avail;
+            if (cur_line < 0) cur_line = 0;
+            break;
+        case PKEY_NEXT_LINE:
+            if (cur_line < body_lines - 1) cur_line++;
+            break;
+        case PKEY_PREV_LINE:
+            if (cur_line > 0) cur_line--;
+            break;
+        case PKEY_IGNORE:
+            break;
+        }
+    }
+show_int_done:
+#undef SHOW_HDR_LINES_INT
+    free(body); free(from); free(subject); free(date); free(raw);
+    return result;
 }
 
 /* ── List helpers ────────────────────────────────────────────────────── */
@@ -543,32 +635,25 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     /* Sort: unseen first, then descending UID */
     qsort(entries, (size_t)show_count, sizeof(UIDEntry), cmp_uid_entry);
 
-    int limit = (opts->limit > 0) ? opts->limit : show_count;
-    int cur   = (opts->offset > 1) ? opts->offset - 1 : 0;
-    if (cur >= show_count) {
-        printf("No messages at offset %d (total: %d).\n",
-               opts->offset, show_count);
-        free(entries);
-        return 0;
-    }
+    int limit  = (opts->limit > 0) ? opts->limit : show_count;
+    int cursor = (opts->offset > 1) ? opts->offset - 1 : 0;
+    if (cursor >= show_count) cursor = 0;
+    int wstart = cursor;   /* top of the visible window */
 
-    int list_displayed = 0;
     for (;;) {
-        if (list_displayed && opts->pager)
-            printf("\033[H\033[2J"); /* clear screen */
-        list_displayed = 1;
+        /* Scroll window to keep cursor visible */
+        if (cursor < wstart)             wstart = cursor;
+        if (cursor >= wstart + limit)    wstart = cursor - limit + 1;
+        if (wstart < 0)                  wstart = 0;
+        int wend = wstart + limit;
+        if (wend > show_count)           wend = show_count;
 
-        int end = show_count;
-        if (cur + limit < end) end = cur + limit;
+        if (opts->pager) printf("\033[H\033[2J");
 
         /* Count / status line */
         if (opts->all) {
-            if (cur > 0 || end < show_count)
-                printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
-                       cur + 1, end, show_count, folder, unseen_count);
-            else
-                printf("%d message(s) in %s (%d unread).\n\n",
-                       show_count, folder, unseen_count);
+            printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
+                   wstart + 1, wend, show_count, folder, unseen_count);
             printf("  S  %5s  %-30s  %-30s  %s\n",
                    "UID", "From", "Subject", "Date");
             printf("  \u2550  %s  %s  %s  %s\n", "═════",
@@ -576,11 +661,8 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                    "══════════════════════════════",
                    "═══════════════════════════");
         } else {
-            if (cur > 0 || end < show_count)
-                printf("%d-%d of %d unread message(s) in %s.\n\n",
-                       cur + 1, end, show_count, folder);
-            else
-                printf("%d unread message(s) in %s.\n\n", show_count, folder);
+            printf("%d-%d of %d unread message(s) in %s.\n\n",
+                   wstart + 1, wend, show_count, folder);
             printf("  %5s  %-30s  %-30s  %s\n",
                    "UID", "From", "Subject", "Date");
             printf("  %s  %s  %s  %s\n", "═════",
@@ -590,7 +672,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         }
 
         /* Data rows */
-        for (int i = cur; i < end; i++) {
+        for (int i = wstart; i < wend; i++) {
             char *hdrs     = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
             char *from     = hdrs ? mime_get_header(hdrs, "From")    : NULL;
             char *subject  = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
@@ -598,41 +680,73 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             char *date     = date_raw ? mime_format_date(date_raw)   : NULL;
             free(date_raw);
 
+            int sel = opts->pager && (i == cursor);
+            if (sel) printf("\033[7m");
+
             if (opts->all)
-                printf("  %c  %5d  %-30.30s  %-30.30s  %s\n",
+                printf("  %c  %5d  %-30.30s  %-30.30s  %-16.16s",
                        entries[i].unseen ? 'N' : ' ',
                        entries[i].uid,
                        from    ? from    : "(no from)",
                        subject ? subject : "(no subject)",
                        date    ? date    : "");
             else
-                printf("  %5d  %-30.30s  %-30.30s  %s\n",
+                printf("  %5d  %-30.30s  %-30.30s  %-16.16s",
                        entries[i].uid,
                        from    ? from    : "(no from)",
                        subject ? subject : "(no subject)",
                        date    ? date    : "");
 
+            if (sel) printf("\033[K\033[0m");
+            printf("\n");
             free(hdrs); free(from); free(subject); free(date);
         }
 
-        if (end >= show_count && cur == 0) break; /* only page — done */
+        if (!opts->pager) {
+            if (wend < show_count)
+                printf("\n  -- %d more message(s) --  use --offset %d for next page\n",
+                       show_count - wend, wend + 1);
+            break;
+        }
 
-        if (opts->pager) {
-            int total_pages = (show_count + limit - 1) / limit;
-            int cur_page    = cur / limit + 1;
-            int delta = pager_prompt(cur_page, total_pages, limit);
-            if (delta == 0) break;
-            cur += delta;
-            if (cur < 0) cur = 0;
-            if (cur >= show_count) break; /* scrolled past the end */
-        } else {
-            if (end >= show_count) break;
-            printf("\n  -- %d more message(s) --  use --offset %d for next page\n",
-                   show_count - end, end + 1);
+        /* Navigation hint (status bar) */
+        printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=open  q=quit"
+               "  [%d/%d]\033[0m\n",
+               cursor + 1, show_count);
+        fflush(stdout);
+
+        enum PKey key = read_pager_key();
+
+        switch (key) {
+        case PKEY_QUIT:
+        case PKEY_ESC:
+            goto list_done;
+        case PKEY_ENTER:
+            {
+                int ret = show_uid_interactive(cfg, entries[cursor].uid, opts->limit);
+                if (ret == 1) goto list_done;  /* user pressed q in show */
+                /* ret == 0: ESC → back to list; ret == -1: error → stay */
+            }
+            break;
+        case PKEY_NEXT_LINE:
+            if (cursor < show_count - 1) cursor++;
+            break;
+        case PKEY_PREV_LINE:
+            if (cursor > 0) cursor--;
+            break;
+        case PKEY_NEXT_PAGE:
+            cursor += limit;
+            if (cursor >= show_count) cursor = show_count - 1;
+            break;
+        case PKEY_PREV_PAGE:
+            cursor -= limit;
+            if (cursor < 0) cursor = 0;
+            break;
+        case PKEY_IGNORE:
             break;
         }
     }
-
+list_done:
     free(entries);
     return 0;
 }
@@ -718,23 +832,12 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
     char *date     = date_raw ? mime_format_date(date_raw) : NULL;
     free(date_raw);
 
-    printf("From:    %s\n", from    ? from    : "(none)");
-    printf("Subject: %s\n", subject ? subject : "(none)");
-    printf("Date:    %s\n", date    ? date    : "(none)");
-    printf("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-           "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-           "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-           "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-           "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-           "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-           "\u2500\n");
+    print_show_headers(from, subject, date);
 
     char *body = mime_get_text_body(raw);
     const char *body_text = body ? body : "(no readable text body)";
 
-/* Lines taken by headers + separator already on screen */
 #define SHOW_HDR_LINES 5
-
     if (!pager || page_size <= SHOW_HDR_LINES) {
         printf("%s\n", body_text);
     } else {
@@ -745,37 +848,21 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 
         for (int cur_line = 0, show_displayed = 0; ; ) {
             if (show_displayed) {
-                /* Clear screen and reprint headers on pages 2+ */
                 printf("\033[H\033[2J");
-                printf("From:    %s\n", from    ? from    : "(none)");
-                printf("Subject: %s\n", subject ? subject : "(none)");
-                printf("Date:    %s\n", date    ? date    : "(none)");
-                printf("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-                       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-                       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-                       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-                       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-                       "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
-                       "\u2500\n");
+                print_show_headers(from, subject, date);
             }
             show_displayed = 1;
-
-            int next_line = cur_line + rows_avail;
-            if (next_line > body_lines) next_line = body_lines;
             print_body_page(body_text, cur_line, rows_avail);
 
-            if (next_line >= body_lines && cur_line == 0) break; /* only page */
+            if (cur_line == 0 && cur_line + rows_avail >= body_lines) break;
 
             int cur_page = cur_line / rows_avail + 1;
             int delta = pager_prompt(cur_page, total_pages, rows_avail);
             if (delta == 0) break;
             cur_line += delta;
             if (cur_line < 0) cur_line = 0;
-            if (cur_line >= body_lines) break; /* scrolled past end */
+            if (cur_line >= body_lines) break;
         }
-
-        free(body); free(from); free(subject); free(date); free(raw);
-        return 0;
     }
 #undef SHOW_HDR_LINES
 

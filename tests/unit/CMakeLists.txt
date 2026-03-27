@@ -30,6 +30,7 @@ set(TEST_SOURCES
     test_mime.c
     test_cache.c
     test_imap_util.c
+    test_email_service.c
     ../../src/core/fs_util.c
     ../../src/core/logger.c
     ../../src/core/config.c

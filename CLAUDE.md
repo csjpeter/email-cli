@@ -67,14 +67,25 @@ Known portability gaps that need shims before non-Linux builds work:
 | `wcwidth(3)` | ✅ | ✅ | ❌ needs bundled implementation |
 | `asprintf` | ✅ | ✅ | ❌ needs a thin wrapper (available in MinGW) |
 | `iconv(3)` | ✅ | ⚠️ limited (NDK r23+) | ❌ needs libiconv or `WideCharToMultiByte` |
-| `__attribute__((cleanup(...)))` (RAII) | ✅ Clang | ✅ Clang NDK | ❌ MSVC; ✅ MinGW/GCC |
+| `__attribute__((cleanup(...)))` (RAII) | ✅ GCC / Apple Clang | ✅ Clang NDK | ✅ MinGW-w64 (GCC) |
 | Home dir (`$HOME`) | ✅ | ⚠️ use app data dir | ❌ use `%USERPROFILE%` |
 | Cache/config paths (`~/.cache`, `~/.config`) | ✅ | ❌ use app-specific dirs | ❌ use `%APPDATA%` |
+
+**Compiler policy: GCC (or Clang) on every platform — MSVC is out of scope.**
+
+| Platform | Toolchain |
+|----------|-----------|
+| Linux | GCC |
+| macOS | GCC (Homebrew) or Apple Clang |
+| Windows | MinGW-w64 (GCC) |
+| Android | NDK Clang |
+
+`__attribute__((cleanup(...)))` is supported by all of the above and is the
+canonical RAII mechanism for this project.  MSVC is explicitly not a target.
 
 **Rules for new code:**
 - Never add a new POSIX/platform-specific call without noting it in the table above.
 - Terminal I/O (raw mode, window size, `read`/`write` on fd 0/1) must go through the future `platform/` abstraction — do not scatter it in domain or core code.
-- `__attribute__((cleanup(...)))` is GCC/Clang-only; MSVC support requires either MinGW or a redesigned RAII strategy.
 - Android TUI works only inside a terminal emulator; non-interactive (batch) mode must always be functional.
 
 ## Documentation

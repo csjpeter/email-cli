@@ -21,6 +21,7 @@ endif()
 
 set(TEST_SOURCES
     test_runner.c
+    test_platform.c
     test_fs_util.c
     test_config.c
     test_logger.c

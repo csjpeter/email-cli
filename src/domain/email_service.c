@@ -391,8 +391,11 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
             goto show_int_done;
         case PKEY_ENTER:
         case PKEY_NEXT_PAGE:
-            cur_line += rows_avail;
-            if (cur_line >= body_lines) { result = 0; goto show_int_done; }
+        {
+            int next = cur_line + rows_avail;
+            if (next < body_lines) cur_line = next;
+            /* else: already on last page — stay */
+        }
             break;
         case PKEY_PREV_PAGE:
             cur_line -= rows_avail;
@@ -640,6 +643,23 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     if (cursor >= show_count) cursor = 0;
     int wstart = cursor;   /* top of the visible window */
 
+    /* Keep the terminal in raw mode for the entire interactive TUI.
+     * Without this, each read_pager_key() call briefly restores cooked mode
+     * between keystrokes, which causes the terminal to echo escape sequences
+     * and to buffer input until Enter (cooked ICANON), making the interface
+     * appear frozen.  Ctrl+C works in that state only because cooked mode
+     * delivers ISIG signals — the exact symptom the user observed. */
+    struct termios tui_saved;
+    int tui_raw = 0;
+    if (opts->pager && tcgetattr(STDIN_FILENO, &tui_saved) == 0) {
+        struct termios raw = tui_saved;
+        raw.c_lflag &= ~(unsigned)(ICANON | ECHO | ISIG);
+        raw.c_cc[VMIN]  = 1;
+        raw.c_cc[VTIME] = 0;
+        tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+        tui_raw = 1;
+    }
+
     for (;;) {
         /* Scroll window to keep cursor visible */
         if (cursor < wstart)             wstart = cursor;
@@ -747,6 +767,8 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         }
     }
 list_done:
+    if (tui_raw)
+        tcsetattr(STDIN_FILENO, TCSANOW, &tui_saved);
     free(entries);
     return 0;
 }

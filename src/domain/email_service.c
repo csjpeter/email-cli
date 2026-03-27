@@ -92,8 +92,8 @@ static void print_padded_col(const char *s, int width) {
         }
 
         int w = wcwidth((wchar_t)cp);
-        if (w < 0) w = 1;             /* treat control chars as 1 wide */
-        if (used + w > width) break;  /* doesn't fit — stop here */
+        if (w < 0) { p += seqlen; continue; }  /* skip control/non-printable */
+        if (used + w > width) break;            /* doesn't fit — stop here */
 
         fwrite(p, 1, (size_t)seqlen, stdout);
         used += w;
@@ -384,11 +384,18 @@ static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
     "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
     "\u2500\u2500\u2500\u2500\u2500\n"
 
+/* Print a string replacing control characters (<0x20 except tab) with spaces. */
+static void print_clean(const char *s, const char *fallback) {
+    if (!s) { printf("%s", fallback); return; }
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++)
+        putchar((*p < 0x20 && *p != '\t') ? ' ' : (int)*p);
+}
+
 static void print_show_headers(const char *from, const char *subject,
                                 const char *date) {
-    printf("From:    %s\n", from    ? from    : "(none)");
-    printf("Subject: %s\n", subject ? subject : "(none)");
-    printf("Date:    %s\n", date    ? date    : "(none)");
+    printf("From:    "); print_clean(from,    "(none)"); putchar('\n');
+    printf("Subject: "); print_clean(subject, "(none)"); putchar('\n');
+    printf("Date:    %s\n", date ? date : "(none)");
     printf(SHOW_SEPARATOR);
 }
 

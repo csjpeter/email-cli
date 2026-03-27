@@ -3,6 +3,7 @@
 #include "raii.h"
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 
 void test_mime_util(void) {
 
@@ -169,4 +170,56 @@ void test_mime_util(void) {
     /* NULL input */
     ASSERT(mime_extract_imap_literal(NULL) == NULL,
            "NULL response should return NULL");
+
+    /* ── mime_format_date ───────────────────────────────────────────── */
+
+    /* Force UTC so the expected output is timezone-independent. */
+    const char *saved_tz = getenv("TZ");
+    setenv("TZ", "UTC", 1);
+    tzset();
+
+    /* Standard RFC 2822 with weekday, UTC offset */
+    {
+        RAII_STRING char *r = mime_format_date("Tue, 10 Mar 2026 15:07:40 +0000");
+        ASSERT(r != NULL, "mime_format_date: should not return NULL");
+        ASSERT(strcmp(r, "2026-03-10 15:07") == 0, "UTC date format mismatch");
+    }
+
+    /* Date with +0100 offset: local (UTC) output should subtract 1 hour */
+    {
+        RAII_STRING char *r = mime_format_date("Thu, 26 Mar 2026 12:00:00 +0100");
+        ASSERT(r != NULL, "mime_format_date: offset date should not return NULL");
+        ASSERT(strcmp(r, "2026-03-26 11:00") == 0, "Offset date format mismatch");
+    }
+
+    /* Trailing timezone comment in parentheses */
+    {
+        RAII_STRING char *r = mime_format_date("Mon, 1 Jan 2026 00:00:00 +0000 (UTC)");
+        ASSERT(r != NULL, "mime_format_date: comment date should not return NULL");
+        ASSERT(strcmp(r, "2026-01-01 00:00") == 0, "Date with comment format mismatch");
+    }
+
+    /* Without day-of-week */
+    {
+        RAII_STRING char *r = mime_format_date("1 Jan 2026 10:30:00 +0000");
+        ASSERT(r != NULL, "mime_format_date: no-weekday date should not return NULL");
+        ASSERT(strcmp(r, "2026-01-01 10:30") == 0, "No-weekday date format mismatch");
+    }
+
+    /* Unparseable input: returns a copy of the raw string */
+    {
+        RAII_STRING char *r = mime_format_date("not a date");
+        ASSERT(r != NULL, "mime_format_date: bad date should return raw copy");
+        ASSERT(strcmp(r, "not a date") == 0, "Bad date should return raw input");
+    }
+
+    /* NULL input */
+    ASSERT(mime_format_date(NULL) == NULL, "mime_format_date: NULL should return NULL");
+
+    /* Restore original TZ */
+    if (saved_tz)
+        setenv("TZ", saved_tz, 1);
+    else
+        unsetenv("TZ");
+    tzset();
 }

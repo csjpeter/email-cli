@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <time.h>
 
 /* ── Header extraction ──────────────────────────────────────────────── */
 
@@ -237,6 +238,44 @@ static char *text_from_part(const char *part) {
     free(ctype);
     free(enc);
     return result;
+}
+
+/* ── Date formatting ────────────────────────────────────────────────── */
+
+char *mime_format_date(const char *date) {
+    if (!date || !*date) return NULL;
+
+    static const char * const fmts[] = {
+        "%a, %d %b %Y %T %z",  /* "Tue, 10 Mar 2026 15:07:40 +0000" */
+        "%d %b %Y %T %z",       /* "10 Mar 2026 15:07:40 +0000"      */
+        NULL
+    };
+
+    struct tm tm;
+    int parsed = 0;
+    for (int i = 0; fmts[i]; i++) {
+        memset(&tm, 0, sizeof(tm));
+        if (strptime(date, fmts[i], &tm)) { parsed = 1; break; }
+    }
+    if (!parsed) return strdup(date);
+
+    /* Save tm_gmtoff before calling timegm(): timegm() normalises the struct
+     * and resets tm_gmtoff to 0.  timegm() treats the fields as UTC, so
+     * subtracting the original offset converts to true UTC. */
+    long gmtoff = tm.tm_gmtoff;
+    time_t utc = timegm(&tm) - gmtoff;
+    if (utc == (time_t)-1) return strdup(date);
+
+    struct tm local;
+    localtime_r(&utc, &local);
+
+    char *buf = malloc(17);   /* "YYYY-MM-DD HH:MM\0" */
+    if (!buf) return NULL;
+    if (strftime(buf, 17, "%Y-%m-%d %H:%M", &local) == 0) {
+        free(buf);
+        return strdup(date);
+    }
+    return buf;
 }
 
 /* ── Public API ─────────────────────────────────────────────────────── */

@@ -510,10 +510,12 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 
         /* Data rows */
         for (int i = cur; i < end; i++) {
-            char *hdrs    = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
-            char *from    = hdrs ? mime_get_header(hdrs, "From")    : NULL;
-            char *subject = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
-            char *date    = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
+            char *hdrs     = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
+            char *from     = hdrs ? mime_get_header(hdrs, "From")    : NULL;
+            char *subject  = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
+            char *date_raw = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
+            char *date     = date_raw ? mime_format_date(date_raw)   : NULL;
+            free(date_raw);
 
             if (opts->all)
                 printf("  %c  %5d  %-30.30s  %-30.30s  %s\n",
@@ -627,9 +629,11 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 
     if (!raw) { fprintf(stderr, "Could not load message UID %d.\n", uid); return -1; }
 
-    char *from    = mime_get_header(raw, "From");
-    char *subject = mime_get_header(raw, "Subject");
-    char *date    = mime_get_header(raw, "Date");
+    char *from     = mime_get_header(raw, "From");
+    char *subject  = mime_get_header(raw, "Subject");
+    char *date_raw = mime_get_header(raw, "Date");
+    char *date     = date_raw ? mime_format_date(date_raw) : NULL;
+    free(date_raw);
 
     printf("From:    %s\n", from    ? from    : "(none)");
     printf("Subject: %s\n", subject ? subject : "(none)");

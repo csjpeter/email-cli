@@ -73,6 +73,24 @@ enum PKey {
 };
 
 /**
+ * Read one byte from STDIN_FILENO via read(2) — NOT via getchar()/stdio.
+ *
+ * Rationale: getchar() uses the C stdio buffer.  When getchar() calls
+ * read(2) with VMIN=0 VTIME=1 and gets a 0-byte return (timeout for bare
+ * ESC), stdio marks the FILE* EOF flag.  All subsequent getchar() calls
+ * then return EOF immediately without blocking, causing an infinite
+ * redraw loop in the TUI.  Using read(2) directly bypasses the stdio
+ * layer entirely and avoids the EOF flag problem.
+ *
+ * Returns the byte value [0..255], or -1 on error/timeout.
+ */
+static int read_byte(void) {
+    unsigned char c;
+    ssize_t n = read(STDIN_FILENO, &c, 1);
+    return (n == 1) ? (int)c : -1;
+}
+
+/**
  * Reads one keypress in raw (non-canonical) mode and returns a PKey code.
  * Multi-byte escape sequences are fully consumed before returning.
  */
@@ -85,28 +103,28 @@ static enum PKey read_pager_key(void) {
     raw.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 
-    int c = getchar();
-    enum PKey result = PKEY_NEXT_PAGE;   /* default: any unlisted key = next */
+    int c = read_byte();
+    enum PKey result = PKEY_IGNORE;   /* unknown input → silent no-op */
 
     if (c == '\033') {
         raw.c_cc[VMIN]  = 0;
         raw.c_cc[VTIME] = 1;   /* 100 ms timeout for escape sequence drain */
         tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 
-        int c2 = getchar();
+        int c2 = read_byte();
         if (c2 == '[') {
-            int c3 = getchar();
+            int c3 = read_byte();
             switch (c3) {
             case 'A': result = PKEY_PREV_LINE; break;  /* ESC[A — Up arrow    */
             case 'B': result = PKEY_NEXT_LINE; break;  /* ESC[B — Down arrow  */
             case 'C': result = PKEY_IGNORE;    break;  /* ESC[C — Right arrow */
             case 'D': result = PKEY_IGNORE;    break;  /* ESC[D — Left arrow  */
-            case '5': getchar(); result = PKEY_PREV_PAGE; break; /* ESC[5~ PgUp */
-            case '6': getchar(); result = PKEY_NEXT_PAGE; break; /* ESC[6~ PgDn */
+            case '5': read_byte(); result = PKEY_PREV_PAGE; break; /* ESC[5~ PgUp */
+            case '6': read_byte(); result = PKEY_NEXT_PAGE; break; /* ESC[6~ PgDn */
             default:
-                if (c3 != EOF) {
+                if (c3 != -1) {
                     int ch;
-                    while ((ch = getchar()) != EOF) {
+                    while ((ch = read_byte()) != -1) {
                         if ((ch >= 'A' && ch <= 'Z') ||
                             (ch >= 'a' && ch <= 'z') || ch == '~') break;
                     }
@@ -123,11 +141,14 @@ static enum PKey read_pager_key(void) {
         result = PKEY_QUIT;
     } else if (c == 'p' || c == 'P' || c == 'b') {
         result = PKEY_PREV_PAGE;
+    } else if (c == ' ') {
+        result = PKEY_NEXT_PAGE;
     } else if (c == 'j') {
         result = PKEY_NEXT_LINE;
     } else if (c == 'k') {
         result = PKEY_PREV_LINE;
     }
+    /* c == -1 (read error/timeout) → result stays PKEY_IGNORE */
 
     tcsetattr(STDIN_FILENO, TCSANOW, &old);
     return result;

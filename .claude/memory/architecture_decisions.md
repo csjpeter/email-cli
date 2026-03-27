@@ -29,7 +29,9 @@ Dovecot = MIAB IMAP komponense, de pár másodperc alatt indul.
 **Why:** A felhasználó explicit igénye: jövőbeli multi-platform support.
 **How to apply:**
 - Új platform-specifikus hívás előtt ellenőrizd a hordozhatósági táblázatot a CLAUDE.md-ben.
-- Terminal I/O (raw mode, ablakméret, fd 0/1 olvasás) kerüljön egy `platform/` absztrakcióba — ne szóródjon a domain/core kódban.
+- Platform különbségeket a **build rendszer (CMake) oldja fel, nem `#ifdef` makrók** — ez explicit elvárás a felhasználótól.
+- `src/platform/` réteg: `terminal.h` és `path.h` kanonikus interfészek; `posix/` és `windows/` alkönyvtárakban az implementációk. CMake választja a megfelelőt.
+- `#ifdef` csak platform implementációs fájlon belül megengedett (pl. Linux vs macOS különbség a POSIX backenden belül). A `core/`, `domain/`, `infrastructure/`, `main.c` fájlokban tilos.
 - Toolchain: Linux=GCC, macOS=GCC/Apple Clang, Windows=MinGW-w64, Android=NDK Clang. MSVC nem célplatform.
 - `__attribute__((cleanup(...)))` minden fenti toolchain-en működik — nem kell alternatív RAII stratégia.
 - Android batch (nem-interaktív) módnak mindig működnie kell, TUI csak terminálemulátorban.

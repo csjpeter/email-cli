@@ -147,6 +147,55 @@ void test_mime_util(void) {
     /* NULL input */
     ASSERT(mime_get_text_body(NULL) == NULL, "NULL msg should return NULL");
 
+    /* ── mime_decode_words ──────────────────────────────────────────── */
+
+    /* Plain string — no encoded words, returned verbatim */
+    {
+        RAII_STRING char *r = mime_decode_words("Hello World");
+        ASSERT(r != NULL, "mime_decode_words: plain should not be NULL");
+        ASSERT(strcmp(r, "Hello World") == 0, "plain string should be unchanged");
+    }
+
+    /* UTF-8 Q-encoding: Bí-Bor-Ász Kft. - Borászati Szaküzlet */
+    {
+        RAII_STRING char *r = mime_decode_words(
+            "=?utf-8?Q?B=C3=AD-Bor-=C3=81sz_Kft=2E_-_Bor=C3=A1szati"
+            "_Szak=C3=BCzlet?=");
+        ASSERT(r != NULL, "mime_decode_words: Q UTF-8 should not be NULL");
+        ASSERT(strcmp(r, "B\xc3\xad-Bor-\xc3\x81sz Kft. - Bor\xc3\xa1szati"
+                         " Szak\xc3\xbczlet") == 0,
+               "Q UTF-8 decode mismatch");
+    }
+
+    /* UTF-8 B-encoding: "Hello" → base64 "SGVsbG8=" */
+    {
+        RAII_STRING char *r = mime_decode_words("=?utf-8?B?SGVsbG8=?=");
+        ASSERT(r != NULL, "mime_decode_words: B UTF-8 should not be NULL");
+        ASSERT(strcmp(r, "Hello") == 0, "B UTF-8 decode mismatch");
+    }
+
+    /* Multiple encoded words: whitespace between them must be stripped */
+    {
+        RAII_STRING char *r = mime_decode_words(
+            "=?utf-8?Q?foo?= =?utf-8?Q?bar?=");
+        ASSERT(r != NULL, "mime_decode_words: multi-word should not be NULL");
+        ASSERT(strcmp(r, "foobar") == 0,
+               "whitespace between encoded words should be stripped");
+    }
+
+    /* Mixed: encoded word followed by literal suffix */
+    {
+        RAII_STRING char *r = mime_decode_words(
+            "=?utf-8?Q?Hello?= <user@example.com>");
+        ASSERT(r != NULL, "mime_decode_words: mixed should not be NULL");
+        ASSERT(strcmp(r, "Hello <user@example.com>") == 0,
+               "mixed encoded + literal mismatch");
+    }
+
+    /* NULL input */
+    ASSERT(mime_decode_words(NULL) == NULL,
+           "mime_decode_words: NULL input should return NULL");
+
     /* ── mime_extract_imap_literal ──────────────────────────────────── */
 
     {

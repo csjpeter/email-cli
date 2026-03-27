@@ -130,6 +130,39 @@ static CURL *make_curl(const Config *cfg) {
     return curl_adapter_init(cfg->user, cfg->pass, !cfg->ssl_no_verify);
 }
 
+/** Returns 1 if the message has the \Seen flag set, 0 otherwise. */
+static int check_uid_seen(const Config *cfg, const char *folder, int uid) {
+    RAII_CURL CURL *curl = make_curl(cfg);
+    if (!curl) return 0;
+    RAII_STRING char *url = NULL;
+    RAII_STRING char *cmd = NULL;
+    if (asprintf(&url, "%s/%s", cfg->host, folder) == -1) return 0;
+    if (asprintf(&cmd, "UID FETCH %d (FLAGS)", uid) == -1) return 0;
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
+    Buffer buf = {NULL, 0};
+    CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
+    int seen = (res == CURLE_OK && buf.data && strstr(buf.data, "\\Seen") != NULL);
+    free(buf.data);
+    return seen;
+}
+
+/** Removes the \Seen flag from a message (restore unread state). */
+static void restore_uid_unseen(const Config *cfg, const char *folder, int uid) {
+    RAII_CURL CURL *curl = make_curl(cfg);
+    if (!curl) return;
+    RAII_STRING char *url = NULL;
+    RAII_STRING char *cmd = NULL;
+    if (asprintf(&url, "%s/%s", cfg->host, folder) == -1) return;
+    if (asprintf(&cmd, "UID STORE %d -FLAGS (\\Seen)", uid) == -1) return;
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
+    Buffer buf = {NULL, 0};
+    CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
+    if (res != CURLE_OK)
+        logger_log(LOG_WARN, "Failed to restore \\Seen for UID %d: %s",
+                   uid, curl_easy_strerror(res));
+    free(buf.data);
+}
+
 /** Issues UID SEARCH <criteria> in <folder>. Caller must free *uids_out. */
 static int search_uids_in(const Config *cfg, const char *folder,
                           const char *criteria, int **uids_out) {
@@ -153,17 +186,35 @@ static int search_uids_in(const Config *cfg, const char *folder,
     return count;
 }
 
-/** Fetches headers or full message for a UID in <folder>. Caller must free. */
+/** Fetches headers or full message for a UID in <folder>. Caller must free.
+ *
+ *  headers_only=1: URL-based BODY[HEADER] fetch — does NOT set \Seen (RFC 3501).
+ *  headers_only=0: URL-based fetch (sets \Seen transiently); \Seen is restored
+ *                  afterward if the message was not already read.
+ *                  Note: CURLOPT_CUSTOMREQUEST cannot be used for full-body IMAP
+ *                  FETCH because libcurl does not deliver the literal payload to
+ *                  the write callback in that mode. */
 static char *fetch_uid_content_in(const Config *cfg, const char *folder,
                                   int uid, int headers_only) {
     RAII_CURL CURL *curl = make_curl(cfg);
     if (!curl) return NULL;
 
     RAII_STRING char *url = NULL;
-    int rc = headers_only
-        ? asprintf(&url, "%s/%s/;UID=%d/;SECTION=HEADER", cfg->host, folder, uid)
-        : asprintf(&url, "%s/%s/;UID=%d", cfg->host, folder, uid);
-    if (rc == -1) return NULL;
+
+    /* Check \Seen status before the fetch so we can restore it if needed. */
+    int was_seen = 0;
+    if (!headers_only)
+        was_seen = check_uid_seen(cfg, folder, uid);
+
+    if (headers_only) {
+        if (asprintf(&url, "%s/%s/;UID=%d/;SECTION=HEADER",
+                     cfg->host, folder, uid) == -1) return NULL;
+    } else {
+        /* Standard URL fetch — libcurl sends BODY[] and delivers the full
+         * literal to the write callback.  This sets \Seen; we restore it below
+         * when the message was not already read. */
+        if (asprintf(&url, "%s/%s/;UID=%d", cfg->host, folder, uid) == -1) return NULL;
+    }
 
     Buffer buf = {NULL, 0};
     CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
@@ -172,6 +223,10 @@ static char *fetch_uid_content_in(const Config *cfg, const char *folder,
         free(buf.data);
         return NULL;
     }
+
+    if (!headers_only && !was_seen)
+        restore_uid_unseen(cfg, folder, uid);
+
     return buf.data;
 }
 

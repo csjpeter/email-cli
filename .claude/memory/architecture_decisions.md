@@ -30,7 +30,8 @@ Dovecot = MIAB IMAP komponense, de pár másodperc alatt indul.
 **How to apply:**
 - Új platform-specifikus hívás előtt ellenőrizd a hordozhatósági táblázatot a CLAUDE.md-ben.
 - Terminal I/O (raw mode, ablakméret, fd 0/1 olvasás) kerüljön egy `platform/` absztrakcióba — ne szóródjon a domain/core kódban.
-- `__attribute__((cleanup(...)))`: GCC/Clang OK; MSVC-re MinGW vagy RAII-redesign kell.
+- Toolchain: Linux=GCC, macOS=GCC/Apple Clang, Windows=MinGW-w64, Android=NDK Clang. MSVC nem célplatform.
+- `__attribute__((cleanup(...)))` minden fenti toolchain-en működik — nem kell alternatív RAII stratégia.
 - Android batch (nem-interaktív) módnak mindig működnie kell, TUI csak terminálemulátorban.
 - Ismert portabilitási rések: `termios.h`, `ioctl TIOCGWINSZ`, `wcwidth`, `asprintf`, `iconv`, home dir útvonalak — részletek a CLAUDE.md Portability szekciójában.
 

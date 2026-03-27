@@ -17,7 +17,9 @@ static void config_cleanup(void *ptr) {
 
 void test_config_store(void) {
     char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
     setenv("HOME", "/tmp/email-cli-test-home", 1);
+    unsetenv("XDG_CONFIG_HOME");   /* ensure we use the HOME-based path */
     fs_mkdir_p("/tmp/email-cli-test-home/.config/email-cli", 0700);
 
     // 1. Test Save
@@ -54,12 +56,9 @@ void test_config_store(void) {
             fprintf(fp, "EMAIL_PASS=password123\n");
             fclose(fp);
         }
-        // Suppress the expected warning log
-        logger_init("/tmp/email-cli-config-test.log", LOG_ERROR);
+        /* logger not initialised → logger_log() returns early, no output */
         RAII_WITH_CLEANUP(config_cleanup) Config *loaded = config_load_from_store();
         ASSERT(loaded == NULL, "config_load_from_store should return NULL for incomplete config");
-        logger_close();
-        unlink("/tmp/email-cli-config-test.log");
     }
 
     // 4. Test Load - no config file → should return NULL
@@ -100,11 +99,9 @@ void test_config_store(void) {
             fprintf(fp, "EMAIL_PASS=password123\n");
             fclose(fp);
         }
-        logger_init("/tmp/email-cli-config-test.log", LOG_ERROR);
+        /* logger not initialised → logger_log() returns early, no output */
         RAII_WITH_CLEANUP(config_cleanup) Config *loaded = config_load_from_store();
         ASSERT(loaded == NULL, "config_load_from_store should return NULL for host without protocol");
-        logger_close();
-        unlink("/tmp/email-cli-config-test.log");
         unlink("/tmp/email-cli-test-home/.config/email-cli/config.ini");
     }
 
@@ -113,4 +110,5 @@ void test_config_store(void) {
 
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
+    if (old_xdg) setenv("XDG_CONFIG_HOME", old_xdg, 1);
 }

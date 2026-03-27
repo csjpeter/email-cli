@@ -34,12 +34,26 @@ No unread messages in <folder>.
 
 ### Column widths
 
-| Column | Width | Truncation |
-|--------|-------|------------|
-| UID | 5 (right-aligned) | — |
-| From | 30 (left-aligned) | truncated at 30 chars |
-| Subject | 30 (left-aligned) | truncated at 30 chars |
-| Date | variable (no truncation) | — |
+Column widths adapt to the current terminal width (measured via `ioctl TIOCGWINSZ`,
+falling back to 80).  Fixed overhead per row is subtracted first; the remaining
+space is split evenly between **From** and **Subject**.
+
+| Column | Width | Notes |
+|--------|-------|-------|
+| UID | 5 (right-aligned) | fixed |
+| From | `avail / 2` terminal cols | truncated at character boundary; min 20 |
+| Subject | `avail - from_w` terminal cols | truncated at character boundary; min 20 |
+| Date | 16 (fixed, `YYYY-MM-DD HH:MM`) | truncated at 16 bytes |
+
+**Overhead** (subtracted from terminal width before splitting):
+
+| Mode | Overhead |
+|------|----------|
+| unread-only | 29 cols (`"  UID  "` + `"  "` + `"  DATE"`) |
+| `--all` | 32 cols (`"  S  UID  "` + `"  "` + `"  DATE"`) |
+
+Column widths are recomputed on each screen redraw so the layout adjusts
+automatically after terminal resize.
 
 ### Date format
 
@@ -93,6 +107,9 @@ Success: Fetch complete.
 - If a header field is absent or unparseable, `(none)` is printed.
 - The body is the plain-text part extracted from the MIME structure.  If no
   plain-text part exists, `(no readable text body)` is printed.
+- Long body lines are **soft-wrapped** at word boundaries so that no output
+  line exceeds `min(terminal_width, 80)` terminal columns.  Words that
+  individually exceed the limit are emitted on their own line without breaking.
 - When the interactive pager is active, each page begins with a full-screen
   clear (`\033[H\033[2J`) followed by the headers + separator, then the body
   page.  A pager status bar is printed to **stderr** (reverse video):
@@ -111,8 +128,8 @@ behaviour is identical to standalone `show` with the following differences:
 | Key | Effect |
 |-----|--------|
 | ESC | Return to `list` at the same cursor position (return value 0) |
-| `q` / `Q` / Ctrl-C | Exit the entire program (return value 1) |
-| PgDn / Down / Enter | Scroll forward; reaching the last page returns to `list` |
+| Ctrl-C | Exit the entire program (return value 1) |
+| PgDn / Down / Enter | Scroll forward; stays at last page when the end is reached |
 
 ---
 
@@ -163,7 +180,7 @@ after a key is pressed.
 Printed to **stdout** below the table (dim style `\033[2m … \033[0m`):
 
 ```
-  ↑↓=step  PgDn/PgUp=page  Enter=open  q=quit  [<cursor+1>/<total>]
+  ↑↓=step  PgDn/PgUp=page  Enter=open  ESC=quit  [<cursor+1>/<total>]
 ```
 
 ## Status bar — interactive `show` (opened from list)
@@ -171,23 +188,20 @@ Printed to **stdout** below the table (dim style `\033[2m … \033[0m`):
 Printed to **stderr** in reverse video:
 
 ```
--- [<cur>/<total>] PgDn/↓=scroll  PgUp/↑=back  ESC=list  q=quit --
+-- [<cur>/<total>] PgDn/↓=scroll  PgUp/↑=back  ESC=list --
 ```
 
 ### Key bindings — all interactive views
 
 | Key | `list` | `show` (standalone) | `show` (from list) |
 |-----|--------|---------------------|--------------------|
-| PgDn / Down / Space / Enter | Move cursor down / next page | Next page | Next page |
-| PgUp / Up | Move cursor up / prev page | Prev page | Prev page |
+| Space / PgDn | Next page | Next page | Next page |
+| PgUp | Prev page | Prev page | Prev page |
 | ↑ (Up-arrow) | Cursor up one row | Scroll up one line | Scroll up one line |
 | ↓ (Down-arrow) | Cursor down one row | Scroll down one line | Scroll down one line |
-| `j` | Cursor down one row | Scroll down one line | Scroll down one line |
-| `k` | Cursor up one row | Scroll up one line | Scroll up one line |
-| `p` / `P` / `b` | Page up | Page up | Page up |
-| Enter | Open message with `show` | Next page | Next page / return to list at end |
+| Enter | Open message | Next page | Next page (stays at last page) |
 | ESC | Quit list | Quit | Return to list |
-| `q` / `Q` / Ctrl-C | Quit entirely | Quit | Quit entirely |
+| Ctrl-C | Quit entirely | Quit | Quit entirely |
 | Left / Right arrows | No-op (ignored) | No-op | No-op |
 
 Multi-byte escape sequences (PgDn = `ESC[6~`, PgUp = `ESC[5~`, arrows = `ESC[A/B`)

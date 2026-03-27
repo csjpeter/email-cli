@@ -10,6 +10,8 @@
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
+#include <wchar.h>
+#include <stdint.h>
 
 /* ── Internal buffer ─────────────────────────────────────────────────── */
 
@@ -58,18 +60,61 @@ static int parse_uid_list(const char *resp, int **uids_out) {
     return cnt;
 }
 
+/* ── Column-aware printing ───────────────────────────────────────────── */
+
+/**
+ * Print a UTF-8 string left-aligned in exactly `width` terminal columns.
+ * Truncates at character boundaries so that the output never exceeds `width`
+ * columns, then pads with spaces to reach exactly `width` columns.
+ * Uses wcwidth(3) for per-character column measurement (handles multi-byte
+ * UTF-8, wide/emoji characters, and combining marks correctly).
+ * Requires setlocale(LC_ALL, "") to have been called in main().
+ */
+static void print_padded_col(const char *s, int width) {
+    if (!s) s = "";
+    const unsigned char *p = (const unsigned char *)s;
+    int used = 0;
+
+    while (*p) {
+        /* Decode one UTF-8 code point. */
+        uint32_t cp;
+        int seqlen;
+        if      (*p < 0x80) { cp = *p;        seqlen = 1; }
+        else if (*p < 0xC2) { cp = 0xFFFD;    seqlen = 1; } /* invalid lead byte */
+        else if (*p < 0xE0) { cp = *p & 0x1F; seqlen = 2; }
+        else if (*p < 0xF0) { cp = *p & 0x0F; seqlen = 3; }
+        else if (*p < 0xF8) { cp = *p & 0x07; seqlen = 4; }
+        else                { cp = 0xFFFD;    seqlen = 1; } /* invalid lead byte */
+
+        for (int i = 1; i < seqlen; i++) {
+            if ((p[i] & 0xC0) != 0x80) { seqlen = i; cp = 0xFFFD; break; }
+            cp = (cp << 6) | (p[i] & 0x3F);
+        }
+
+        int w = wcwidth((wchar_t)cp);
+        if (w < 0) w = 1;             /* treat control chars as 1 wide */
+        if (used + w > width) break;  /* doesn't fit — stop here */
+
+        fwrite(p, 1, (size_t)seqlen, stdout);
+        used += w;
+        p    += seqlen;
+    }
+
+    for (int i = used; i < width; i++) putchar(' ');
+}
+
 /* ── Interactive pager helpers ───────────────────────────────────────── */
 
 /* Logical key codes returned by read_pager_key(). */
 enum PKey {
-    PKEY_QUIT      = 0,  /* q / Q / Ctrl-C — quit entirely            */
+    PKEY_QUIT      = 0,  /* Ctrl-C — quit entirely                    */
     PKEY_NEXT_PAGE = 1,  /* PgDn / Space                              */
-    PKEY_PREV_PAGE = 2,  /* PgUp / p / P / b                          */
-    PKEY_NEXT_LINE = 3,  /* Down-arrow / j                            */
-    PKEY_PREV_LINE = 4,  /* Up-arrow / k                              */
+    PKEY_PREV_PAGE = 2,  /* PgUp                                      */
+    PKEY_NEXT_LINE = 3,  /* Down-arrow                                */
+    PKEY_PREV_LINE = 4,  /* Up-arrow                                  */
     PKEY_IGNORE    = 5,  /* Left/Right arrows and unknown sequences   */
-    PKEY_ENTER     = 6,  /* Enter / Return                            */
-    PKEY_ESC       = 7   /* Bare ESC — "go back / close current view" */
+    PKEY_ENTER     = 6,  /* Enter — open message (list) / next (show) */
+    PKEY_ESC       = 7   /* Bare ESC — go back / quit                 */
 };
 
 /**
@@ -137,16 +182,10 @@ static enum PKey read_pager_key(void) {
         }
     } else if (c == '\n' || c == '\r') {
         result = PKEY_ENTER;
-    } else if (c == 'q' || c == 'Q' || c == 3 /* Ctrl-C */) {
-        result = PKEY_QUIT;
-    } else if (c == 'p' || c == 'P' || c == 'b') {
-        result = PKEY_PREV_PAGE;
     } else if (c == ' ') {
         result = PKEY_NEXT_PAGE;
-    } else if (c == 'j') {
-        result = PKEY_NEXT_LINE;
-    } else if (c == 'k') {
-        result = PKEY_PREV_LINE;
+    } else if (c == 3 /* Ctrl-C */) {
+        result = PKEY_QUIT;
     }
     /* c == -1 (read error/timeout) → result stays PKEY_IGNORE */
 
@@ -162,7 +201,7 @@ static enum PKey read_pager_key(void) {
 static int pager_prompt(int cur_page, int total_pages, int page_size) {
     for (;;) {
         fprintf(stderr,
-                "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back  q=quit --\033[0m",
+                "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back  ESC=quit --\033[0m",
                 cur_page, total_pages);
         fflush(stderr);
         enum PKey key = read_pager_key();
@@ -399,7 +438,7 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
         int cur_page = cur_line / rows_avail + 1;
         fprintf(stderr,
                 "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                "  ESC=list  q=quit --\033[0m",
+                "  ESC=list --\033[0m",
                 cur_page, total_pages);
         fflush(stderr);
 
@@ -733,18 +772,13 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             if (sel) printf("\033[7m");
 
             if (opts->all)
-                printf("  %c  %5d  %-30.30s  %-30.30s  %-16.16s",
-                       entries[i].unseen ? 'N' : ' ',
-                       entries[i].uid,
-                       from    ? from    : "(no from)",
-                       subject ? subject : "(no subject)",
-                       date    ? date    : "");
+                printf("  %c  %5d  ", entries[i].unseen ? 'N' : ' ', entries[i].uid);
             else
-                printf("  %5d  %-30.30s  %-30.30s  %-16.16s",
-                       entries[i].uid,
-                       from    ? from    : "(no from)",
-                       subject ? subject : "(no subject)",
-                       date    ? date    : "");
+                printf("  %5d  ", entries[i].uid);
+            print_padded_col(from    ? from    : "(no from)",    30);
+            printf("  ");
+            print_padded_col(subject ? subject : "(no subject)", 30);
+            printf("  %-16.16s", date ? date : "");
 
             if (sel) printf("\033[K\033[0m");
             printf("\n");
@@ -759,7 +793,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         }
 
         /* Navigation hint (status bar) */
-        printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=open  q=quit"
+        printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=open  ESC=quit"
                "  [%d/%d]\033[0m\n",
                cursor + 1, show_count);
         fflush(stdout);

@@ -12,8 +12,8 @@
 #include <sys/types.h>
 
 static char g_home[4096];
-static char g_cache[4096];
-static char g_config[4096];
+static char g_cache[8192];
+static char g_config[8192];
 
 const char *platform_home_dir(void) {
     const char *h = getenv("HOME");

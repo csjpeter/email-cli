@@ -23,6 +23,17 @@ Dovecot = MIAB IMAP komponense, de pár másodperc alatt indul.
 **Why:** Codecov a main ágra tokent kér (regisztráció), genbadge-hez semmi sem kell.
 **How to apply:** Badge URL: `https://csjpeter.github.io/email-cli/coverage-badge.svg`
 
+## Cross-platform portabilitás
+
+**Döntés:** A projekt Linux mellett macOS, Windows és Android platformokra is céloz.
+**Why:** A felhasználó explicit igénye: jövőbeli multi-platform support.
+**How to apply:**
+- Új platform-specifikus hívás előtt ellenőrizd a hordozhatósági táblázatot a CLAUDE.md-ben.
+- Terminal I/O (raw mode, ablakméret, fd 0/1 olvasás) kerüljön egy `platform/` absztrakcióba — ne szóródjon a domain/core kódban.
+- `__attribute__((cleanup(...)))`: GCC/Clang OK; MSVC-re MinGW vagy RAII-redesign kell.
+- Android batch (nem-interaktív) módnak mindig működnie kell, TUI csak terminálemulátorban.
+- Ismert portabilitási rések: `termios.h`, `ioctl TIOCGWINSZ`, `wcwidth`, `asprintf`, `iconv`, home dir útvonalak — részletek a CLAUDE.md Portability szekciójában.
+
 ## Minimális függőségek
 
 **Döntés:** Csak C stdlib, POSIX, libcurl és libssl engedélyezett runtime függőségként.

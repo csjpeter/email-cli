@@ -50,6 +50,33 @@ C11 (`-std=c11`). Linked against libcurl + libssl. All public functions should h
 
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libcurl, and libssl.  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
+## Portability
+
+**Target platforms: Linux (primary), macOS, Windows, Android.**
+
+Prefer standard C11 / POSIX interfaces.  Where platform-specific APIs are
+unavoidable, isolate them behind thin abstraction layers (e.g. a `platform/`
+module) so each target only needs to implement a small, well-defined surface.
+
+Known portability gaps that need shims before non-Linux builds work:
+
+| API / feature | macOS | Android (NDK) | Windows |
+|---|---|---|---|
+| `termios.h` raw mode | ✅ | ✅ | ❌ needs `GetConsoleMode`/`SetConsoleMode` |
+| `ioctl TIOCGWINSZ` | ✅ | ✅ | ❌ needs `GetConsoleScreenBufferInfo` |
+| `wcwidth(3)` | ✅ | ✅ | ❌ needs bundled implementation |
+| `asprintf` | ✅ | ✅ | ❌ needs a thin wrapper (available in MinGW) |
+| `iconv(3)` | ✅ | ⚠️ limited (NDK r23+) | ❌ needs libiconv or `WideCharToMultiByte` |
+| `__attribute__((cleanup(...)))` (RAII) | ✅ Clang | ✅ Clang NDK | ❌ MSVC; ✅ MinGW/GCC |
+| Home dir (`$HOME`) | ✅ | ⚠️ use app data dir | ❌ use `%USERPROFILE%` |
+| Cache/config paths (`~/.cache`, `~/.config`) | ✅ | ❌ use app-specific dirs | ❌ use `%APPDATA%` |
+
+**Rules for new code:**
+- Never add a new POSIX/platform-specific call without noting it in the table above.
+- Terminal I/O (raw mode, window size, `read`/`write` on fd 0/1) must go through the future `platform/` abstraction — do not scatter it in domain or core code.
+- `__attribute__((cleanup(...)))` is GCC/Clang-only; MSVC support requires either MinGW or a redesigned RAII strategy.
+- Android TUI works only inside a terminal emulator; non-interactive (batch) mode must always be functional.
+
 ## Documentation
 
 ```

@@ -23,6 +23,12 @@ Dovecot = MIAB IMAP komponense, de pár másodperc alatt indul.
 **Why:** Codecov a main ágra tokent kér (regisztráció), genbadge-hez semmi sem kell.
 **How to apply:** Badge URL: `https://csjpeter.github.io/email-cli/coverage-badge.svg`
 
+## Minimális függőségek
+
+**Döntés:** Csak C stdlib, POSIX, libcurl és libssl engedélyezett runtime függőségként.
+**Why:** A felhasználó explicit elvként rögzítette: a függőségeket minimálisan kell tartani.
+**How to apply:** Új könyvtár hozzáadása előtt mindig ki kell meríteni a stdlib/POSIX lehetőségeket. Új runtime függőség csak indoklással és felhasználói jóváhagyással kerülhet be.
+
 ## Repo-beli memória symlink-kel
 
 **Döntés:** `.claude/memory/` a repóban van; `manage.sh memory-setup` symlinkeli

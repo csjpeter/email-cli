@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <wchar.h>
 #include <stdint.h>
+#include <sys/ioctl.h>
 
 /* ── Internal buffer ─────────────────────────────────────────────────── */
 
@@ -101,6 +102,109 @@ static void print_padded_col(const char *s, int width) {
     }
 
     for (int i = used; i < width; i++) putchar(' ');
+}
+
+/** Returns the terminal width in columns, or 80 if unknown. */
+static int terminal_cols(void) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+        return (int)ws.ws_col;
+    return 80;
+}
+
+/** Print n copies of the double-horizontal-bar character ═ (U+2550). */
+static void print_dbar(int n) {
+    for (int i = 0; i < n; i++) fputs("\xe2\x95\x90", stdout);
+}
+
+/**
+ * Soft-wrap text at word boundaries so no output line exceeds `width`
+ * terminal columns (measured by wcwidth).  Long words that exceed `width`
+ * are emitted on a line of their own.  Returns a heap-allocated string;
+ * caller must free.  Returns strdup(text) on allocation failure.
+ */
+static char *word_wrap(const char *text, int width) {
+    if (!text) return NULL;
+    if (width < 20) width = 20;
+
+    size_t in_len = strlen(text);
+    /* Hard breaks add one '\n' per `width` chars; space-breaks are net-zero. */
+    char *out = malloc(in_len + in_len / (size_t)width + 4);
+    if (!out) return strdup(text);
+    char *wp = out;
+
+    const char *src = text;
+    while (*src) {
+        /* Isolate one source line. */
+        const char *eol      = strchr(src, '\n');
+        const char *line_end = eol ? eol : src + strlen(src);
+
+        /* Emit the source line as one or more width-limited output lines. */
+        const char *seg = src;
+        while (seg < line_end) {
+            const unsigned char *p = (const unsigned char *)seg;
+            int col = 0;
+            const char *brk = NULL;   /* last candidate break (space) */
+
+            while ((const char *)p < line_end) {
+                uint32_t cp; int seqlen;
+                if      (*p < 0x80) { cp = *p;        seqlen = 1; }
+                else if (*p < 0xC2) { cp = 0xFFFD;    seqlen = 1; }
+                else if (*p < 0xE0) { cp = *p & 0x1F; seqlen = 2; }
+                else if (*p < 0xF0) { cp = *p & 0x0F; seqlen = 3; }
+                else if (*p < 0xF8) { cp = *p & 0x07; seqlen = 4; }
+                else                { cp = 0xFFFD;    seqlen = 1; }
+                for (int i = 1; i < seqlen; i++) {
+                    if ((p[i] & 0xC0) != 0x80) { seqlen = i; cp = 0xFFFD; break; }
+                    cp = (cp << 6) | (p[i] & 0x3F);
+                }
+                if ((const char *)p + seqlen > line_end) break;
+
+                int cw = wcwidth((wchar_t)cp);
+                if (cw < 0) cw = 0;
+                if (col + cw > width) break;
+
+                if (*p == ' ') brk = (const char *)p;
+                col += cw;
+                p   += seqlen;
+            }
+
+            const char *chunk_end = (const char *)p;
+
+            if (chunk_end >= line_end) {
+                /* Rest of line fits. */
+                size_t n = (size_t)(line_end - seg);
+                memcpy(wp, seg, n); wp += n;
+                seg = line_end;
+            } else if (brk) {
+                /* Break at last space (replace space with newline). */
+                size_t n = (size_t)(brk - seg);
+                memcpy(wp, seg, n); wp += n;
+                *wp++ = '\n';
+                seg = brk + 1;
+            } else {
+                /* No space found: hard break. */
+                size_t n = (size_t)(chunk_end - seg);
+                if (n == 0) {
+                    /* Single wide char exceeds width: emit it anyway. */
+                    const unsigned char *u = (const unsigned char *)seg;
+                    int sl = (*u < 0x80) ? 1
+                           : (*u < 0xE0) ? 2
+                           : (*u < 0xF0) ? 3 : 4;
+                    memcpy(wp, seg, (size_t)sl); wp += sl; seg += sl;
+                } else {
+                    memcpy(wp, seg, n); wp += n;
+                    *wp++ = '\n';
+                    seg = chunk_end;
+                }
+            }
+        }
+
+        *wp++ = '\n';
+        src = eol ? eol + 1 : line_end;
+    }
+    *wp = '\0';
+    return out;
 }
 
 /* ── Interactive pager helpers ───────────────────────────────────────── */
@@ -428,6 +532,10 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
     free(date_raw);
     char *body = mime_get_text_body(raw);
     const char *body_text = body ? body : "(no readable text body)";
+    int wrap_cols = terminal_cols();
+    if (wrap_cols > 80) wrap_cols = 80;
+    char *body_wrapped = word_wrap(body_text, wrap_cols);
+    if (body_wrapped) body_text = body_wrapped;
 
 #define SHOW_HDR_LINES_INT 5
     int rows_avail  = (page_size > SHOW_HDR_LINES_INT)
@@ -484,7 +592,7 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
     }
 show_int_done:
 #undef SHOW_HDR_LINES_INT
-    free(body); free(from); free(subject); free(date); free(raw);
+    free(body); free(body_wrapped); free(from); free(subject); free(date); free(raw);
     return result;
 }
 
@@ -739,27 +847,39 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         int wend = wstart + limit;
         if (wend > show_count)           wend = show_count;
 
+        /* Compute adaptive column widths.
+         * Fixed overhead per data row:
+         *   --all:    "  S  UID  " (12) + "  " (2) + "  DATE" (2+16=18) = 32
+         *   unread:   "  UID  "   (9)  + "  " (2) + "  DATE" (2+16=18) = 29
+         * from_w and subj_w share the remaining space evenly (min 20 each). */
+        int tcols    = terminal_cols();
+        int overhead = opts->all ? 32 : 29;
+        int avail    = tcols - overhead;
+        if (avail < 40) avail = 40;
+        int from_w = avail / 2;
+        int subj_w = avail - from_w;
+
         if (opts->pager) printf("\033[H\033[2J");
 
         /* Count / status line */
         if (opts->all) {
             printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
                    wstart + 1, wend, show_count, folder, unseen_count);
-            printf("  S  %5s  %-30s  %-30s  %s\n",
-                   "UID", "From", "Subject", "Date");
-            printf("  \u2550  %s  %s  %s  %s\n", "═════",
-                   "══════════════════════════════",
-                   "══════════════════════════════",
-                   "═══════════════════════════");
+            printf("  S  %5s  %-*s  %-*s  %s\n",
+                   "UID", from_w, "From", subj_w, "Subject", "Date");
+            printf("  \u2550  \u2550\u2550\u2550\u2550\u2550  ");
+            print_dbar(from_w); printf("  ");
+            print_dbar(subj_w); printf("  ");
+            print_dbar(16);     printf("\n");
         } else {
             printf("%d-%d of %d unread message(s) in %s.\n\n",
                    wstart + 1, wend, show_count, folder);
-            printf("  %5s  %-30s  %-30s  %s\n",
-                   "UID", "From", "Subject", "Date");
-            printf("  %s  %s  %s  %s\n", "═════",
-                   "══════════════════════════════",
-                   "══════════════════════════════",
-                   "═══════════════════════════");
+            printf("  %5s  %-*s  %-*s  %s\n",
+                   "UID", from_w, "From", subj_w, "Subject", "Date");
+            printf("  \u2550\u2550\u2550\u2550\u2550  ");
+            print_dbar(from_w); printf("  ");
+            print_dbar(subj_w); printf("  ");
+            print_dbar(16);     printf("\n");
         }
 
         /* Data rows */
@@ -782,9 +902,9 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                 printf("  %c  %5d  ", entries[i].unseen ? 'N' : ' ', entries[i].uid);
             else
                 printf("  %5d  ", entries[i].uid);
-            print_padded_col(from    ? from    : "(no from)",    30);
+            print_padded_col(from    ? from    : "(no from)",    from_w);
             printf("  ");
-            print_padded_col(subject ? subject : "(no subject)", 30);
+            print_padded_col(subject ? subject : "(no subject)", subj_w);
             printf("  %-16.16s", date ? date : "");
 
             if (sel) printf("\033[K\033[0m");
@@ -932,6 +1052,10 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 
     char *body = mime_get_text_body(raw);
     const char *body_text = body ? body : "(no readable text body)";
+    int wrap_cols = pager ? terminal_cols() : 80;
+    if (wrap_cols > 80) wrap_cols = 80;
+    char *body_wrapped = word_wrap(body_text, wrap_cols);
+    if (body_wrapped) body_text = body_wrapped;
 
 #define SHOW_HDR_LINES 5
     if (!pager || page_size <= SHOW_HDR_LINES) {
@@ -962,6 +1086,6 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
     }
 #undef SHOW_HDR_LINES
 
-    free(body); free(from); free(subject); free(date); free(raw);
+    free(body); free(body_wrapped); free(from); free(subject); free(date); free(raw);
     return 0;
 }

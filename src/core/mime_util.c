@@ -165,6 +165,52 @@ static char *decode_transfer(const char *body, size_t len, const char *enc) {
     return strndup(body, len);
 }
 
+/* Extract the charset parameter value from a Content-Type header value.
+ * E.g. "text/plain; charset=iso-8859-2" → "iso-8859-2".
+ * Returns a malloc'd string or NULL if not found. */
+static char *extract_charset(const char *ctype) {
+    if (!ctype) return NULL;
+    const char *p = strcasestr(ctype, "charset=");
+    if (!p) return NULL;
+    p += 8;
+    if (*p == '"') p++;          /* skip optional opening quote */
+    const char *start = p;
+    while (*p && *p != ';' && *p != ' ' && *p != '\t' && *p != '"' && *p != '\r' && *p != '\n')
+        p++;
+    if (p == start) return NULL;
+    return strndup(start, (size_t)(p - start));
+}
+
+/* Convert s from from_charset to UTF-8 via iconv.
+ * Returns a malloc'd UTF-8 string; on failure returns strdup(s). */
+static char *charset_to_utf8(const char *s, const char *from_charset) {
+    if (!s) return NULL;
+    if (!from_charset ||
+        strcasecmp(from_charset, "utf-8")  == 0 ||
+        strcasecmp(from_charset, "utf8")   == 0 ||
+        strcasecmp(from_charset, "us-ascii") == 0)
+        return strdup(s);
+
+    iconv_t cd = iconv_open("UTF-8", from_charset);
+    if (cd == (iconv_t)-1) return strdup(s);
+
+    size_t in_len   = strlen(s);
+    size_t out_size = in_len * 4 + 1;
+    char  *out      = malloc(out_size);
+    if (!out) { iconv_close(cd); return strdup(s); }
+
+    char  *inp      = (char *)s;
+    char  *outp     = out;
+    size_t inbytes  = in_len;
+    size_t outbytes = out_size - 1;
+    size_t r        = iconv(cd, &inp, &inbytes, &outp, &outbytes);
+    iconv_close(cd);
+
+    if (r == (size_t)-1) { free(out); return strdup(s); }
+    *outp = '\0';
+    return out;
+}
+
 static char *text_from_part(const char *part);
 
 static char *text_from_multipart(const char *msg, const char *ctype) {
@@ -216,28 +262,36 @@ static char *text_from_multipart(const char *msg, const char *ctype) {
 }
 
 static char *text_from_part(const char *part) {
-    char *ctype = mime_get_header(part, "Content-Type");
-    char *enc   = mime_get_header(part, "Content-Transfer-Encoding");
+    char *ctype   = mime_get_header(part, "Content-Type");
+    char *enc     = mime_get_header(part, "Content-Transfer-Encoding");
+    char *charset = extract_charset(ctype);
     const char *body = body_start(part);
     char *result = NULL;
 
     if (!ctype || strncasecmp(ctype, "text/plain", 10) == 0) {
-        if (body)
-            result = decode_transfer(body, strlen(body), enc);
+        if (body) {
+            char *raw = decode_transfer(body, strlen(body), enc);
+            if (raw) {
+                result = charset_to_utf8(raw, charset);
+                free(raw);
+            }
+        }
     } else if (strncasecmp(ctype, "multipart/", 10) == 0) {
         result = text_from_multipart(part, ctype);
     } else if (strncasecmp(ctype, "text/html", 9) == 0) {
         if (body) {
-            char *decoded = decode_transfer(body, strlen(body), enc);
-            if (decoded) {
-                result = strip_html(decoded);
-                free(decoded);
+            char *raw = decode_transfer(body, strlen(body), enc);
+            if (raw) {
+                char *utf8 = charset_to_utf8(raw, charset);
+                free(raw);
+                if (utf8) { result = strip_html(utf8); free(utf8); }
             }
         }
     }
 
     free(ctype);
     free(enc);
+    free(charset);
     return result;
 }
 

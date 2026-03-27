@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <locale.h>
 #include "config_store.h"
 #include "setup_wizard.h"
 #include "email_service.h"
@@ -122,6 +123,10 @@ static void unknown_option(const char *cmd, const char *opt) {
 /* ── Entry point ─────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
+    /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
+     *    multi-byte UTF-8 characters (needed for column-width calculations). */
+    setlocale(LC_ALL, "");
+
     /* 1. Determine home directory */
     const char *home = fs_get_home_dir();
     if (!home) {

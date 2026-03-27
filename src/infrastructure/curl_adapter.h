@@ -8,6 +8,26 @@
  * @brief RAII-aware wrapper for libcurl IMAP operations with TLS 1.2+ support.
  */
 
+/** RAII cleanup functions for libcurl handles. */
+static inline void curl_cleanup_ptr(CURL **p) {
+    if (p && *p) {
+        curl_easy_cleanup(*p);
+        *p = NULL;
+    }
+}
+
+static inline void curl_slist_free_all_ptr(struct curl_slist **p) {
+    if (p && *p) {
+        curl_slist_free_all(*p);
+        *p = NULL;
+    }
+}
+
+/** Automatically cleans up a CURL handle when it goes out of scope. */
+#define RAII_CURL  __attribute__((cleanup(curl_cleanup_ptr)))
+/** Automatically cleans up a curl_slist when it goes out of scope. */
+#define RAII_SLIST __attribute__((cleanup(curl_slist_free_all_ptr)))
+
 /**
  * @brief Initializes a CURL handle with IMAP settings and TLS enforcement.
  *

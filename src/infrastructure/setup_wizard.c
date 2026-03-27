@@ -1,41 +1,35 @@
 #include "setup_wizard.h"
+#include "platform/terminal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <termios.h>
 
 static char* get_input(const char *prompt, int hide, FILE *stream) {
     int is_tty = isatty(fileno(stream));
+
+    if (hide && stream == stdin) {
+        /* Delegate password reading (with echo suppression) to the platform layer.
+         * terminal_read_password() reads from stdin and handles TTY detection. */
+        char buf[512];
+        int n = terminal_read_password(prompt, buf, sizeof(buf));
+        if (n < 0) return NULL;
+        return strdup(buf);
+    }
+
     if (stream == stdin && is_tty) {
         printf("%s: ", prompt);
         fflush(stdout);
-    }
-
-    struct termios oldt, newt;
-    // int is_tty = isatty(fileno(stream)); // removed because moved up
-
-    if (hide && is_tty) {
-        tcgetattr(fileno(stream), &oldt);
-        newt = oldt;
-        newt.c_lflag &= ~(ECHO);
-        tcsetattr(fileno(stream), TCSANOW, &newt);
     }
 
     char *line = NULL;
     size_t len = 0;
     if (getline(&line, &len, stream) == -1) {
         free(line);
-        if (hide && is_tty) tcsetattr(fileno(stream), TCSANOW, &oldt);
         return NULL;
     }
 
-    if (hide && is_tty) {
-        tcsetattr(fileno(stream), TCSANOW, &oldt);
-        printf("\n");
-    }
-
-    // Remove newline
+    /* Remove newline */
     line[strcspn(line, "\r\n")] = 0;
     return line;
 }

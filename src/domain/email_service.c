@@ -5,14 +5,12 @@
 #include "imap_util.h"
 #include "raii.h"
 #include "logger.h"
+#include "platform/terminal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <termios.h>
 #include <unistd.h>
-#include <wchar.h>
 #include <stdint.h>
-#include <sys/ioctl.h>
 
 /* ── Internal buffer ─────────────────────────────────────────────────── */
 
@@ -92,9 +90,9 @@ static void print_padded_col(const char *s, int width) {
             cp = (cp << 6) | (p[i] & 0x3F);
         }
 
-        int w = wcwidth((wchar_t)cp);
-        if (w < 0) { p += seqlen; continue; }  /* skip control/non-printable */
-        if (used + w > width) break;            /* doesn't fit — stop here */
+        int w = terminal_wcwidth(cp);
+        if (w == 0) { p += seqlen; continue; }  /* skip control/non-printable */
+        if (used + w > width) break;             /* doesn't fit — stop here */
 
         fwrite(p, 1, (size_t)seqlen, stdout);
         used += w;
@@ -102,14 +100,6 @@ static void print_padded_col(const char *s, int width) {
     }
 
     for (int i = used; i < width; i++) putchar(' ');
-}
-
-/** Returns the terminal width in columns, or 80 if unknown. */
-static int terminal_cols(void) {
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
-        return (int)ws.ws_col;
-    return 80;
 }
 
 /** Print n copies of the double-horizontal-bar character ═ (U+2550). */
@@ -160,8 +150,8 @@ static char *word_wrap(const char *text, int width) {
                 }
                 if ((const char *)p + seqlen > line_end) break;
 
-                int cw = wcwidth((wchar_t)cp);
-                if (cw < 0) cw = 0;
+                int cw = terminal_wcwidth(cp);
+                /* cw is already 0 for non-printable characters */
                 if (col + cw > width) break;
 
                 if (*p == ' ') brk = (const char *)p;
@@ -209,97 +199,9 @@ static char *word_wrap(const char *text, int width) {
 
 /* ── Interactive pager helpers ───────────────────────────────────────── */
 
-/* Logical key codes returned by read_pager_key(). */
-enum PKey {
-    PKEY_QUIT      = 0,  /* Ctrl-C — quit entirely                    */
-    PKEY_NEXT_PAGE = 1,  /* PgDn / Space                              */
-    PKEY_PREV_PAGE = 2,  /* PgUp                                      */
-    PKEY_NEXT_LINE = 3,  /* Down-arrow                                */
-    PKEY_PREV_LINE = 4,  /* Up-arrow                                  */
-    PKEY_IGNORE    = 5,  /* Left/Right arrows and unknown sequences   */
-    PKEY_ENTER     = 6,  /* Enter — open message (list) / next (show) */
-    PKEY_ESC       = 7   /* Bare ESC — go back / quit                 */
-};
-
-/**
- * Read one byte from STDIN_FILENO via read(2) — NOT via getchar()/stdio.
- *
- * Rationale: getchar() uses the C stdio buffer.  When getchar() calls
- * read(2) with VMIN=0 VTIME=1 and gets a 0-byte return (timeout for bare
- * ESC), stdio marks the FILE* EOF flag.  All subsequent getchar() calls
- * then return EOF immediately without blocking, causing an infinite
- * redraw loop in the TUI.  Using read(2) directly bypasses the stdio
- * layer entirely and avoids the EOF flag problem.
- *
- * Returns the byte value [0..255], or -1 on error/timeout.
- */
-static int read_byte(void) {
-    unsigned char c;
-    ssize_t n = read(STDIN_FILENO, &c, 1);
-    return (n == 1) ? (int)c : -1;
-}
-
-/**
- * Reads one keypress in raw (non-canonical) mode and returns a PKey code.
- * Multi-byte escape sequences are fully consumed before returning.
- */
-static enum PKey read_pager_key(void) {
-    struct termios old, raw;
-    if (tcgetattr(STDIN_FILENO, &old) != 0) return PKEY_QUIT;
-    raw = old;
-    raw.c_lflag &= ~(unsigned)(ICANON | ECHO | ISIG);
-    raw.c_cc[VMIN]  = 1;
-    raw.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-
-    int c = read_byte();
-    enum PKey result = PKEY_IGNORE;   /* unknown input → silent no-op */
-
-    if (c == '\033') {
-        raw.c_cc[VMIN]  = 0;
-        raw.c_cc[VTIME] = 1;   /* 100 ms timeout for escape sequence drain */
-        tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-
-        int c2 = read_byte();
-        if (c2 == '[') {
-            int c3 = read_byte();
-            switch (c3) {
-            case 'A': result = PKEY_PREV_LINE; break;  /* ESC[A — Up arrow    */
-            case 'B': result = PKEY_NEXT_LINE; break;  /* ESC[B — Down arrow  */
-            case 'C': result = PKEY_IGNORE;    break;  /* ESC[C — Right arrow */
-            case 'D': result = PKEY_IGNORE;    break;  /* ESC[D — Left arrow  */
-            case '5': read_byte(); result = PKEY_PREV_PAGE; break; /* ESC[5~ PgUp */
-            case '6': read_byte(); result = PKEY_NEXT_PAGE; break; /* ESC[6~ PgDn */
-            default:
-                if (c3 != -1) {
-                    int ch;
-                    while ((ch = read_byte()) != -1) {
-                        if ((ch >= 'A' && ch <= 'Z') ||
-                            (ch >= 'a' && ch <= 'z') || ch == '~') break;
-                    }
-                }
-                result = PKEY_IGNORE;
-                break;
-            }
-        } else {
-            result = PKEY_ESC;   /* bare ESC — go back */
-        }
-    } else if (c == '\n' || c == '\r') {
-        result = PKEY_ENTER;
-    } else if (c == ' ') {
-        result = PKEY_NEXT_PAGE;
-    } else if (c == 3 /* Ctrl-C */) {
-        result = PKEY_QUIT;
-    }
-    /* c == -1 (read error/timeout) → result stays PKEY_IGNORE */
-
-    tcsetattr(STDIN_FILENO, TCSANOW, &old);
-    return result;
-}
-
 /**
  * Pager prompt for the standalone `show` command.
- * PKEY_ENTER and PKEY_ESC are treated the same as next/quit respectively.
+ * TERM_KEY_ENTER and TERM_KEY_ESC are treated the same as next/quit respectively.
  * Returns scroll delta: 0 = quit, positive = forward N lines, negative = back N.
  */
 static int pager_prompt(int cur_page, int total_pages, int page_size) {
@@ -308,19 +210,19 @@ static int pager_prompt(int cur_page, int total_pages, int page_size) {
                 "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back  ESC=quit --\033[0m",
                 cur_page, total_pages);
         fflush(stderr);
-        enum PKey key = read_pager_key();
+        TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K");
         fflush(stderr);
 
         switch (key) {
-        case PKEY_QUIT:
-        case PKEY_ESC:       return 0;           /* ESC = quit in standalone mode */
-        case PKEY_ENTER:
-        case PKEY_NEXT_PAGE: return  page_size;
-        case PKEY_PREV_PAGE: return -page_size;
-        case PKEY_NEXT_LINE: return  1;
-        case PKEY_PREV_LINE: return -1;
-        case PKEY_IGNORE:    continue;
+        case TERM_KEY_QUIT:
+        case TERM_KEY_ESC:       return 0;           /* ESC = quit in standalone mode */
+        case TERM_KEY_ENTER:
+        case TERM_KEY_NEXT_PAGE: return  page_size;
+        case TERM_KEY_PREV_PAGE: return -page_size;
+        case TERM_KEY_NEXT_LINE: return  1;
+        case TERM_KEY_PREV_LINE: return -1;
+        case TERM_KEY_IGNORE:    continue;
         }
     }
 }
@@ -557,36 +459,36 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
                 cur_page, total_pages);
         fflush(stderr);
 
-        enum PKey key = read_pager_key();
+        TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K");
         fflush(stderr);
 
         switch (key) {
-        case PKEY_ESC:
+        case TERM_KEY_ESC:
             result = 0;
             goto show_int_done;
-        case PKEY_QUIT:
+        case TERM_KEY_QUIT:
             result = 1;
             goto show_int_done;
-        case PKEY_ENTER:
-        case PKEY_NEXT_PAGE:
+        case TERM_KEY_ENTER:
+        case TERM_KEY_NEXT_PAGE:
         {
             int next = cur_line + rows_avail;
             if (next < body_lines) cur_line = next;
             /* else: already on last page — stay */
         }
             break;
-        case PKEY_PREV_PAGE:
+        case TERM_KEY_PREV_PAGE:
             cur_line -= rows_avail;
             if (cur_line < 0) cur_line = 0;
             break;
-        case PKEY_NEXT_LINE:
+        case TERM_KEY_NEXT_LINE:
             if (cur_line < body_lines - 1) cur_line++;
             break;
-        case PKEY_PREV_LINE:
+        case TERM_KEY_PREV_LINE:
             if (cur_line > 0) cur_line--;
             break;
-        case PKEY_IGNORE:
+        case TERM_KEY_IGNORE:
             break;
         }
     }
@@ -823,21 +725,13 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     int wstart = cursor;   /* top of the visible window */
 
     /* Keep the terminal in raw mode for the entire interactive TUI.
-     * Without this, each read_pager_key() call briefly restores cooked mode
-     * between keystrokes, which causes the terminal to echo escape sequences
-     * and to buffer input until Enter (cooked ICANON), making the interface
-     * appear frozen.  Ctrl+C works in that state only because cooked mode
-     * delivers ISIG signals — the exact symptom the user observed. */
-    struct termios tui_saved;
-    int tui_raw = 0;
-    if (opts->pager && tcgetattr(STDIN_FILENO, &tui_saved) == 0) {
-        struct termios raw = tui_saved;
-        raw.c_lflag &= ~(unsigned)(ICANON | ECHO | ISIG);
-        raw.c_cc[VMIN]  = 1;
-        raw.c_cc[VTIME] = 0;
-        tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-        tui_raw = 1;
-    }
+     * Without this, each terminal_read_key() call would need to briefly enter
+     * and exit raw mode per keystroke, which causes escape sequence echo and
+     * ICANON buffering artefacts.  terminal_read_key() requires raw mode to
+     * already be active — we enter it once here and exit at list_done. */
+    RAII_TERM_RAW TermRawState *tui_raw = opts->pager
+                                          ? terminal_raw_enter()
+                                          : NULL;
 
     for (;;) {
         /* Scroll window to keep cursor visible */
@@ -925,40 +819,39 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                cursor + 1, show_count);
         fflush(stdout);
 
-        enum PKey key = read_pager_key();
+        TermKey key = terminal_read_key();
 
         switch (key) {
-        case PKEY_QUIT:
-        case PKEY_ESC:
+        case TERM_KEY_QUIT:
+        case TERM_KEY_ESC:
             goto list_done;
-        case PKEY_ENTER:
+        case TERM_KEY_ENTER:
             {
                 int ret = show_uid_interactive(cfg, entries[cursor].uid, opts->limit);
                 if (ret == 1) goto list_done;  /* user pressed q in show */
                 /* ret == 0: ESC → back to list; ret == -1: error → stay */
             }
             break;
-        case PKEY_NEXT_LINE:
+        case TERM_KEY_NEXT_LINE:
             if (cursor < show_count - 1) cursor++;
             break;
-        case PKEY_PREV_LINE:
+        case TERM_KEY_PREV_LINE:
             if (cursor > 0) cursor--;
             break;
-        case PKEY_NEXT_PAGE:
+        case TERM_KEY_NEXT_PAGE:
             cursor += limit;
             if (cursor >= show_count) cursor = show_count - 1;
             break;
-        case PKEY_PREV_PAGE:
+        case TERM_KEY_PREV_PAGE:
             cursor -= limit;
             if (cursor < 0) cursor = 0;
             break;
-        case PKEY_IGNORE:
+        case TERM_KEY_IGNORE:
             break;
         }
     }
 list_done:
-    if (tui_raw)
-        tcsetattr(STDIN_FILENO, TCSANOW, &tui_saved);
+    /* tui_raw is cleaned up automatically via RAII_TERM_RAW */
     free(entries);
     return 0;
 }
@@ -1066,6 +959,10 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
         int total_pages = (body_lines + rows_avail - 1) / rows_avail;
         if (total_pages < 1) total_pages = 1;
 
+        /* Enter raw mode for the pager loop; pager_prompt calls terminal_read_key
+         * which requires raw mode to be already active. */
+        RAII_TERM_RAW TermRawState *show_raw = terminal_raw_enter();
+
         for (int cur_line = 0, show_displayed = 0; ; ) {
             if (show_displayed) {
                 printf("\033[H\033[2J");
@@ -1083,6 +980,7 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
             if (cur_line < 0) cur_line = 0;
             if (cur_line >= body_lines) break;
         }
+        (void)show_raw; /* cleaned up automatically via RAII_TERM_RAW */
     }
 #undef SHOW_HDR_LINES
 

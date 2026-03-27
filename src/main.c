@@ -2,12 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/ioctl.h>
 #include <locale.h>
 #include "config_store.h"
 #include "setup_wizard.h"
 #include "email_service.h"
 #include "curl_adapter.h"
+#include "platform/terminal.h"
 #include "raii.h"
 #include "logger.h"
 #include "fs_util.h"
@@ -18,12 +18,11 @@
 #define BATCH_DEFAULT_LIMIT 100
 
 static int detect_page_size(int batch) {
-    if (batch || !isatty(STDOUT_FILENO))
+    if (batch || !terminal_is_tty(STDOUT_FILENO))
         return BATCH_DEFAULT_LIMIT;
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0
-            && ws.ws_row > LIST_HEADER_LINES + 2)
-        return (int)ws.ws_row - LIST_HEADER_LINES;
+    int rows = terminal_rows();
+    if (rows > LIST_HEADER_LINES + 2)
+        return rows - LIST_HEADER_LINES;
     return 20; /* safe fallback */
 }
 
@@ -155,7 +154,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Page size / pager capability (used by list and show) */
-    int pager     = !batch && isatty(STDOUT_FILENO);
+    int pager     = !batch && terminal_is_tty(STDOUT_FILENO);
     int page_size = detect_page_size(batch);
 
     if (!cmd || strcmp(cmd, "help") == 0) {

@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <dirent.h>
 #include <curl/curl.h>
 
 /**
@@ -42,10 +43,18 @@ static inline void fclose_ptr(void *ptr) {
     }
 }
 
+static inline void closedir_ptr(DIR **p) {
+    if (p && *p) {
+        closedir(*p);
+        *p = NULL;
+    }
+}
+
 #define RAII_STRING __attribute__((cleanup(free_ptr)))
 #define RAII_CURL __attribute__((cleanup(curl_cleanup_ptr)))
 #define RAII_SLIST __attribute__((cleanup(curl_slist_free_all_ptr)))
 #define RAII_FILE __attribute__((cleanup(fclose_ptr)))
+#define RAII_DIR __attribute__((cleanup(closedir_ptr)))
 
 /* To avoid circular dependencies with Config, we use a generic cleanup for it 
  * but it must be defined in each file that uses it or we use a macro. */

@@ -1,4 +1,5 @@
 #include "logger.h"
+#include "raii.h"
 #include <stdarg.h>
 #include <time.h>
 #include <string.h>
@@ -120,7 +121,7 @@ void logger_set_stderr(int enable) {
 }
 
 int logger_clean_logs(const char *log_dir) {
-    DIR *dir = opendir(log_dir);
+    RAII_DIR DIR *dir = opendir(log_dir);
     if (!dir) return -1;
 
     struct dirent *entry;
@@ -131,6 +132,5 @@ int logger_clean_logs(const char *log_dir) {
             unlink(path);
         }
     }
-    closedir(dir);
     return 0;
 }

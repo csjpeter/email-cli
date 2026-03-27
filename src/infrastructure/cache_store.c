@@ -140,7 +140,7 @@ void hcache_evict_stale(const char *folder,
     memcpy(sorted, keep_uids, (size_t)keep_count * sizeof(int));
     qsort(sorted, (size_t)keep_count, sizeof(int), cmp_int_evict);
 
-    DIR *d = opendir(dir);
+    RAII_DIR DIR *d = opendir(dir);
     if (!d) { free(sorted); return; }
 
     struct dirent *ent;
@@ -162,6 +162,5 @@ void hcache_evict_stale(const char *folder,
             }
         }
     }
-    closedir(d);
     free(sorted);
 }

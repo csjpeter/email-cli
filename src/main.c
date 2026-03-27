@@ -7,6 +7,7 @@
 #include "config_store.h"
 #include "setup_wizard.h"
 #include "email_service.h"
+#include "curl_adapter.h"
 #include "raii.h"
 #include "logger.h"
 #include "fs_util.h"

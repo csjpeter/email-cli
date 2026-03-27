@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <dirent.h>
-#include <curl/curl.h>
 
 /**
  * Cleanup functions for GNU RAII attributes.
@@ -15,22 +14,6 @@ static inline void free_ptr(void *ptr) {
     void **p = (void **)ptr;
     if (*p) {
         free(*p);
-        *p = NULL;
-    }
-}
-
-static inline void curl_cleanup_ptr(void *ptr) {
-    CURL **p = (CURL **)ptr;
-    if (*p) {
-        curl_easy_cleanup(*p);
-        *p = NULL;
-    }
-}
-
-static inline void curl_slist_free_all_ptr(void *ptr) {
-    struct curl_slist **p = (struct curl_slist **)ptr;
-    if (*p) {
-        curl_slist_free_all(*p);
         *p = NULL;
     }
 }
@@ -51,8 +34,6 @@ static inline void closedir_ptr(DIR **p) {
 }
 
 #define RAII_STRING __attribute__((cleanup(free_ptr)))
-#define RAII_CURL __attribute__((cleanup(curl_cleanup_ptr)))
-#define RAII_SLIST __attribute__((cleanup(curl_slist_free_all_ptr)))
 #define RAII_FILE __attribute__((cleanup(fclose_ptr)))
 #define RAII_DIR __attribute__((cleanup(closedir_ptr)))
 

@@ -278,4 +278,207 @@ void test_mime_util(void) {
     else
         unsetenv("TZ");
     tzset();
+
+    /* ── QP soft line break (=\r\n) ────────────────────────────────── */
+
+    {
+        /* "=" followed by \r\n is a soft break: the line ending is removed */
+        const char *qp_soft =
+            "Content-Type: text/plain\r\n"
+            "Content-Transfer-Encoding: quoted-printable\r\n"
+            "\r\n"
+            "First=\r\n"
+            "Second";
+        RAII_STRING char *body = mime_get_text_body(qp_soft);
+        ASSERT(body != NULL, "mime_get_text_body: QP soft break should not return NULL");
+        ASSERT(strstr(body, "FirstSecond") != NULL,
+               "QP soft line break should be removed");
+    }
+
+    /* ── body_start: LF-only separator ─────────────────────────────── */
+
+    {
+        /* Message with \n\n instead of \r\n\r\n as header/body separator */
+        const char *lf_msg =
+            "Content-Type: text/plain\n"
+            "\n"
+            "LF-only body";
+        RAII_STRING char *body = mime_get_text_body(lf_msg);
+        ASSERT(body != NULL, "mime_get_text_body: LF-only separator should work");
+        ASSERT(strstr(body, "LF-only body") != NULL, "LF-only body content mismatch");
+    }
+
+    /* ── body_start: no separator → returns NULL ────────────────────── */
+
+    {
+        /* No blank line at all → body_start() returns NULL */
+        RAII_STRING char *body = mime_get_text_body("Subject: no body");
+        ASSERT(body == NULL,
+               "mime_get_text_body: message without body separator should return NULL");
+    }
+
+    /* ── extract_charset: unquoted value ────────────────────────────── */
+
+    {
+        const char *ct_plain =
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            "\r\n"
+            "explicit UTF-8";
+        RAII_STRING char *body = mime_get_text_body(ct_plain);
+        ASSERT(body != NULL, "mime_get_text_body: unquoted charset=utf-8 should work");
+        ASSERT(strstr(body, "explicit UTF-8") != NULL,
+               "unquoted charset body mismatch");
+    }
+
+    /* ── extract_charset: quoted value ──────────────────────────────── */
+
+    {
+        const char *ct_quoted =
+            "Content-Type: text/plain; charset=\"utf-8\"\r\n"
+            "\r\n"
+            "quoted charset";
+        RAII_STRING char *body = mime_get_text_body(ct_quoted);
+        ASSERT(body != NULL, "mime_get_text_body: quoted charset should work");
+        ASSERT(strstr(body, "quoted charset") != NULL,
+               "quoted charset body mismatch");
+    }
+
+    /* ── extract_charset: empty quoted value → NULL (p == start) ────── */
+
+    {
+        /* charset="" → extract_charset returns NULL → charset_to_utf8 is
+         * called with NULL charset and simply returns strdup(body). */
+        const char *ct_empty =
+            "Content-Type: text/plain; charset=\"\"\r\n"
+            "\r\n"
+            "empty charset";
+        RAII_STRING char *body = mime_get_text_body(ct_empty);
+        ASSERT(body != NULL, "mime_get_text_body: empty charset should not crash");
+        ASSERT(strstr(body, "empty charset") != NULL,
+               "empty charset body mismatch");
+    }
+
+    /* ── charset_to_utf8: ISO-8859-1 body via iconv ──────────────────── */
+
+    {
+        /* \xE9 = 'é' in ISO-8859-1; UTF-8 encoding: \xC3\xA9 */
+        const char *iso_msg =
+            "Content-Type: text/plain; charset=iso-8859-1\r\n"
+            "\r\n"
+            "\xE9t\xE9";   /* "été" in ISO-8859-1 */
+        RAII_STRING char *body = mime_get_text_body(iso_msg);
+        ASSERT(body != NULL,
+               "mime_get_text_body: iso-8859-1 should not return NULL");
+        ASSERT(strstr(body, "\xC3\xA9t\xC3\xA9") != NULL,
+               "ISO-8859-1 to UTF-8 body conversion mismatch");
+    }
+
+    /* ── text_from_multipart: unquoted boundary ──────────────────────── */
+
+    {
+        const char *mp_unquoted =
+            "Content-Type: multipart/mixed; boundary=NOBOUND\r\n"
+            "\r\n"
+            "--NOBOUND\r\n"
+            "Content-Type: text/plain\r\n"
+            "\r\n"
+            "Unquoted boundary text\r\n"
+            "--NOBOUND--\r\n";
+        RAII_STRING char *body = mime_get_text_body(mp_unquoted);
+        ASSERT(body != NULL,
+               "mime_get_text_body: unquoted boundary should work");
+        ASSERT(strstr(body, "Unquoted boundary text") != NULL,
+               "Unquoted boundary multipart content mismatch");
+    }
+
+    /* ── text_from_multipart: two non-text parts → exercises loop-continue
+     *    path (lines 256-259) and closing-boundary break (line 257 final),
+     *    then returns NULL (line 261). ──────────────────────────────────── */
+
+    {
+        /* Both parts are application/octet-stream → text_from_part returns NULL
+         * for each.  After the first part the loop continues (lines 258-259),
+         * then the second delimiter turns out to be the closing "--B3--" →
+         * break → return NULL. */
+        const char *mp_none =
+            "Content-Type: multipart/mixed; boundary=B3\r\n"
+            "\r\n"
+            "--B3\r\n"
+            "Content-Type: application/octet-stream\r\n"
+            "\r\n"
+            "binary1\r\n"
+            "--B3\r\n"
+            "Content-Type: application/octet-stream\r\n"
+            "\r\n"
+            "binary2\r\n"
+            "--B3--\r\n";
+        RAII_STRING char *body = mime_get_text_body(mp_none);
+        ASSERT(body == NULL,
+               "mime_get_text_body: all-binary multipart should return NULL");
+    }
+
+    /* ── mime_decode_words: ISO-8859-1 encoded word via iconv ─────────── */
+
+    {
+        /* "été": \xE9=é, \xE9=é in ISO-8859-1 Q-encoding */
+        RAII_STRING char *r = mime_decode_words("=?iso-8859-1?Q?=E9t=E9?=");
+        ASSERT(r != NULL,
+               "mime_decode_words: iso-8859-1 word should not return NULL");
+        ASSERT(strcmp(r, "\xC3\xA9t\xC3\xA9") == 0,
+               "ISO-8859-1 Q-encoded word UTF-8 decode mismatch");
+    }
+
+    /* ── mime_decode_words: unknown charset → raw bytes fallback ─────── */
+
+    {
+        /* iconv_open fails for unknown charset: raw decoded bytes returned */
+        RAII_STRING char *r = mime_decode_words("=?x-unknown-charset?Q?hello?=");
+        ASSERT(r != NULL,
+               "mime_decode_words: unknown charset should not return NULL");
+        ASSERT(strcmp(r, "hello") == 0,
+               "Unknown charset encoded word should pass through raw bytes");
+    }
+
+    /* ── mime_extract_imap_literal: content shorter than claimed size ── */
+
+    {
+        /* {100} claims 100 bytes but only 5 are present */
+        const char *trunc = "* FETCH {100}\r\nhello";
+        RAII_STRING char *lit = mime_extract_imap_literal(trunc);
+        ASSERT(lit != NULL,
+               "mime_extract_imap_literal: truncated should not return NULL");
+        ASSERT(strcmp(lit, "hello") == 0,
+               "Truncated literal should return all available bytes");
+    }
+
+    /* ── mime_get_header: long value triggers realloc (>512 bytes) ───── */
+
+    {
+        /* 580 Z's exceed the initial 512-byte buffer → realloc required */
+        char big_msg[700];
+        strcpy(big_msg, "X-Big: ");
+        memset(big_msg + 7, 'Z', 580);
+        strcpy(big_msg + 587, "\r\n\r\n");
+        RAII_STRING char *val = mime_get_header(big_msg, "X-Big");
+        ASSERT(val != NULL,
+               "mime_get_header: 580-char value should not return NULL");
+        ASSERT(strlen(val) == 580, "Long header value length mismatch");
+    }
+
+    /* ── mime_get_header: folded long value triggers realloc ─────────── */
+
+    {
+        /* 511 A's fill the buffer, then a folded continuation adds space+X.
+         * When the fold handler tries to add the separator space, n+1==512==cap
+         * → realloc is triggered inside the fold branch. */
+        char fold_msg[700];
+        strcpy(fold_msg, "X-Fold: ");       /* 8 chars */
+        memset(fold_msg + 8, 'A', 511);     /* 511 A's */
+        strcpy(fold_msg + 519, "\r\n X\r\n\r\n");
+        RAII_STRING char *val = mime_get_header(fold_msg, "X-Fold");
+        ASSERT(val != NULL,
+               "mime_get_header: folded long value should not return NULL");
+        ASSERT(strlen(val) == 513,
+               "Folded long header value length mismatch (511 A + space + X)");
+    }
 }

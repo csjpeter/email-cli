@@ -1,31 +1,40 @@
-# email-cli
-
-A terminal-based IMAP email client written in C.
-
 [![CI](https://github.com/csjpeter/email-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/csjpeter/email-cli/actions/workflows/ci.yml)
 [![Valgrind](https://github.com/csjpeter/email-cli/actions/workflows/valgrind.yml/badge.svg)](https://github.com/csjpeter/email-cli/actions/workflows/valgrind.yml)
 [![Coverage](https://csjpeter.github.io/email-cli/coverage-badge.svg)](https://csjpeter.github.io/email-cli/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-> **Read-only client.** `email-cli` only reads your mailbox — it never sends, moves, deletes, or marks messages as read. Your email stays exactly as it is on the server.
+# email-cli
+
+A terminal-based, **read-only** IMAP email client written in C.
+Designed primarily for AI agents that need to read mailbox contents for decision support — without any ability to send, delete, or otherwise modify data.
+A write-capable companion client may be developed in the future.
+
+---
+
+> **Disclaimer:** This software is provided as-is, without warranty of any kind.
+> The author accepts no responsibility for any damage, data loss, or unintended
+> consequences resulting from the use or malfunction of this program.
 
 ---
 
 ## Table of Contents
 
+- [Security](#security)
 - [Installation](#installation)
 - [Configuration](#configuration)
-  - [Provider Notes](#provider-notes)
 - [Interactive Mode](#interactive-mode)
-  - [Message List View](#message-list-view)
-  - [Folder List View](#folder-list-view)
-  - [Message Reader View](#message-reader-view)
 - [CLI Batch Mode](#cli-batch-mode)
-  - [list](#list)
-  - [show](#show)
-  - [folders](#folders)
-  - [help](#help)
-- [Security](#security)
+
+---
+
+## Security
+
+- **Read-only:** `email-cli` issues only `FETCH` and `SEARCH` IMAP commands. It never sends, moves, deletes, or modifies messages or flags on the server.
+- **Credentials at rest:** The configuration file is written with `0600` permissions, readable only by the owning user. The password is stored in plaintext — keep the file private.
+- **Transport:** Connections use `imaps://` (TLS 1.2+) by default. Plain `imap://` is supported for local testing only. `SSL_NO_VERIFY=1` disables certificate verification — never use it in production.
+- **Local cache:** Fetched messages are stored in `~/.cache/email-cli/` with directory permissions `0700`. No external service has access to the cache.
+- **Logs:** Session diagnostics are written to `~/.cache/email-cli/logs/session.log`. Logs may include IMAP server responses; rotate or delete them as needed.
+- **Memory safety:** The codebase is tested with AddressSanitizer and Valgrind on every CI run to eliminate memory leaks and buffer overflows. See the [developer docs](docs/) for details.
 
 ---
 
@@ -239,13 +248,3 @@ email-cli help show
 email-cli help folders
 ```
 
----
-
-## Security
-
-- **Read-only:** `email-cli` issues only `FETCH` and `SEARCH` IMAP commands. It never sends, moves, deletes, or modifies messages or flags on the server.
-- **Credentials at rest:** The configuration file is written with `0600` permissions, readable only by the owning user. The password is stored in plaintext — keep the file private.
-- **Transport:** Connections use `imaps://` (TLS 1.2+) by default. Plain `imap://` is supported for local testing only. `SSL_NO_VERIFY=1` disables certificate verification — never use it in production.
-- **Local cache:** Fetched messages are stored in `~/.cache/email-cli/` with directory permissions `0700`. No external service has access to the cache.
-- **Logs:** Session diagnostics are written to `~/.cache/email-cli/logs/session.log`. Logs may include IMAP server responses; rotate or delete them as needed.
-- **Memory safety:** The codebase is tested with AddressSanitizer and Valgrind on every CI run to eliminate memory leaks and buffer overflows. See the [developer docs](docs/) for details.

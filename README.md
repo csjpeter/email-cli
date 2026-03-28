@@ -35,16 +35,6 @@ A terminal-based IMAP email client written in C.
 ./manage.sh build   # Build → bin/email-cli
 ```
 
-For other distributions, install the dependencies manually:
-
-```bash
-# Debian/Ubuntu
-sudo apt-get install build-essential cmake libcurl4-openssl-dev libssl-dev
-
-# Fedora/RHEL/Rocky
-sudo dnf install gcc cmake libcurl-devel openssl-devel
-```
-
 Run it:
 
 ```bash

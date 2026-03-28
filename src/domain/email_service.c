@@ -801,10 +801,25 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     int show_count = all_count;
 
     if (show_count == 0) {
-        printf("No messages in %s.\n", folder);
         free(unseen_uids);
         free(all_uids);
-        return 0;
+        if (!opts->pager) {
+            printf("No messages in %s.\n", folder);
+            return 0;
+        }
+        /* Interactive mode: show empty-folder screen and wait for input.
+         * Returning immediately would drop the user back to the OS — instead
+         * let them navigate away with Backspace (→ folder list) or ESC/^C. */
+        RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
+        printf("\033[H\033[2J");
+        printf("No messages in %s.\n\n", folder);
+        printf("\033[2m  Backspace=folders  ESC=quit\033[0m\n");
+        fflush(stdout);
+        for (;;) {
+            TermKey key = terminal_read_key();
+            if (key == TERM_KEY_BACK)  return 1; /* go to folder list */
+            if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
+        }
     }
 
     /* Build tagged entry array */

@@ -14,7 +14,8 @@
 
 void handle_client(int client_sock) {
     char buffer[4096];
-    
+    char selected_folder[256] = "";   /* currently selected mailbox */
+
     // 1. Greeting
     const char *greeting = "* OK Mock IMAP server ready\r\n";
     send(client_sock, greeting, strlen(greeting), 0);
@@ -43,7 +44,30 @@ void handle_client(int client_sock) {
             snprintf(ok, sizeof(ok), "%s OK LOGIN completed\r\n", tag);
             send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "SELECT")) {
-            const char *exists = "* 1 EXISTS\r\n* 1 RECENT\r\n* OK [UIDVALIDITY 1] UIDs are valid\r\n";
+            /* Track selected folder — handle both quoted and unquoted names */
+            char *sel = strstr(buffer, "SELECT ");
+            if (sel) {
+                sel += 7; /* skip "SELECT " */
+                if (*sel == '"') {
+                    /* quoted: SELECT "INBOX.Empty" */
+                    sel++;
+                    char *q2 = strchr(sel, '"');
+                    size_t len = q2 ? (size_t)(q2 - sel) : strlen(sel);
+                    if (len >= sizeof(selected_folder)) len = sizeof(selected_folder) - 1;
+                    strncpy(selected_folder, sel, len);
+                    selected_folder[len] = '\0';
+                } else {
+                    /* unquoted: SELECT INBOX.Empty */
+                    size_t len = strcspn(sel, " \r\n");
+                    if (len >= sizeof(selected_folder)) len = sizeof(selected_folder) - 1;
+                    strncpy(selected_folder, sel, len);
+                    selected_folder[len] = '\0';
+                }
+            }
+            int is_empty = (strstr(selected_folder, "Empty") != NULL);
+            const char *exists = is_empty
+                ? "* 0 EXISTS\r\n* 0 RECENT\r\n* OK [UIDVALIDITY 1] UIDs are valid\r\n"
+                : "* 1 EXISTS\r\n* 1 RECENT\r\n* OK [UIDVALIDITY 1] UIDs are valid\r\n";
             send(client_sock, exists, strlen(exists), 0);
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK [READ-WRITE] SELECT completed\r\n", tag);
@@ -52,13 +76,15 @@ void handle_client(int client_sock) {
             const char *list_resp =
                 "* LIST (\\HasNoChildren) \".\" \"INBOX\"\r\n"
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Sent\"\r\n"
-                "* LIST (\\HasNoChildren) \".\" \"INBOX.Trash\"\r\n";
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.Trash\"\r\n"
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.Empty\"\r\n";
             send(client_sock, list_resp, strlen(list_resp), 0);
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK LIST completed\r\n", tag);
             send(client_sock, ok, strlen(ok), 0);
         } else if (strstr(buffer, "SEARCH")) {
-            const char *search_resp = "* SEARCH 1\r\n";
+            int is_empty = (strstr(selected_folder, "Empty") != NULL);
+            const char *search_resp = is_empty ? "* SEARCH\r\n" : "* SEARCH 1\r\n";
             send(client_sock, search_resp, strlen(search_resp), 0);
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK SEARCH completed\r\n", tag);

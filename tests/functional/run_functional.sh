@@ -138,6 +138,15 @@ check "Tree: has branch char"     "──"                      "$TREE_OUTPUT"
 check "Tree: INBOX shown"         "INBOX"                   "$TREE_OUTPUT"
 check "Tree: Sent shown"          "Sent"                    "$TREE_OUTPUT"
 
+# 13. Test: empty folder (batch mode)
+echo ""
+echo "Running: email-cli list --folder INBOX.Empty --batch ..."
+EMPTY_OUTPUT=$("$BIN_DIR/email-cli" list --folder INBOX.Empty --batch 2>&1 || true)
+echo "$EMPTY_OUTPUT"
+echo "--- Empty folder assertions ---"
+check "Empty folder: no messages msg" "No messages"  "$EMPTY_OUTPUT"
+check "Empty folder: exit success"    "Success"       "$EMPTY_OUTPUT"
+
 check_not() {
     local desc="$1"
     local pattern="$2"

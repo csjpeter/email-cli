@@ -227,7 +227,7 @@ int main(int argc, char *argv[]) {
                 int ret = email_service_list(cfg, &opts);
                 if (ret != 1) { result = (ret >= 0) ? 0 : -1; break; }
                 /* User pressed Backspace → show folder browser */
-                char *sel = email_service_list_folders_interactive(cfg);
+                char *sel = email_service_list_folders_interactive(cfg, tui_folder);
                 free(tui_folder);
                 tui_folder = sel;
                 if (!tui_folder) { result = 0; break; }

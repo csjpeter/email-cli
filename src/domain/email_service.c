@@ -1068,7 +1068,8 @@ int email_service_list_folders(const Config *cfg, int tree) {
     return 0;
 }
 
-char *email_service_list_folders_interactive(const Config *cfg) {
+char *email_service_list_folders_interactive(const Config *cfg,
+                                             const char *current_folder) {
     int count = 0;
     char sep = '.';
     char **folders = fetch_folder_list(cfg, &count, &sep);
@@ -1089,6 +1090,26 @@ char *email_service_list_folders_interactive(const Config *cfg) {
     int cursor = 0, wstart = 0;
     int tree_mode = ui_pref_get_int("folder_view_mode", 1);
     char current_prefix[512] = "";   /* flat mode: current navigation level */
+
+    /* In flat mode, pre-navigate to the level that contains current_folder */
+    if (!tree_mode && current_folder && *current_folder) {
+        const char *last = strrchr(current_folder, sep);
+        if (last) {
+            size_t plen = (size_t)(last - current_folder);
+            if (plen < sizeof(current_prefix)) {
+                memcpy(current_prefix, current_folder, plen);
+                current_prefix[plen] = '\0';
+            }
+        }
+        /* position cursor on current_folder */
+        int tmp_vis[1024];
+        int tv = build_flat_view(folders, count, sep, current_prefix, tmp_vis);
+        for (int i = 0; i < tv; i++) {
+            if (strcmp(folders[tmp_vis[i]], current_folder) == 0) {
+                cursor = i; break;
+            }
+        }
+    }
     int vcount = 0;                  /* flat view: number of visible entries */
     char *selected = NULL;
 
@@ -1154,9 +1175,8 @@ char *email_service_list_folders_interactive(const Config *cfg) {
                 if (last_sep) *last_sep = '\0';
                 else          current_prefix[0] = '\0';
                 cursor = 0; wstart = 0;
-            } else {
-                goto folders_int_done;
             }
+            /* at root (tree mode or flat root): ignore Backspace — use ESC */
             break;
         case TERM_KEY_ENTER:
             if (tree_mode) {

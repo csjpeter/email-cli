@@ -725,9 +725,41 @@ static int ancestor_is_last(char **names, int count, int i,
     return 1;
 }
 
+/** Returns 1 if folder `name` has any direct or indirect children. */
+static int folder_has_children(char **names, int count, const char *name, char sep) {
+    size_t len = strlen(name);
+    for (int i = 0; i < count; i++)
+        if (strncmp(names[i], name, len) == 0 && names[i][len] == sep)
+            return 1;
+    return 0;
+}
+
+/**
+ * Build filtered index (into names[]) of direct children of `prefix`.
+ * prefix="" means root level (folders with no sep in their name).
+ * Returns number of visible entries written into vis_out[].
+ */
+static int build_flat_view(char **names, int count, char sep,
+                           const char *prefix, int *vis_out) {
+    int vcount = 0;
+    size_t plen = strlen(prefix);
+    for (int i = 0; i < count; i++) {
+        const char *name = names[i];
+        if (plen == 0) {
+            if (strchr(name, sep) == NULL)
+                vis_out[vcount++] = i;
+        } else {
+            if (strncmp(name, prefix, plen) == 0 && name[plen] == sep &&
+                strchr(name + plen + 1, sep) == NULL)
+                vis_out[vcount++] = i;
+        }
+    }
+    return vcount;
+}
+
 /** Print one folder item with its tree/flat prefix and optional selection highlight. */
 static void print_folder_item(char **names, int count, int i, char sep,
-                               int tree_mode, int selected) {
+                               int tree_mode, int selected, int has_kids) {
     if (selected) printf("\033[7m");
 
     if (tree_mode) {
@@ -744,7 +776,9 @@ static void print_folder_item(char **names, int count, int i, char sep,
         const char *comp = strrchr(names[i], sep);
         printf("%s", comp ? comp + 1 : names[i]);
     } else {
-        printf("  %s", names[i]);
+        const char *comp = strrchr(names[i], sep);
+        const char *display = comp ? comp + 1 : names[i];
+        printf("  %s%s", display, has_kids ? "/" : "");
     }
 
     if (selected) printf("\033[K\033[0m");
@@ -1045,7 +1079,16 @@ char *email_service_list_folders_interactive(const Config *cfg) {
 
     qsort(folders, (size_t)count, sizeof(char *), cmp_str);
 
+    int *vis = malloc((size_t)count * sizeof(int));
+    if (!vis) {
+        for (int i = 0; i < count; i++) free(folders[i]);
+        free(folders);
+        return NULL;
+    }
+
     int cursor = 0, wstart = 0, tree_mode = 1;
+    char current_prefix[512] = "";   /* flat mode: current navigation level */
+    int vcount = 0;                  /* flat view: number of visible entries */
     char *selected = NULL;
 
     RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
@@ -1054,20 +1097,47 @@ char *email_service_list_folders_interactive(const Config *cfg) {
         int rows  = terminal_rows();
         int limit = (rows > 4) ? rows - 3 : 10;
 
+        /* Rebuild flat view on each iteration */
+        int display_count;
+        if (tree_mode) {
+            display_count = count;
+        } else {
+            vcount = build_flat_view(folders, count, sep, current_prefix, vis);
+            display_count = vcount;
+        }
+        if (cursor >= display_count && display_count > 0)
+            cursor = display_count - 1;
+
         if (cursor < wstart) wstart = cursor;
         if (cursor >= wstart + limit) wstart = cursor - limit + 1;
         int wend = wstart + limit;
-        if (wend > count) wend = count;
+        if (wend > display_count) wend = display_count;
 
         printf("\033[H\033[2J");
-        printf("Folders (%d)\n\n", count);
+        if (!tree_mode && current_prefix[0])
+            printf("Folders: %s/ (%d)\n\n", current_prefix, display_count);
+        else
+            printf("Folders (%d)\n\n", display_count);
 
-        for (int i = wstart; i < wend; i++)
-            print_folder_item(folders, count, i, sep, tree_mode, i == cursor);
+        for (int i = wstart; i < wend; i++) {
+            if (tree_mode) {
+                print_folder_item(folders, count, i, sep, 1, i == cursor, 0);
+            } else {
+                int fi = vis[i];
+                int hk = folder_has_children(folders, count, folders[fi], sep);
+                print_folder_item(folders, count, fi, sep, 0, i == cursor, hk);
+            }
+        }
 
-        printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=select"
-               "  t=%s  Backspace/ESC=quit  [%d/%d]\033[0m\n",
-               tree_mode ? "flat" : "tree", cursor + 1, count);
+        if (!tree_mode && current_prefix[0])
+            printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
+                   "  t=tree  Backspace=up  ESC=quit  [%d/%d]\033[0m\n",
+                   display_count > 0 ? cursor + 1 : 0, display_count);
+        else
+            printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
+                   "  t=%s  Backspace/ESC=quit  [%d/%d]\033[0m\n",
+                   tree_mode ? "flat" : "tree",
+                   display_count > 0 ? cursor + 1 : 0, display_count);
         fflush(stdout);
 
         TermKey key = terminal_read_key();
@@ -1075,32 +1145,60 @@ char *email_service_list_folders_interactive(const Config *cfg) {
         switch (key) {
         case TERM_KEY_QUIT:
         case TERM_KEY_ESC:
+            goto folders_int_done;
         case TERM_KEY_BACK:
-            goto folders_int_done;
+            if (!tree_mode && current_prefix[0]) {
+                /* navigate up one level */
+                char *last_sep = strrchr(current_prefix, sep);
+                if (last_sep) *last_sep = '\0';
+                else          current_prefix[0] = '\0';
+                cursor = 0; wstart = 0;
+            } else {
+                goto folders_int_done;
+            }
+            break;
         case TERM_KEY_ENTER:
-            selected = strdup(folders[cursor]);
-            goto folders_int_done;
+            if (tree_mode) {
+                selected = strdup(folders[cursor]);
+                goto folders_int_done;
+            } else if (display_count > 0) {
+                int fi = vis[cursor];
+                if (folder_has_children(folders, count, folders[fi], sep)) {
+                    /* navigate into subfolder */
+                    strncpy(current_prefix, folders[fi], sizeof(current_prefix) - 1);
+                    current_prefix[sizeof(current_prefix) - 1] = '\0';
+                    cursor = 0; wstart = 0;
+                } else {
+                    selected = strdup(folders[fi]);
+                    goto folders_int_done;
+                }
+            }
+            break;
         case TERM_KEY_NEXT_LINE:
-            if (cursor < count - 1) cursor++;
+            if (cursor < display_count - 1) cursor++;
             break;
         case TERM_KEY_PREV_LINE:
             if (cursor > 0) cursor--;
             break;
         case TERM_KEY_NEXT_PAGE:
             cursor += limit;
-            if (cursor >= count) cursor = count - 1;
+            if (cursor >= display_count) cursor = display_count > 0 ? display_count - 1 : 0;
             break;
         case TERM_KEY_PREV_PAGE:
             cursor -= limit;
             if (cursor < 0) cursor = 0;
             break;
         case TERM_KEY_IGNORE:
-            if (terminal_last_printable() == 't')
+            if (terminal_last_printable() == 't') {
                 tree_mode = !tree_mode;
+                cursor = 0; wstart = 0;
+                if (!tree_mode) current_prefix[0] = '\0';
+            }
             break;
         }
     }
 folders_int_done:
+    free(vis);
     for (int i = 0; i < count; i++) free(folders[i]);
     free(folders);
     return selected;

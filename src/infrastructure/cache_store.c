@@ -122,6 +122,62 @@ char *hcache_load(const char *folder, int uid) {
     return load_file(path);
 }
 
+/* ── UI preferences (~/.cache/email-cli/ui.ini) ──────────────────────── */
+
+static char *ui_pref_path(void) {
+    const char *cache_base = platform_cache_dir();
+    if (!cache_base) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/email-cli/ui.ini", cache_base) == -1)
+        return NULL;
+    return path;
+}
+
+int ui_pref_get_int(const char *key, int default_val) {
+    RAII_STRING char *path = ui_pref_path();
+    if (!path) return default_val;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return default_val;
+    char line[256];
+    size_t klen = strlen(key);
+    while (fgets(line, sizeof(line), fp))
+        if (strncmp(line, key, klen) == 0 && line[klen] == '=')
+            return atoi(line + klen + 1);
+    return default_val;
+}
+
+int ui_pref_set_int(const char *key, int value) {
+    const char *cache_base = platform_cache_dir();
+    if (!cache_base) return -1;
+    RAII_STRING char *dir = NULL;
+    if (asprintf(&dir, "%s/email-cli", cache_base) == -1) return -1;
+    if (fs_mkdir_p(dir, 0700) != 0) return -1;
+    RAII_STRING char *path = ui_pref_path();
+    if (!path) return -1;
+
+    char *existing = load_file(path); /* NULL if file doesn't exist yet */
+
+    RAII_FILE FILE *fp = fopen(path, "w");
+    if (!fp) { free(existing); return -1; }
+
+    /* Copy all existing lines except the one matching key */
+    size_t klen = strlen(key);
+    if (existing) {
+        char *line = existing;
+        while (*line) {
+            char *nl = strchr(line, '\n');
+            size_t llen = nl ? (size_t)(nl - line + 1) : strlen(line);
+            if (!(strncmp(line, key, klen) == 0 && line[klen] == '='))
+                fwrite(line, 1, llen, fp);
+            line += llen;
+        }
+        free(existing);
+    }
+    fprintf(fp, "%s=%d\n", key, value);
+    logger_log(LOG_DEBUG, "UI pref %s=%d saved", key, value);
+    return 0;
+}
+
 static int cmp_int_evict(const void *a, const void *b) {
     return *(const int *)a - *(const int *)b;
 }

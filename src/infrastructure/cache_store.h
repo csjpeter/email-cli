@@ -51,6 +51,24 @@ int   hcache_save(const char *folder, int uid, const char *content, size_t len);
  */
 char *hcache_load(const char *folder, int uid);
 
+/* ── UI preferences ──────────────────────────────────────────────────── */
+
+/**
+ * @brief Reads an integer UI preference from ~/.cache/email-cli/ui.ini.
+ * @param key         Preference key (e.g. "folder_view_mode").
+ * @param default_val Value to return if key is absent or file missing.
+ * @return Stored integer value, or @p default_val.
+ */
+int ui_pref_get_int(const char *key, int default_val);
+
+/**
+ * @brief Writes an integer UI preference to ~/.cache/email-cli/ui.ini.
+ * @param key   Preference key.
+ * @param value Integer value to store.
+ * @return 0 on success, -1 on failure.
+ */
+int ui_pref_set_int(const char *key, int value);
+
 /**
  * @brief Removes header cache files whose UID is not in @p keep_uids.
  *

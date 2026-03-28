@@ -322,4 +322,57 @@ void test_email_service(void) {
         int r = ancestor_is_last(names, 4, 2, 0, '.');
         ASSERT(r == 1, "ancestor_is_last: INBOX is only root → 1");
     }
+
+    /* ── extract_fetch_literal ───────────────────────────────────────── */
+
+    /* NULL input */
+    {
+        char *r = extract_fetch_literal(NULL, 0);
+        ASSERT(r == NULL, "extract_fetch_literal: NULL → NULL");
+    }
+
+    /* No literal marker */
+    {
+        const char *resp = "* 1 FETCH (FLAGS (\\Seen))\r\n";
+        char *r = extract_fetch_literal(resp, strlen(resp));
+        ASSERT(r == NULL, "extract_fetch_literal: no literal → NULL");
+    }
+
+    /* Basic FETCH response: BODY.PEEK[] literal */
+    {
+        const char *msg = "From: alice@example.com\r\nSubject: Hi\r\n\r\nHello!\r\n";
+        char resp[256];
+        int n = snprintf(resp, sizeof(resp),
+                         "* 1 FETCH (BODY[] {%zu}\r\n%s)\r\nA001 OK FETCH done\r\n",
+                         strlen(msg), msg);
+        char *r = extract_fetch_literal(resp, (size_t)n);
+        ASSERT(r != NULL, "extract_fetch_literal: basic response → non-NULL");
+        ASSERT(strcmp(r, msg) == 0, "extract_fetch_literal: content matches");
+        free(r);
+    }
+
+    /* Response with \\r\\n line ending before literal */
+    {
+        const char *msg = "Subject: Test\r\n\r\nbody\r\n";
+        char resp[256];
+        int n = snprintf(resp, sizeof(resp),
+                         "* 3 FETCH (BODY[] {%zu}\r\n%s)\r\n",
+                         strlen(msg), msg);
+        char *r = extract_fetch_literal(resp, (size_t)n);
+        ASSERT(r != NULL, "extract_fetch_literal: CRLF before literal → non-NULL");
+        ASSERT(strcmp(r, msg) == 0, "extract_fetch_literal: CRLF content correct");
+        free(r);
+    }
+
+    /* Truncated response (reported size > available bytes) */
+    {
+        const char *resp = "* 1 FETCH (BODY[] {1000}\r\nshort)\r\n";
+        size_t len = strlen(resp);
+        char *r = extract_fetch_literal(resp, len);
+        /* size (1000) > available bytes after CRLF → clamp to available */
+        ASSERT(r != NULL, "extract_fetch_literal: truncated → non-NULL (clamped)");
+        ASSERT(strncmp(r, "short)\r\n", 8) == 0,
+               "extract_fetch_literal: truncated content clamped correctly");
+        free(r);
+    }
 }

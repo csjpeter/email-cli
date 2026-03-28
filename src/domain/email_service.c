@@ -266,37 +266,38 @@ static CURL *make_curl(const Config *cfg) {
     return curl_adapter_init(cfg->user, cfg->pass, !cfg->ssl_no_verify);
 }
 
-/** Returns 1 if the message has the \Seen flag set, 0 otherwise. */
-static int check_uid_seen(const Config *cfg, const char *folder, int uid) {
-    RAII_CURL CURL *curl = make_curl(cfg);
-    if (!curl) return 0;
-    RAII_STRING char *url = NULL;
-    RAII_STRING char *cmd = NULL;
-    if (asprintf(&url, "%s/%s", cfg->host, folder) == -1) return 0;
-    if (asprintf(&cmd, "UID FETCH %d (FLAGS)", uid) == -1) return 0;
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
-    Buffer buf = {NULL, 0};
-    CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
-    int seen = (res == CURLE_OK && buf.data && strstr(buf.data, "\\Seen") != NULL);
-    free(buf.data);
-    return seen;
-}
-
-/** Removes the \Seen flag from a message (restore unread state). */
-static void restore_uid_unseen(const Config *cfg, const char *folder, int uid) {
-    RAII_CURL CURL *curl = make_curl(cfg);
-    if (!curl) return;
-    RAII_STRING char *url = NULL;
-    RAII_STRING char *cmd = NULL;
-    if (asprintf(&url, "%s/%s", cfg->host, folder) == -1) return;
-    if (asprintf(&cmd, "UID STORE %d -FLAGS (\\Seen)", uid) == -1) return;
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
-    Buffer buf = {NULL, 0};
-    CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
-    if (res != CURLE_OK)
-        logger_log(LOG_WARN, "Failed to restore \\Seen for UID %d: %s",
-                   uid, curl_easy_strerror(res));
-    free(buf.data);
+/**
+ * Extract the message literal from a raw IMAP FETCH response.
+ *
+ * IMAP literals use the format: {SIZE}\r\n<SIZE bytes>
+ * This helper finds the first literal marker and returns a heap-allocated copy
+ * of exactly SIZE bytes of content, NUL-terminated.  Returns NULL on failure.
+ *
+ * Used when fetching via CURLOPT_CUSTOMREQUEST (folder URL), which delivers the
+ * full IMAP response — including the "* N FETCH (BODY[] {N}" envelope — to the
+ * write callback.  Callers using a message URL in download mode do not need this.
+ */
+static char *extract_fetch_literal(const char *response, size_t response_len)
+    __attribute__((unused));
+static char *extract_fetch_literal(const char *response, size_t response_len) {
+    if (!response) return NULL;
+    const char *brace = strchr(response, '{');
+    if (!brace) return NULL;
+    char *end;
+    long size = strtol(brace + 1, &end, 10);
+    if (*end != '}' || size <= 0) return NULL;
+    const char *data = end + 1;
+    if (*data == '\r') data++;
+    if (*data == '\n') data++;
+    size_t offset = (size_t)(data - response);
+    if (offset >= response_len) return NULL;
+    size_t avail = response_len - offset;
+    if ((size_t)size > avail) size = (long)avail;
+    char *result = malloc((size_t)size + 1);
+    if (!result) return NULL;
+    memcpy(result, data, (size_t)size);
+    result[size] = '\0';
+    return result;
 }
 
 /** Issues UID SEARCH <criteria> in <folder>. Caller must free *uids_out. */
@@ -322,48 +323,132 @@ static int search_uids_in(const Config *cfg, const char *folder,
     return count;
 }
 
-/** Fetches headers or full message for a UID in <folder>. Caller must free.
+/**
+ * State for the BODY.PEEK[] literal capture via the CURLINFO_DATA_IN debug hook.
  *
- *  headers_only=1: URL-based BODY[HEADER] fetch — does NOT set \Seen (RFC 3501).
- *  headers_only=0: URL-based fetch (sets \Seen transiently); \Seen is restored
- *                  afterward if the message was not already read.
- *                  Note: CURLOPT_CUSTOMREQUEST cannot be used for full-body IMAP
- *                  FETCH because libcurl does not deliver the literal payload to
- *                  the write callback in that mode. */
+ * When CURLOPT_CUSTOMREQUEST is active, libcurl delivers the entire raw IMAP
+ * server response (envelope + literal bytes) to CURLINFO_DATA_IN but does NOT
+ * route it to WRITEFUNCTION.  We intercept DATA_IN to extract the literal.
+ */
+typedef struct {
+    Buffer  literal;      /* accumulated literal bytes */
+    int     in_literal;   /* currently reading a literal */
+    long    bytes_left;   /* bytes still needed for the current literal */
+} PeekCapture;
+
+/** Debug callback that combines normal IMAP logging with literal capture. */
+static int peek_debug_cb(CURL *handle, curl_infotype type,
+                         char *data, size_t size, void *userp) {
+    (void)handle;
+    PeekCapture *cap = (PeekCapture *)userp;
+
+    /* Normal IMAP traffic logging */
+    if (type == CURLINFO_HEADER_IN || type == CURLINFO_HEADER_OUT ||
+        type == CURLINFO_DATA_IN   || type == CURLINFO_DATA_OUT) {
+        char buf[4096];
+        size_t n = size < sizeof(buf) - 1 ? size : sizeof(buf) - 1;
+        memcpy(buf, data, n);
+        buf[n] = '\0';
+        while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r' || buf[n-1] == ' '))
+            buf[--n] = '\0';
+        if (n > 0)
+            logger_log(LOG_DEBUG, "IMAP [%s] %s",
+                       (type == CURLINFO_HEADER_OUT ||
+                        type == CURLINFO_DATA_OUT) ? "OUT" : " IN", buf);
+    }
+
+    /* Literal capture from HEADER_IN: with CUSTOMREQUEST+folder URL, libcurl
+     * routes the entire IMAP response (envelope + literal) through HEADER_IN.
+     * DATA_IN only carries the FETCH envelope echo — not the literal bytes. */
+    if (!cap || type != CURLINFO_HEADER_IN || size == 0) return 0;
+
+    const char *p   = data;
+    const char *end = data + size;
+
+    while (p < end) {
+        if (!cap->in_literal) {
+            /* Scan for the IMAP literal size marker: {N}\r\n */
+            const char *brace = memchr(p, '{', (size_t)(end - p));
+            if (!brace) break;
+            char *numend;
+            long sz = strtol(brace + 1, &numend, 10);
+            if (*numend != '}' || sz <= 0) { p = brace + 1; continue; }
+            cap->in_literal  = 1;
+            cap->bytes_left  = sz;
+            /* Advance past }\r\n to the start of the literal bytes */
+            p = numend + 1;
+            if (p < end && *p == '\r') p++;
+            if (p < end && *p == '\n') p++;
+            /* Fall through to accumulate any bytes already in this chunk */
+        }
+
+        if (cap->in_literal && cap->bytes_left > 0) {
+            size_t avail   = (size_t)(end - p);
+            size_t to_copy = (size_t)cap->bytes_left < avail
+                             ? (size_t)cap->bytes_left : avail;
+            char *tmp = realloc(cap->literal.data,
+                                cap->literal.size + to_copy + 1);
+            if (tmp) {
+                cap->literal.data = tmp;
+                memcpy(cap->literal.data + cap->literal.size, p, to_copy);
+                cap->literal.size += to_copy;
+                cap->literal.data[cap->literal.size] = '\0';
+            }
+            cap->bytes_left -= (long)to_copy;
+            p               += to_copy;
+            if (cap->bytes_left <= 0) {
+                cap->in_literal = 0;
+                break;  /* literal complete — stop processing this chunk */
+            }
+        } else {
+            break;
+        }
+    }
+
+    return 0;
+}
+
+/** Fetches headers or full message for a UID in <folder>.  Caller must free.
+ *
+ *  Issues BODY.PEEK[HEADER] or BODY.PEEK[] — both NEVER set the \Seen flag
+ *  per RFC 3501 §6.4.5.  When CURLOPT_CUSTOMREQUEST is active, libcurl routes
+ *  all server data to CURLINFO_DATA_IN rather than WRITEFUNCTION.  We capture
+ *  the message literal via peek_debug_cb which intercepts CURLINFO_DATA_IN. */
 static char *fetch_uid_content_in(const Config *cfg, const char *folder,
                                   int uid, int headers_only) {
     RAII_CURL CURL *curl = make_curl(cfg);
     if (!curl) return NULL;
 
     RAII_STRING char *url = NULL;
-
-    /* Check \Seen status before the fetch so we can restore it if needed. */
-    int was_seen = 0;
-    if (!headers_only)
-        was_seen = check_uid_seen(cfg, folder, uid);
-
+    RAII_STRING char *cmd = NULL;
+    if (asprintf(&url, "%s/%s", cfg->host, folder) == -1) return NULL;
     if (headers_only) {
-        if (asprintf(&url, "%s/%s/;UID=%d/;SECTION=HEADER",
-                     cfg->host, folder, uid) == -1) return NULL;
+        if (asprintf(&cmd, "UID FETCH %d BODY.PEEK[HEADER]", uid) == -1) return NULL;
     } else {
-        /* Standard URL fetch — libcurl sends BODY[] and delivers the full
-         * literal to the write callback.  This sets \Seen; we restore it below
-         * when the message was not already read. */
-        if (asprintf(&url, "%s/%s/;UID=%d", cfg->host, folder, uid) == -1) return NULL;
+        if (asprintf(&cmd, "UID FETCH %d BODY.PEEK[]", uid) == -1) return NULL;
     }
 
-    Buffer buf = {NULL, 0};
-    CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
+    PeekCapture cap = {{NULL, 0}, 0, 0};
+    curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, peek_debug_cb);
+    curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &cap);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
+
+    /* WRITEFUNCTION is set but receives only the FETCH envelope (ignored). */
+    Buffer envelope = {NULL, 0};
+    CURLcode res = curl_adapter_fetch(curl, url, &envelope, buffer_append);
+    free(envelope.data);
+
     if (res != CURLE_OK) {
         logger_log(LOG_WARN, "Fetch UID %d failed: %s", uid, curl_easy_strerror(res));
-        free(buf.data);
+        free(cap.literal.data);
         return NULL;
     }
-
-    if (!headers_only && !was_seen)
-        restore_uid_unseen(cfg, folder, uid);
-
-    return buf.data;
+    if (!cap.literal.data || cap.literal.size == 0) {
+        logger_log(LOG_WARN, "BODY.PEEK fetch UID %d: no literal captured", uid);
+        free(cap.literal.data);
+        return NULL;
+    }
+    return cap.literal.data;
 }
 
 /* ── Cached header fetch ─────────────────────────────────────────────── */
@@ -697,31 +782,26 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     printf("--- Fetching emails: %s @ %s/%s ---\n",
            cfg->user, cfg->host, folder);
 
-    /* Always fetch UNSEEN set */
+    /* Fetch UNSEEN set (for N markers) and ALL messages */
     int *unseen_uids = NULL;
     int unseen_count = search_uids_in(cfg, folder, "UNSEEN", &unseen_uids);
     if (unseen_count < 0) { fprintf(stderr, "Failed to search mailbox.\n"); return -1; }
 
     int *all_uids  = NULL;
-    int  all_count = 0;
-    if (opts->all) {
-        all_count = search_uids_in(cfg, folder, "ALL", &all_uids);
-        if (all_count < 0) {
-            free(unseen_uids);
-            fprintf(stderr, "Failed to search mailbox.\n");
-            return -1;
-        }
-        /* Evict headers for messages deleted from the server */
-        if (all_count > 0)
-            hcache_evict_stale(folder, all_uids, all_count);
+    int  all_count = search_uids_in(cfg, folder, "ALL", &all_uids);
+    if (all_count < 0) {
+        free(unseen_uids);
+        fprintf(stderr, "Failed to search mailbox.\n");
+        return -1;
     }
+    /* Evict headers for messages deleted from the server */
+    if (all_count > 0)
+        hcache_evict_stale(folder, all_uids, all_count);
 
-    int  show_count = opts->all ? all_count : unseen_count;
-    int *show_uids  = opts->all ? all_uids  : unseen_uids;
+    int show_count = all_count;
 
     if (show_count == 0) {
-        printf(opts->all ? "No messages in %s.\n"
-                         : "No unread messages in %s.\n", folder);
+        printf("No messages in %s.\n", folder);
         free(unseen_uids);
         free(all_uids);
         return 0;
@@ -732,14 +812,10 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     if (!entries) { free(unseen_uids); free(all_uids); return -1; }
 
     for (int i = 0; i < show_count; i++) {
-        entries[i].uid    = show_uids[i];
+        entries[i].uid    = all_uids[i];
         entries[i].unseen = 0;
-        if (!opts->all) {
-            entries[i].unseen = 1; /* UNSEEN-only mode: all are unread */
-        } else {
-            for (int j = 0; j < unseen_count; j++) {
-                if (unseen_uids[j] == show_uids[i]) { entries[i].unseen = 1; break; }
-            }
+        for (int j = 0; j < unseen_count; j++) {
+            if (unseen_uids[j] == all_uids[i]) { entries[i].unseen = 1; break; }
         }
     }
     free(unseen_uids);
@@ -771,12 +847,10 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         if (wend > show_count)           wend = show_count;
 
         /* Compute adaptive column widths.
-         * Fixed overhead per data row:
-         *   --all:    "  S  UID  " (12) + "  " (2) + "  DATE" (2+16=18) = 32
-         *   unread:   "  UID  "   (9)  + "  " (2) + "  DATE" (2+16=18) = 29
+         * Fixed overhead per data row: "  S  UID  " (12) + "  " (2) + "  DATE" (18) = 32
          * from_w and subj_w share the remaining space evenly (min 20 each). */
         int tcols    = terminal_cols();
-        int overhead = opts->all ? 32 : 29;
+        int overhead = 32;
         int avail    = tcols - overhead;
         if (avail < 40) avail = 40;
         int from_w = avail / 2;
@@ -785,25 +859,14 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         if (opts->pager) printf("\033[H\033[2J");
 
         /* Count / status line */
-        if (opts->all) {
-            printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
-                   wstart + 1, wend, show_count, folder, unseen_count);
-            printf("  S  %5s  %-*s  %-*s  %s\n",
-                   "UID", from_w, "From", subj_w, "Subject", "Date");
-            printf("  \u2550  \u2550\u2550\u2550\u2550\u2550  ");
-            print_dbar(from_w); printf("  ");
-            print_dbar(subj_w); printf("  ");
-            print_dbar(16);     printf("\n");
-        } else {
-            printf("%d-%d of %d unread message(s) in %s.\n\n",
-                   wstart + 1, wend, show_count, folder);
-            printf("  %5s  %-*s  %-*s  %s\n",
-                   "UID", from_w, "From", subj_w, "Subject", "Date");
-            printf("  \u2550\u2550\u2550\u2550\u2550  ");
-            print_dbar(from_w); printf("  ");
-            print_dbar(subj_w); printf("  ");
-            print_dbar(16);     printf("\n");
-        }
+        printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
+               wstart + 1, wend, show_count, folder, unseen_count);
+        printf("  S  %5s  %-*s  %-*s  %s\n",
+               "UID", from_w, "From", subj_w, "Subject", "Date");
+        printf("  \u2550  \u2550\u2550\u2550\u2550\u2550  ");
+        print_dbar(from_w); printf("  ");
+        print_dbar(subj_w); printf("  ");
+        print_dbar(16);     printf("\n");
 
         /* Data rows */
         for (int i = wstart; i < wend; i++) {
@@ -821,10 +884,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             int sel = opts->pager && (i == cursor);
             if (sel) printf("\033[7m");
 
-            if (opts->all)
-                printf("  %c  %5d  ", entries[i].unseen ? 'N' : ' ', entries[i].uid);
-            else
-                printf("  %5d  ", entries[i].uid);
+            printf("  %c  %5d  ", entries[i].unseen ? 'N' : ' ', entries[i].uid);
             print_padded_col(from    ? from    : "(no from)",    from_w);
             printf("  ");
             print_padded_col(subject ? subject : "(no subject)", subj_w);

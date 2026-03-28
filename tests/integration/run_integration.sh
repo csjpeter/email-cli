@@ -106,21 +106,43 @@ EMAIL_FOLDER=$IMAP_FOLDER
 SSL_NO_VERIFY=1
 EOF
 
-# 4. Run email-cli and capture output
-echo "Connecting to $IMAP_HOST as $IMAP_USER (TLS, self-signed cert)..."
-echo ""
-OUTPUT=$(HOME="$TEST_HOME" "$PROJECT_ROOT/bin/email-cli" 2>&1)
-echo "$OUTPUT"
+# Helper: query FLAGS for all messages in INBOX via doveadm inside the container
+flags_for_user() {
+    docker exec "$CONTAINER" doveadm fetch -u "$IMAP_USER" "flags" mailbox INBOX ALL 2>/dev/null
+}
+
+# 4. Verify FLAGS before any email-cli operation (baseline)
+BEFORE_FLAGS=$(flags_for_user)
+
+# 5. Run email-cli list (batch) and capture output
+echo "Running: email-cli list --batch ..."
+LIST_OUTPUT=$(HOME="$TEST_HOME" "$PROJECT_ROOT/bin/email-cli" list --batch 2>&1)
+echo "$LIST_OUTPUT"
 echo ""
 
-# 5. Assertions
+# 6. Run email-cli show for each UID found in list output
+UIDS=$(echo "$LIST_OUTPUT" | grep -Eo '^[[:space:]]+[0-9]+' | tr -d ' ' | head -5)
+SHOW_OUTPUT=""
+for UID in $UIDS; do
+    echo "Running: email-cli show $UID ..."
+    OUT=$(HOME="$TEST_HOME" "$PROJECT_ROOT/bin/email-cli" --batch show "$UID" 2>&1)
+    echo "$OUT"
+    SHOW_OUTPUT="$SHOW_OUTPUT $OUT"
+done
+echo ""
+
+# 7. Verify FLAGS after email-cli operations (must be unchanged)
+AFTER_FLAGS=$(flags_for_user)
+
+# 8. Assertions
 PASSED=0
 FAILED=0
 
 check() {
     local desc="$1"
     local pattern="$2"
-    if echo "$OUTPUT" | grep -q "$pattern"; then
+    local text="$3"
+    if echo "$text" | grep -q "$pattern"; then
         echo "  [PASS] $desc"
         PASSED=$((PASSED + 1))
     else
@@ -129,12 +151,33 @@ check() {
     fi
 }
 
+check_equal() {
+    local desc="$1"
+    local a="$2"
+    local b="$3"
+    if [ "$a" = "$b" ]; then
+        echo "  [PASS] $desc"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] $desc"
+        echo "         BEFORE: $a"
+        echo "         AFTER:  $b"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
+ALL_OUTPUT="$LIST_OUTPUT $SHOW_OUTPUT"
+
 echo "--- Assertions ---"
-check "Fetch header printed"              "Fetching recent emails"
-check "Messages found in mailbox"        "message"
-check "First test email content found"   "Integration Test Email 1"
-check "Second test email content found"  "Integration Test Email 2"
-check "Successful completion"            "Fetch complete"
+check "Messages listed"                  "message"      "$LIST_OUTPUT"
+check "First test email in list"         "Test Email 1" "$LIST_OUTPUT"
+check "Second test email in list"        "Test Email 2" "$LIST_OUTPUT"
+check "Show output has message content"  "Test Email"   "$SHOW_OUTPUT"
+check "Successful list completion"       "Fetch complete" "$LIST_OUTPUT"
+
+echo ""
+echo "--- CRITICAL: Read-only guarantee (FLAGS must not change) ---"
+check_equal "Message FLAGS unchanged after list+show" "$BEFORE_FLAGS" "$AFTER_FLAGS"
 
 echo ""
 echo "--- Integration Test Results ---"
@@ -146,3 +189,6 @@ if [ "$FAILED" -gt 0 ]; then
 fi
 
 echo "INTEGRATION TEST PASSED"
+echo ""
+echo "NOTE: The FLAGS-unchanged assertion above is CRITICAL."
+echo "      A failure there means email-cli is marking messages as read on the server."

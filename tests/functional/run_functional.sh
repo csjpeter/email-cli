@@ -16,9 +16,10 @@ echo "--- email-cli Functional Tests ---"
 mkdir -p "$PROJECT_ROOT/build/tests/functional"
 gcc "$MOCK_SERVER_SRC" -o "$MOCK_SERVER_BIN"
 
-# 2. Start Mock Server in background
+# 2. Start Mock Server in background, capturing its stdout for later assertions
 echo "Starting Mock IMAP Server..."
-"$MOCK_SERVER_BIN" &
+MOCK_LOG="$PROJECT_ROOT/build/tests/functional/mock_server.log"
+"$MOCK_SERVER_BIN" >"$MOCK_LOG" 2>&1 &
 SERVER_PID=$!
 
 # Ensure cleanup on exit
@@ -78,26 +79,27 @@ HELP_SHOW=$("$BIN_DIR/email-cli" help show 2>&1)
 echo "--- help show ---"
 check "help show: usage line"     "email-cli show"          "$HELP_SHOW"
 
-# 7. Test: list (unread only)
+# 7. Test: list
 echo ""
 echo "Running: email-cli list ..."
 LIST_OUTPUT=$("$BIN_DIR/email-cli" list 2>&1 || true)
 echo "$LIST_OUTPUT"
 echo "--- List Assertions ---"
 check "Fetch header printed"      "Fetching emails"         "$LIST_OUTPUT"
-check "Unread message count"      "unread message"          "$LIST_OUTPUT"
+check "Message count shown"       "message(s) in"           "$LIST_OUTPUT"
+check "Unread count shown"        "unread"                  "$LIST_OUTPUT"
 check "Table separator shown"     "═══"                     "$LIST_OUTPUT"
 check "Subject in table"          "Test Message"            "$LIST_OUTPUT"
 check "Successful completion"     "Success: Fetch complete" "$LIST_OUTPUT"
 
-# 8. Test: list --all
+# 8. Test: list --all (same behavior — all messages always shown)
 echo ""
 echo "Running: email-cli list --all ..."
 ALL_OUTPUT=$("$BIN_DIR/email-cli" list --all 2>&1 || true)
 echo "$ALL_OUTPUT"
 echo "--- List --all Assertions ---"
 check "All mode: message count"   "message(s) in"           "$ALL_OUTPUT"
-check "All mode: unread marker N" " N "                     "$ALL_OUTPUT"
+check "All mode: unread count"    "unread"                  "$ALL_OUTPUT"
 check "All mode: subject shown"   "Test Message"            "$ALL_OUTPUT"
 
 # 9. Test: list --folder
@@ -135,6 +137,26 @@ echo "--- Folders Tree Assertions ---"
 check "Tree: has branch char"     "──"                      "$TREE_OUTPUT"
 check "Tree: INBOX shown"         "INBOX"                   "$TREE_OUTPUT"
 check "Tree: Sent shown"          "Sent"                    "$TREE_OUTPUT"
+
+check_not() {
+    local desc="$1"
+    local pattern="$2"
+    local text="$3"
+    if ! echo "$text" | grep -q "$pattern"; then
+        echo "  [PASS] $desc"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] $desc  (unexpected pattern found: '$pattern')"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
+# CRITICAL: verify email-cli never issued a STORE (flag-modification) command
+MOCK_CMDS=$(cat "$MOCK_LOG" 2>/dev/null || true)
+echo ""
+echo "--- CRITICAL: Read-only guarantee (no STORE commands issued) ---"
+check_not "No STORE command sent to server" "STORE" "$MOCK_CMDS"
+echo "(mock server log: $MOCK_LOG)"
 
 echo ""
 echo "--- Functional Test Results ---"

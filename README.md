@@ -29,7 +29,7 @@ A write-capable companion client may be developed in the future.
 
 ## Security
 
-- **Read-only:** `email-cli` issues only `FETCH` and `SEARCH` IMAP commands. It never sends, moves, deletes, or modifies messages or flags on the server.
+- **Read-only:** `email-cli` issues only `FETCH` (with `BODY.PEEK`, which never sets `\Seen`) and `SEARCH` IMAP commands. It never sends, moves, deletes, or modifies messages or flags on the server — not even the `\Seen` flag.
 - **Credentials at rest:** The configuration file is written with `0600` permissions, readable only by the owning user. The password is stored in plaintext — keep the file private.
 - **Transport:** Connections use `imaps://` (TLS 1.2+) by default. Plain `imap://` is supported for local testing only. `SSL_NO_VERIFY=1` disables certificate verification — never use it in production.
 - **Local cache:** Fetched messages are stored in `~/.cache/email-cli/` with directory permissions `0700`. No external service has access to the cache.
@@ -182,8 +182,8 @@ email-cli list [--all] [--folder <name>] [--limit <n>] [--offset <n>] [--batch]
 
 | Option | Description |
 |--------|-------------|
-| _(none)_ | Show unread messages in the configured folder |
-| `--all` | Show all messages; unread ones marked `N`, listed first |
+| _(none)_ | Show all messages; unread ones marked `N`, listed first |
+| `--all` | Same as no option (all messages are always shown) |
 | `--folder <name>` | Use a different folder instead of the configured default |
 | `--limit <n>` | Number of messages per page (default: terminal height) |
 | `--offset <n>` | Start from the nth message, 1-based (for paging scripts) |

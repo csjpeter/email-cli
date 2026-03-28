@@ -11,11 +11,9 @@ Authoritative what-and-how reference; sufficient to re-implement the program fro
 - [Caching](spec/caching.md) — cache layout, read/write policy, eviction rules
 - [Pagination](spec/pagination.md) — terminal detection, pager, batch mode
 
-## User Guides
+## User Guide
 
-- [Getting Started](user/getting-started.md) — installation, first run, provider notes
-- [Configuration](user/configuration.md) — config file reference, TLS options
-- [Usage](user/usage.md) — CLI commands, output format, exit codes
+See the project [README](../README.md) for installation, configuration, interactive mode, and CLI reference.
 
 ## Developer Guides
 

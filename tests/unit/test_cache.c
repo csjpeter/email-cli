@@ -53,3 +53,45 @@ void test_cache_store(void) {
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
 }
+
+void test_ui_prefs(void) {
+    char *old_home = getenv("HOME");
+    setenv("HOME", "/tmp/email-cli-ui-pref-test-home", 1);
+    unlink("/tmp/email-cli-ui-pref-test-home/.cache/email-cli/ui.ini");
+
+    /* 1. Missing key returns default */
+    ASSERT(ui_pref_get_int("folder_view_mode", 1) == 1,
+           "ui_pref_get_int: missing key should return default 1");
+    ASSERT(ui_pref_get_int("folder_view_mode", 0) == 0,
+           "ui_pref_get_int: missing key should return default 0");
+
+    /* 2. Set and get back */
+    ASSERT(ui_pref_set_int("folder_view_mode", 0) == 0,
+           "ui_pref_set_int: should return 0 on success");
+    ASSERT(ui_pref_get_int("folder_view_mode", 1) == 0,
+           "ui_pref_get_int: should return stored value 0");
+
+    /* 3. Overwrite existing key */
+    ASSERT(ui_pref_set_int("folder_view_mode", 1) == 0,
+           "ui_pref_set_int: overwrite should return 0");
+    ASSERT(ui_pref_get_int("folder_view_mode", 0) == 1,
+           "ui_pref_get_int: should return updated value 1");
+
+    /* 4. Multiple keys coexist */
+    ASSERT(ui_pref_set_int("other_pref", 42) == 0,
+           "ui_pref_set_int: second key should return 0");
+    ASSERT(ui_pref_get_int("folder_view_mode", 0) == 1,
+           "ui_pref_get_int: first key intact after adding second");
+    ASSERT(ui_pref_get_int("other_pref", 0) == 42,
+           "ui_pref_get_int: second key should return 42");
+
+    /* 5. Unknown key still returns default */
+    ASSERT(ui_pref_get_int("no_such_key", 7) == 7,
+           "ui_pref_get_int: unknown key should return default");
+
+    /* Cleanup */
+    unlink("/tmp/email-cli-ui-pref-test-home/.cache/email-cli/ui.ini");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}

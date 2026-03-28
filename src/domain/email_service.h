@@ -36,7 +36,9 @@ typedef struct {
  *
  * @param cfg   Connection configuration.
  * @param opts  Listing options.
- * @return 0 on success, -1 on failure.
+ * @return  0 = user quit normally,
+ *          1 = user pressed Backspace (go to folder list, pager mode only),
+ *         -1 = error.
  */
 int email_service_list(const Config *cfg, const EmailListOpts *opts);
 
@@ -51,6 +53,18 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts);
  * @return 0 on success, -1 on failure.
  */
 int email_service_list_folders(const Config *cfg, int tree);
+
+/**
+ * @brief Interactive folder browser (TUI).
+ *
+ * Displays a full-screen cursor-driven folder list with tree/flat toggle.
+ * The user can select a folder with Enter or quit with ESC / Ctrl-C / Backspace.
+ *
+ * @param cfg  Connection configuration.
+ * @return Heap-allocated selected folder name, or NULL if the user quit.
+ *         Caller must free() the returned string.
+ */
+char *email_service_list_folders_interactive(const Config *cfg);
 
 /**
  * @brief Reads and displays one message identified by its IMAP UID.

@@ -7,13 +7,14 @@
 /** Logical key codes returned by terminal_read_key(). */
 typedef enum {
     TERM_KEY_QUIT      = 0,  /* Ctrl-C                          */
-    TERM_KEY_NEXT_PAGE = 1,  /* PgDn / Space                    */
+    TERM_KEY_NEXT_PAGE = 1,  /* PgDn                            */
     TERM_KEY_PREV_PAGE = 2,  /* PgUp                            */
     TERM_KEY_NEXT_LINE = 3,  /* Down-arrow                      */
     TERM_KEY_PREV_LINE = 4,  /* Up-arrow                        */
-    TERM_KEY_IGNORE    = 5,  /* unknown / left / right          */
+    TERM_KEY_IGNORE    = 5,  /* unknown / left / right / Space  */
     TERM_KEY_ENTER     = 6,  /* Enter (\n or \r)                */
-    TERM_KEY_ESC       = 7   /* bare ESC                        */
+    TERM_KEY_ESC       = 7,  /* bare ESC                        */
+    TERM_KEY_BACK      = 8   /* Backspace / DEL                 */
 } TermKey;
 
 /** Opaque saved terminal state (used for raw-mode enter/exit). */
@@ -54,6 +55,13 @@ static inline void terminal_raw_exit_ptr(TermRawState **p) {
  * Fully consumes multi-byte escape sequences.
  */
 TermKey terminal_read_key(void);
+
+/**
+ * Returns the last printable ASCII character (32–126) that caused
+ * terminal_read_key() to return TERM_KEY_IGNORE.
+ * Returns 0 if the last ignored keystroke was not a printable character.
+ */
+int terminal_last_printable(void);
 
 /**
  * Display column width of Unicode codepoint cp.

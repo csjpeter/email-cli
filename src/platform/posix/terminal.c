@@ -79,8 +79,13 @@ static int read_byte(void) {
     return (n == 1) ? (int)c : -1;
 }
 
+static int g_last_printable = 0;
+
+int terminal_last_printable(void) { return g_last_printable; }
+
 TermKey terminal_read_key(void) {
     /* The terminal must already be in raw mode (VMIN=1, VTIME=0). */
+    g_last_printable = 0;
     int c = read_byte();
     TermKey result = TERM_KEY_IGNORE;   /* unknown input → silent no-op */
 
@@ -125,10 +130,13 @@ TermKey terminal_read_key(void) {
         tcsetattr(STDIN_FILENO, TCSANOW, &t);
     } else if (c == '\n' || c == '\r') {
         result = TERM_KEY_ENTER;
-    } else if (c == ' ') {
-        result = TERM_KEY_NEXT_PAGE;
     } else if (c == 3 /* Ctrl-C */) {
         result = TERM_KEY_QUIT;
+    } else if (c == 127 || c == 8 /* DEL / Backspace */) {
+        result = TERM_KEY_BACK;
+    } else if (c >= 32 && c <= 126) {
+        g_last_printable = c;
+        result = TERM_KEY_IGNORE;
     }
     /* c == -1 (read error/timeout) → result stays TERM_KEY_IGNORE */
 

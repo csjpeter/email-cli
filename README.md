@@ -18,6 +18,7 @@ A terminal-based IMAP email client written in C.
   - [Provider Notes](#provider-notes)
 - [Interactive Mode](#interactive-mode)
   - [Message List View](#message-list-view)
+  - [Folder List View](#folder-list-view)
   - [Message Reader View](#message-reader-view)
 - [CLI Batch Mode](#cli-batch-mode)
   - [list](#list)
@@ -76,11 +77,11 @@ bin/email-cli
 
 ## Interactive Mode
 
-When output is a terminal, `email-cli` opens a full-screen interactive TUI. Navigation uses keyboard shortcuts — no mouse required.
+When run without arguments in a terminal, `email-cli` opens a full-screen interactive TUI starting with the unread messages in your configured folder. Navigation uses keyboard shortcuts — no mouse required.
 
 ### Message List View
 
-Opened by running `email-cli list` (or `email-cli list --all`).
+The default view on launch, or opened with `email-cli list` / `email-cli list --all`.
 
 ```
 1-20 of 42 unread message(s) in INBOX.
@@ -91,18 +92,45 @@ Opened by running `email-cli list` (or `email-cli list --all`).
    1230  Bob <bob@ex.com>      Invoice attached      2026-03-27 18:01
    ...
 
-  ↑↓=step  PgDn/PgUp=page  Enter=open  ESC=quit  [1/42]
+  ↑↓=step  PgDn/PgUp=page  Enter=open  Backspace=folders  ESC=quit  [1/42]
 ```
 
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Move cursor one row up/down |
-| `PgDn` / `Space` | Move cursor one page down |
+| `PgDn` | Move cursor one page down |
 | `PgUp` | Move cursor one page up |
 | `Enter` | Open selected message |
+| `Backspace` | Go to folder list |
 | `ESC` or Ctrl-C | Quit |
 
 Unread messages are shown first. In `--all` mode an `N` marker appears in the `S` column for unread messages.
+
+### Folder List View
+
+Opened by pressing `Backspace` in the message list.
+
+```
+Folders (12)
+
+├── INBOX
+│   ├── Sent
+│   ├── Drafts
+│   └── Archive
+│       └── 2025
+└── Trash
+
+  ↑↓=step  PgDn/PgUp=page  Enter=select  t=flat  Backspace/ESC=quit  [1/12]
+```
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Move cursor one row up/down |
+| `PgDn` | Move cursor one page down |
+| `PgUp` | Move cursor one page up |
+| `Enter` | Open the selected folder's message list |
+| `t` | Toggle between tree and flat list view |
+| `Backspace` / `ESC` / Ctrl-C | Quit |
 
 ### Message Reader View
 
@@ -117,17 +145,17 @@ Hi,
 
 Just confirming the meeting is on for 10:00.
 
--- [1/3] PgDn/↓=scroll  PgUp/↑=back  ESC=list --
+-- [1/3] PgDn/↓=scroll  PgUp/↑=back  Backspace=list  ESC=quit --
 ```
 
 | Key | Action |
 |-----|--------|
-| `PgDn` / `Enter` | Scroll forward one page |
+| `PgDn` | Scroll forward one page |
 | `PgUp` | Scroll back one page |
 | `↓` | Scroll forward one line |
 | `↑` | Scroll back one line |
-| `ESC` | Return to message list |
-| Ctrl-C | Quit entirely |
+| `Backspace` | Return to message list |
+| `ESC` / Ctrl-C | Quit entirely |
 
 Messages are cached locally at `~/.cache/email-cli/messages/<folder>/<uid>.eml` after the first fetch.
 

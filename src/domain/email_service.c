@@ -1086,7 +1086,8 @@ char *email_service_list_folders_interactive(const Config *cfg) {
         return NULL;
     }
 
-    int cursor = 0, wstart = 0, tree_mode = 1;
+    int cursor = 0, wstart = 0;
+    int tree_mode = ui_pref_get_int("folder_view_mode", 1);
     char current_prefix[512] = "";   /* flat mode: current navigation level */
     int vcount = 0;                  /* flat view: number of visible entries */
     char *selected = NULL;
@@ -1191,6 +1192,7 @@ char *email_service_list_folders_interactive(const Config *cfg) {
         case TERM_KEY_IGNORE:
             if (terminal_last_printable() == 't') {
                 tree_mode = !tree_mode;
+                ui_pref_set_int("folder_view_mode", tree_mode);
                 cursor = 0; wstart = 0;
                 if (!tree_mode) current_prefix[0] = '\0';
             }

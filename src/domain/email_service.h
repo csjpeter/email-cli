@@ -58,13 +58,18 @@ int email_service_list_folders(const Config *cfg, int tree);
  * @brief Interactive folder browser (TUI).
  *
  * Displays a full-screen cursor-driven folder list with tree/flat toggle.
- * The user can select a folder with Enter or quit with ESC / Ctrl-C / Backspace.
+ * In flat mode the browser opens at the level containing @p current_folder
+ * so the user lands back where they came from.
+ * Backspace navigates up one level; at root it is a no-op (use ESC to quit).
  *
- * @param cfg  Connection configuration.
+ * @param cfg            Connection configuration.
+ * @param current_folder Folder active before opening the browser; used to
+ *                       pre-position the flat-mode view. May be NULL.
  * @return Heap-allocated selected folder name, or NULL if the user quit.
  *         Caller must free() the returned string.
  */
-char *email_service_list_folders_interactive(const Config *cfg);
+char *email_service_list_folders_interactive(const Config *cfg,
+                                             const char *current_folder);
 
 /**
  * @brief Reads and displays one message identified by its IMAP UID.

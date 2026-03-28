@@ -158,7 +158,7 @@ int main(int argc, char *argv[]) {
     int pager     = !batch && terminal_is_tty(STDOUT_FILENO);
     int page_size = detect_page_size(batch);
 
-    if (!cmd || strcmp(cmd, "help") == 0) {
+    if (cmd && strcmp(cmd, "help") == 0) {
         /* First non --batch arg after "help" is the topic */
         const char *topic = NULL;
         int past_help = 0;
@@ -175,6 +175,12 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Run 'email-cli help' for available commands.\n");
             return EXIT_FAILURE;
         }
+        help_general();
+        return EXIT_SUCCESS;
+    }
+
+    /* No command in batch/non-tty mode: show help and exit. */
+    if (!cmd && !pager) {
         help_general();
         return EXIT_SUCCESS;
     }
@@ -210,7 +216,26 @@ int main(int argc, char *argv[]) {
     /* 6. Dispatch */
     int result = -1;
 
-    if (strcmp(cmd, "list") == 0) {
+    if (!cmd) {
+        /* Interactive TUI: start with unread messages in the configured folder. */
+        char *tui_folder = strdup(cfg->folder ? cfg->folder : "INBOX");
+        if (!tui_folder) {
+            result = -1;
+        } else {
+            for (;;) {
+                EmailListOpts opts = {0, tui_folder, page_size, 0, 1};
+                int ret = email_service_list(cfg, &opts);
+                if (ret != 1) { result = (ret >= 0) ? 0 : -1; break; }
+                /* User pressed Backspace → show folder browser */
+                char *sel = email_service_list_folders_interactive(cfg);
+                free(tui_folder);
+                tui_folder = sel;
+                if (!tui_folder) { result = 0; break; }
+            }
+            free(tui_folder);
+        }
+
+    } else if (strcmp(cmd, "list") == 0) {
         EmailListOpts opts = {0, NULL, 0, 0, pager};
         int ok = 1, explicit_limit = -1;
         for (int i = 2; i < argc && ok; i++) {
@@ -304,7 +329,7 @@ int main(int argc, char *argv[]) {
     logger_log(LOG_INFO, "--- email-cli session finished ---");
     logger_close();
 
-    if (result == 0) {
+    if (result >= 0) {
         printf("\nSuccess: Fetch complete.\n");
         return EXIT_SUCCESS;
     }

@@ -201,7 +201,6 @@ static char *word_wrap(const char *text, int width) {
 
 /**
  * Pager prompt for the standalone `show` command.
- * TERM_KEY_ENTER and TERM_KEY_ESC are treated the same as next/quit respectively.
  * Returns scroll delta: 0 = quit, positive = forward N lines, negative = back N.
  */
 static int pager_prompt(int cur_page, int total_pages, int page_size) {
@@ -216,12 +215,13 @@ static int pager_prompt(int cur_page, int total_pages, int page_size) {
 
         switch (key) {
         case TERM_KEY_QUIT:
-        case TERM_KEY_ESC:       return 0;           /* ESC = quit in standalone mode */
-        case TERM_KEY_ENTER:
+        case TERM_KEY_ESC:
+        case TERM_KEY_BACK:      return 0;
         case TERM_KEY_NEXT_PAGE: return  page_size;
         case TERM_KEY_PREV_PAGE: return -page_size;
         case TERM_KEY_NEXT_LINE: return  1;
         case TERM_KEY_PREV_LINE: return -1;
+        case TERM_KEY_ENTER:
         case TERM_KEY_IGNORE:    continue;
         }
     }
@@ -455,7 +455,7 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
         int cur_page = cur_line / rows_avail + 1;
         fprintf(stderr,
                 "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                "  ESC=list --\033[0m",
+                "  Backspace=list  ESC=quit --\033[0m",
                 cur_page, total_pages);
         fflush(stderr);
 
@@ -464,13 +464,13 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
         fflush(stderr);
 
         switch (key) {
+        case TERM_KEY_BACK:
+            result = 0;          /* back to list */
+            goto show_int_done;
         case TERM_KEY_ESC:
-            result = 0;
-            goto show_int_done;
         case TERM_KEY_QUIT:
-            result = 1;
+            result = 1;          /* quit entirely */
             goto show_int_done;
-        case TERM_KEY_ENTER:
         case TERM_KEY_NEXT_PAGE:
         {
             int next = cur_line + rows_avail;
@@ -478,6 +478,8 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
             /* else: already on last page — stay */
         }
             break;
+        case TERM_KEY_ENTER:
+            break;               /* Enter does not scroll */
         case TERM_KEY_PREV_PAGE:
             cur_line -= rows_avail;
             if (cur_line < 0) cur_line = 0;
@@ -638,6 +640,32 @@ static int ancestor_is_last(char **names, int count, int i,
     return 1;
 }
 
+/** Print one folder item with its tree/flat prefix and optional selection highlight. */
+static void print_folder_item(char **names, int count, int i, char sep,
+                               int tree_mode, int selected) {
+    if (selected) printf("\033[7m");
+
+    if (tree_mode) {
+        int depth = 0;
+        for (const char *p = names[i]; *p; p++)
+            if (*p == sep) depth++;
+
+        for (int lv = 0; lv < depth; lv++) {
+            int last = ancestor_is_last(names, count, i, lv, sep);
+            printf("%s", last ? "    " : "\u2502   ");
+        }
+        int last = is_last_sibling(names, count, i, sep);
+        printf("%s", last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ");
+        const char *comp = strrchr(names[i], sep);
+        printf("%s", comp ? comp + 1 : names[i]);
+    } else {
+        printf("  %s", names[i]);
+    }
+
+    if (selected) printf("\033[K\033[0m");
+    printf("\n");
+}
+
 static void render_folder_tree(char **names, int count, char sep) {
     for (int i = 0; i < count; i++) {
         int depth = 0;
@@ -664,6 +692,7 @@ static void render_folder_tree(char **names, int count, char sep) {
 
 int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     const char *folder = opts->folder ? opts->folder : cfg->folder;
+    int list_result = 0;
 
     printf("--- Fetching emails: %s @ %s/%s ---\n",
            cfg->user, cfg->host, folder);
@@ -814,22 +843,25 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         }
 
         /* Navigation hint (status bar) */
-        printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=open  ESC=quit"
-               "  [%d/%d]\033[0m\n",
+        printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+               "  Backspace=folders  ESC=quit  [%d/%d]\033[0m\n",
                cursor + 1, show_count);
         fflush(stdout);
 
         TermKey key = terminal_read_key();
 
         switch (key) {
+        case TERM_KEY_BACK:
+            list_result = 1;
+            goto list_done;
         case TERM_KEY_QUIT:
         case TERM_KEY_ESC:
             goto list_done;
         case TERM_KEY_ENTER:
             {
                 int ret = show_uid_interactive(cfg, entries[cursor].uid, opts->limit);
-                if (ret == 1) goto list_done;  /* user pressed q in show */
-                /* ret == 0: ESC → back to list; ret == -1: error → stay */
+                if (ret == 1) goto list_done;  /* user quit from show */
+                /* ret == 0: Backspace → back to list; ret == -1: error → stay */
             }
             break;
         case TERM_KEY_NEXT_LINE:
@@ -853,15 +885,16 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 list_done:
     /* tui_raw is cleaned up automatically via RAII_TERM_RAW */
     free(entries);
-    return 0;
+    return list_result;
 }
 
-int email_service_list_folders(const Config *cfg, int tree) {
+/** Fetch the folder list into a heap-allocated array; caller owns entries and array. */
+static char **fetch_folder_list(const Config *cfg, int *count_out, char *sep_out) {
     RAII_CURL CURL *curl = make_curl(cfg);
-    if (!curl) return -1;
+    if (!curl) return NULL;
 
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/", cfg->host) == -1) return -1;
+    if (asprintf(&url, "%s/", cfg->host) == -1) return NULL;
 
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "LIST \"\" \"*\"");
 
@@ -870,19 +903,18 @@ int email_service_list_folders(const Config *cfg, int tree) {
     if (res != CURLE_OK) {
         logger_log(LOG_WARN, "LIST failed: %s", curl_easy_strerror(res));
         free(buf.data);
-        return -1;
+        return NULL;
     }
 
-    /* Parse folder names */
     char **folders = NULL;
-    int    count   = 0, cap = 0;
-    char   sep     = '.';
+    int count = 0, cap = 0;
+    char sep = '.';
 
     const char *p = buf.data;
     while (p && *p) {
         char got_sep = '.';
         char *raw_name = parse_list_line(p, &got_sep);
-        char *name     = raw_name ? imap_utf7_decode(raw_name) : NULL;
+        char *name = raw_name ? imap_utf7_decode(raw_name) : NULL;
         free(raw_name);
         if (name) {
             sep = got_sep;
@@ -899,10 +931,20 @@ int email_service_list_folders(const Config *cfg, int tree) {
     }
     free(buf.data);
 
-    if (count == 0) {
+    *count_out = count;
+    if (sep_out) *sep_out = sep;
+    return folders;
+}
+
+int email_service_list_folders(const Config *cfg, int tree) {
+    int count = 0;
+    char sep = '.';
+    char **folders = fetch_folder_list(cfg, &count, &sep);
+
+    if (!folders || count == 0) {
         printf("No folders found.\n");
-        free(folders);
-        return 0;
+        if (folders) free(folders);
+        return folders ? 0 : -1;
     }
 
     qsort(folders, (size_t)count, sizeof(char *), cmp_str);
@@ -915,6 +957,78 @@ int email_service_list_folders(const Config *cfg, int tree) {
     for (int i = 0; i < count; i++) free(folders[i]);
     free(folders);
     return 0;
+}
+
+char *email_service_list_folders_interactive(const Config *cfg) {
+    int count = 0;
+    char sep = '.';
+    char **folders = fetch_folder_list(cfg, &count, &sep);
+    if (!folders || count == 0) {
+        if (folders) free(folders);
+        return NULL;
+    }
+
+    qsort(folders, (size_t)count, sizeof(char *), cmp_str);
+
+    int cursor = 0, wstart = 0, tree_mode = 1;
+    char *selected = NULL;
+
+    RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
+
+    for (;;) {
+        int rows  = terminal_rows();
+        int limit = (rows > 4) ? rows - 3 : 10;
+
+        if (cursor < wstart) wstart = cursor;
+        if (cursor >= wstart + limit) wstart = cursor - limit + 1;
+        int wend = wstart + limit;
+        if (wend > count) wend = count;
+
+        printf("\033[H\033[2J");
+        printf("Folders (%d)\n\n", count);
+
+        for (int i = wstart; i < wend; i++)
+            print_folder_item(folders, count, i, sep, tree_mode, i == cursor);
+
+        printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=select"
+               "  t=%s  Backspace/ESC=quit  [%d/%d]\033[0m\n",
+               tree_mode ? "flat" : "tree", cursor + 1, count);
+        fflush(stdout);
+
+        TermKey key = terminal_read_key();
+
+        switch (key) {
+        case TERM_KEY_QUIT:
+        case TERM_KEY_ESC:
+        case TERM_KEY_BACK:
+            goto folders_int_done;
+        case TERM_KEY_ENTER:
+            selected = strdup(folders[cursor]);
+            goto folders_int_done;
+        case TERM_KEY_NEXT_LINE:
+            if (cursor < count - 1) cursor++;
+            break;
+        case TERM_KEY_PREV_LINE:
+            if (cursor > 0) cursor--;
+            break;
+        case TERM_KEY_NEXT_PAGE:
+            cursor += limit;
+            if (cursor >= count) cursor = count - 1;
+            break;
+        case TERM_KEY_PREV_PAGE:
+            cursor -= limit;
+            if (cursor < 0) cursor = 0;
+            break;
+        case TERM_KEY_IGNORE:
+            if (terminal_last_printable() == 't')
+                tree_mode = !tree_mode;
+            break;
+        }
+    }
+folders_int_done:
+    for (int i = 0; i < count; i++) free(folders[i]);
+    free(folders);
+    return selected;
 }
 
 int email_service_read(const Config *cfg, int uid, int pager, int page_size) {

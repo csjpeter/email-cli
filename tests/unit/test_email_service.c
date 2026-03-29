@@ -151,6 +151,115 @@ void test_email_service(void) {
         free(r);
     }
 
+    /* ── ansi_scan ───────────────────────────────────────────────────── */
+
+    /* Empty content → all zeros */
+    {
+        AnsiState st = {0};
+        ansi_scan("", "", &st);
+        ASSERT(st.bold==0 && st.italic==0 && st.uline==0 && st.strike==0,
+               "ansi_scan: empty → no state");
+        ASSERT(st.fg_on==0 && st.bg_on==0, "ansi_scan: empty → no color");
+    }
+
+    /* Bold on/off */
+    {
+        AnsiState st = {0};
+        const char *s = "\033[1mtext\033[22m";
+        ansi_scan(s, s + strlen(s), &st);
+        ASSERT(st.bold == 0, "ansi_scan: bold on then off → 0");
+
+        AnsiState st2 = {0};
+        const char *s2 = "\033[1mtext";
+        ansi_scan(s2, s2 + strlen(s2), &st2);
+        ASSERT(st2.bold == 1, "ansi_scan: bold on, no off → 1");
+    }
+
+    /* Italic on/off */
+    {
+        AnsiState st = {0};
+        const char *s = "\033[3m";
+        ansi_scan(s, s + strlen(s), &st);
+        ASSERT(st.italic == 1, "ansi_scan: italic on → 1");
+
+        st.italic = 1;
+        const char *s2 = "\033[23m";
+        ansi_scan(s2, s2 + strlen(s2), &st);
+        ASSERT(st.italic == 0, "ansi_scan: italic off → 0");
+    }
+
+    /* Underline on/off */
+    {
+        AnsiState st = {0};
+        const char *s = "\033[4m";
+        ansi_scan(s, s + strlen(s), &st);
+        ASSERT(st.uline == 1, "ansi_scan: uline on → 1");
+
+        const char *s2 = "\033[24m";
+        ansi_scan(s2, s2 + strlen(s2), &st);
+        ASSERT(st.uline == 0, "ansi_scan: uline off → 0");
+    }
+
+    /* Strikethrough on/off */
+    {
+        AnsiState st = {0};
+        const char *s = "\033[9m";
+        ansi_scan(s, s + strlen(s), &st);
+        ASSERT(st.strike == 1, "ansi_scan: strike on → 1");
+
+        const char *s2 = "\033[29m";
+        ansi_scan(s2, s2 + strlen(s2), &st);
+        ASSERT(st.strike == 0, "ansi_scan: strike off → 0");
+    }
+
+    /* Foreground color set and reset */
+    {
+        AnsiState st = {0};
+        const char *s = "\033[38;2;255;0;128m";
+        ansi_scan(s, s + strlen(s), &st);
+        ASSERT(st.fg_on == 1, "ansi_scan: fg on → 1");
+        ASSERT(st.fg_r == 255 && st.fg_g == 0 && st.fg_b == 128,
+               "ansi_scan: fg RGB correct");
+
+        const char *s2 = "\033[39m";
+        ansi_scan(s2, s2 + strlen(s2), &st);
+        ASSERT(st.fg_on == 0, "ansi_scan: fg reset → 0");
+    }
+
+    /* Background color set and reset */
+    {
+        AnsiState st = {0};
+        const char *s = "\033[48;2;0;64;255m";
+        ansi_scan(s, s + strlen(s), &st);
+        ASSERT(st.bg_on == 1, "ansi_scan: bg on → 1");
+        ASSERT(st.bg_r == 0 && st.bg_g == 64 && st.bg_b == 255,
+               "ansi_scan: bg RGB correct");
+
+        const char *s2 = "\033[49m";
+        ansi_scan(s2, s2 + strlen(s2), &st);
+        ASSERT(st.bg_on == 0, "ansi_scan: bg reset → 0");
+    }
+
+    /* Full reset \033[0m clears all accumulated state */
+    {
+        AnsiState st = {0};
+        const char *s = "\033[1m\033[3m\033[38;2;255;0;0m\033[0m";
+        ansi_scan(s, s + strlen(s), &st);
+        ASSERT(st.bold==0 && st.italic==0 && st.fg_on==0,
+               "ansi_scan: full reset clears all");
+    }
+
+    /* Partial scan: only up to a mid-point in the string */
+    {
+        /* Scan only the first segment (bold+color open), stop before close */
+        const char *body = "\033[1m\033[38;2;255;0;0mLine 0\nLine 1\n\033[22m\033[39m";
+        const char *nl   = strchr(body, '\n');  /* end of "Line 0" */
+        AnsiState st = {0};
+        ansi_scan(body, nl, &st);
+        ASSERT(st.bold == 1,  "ansi_scan: partial scan bold open");
+        ASSERT(st.fg_on == 1, "ansi_scan: partial scan fg open");
+    }
+
     /* ── print_body_page ─────────────────────────────────────────────── */
     /*
      * Redirect stdout to /dev/null so the printed lines do not pollute
@@ -176,6 +285,96 @@ void test_email_service(void) {
         fflush(stdout);
         dup2(saved_fd, STDOUT_FILENO);
         close(saved_fd);
+    }
+
+    /*
+     * Regression test: ANSI state must be replayed at page boundaries.
+     *
+     * A multi-line styled span (e.g. <div style="color:red">) produces:
+     *   \033[38;2;255;0;0mLine 0\nLine 1\nLine 2\n\n\033[39m
+     *
+     * When paginating from line 1 onward, the fg-color escape from line 0
+     * would have been SKIPPED.  Without the fix, Line 1 and Line 2 appeared
+     * in the terminal's default color — and if the terminal had a dark theme
+     * and the email also set background:white, the result was white-on-white.
+     *
+     * The fix (ansi_scan + ansi_replay) re-emits the color escape before the
+     * first visible line.  This test captures stdout via a pipe and asserts
+     * the replayed escape is present.
+     */
+    {
+        /* Body that html_render() would produce for a multi-line color span */
+        const char *body =
+            "\033[38;2;255;0;0mLine 0\n"   /* fg red open on line 0 */
+            "Line 1\n"
+            "Line 2\n"
+            "\033[39m";                    /* fg reset after last line */
+
+        int pipefd[2];
+        pipe(pipefd);
+        fflush(stdout);
+        int saved = dup(STDOUT_FILENO);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        /* Skip line 0; print lines 1-2 */
+        print_body_page(body, 1, 2);
+
+        fflush(stdout);
+        dup2(saved, STDOUT_FILENO);
+        close(saved);
+
+        char buf[256] = {0};
+        ssize_t n = read(pipefd[0], buf, sizeof(buf) - 1);
+        close(pipefd[0]);
+        buf[n > 0 ? n : 0] = '\0';
+
+        /* The replayed fg-red escape must appear before "Line 1" */
+        const char *esc  = strstr(buf, "\033[38;2;255;0;0m");
+        const char *line1 = strstr(buf, "Line 1");
+        ASSERT(esc != NULL,
+               "page ANSI replay: fg color escape present in page-2 output");
+        ASSERT(line1 != NULL,
+               "page ANSI replay: Line 1 present in output");
+        ASSERT(esc < line1,
+               "page ANSI replay: fg escape precedes Line 1");
+    }
+
+    /*
+     * Regression test: background color must also be replayed.
+     * This models the exact scenario that caused white-on-white:
+     * a <div style="background-color:white"> spanning multiple lines.
+     */
+    {
+        const char *body =
+            "\033[48;2;255;255;255mLine 0\n"   /* bg white on line 0 */
+            "Line 1\n"
+            "\033[49m";
+
+        int pipefd[2];
+        pipe(pipefd);
+        fflush(stdout);
+        int saved = dup(STDOUT_FILENO);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        print_body_page(body, 1, 1);
+
+        fflush(stdout);
+        dup2(saved, STDOUT_FILENO);
+        close(saved);
+
+        char buf[256] = {0};
+        ssize_t n = read(pipefd[0], buf, sizeof(buf) - 1);
+        close(pipefd[0]);
+        buf[n > 0 ? n : 0] = '\0';
+
+        const char *esc   = strstr(buf, "\033[48;2;255;255;255m");
+        const char *line1 = strstr(buf, "Line 1");
+        ASSERT(esc != NULL,
+               "page ANSI replay bg: bg color escape present in page-2 output");
+        ASSERT(esc < line1,
+               "page ANSI replay bg: bg escape precedes Line 1");
     }
 
     /* ── print_padded_col (non-ASCII paths, lines 83-91) ─────────────── */

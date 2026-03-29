@@ -5,6 +5,61 @@
 
 /* All tests use html_medium_stub (every printable codepoint = 1 column). */
 
+/* ── Style-balance helpers ────────────────────────────────────────────── */
+
+/** Count non-overlapping occurrences of needle in s. */
+static int count_str(const char *s, const char *needle) {
+    int n = 0;
+    size_t nl = strlen(needle);
+    for (const char *p = s; (p = strstr(p, needle)) != NULL; p += nl) n++;
+    return n;
+}
+
+/**
+ * Render html with ansi=1 and assert that every ANSI "style-on" escape is
+ * paired with its "style-off" counterpart (equal occurrence counts).
+ *
+ * Checks: bold \033[1m/\033[22m, italic \033[3m/\033[23m,
+ *         underline \033[4m/\033[24m, strikethrough \033[9m/\033[29m,
+ *         fg color \033[38;2;/\033[39m, bg color \033[48;2;/\033[49m.
+ */
+static void assert_style_balanced(const char *html, const char *label) {
+    char *r = html_render(html, 0, 1);
+    if (!r) { ASSERT(0, label); return; }
+
+    /* bold */
+    int bold_on  = count_str(r, "\033[1m");
+    int bold_off = count_str(r, "\033[22m");
+    ASSERT(bold_on == bold_off,   label);
+
+    /* italic */
+    int ital_on  = count_str(r, "\033[3m");
+    int ital_off = count_str(r, "\033[23m");
+    ASSERT(ital_on == ital_off,   label);
+
+    /* underline */
+    int uline_on  = count_str(r, "\033[4m");
+    int uline_off = count_str(r, "\033[24m");
+    ASSERT(uline_on == uline_off, label);
+
+    /* strikethrough */
+    int strike_on  = count_str(r, "\033[9m");
+    int strike_off = count_str(r, "\033[29m");
+    ASSERT(strike_on == strike_off, label);
+
+    /* fg color */
+    int fg_on  = count_str(r, "\033[38;2;");
+    int fg_off = count_str(r, "\033[39m");
+    ASSERT(fg_on == fg_off,       label);
+
+    /* bg color */
+    int bg_on  = count_str(r, "\033[48;2;");
+    int bg_off = count_str(r, "\033[49m");
+    ASSERT(bg_on == bg_off,       label);
+
+    free(r);
+}
+
 void test_html_render(void) {
 
     /* 1. NULL input → NULL */
@@ -563,4 +618,156 @@ void test_html_render(void) {
                "color bleed bg: 'after' comes after bg reset");
         free(r);
     }
+}
+
+/* ── Style-balance comprehensive tests ───────────────────────────────── */
+
+void test_html_render_style_balance(void) {
+
+    /* ── Semantic tags — well-formed (with closing tag) ──────────────── */
+    assert_style_balanced("<b>X</b> Y",              "b closed");
+    assert_style_balanced("<strong>X</strong> Y",    "strong closed");
+    assert_style_balanced("<i>X</i> Y",              "i closed");
+    assert_style_balanced("<em>X</em> Y",            "em closed");
+    assert_style_balanced("<u>X</u> Y",              "u closed");
+    assert_style_balanced("<s>X</s> Y",              "s closed");
+    assert_style_balanced("<del>X</del> Y",          "del closed");
+    assert_style_balanced("<strike>X</strike> Y",    "strike closed");
+
+    /* ── Semantic tags — missing closing tag ─────────────────────────── */
+    assert_style_balanced("<b>X Y",                  "b unclosed");
+    assert_style_balanced("<strong>X Y",             "strong unclosed");
+    assert_style_balanced("<i>X Y",                  "i unclosed");
+    assert_style_balanced("<em>X Y",                 "em unclosed");
+    assert_style_balanced("<u>X Y",                  "u unclosed");
+    assert_style_balanced("<s>X Y",                  "s unclosed");
+    assert_style_balanced("<del>X Y",                "del unclosed");
+
+    /* ── Inline style on <span> — well-formed ────────────────────────── */
+    assert_style_balanced(
+        "<span style=\"font-weight:bold\">X</span> Y",
+        "span bold closed");
+    assert_style_balanced(
+        "<span style=\"font-style:italic\">X</span> Y",
+        "span italic closed");
+    assert_style_balanced(
+        "<span style=\"text-decoration:underline\">X</span> Y",
+        "span underline closed");
+    assert_style_balanced(
+        "<span style=\"color:#FF0000\">X</span> Y",
+        "span color closed");
+    assert_style_balanced(
+        "<span style=\"background-color:#0000FF\">X</span> Y",
+        "span bgcolor closed");
+
+    /* ── Inline style on <span> — missing closing tag ────────────────── */
+    assert_style_balanced(
+        "<span style=\"font-weight:bold\">X Y",
+        "span bold unclosed");
+    assert_style_balanced(
+        "<span style=\"font-style:italic\">X Y",
+        "span italic unclosed");
+    assert_style_balanced(
+        "<span style=\"text-decoration:underline\">X Y",
+        "span underline unclosed");
+    assert_style_balanced(
+        "<span style=\"color:#FF0000\">X Y",
+        "span color unclosed");
+    assert_style_balanced(
+        "<span style=\"background-color:#0000FF\">X Y",
+        "span bgcolor unclosed");
+
+    /* ── Inline style on <a> (common in newsletters) ─────────────────── */
+    assert_style_balanced(
+        "<a href=\"x\" style=\"color:#333;text-decoration:underline\">link</a> Y",
+        "a color+uline closed");
+    assert_style_balanced(
+        "<a href=\"x\" style=\"color:#333;text-decoration:underline\">link Y",
+        "a color+uline unclosed");
+
+    /* ── Inline style on non-inline elements (<td>, <div>) ───────────── */
+    assert_style_balanced(
+        "<td style=\"font-weight:bold;color:#FF0000\">X</td> Y",
+        "td bold+color closed");
+    assert_style_balanced(
+        "<div style=\"font-style:italic;background-color:#EEE\">X</div> Y",
+        "div italic+bgcolor closed");
+    assert_style_balanced(
+        "<div style=\"font-style:italic;background-color:#EEE\">X Y",
+        "div italic+bgcolor unclosed");
+
+    /* ── Multiple styles combined on one element ─────────────────────── */
+    assert_style_balanced(
+        "<span style=\"font-weight:bold;font-style:italic;"
+        "text-decoration:underline;color:#FF0000;"
+        "background-color:#0000FF\">X</span> Y",
+        "span all-styles closed");
+    assert_style_balanced(
+        "<span style=\"font-weight:bold;font-style:italic;"
+        "text-decoration:underline;color:#FF0000;"
+        "background-color:#0000FF\">X Y",
+        "span all-styles unclosed");
+
+    /* ── Deeply nested, all unclosed ─────────────────────────────────── */
+    assert_style_balanced(
+        "<b><i><u><span style=\"color:red\">deep text",
+        "deeply nested unclosed");
+
+    /* ── Deeply nested, properly closed ──────────────────────────────── */
+    assert_style_balanced(
+        "<b><i><u><span style=\"color:red\">deep</span></u></i></b> Y",
+        "deeply nested closed");
+
+    /* ── Mixed: some closed, some not ────────────────────────────────── */
+    assert_style_balanced(
+        "<b>bold</b> <i>italic <u>both",
+        "mixed partial unclosed");
+    assert_style_balanced(
+        "<span style=\"color:red\">A</span>"
+        "<span style=\"color:blue\">B</span>"
+        "<span style=\"color:green\">C</span>",
+        "three color spans closed");
+    assert_style_balanced(
+        "<span style=\"color:red\">A"
+        "<span style=\"color:blue\">B"
+        "<span style=\"color:green\">C",
+        "three color spans unclosed nested");
+
+    /* ── Named CSS colors ────────────────────────────────────────────── */
+    assert_style_balanced(
+        "<span style=\"color:red\">X</span> Y",        "named color red");
+    assert_style_balanced(
+        "<span style=\"color:blue\">X</span> Y",       "named color blue");
+    assert_style_balanced(
+        "<span style=\"background-color:yellow\">X</span> Y",
+        "named bgcolor yellow");
+
+    /* ── #RGB shorthand ──────────────────────────────────────────────── */
+    assert_style_balanced(
+        "<span style=\"color:#F00\">X</span> Y",       "color #RGB closed");
+    assert_style_balanced(
+        "<span style=\"color:#F00\">X Y",              "color #RGB unclosed");
+
+    /* ── Realistic newsletter snippet ────────────────────────────────── */
+    assert_style_balanced(
+        "<div style=\"background-color:#f4f4f4\">"
+          "<table><tr>"
+            "<td style=\"color:#333333;font-weight:bold\">Title</td>"
+            "<td style=\"color:#999999\">"
+              "<a style=\"color:#999;text-decoration:underline\""
+              " href=\"x\">click here</a>"
+            "</td>"
+          "</tr></table>"
+        "</div>",
+        "newsletter snippet all closed");
+
+    /* Same snippet with several closing tags omitted */
+    assert_style_balanced(
+        "<div style=\"background-color:#f4f4f4\">"
+          "<table><tr>"
+            "<td style=\"color:#333333;font-weight:bold\">Title"
+            "<td style=\"color:#999999\">"
+              "<a style=\"color:#999;text-decoration:underline\""
+              " href=\"x\">click here",
+        "newsletter snippet partial unclosed");
 }

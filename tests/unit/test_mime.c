@@ -481,4 +481,82 @@ void test_mime_util(void) {
         ASSERT(strlen(val) == 513,
                "Folded long header value length mismatch (511 A + space + X)");
     }
+
+    /* ── mime_get_html_part ─────────────────────────────────────────── */
+
+    /* HTML-only message */
+    {
+        const char *html_msg =
+            "Content-Type: text/html\r\n"
+            "\r\n"
+            "<html><body><b>Bold</b></body></html>";
+        RAII_STRING char *html = mime_get_html_part(html_msg);
+        ASSERT(html != NULL, "mime_get_html_part: html-only should not be NULL");
+        ASSERT(strstr(html, "<b>Bold</b>") != NULL,
+               "mime_get_html_part: html content present");
+    }
+
+    /* Plain-only message → NULL */
+    {
+        const char *plain_msg =
+            "Content-Type: text/plain\r\n"
+            "\r\n"
+            "Plain only";
+        RAII_STRING char *html = mime_get_html_part(plain_msg);
+        ASSERT(html == NULL, "mime_get_html_part: plain-only should return NULL");
+    }
+
+    /* NULL input → NULL */
+    ASSERT(mime_get_html_part(NULL) == NULL,
+           "mime_get_html_part: NULL should return NULL");
+
+    /* multipart/alternative with html part */
+    {
+        const char *alt_msg =
+            "Content-Type: multipart/alternative; boundary=\"ALT\"\r\n"
+            "\r\n"
+            "--ALT\r\n"
+            "Content-Type: text/plain\r\n"
+            "\r\n"
+            "Plain fallback\r\n"
+            "--ALT\r\n"
+            "Content-Type: text/html\r\n"
+            "\r\n"
+            "<p>HTML part</p>\r\n"
+            "--ALT--\r\n";
+        RAII_STRING char *html = mime_get_html_part(alt_msg);
+        ASSERT(html != NULL, "mime_get_html_part: multipart/alt html should not be NULL");
+        ASSERT(strstr(html, "<p>HTML part</p>") != NULL,
+               "mime_get_html_part: multipart html content present");
+    }
+
+    /* multipart with unquoted boundary (covers html_from_multipart unquoted path) */
+    {
+        const char *unquoted_msg =
+            "Content-Type: multipart/alternative; boundary=UNQUOTED\r\n"
+            "\r\n"
+            "--UNQUOTED\r\n"
+            "Content-Type: text/html\r\n"
+            "\r\n"
+            "<b>unquoted</b>\r\n"
+            "--UNQUOTED--\r\n";
+        RAII_STRING char *html = mime_get_html_part(unquoted_msg);
+        ASSERT(html != NULL, "mime_get_html_part: unquoted boundary not NULL");
+        ASSERT(strstr(html, "<b>unquoted</b>") != NULL,
+               "mime_get_html_part: unquoted boundary content present");
+    }
+
+    /* multipart with no HTML parts → NULL (covers html_from_multipart return NULL) */
+    {
+        const char *no_html_msg =
+            "Content-Type: multipart/mixed; boundary=\"NOHTML\"\r\n"
+            "\r\n"
+            "--NOHTML\r\n"
+            "Content-Type: text/plain\r\n"
+            "\r\n"
+            "plain only\r\n"
+            "--NOHTML--\r\n";
+        RAII_STRING char *html = mime_get_html_part(no_html_msg);
+        ASSERT(html == NULL, "mime_get_html_part: no-html multipart should return NULL");
+    }
 }

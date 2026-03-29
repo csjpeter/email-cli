@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 static void config_cleanup(void *ptr) {
     Config **cfg = (Config **)ptr;
@@ -107,6 +108,53 @@ void test_config_store(void) {
 
     // 7. Test config_free with NULL (should not crash)
     config_free(NULL);
+
+    // 8. config_save_to_store fails: fs_mkdir_p fails (lines 96-97)
+    // Make .config directory non-writable so subdirectory creation fails
+    {
+        setenv("HOME", "/tmp/email-cli-test-home-fail", 1);
+        fs_mkdir_p("/tmp/email-cli-test-home-fail/.config", 0700);
+        chmod("/tmp/email-cli-test-home-fail/.config", 0000);
+
+        Config cfg_fail = {0};
+        cfg_fail.host   = strdup("imaps://imap.test.com");
+        cfg_fail.user   = strdup("test@test.com");
+        cfg_fail.pass   = strdup("password123");
+        cfg_fail.folder = strdup("INBOX");
+
+        int res = config_save_to_store(&cfg_fail);
+        ASSERT(res == -1, "config_save_to_store: mkdir fail should return -1");
+
+        chmod("/tmp/email-cli-test-home-fail/.config", 0700);
+        free(cfg_fail.host);
+        free(cfg_fail.user);
+        free(cfg_fail.pass);
+        free(cfg_fail.folder);
+    }
+
+    // 9. config_save_to_store fails: fopen fails (lines 105-106)
+    // Create config dir, then create the config file as a directory
+    {
+        setenv("HOME", "/tmp/email-cli-test-home-fopen", 1);
+        fs_mkdir_p("/tmp/email-cli-test-home-fopen/.config/email-cli", 0700);
+        // Create a directory at the config file path to make fopen("w") fail
+        mkdir("/tmp/email-cli-test-home-fopen/.config/email-cli/config.ini", 0700);
+
+        Config cfg_fopen = {0};
+        cfg_fopen.host   = strdup("imaps://imap.test.com");
+        cfg_fopen.user   = strdup("test@test.com");
+        cfg_fopen.pass   = strdup("password123");
+        cfg_fopen.folder = strdup("INBOX");
+
+        int res = config_save_to_store(&cfg_fopen);
+        ASSERT(res == -1, "config_save_to_store: fopen on dir should return -1");
+
+        rmdir("/tmp/email-cli-test-home-fopen/.config/email-cli/config.ini");
+        free(cfg_fopen.host);
+        free(cfg_fopen.user);
+        free(cfg_fopen.pass);
+        free(cfg_fopen.folder);
+    }
 
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");

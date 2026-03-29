@@ -2,6 +2,7 @@
 #include "curl_adapter.h"
 #include "cache_store.h"
 #include "mime_util.h"
+#include "html_render.h"
 #include "imap_util.h"
 #include "raii.h"
 #include "logger.h"
@@ -1252,12 +1253,24 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 
     print_show_headers(from, subject, date);
 
-    char *body = mime_get_text_body(raw);
-    const char *body_text = body ? body : "(no readable text body)";
     int wrap_cols = pager ? terminal_cols() : 80;
     if (wrap_cols > 80) wrap_cols = 80;
-    char *body_wrapped = word_wrap(body_text, wrap_cols);
-    if (body_wrapped) body_text = body_wrapped;
+
+    char *body = NULL;
+    char *html_raw = mime_get_html_part(raw);
+    if (html_raw) {
+        body = html_render(html_raw, wrap_cols, pager ? 1 : 0);
+        free(html_raw);
+    }
+    if (!body) {
+        char *plain = mime_get_text_body(raw);
+        if (plain) {
+            body = word_wrap(plain, wrap_cols);
+            if (!body) body = plain;
+            else free(plain);
+        }
+    }
+    const char *body_text = body ? body : "(no readable text body)";
 
 #define SHOW_HDR_LINES 5
     if (!pager || page_size <= SHOW_HDR_LINES) {
@@ -1293,6 +1306,7 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
     }
 #undef SHOW_HDR_LINES
 
-    free(body); free(body_wrapped); free(from); free(subject); free(date); free(raw);
+    free(body); free(from); free(subject); free(date); free(raw);
     return 0;
 }
+

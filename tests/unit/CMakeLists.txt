@@ -7,6 +7,7 @@ include_directories(
 )
 
 # Platform-specific sources for tests
+# html_medium_stub.c replaces platform html_medium.c for deterministic tests
 if(WIN32)
     set(TEST_PLATFORM_SOURCES
         ../../src/platform/windows/terminal.c
@@ -31,15 +32,20 @@ set(TEST_SOURCES
     test_cache.c
     test_imap_util.c
     test_email_service.c
+    test_html_parser.c
+    test_html_render.c
     ../../src/core/fs_util.c
     ../../src/core/logger.c
     ../../src/core/config.c
     ../../src/core/mime_util.c
+    ../../src/core/html_parser.c
+    ../../src/core/html_render.c
     ../../src/core/imap_util.c
     ../../src/infrastructure/config_store.c
     ../../src/infrastructure/setup_wizard.c
     ../../src/infrastructure/curl_adapter.c
     ../../src/infrastructure/cache_store.c
+    html_medium_stub.c
     ${TEST_PLATFORM_SOURCES}
 )
 

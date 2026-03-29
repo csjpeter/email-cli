@@ -178,6 +178,41 @@ void test_email_service(void) {
         close(saved_fd);
     }
 
+    /* ── print_padded_col (non-ASCII paths, lines 83-91) ─────────────── */
+    /*
+     * Redirect stdout to /dev/null to avoid polluting test output.
+     * print_padded_col writes to stdout via fwrite/putchar.
+     */
+    {
+        fflush(stdout);
+        int saved_fd2 = dup(STDOUT_FILENO);
+        int null_fd2  = open("/dev/null", O_WRONLY);
+        if (null_fd2 >= 0) dup2(null_fd2, STDOUT_FILENO);
+        if (null_fd2 >= 0) close(null_fd2);
+
+        /* 0x80 = invalid lead byte → line 83 */
+        print_padded_col("\x80 bad", 20);
+
+        /* 2-byte UTF-8: é = \xC3\xA9 → line 84 */
+        print_padded_col("\xC3\xA9 cafe", 20);
+
+        /* 3-byte UTF-8: 中 = \xE4\xB8\xAD → line 85 */
+        print_padded_col("\xE4\xB8\xAD word", 20);
+
+        /* 4-byte UTF-8: U+10000 = \xF0\x90\x80\x80 → line 86 */
+        print_padded_col("\xF0\x90\x80\x80 hi", 20);
+
+        /* 0xFE = invalid lead byte >= 0xF8 → line 87 */
+        print_padded_col("\xFE bad", 20);
+
+        /* Truncated 2-byte: \xC3 then 'A' (not continuation) → lines 90-91 */
+        print_padded_col("\xC3\x41 trunc", 20);
+
+        fflush(stdout);
+        dup2(saved_fd2, STDOUT_FILENO);
+        close(saved_fd2);
+    }
+
     /* ── cmp_uid_entry ───────────────────────────────────────────────── */
     {
         UIDEntry a = {100, 1};  /* unseen */

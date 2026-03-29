@@ -43,4 +43,8 @@ void test_fs_util(void) {
     ASSERT(res == 0, "fs_ensure_permissions should succeed");
     ASSERT(stat(test_dir, &st) == 0, "Directory should still exist");
     ASSERT((st.st_mode & 0777) == 0755, "Directory should have 0755 permissions");
+
+    // 7. Test fs_mkdir_p with "/" — strips trailing slash → empty tmp → return 0 (line 49)
+    res = fs_mkdir_p("/", 0700);
+    ASSERT(res == 0, "fs_mkdir_p(\"/\") should return 0");
 }

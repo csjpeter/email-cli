@@ -419,4 +419,85 @@ void test_html_render(void) {
         ASSERT(strstr(r, "Bold") != NULL, "ansi in img alt: text visible");
         free(r);
     }
+
+    /* 46. <img alt=" "> (space only) → no [ ] rendered (is_blank_str) */
+    {
+        char *r = html_render("<img alt=\" \">", 0, 0);
+        ASSERT(r != NULL, "img blank alt space: not NULL");
+        ASSERT(strstr(r, "[") == NULL, "img blank alt space: no [ ] output");
+        free(r);
+    }
+
+    /* 47. <img alt> with nbsp-only (U+00A0) → no [ ] rendered */
+    {
+        /* \xC2\xA0 = UTF-8 encoding of U+00A0 NON-BREAKING SPACE */
+        char *r = html_render("<img alt=\"\xC2\xA0\">", 0, 0);
+        ASSERT(r != NULL, "img nbsp alt: not NULL");
+        ASSERT(strstr(r, "[") == NULL, "img nbsp alt: no [ ] output");
+        free(r);
+    }
+
+    /* 48. <img alt> with zwnj-only (U+200C) → no [ ] rendered */
+    {
+        /* \xE2\x80\x8C = UTF-8 encoding of U+200C ZERO WIDTH NON-JOINER */
+        char *r = html_render("<img alt=\"\xE2\x80\x8C\">", 0, 0);
+        ASSERT(r != NULL, "img zwnj alt: not NULL");
+        ASSERT(strstr(r, "[") == NULL, "img zwnj alt: no [ ] output");
+        free(r);
+    }
+
+    /* 49. &zwnj; entity → invisible (zero-width), does not appear as text */
+    {
+        char *r = html_render("A&zwnj;B", 0, 0);
+        ASSERT(r != NULL, "zwnj entity: not NULL");
+        /* zwnj is U+200C, zero-width: text must contain A and B */
+        ASSERT(strstr(r, "A") != NULL, "zwnj entity: A present");
+        ASSERT(strstr(r, "B") != NULL, "zwnj entity: B present");
+        /* must NOT contain literal "&zwnj;" */
+        ASSERT(strstr(r, "&zwnj;") == NULL, "zwnj entity: not literal");
+        free(r);
+    }
+
+    /* 50. compact_lines: many consecutive blank lines collapsed to one */
+    {
+        /* Many <div> / <tr> blocks in a row produce multiple blank lines */
+        char *r = html_render(
+            "<div>A</div><div></div><div></div><div></div>"
+            "<div></div><div></div><div>B</div>", 0, 0);
+        ASSERT(r != NULL, "compact: not NULL");
+        ASSERT(strstr(r, "A") != NULL, "compact: A present");
+        ASSERT(strstr(r, "B") != NULL, "compact: B present");
+        /* Must not have more than one consecutive blank line between A and B */
+        const char *a = strstr(r, "A");
+        const char *b = strstr(r, "B");
+        ASSERT(a && b && b > a, "compact: A before B");
+        /* Count blank lines (consecutive \n\n) between A and B */
+        int max_blanks = 0, cur_blanks = 0;
+        for (const char *p = a; p < b; p++) {
+            if (*p == '\n') { cur_blanks++; if (cur_blanks > max_blanks) max_blanks = cur_blanks; }
+            else            { cur_blanks = 0; }
+        }
+        ASSERT(max_blanks <= 2, "compact: at most one blank line between blocks");
+        free(r);
+    }
+
+    /* 51. compact_lines: paragraph spacing preserved (≤1 blank line kept) */
+    {
+        char *r = html_render("<p>A</p><p>B</p>", 0, 0);
+        ASSERT(r != NULL, "compact para: not NULL");
+        /* compact_lines must not strip intentional paragraph blank line */
+        ASSERT(strstr(r, "A\n\nB") != NULL, "compact para: blank line preserved");
+        free(r);
+    }
+
+    /* 52. compact_lines: trailing whitespace trimmed from lines */
+    {
+        /* <pre> preserves whitespace; inject spaces at end of a line */
+        char *r = html_render("<pre>hello   \nworld</pre>", 0, 0);
+        ASSERT(r != NULL, "compact trim: not NULL");
+        /* trailing spaces on "hello   " line must be trimmed */
+        ASSERT(strstr(r, "hello   ") == NULL, "compact trim: trailing spaces removed");
+        ASSERT(strstr(r, "hello") != NULL,    "compact trim: hello still present");
+        free(r);
+    }
 }

@@ -74,8 +74,10 @@ cmake_configure() {
     cd ..
 }
 
+JOBS=$(nproc)
+
 cmake_build() {
-    cmake --build "$BUILD_DIR"
+    cmake --build "$BUILD_DIR" -- -j"$JOBS"
     cp "$BUILD_DIR/$PROJECT_NAME" "$BIN_DIR/"
 }
 
@@ -92,7 +94,7 @@ build_debug() {
 }
 
 build_test_runner() {
-    cmake --build "$BUILD_DIR" --target test-runner
+    cmake --build "$BUILD_DIR" --target test-runner -- -j"$JOBS"
 }
 
 case "$1" in

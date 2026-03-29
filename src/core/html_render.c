@@ -445,10 +445,20 @@ static void traverse(RS *rs, const HtmlNode *node) {
         emit_text(rs, node->text);
         return;
     }
+    /* Snapshot style depth so parse_style side-effects from inline
+     * style= attributes are balanced even when tag_close has no handler
+     * for this tag (e.g. <a>, <span>, <td> with style="…"). */
+    int bold_sv   = rs->bold;
+    int italic_sv = rs->italic;
+    int uline_sv  = rs->uline;
     tag_open(rs, node);
     for (const HtmlNode *c = node->first_child; c; c = c->next_sibling)
         traverse(rs, c);
     tag_close(rs, node);
+    /* Close any depth-tracked style that tag_close left open */
+    while (rs->uline  > uline_sv)  close_uline(rs);
+    while (rs->italic > italic_sv) close_italic(rs);
+    while (rs->bold   > bold_sv)   close_bold(rs);
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */

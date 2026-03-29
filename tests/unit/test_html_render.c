@@ -490,7 +490,43 @@ void test_html_render(void) {
         free(r);
     }
 
-    /* 52. compact_lines: trailing whitespace trimmed from lines */
+    /* 52. <a style="text-decoration:underline"> must not bleed underline to
+     *     subsequent text — parse_style depth counters must be balanced by
+     *     traverse() even when tag_close has no handler for <a>. */
+    {
+        char *r = html_render(
+            "<a style=\"text-decoration:underline\">link</a> normal", 0, 1);
+        ASSERT(r != NULL, "style bleed: not NULL");
+        /* The underline-off escape must appear after the link */
+        ASSERT(strstr(r, "\033[24m") != NULL, "style bleed: underline closed");
+        /* After the underline close, 'normal' must follow without underline-on */
+        const char *off = strstr(r, "\033[24m");
+        ASSERT(off != NULL && strstr(off, "normal") != NULL,
+               "style bleed: 'normal' comes after underline-off");
+        /* Must not re-open underline before 'normal' */
+        const char *after_off = off + 5;  /* skip \033[24m */
+        const char *uline_on = strstr(after_off, "\033[4m");
+        const char *normal_pos = strstr(after_off, "normal");
+        ASSERT(normal_pos != NULL, "style bleed: 'normal' found after off");
+        ASSERT(uline_on == NULL || uline_on > normal_pos,
+               "style bleed: no underline-on before 'normal'");
+        free(r);
+    }
+
+    /* 53. <span style="font-weight:bold"> on non-<b> element — bold must
+     *     be closed when </span> is processed. */
+    {
+        char *r = html_render(
+            "<span style=\"font-weight:bold\">bold</span> plain", 0, 1);
+        ASSERT(r != NULL, "span bold: not NULL");
+        ASSERT(strstr(r, "\033[22m") != NULL, "span bold: bold closed");
+        const char *off = strstr(r, "\033[22m");
+        ASSERT(off && strstr(off, "plain") != NULL,
+               "span bold: 'plain' after bold-off");
+        free(r);
+    }
+
+    /* 55. compact_lines: trailing whitespace trimmed from lines */
     {
         /* <pre> preserves whitespace; inject spaces at end of a line */
         char *r = html_render("<pre>hello   \nworld</pre>", 0, 0);

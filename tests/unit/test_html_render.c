@@ -771,3 +771,220 @@ void test_html_render_style_balance(void) {
               " href=\"x\">click here",
         "newsletter snippet partial unclosed");
 }
+
+/* ── Parent-close forces child style reset ───────────────────────────── */
+
+/**
+ * Renders html with ansi=1, finds 'marker' in the output, then checks that
+ * the output prefix (everything BEFORE marker) has balanced on/off ANSI
+ * escape counts.  This proves that closing the parent tag closed all child
+ * styles before the next sibling (marker) was written.
+ *
+ * HTML must be structured so that 'marker' appears as plain text AFTER the
+ * parent's closing tag, e.g.:  <parent><child>...</parent>MARKER
+ */
+static void assert_style_closed_before(const char *html, const char *marker,
+                                       const char *label)
+{
+    char *r = html_render(html, 0, 1);
+    if (!r) { ASSERT(0, label); return; }
+
+    const char *m = strstr(r, marker);
+    if (!m) {
+        /* marker not present in output — fail with context */
+        ASSERT(0, label);
+        free(r);
+        return;
+    }
+
+    size_t prefix_len = (size_t)(m - r);
+    char *prefix = malloc(prefix_len + 1);
+    if (!prefix) { ASSERT(0, label); free(r); return; }
+    memcpy(prefix, r, prefix_len);
+    prefix[prefix_len] = '\0';
+
+    int bold_on  = count_str(prefix, "\033[1m");
+    int bold_off = count_str(prefix, "\033[22m");
+    ASSERT(bold_on == bold_off, label);
+
+    int ital_on  = count_str(prefix, "\033[3m");
+    int ital_off = count_str(prefix, "\033[23m");
+    ASSERT(ital_on == ital_off, label);
+
+    int uline_on  = count_str(prefix, "\033[4m");
+    int uline_off = count_str(prefix, "\033[24m");
+    ASSERT(uline_on == uline_off, label);
+
+    int strike_on  = count_str(prefix, "\033[9m");
+    int strike_off = count_str(prefix, "\033[29m");
+    ASSERT(strike_on == strike_off, label);
+
+    int fg_on  = count_str(prefix, "\033[38;2;");
+    int fg_off = count_str(prefix, "\033[39m");
+    ASSERT(fg_on == fg_off, label);
+
+    int bg_on  = count_str(prefix, "\033[48;2;");
+    int bg_off = count_str(prefix, "\033[49m");
+    ASSERT(bg_on == bg_off, label);
+
+    free(prefix);
+    free(r);
+}
+
+void test_html_render_parent_close(void)
+{
+    /* Marker text appended as sibling after the parent's closing tag.
+     * traverse() visits parent (with snapshot/restore), then visits MARKER.
+     * All child styles must be closed BEFORE MARKER is emitted. */
+
+#define MK "XMARKERX"
+
+    /* ── <div> parent — single unclosed child style ───────────────────── */
+    assert_style_closed_before(
+        "<div><b>bold text</div>" MK,
+        MK, "div > b unclosed");
+    assert_style_closed_before(
+        "<div><i>italic text</div>" MK,
+        MK, "div > i unclosed");
+    assert_style_closed_before(
+        "<div><u>underline text</div>" MK,
+        MK, "div > u unclosed");
+    assert_style_closed_before(
+        "<div><s>strike text</div>" MK,
+        MK, "div > s unclosed");
+    assert_style_closed_before(
+        "<div><strong>strong text</div>" MK,
+        MK, "div > strong unclosed");
+    assert_style_closed_before(
+        "<div><em>em text</div>" MK,
+        MK, "div > em unclosed");
+
+    /* ── <div> parent — inline-style child (non-semantic) ────────────── */
+    assert_style_closed_before(
+        "<div><span style=\"color:#FF0000\">red</div>" MK,
+        MK, "div > span color unclosed");
+    assert_style_closed_before(
+        "<div><span style=\"background-color:#0000FF\">bg</div>" MK,
+        MK, "div > span bgcolor unclosed");
+    assert_style_closed_before(
+        "<div><span style=\"font-weight:bold\">bold</div>" MK,
+        MK, "div > span bold unclosed");
+    assert_style_closed_before(
+        "<div><span style=\"font-style:italic\">ital</div>" MK,
+        MK, "div > span italic unclosed");
+    assert_style_closed_before(
+        "<div><span style=\"text-decoration:underline\">uline</div>" MK,
+        MK, "div > span uline unclosed");
+
+    /* ── <p> parent ───────────────────────────────────────────────────── */
+    assert_style_closed_before(
+        "<p><b>bold</p>" MK,
+        MK, "p > b unclosed");
+    assert_style_closed_before(
+        "<p><span style=\"color:red\">red</p>" MK,
+        MK, "p > span color unclosed");
+
+    /* ── <ul>/<li> parent ─────────────────────────────────────────────── */
+    assert_style_closed_before(
+        "<ul><li><b>bold item</li></ul>" MK,
+        MK, "ul > li > b closed");
+    assert_style_closed_before(
+        "<ul><li><i>italic item</ul>" MK,
+        MK, "ul > li > i unclosed");
+    assert_style_closed_before(
+        "<ul><li><span style=\"color:#F00\">colored</ul>" MK,
+        MK, "ul > li > span color unclosed");
+
+    /* ── <ol> parent ──────────────────────────────────────────────────── */
+    assert_style_closed_before(
+        "<ol><li><u>underline item</li></ol>" MK,
+        MK, "ol > li > u closed");
+
+    /* ── <blockquote> parent ──────────────────────────────────────────── */
+    assert_style_closed_before(
+        "<blockquote><b>bold quote</blockquote>" MK,
+        MK, "blockquote > b unclosed");
+    assert_style_closed_before(
+        "<blockquote><span style=\"color:blue\">blue</blockquote>" MK,
+        MK, "blockquote > span color unclosed");
+
+    /* ── <table>/<tr>/<td> chain ──────────────────────────────────────── */
+    assert_style_closed_before(
+        "<table><tr><td><b>bold cell</td></tr></table>" MK,
+        MK, "table > tr > td > b closed");
+    assert_style_closed_before(
+        "<table><tr><td style=\"color:#333\"><b>styled</td></tr></table>" MK,
+        MK, "table > tr > td style+b closed");
+    assert_style_closed_before(
+        "<table><tr><td style=\"font-weight:bold\">bold cell</table>" MK,
+        MK, "table > td style bold unclosed");
+    assert_style_closed_before(
+        "<table><tr>"
+          "<td style=\"color:#333333\"><b>A</td>"
+          "<td style=\"color:#999999\"><i>B</td>"
+        "</tr></table>" MK,
+        MK, "table multi-td style unclosed");
+
+    /* ── <div> parent — well-formed child (with closing tag) ─────────── */
+    assert_style_closed_before(
+        "<div><b>bold</b></div>" MK,
+        MK, "div > b closed");
+    assert_style_closed_before(
+        "<div><span style=\"color:#FF0000\">red</span></div>" MK,
+        MK, "div > span color closed");
+
+    /* ── Multiple nested unclosed children ───────────────────────────── */
+    assert_style_closed_before(
+        "<div><b><i><u>triple nested</div>" MK,
+        MK, "div > b>i>u all unclosed");
+    assert_style_closed_before(
+        "<div><b><i><u>"
+          "<span style=\"color:red;background-color:#00F\">deep</div>" MK,
+        MK, "div > deep nested all styles unclosed");
+
+    /* ── <a> with inline style ────────────────────────────────────────── */
+    assert_style_closed_before(
+        "<div>"
+          "<a style=\"color:#333;text-decoration:underline\" href=\"x\">link"
+        "</div>" MK,
+        MK, "div > a color+uline unclosed");
+
+    /* ── All styles combined on single child ─────────────────────────── */
+    assert_style_closed_before(
+        "<div>"
+          "<span style=\"font-weight:bold;font-style:italic;"
+                        "text-decoration:underline;"
+                        "color:#FF0000;background-color:#0000FF\">all"
+        "</div>" MK,
+        MK, "div > span all-styles unclosed");
+
+    /* ── Nested divs: outer close should reset everything ────────────── */
+    assert_style_closed_before(
+        "<div>"
+          "<div>"
+            "<b><i><span style=\"color:red\">deep</span></i></b>"
+          "</div>"
+        "</div>" MK,
+        MK, "nested divs properly closed");
+    assert_style_closed_before(
+        "<div>"
+          "<div>"
+            "<b><i><span style=\"color:red\">deep"
+          "</div>"       /* no closing for inner div, b, i, span */
+        "</div>" MK,
+        MK, "nested divs outer close resets all");
+
+    /* ── Realistic newsletter: div wrapper > table > td with styles ───── */
+    assert_style_closed_before(
+        "<div style=\"background-color:#f4f4f4\">"
+          "<table><tr>"
+            "<td style=\"color:#333333;font-weight:bold\">Title"
+            "<td style=\"color:#999999\">"
+              "<a style=\"color:#999;text-decoration:underline\""
+              " href=\"x\">click here"
+          "</tr></table>"
+        "</div>" MK,
+        MK, "newsletter all styles reset before marker");
+
+#undef MK
+}

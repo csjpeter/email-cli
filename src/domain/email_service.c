@@ -239,14 +239,76 @@ static int count_lines(const char *s) {
 }
 
 /**
+ * ANSI SGR state tracked while scanning skipped body lines.
+ * Only the subset emitted by html_render() is handled.
+ */
+typedef struct {
+    int bold, italic, uline, strike;
+    int fg_on; int fg_r, fg_g, fg_b;
+    int bg_on; int bg_r, bg_g, bg_b;
+} AnsiState;
+
+/** Scan bytes [begin, end) for SGR sequences and update *st. */
+static void ansi_scan(const char *begin, const char *end, AnsiState *st)
+{
+    const char *p = begin;
+    while (p < end) {
+        if (*p != '\033' || p + 1 >= end || *(p+1) != '[') { p++; continue; }
+        p += 2;
+        char seq[64]; int si = 0;
+        while (p < end && *p != 'm' && si < 62) seq[si++] = *p++;
+        seq[si] = '\0';
+        if (p < end && *p == 'm') p++;
+        if      (!strcmp(seq,"0"))   { st->bold=0; st->italic=0; st->uline=0;
+                                       st->strike=0; st->fg_on=0; st->bg_on=0; }
+        else if (!strcmp(seq,"1"))   { st->bold   = 1; }
+        else if (!strcmp(seq,"22"))  { st->bold   = 0; }
+        else if (!strcmp(seq,"3"))   { st->italic = 1; }
+        else if (!strcmp(seq,"23"))  { st->italic = 0; }
+        else if (!strcmp(seq,"4"))   { st->uline  = 1; }
+        else if (!strcmp(seq,"24"))  { st->uline  = 0; }
+        else if (!strcmp(seq,"9"))   { st->strike = 1; }
+        else if (!strcmp(seq,"29"))  { st->strike = 0; }
+        else if (!strcmp(seq,"39"))  { st->fg_on  = 0; }
+        else if (!strcmp(seq,"49"))  { st->bg_on  = 0; }
+        else if (!strncmp(seq,"38;2;",5)) {
+            st->fg_on = 1;
+            sscanf(seq+5, "%d;%d;%d", &st->fg_r, &st->fg_g, &st->fg_b);
+        }
+        else if (!strncmp(seq,"48;2;",5)) {
+            st->bg_on = 1;
+            sscanf(seq+5, "%d;%d;%d", &st->bg_r, &st->bg_g, &st->bg_b);
+        }
+    }
+}
+
+/** Re-emit escapes needed to restore *st on a freshly-reset terminal. */
+static void ansi_replay(const AnsiState *st)
+{
+    if (st->bold)   printf("\033[1m");
+    if (st->italic) printf("\033[3m");
+    if (st->uline)  printf("\033[4m");
+    if (st->strike) printf("\033[9m");
+    if (st->fg_on)  printf("\033[38;2;%d;%d;%dm", st->fg_r, st->fg_g, st->fg_b);
+    if (st->bg_on)  printf("\033[48;2;%d;%d;%dm", st->bg_r, st->bg_g, st->bg_b);
+}
+
+/**
  * Print lines [from_line, from_line+line_count) from body.
- * Lines are 0-indexed.
+ * Lines are 0-indexed.  Replays any ANSI state accumulated in skipped lines
+ * so that multi-line styled spans remain correct across page boundaries.
  */
 static void print_body_page(const char *body, int from_line, int line_count) {
     int line = 0;
     const char *p = body;
     while (*p && line < from_line) {   /* skip to from_line */
         if (*p++ == '\n') line++;
+    }
+    /* Restore ANSI state that was active at the start of from_line */
+    if (p > body) {
+        AnsiState st = {0};
+        ansi_scan(body, p, &st);
+        ansi_replay(&st);
     }
     int printed = 0;
     while (*p && printed < line_count) {

@@ -206,9 +206,9 @@ static char *word_wrap(const char *text, int width) {
  */
 static int pager_prompt(int cur_page, int total_pages, int page_size, int term_rows) {
     for (;;) {
-        fprintf(stderr, "\033[%d;1H", term_rows);   /* jump to last terminal row */
+        fprintf(stderr, "\033[%d;1H\033[7m\033[2K", term_rows); /* last row + reverse + erase */
         fprintf(stderr,
-                "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back  ESC=quit --\033[0m",
+                "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back  ESC=quit --\033[0m",
                 cur_page, total_pages);
         fflush(stderr);
         TermKey key = terminal_read_key();
@@ -566,9 +566,9 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
         print_body_page(body_text, cur_line, rows_avail);
 
         int cur_page = cur_line / rows_avail + 1;
-        fprintf(stderr, "\033[%d;1H", page_size);   /* jump to last terminal row */
+        fprintf(stderr, "\033[%d;1H\033[7m\033[2K", page_size); /* last row + reverse + erase */
         fprintf(stderr,
-                "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
+                "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
                 "  Backspace=list  ESC=quit --\033[0m",
                 cur_page, total_pages);
         fflush(stderr);

@@ -110,13 +110,18 @@ void handle_client(int client_sock) {
                 "Subject: Test Message\r\n"
                 "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
                 "\r\n";
+            /* HTML-only message (no text/plain part) with an embedded
+             * <style> block — CSS must be suppressed in rendered output. */
             const char *full_msg =
                 "From: Test User <test@example.com>\r\n"
                 "Subject: Test Message\r\n"
                 "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
                 "Content-Type: text/html; charset=UTF-8\r\n"
                 "\r\n"
-                "<html><body><b>Hello from Mock Server!</b></body></html>";
+                "<html>"
+                "<head><style>body { color: red; font-size: 14px; }</style></head>"
+                "<body><b>Hello from Mock Server!</b></body>"
+                "</html>";
 
             int is_header = strstr(buffer, "HEADER") != NULL;
             const char *content = is_header ? headers : full_msg;

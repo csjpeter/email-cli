@@ -59,6 +59,19 @@ check() {
     fi
 }
 
+check_not() {
+    local desc="$1"
+    local pattern="$2"
+    local text="$3"
+    if ! echo "$text" | grep -q "$pattern"; then
+        echo "  [PASS] $desc"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] $desc  (unexpected pattern found: '$pattern')"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
 # 4. Test: help (no args)
 echo "Running: email-cli (no args) ..."
 HELP_OUTPUT=$("$BIN_DIR/email-cli" 2>&1 || true)
@@ -118,6 +131,8 @@ check "From header shown"         "From:"                   "$SHOW_OUTPUT"
 check "Subject header shown"      "Subject:"                "$SHOW_OUTPUT"
 check "Email body shown"          "Hello from Mock Server"  "$SHOW_OUTPUT"
 check "Successful completion"     "Success: Fetch complete" "$SHOW_OUTPUT"
+check_not "Show: no CSS in output (color)"     "color"      "$SHOW_OUTPUT"
+check_not "Show: no CSS in output (font-size)" "font-size"  "$SHOW_OUTPUT"
 
 # 11. Test: folders (flat)
 echo ""
@@ -146,19 +161,6 @@ echo "$EMPTY_OUTPUT"
 echo "--- Empty folder assertions ---"
 check "Empty folder: no messages msg" "No messages"  "$EMPTY_OUTPUT"
 check "Empty folder: exit success"    "Success"       "$EMPTY_OUTPUT"
-
-check_not() {
-    local desc="$1"
-    local pattern="$2"
-    local text="$3"
-    if ! echo "$text" | grep -q "$pattern"; then
-        echo "  [PASS] $desc"
-        PASSED=$((PASSED + 1))
-    else
-        echo "  [FAIL] $desc  (unexpected pattern found: '$pattern')"
-        FAILED=$((FAILED + 1))
-    fi
-}
 
 # CRITICAL: verify email-cli never issued a STORE (flag-modification) command
 MOCK_CMDS=$(cat "$MOCK_LOG" 2>/dev/null || true)

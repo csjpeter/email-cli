@@ -410,4 +410,44 @@ void test_email_service(void) {
                "extract_fetch_literal: truncated content clamped correctly");
         free(r);
     }
+
+    /* ── HTML-only MIME: CSS must not leak into rendered output ──────── */
+    /*
+     * Regression test for show_uid_interactive: when an email has only a
+     * text/html part (no text/plain), the body must be rendered through
+     * html_render(), not passed through as raw text.  In particular, any
+     * <style> block must be suppressed and visible body text must appear.
+     */
+    {
+        /* Minimal MIME message: HTML-only, with an embedded <style> block */
+        const char *mime_msg =
+            "MIME-Version: 1.0\r\n"
+            "Content-Type: text/html; charset=UTF-8\r\n"
+            "\r\n"
+            "<html>"
+            "<head><style>body { color: red; font-family: Arial; }</style></head>"
+            "<body><b>Visible Text</b></body>"
+            "</html>";
+
+        char *html = mime_get_html_part(mime_msg);
+        ASSERT(html != NULL, "html-only mime: html part found");
+
+        char *rendered = html_render(html, 0, 0);
+        free(html);
+        ASSERT(rendered != NULL, "html-only mime: render not NULL");
+
+        /* Visible content must appear */
+        ASSERT(strstr(rendered, "Visible Text") != NULL,
+               "html-only mime: body text present in output");
+
+        /* CSS must be suppressed */
+        ASSERT(strstr(rendered, "color") == NULL,
+               "html-only mime: CSS property 'color' not in output");
+        ASSERT(strstr(rendered, "font-family") == NULL,
+               "html-only mime: CSS property 'font-family' not in output");
+        ASSERT(strstr(rendered, "Arial") == NULL,
+               "html-only mime: CSS value 'Arial' not in output");
+
+        free(rendered);
+    }
 }

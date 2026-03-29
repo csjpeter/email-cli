@@ -95,7 +95,14 @@ static void attr_prepend(HtmlNode *elem, char *name, char *value) {
 static const struct { const char *name; unsigned cp; } ENTITIES[] = {
     {"amp",'&'},{"lt",'<'},{"gt",'>'},{"quot",'"'},{"apos",'\''},
     {"nbsp",0xA0},{"copy",0xA9},{"reg",0xAE},{"mdash",0x2014},
-    {"ndash",0x2013},{"hellip",0x2026},{"laquo",0xAB},{"raquo",0xBB},{NULL,0}
+    {"ndash",0x2013},{"hellip",0x2026},{"laquo",0xAB},{"raquo",0xBB},
+    /* zero-width / formatting */
+    {"zwnj",0x200C},{"zwj",0x200D},{"shy",0xAD},
+    /* common symbols */
+    {"bull",0x2022},{"middot",0xB7},{"trade",0x2122},{"euro",0x20AC},
+    {"pound",0xA3},{"cent",0xA2},{"yen",0xA5},
+    {"times",0xD7},{"divide",0xF7},
+    {NULL,0}
 };
 static int cp_to_utf8(unsigned cp, char *out) {
     if (cp < 0x80)  { out[0]=(char)cp; return 1; }

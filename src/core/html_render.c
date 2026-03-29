@@ -89,7 +89,12 @@ static void emit_bq_prefix(RS *rs) {
 
 static void flush_nl(RS *rs) {
     if (!rs->pending_nl) return;
-    for (int i = 0; i < rs->pending_nl; i++) rs_push(rs, '\n');
+    /* Count consecutive newlines already at the end of the buffer so we
+     * never accumulate more than pending_nl in a row. */
+    int trailing = 0;
+    for (int i = (int)rs->len - 1; i >= 0 && rs->buf[i] == '\n'; i--)
+        trailing++;
+    for (int i = trailing; i < rs->pending_nl; i++) rs_push(rs, '\n');
     rs->col = 0;
     rs->pending_nl = 0;
     emit_bq_prefix(rs);
@@ -242,6 +247,73 @@ static void emit_text(RS *rs, const char *text) {
     }
 }
 
+/* ── Whitespace helpers ──────────────────────────────────────────────── */
+
+/** Returns 1 if s contains only ASCII whitespace, U+00A0 nbsp, U+200C zwnj,
+ *  U+200D zwj, or U+00AD soft-hyphen — i.e. invisible/non-printing content. */
+static int is_blank_str(const char *s) {
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p) {
+        if (*p <= ' ')                                    { p++;   continue; }
+        if (p[0]==0xC2 && p[1]==0xA0)                    { p+=2;  continue; } /* nbsp  */
+        if (p[0]==0xC2 && p[1]==0xAD)                    { p+=2;  continue; } /* shy   */
+        if (p[0]==0xE2 && p[1]==0x80 && p[2]==0x8C)      { p+=3;  continue; } /* zwnj  */
+        if (p[0]==0xE2 && p[1]==0x80 && p[2]==0x8D)      { p+=3;  continue; } /* zwj   */
+        return 0;
+    }
+    return 1;
+}
+
+/** Collapses runs of >1 consecutive blank lines to exactly one blank line.
+ *  Also trims trailing ASCII/nbsp/zwnj whitespace from each line.
+ *  Preserves up to one trailing blank line.
+ *  Takes ownership of s (frees it); returns a new heap string (or s on OOM). */
+static char *compact_lines(char *s) {
+    if (!s) return s;
+    size_t n = strlen(s);
+    char *out = malloc(n + 1);
+    if (!out) return s;
+
+    const unsigned char *p = (const unsigned char *)s;
+    char *q = out;
+    int blank_pending = 0;  /* at most 1: whether a blank line is pending */
+    int have_content  = 0;
+
+    while (*p) {
+        const unsigned char *ls = p;
+        while (*p && *p != '\n') p++;
+        int had_nl = (*p == '\n');
+        const unsigned char *le = p;
+        if (had_nl) p++;
+
+        /* Trim trailing invisible chars (ASCII ws, nbsp C2A0, shy C2AD, zwnj/zwj E2808C/8D) */
+        while (le > ls) {
+            if (le[-1] <= ' ')                                              { le--;   continue; }
+            if (le>=ls+2 && le[-2]==0xC2 && (le[-1]==0xA0||le[-1]==0xAD)) { le-=2;  continue; }
+            if (le>=ls+3 && le[-3]==0xE2 && le[-2]==0x80 &&
+                (le[-1]==0x8C||le[-1]==0x8D))                              { le-=3;  continue; }
+            break;
+        }
+
+        if (le == ls) {  /* blank line */
+            if (had_nl) blank_pending = 1;
+        } else {         /* non-blank line */
+            if (blank_pending && have_content) *q++ = '\n';
+            blank_pending = 0;
+            have_content = 1;
+            memcpy(q, ls, (size_t)(le - ls));
+            q += (size_t)(le - ls);
+            if (had_nl) *q++ = '\n';
+        }
+    }
+    /* Preserve at most one trailing blank line */
+    if (blank_pending) *q++ = '\n';
+
+    *q = '\0';
+    free(s);
+    return out;
+}
+
 /* ── Tag open / close ────────────────────────────────────────────────── */
 
 static void traverse(RS *rs, const HtmlNode *node);
@@ -308,7 +380,7 @@ static void tag_open(RS *rs, const HtmlNode *node) {
     else if (!strcmp(t,"code"))   { /* inline: no special formatting */ }
     else if (!strcmp(t,"img")) {
         const char *alt = html_attr_get(node, "alt");
-        if (alt && *alt) {
+        if (alt && *alt && !is_blank_str(alt)) {
             flush_nl(rs); emit_bq_prefix(rs);
             rs_push(rs, '[');
             rs_str(rs, alt);
@@ -410,5 +482,5 @@ char *html_render(const char *html, int width, int ansi) {
         if (empty) *empty = '\0';
         return empty;
     }
-    return rs.buf;
+    return compact_lines(rs.buf);
 }

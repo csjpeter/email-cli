@@ -58,6 +58,18 @@ char *mime_format_date(const char *date);
 char *mime_decode_words(const char *value);
 
 /**
+ * @brief Extracts the raw HTML body from a MIME message, if present.
+ *
+ * Returns the first text/html part, transfer-decoded and charset-converted
+ * to UTF-8, without any further processing.
+ * Use html_render() to convert the result to terminal text.
+ *
+ * @param msg  Raw message string.
+ * @return Heap-allocated HTML string, or NULL. Caller must free.
+ */
+char *mime_get_html_part(const char *msg);
+
+/**
  * @brief Extracts the literal content from an IMAP FETCH response.
  *
  * Parses the `{size}` octet-count literal notation produced by IMAP servers:

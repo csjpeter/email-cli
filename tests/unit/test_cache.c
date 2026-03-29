@@ -54,6 +54,34 @@ void test_cache_store(void) {
     else unsetenv("HOME");
 }
 
+void test_hcache_evict(void) {
+    char *old_home = getenv("HOME");
+    setenv("HOME", "/tmp/email-cli-hcache-evict-test", 1);
+
+    const char *folder = "INBOX";
+
+    /* Save two header cache entries: UIDs 10 and 20 */
+    hcache_save(folder, 10, "header-10", 9);
+    hcache_save(folder, 20, "header-20", 9);
+
+    ASSERT(hcache_exists(folder, 10) == 1, "hcache_evict: UID 10 exists before evict");
+    ASSERT(hcache_exists(folder, 20) == 1, "hcache_evict: UID 20 exists before evict");
+
+    /* Keep only UID 20 → UID 10 should be evicted (lines 214-217) */
+    int keep[] = {20};
+    hcache_evict_stale(folder, keep, 1);
+
+    ASSERT(hcache_exists(folder, 10) == 0, "hcache_evict: UID 10 evicted");
+    ASSERT(hcache_exists(folder, 20) == 1, "hcache_evict: UID 20 kept");
+
+    /* Cleanup */
+    hcache_evict_stale(folder, NULL, 0);  /* evict everything */
+    unlink("/tmp/email-cli-hcache-evict-test/.cache/email-cli/headers/INBOX/20.hdr");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
 void test_ui_prefs(void) {
     char *old_home = getenv("HOME");
     setenv("HOME", "/tmp/email-cli-ui-pref-test-home", 1);

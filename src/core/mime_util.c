@@ -1,4 +1,5 @@
 #include "mime_util.h"
+#include "html_render.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,23 +126,6 @@ static char *decode_qp(const char *in, size_t inlen) {
         } else {
             out[n++] = in[i++];
         }
-    }
-    out[n] = '\0';
-    return out;
-}
-
-/* ── HTML tag stripper ──────────────────────────────────────────────── */
-
-static char *strip_html(const char *html) {
-    size_t len = strlen(html);
-    char *out = malloc(len + 1);
-    if (!out) return NULL;
-    size_t n = 0;
-    int in_tag = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (html[i] == '<')      { in_tag = 1; continue; }
-        if (html[i] == '>')      { in_tag = 0; continue; }
-        if (!in_tag) out[n++] = html[i];
     }
     out[n] = '\0';
     return out;
@@ -284,7 +268,10 @@ static char *text_from_part(const char *part) {
             if (raw) {
                 char *utf8 = charset_to_utf8(raw, charset);
                 free(raw);
-                if (utf8) { result = strip_html(utf8); free(utf8); }
+                if (utf8) {
+                    result = html_render(utf8, 0, 0);
+                    free(utf8);
+                }
             }
         }
     }
@@ -498,11 +485,86 @@ char *mime_format_date(const char *date) {
     return buf;
 }
 
+/* ── HTML part extractor ────────────────────────────────────────────── */
+
+static char *html_from_part(const char *part);
+
+static char *html_from_multipart(const char *msg, const char *ctype) {
+    const char *b = strcasestr(ctype, "boundary=");
+    if (!b) return NULL;
+    b += strlen("boundary=");
+
+    char boundary[512] = {0};
+    if (*b == '"') {
+        b++;
+        const char *end = strchr(b, '"');
+        if (!end) return NULL;
+        snprintf(boundary, sizeof(boundary), "%.*s", (int)(end - b), b);
+    } else {
+        size_t i = 0;
+        while (*b && *b != ';' && *b != ' ' && *b != '\r' && *b != '\n' &&
+               i < sizeof(boundary) - 1)
+            boundary[i++] = *b++;
+        boundary[i] = '\0';
+    }
+    if (!boundary[0]) return NULL;
+
+    char delim[520];
+    snprintf(delim, sizeof(delim), "--%s", boundary);
+    size_t dlen = strlen(delim);
+
+    const char *p = strstr(msg, delim);
+    while (p) {
+        if (p[dlen] == '-' && p[dlen+1] == '-') break; /* end boundary */
+        p = strchr(p + dlen, '\n');
+        if (!p) break;
+        p++;
+        const char *next = strstr(p, delim);
+        if (!next) break;
+        size_t partlen = (size_t)(next - p);
+        char *part = strndup(p, partlen);
+        if (!part) break;
+        char *result = html_from_part(part);
+        free(part);
+        if (result) return result;
+        p = next; /* keep p pointing at delimiter for next iteration */
+    }
+    return NULL;
+}
+
+static char *html_from_part(const char *part) {
+    char *ctype   = mime_get_header(part, "Content-Type");
+    char *enc     = mime_get_header(part, "Content-Transfer-Encoding");
+    char *charset = extract_charset(ctype);
+    const char *body = body_start(part);
+    char *result = NULL;
+
+    if (ctype && strncasecmp(ctype, "text/html", 9) == 0) {
+        if (body) {
+            char *raw = decode_transfer(body, strlen(body), enc);
+            if (raw) {
+                result = charset_to_utf8(raw, charset);
+                free(raw);
+            }
+        }
+    } else if (ctype && strncasecmp(ctype, "multipart/", 10) == 0) {
+        result = html_from_multipart(part, ctype);
+    }
+
+    free(ctype); free(enc); free(charset);
+    return result;
+}
+
 /* ── Public API ─────────────────────────────────────────────────────── */
 
 char *mime_get_text_body(const char *msg) {
     if (!msg) return NULL;
     return text_from_part(msg);
+}
+
+char *mime_get_html_part(const char *msg) {
+    if (!msg) return NULL;
+    return html_from_part(msg);
 }
 
 char *mime_extract_imap_literal(const char *response) {

@@ -81,6 +81,22 @@ void test_logger(void) {
            "Rotated log file should exist");
     logger_close();
 
+    // 11. Test stderr mirror path (lines 100-104): re-enable stderr, log error
+    {
+        logger_init(test_log_file, LOG_DEBUG);
+        logger_set_stderr(1);  /* re-enable stderr mirror */
+        logger_log(LOG_ERROR, "stderr mirror test");
+        logger_set_stderr(0);  /* restore for subsequent tests */
+        logger_close();
+    }
+
+    // 12. Unknown log level → level_to_str returns "UNKNOWN"
+    {
+        logger_init(test_log_file, LOG_DEBUG);
+        logger_log(99, "unknown level test");  /* level 99 → "UNKNOWN" */
+        logger_close();
+    }
+
     // Manual cleanup
     unlink(test_log_file);
     unlink(rotated_log_file);

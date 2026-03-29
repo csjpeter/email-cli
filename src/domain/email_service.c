@@ -204,8 +204,9 @@ static char *word_wrap(const char *text, int width) {
  * Pager prompt for the standalone `show` command.
  * Returns scroll delta: 0 = quit, positive = forward N lines, negative = back N.
  */
-static int pager_prompt(int cur_page, int total_pages, int page_size) {
+static int pager_prompt(int cur_page, int total_pages, int page_size, int term_rows) {
     for (;;) {
+        fprintf(stderr, "\033[%d;1H", term_rows);   /* jump to last terminal row */
         fprintf(stderr,
                 "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back  ESC=quit --\033[0m",
                 cur_page, total_pages);
@@ -539,6 +540,7 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
         print_body_page(body_text, cur_line, rows_avail);
 
         int cur_page = cur_line / rows_avail + 1;
+        fprintf(stderr, "\033[%d;1H", page_size);   /* jump to last terminal row */
         fprintf(stderr,
                 "\033[7m-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
                 "  Backspace=list  ESC=quit --\033[0m",
@@ -1296,7 +1298,7 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
             if (cur_line == 0 && cur_line + rows_avail >= body_lines) break;
 
             int cur_page = cur_line / rows_avail + 1;
-            int delta = pager_prompt(cur_page, total_pages, rows_avail);
+            int delta = pager_prompt(cur_page, total_pages, rows_avail, page_size);
             if (delta == 0) break;
             cur_line += delta;
             if (cur_line < 0) cur_line = 0;

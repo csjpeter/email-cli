@@ -545,12 +545,23 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
     char *date_raw = mime_get_header(raw, "Date");
     char *date     = date_raw ? mime_format_date(date_raw) : NULL;
     free(date_raw);
-    char *body = mime_get_text_body(raw);
-    const char *body_text = body ? body : "(no readable text body)";
     int wrap_cols = terminal_cols();
     if (wrap_cols > SHOW_WIDTH) wrap_cols = SHOW_WIDTH;
-    char *body_wrapped = word_wrap(body_text, wrap_cols);
-    if (body_wrapped) body_text = body_wrapped;
+    char *body = NULL;
+    char *html_raw = mime_get_html_part(raw);
+    if (html_raw) {
+        body = html_render(html_raw, wrap_cols, 1);
+        free(html_raw);
+    } else {
+        char *plain = mime_get_text_body(raw);
+        if (plain) {
+            char *wrapped = word_wrap(plain, wrap_cols);
+            if (wrapped) { free(plain); body = wrapped; }
+            else body = plain;
+        }
+    }
+    const char *body_text = body ? body : "(no readable text body)";
+    char *body_wrapped = NULL; /* kept for free() at cleanup */
 
 #define SHOW_HDR_LINES_INT 5
     int rows_avail  = (page_size > SHOW_HDR_LINES_INT)

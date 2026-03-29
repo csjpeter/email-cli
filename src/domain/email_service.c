@@ -572,9 +572,11 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
 
     int result = 0;
     for (int cur_line = 0;;) {
-        printf("\033[H\033[2J");
+        printf("\033[0m\033[H\033[2J");     /* reset attrs + clear screen */
         print_show_headers(from, subject, date);
         print_body_page(body_text, cur_line, rows_avail);
+        printf("\033[0m");                  /* close any open ANSI from body */
+        fflush(stdout);
 
         int cur_page = cur_line / rows_avail + 1;
         fprintf(stderr, "\033[%d;1H\033[7m\033[2K", page_size); /* last row + reverse + erase */
@@ -1326,11 +1328,13 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 
         for (int cur_line = 0, show_displayed = 0; ; ) {
             if (show_displayed) {
-                printf("\033[H\033[2J");
+                printf("\033[0m\033[H\033[2J");   /* reset attrs + clear screen */
                 print_show_headers(from, subject, date);
             }
             show_displayed = 1;
             print_body_page(body_text, cur_line, rows_avail);
+            printf("\033[0m");                     /* close any open ANSI from body */
+            fflush(stdout);
 
             if (cur_line == 0 && cur_line + rows_avail >= body_lines) break;
 

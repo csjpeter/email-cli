@@ -22,6 +22,7 @@ void test_platform(void);
 void test_email_service(void);
 void test_html_parser(void);
 void test_html_render(void);
+void test_html_render_style_balance(void);
 
 int main() {
     printf("--- email-cli Unit Test Suite ---\n\n");
@@ -43,6 +44,7 @@ int main() {
     RUN_TEST(test_email_service);
     RUN_TEST(test_html_parser);
     RUN_TEST(test_html_render);
+    RUN_TEST(test_html_render_style_balance);
 
     printf("\n--- Test Results ---\n");
     printf("Tests Run:    %d\n", g_tests_run);

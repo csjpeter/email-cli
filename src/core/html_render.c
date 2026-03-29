@@ -24,6 +24,8 @@ typedef struct {
     int       bold;        /* depth counter */
     int       italic;
     int       uline;
+    int       color_fg;    /* depth: foreground color set by parse_style */
+    int       color_bg;    /* depth: background color set by parse_style */
     int       skip;        /* depth: no output (script/style) */
     int       pre;         /* depth: no wrap */
     int       pending_nl;  /* buffered newlines to emit: 0, 1, or 2 */
@@ -159,6 +161,7 @@ static void apply_color(RS *rs, const char *v, int fg) {
     if (r<0) return;
     char e[32]; snprintf(e,sizeof(e),"\033[%d;2;%d;%d;%dm",fg?38:48,r,g,b);
     rs_str(rs, e);
+    if (fg) rs->color_fg++; else rs->color_bg++;
 }
 static void parse_style(RS *rs, const char *style) {
     if (!style || !rs->ansi) return;
@@ -448,17 +451,23 @@ static void traverse(RS *rs, const HtmlNode *node) {
     /* Snapshot style depth so parse_style side-effects from inline
      * style= attributes are balanced even when tag_close has no handler
      * for this tag (e.g. <a>, <span>, <td> with style="…"). */
-    int bold_sv   = rs->bold;
-    int italic_sv = rs->italic;
-    int uline_sv  = rs->uline;
+    int bold_sv     = rs->bold;
+    int italic_sv   = rs->italic;
+    int uline_sv    = rs->uline;
+    int color_fg_sv = rs->color_fg;
+    int color_bg_sv = rs->color_bg;
     tag_open(rs, node);
     for (const HtmlNode *c = node->first_child; c; c = c->next_sibling)
         traverse(rs, c);
     tag_close(rs, node);
     /* Close any depth-tracked style that tag_close left open */
-    while (rs->uline  > uline_sv)  close_uline(rs);
-    while (rs->italic > italic_sv) close_italic(rs);
-    while (rs->bold   > bold_sv)   close_bold(rs);
+    while (rs->uline    > uline_sv)    close_uline(rs);
+    while (rs->italic   > italic_sv)   close_italic(rs);
+    while (rs->bold     > bold_sv)     close_bold(rs);
+    if (rs->ansi) {
+        if (rs->color_fg > color_fg_sv) { esc(rs, "\033[39m"); rs->color_fg = color_fg_sv; }
+        if (rs->color_bg > color_bg_sv) { esc(rs, "\033[49m"); rs->color_bg = color_bg_sv; }
+    }
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */

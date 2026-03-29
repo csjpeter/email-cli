@@ -468,6 +468,7 @@ static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
 
 /* ── Show helpers ────────────────────────────────────────────────────── */
 
+#define SHOW_WIDTH 80
 #define SHOW_SEPARATOR \
     "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
     "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
@@ -475,20 +476,45 @@ static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
     "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
     "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
     "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
-    "\u2500\u2500\u2500\u2500\u2500\n"
+    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
+    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
 
-/* Print a string replacing control characters (<0x20 except tab) with spaces. */
-static void print_clean(const char *s, const char *fallback) {
-    if (!s) { printf("%s", fallback); return; }
-    for (const unsigned char *p = (const unsigned char *)s; *p; p++)
-        putchar((*p < 0x20 && *p != '\t') ? ' ' : (int)*p);
+/*
+ * Print s (cleaning control chars), truncating at max_cols display columns.
+ * Falls back to `fallback` if s is NULL.  Uses terminal_wcwidth for accurate
+ * multi-byte / wide-character measurement.
+ */
+static void print_clean(const char *s, const char *fallback, int max_cols) {
+    const unsigned char *p = (const unsigned char *)(s ? s : fallback);
+    int col = 0;
+    while (*p) {
+        uint32_t cp; int sl;
+        if      (*p < 0x80) { cp = *p;        sl = 1; }
+        else if (*p < 0xC2) { cp = 0xFFFD;    sl = 1; }
+        else if (*p < 0xE0) { cp = *p & 0x1F; sl = 2; }
+        else if (*p < 0xF0) { cp = *p & 0x0F; sl = 3; }
+        else if (*p < 0xF8) { cp = *p & 0x07; sl = 4; }
+        else                { cp = 0xFFFD;    sl = 1; }
+        for (int i = 1; i < sl; i++) {
+            if ((p[i] & 0xC0) != 0x80) { sl = i; cp = 0xFFFD; break; }
+            cp = (cp << 6) | (p[i] & 0x3F);
+        }
+        int w = terminal_wcwidth(cp);
+        if (w < 0) w = 0;
+        if (col + w > max_cols) break;
+        if (cp < 0x20 && cp != '\t') putchar(' ');
+        else fwrite(p, 1, (size_t)sl, stdout);
+        col += w;
+        p   += sl;
+    }
 }
 
 static void print_show_headers(const char *from, const char *subject,
                                 const char *date) {
-    printf("From:    "); print_clean(from,    "(none)"); putchar('\n');
-    printf("Subject: "); print_clean(subject, "(none)"); putchar('\n');
-    printf("Date:    %s\n", date ? date : "(none)");
+    /* label = 9 chars ("From:    "), remaining = SHOW_WIDTH - 9 = 71 */
+    printf("From:    "); print_clean(from,    "(none)", SHOW_WIDTH - 9); putchar('\n');
+    printf("Subject: "); print_clean(subject, "(none)", SHOW_WIDTH - 9); putchar('\n');
+    printf("Date:    "); print_clean(date,    "(none)", SHOW_WIDTH - 9); putchar('\n');
     printf(SHOW_SEPARATOR);
 }
 
@@ -522,7 +548,7 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
     char *body = mime_get_text_body(raw);
     const char *body_text = body ? body : "(no readable text body)";
     int wrap_cols = terminal_cols();
-    if (wrap_cols > 80) wrap_cols = 80;
+    if (wrap_cols > SHOW_WIDTH) wrap_cols = SHOW_WIDTH;
     char *body_wrapped = word_wrap(body_text, wrap_cols);
     if (body_wrapped) body_text = body_wrapped;
 
@@ -1255,8 +1281,8 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 
     print_show_headers(from, subject, date);
 
-    int wrap_cols = pager ? terminal_cols() : 80;
-    if (wrap_cols > 80) wrap_cols = 80;
+    int wrap_cols = pager ? terminal_cols() : SHOW_WIDTH;
+    if (wrap_cols > SHOW_WIDTH) wrap_cols = SHOW_WIDTH;
 
     char *body = NULL;
     char *html_raw = mime_get_html_part(raw);

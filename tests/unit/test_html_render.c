@@ -536,4 +536,31 @@ void test_html_render(void) {
         ASSERT(strstr(r, "hello") != NULL,    "compact trim: hello still present");
         free(r);
     }
+
+    /* 56. <a style="color:#FF0000"> must not bleed foreground color to
+     *     subsequent text — apply_color depth counter balanced by traverse(). */
+    {
+        char *r = html_render(
+            "<a style=\"color:#FF0000\">red link</a> normal", 0, 1);
+        ASSERT(r != NULL, "color bleed fg: not NULL");
+        /* Default-fg reset \033[39m must appear after the link */
+        ASSERT(strstr(r, "\033[39m") != NULL, "color bleed fg: fg reset present");
+        /* 'normal' must come after the reset */
+        const char *reset = strstr(r, "\033[39m");
+        ASSERT(reset && strstr(reset, "normal") != NULL,
+               "color bleed fg: 'normal' after fg reset");
+        free(r);
+    }
+
+    /* 57. <span style="background-color:#0000FF"> must reset bg color. */
+    {
+        char *r = html_render(
+            "<span style=\"background-color:#0000FF\">bg</span> after", 0, 1);
+        ASSERT(r != NULL, "color bleed bg: not NULL");
+        ASSERT(strstr(r, "\033[49m") != NULL, "color bleed bg: bg reset present");
+        const char *reset = strstr(r, "\033[49m");
+        ASSERT(reset && strstr(reset, "after") != NULL,
+               "color bleed bg: 'after' comes after bg reset");
+        free(r);
+    }
 }

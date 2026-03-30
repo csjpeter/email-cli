@@ -54,6 +54,19 @@ No external test libraries are used. Tests use `ASSERT(condition, message)` and 
 
 C11 (`-std=c11`). Linked against libcurl + libssl. All public functions should have Doxygen-style comments.
 
+## GNU/Linux CLI Conventions
+
+New commands and options must follow standard GNU/Linux CLI conventions:
+
+- **`--help`** must be supported for every command and for the bare binary.
+  `email-cli --help` shows the general help page.
+  `email-cli <cmd> --help` shows the same page as `email-cli help <cmd>`.
+- **`--version`** should be added when a version string is available.
+- Long options use `--option-name` (double dash, lowercase, hyphen-separated).
+- Short single-character aliases (`-h`, `-v`) are welcome but not required.
+- Exit codes: `0` = success, non-zero = failure (use `EXIT_SUCCESS`/`EXIT_FAILURE`).
+- Errors go to **stderr**; normal output to **stdout**.
+
 ## Dependency Policy
 
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libcurl, and libssl.  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.

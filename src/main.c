@@ -174,6 +174,22 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[i], "--batch") != 0) { cmd = argv[i]; break; }
     }
 
+    /* --help anywhere in the args: treat as "help <cmd>" */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0) {
+            if (cmd && strcmp(cmd, "--help") != 0) {
+                /* e.g. email-cli list --help */
+                if (strcmp(cmd, "list")    == 0) { help_list();    return EXIT_SUCCESS; }
+                if (strcmp(cmd, "show")    == 0) { help_show();    return EXIT_SUCCESS; }
+                if (strcmp(cmd, "folders") == 0) { help_folders(); return EXIT_SUCCESS; }
+                if (strcmp(cmd, "sync")    == 0) { help_sync();    return EXIT_SUCCESS; }
+            }
+            /* email-cli --help  or  email-cli help --help */
+            help_general();
+            return EXIT_SUCCESS;
+        }
+    }
+
     /* Page size / pager capability (used by list and show) */
     int pager     = !batch && terminal_is_tty(STDOUT_FILENO);
     int page_size = detect_page_size(batch);

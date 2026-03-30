@@ -702,8 +702,10 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         raw = local_msg_load(folder, uid);
     } else {
         raw = fetch_uid_content_in(cfg, folder, uid, 0);
-        if (raw)
+        if (raw) {
             local_msg_save(folder, uid, raw, strlen(raw));
+            local_index_update(folder, uid, raw);
+        }
     }
     if (!raw) {
         fprintf(stderr, "Could not load UID %d.\n", uid);
@@ -1482,8 +1484,10 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
         raw = local_msg_load(cfg->folder, uid);
     } else {
         raw = fetch_uid_content_in(cfg, cfg->folder, uid, 0);
-        if (raw)
+        if (raw) {
             local_msg_save(cfg->folder, uid, raw, strlen(raw));
+            local_index_update(cfg->folder, uid, raw);
+        }
     }
 
     if (!raw) { fprintf(stderr, "Could not load message UID %d.\n", uid); return -1; }
@@ -1604,6 +1608,7 @@ int email_service_sync(const Config *cfg) {
                 continue;
             }
             local_msg_save(folder, uid, raw, strlen(raw));
+            local_index_update(folder, uid, raw);
             free(raw);
             fetched++;
             printf("  [%d/%d] UID %d fetched\r", i + 1, uid_count, uid);

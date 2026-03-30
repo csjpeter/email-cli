@@ -17,6 +17,7 @@
 void test_email_service(void) {
 
     setlocale(LC_ALL, "");
+    local_store_init("imaps://test.example.com");
 
     /* ── parse_uid_list ──────────────────────────────────────────────── */
 

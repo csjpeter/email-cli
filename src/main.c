@@ -11,6 +11,7 @@
 #include "platform/path.h"
 #include "raii.h"
 #include "logger.h"
+#include "local_store.h"
 #include "fs_util.h"
 
 /* Number of non-data lines printed around the message table */
@@ -247,7 +248,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* 5. Initialize libcurl */
+    /* 5. Initialize local store and libcurl */
+    if (local_store_init(cfg->host) != 0)
+        logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
     curl_global_init(CURL_GLOBAL_ALL);
 
     /* 6. Dispatch */

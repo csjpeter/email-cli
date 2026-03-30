@@ -85,4 +85,17 @@ char *email_service_list_folders_interactive(const Config *cfg,
  */
 int email_service_read(const Config *cfg, int uid, int pager, int page_size);
 
+/**
+ * @brief Downloads all messages in all folders to the local cache.
+ *
+ * Iterates over every folder returned by LIST, fetches each message that is
+ * not yet in the full-message cache (BODY.PEEK[]), and saves it locally.
+ * Messages already cached are skipped.  Progress is printed to stdout.
+ * Attachments are stored as part of the raw RFC 2822 data (not extracted).
+ *
+ * @param cfg  Connection configuration.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_sync(const Config *cfg);
+
 #endif /* EMAIL_SERVICE_H */

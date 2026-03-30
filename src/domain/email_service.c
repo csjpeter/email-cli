@@ -1559,3 +1559,69 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
     return 0;
 }
 
+int email_service_sync(const Config *cfg) {
+    int folder_count = 0;
+    char sep = '.';
+    char **folders = fetch_folder_list(cfg, &folder_count, &sep);
+    if (!folders || folder_count == 0) {
+        fprintf(stderr, "sync: could not retrieve folder list.\n");
+        if (folders) free(folders);
+        return -1;
+    }
+    qsort(folders, (size_t)folder_count, sizeof(char *), cmp_str);
+
+    int total_fetched = 0, total_skipped = 0, errors = 0;
+
+    for (int fi = 0; fi < folder_count; fi++) {
+        const char *folder = folders[fi];
+        printf("Syncing %s ...\n", folder);
+        fflush(stdout);
+
+        int *uids = NULL;
+        int uid_count = search_uids_in(cfg, folder, "ALL", &uids);
+        if (uid_count < 0) {
+            fprintf(stderr, "  WARN: SEARCH ALL failed for %s\n", folder);
+            errors++;
+            continue;
+        }
+        if (uid_count == 0) {
+            printf("  (empty)\n");
+            free(uids);
+            continue;
+        }
+
+        int fetched = 0, skipped = 0;
+        for (int i = 0; i < uid_count; i++) {
+            int uid = uids[i];
+            if (cache_exists(folder, uid)) {
+                skipped++;
+                continue;
+            }
+            char *raw = fetch_uid_content_in(cfg, folder, uid, 0);
+            if (!raw) {
+                fprintf(stderr, "  WARN: failed to fetch UID %d in %s\n", uid, folder);
+                errors++;
+                continue;
+            }
+            cache_save(folder, uid, raw, strlen(raw));
+            free(raw);
+            fetched++;
+            printf("  [%d/%d] UID %d fetched\r", i + 1, uid_count, uid);
+            fflush(stdout);
+        }
+        free(uids);
+
+        printf("  %d fetched, %d already cached%s\n",
+               fetched, skipped, errors ? " (some errors)" : "");
+        total_fetched += fetched;
+        total_skipped += skipped;
+    }
+
+    for (int i = 0; i < folder_count; i++) free(folders[i]);
+    free(folders);
+
+    printf("\nSync complete: %d fetched, %d already cached", total_fetched, total_skipped);
+    if (errors) printf(", %d errors", errors);
+    printf("\n");
+    return errors ? -1 : 0;
+}

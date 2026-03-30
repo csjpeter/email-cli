@@ -1,0 +1,8 @@
+/home/csjpeter/email-cli/build_noasan/CMakeFiles/email-cli.dir
+/home/csjpeter/email-cli/build_noasan/CMakeFiles/test.dir
+/home/csjpeter/email-cli/build_noasan/CMakeFiles/edit_cache.dir
+/home/csjpeter/email-cli/build_noasan/CMakeFiles/rebuild_cache.dir
+/home/csjpeter/email-cli/build_noasan/tests/unit/CMakeFiles/test-runner.dir
+/home/csjpeter/email-cli/build_noasan/tests/unit/CMakeFiles/test.dir
+/home/csjpeter/email-cli/build_noasan/tests/unit/CMakeFiles/edit_cache.dir
+/home/csjpeter/email-cli/build_noasan/tests/unit/CMakeFiles/rebuild_cache.dir

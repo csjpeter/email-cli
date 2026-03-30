@@ -1,0 +1,41 @@
+file(REMOVE_RECURSE
+  "CMakeFiles/email-cli.dir/src/core/config.c.o"
+  "CMakeFiles/email-cli.dir/src/core/config.c.o.d"
+  "CMakeFiles/email-cli.dir/src/core/fs_util.c.o"
+  "CMakeFiles/email-cli.dir/src/core/fs_util.c.o.d"
+  "CMakeFiles/email-cli.dir/src/core/html_parser.c.o"
+  "CMakeFiles/email-cli.dir/src/core/html_parser.c.o.d"
+  "CMakeFiles/email-cli.dir/src/core/html_render.c.o"
+  "CMakeFiles/email-cli.dir/src/core/html_render.c.o.d"
+  "CMakeFiles/email-cli.dir/src/core/imap_util.c.o"
+  "CMakeFiles/email-cli.dir/src/core/imap_util.c.o.d"
+  "CMakeFiles/email-cli.dir/src/core/logger.c.o"
+  "CMakeFiles/email-cli.dir/src/core/logger.c.o.d"
+  "CMakeFiles/email-cli.dir/src/core/mime_util.c.o"
+  "CMakeFiles/email-cli.dir/src/core/mime_util.c.o.d"
+  "CMakeFiles/email-cli.dir/src/domain/email_service.c.o"
+  "CMakeFiles/email-cli.dir/src/domain/email_service.c.o.d"
+  "CMakeFiles/email-cli.dir/src/infrastructure/cache_store.c.o"
+  "CMakeFiles/email-cli.dir/src/infrastructure/cache_store.c.o.d"
+  "CMakeFiles/email-cli.dir/src/infrastructure/config_store.c.o"
+  "CMakeFiles/email-cli.dir/src/infrastructure/config_store.c.o.d"
+  "CMakeFiles/email-cli.dir/src/infrastructure/curl_adapter.c.o"
+  "CMakeFiles/email-cli.dir/src/infrastructure/curl_adapter.c.o.d"
+  "CMakeFiles/email-cli.dir/src/infrastructure/setup_wizard.c.o"
+  "CMakeFiles/email-cli.dir/src/infrastructure/setup_wizard.c.o.d"
+  "CMakeFiles/email-cli.dir/src/main.c.o"
+  "CMakeFiles/email-cli.dir/src/main.c.o.d"
+  "CMakeFiles/email-cli.dir/src/platform/posix/html_medium.c.o"
+  "CMakeFiles/email-cli.dir/src/platform/posix/html_medium.c.o.d"
+  "CMakeFiles/email-cli.dir/src/platform/posix/path.c.o"
+  "CMakeFiles/email-cli.dir/src/platform/posix/path.c.o.d"
+  "CMakeFiles/email-cli.dir/src/platform/posix/terminal.c.o"
+  "CMakeFiles/email-cli.dir/src/platform/posix/terminal.c.o.d"
+  "email-cli"
+  "email-cli.pdb"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang C)
+  include(CMakeFiles/email-cli.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

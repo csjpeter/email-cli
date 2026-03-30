@@ -1,6 +1,6 @@
 #include "email_service.h"
 #include "curl_adapter.h"
-#include "cache_store.h"
+#include "local_store.h"
 #include "mime_util.h"
 #include "html_render.h"
 #include "imap_util.h"
@@ -631,11 +631,11 @@ static char *fetch_uid_content_in(const Config *cfg, const char *folder,
 /** Fetches headers for uid/folder, using the header cache. Caller must free. */
 static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
                                        int uid) {
-    if (hcache_exists(folder, uid))
-        return hcache_load(folder, uid);
+    if (local_hdr_exists(folder, uid))
+        return local_hdr_load(folder, uid);
     char *hdrs = fetch_uid_content_in(cfg, folder, uid, 1);
     if (hdrs)
-        hcache_save(folder, uid, hdrs, strlen(hdrs));
+        local_hdr_save(folder, uid, hdrs, strlen(hdrs));
     return hdrs;
 }
 
@@ -698,12 +698,12 @@ static void print_show_headers(const char *from, const char *subject,
 static int show_uid_interactive(const Config *cfg, const char *folder,
                                 int uid, int page_size) {
     char *raw = NULL;
-    if (cache_exists(folder, uid)) {
-        raw = cache_load(folder, uid);
+    if (local_msg_exists(folder, uid)) {
+        raw = local_msg_load(folder, uid);
     } else {
         raw = fetch_uid_content_in(cfg, folder, uid, 0);
         if (raw)
-            cache_save(folder, uid, raw, strlen(raw));
+            local_msg_save(folder, uid, raw, strlen(raw));
     }
     if (!raw) {
         fprintf(stderr, "Could not load UID %d.\n", uid);
@@ -1050,7 +1050,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     }
     /* Evict headers for messages deleted from the server */
     if (all_count > 0)
-        hcache_evict_stale(folder, all_uids, all_count);
+        local_hdr_evict_stale(folder, all_uids, all_count);
 
     int show_count = all_count;
 
@@ -1477,13 +1477,13 @@ folders_int_done:
 int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
     char *raw = NULL;
 
-    if (cache_exists(cfg->folder, uid)) {
+    if (local_msg_exists(cfg->folder, uid)) {
         logger_log(LOG_DEBUG, "Cache hit for UID %d in %s", uid, cfg->folder);
-        raw = cache_load(cfg->folder, uid);
+        raw = local_msg_load(cfg->folder, uid);
     } else {
         raw = fetch_uid_content_in(cfg, cfg->folder, uid, 0);
         if (raw)
-            cache_save(cfg->folder, uid, raw, strlen(raw));
+            local_msg_save(cfg->folder, uid, raw, strlen(raw));
     }
 
     if (!raw) { fprintf(stderr, "Could not load message UID %d.\n", uid); return -1; }
@@ -1593,7 +1593,7 @@ int email_service_sync(const Config *cfg) {
         int fetched = 0, skipped = 0;
         for (int i = 0; i < uid_count; i++) {
             int uid = uids[i];
-            if (cache_exists(folder, uid)) {
+            if (local_msg_exists(folder, uid)) {
                 skipped++;
                 continue;
             }
@@ -1603,7 +1603,7 @@ int email_service_sync(const Config *cfg) {
                 errors++;
                 continue;
             }
-            cache_save(folder, uid, raw, strlen(raw));
+            local_msg_save(folder, uid, raw, strlen(raw));
             free(raw);
             fetched++;
             printf("  [%d/%d] UID %d fetched\r", i + 1, uid_count, uid);

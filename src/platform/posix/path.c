@@ -1,7 +1,7 @@
 /**
  * POSIX path implementation.
- * Uses $HOME / $XDG_CACHE_HOME / $XDG_CONFIG_HOME, falling back to
- * getpwuid(getuid()) for the home directory.
+ * Uses $HOME / $XDG_CACHE_HOME / $XDG_CONFIG_HOME / $XDG_DATA_HOME,
+ * falling back to getpwuid(getuid()) for the home directory.
  */
 #include "../path.h"
 #include <stdlib.h>
@@ -14,6 +14,7 @@
 static char g_home[4096];
 static char g_cache[8192];
 static char g_config[8192];
+static char g_data[8192];
 
 const char *platform_home_dir(void) {
     const char *h = getenv("HOME");
@@ -48,4 +49,16 @@ const char *platform_config_dir(void) {
     if (!home) return NULL;
     snprintf(g_config, sizeof(g_config), "%s/.config", home);
     return g_config;
+}
+
+const char *platform_data_dir(void) {
+    const char *xdg = getenv("XDG_DATA_HOME");
+    if (xdg && *xdg) {
+        snprintf(g_data, sizeof(g_data), "%s", xdg);
+        return g_data;
+    }
+    const char *home = platform_home_dir();
+    if (!home) return NULL;
+    snprintf(g_data, sizeof(g_data), "%s/.local/share", home);
+    return g_data;
 }

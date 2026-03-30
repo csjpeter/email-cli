@@ -54,7 +54,7 @@ set(SOURCES
     src/infrastructure/config_store.c
     src/infrastructure/setup_wizard.c
     src/infrastructure/curl_adapter.c
-    src/infrastructure/cache_store.c
+    src/infrastructure/local_store.c
     src/domain/email_service.c
     ${PLATFORM_SOURCES}
 )

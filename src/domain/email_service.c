@@ -1308,6 +1308,11 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
     qsort(folders, (size_t)count, sizeof(char *), cmp_str);
 
+    logger_log(LOG_DEBUG, "folder_browser: current_folder='%s' count=%d sep='%c'",
+               current_folder ? current_folder : "(null)", count, sep);
+    for (int i = 0; i < count; i++)
+        logger_log(LOG_DEBUG, "folder_browser: folders[%d]='%s'", i, folders[i]);
+
     int *vis = malloc((size_t)count * sizeof(int));
     if (!vis) {
         for (int i = 0; i < count; i++) free(folders[i]);
@@ -1319,12 +1324,14 @@ char *email_service_list_folders_interactive(const Config *cfg,
     int tree_mode = ui_pref_get_int("folder_view_mode", 1);
     char current_prefix[512] = "";   /* flat mode: current navigation level */
 
-    /* Pre-position cursor on current_folder */
+    /* Pre-position cursor on current_folder.
+     * INBOX is case-insensitive per RFC 3501 — use strcasecmp so that a
+     * config value of "inbox" still matches the server's "INBOX". */
     if (current_folder && *current_folder) {
         if (tree_mode) {
             /* In tree mode the flat view is folders[0..count-1] directly */
             for (int i = 0; i < count; i++) {
-                if (strcmp(folders[i], current_folder) == 0) {
+                if (strcasecmp(folders[i], current_folder) == 0) {
                     cursor = i; break;
                 }
             }
@@ -1341,7 +1348,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
             int tmp_vis[1024];
             int tv = build_flat_view(folders, count, sep, current_prefix, tmp_vis);
             for (int i = 0; i < tv; i++) {
-                if (strcmp(folders[tmp_vis[i]], current_folder) == 0) {
+                if (strcasecmp(folders[tmp_vis[i]], current_folder) == 0) {
                     cursor = i; break;
                 }
             }

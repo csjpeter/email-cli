@@ -41,6 +41,7 @@ static void help_general(void) {
         "  list              List messages in the configured mailbox\n"
         "  show <uid>        Display the full content of a message by its UID\n"
         "  folders           List available IMAP folders\n"
+        "  sync              Download all messages in all folders to local cache\n"
         "  help [command]    Show this help, or detailed help for a command\n"
         "\n"
         "Run 'email-cli help <command>' for more information.\n",
@@ -104,6 +105,25 @@ static void help_folders(void) {
         "Examples:\n"
         "  email-cli folders\n"
         "  email-cli folders --tree\n"
+    );
+}
+
+static void help_sync(void) {
+    printf(
+        "Usage: email-cli sync\n"
+        "\n"
+        "Downloads all messages in every IMAP folder to the local cache.\n"
+        "Messages already cached are skipped.\n"
+        "Attachments are stored as part of the raw RFC 2822 message data\n"
+        "(not extracted to separate files).\n"
+        "\n"
+        "Progress is printed per folder:\n"
+        "  Syncing INBOX ...\n"
+        "  42 fetched, 10 already cached\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli sync\n"
+        "  email-cli sync --batch\n"
     );
 }
 
@@ -171,6 +191,7 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "list")    == 0) { help_list();    return EXIT_SUCCESS; }
             if (strcmp(topic, "show")    == 0) { help_show();    return EXIT_SUCCESS; }
             if (strcmp(topic, "folders") == 0) { help_folders(); return EXIT_SUCCESS; }
+            if (strcmp(topic, "sync")    == 0) { help_sync();    return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli help' for available commands.\n");
             return EXIT_FAILURE;
@@ -317,6 +338,9 @@ int main(int argc, char *argv[]) {
             else { unknown_option("folders", argv[i]); ok = 0; }
         }
         if (ok) result = email_service_list_folders(cfg, tree);
+
+    } else if (strcmp(cmd, "sync") == 0) {
+        result = email_service_sync(cfg);
 
     } else {
         fprintf(stderr, "Unknown command '%s'.\n", cmd);

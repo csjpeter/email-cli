@@ -31,4 +31,12 @@ const char *platform_cache_dir(void);
  */
 const char *platform_config_dir(void);
 
+/**
+ * Returns the base directory for user-specific persistent data files.
+ * POSIX: $XDG_DATA_HOME or ~/.local/share
+ * Windows: %APPDATA%
+ * The returned string is owned by the platform layer (do not free).
+ */
+const char *platform_data_dir(void);
+
 #endif /* PLATFORM_PATH_H */

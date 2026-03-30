@@ -818,9 +818,9 @@ void test_email_service(void) {
      *   - Inject ESC via pipe into STDIN_FILENO so the function exits cleanly.
      *
      * If the function uses cfg->folder ("INBOX"):
-     *   cache_exists("INBOX", 7777) → false → fetch fails → returns -1.
+     *   local_msg_exists("INBOX", 7777) → false → fetch fails → returns -1.
      * If the function uses the correct folder ("test_subfolder"):
-     *   cache_exists("test_subfolder", 7777) → true → loads OK → ESC → returns 1.
+     *   local_msg_exists("test_subfolder", 7777) → true → loads OK → ESC → returns 1.
      */
     {
         /* Minimal plain-text MIME message */
@@ -833,10 +833,10 @@ void test_email_service(void) {
             "Subfolder message body.\r\n";
 
         /* Pre-populate cache under the correct subfolder */
-        int saved_rc = cache_save("test_subfolder", 7777,
+        int saved_rc = local_msg_save("test_subfolder", 7777,
                                   sf_mime, strlen(sf_mime));
         if (saved_rc != 0) {
-            ASSERT(0, "show_uid_interactive subfolder: cache_save failed");
+            ASSERT(0, "show_uid_interactive subfolder: local_msg_save failed");
             goto skip_subfolder_test;
         }
 

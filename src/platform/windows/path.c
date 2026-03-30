@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-static char g_home[4096], g_cache[4096], g_config[4096];
+static char g_home[4096], g_cache[4096], g_config[4096], g_data[4096];
 
 const char *platform_home_dir(void) {
     char *h = getenv("USERPROFILE");
@@ -21,5 +21,12 @@ const char *platform_cache_dir(void) {
 const char *platform_config_dir(void) {
     char *h = getenv("APPDATA");
     if (h) { snprintf(g_config, sizeof(g_config), "%s", h); return g_config; }
+    return NULL;
+}
+
+const char *platform_data_dir(void) {
+    /* Windows has no separate "data" dir; %APPDATA% is the closest equivalent */
+    char *h = getenv("APPDATA");
+    if (h) { snprintf(g_data, sizeof(g_data), "%s", h); return g_data; }
     return NULL;
 }

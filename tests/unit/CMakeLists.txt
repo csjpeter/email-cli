@@ -29,7 +29,7 @@ set(TEST_SOURCES
     test_wizard.c
     test_curl.c
     test_mime.c
-    test_cache.c
+    test_local_store.c
     test_imap_util.c
     test_email_service.c
     test_html_parser.c
@@ -44,7 +44,7 @@ set(TEST_SOURCES
     ../../src/infrastructure/config_store.c
     ../../src/infrastructure/setup_wizard.c
     ../../src/infrastructure/curl_adapter.c
-    ../../src/infrastructure/cache_store.c
+    ../../src/infrastructure/local_store.c
     html_medium_stub.c
     ${TEST_PLATFORM_SOURCES}
 )

@@ -224,12 +224,12 @@ void test_html_render(void) {
         free(r);
     }
 
-    /* 19. <a href="url">text</a> → text (no URL in output) */
+    /* 19. <a href="url">text</a> → link text + href URL emitted after */
     {
         char *r = html_render("<a href=\"http://example.com\">link text</a>", 0, 0);
         ASSERT(r != NULL, "a href: not NULL");
         ASSERT(strstr(r, "link text") != NULL, "a href: text present");
-        ASSERT(strstr(r, "http://") == NULL, "a href: URL not in output");
+        ASSERT(strstr(r, "http://example.com") != NULL, "a href: URL present");
         free(r);
     }
 
@@ -1288,6 +1288,44 @@ void test_html_render_url_isolation(void)
 
     /* 7. Style-balance is preserved when URL isolation adds newlines */
     assert_style_balanced("<b>bold " URL " text</b>", "url isolation: style balanced");
+
+/* Helper: check condition without early return (safe even if ASSERT would abort). */
+#define CHECK(cond, msg) do { \
+    g_tests_run++; \
+    if (!(cond)) { \
+        printf("  [FAIL] %s:%d: %s\n", __FILE__, __LINE__, msg); \
+        g_tests_failed++; \
+    } \
+} while (0)
+
+    /* 8. <a href="...">text</a>: href URL must appear in output */
+    {
+        char *r = html_render("<a href=\"" URL "\">Click here</a>", 80, 0);
+        ASSERT(r != NULL, "anchor href: not NULL");
+        CHECK(strstr(r, "Click here") != NULL, "anchor href: link text present");
+        CHECK(strstr(r, URL) != NULL,           "anchor href: URL present in output");
+        const char *u = strstr(r, URL);
+        if (u) CHECK(u == r || *(u-1) == '\n',  "anchor href: URL on own line");
+        free(r);
+    }
+
+    /* 9. <a href="#section">skip</a>: fragment-only href not emitted */
+    {
+        char *r = html_render("<a href=\"#section\">skip</a>", 80, 0);
+        ASSERT(r != NULL, "anchor fragment: not NULL");
+        CHECK(strstr(r, "#section") == NULL, "anchor fragment: not emitted");
+        free(r);
+    }
+
+    /* 10. <a href="javascript:void(0)">skip</a>: js href not emitted */
+    {
+        char *r = html_render("<a href=\"javascript:void(0)\">skip</a>", 80, 0);
+        ASSERT(r != NULL, "anchor js: not NULL");
+        CHECK(strstr(r, "javascript:") == NULL, "anchor js: not emitted");
+        free(r);
+    }
+
+#undef CHECK
 
 #undef URL
 #undef URL2

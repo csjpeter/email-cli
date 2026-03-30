@@ -198,19 +198,21 @@ static char *word_wrap(const char *text, int width) {
     return out;
 }
 
-/* ── Interactive pager helpers ───────────────────────────────────────── */
+/* Forward declaration — defined after visible_line_cols (below). */
+static void print_statusbar(int trows, int width, const char *text);
 
 /**
  * Pager prompt for the standalone `show` command.
  * Returns scroll delta: 0 = quit, positive = forward N lines, negative = back N.
  */
-static int pager_prompt(int cur_page, int total_pages, int page_size, int term_rows) {
+static int pager_prompt(int cur_page, int total_pages, int page_size,
+                        int term_rows, int sb_width) {
     for (;;) {
-        fprintf(stderr, "\033[%d;1H\033[7m\033[2K", term_rows); /* last row + reverse + erase */
-        fprintf(stderr,
-                "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back  ESC=quit --\033[0m",
-                cur_page, total_pages);
-        fflush(stderr);
+        char sb[256];
+        snprintf(sb, sizeof(sb),
+                 "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back  ESC=quit --",
+                 cur_page, total_pages);
+        print_statusbar(term_rows, sb_width, sb);
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K");
         fflush(stderr);
@@ -298,6 +300,22 @@ static int count_visual_rows(const char *body, int term_cols) {
         p = eol + 1;
     }
     return total;
+}
+
+/* ── Interactive pager helpers ───────────────────────────────────────── */
+
+/**
+ * Print a reverse-video status bar at terminal row trows, exactly width columns wide.
+ * text must not contain ANSI escapes that move the cursor off the line.
+ */
+static void print_statusbar(int trows, int width, const char *text) {
+    fprintf(stderr, "\033[%d;1H\033[7m", trows);
+    fputs(text, stderr);
+    int used = visible_line_cols(text, text + strlen(text));
+    int pad  = width - used;
+    for (int i = 0; i < pad; i++) fputc(' ', stderr);
+    fprintf(stderr, "\033[0m");
+    fflush(stderr);
 }
 
 /**
@@ -737,12 +755,14 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         fflush(stdout);
 
         int cur_page = cur_line / rows_avail + 1;
-        fprintf(stderr, "\033[%d;1H\033[7m\033[2K", term_rows); /* last row + reverse + erase */
-        fprintf(stderr,
-                "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                "  Backspace=list  ESC=quit --\033[0m",
-                cur_page, total_pages);
-        fflush(stderr);
+        {
+            char sb[256];
+            snprintf(sb, sizeof(sb),
+                     "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
+                     "  Backspace=list  ESC=quit --",
+                     cur_page, total_pages);
+            print_statusbar(term_rows, wrap_cols, sb);
+        }
 
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K");
@@ -1156,11 +1176,12 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         {
             int trows = terminal_rows();
             if (trows <= 0) trows = limit + 6;
-            fprintf(stderr, "\033[%d;1H\033[7m\033[2K", trows);
-            fprintf(stderr, "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                   "  Backspace=folders  ESC=quit  [%d/%d]\033[0m",
-                   cursor + 1, show_count);
-            fflush(stderr);
+            char sb[256];
+            snprintf(sb, sizeof(sb),
+                     "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                     "  Backspace=folders  ESC=quit  [%d/%d]",
+                     cursor + 1, show_count);
+            print_statusbar(trows, tcols, sb);
         }
 
         TermKey key = terminal_read_key();
@@ -1298,22 +1319,31 @@ char *email_service_list_folders_interactive(const Config *cfg,
     int tree_mode = ui_pref_get_int("folder_view_mode", 1);
     char current_prefix[512] = "";   /* flat mode: current navigation level */
 
-    /* In flat mode, pre-navigate to the level that contains current_folder */
-    if (!tree_mode && current_folder && *current_folder) {
-        const char *last = strrchr(current_folder, sep);
-        if (last) {
-            size_t plen = (size_t)(last - current_folder);
-            if (plen < sizeof(current_prefix)) {
-                memcpy(current_prefix, current_folder, plen);
-                current_prefix[plen] = '\0';
+    /* Pre-position cursor on current_folder */
+    if (current_folder && *current_folder) {
+        if (tree_mode) {
+            /* In tree mode the flat view is folders[0..count-1] directly */
+            for (int i = 0; i < count; i++) {
+                if (strcmp(folders[i], current_folder) == 0) {
+                    cursor = i; break;
+                }
             }
-        }
-        /* position cursor on current_folder */
-        int tmp_vis[1024];
-        int tv = build_flat_view(folders, count, sep, current_prefix, tmp_vis);
-        for (int i = 0; i < tv; i++) {
-            if (strcmp(folders[tmp_vis[i]], current_folder) == 0) {
-                cursor = i; break;
+        } else {
+            /* In flat mode, navigate to the level that contains current_folder */
+            const char *last = strrchr(current_folder, sep);
+            if (last) {
+                size_t plen = (size_t)(last - current_folder);
+                if (plen < sizeof(current_prefix)) {
+                    memcpy(current_prefix, current_folder, plen);
+                    current_prefix[plen] = '\0';
+                }
+            }
+            int tmp_vis[1024];
+            int tv = build_flat_view(folders, count, sep, current_prefix, tmp_vis);
+            for (int i = 0; i < tv; i++) {
+                if (strcmp(folders[tmp_vis[i]], current_folder) == 0) {
+                    cursor = i; break;
+                }
             }
         }
     }
@@ -1358,16 +1388,25 @@ char *email_service_list_folders_interactive(const Config *cfg,
             }
         }
 
-        if (!tree_mode && current_prefix[0])
-            printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
-                   "  t=tree  Backspace=up  ESC=quit  [%d/%d]\033[0m\n",
-                   display_count > 0 ? cursor + 1 : 0, display_count);
-        else
-            printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
-                   "  t=%s  Backspace/ESC=quit  [%d/%d]\033[0m\n",
-                   tree_mode ? "flat" : "tree",
-                   display_count > 0 ? cursor + 1 : 0, display_count);
         fflush(stdout);
+        {
+            int trows_f = terminal_rows();
+            if (trows_f <= 0) trows_f = limit + 4;
+            int tcols_f = terminal_cols();
+            char sb[256];
+            if (!tree_mode && current_prefix[0])
+                snprintf(sb, sizeof(sb),
+                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
+                         "  t=tree  Backspace=up  ESC=quit  [%d/%d]",
+                         display_count > 0 ? cursor + 1 : 0, display_count);
+            else
+                snprintf(sb, sizeof(sb),
+                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
+                         "  t=%s  Backspace/ESC=quit  [%d/%d]",
+                         tree_mode ? "flat" : "tree",
+                         display_count > 0 ? cursor + 1 : 0, display_count);
+            print_statusbar(trows_f, tcols_f, sb);
+        }
 
         TermKey key = terminal_read_key();
 
@@ -1504,7 +1543,7 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
             if (cur_line == 0 && cur_line + rows_avail >= body_vrows) break;
 
             int cur_page = cur_line / rows_avail + 1;
-            int delta = pager_prompt(cur_page, total_pages, rows_avail, page_size);
+            int delta = pager_prompt(cur_page, total_pages, rows_avail, page_size, wrap_cols);
             if (delta == 0) break;
             cur_line += delta;
             if (cur_line < 0) cur_line = 0;

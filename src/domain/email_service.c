@@ -702,6 +702,8 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
     char *date     = date_raw ? mime_format_date(date_raw) : NULL;
     free(date_raw);
     int term_cols = terminal_cols();
+    int term_rows = terminal_rows();
+    if (term_rows <= 0) term_rows = page_size;
     int wrap_cols = term_cols > SHOW_WIDTH ? SHOW_WIDTH : term_cols;
     char *body = NULL;
     char *html_raw = mime_get_html_part(raw);
@@ -735,7 +737,7 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         fflush(stdout);
 
         int cur_page = cur_line / rows_avail + 1;
-        fprintf(stderr, "\033[%d;1H\033[7m\033[2K", page_size); /* last row + reverse + erase */
+        fprintf(stderr, "\033[%d;1H\033[7m\033[2K", term_rows); /* last row + reverse + erase */
         fprintf(stderr,
                 "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
                 "  Backspace=list  ESC=quit --\033[0m",
@@ -1149,13 +1151,20 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             break;
         }
 
-        /* Navigation hint (status bar) */
-        printf("\n\033[2m  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-               "  Backspace=folders  ESC=quit  [%d/%d]\033[0m\n",
-               cursor + 1, show_count);
+        /* Navigation hint (status bar) — anchored at last terminal row */
         fflush(stdout);
+        {
+            int trows = terminal_rows();
+            if (trows <= 0) trows = limit + 6;
+            fprintf(stderr, "\033[%d;1H\033[7m\033[2K", trows);
+            fprintf(stderr, "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                   "  Backspace=folders  ESC=quit  [%d/%d]\033[0m",
+                   cursor + 1, show_count);
+            fflush(stderr);
+        }
 
         TermKey key = terminal_read_key();
+        fprintf(stderr, "\r\033[K"); fflush(stderr);
 
         switch (key) {
         case TERM_KEY_BACK:

@@ -1308,11 +1308,6 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
     qsort(folders, (size_t)count, sizeof(char *), cmp_str);
 
-    logger_log(LOG_DEBUG, "folder_browser: current_folder='%s' count=%d sep='%c'",
-               current_folder ? current_folder : "(null)", count, sep);
-    for (int i = 0; i < count; i++)
-        logger_log(LOG_DEBUG, "folder_browser: folders[%d]='%s'", i, folders[i]);
-
     int *vis = malloc((size_t)count * sizeof(int));
     if (!vis) {
         for (int i = 0; i < count; i++) free(folders[i]);

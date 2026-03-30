@@ -105,11 +105,15 @@ Success: Fetch complete.
 - The separator line is exactly 65 `─` (U+2500) characters.
 - `Date` is shown in `YYYY-MM-DD HH:MM` format (local timezone), same as `list`.
 - If a header field is absent or unparseable, `(none)` is printed.
-- The body is the plain-text part extracted from the MIME structure.  If no
-  plain-text part exists, `(no readable text body)` is printed.
-- Long body lines are **soft-wrapped** at word boundaries so that no output
-  line exceeds `min(terminal_width, 80)` terminal columns.  Words that
-  individually exceed the limit are emitted on their own line without breaking.
+- The body is selected and rendered in the following priority order (see
+  [html-rendering.md](html-rendering.md) for full details):
+  1. **`text/html`** part — rendered to terminal text via `html_render()`,
+     with ANSI colour/style escapes when the pager is active.
+  2. **`text/plain`** part — extracted as-is and word-wrapped.
+  3. **Neither present** — `(no readable text body)` is printed.
+- Long lines are **soft-wrapped** at word boundaries so that no output line
+  exceeds `min(terminal_width, 80)` terminal columns.  Words that individually
+  exceed the limit are emitted on their own line without breaking.
 - When the interactive pager is active, each page begins with a full-screen
   clear (`\033[H\033[2J`) followed by the headers + separator, then the body
   page.  A pager status bar is printed to **stderr** (reverse video):

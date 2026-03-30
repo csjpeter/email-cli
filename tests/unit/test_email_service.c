@@ -311,7 +311,7 @@ void test_email_service(void) {
             "\033[39m";                    /* fg reset after last line */
 
         int pipefd[2];
-        pipe(pipefd);
+        if (pipe(pipefd) != 0) { ASSERT(0, "page ANSI replay: pipe failed"); goto skip_replay_fg; }
         fflush(stdout);
         int saved = dup(STDOUT_FILENO);
         dup2(pipefd[1], STDOUT_FILENO);
@@ -338,6 +338,7 @@ void test_email_service(void) {
                "page ANSI replay: Line 1 present in output");
         ASSERT(esc < line1,
                "page ANSI replay: fg escape precedes Line 1");
+        skip_replay_fg:;
     }
 
     /*
@@ -352,7 +353,7 @@ void test_email_service(void) {
             "\033[49m";
 
         int pipefd[2];
-        pipe(pipefd);
+        if (pipe(pipefd) != 0) { ASSERT(0, "page ANSI replay bg: pipe failed"); goto skip_replay_bg; }
         fflush(stdout);
         int saved = dup(STDOUT_FILENO);
         dup2(pipefd[1], STDOUT_FILENO);
@@ -375,6 +376,7 @@ void test_email_service(void) {
                "page ANSI replay bg: bg color escape present in page-2 output");
         ASSERT(esc < line1,
                "page ANSI replay bg: bg escape precedes Line 1");
+        skip_replay_bg:;
     }
 
     /* ── print_padded_col (non-ASCII paths, lines 83-91) ─────────────── */
@@ -410,6 +412,76 @@ void test_email_service(void) {
         fflush(stdout);
         dup2(saved_fd2, STDOUT_FILENO);
         close(saved_fd2);
+    }
+
+    /* ── print_clean — truncation at max_cols ───────────────────────── */
+    /*
+     * Regression test for ce09877: print_clean must stop emitting characters
+     * once the visible column count reaches max_cols, so that header values
+     * (From/Subject/Date) never overflow the 80-column display width.
+     *
+     * We capture stdout via a pipe, call print_clean with a 200-char ASCII
+     * string and max_cols=10, then verify the captured output is ≤ 10 bytes.
+     */
+    {
+        char long_str[201];
+        memset(long_str, 'A', 200);
+        long_str[200] = '\0';
+
+        int pipefd[2];
+        if (pipe(pipefd) != 0) {
+            ASSERT(0, "print_clean truncation: pipe failed");
+            goto skip_print_clean;
+        }
+        fflush(stdout);
+        int saved_pc = dup(STDOUT_FILENO);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        print_clean(long_str, "(none)", 10);
+
+        fflush(stdout);
+        dup2(saved_pc, STDOUT_FILENO);
+        close(saved_pc);
+
+        char buf_pc[256] = {0};
+        ssize_t n_pc = read(pipefd[0], buf_pc, sizeof(buf_pc) - 1);
+        close(pipefd[0]);
+        buf_pc[n_pc > 0 ? n_pc : 0] = '\0';
+
+        ASSERT((int)strlen(buf_pc) <= 10,
+               "print_clean: output truncated to max_cols=10");
+        ASSERT(strlen(buf_pc) > 0,
+               "print_clean: output is non-empty");
+        skip_print_clean:;
+    }
+
+    /* NULL input falls back to fallback string */
+    {
+        int pipefd[2];
+        if (pipe(pipefd) != 0) {
+            ASSERT(0, "print_clean fallback: pipe failed");
+            goto skip_print_clean_fb;
+        }
+        fflush(stdout);
+        int saved_fb = dup(STDOUT_FILENO);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        print_clean(NULL, "(none)", 20);
+
+        fflush(stdout);
+        dup2(saved_fb, STDOUT_FILENO);
+        close(saved_fb);
+
+        char buf_fb[64] = {0};
+        ssize_t n_fb = read(pipefd[0], buf_fb, sizeof(buf_fb) - 1);
+        close(pipefd[0]);
+        buf_fb[n_fb > 0 ? n_fb : 0] = '\0';
+
+        ASSERT(strcmp(buf_fb, "(none)") == 0,
+               "print_clean: NULL input uses fallback");
+        skip_print_clean_fb:;
     }
 
     /* ── cmp_uid_entry ───────────────────────────────────────────────── */

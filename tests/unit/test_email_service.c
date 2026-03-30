@@ -60,13 +60,40 @@ void test_email_service(void) {
         free(uids);
     }
 
-    /* ── count_lines ─────────────────────────────────────────────────── */
+    /* ── count_visual_rows ───────────────────────────────────────────── */
 
-    ASSERT(count_lines(NULL)         == 0, "count_lines: NULL → 0");
-    ASSERT(count_lines("")           == 0, "count_lines: empty string → 0");
-    ASSERT(count_lines("abc")        == 1, "count_lines: single line → 1");
-    ASSERT(count_lines("a\nb")       == 2, "count_lines: two lines → 2");
-    ASSERT(count_lines("a\nb\nc\n")  == 4, "count_lines: trailing newline → 4");
+    /* Short lines: visual rows == logical lines (all fit within term_cols) */
+    ASSERT(count_visual_rows(NULL,  80) == 0, "cvr: NULL → 0");
+    ASSERT(count_visual_rows("",    80) == 0, "cvr: empty → 0");
+    ASSERT(count_visual_rows("abc", 80) == 1, "cvr: single line → 1");
+    ASSERT(count_visual_rows("a\nb", 80) == 2, "cvr: two lines → 2");
+    ASSERT(count_visual_rows("a\nb\nc\n", 80) == 4, "cvr: trailing newline → 4");
+
+    /* A line exactly term_cols wide → 1 visual row */
+    {
+        char exact[81]; memset(exact, 'X', 80); exact[80] = '\0';
+        ASSERT(count_visual_rows(exact, 80) == 1, "cvr: 80-char line → 1 row");
+    }
+
+    /* A line wider than term_cols → multiple visual rows */
+    {
+        char wide[161]; memset(wide, 'X', 160); wide[160] = '\0';
+        /* 160-char line on 80-col terminal → 2 visual rows (+ terminating segment) */
+        char body[163]; snprintf(body, sizeof(body), "%s\n", wide);
+        int vr = count_visual_rows(body, 80);
+        ASSERT(vr == 3, "cvr: 160-char line+\\n → 3 rows (2 for URL, 1 trailing)");
+    }
+
+    /* A long URL (no newline) → single logical line counted as multiple visual rows */
+    {
+        char url[201]; memset(url, 'x', 200); url[200] = '\0';
+        /* 200 chars on 80-col terminal = ceil(200/80) = 3 visual rows */
+        ASSERT(count_visual_rows(url, 80) == 3, "cvr: 200-char url → 3 rows");
+    }
+
+    /* With ANSI escapes: invisible bytes not counted toward visible cols */
+    ASSERT(count_visual_rows("\033[1mhello\033[22m", 80) == 1,
+           "cvr: ANSI-wrapped line → 1 row");
 
     /* ── word_wrap ───────────────────────────────────────────────────── */
 
@@ -273,14 +300,14 @@ void test_email_service(void) {
         if (null_fd >= 0) close(null_fd);
 
         /* Print lines 1-2 of a 4-line body (normal newline path) */
-        print_body_page("Line 0\nLine 1\nLine 2\nLine 3\n", 1, 2);
+        print_body_page("Line 0\nLine 1\nLine 2\nLine 3\n", 1, 2, 80);
 
         /* Body does not end with '\n': last segment hits the else branch
          * (printf("%s\n", p); break;) at lines 255-257 */
-        print_body_page("Line 0\nNo newline here", 1, 5);
+        print_body_page("Line 0\nNo newline here", 1, 5, 80);
 
         /* from_line == 0, single print */
-        print_body_page("only line", 0, 1);
+        print_body_page("only line", 0, 1, 80);
 
         fflush(stdout);
         dup2(saved_fd, STDOUT_FILENO);
@@ -318,7 +345,7 @@ void test_email_service(void) {
         close(pipefd[1]);
 
         /* Skip line 0; print lines 1-2 */
-        print_body_page(body, 1, 2);
+        print_body_page(body, 1, 2, 80);
 
         fflush(stdout);
         dup2(saved, STDOUT_FILENO);
@@ -359,7 +386,7 @@ void test_email_service(void) {
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
 
-        print_body_page(body, 1, 1);
+        print_body_page(body, 1, 1, 80);
 
         fflush(stdout);
         dup2(saved, STDOUT_FILENO);
@@ -412,6 +439,61 @@ void test_email_service(void) {
         fflush(stdout);
         dup2(saved_fd2, STDOUT_FILENO);
         close(saved_fd2);
+    }
+
+    /*
+     * Regression: visual row budget in print_body_page.
+     *
+     * Body has 1 normal line + 1 very wide line (wider than term_cols) +
+     * 2 more normal lines.  With a visual row budget of 3 on a 40-col
+     * terminal, the wide line consumes multiple visual rows, so the 3rd
+     * normal line should NOT appear in the output.
+     *
+     * This proves print_body_page stops at the visual row budget, not the
+     * logical line count.
+     */
+    {
+        /* Build a 120-char URL-like token (fits on 1 logical line, 3 visual rows on 40-col) */
+        char wide[121]; memset(wide, 'W', 120); wide[120] = '\0';
+        char body_vr[256];
+        snprintf(body_vr, sizeof(body_vr),
+                 "NormalA\n%s\nNormalB\nNormalC\n", wide);
+
+        int pipefd[2];
+        if (pipe(pipefd) != 0) {
+            ASSERT(0, "visual rows: pipe failed");
+            goto skip_vr_test;
+        }
+        fflush(stdout);
+        int saved_vr = dup(STDOUT_FILENO);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        /* budget = 4 visual rows on 40-col terminal:
+         *   NormalA  = 1 row  (total 1)
+         *   wide 120 = 3 rows (total 4) → fits in budget
+         *   NormalB  = 1 row  (total 5 > 4) → should NOT appear
+         *   NormalC  → should NOT appear */
+        print_body_page(body_vr, 0, 4, 40);
+
+        fflush(stdout);
+        dup2(saved_vr, STDOUT_FILENO);
+        close(saved_vr);
+
+        char buf_vr[512] = {0};
+        ssize_t n_vr = read(pipefd[0], buf_vr, sizeof(buf_vr) - 1);
+        close(pipefd[0]);
+        buf_vr[n_vr > 0 ? n_vr : 0] = '\0';
+
+        ASSERT(strstr(buf_vr, "NormalA")  != NULL,
+               "visual rows: NormalA shown (fits in budget)");
+        ASSERT(strstr(buf_vr, wide)        != NULL,
+               "visual rows: wide line shown (fits in budget)");
+        ASSERT(strstr(buf_vr, "NormalB")  == NULL,
+               "visual rows: NormalB NOT shown (budget exhausted)");
+        ASSERT(strstr(buf_vr, "NormalC")  == NULL,
+               "visual rows: NormalC NOT shown (budget exhausted)");
+        skip_vr_test:;
     }
 
     /* ── print_clean — truncation at max_cols ───────────────────────── */

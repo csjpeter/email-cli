@@ -250,6 +250,25 @@ static void emit_text(RS *rs, const char *text) {
         }
         int wlen = (int)(p - ws);
 
+        /* URL tokens (http://, https://, ftp://, mailto:) are always placed
+         * on their own line so terminal URL-recognition works reliably.
+         * They are never broken regardless of width. */
+        int is_url = (wlen >= 6) && (
+            strncmp(ws, "http://",  7) == 0 ||
+            strncmp(ws, "https://", 8) == 0 ||
+            strncmp(ws, "ftp://",   6) == 0 ||
+            strncmp(ws, "mailto:",  7) == 0);
+
+        if (is_url) {
+            if (rs->col > rs->bq * 2) emit_wrap_nl(rs);  /* start own line */
+            rs_write(rs, ws, wlen);
+            rs->col += ww;
+            rs_push(rs, '\n');          /* trailing newline: next content fresh line */
+            rs->col = 0;
+            emit_bq_prefix(rs);
+            continue;
+        }
+
         /* Wrap if needed (never wrap an otherwise-empty line) */
         if (rs->width > 0 && rs->col > rs->bq * 2 && rs->col + ww > rs->width)
             emit_wrap_nl(rs);

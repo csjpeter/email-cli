@@ -1611,7 +1611,7 @@ int email_service_sync(const Config *cfg) {
         }
         free(uids);
 
-        printf("  %d fetched, %d already cached%s\n",
+        printf("  %d fetched, %d already stored%s\n",
                fetched, skipped, errors ? " (some errors)" : "");
         total_fetched += fetched;
         total_skipped += skipped;
@@ -1620,7 +1620,7 @@ int email_service_sync(const Config *cfg) {
     for (int i = 0; i < folder_count; i++) free(folders[i]);
     free(folders);
 
-    printf("\nSync complete: %d fetched, %d already cached", total_fetched, total_skipped);
+    printf("\nSync complete: %d fetched, %d already stored", total_fetched, total_skipped);
     if (errors) printf(", %d errors", errors);
     printf("\n");
     return errors ? -1 : 0;

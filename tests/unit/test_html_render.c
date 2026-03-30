@@ -1199,3 +1199,96 @@ void test_html_render_color_filter(void)
         "<span style=\"color:#808080\">dark</span>",
         "bright+dark fg mix: still balanced");
 }
+
+/* ── URL isolation ─────────────────────────────────────────────────────── */
+
+void test_html_render_url_isolation(void)
+{
+#define URL "https://example.com/path"
+#define URL2 "http://other.org/x"
+
+    /* 1. URL mid-text: must start on its own line */
+    {
+        char *r = html_render("before " URL " after", 80, 0);
+        ASSERT(r != NULL, "url mid: not NULL");
+        const char *u = strstr(r, URL);
+        ASSERT(u != NULL, "url mid: URL present");
+        ASSERT(u == r || *(u - 1) == '\n', "url mid: URL starts after newline");
+        const char *a = u + strlen(URL);
+        ASSERT(*a == '\n' || *a == '\0', "url mid: URL ends with newline");
+        free(r);
+    }
+
+    /* 2. URL at start of text: no spurious leading blank line */
+    {
+        char *r = html_render(URL " after", 80, 0);
+        ASSERT(r != NULL, "url start: not NULL");
+        const char *u = strstr(r, URL);
+        ASSERT(u != NULL, "url start: URL present");
+        /* URL is at start → either r itself or after '\n' */
+        ASSERT(u == r || *(u - 1) == '\n', "url start: URL at start or after newline");
+        const char *a = u + strlen(URL);
+        ASSERT(*a == '\n' || *a == '\0', "url start: URL followed by newline");
+        /* following text appears after the URL */
+        ASSERT(strstr(a, "after") != NULL || strstr(r, "after") > u,
+               "url start: text after URL is present");
+        free(r);
+    }
+
+    /* 3. URL at end of text: just the URL, nothing after */
+    {
+        char *r = html_render("before " URL, 80, 0);
+        ASSERT(r != NULL, "url end: not NULL");
+        const char *u = strstr(r, URL);
+        ASSERT(u != NULL, "url end: URL present");
+        ASSERT(u == r || *(u - 1) == '\n', "url end: URL on own line");
+        free(r);
+    }
+
+    /* 4. http:// scheme also isolated */
+    {
+        char *r = html_render("visit " URL2 " now", 80, 0);
+        ASSERT(r != NULL, "http url: not NULL");
+        const char *u = strstr(r, URL2);
+        ASSERT(u != NULL, "http url: URL present");
+        ASSERT(u == r || *(u - 1) == '\n', "http url: starts on own line");
+        free(r);
+    }
+
+    /* 5. Two adjacent URLs each on their own line */
+    {
+        char *r = html_render(URL " " URL2, 80, 0);
+        ASSERT(r != NULL, "two urls: not NULL");
+        const char *u1 = strstr(r, URL);
+        const char *u2 = strstr(r, URL2);
+        ASSERT(u1 != NULL && u2 != NULL, "two urls: both present");
+        ASSERT(u1 < u2, "two urls: first before second");
+        /* There must be a newline between them */
+        char between[64] = {0};
+        size_t gap = (size_t)(u2 - (u1 + strlen(URL)));
+        if (gap < sizeof(between)) {
+            memcpy(between, u1 + strlen(URL), gap);
+            between[gap] = '\0';
+        }
+        ASSERT(strchr(between, '\n') != NULL, "two urls: newline between them");
+        free(r);
+    }
+
+    /* 6. URL inside <p> tag: same isolation rules apply */
+    {
+        char *r = html_render("<p>see " URL " for details</p>", 80, 0);
+        ASSERT(r != NULL, "url in p: not NULL");
+        const char *u = strstr(r, URL);
+        ASSERT(u != NULL, "url in p: URL present");
+        ASSERT(u == r || *(u - 1) == '\n', "url in p: URL on own line");
+        const char *a = u + strlen(URL);
+        ASSERT(*a == '\n' || *a == '\0', "url in p: followed by newline");
+        free(r);
+    }
+
+    /* 7. Style-balance is preserved when URL isolation adds newlines */
+    assert_style_balanced("<b>bold " URL " text</b>", "url isolation: style balanced");
+
+#undef URL
+#undef URL2
+}

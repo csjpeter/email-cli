@@ -25,6 +25,7 @@ void test_html_render(void);
 void test_html_render_style_balance(void);
 void test_html_render_parent_close(void);
 void test_html_render_color_filter(void);
+void test_html_render_url_isolation(void);
 
 int main() {
     printf("--- email-cli Unit Test Suite ---\n\n");
@@ -49,6 +50,7 @@ int main() {
     RUN_TEST(test_html_render_style_balance);
     RUN_TEST(test_html_render_parent_close);
     RUN_TEST(test_html_render_color_filter);
+    RUN_TEST(test_html_render_url_isolation);
 
     printf("\n--- Test Results ---\n");
     printf("Tests Run:    %d\n", g_tests_run);

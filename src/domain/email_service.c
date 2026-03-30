@@ -230,12 +230,74 @@ static int pager_prompt(int cur_page, int total_pages, int page_size, int term_r
 }
 
 /** Count newlines in s (= number of lines). */
-static int count_lines(const char *s) {
-    if (!s || !*s) return 0;
-    int n = 1;
-    for (const char *p = s; *p; p++)
-        if (*p == '\n') n++;
-    return n;
+/**
+ * Count visible terminal columns in bytes [p, end), skipping ANSI SGR
+ * and OSC escape sequences.  Uses terminal_wcwidth for multi-byte chars.
+ */
+static int visible_line_cols(const char *p, const char *end) {
+    int cols = 0;
+    while (p < end) {
+        unsigned char c = (unsigned char)*p;
+        /* Skip ANSI CSI sequence: ESC [ ... final_byte (0x40–0x7E) */
+        if (c == 0x1b && p + 1 < end && (unsigned char)*(p + 1) == '[') {
+            p += 2;
+            while (p < end && ((unsigned char)*p < 0x40 || (unsigned char)*p > 0x7e))
+                p++;
+            if (p < end) p++;
+            continue;
+        }
+        /* Skip OSC sequence: ESC ] ... BEL  or  ESC ] ... ESC \ */
+        if (c == 0x1b && p + 1 < end && (unsigned char)*(p + 1) == ']') {
+            p += 2;
+            while (p < end) {
+                if ((unsigned char)*p == 0x07) { p++; break; }
+                if ((unsigned char)*p == 0x1b && p + 1 < end &&
+                    (unsigned char)*(p + 1) == '\\') { p += 2; break; }
+                p++;
+            }
+            continue;
+        }
+        /* Decode one UTF-8 codepoint */
+        uint32_t cp; int sl;
+        if      (c < 0x80) { cp = c;        sl = 1; }
+        else if (c < 0xC2) { cp = 0xFFFD;   sl = 1; }
+        else if (c < 0xE0) { cp = c & 0x1F; sl = 2; }
+        else if (c < 0xF0) { cp = c & 0x0F; sl = 3; }
+        else if (c < 0xF8) { cp = c & 0x07; sl = 4; }
+        else               { cp = 0xFFFD;   sl = 1; }
+        for (int i = 1; i < sl && p + i < end; i++) {
+            if (((unsigned char)p[i] & 0xC0) != 0x80) { sl = i; cp = 0xFFFD; break; }
+            cp = (cp << 6) | ((unsigned char)p[i] & 0x3F);
+        }
+        int w = terminal_wcwidth((wchar_t)cp);
+        if (w > 0) cols += w;
+        p += sl;
+    }
+    return cols;
+}
+
+/**
+ * Count total visual (physical terminal) rows that 'body' occupies when
+ * rendered in a terminal of 'term_cols' columns.  A logical line whose
+ * visible width exceeds term_cols wraps onto ceil(width/term_cols) rows.
+ * Semantics mirror count_lines: each newline-terminated segment plus the
+ * final segment (even if empty) each contribute at least 1 visual row.
+ */
+static int count_visual_rows(const char *body, int term_cols) {
+    if (!body || !*body || term_cols <= 0) return 0;
+    int total = 0;
+    const char *p = body;
+    for (;;) {
+        const char *eol = strchr(p, '\n');
+        const char *seg_end = eol ? eol : (p + strlen(p));
+        int cols = visible_line_cols(p, seg_end);
+        int rows = (cols == 0 || cols <= term_cols) ? 1
+                   : (cols + term_cols - 1) / term_cols;
+        total += rows;
+        if (!eol) break;
+        p = eol + 1;
+    }
+    return total;
 }
 
 /**
@@ -294,33 +356,64 @@ static void ansi_replay(const AnsiState *st)
 }
 
 /**
- * Print lines [from_line, from_line+line_count) from body.
- * Lines are 0-indexed.  Replays any ANSI state accumulated in skipped lines
- * so that multi-line styled spans remain correct across page boundaries.
+ * Print up to 'vrow_budget' visual rows from 'body', starting at visual
+ * row 'from_vrow'.  A logical line whose visible width exceeds 'term_cols'
+ * counts as ceil(width/term_cols) visual rows.
+ *
+ * Replays any ANSI SGR state accumulated in skipped content so that
+ * multi-line styled spans remain correct across page boundaries.
+ *
+ * At least one logical line is always shown even if it alone exceeds the
+ * budget (ensures very long URLs are never silently skipped).
  */
-static void print_body_page(const char *body, int from_line, int line_count) {
-    int line = 0;
+static void print_body_page(const char *body, int from_vrow, int vrow_budget,
+                             int term_cols) {
+    if (!body) return;
+
+    /* ── Skip to from_vrow ──────────────────────────────────────────── */
     const char *p = body;
-    while (*p && line < from_line) {   /* skip to from_line */
-        if (*p++ == '\n') line++;
+    int vrow = 0;
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        const char *seg = eol ? eol : (p + strlen(p));
+        int cols = visible_line_cols(p, seg);
+        int rows = (cols == 0 || (term_cols > 0 && cols <= term_cols)) ? 1
+                   : (cols + term_cols - 1) / term_cols;
+        if (vrow + rows > from_vrow) break;   /* this line spans from_vrow */
+        vrow += rows;
+        p = eol ? eol + 1 : seg;
+        if (!eol) break;
     }
-    /* Restore ANSI state that was active at the start of from_line */
+
+    /* Restore ANSI state that was active at the start of the visible region */
     if (p > body) {
         AnsiState st = {0};
         ansi_scan(body, p, &st);
         ansi_replay(&st);
     }
-    int printed = 0;
-    while (*p && printed < line_count) {
-        const char *nl = strchr(p, '\n');
-        if (nl) {
-            printf("%.*s\n", (int)(nl - p), p);
-            p = nl + 1;
+
+    /* ── Display up to vrow_budget visual rows ───────────────────────── */
+    int displayed = 0;
+    int any_shown = 0;
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        const char *seg = eol ? eol : (p + strlen(p));
+        int cols = visible_line_cols(p, seg);
+        int rows = (cols == 0 || (term_cols > 0 && cols <= term_cols)) ? 1
+                   : (cols + term_cols - 1) / term_cols;
+
+        /* Stop when budget exhausted, but always show at least one line */
+        if (any_shown && displayed + rows > vrow_budget) break;
+
+        if (eol) {
+            printf("%.*s\n", (int)(eol - p), p);
+            p = eol + 1;
         } else {
             printf("%s\n", p);
-            break;
+            p += strlen(p);
         }
-        printed++;
+        displayed += rows;
+        any_shown = 1;
     }
 }
 
@@ -607,8 +700,8 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
     char *date_raw = mime_get_header(raw, "Date");
     char *date     = date_raw ? mime_format_date(date_raw) : NULL;
     free(date_raw);
-    int wrap_cols = terminal_cols();
-    if (wrap_cols > SHOW_WIDTH) wrap_cols = SHOW_WIDTH;
+    int term_cols = terminal_cols();
+    int wrap_cols = term_cols > SHOW_WIDTH ? SHOW_WIDTH : term_cols;
     char *body = NULL;
     char *html_raw = mime_get_html_part(raw);
     if (html_raw) {
@@ -628,15 +721,15 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
 #define SHOW_HDR_LINES_INT 5
     int rows_avail  = (page_size > SHOW_HDR_LINES_INT)
                       ? page_size - SHOW_HDR_LINES_INT : 1;
-    int body_lines  = count_lines(body_text);
-    int total_pages = (body_lines + rows_avail - 1) / rows_avail;
+    int body_vrows  = count_visual_rows(body_text, term_cols);
+    int total_pages = (body_vrows + rows_avail - 1) / rows_avail;
     if (total_pages < 1) total_pages = 1;
 
     int result = 0;
     for (int cur_line = 0;;) {
         printf("\033[0m\033[H\033[2J");     /* reset attrs + clear screen */
         print_show_headers(from, subject, date);
-        print_body_page(body_text, cur_line, rows_avail);
+        print_body_page(body_text, cur_line, rows_avail, term_cols);
         printf("\033[0m");                  /* close any open ANSI from body */
         fflush(stdout);
 
@@ -663,7 +756,7 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
         case TERM_KEY_NEXT_PAGE:
         {
             int next = cur_line + rows_avail;
-            if (next < body_lines) cur_line = next;
+            if (next < body_vrows) cur_line = next;
             /* else: already on last page — stay */
         }
             break;
@@ -674,7 +767,7 @@ static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
             if (cur_line < 0) cur_line = 0;
             break;
         case TERM_KEY_NEXT_LINE:
-            if (cur_line < body_lines - 1) cur_line++;
+            if (cur_line < body_vrows - 1) cur_line++;
             break;
         case TERM_KEY_PREV_LINE:
             if (cur_line > 0) cur_line--;
@@ -1356,8 +1449,8 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 
     print_show_headers(from, subject, date);
 
-    int wrap_cols = pager ? terminal_cols() : SHOW_WIDTH;
-    if (wrap_cols > SHOW_WIDTH) wrap_cols = SHOW_WIDTH;
+    int term_cols_show = pager ? terminal_cols() : SHOW_WIDTH;
+    int wrap_cols = term_cols_show > SHOW_WIDTH ? SHOW_WIDTH : term_cols_show;
 
     char *body = NULL;
     char *html_raw = mime_get_html_part(raw);
@@ -1379,9 +1472,9 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
     if (!pager || page_size <= SHOW_HDR_LINES) {
         printf("%s\n", body_text);
     } else {
-        int body_lines  = count_lines(body_text);
+        int body_vrows  = count_visual_rows(body_text, term_cols_show);
         int rows_avail  = page_size - SHOW_HDR_LINES;
-        int total_pages = (body_lines + rows_avail - 1) / rows_avail;
+        int total_pages = (body_vrows + rows_avail - 1) / rows_avail;
         if (total_pages < 1) total_pages = 1;
 
         /* Enter raw mode for the pager loop; pager_prompt calls terminal_read_key
@@ -1394,18 +1487,18 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
                 print_show_headers(from, subject, date);
             }
             show_displayed = 1;
-            print_body_page(body_text, cur_line, rows_avail);
+            print_body_page(body_text, cur_line, rows_avail, term_cols_show);
             printf("\033[0m");                     /* close any open ANSI from body */
             fflush(stdout);
 
-            if (cur_line == 0 && cur_line + rows_avail >= body_lines) break;
+            if (cur_line == 0 && cur_line + rows_avail >= body_vrows) break;
 
             int cur_page = cur_line / rows_avail + 1;
             int delta = pager_prompt(cur_page, total_pages, rows_avail, page_size);
             if (delta == 0) break;
             cur_line += delta;
             if (cur_line < 0) cur_line = 0;
-            if (cur_line >= body_lines) break;
+            if (cur_line >= body_vrows) break;
         }
         (void)show_raw; /* cleaned up automatically via RAII_TERM_RAW */
     }

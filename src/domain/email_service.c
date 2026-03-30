@@ -677,14 +677,15 @@ static void print_show_headers(const char *from, const char *subject,
  * Show a message in interactive pager mode.
  * Returns 0 = ESC (go back to list), 1 = q/quit entirely, -1 = error.
  */
-static int show_uid_interactive(const Config *cfg, int uid, int page_size) {
+static int show_uid_interactive(const Config *cfg, const char *folder,
+                                int uid, int page_size) {
     char *raw = NULL;
-    if (cache_exists(cfg->folder, uid)) {
-        raw = cache_load(cfg->folder, uid);
+    if (cache_exists(folder, uid)) {
+        raw = cache_load(folder, uid);
     } else {
-        raw = fetch_uid_content_in(cfg, cfg->folder, uid, 0);
+        raw = fetch_uid_content_in(cfg, folder, uid, 0);
         if (raw)
-            cache_save(cfg->folder, uid, raw, strlen(raw));
+            cache_save(folder, uid, raw, strlen(raw));
     }
     if (!raw) {
         fprintf(stderr, "Could not load UID %d.\n", uid);
@@ -1165,7 +1166,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             goto list_done;
         case TERM_KEY_ENTER:
             {
-                int ret = show_uid_interactive(cfg, entries[cursor].uid, opts->limit);
+                int ret = show_uid_interactive(cfg, folder, entries[cursor].uid, opts->limit);
                 if (ret == 1) goto list_done;  /* user quit from show */
                 /* ret == 0: Backspace → back to list; ret == -1: error → stay */
             }

@@ -803,4 +803,87 @@ void test_email_service(void) {
 
         free(rendered);
     }
+
+    /* ── show_uid_interactive: uses correct folder, not cfg->folder ──── */
+    /*
+     * Regression test for subfolder message open bug.
+     *
+     * When the user presses Enter on a message in a subfolder (e.g. "munka/ai"),
+     * show_uid_interactive must look up the message in that subfolder's cache —
+     * NOT in cfg->folder (which is always "INBOX").
+     *
+     * Setup:
+     *   - Pre-populate cache under "test_subfolder" with UID 7777.
+     *   - Config has .folder = "INBOX" (wrong folder — the bug).
+     *   - Inject ESC via pipe into STDIN_FILENO so the function exits cleanly.
+     *
+     * If the function uses cfg->folder ("INBOX"):
+     *   cache_exists("INBOX", 7777) → false → fetch fails → returns -1.
+     * If the function uses the correct folder ("test_subfolder"):
+     *   cache_exists("test_subfolder", 7777) → true → loads OK → ESC → returns 1.
+     */
+    {
+        /* Minimal plain-text MIME message */
+        const char *sf_mime =
+            "MIME-Version: 1.0\r\n"
+            "Content-Type: text/plain; charset=UTF-8\r\n"
+            "Subject: Subfolder test\r\n"
+            "From: test@example.com\r\n"
+            "\r\n"
+            "Subfolder message body.\r\n";
+
+        /* Pre-populate cache under the correct subfolder */
+        int saved_rc = cache_save("test_subfolder", 7777,
+                                  sf_mime, strlen(sf_mime));
+        if (saved_rc != 0) {
+            ASSERT(0, "show_uid_interactive subfolder: cache_save failed");
+            goto skip_subfolder_test;
+        }
+
+        /* Config intentionally has the wrong folder (the bug) */
+        Config sf_cfg;
+        memset(&sf_cfg, 0, sizeof(sf_cfg));
+        sf_cfg.folder = "INBOX";
+
+        /* Inject ESC (\033) into stdin via pipe so the function exits */
+        int sf_pipe[2];
+        if (pipe(sf_pipe) != 0) {
+            ASSERT(0, "show_uid_interactive subfolder: pipe failed");
+            goto skip_subfolder_test;
+        }
+        unsigned char esc_byte = '\033';
+        write(sf_pipe[1], &esc_byte, 1);
+        close(sf_pipe[1]);
+
+        /* Redirect stdin to pipe read end */
+        int saved_stdin = dup(STDIN_FILENO);
+        dup2(sf_pipe[0], STDIN_FILENO);
+        close(sf_pipe[0]);
+
+        /* Redirect stdout + stderr to /dev/null (suppress TUI output) */
+        fflush(stdout); fflush(stderr);
+        int sf_null = open("/dev/null", O_WRONLY);
+        int saved_stdout = dup(STDOUT_FILENO);
+        int saved_stderr = dup(STDERR_FILENO);
+        if (sf_null >= 0) {
+            dup2(sf_null, STDOUT_FILENO);
+            dup2(sf_null, STDERR_FILENO);
+            close(sf_null);
+        }
+
+        /* Call with new signature: explicit folder parameter */
+        int sf_ret = show_uid_interactive(&sf_cfg, "test_subfolder", 7777, 25);
+
+        /* Restore stdin, stdout, stderr */
+        fflush(stdout); fflush(stderr);
+        dup2(saved_stdin,  STDIN_FILENO);  close(saved_stdin);
+        dup2(saved_stdout, STDOUT_FILENO); close(saved_stdout);
+        dup2(saved_stderr, STDERR_FILENO); close(saved_stderr);
+
+        /* ESC → returns 1; "not found in INBOX" → returns -1 */
+        ASSERT(sf_ret == 1,
+               "show_uid_interactive: uses correct folder (not cfg->folder)");
+
+        skip_subfolder_test:;
+    }
 }

@@ -462,6 +462,12 @@ static void tag_close(RS *rs, const HtmlNode *node) {
         block_close(rs);
     }
     else if (!strcmp(t,"pre"))  { if (rs->pre>0) rs->pre--; block_close(rs); }
+    else if (!strcmp(t,"a")) {
+        const char *href = html_attr_get(node, "href");
+        if (href && *href && href[0] != '#' &&
+            strncmp(href, "javascript:", 11) != 0)
+            emit_text(rs, href);
+    }
     else if (!strcmp(t,"script")||!strcmp(t,"style")) { if (rs->skip>0) rs->skip--; }
     else if (!strcmp(t,"tr"))   req_nl(rs, 1);
     else if (!strcmp(t,"table")) block_close(rs);

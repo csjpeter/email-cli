@@ -138,6 +138,10 @@ static const struct { const char *name; int r,g,b; } CSS_COLORS[] = {
 };
 static void apply_color(RS *rs, const char *v, int fg) {
     if (!rs->ansi) return;
+    /* Background colors are never emitted: they break dark-theme terminals
+     * and produce unreadable combinations when the email author's palette
+     * does not match the user's terminal theme. */
+    if (!fg) return;
     int r=-1,g=-1,b=-1;
     while (*v==' ') v++;
     if (*v=='#') {
@@ -159,9 +163,14 @@ static void apply_color(RS *rs, const char *v, int fg) {
         }
     }
     if (r<0) return;
-    char e[32]; snprintf(e,sizeof(e),"\033[%d;2;%d;%d;%dm",fg?38:48,r,g,b);
+    /* Suppress dark foreground colors (max component < 160): they are
+     * unreadable on dark-theme terminals and common in newsletter HTML
+     * (e.g. #333, #666, gray).  Only bright colours are emitted. */
+    int mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    if (mx < 160) return;
+    char e[32]; snprintf(e,sizeof(e),"\033[38;2;%d;%d;%dm",r,g,b);
     rs_str(rs, e);
-    if (fg) rs->color_fg++; else rs->color_bg++;
+    rs->color_fg++;
 }
 static void parse_style(RS *rs, const char *style) {
     if (!style || !rs->ansi) return;

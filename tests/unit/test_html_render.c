@@ -421,19 +421,21 @@ void test_html_render(void) {
         free(r);
     }
 
-    /* 40. style="background-color:blue" → bg ANSI escape */
+    /* 40. style="background-color:blue" → bg colors suppressed */
     {
         char *r = html_render("<span style=\"background-color:blue\">X</span>", 0, 1);
         ASSERT(r != NULL, "style bgcolor: not NULL");
-        ASSERT(strstr(r, "\033[48;2;") != NULL, "style bgcolor: bg escape present");
+        ASSERT(strstr(r, "\033[48;2;") == NULL, "style bgcolor: bg escape suppressed");
+        ASSERT(strstr(r, "X") != NULL, "style bgcolor: text still present");
         free(r);
     }
 
-    /* 41. style="background-color:#0000FF" → bg ANSI escape */
+    /* 41. style="background-color:#0000FF" → bg colors suppressed */
     {
         char *r = html_render("<span style=\"background-color:#0000FF\">X</span>", 0, 1);
         ASSERT(r != NULL, "style bgcolor hex: not NULL");
-        ASSERT(strstr(r, "\033[48;2;0;0;255m") != NULL, "style bgcolor hex: escape present");
+        ASSERT(strstr(r, "\033[48;2;") == NULL, "style bgcolor hex: bg escape suppressed");
+        ASSERT(strstr(r, "X") != NULL, "style bgcolor hex: text still present");
         free(r);
     }
 
@@ -455,13 +457,14 @@ void test_html_render(void) {
         free(r);
     }
 
-    /* 44. Invalid hex digit in CSS color (hex_val returns 0 for unknown char) */
+    /* 44. Invalid hex digit in CSS color (hex_val returns 0 for unknown char)
+     *     #GGGGGG parses to black (0,0,0); max=0 < 160 → dark fg suppressed */
     {
-        /* 'G' is not valid hex → hex_val('G')=0, r=g=b=0 → black */
         char *r = html_render("<span style=\"color:#GGGGGG\">X</span>", 0, 1);
         ASSERT(r != NULL, "hex_val invalid: not NULL");
-        /* Should emit black color code (0,0,0) */
-        ASSERT(strstr(r, "\033[38;2;0;0;0m") != NULL, "hex_val invalid: black color");
+        /* Black (0,0,0) is too dark — suppressed under color-filter policy */
+        ASSERT(strstr(r, "\033[38;2;") == NULL, "hex_val invalid: dark color suppressed");
+        ASSERT(strstr(r, "X") != NULL, "hex_val invalid: text still present");
         free(r);
     }
 
@@ -607,15 +610,15 @@ void test_html_render(void) {
         free(r);
     }
 
-    /* 57. <span style="background-color:#0000FF"> must reset bg color. */
+    /* 57. <span style="background-color:#0000FF"> — bg suppressed,
+     *     no bleed possible, 'after' renders in default colors. */
     {
         char *r = html_render(
             "<span style=\"background-color:#0000FF\">bg</span> after", 0, 1);
         ASSERT(r != NULL, "color bleed bg: not NULL");
-        ASSERT(strstr(r, "\033[49m") != NULL, "color bleed bg: bg reset present");
-        const char *reset = strstr(r, "\033[49m");
-        ASSERT(reset && strstr(reset, "after") != NULL,
-               "color bleed bg: 'after' comes after bg reset");
+        ASSERT(strstr(r, "\033[48;2;") == NULL, "color bleed bg: bg escape suppressed");
+        ASSERT(strstr(r, "\033[49m")   == NULL, "color bleed bg: no bg reset needed");
+        ASSERT(strstr(r, "after") != NULL, "color bleed bg: 'after' present");
         free(r);
     }
 }
@@ -987,4 +990,212 @@ void test_html_render_parent_close(void)
         MK, "newsletter all styles reset before marker");
 
 #undef MK
+}
+
+/* ── Color filtering tests ────────────────────────────────────────────
+ *
+ * Policy:
+ *   - Background colors  → suppressed entirely (no \033[48;2; emitted)
+ *   - Dark fg colors     → suppressed (max(r,g,b) < 160)
+ *   - Bright fg colors   → allowed  (max(r,g,b) >= 160)
+ *
+ * Written BEFORE the fix so they define the expected behaviour.
+ * ─────────────────────────────────────────────────────────────────── */
+
+void test_html_render_color_filter(void)
+{
+    /* ── Background colors: never emitted ─────────────────────────── */
+
+    /* Named bg color */
+    {
+        char *r = html_render(
+            "<span style=\"background-color:blue\">X</span>", 0, 1);
+        ASSERT(r != NULL, "bg suppress named: not NULL");
+        ASSERT(strstr(r, "\033[48;2;") == NULL,
+               "bg suppress named: no bg escape emitted");
+        free(r);
+    }
+
+    /* Hex #RRGGBB bg color */
+    {
+        char *r = html_render(
+            "<span style=\"background-color:#FF0000\">X</span>", 0, 1);
+        ASSERT(r != NULL, "bg suppress hex6: not NULL");
+        ASSERT(strstr(r, "\033[48;2;") == NULL,
+               "bg suppress hex6: no bg escape emitted");
+        free(r);
+    }
+
+    /* Hex #RGB shorthand bg color */
+    {
+        char *r = html_render(
+            "<span style=\"background-color:#0F0\">X</span>", 0, 1);
+        ASSERT(r != NULL, "bg suppress hex3: not NULL");
+        ASSERT(strstr(r, "\033[48;2;") == NULL,
+               "bg suppress hex3: no bg escape emitted");
+        free(r);
+    }
+
+    /* bg-color suppressed → no bg-reset \033[49m either */
+    {
+        char *r = html_render(
+            "<span style=\"background-color:white\">X</span> Y", 0, 1);
+        ASSERT(r != NULL, "bg suppress reset: not NULL");
+        ASSERT(strstr(r, "\033[48;2;") == NULL,
+               "bg suppress reset: no bg-open escape");
+        ASSERT(strstr(r, "\033[49m") == NULL,
+               "bg suppress reset: no bg-reset escape");
+        free(r);
+    }
+
+    /* ansi=0: bg color must also be absent (already was, stays so) */
+    {
+        char *r = html_render(
+            "<span style=\"background-color:red\">X</span>", 0, 0);
+        ASSERT(r != NULL && strcmp(r, "X") == 0,
+               "bg ansi0: plain text only");
+        free(r);
+    }
+
+    /* ── Dark foreground colors: suppressed (max(r,g,b) < 160) ────── */
+
+    /* #333333 dark gray (max=51) */
+    {
+        char *r = html_render(
+            "<span style=\"color:#333333\">text</span>", 0, 1);
+        ASSERT(r != NULL, "dark fg #333: not NULL");
+        ASSERT(strstr(r, "\033[38;2;") == NULL,
+               "dark fg #333: no fg escape emitted");
+        free(r);
+    }
+
+    /* #666666 medium dark gray (max=102) */
+    {
+        char *r = html_render(
+            "<span style=\"color:#666666\">text</span>", 0, 1);
+        ASSERT(r != NULL, "dark fg #666: not NULL");
+        ASSERT(strstr(r, "\033[38;2;") == NULL,
+               "dark fg #666: no fg escape emitted");
+        free(r);
+    }
+
+    /* #808080 gray (max=128) — user said this is too dark */
+    {
+        char *r = html_render(
+            "<span style=\"color:#808080\">text</span>", 0, 1);
+        ASSERT(r != NULL, "dark fg gray: not NULL");
+        ASSERT(strstr(r, "\033[38;2;") == NULL,
+               "dark fg gray: no fg escape emitted");
+        free(r);
+    }
+
+    /* CSS named 'gray' (#808080) */
+    {
+        char *r = html_render(
+            "<span style=\"color:gray\">text</span>", 0, 1);
+        ASSERT(r != NULL, "dark fg named gray: not NULL");
+        ASSERT(strstr(r, "\033[38;2;") == NULL,
+               "dark fg named gray: no fg escape emitted");
+        free(r);
+    }
+
+    /* Dark navy #000080 (max=128) */
+    {
+        char *r = html_render(
+            "<span style=\"color:#000080\">text</span>", 0, 1);
+        ASSERT(r != NULL, "dark fg navy: not NULL");
+        ASSERT(strstr(r, "\033[38;2;") == NULL,
+               "dark fg navy: no fg escape emitted");
+        free(r);
+    }
+
+    /* Dark suppressed → no fg-reset \033[39m either */
+    {
+        char *r = html_render(
+            "<span style=\"color:#333\">X</span> Y", 0, 1);
+        ASSERT(r != NULL, "dark fg reset: not NULL");
+        ASSERT(strstr(r, "\033[38;2;") == NULL,
+               "dark fg reset: no fg-open escape");
+        ASSERT(strstr(r, "\033[39m") == NULL,
+               "dark fg reset: no fg-reset escape");
+        free(r);
+    }
+
+    /* Dark color text must still appear */
+    {
+        char *r = html_render(
+            "<span style=\"color:#333333\">hello</span>", 0, 1);
+        ASSERT(r && strstr(r, "hello") != NULL,
+               "dark fg text: text still present");
+        free(r);
+    }
+
+    /* ── Bright foreground colors: allowed (max(r,g,b) >= 160) ─────── */
+
+    /* White #FFFFFF (max=255) */
+    {
+        char *r = html_render(
+            "<span style=\"color:white\">X</span>", 0, 1);
+        ASSERT(r != NULL, "bright fg white: not NULL");
+        ASSERT(strstr(r, "\033[38;2;") != NULL,
+               "bright fg white: fg escape emitted");
+        free(r);
+    }
+
+    /* Bright red #FF0000 (max=255) */
+    {
+        char *r = html_render(
+            "<span style=\"color:#FF0000\">X</span>", 0, 1);
+        ASSERT(r != NULL, "bright fg red: not NULL");
+        ASSERT(strstr(r, "\033[38;2;255;0;0m") != NULL,
+               "bright fg red: correct escape emitted");
+        free(r);
+    }
+
+    /* CSS 'red' (#FF0000, max=255) */
+    {
+        char *r = html_render(
+            "<span style=\"color:red\">X</span>", 0, 1);
+        ASSERT(r != NULL, "bright fg named red: not NULL");
+        ASSERT(strstr(r, "\033[38;2;") != NULL,
+               "bright fg named red: fg escape emitted");
+        free(r);
+    }
+
+    /* #0000CC dark-ish blue (max=204 >= 160) */
+    {
+        char *r = html_render(
+            "<span style=\"color:#0000CC\">X</span>", 0, 1);
+        ASSERT(r != NULL, "bright fg blue CC: not NULL");
+        ASSERT(strstr(r, "\033[38;2;") != NULL,
+               "bright fg blue CC: fg escape emitted");
+        free(r);
+    }
+
+    /* Bright fg → fg-reset must also be present (to close the span) */
+    {
+        char *r = html_render(
+            "<span style=\"color:#FF0000\">X</span> Y", 0, 1);
+        ASSERT(r != NULL, "bright fg reset: not NULL");
+        ASSERT(strstr(r, "\033[38;2;") != NULL,
+               "bright fg reset: fg-open present");
+        ASSERT(strstr(r, "\033[39m") != NULL,
+               "bright fg reset: fg-reset present");
+        free(r);
+    }
+
+    /* ── Style-balance still holds after filtering ──────────────────── */
+    /* (bg suppressed → both bg_on=0 and bg_off=0, trivially balanced)  */
+    assert_style_balanced(
+        "<span style=\"background-color:#FF0000\">X</span> Y",
+        "bg filtered: still balanced");
+    assert_style_balanced(
+        "<div style=\"background-color:#f4f4f4\">"
+          "<span style=\"color:#333\">dark text</span>"
+        "</div>",
+        "bg+dark fg filtered: still balanced");
+    assert_style_balanced(
+        "<span style=\"color:#FF0000\">bright</span>"
+        "<span style=\"color:#808080\">dark</span>",
+        "bright+dark fg mix: still balanced");
 }

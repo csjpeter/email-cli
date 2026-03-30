@@ -12,6 +12,7 @@ It is written at a level of detail sufficient to re-implement the program from s
 | [imap-protocol.md](imap-protocol.md) | IMAP operations issued, flag handling, folder encoding |
 | [caching.md](caching.md) | Local cache layout, read/write policy, eviction rules |
 | [pagination.md](pagination.md) | Pagination logic, terminal detection, interactive pager |
+| [html-rendering.md](html-rendering.md) | MIME part selection, HTML parser, renderer, ANSI colour policy, pager integration |
 
 ## Relationship to other docs
 

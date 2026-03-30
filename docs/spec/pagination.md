@@ -137,6 +137,53 @@ Going back on page 1 is a no-op (`cur_line` stays at 0).
 
 ---
 
+## ANSI State Replay at Page Boundaries
+
+When the pager displays page *N* > 1, it skips the first `(N-1) × rows_avail`
+body lines.  Those skipped lines may contain open ANSI SGR escapes (e.g. a
+heading or coloured span that starts on line 0 but closes many lines later).
+Without correction, the visible text on page 2+ would inherit whatever
+SGR state was left open — producing unreadable output such as white-on-white
+when the email's colour and the user's terminal theme conflict.
+
+**Fix:** before printing the first visible line of any page with `from_line > 0`,
+`print_body_page()`:
+
+1. Scans all skipped bytes (`body[0 .. first_visible_byte)`) with `ansi_scan()`
+   to accumulate the SGR state that would be in effect at `from_line`.
+2. Calls `ansi_replay()` to re-emit the minimal set of escapes needed to restore
+   that state.
+
+`ansi_scan()` tracks: **bold**, **italic**, **underline**, **strikethrough**,
+**fg colour** (24-bit RGB), **bg colour** (24-bit RGB).  It honours `\033[0m`
+(full reset) anywhere in the skipped content.
+
+`ansi_replay()` emits (only for attributes that are active in the accumulated
+state):
+
+| Attribute | Escape |
+|-----------|--------|
+| bold | `\033[1m` |
+| italic | `\033[3m` |
+| underline | `\033[4m` |
+| strikethrough | `\033[9m` |
+| fg colour | `\033[38;2;R;G;Bm` |
+| bg colour | `\033[48;2;R;G;Bm` |
+
+### ANSI Reset at Page Start
+
+Each page redraw begins with `\033[0m\033[H\033[2J` (reset all attributes +
+home cursor + clear screen).  After `print_body_page()` returns, `\033[0m` is
+emitted again to close any ANSI state left open by the page body (the body
+terminates at an arbitrary line boundary, which may be inside a styled span
+that `ansi_replay` re-opened).
+
+The status bar is printed to **stderr** after the body; this ordering
+(stdout body + `\033[0m`, then stderr status) ensures the terminal attribute
+state is clean when the status bar's reverse-video (`\033[7m`) is activated.
+
+---
+
 ## Raw terminal mode
 
 The pager prompt reads a single keypress without requiring Enter.  This is

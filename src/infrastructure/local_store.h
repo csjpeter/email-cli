@@ -5,82 +5,81 @@
 
 /**
  * @file local_store.h
- * @brief Local copies of IMAP messages and headers.
+ * @brief Provider-native local storage with reverse digit bucketing and text indexes.
  *
- * Full messages: ~/.local/share/email-cli/messages/<folder>/<uid>.eml
- * Headers only:  ~/.local/share/email-cli/headers/<folder>/<uid>.hdr
- * UI preferences: ~/.local/share/email-cli/ui.ini
+ * Account layout (IMAP):
+ *   ~/.local/share/email-cli/accounts/imap.<host>/
+ *     store/<folder>/<d1>/<d2>/<uid>.eml
+ *     headers/<folder>/<d1>/<d2>/<uid>.hdr
+ *     index/from/<domain>/<localpart>     (one ref per line)
+ *     index/date/<year>/<month>/<day>     (one ref per line)
+ *
+ * Reverse digit bucketing: d1 = uid % 10, d2 = (uid/10) % 10.
+ * Reference format (IMAP): "<folder>/<uid>" per line.
  */
 
 /**
- * @brief Checks whether a local copy of a message exists on disk.
- * @param folder Mailbox folder name (e.g. "INBOX").
- * @param uid    IMAP UID of the message.
- * @return 1 if the file exists, 0 otherwise.
- */
-int local_msg_exists(const char *folder, int uid);
-
-/**
- * @brief Writes raw message content to the local store.
- * @param folder  Mailbox folder name.
- * @param uid     IMAP UID of the message.
- * @param content Raw message bytes.
- * @param len     Number of bytes to write.
+ * @brief Initialises the account base path from an IMAP host URL.
+ *
+ * Must be called once before any other local_* function.
+ * Extracts the hostname from the URL and sets the account directory.
+ *
+ * @param host_url  IMAP host URL (e.g. "imaps://mail.example.com:993").
  * @return 0 on success, -1 on failure.
  */
+int local_store_init(const char *host_url);
+
+/* ── Message store ───────────────────────────────────────────────────── */
+
+/** @brief Checks whether a locally stored message exists. */
+int local_msg_exists(const char *folder, int uid);
+
+/** @brief Writes raw message content to the local store. */
 int local_msg_save(const char *folder, int uid, const char *content, size_t len);
 
-/**
- * @brief Reads a locally stored message from disk.
- * @param folder Mailbox folder name.
- * @param uid    IMAP UID of the message.
- * @return Heap-allocated NUL-terminated string, or NULL. Caller must free.
- */
+/** @brief Reads a locally stored message. Caller must free. */
 char *local_msg_load(const char *folder, int uid);
 
-/* ── Header local copies (headers/<folder>/<uid>.hdr) ─────────────────── */
+/** @brief Deletes a locally stored message and its index entries. */
+int local_msg_delete(const char *folder, int uid);
 
-/** @brief Checks whether a local header copy exists. */
+/* ── Header store ────────────────────────────────────────────────────── */
+
+/** @brief Checks whether a locally stored header exists. */
 int   local_hdr_exists(const char *folder, int uid);
 
-/** @brief Writes header content to the local header store. */
+/** @brief Writes header content to the local store. */
 int   local_hdr_save(const char *folder, int uid, const char *content, size_t len);
 
-/**
- * @brief Reads a locally stored header from disk.
- * @return Heap-allocated NUL-terminated string, or NULL. Caller must free.
- */
+/** @brief Reads a locally stored header. Caller must free. */
 char *local_hdr_load(const char *folder, int uid);
+
+/** @brief Removes header files whose UID is not in @p keep_uids. */
+void  local_hdr_evict_stale(const char *folder,
+                              const int *keep_uids, int keep_count);
+
+/* ── Index ───────────────────────────────────────────────────────────── */
+
+/**
+ * @brief Updates from/ and date/ indexes for a stored message.
+ *
+ * Parses From and Date headers from raw_msg and appends the reference
+ * "<folder>/<uid>" to the appropriate index files.
+ * Duplicate references are silently skipped.
+ *
+ * @param folder   Mailbox folder name.
+ * @param uid      IMAP UID.
+ * @param raw_msg  Raw RFC 2822 message content.
+ * @return 0 on success, -1 on error.
+ */
+int local_index_update(const char *folder, int uid, const char *raw_msg);
 
 /* ── UI preferences ──────────────────────────────────────────────────── */
 
-/**
- * @brief Reads an integer UI preference from ~/.local/share/email-cli/ui.ini.
- * @param key         Preference key (e.g. "folder_view_mode").
- * @param default_val Value to return if key is absent or file missing.
- * @return Stored integer value, or @p default_val.
- */
+/** @brief Reads an integer UI preference. */
 int ui_pref_get_int(const char *key, int default_val);
 
-/**
- * @brief Writes an integer UI preference to ~/.local/share/email-cli/ui.ini.
- * @param key   Preference key.
- * @param value Integer value to store.
- * @return 0 on success, -1 on failure.
- */
+/** @brief Writes an integer UI preference. */
 int ui_pref_set_int(const char *key, int value);
-
-/**
- * @brief Removes local header copies whose UID is not in @p keep_uids.
- *
- * Call this after a successful SEARCH ALL to remove headers for messages
- * that have been deleted from the server.
- *
- * @param folder     Mailbox folder name.
- * @param keep_uids  Array of UIDs that are still present on the server.
- * @param keep_count Number of entries in @p keep_uids.
- */
-void  local_hdr_evict_stale(const char *folder,
-                              const int *keep_uids, int keep_count);
 
 #endif /* LOCAL_STORE_H */

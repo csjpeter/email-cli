@@ -1138,29 +1138,6 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         int from_w = avail / 2;
         int subj_w = avail - from_w;
 
-        /* Fetch missing headers for viewport BEFORE clearing screen */
-        {
-            int manifest_dirty = 0;
-            for (int i = wstart; i < wend; i++) {
-                if (!manifest_find(manifest, entries[i].uid)) {
-                    char *hdrs     = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
-                    char *fr_raw   = hdrs ? mime_get_header(hdrs, "From")    : NULL;
-                    char *fr       = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
-                    free(fr_raw);
-                    char *su_raw   = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
-                    char *su       = su_raw ? mime_decode_words(su_raw)      : strdup("");
-                    free(su_raw);
-                    char *dt_raw   = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
-                    char *dt       = dt_raw ? mime_format_date(dt_raw)       : strdup("");
-                    free(dt_raw);
-                    free(hdrs);
-                    manifest_upsert(manifest, entries[i].uid, fr, su, dt);
-                    manifest_dirty = 1;
-                }
-            }
-            if (manifest_dirty) manifest_save(folder, manifest);
-        }
-
         if (opts->pager) printf("\033[H\033[2J");
 
         /* Count / status line */
@@ -1173,7 +1150,27 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         print_dbar(subj_w); printf("  ");
         print_dbar(16);     printf("\n");
 
+        /* Data rows: fetch-on-demand + immediate render per row */
+        int manifest_dirty = 0;
         for (int i = wstart; i < wend; i++) {
+            /* Fetch into manifest if missing */
+            if (!manifest_find(manifest, entries[i].uid)) {
+                char *hdrs     = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
+                char *fr_raw   = hdrs ? mime_get_header(hdrs, "From")    : NULL;
+                char *fr       = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
+                free(fr_raw);
+                char *su_raw   = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
+                char *su       = su_raw ? mime_decode_words(su_raw)      : strdup("");
+                free(su_raw);
+                char *dt_raw   = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
+                char *dt       = dt_raw ? mime_format_date(dt_raw)       : strdup("");
+                free(dt_raw);
+                free(hdrs);
+                manifest_upsert(manifest, entries[i].uid, fr, su, dt);
+                manifest_dirty = 1;
+            }
+
+            /* Render this row immediately */
             ManifestEntry *me = manifest_find(manifest, entries[i].uid);
             const char *from    = (me && me->from    && me->from[0])    ? me->from    : "(no from)";
             const char *subject = (me && me->subject && me->subject[0]) ? me->subject : "(no subject)";
@@ -1190,7 +1187,9 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 
             if (sel) printf("\033[K\033[0m");
             printf("\n");
+            fflush(stdout); /* show row immediately as it arrives */
         }
+        if (manifest_dirty) manifest_save(folder, manifest);
 
         if (!opts->pager) {
             if (wend < show_count)

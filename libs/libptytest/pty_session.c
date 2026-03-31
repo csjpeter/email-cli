@@ -92,7 +92,8 @@ void pty_close(PtySession *s) {
 
 void pty_send(PtySession *s, const char *bytes, size_t len) {
     if (!s || s->master_fd < 0) return;
-    write(s->master_fd, bytes, len);
+    ssize_t n = write(s->master_fd, bytes, len);
+    (void)n;
 }
 
 void pty_send_key(PtySession *s, PtyKey key) {

@@ -8,7 +8,7 @@ Authoritative what-and-how reference; sufficient to re-implement the program fro
 - [Commands](spec/commands.md) — all commands, options, argument parsing, exit codes
 - [Output formats](spec/output-formats.md) — exact output for every command and mode
 - [IMAP protocol](spec/imap-protocol.md) — operations issued, flag handling, encoding
-- [Caching](spec/caching.md) — cache layout, read/write policy, eviction rules
+- [Local store](spec/local-store.md) — account-based store, reverse digit bucketing, text indexes
 - [Pagination](spec/pagination.md) — terminal detection, pager, batch mode
 
 ## User Guide

@@ -26,7 +26,7 @@ The project follows a strict layered CLEAN architecture with zero circular depen
 ```
 Application    →  src/main.c
 Domain         →  src/domain/email_service.c
-Infrastructure →  src/infrastructure/{config_store,curl_adapter,setup_wizard}.c
+Infrastructure →  src/infrastructure/{config_store,local_store,curl_adapter,setup_wizard}.c
 Core           →  src/core/{logger,fs_util}.c + raii.h
 Platform       →  src/platform/{terminal,path}.h
                     src/platform/posix/{terminal,path}.c    (Linux/macOS/Android)
@@ -38,9 +38,11 @@ alongside `core/` and is depended upon by `domain/` and `infrastructure/`.
 No layer may contain `#ifdef` guards for platform selection — that is the
 build system's (CMake's) responsibility.
 
-**Data flow:** `main.c` initializes logger and paths → loads config (or runs `setup_wizard` on first run) → calls `email_service_fetch_recent()` → which uses `curl_adapter` to talk to the IMAP server → results go to stdout, diagnostics to `~/.cache/email-cli/logs/`.
+**Data flow:** `main.c` initializes logger, paths, and local store → loads config (or runs `setup_wizard` on first run) → calls `email_service` → which uses `curl_adapter` to talk to the IMAP server → results go to stdout, messages stored in `~/.local/share/email-cli/accounts/`, diagnostics to `~/.cache/email-cli/logs/`.
 
 **Config** is stored at `~/.config/email-cli/config.ini` with mode 0600 (IMAP host, user, password, folder).
+
+**Local store** uses account-based directories with reverse digit bucketing and text indexes. See `docs/spec/local-store.md` for the full specification.
 
 ## RAII Memory Safety
 
@@ -149,9 +151,12 @@ endif()
 ```
 docs/
   README.md               ← index
+  spec/                   ← behavioural specification (commands, local-store, etc.)
   user/                   ← end-user guides (getting-started, configuration, usage)
   dev/                    ← developer guides (testing, logging)
   adr/                    ← Architecture Decision Records (CLEAN arch, RAII, test framework)
+libs/
+  libptytest/             ← PTY-based terminal test library (self-contained)
 ```
 
 ## Project Memory

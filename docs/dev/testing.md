@@ -23,6 +23,12 @@ Each source module has a corresponding test file:
 | `test_config.c` | `src/infrastructure/config_store.c` |
 | `test_wizard.c` | `src/infrastructure/setup_wizard.c` |
 | `test_curl.c` | `src/infrastructure/curl_adapter.c` |
+| `test_local_store.c` | `src/infrastructure/local_store.c` |
+| `test_mime.c` | `src/core/mime_util.c` |
+| `test_imap_util.c` | `src/core/imap_util.c` |
+| `test_email_service.c` | `src/domain/email_service.c` |
+| `test_html_parser.c` | `src/core/html_parser.c` |
+| `test_html_render.c` | `src/core/html_render.c` |
 
 ### Writing a New Test
 
@@ -93,6 +99,52 @@ Requires Docker. Runs a real Dovecot IMAP server with:
 ./manage.sh imap-down     # stop container (volume preserved)
 ./manage.sh imap-clean    # stop + remove volume
 ```
+
+## PTY-based TUI Tests (`libs/libptytest/`)
+
+`libptytest` is a reusable C library for automated testing of terminal programs.
+It opens a pseudo-terminal, forks/execs the program under test, sends keystrokes,
+and inspects a virtual screen buffer.
+
+### Building and running libptytest self-tests
+
+```bash
+cd libs/libptytest
+cc -std=c11 -Wall -Wextra -Werror -o test_ptytest \
+   test_ptytest.c pty_session.c pty_screen.c pty_sync.c -lutil -I.
+./test_ptytest
+```
+
+### Key API
+
+```c
+PtySession *s = pty_open(80, 24);
+const char *argv[] = { "bin/email-cli", NULL };
+pty_run(s, argv);
+pty_wait_for(s, "message(s)", 2000);       /* wait for text, max 2s */
+pty_row_contains(s, 23, "↑↓=step");       /* check last row */
+pty_cell_attr(s, 23, 2) & PTY_ATTR_REVERSE /* check reverse video */
+pty_send_key(s, PTY_KEY_ESC);
+pty_close(s);
+```
+
+### VT100 subset
+
+The parser handles cursor positioning (`CSI H`), screen/line erase
+(`CSI 2J`, `CSI K`), SGR attributes (bold, dim, reverse), and 24-bit
+colour sequences (parsed but not stored).  This covers the escape
+sequences used by `email-cli`'s TUI.
+
+### Assertion macros (`pty_assert.h`)
+
+```c
+ASSERT_ROW_CONTAINS(s, row, "text");
+ASSERT_CELL_ATTR(s, row, col, PTY_ATTR_REVERSE);
+ASSERT_SCREEN_CONTAINS(s, "text");
+ASSERT_WAIT_FOR(s, "text", timeout_ms);
+```
+
+---
 
 ## Coverage Requirements
 

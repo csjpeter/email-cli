@@ -12,6 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <poll.h>
 
 /* ── Internal buffer ─────────────────────────────────────────────────── */
 
@@ -1152,9 +1153,23 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 
         /* Data rows: fetch-on-demand + immediate render per row */
         int manifest_dirty = 0;
+        int load_interrupted = 0;
         for (int i = wstart; i < wend; i++) {
             /* Fetch into manifest if missing */
             if (!manifest_find(manifest, entries[i].uid)) {
+                /* Check for user interrupt before slow network fetch */
+                if (opts->pager) {
+                    struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN};
+                    if (poll(&pfd, 1, 0) > 0) {
+                        TermKey key = terminal_read_key();
+                        if (key == TERM_KEY_BACK) {
+                            list_result = 1; load_interrupted = 1; break;
+                        }
+                        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) {
+                            list_result = 0; load_interrupted = 1; break;
+                        }
+                    }
+                }
                 char *hdrs     = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
                 char *fr_raw   = hdrs ? mime_get_header(hdrs, "From")    : NULL;
                 char *fr       = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
@@ -1190,6 +1205,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             fflush(stdout); /* show row immediately as it arrives */
         }
         if (manifest_dirty) manifest_save(folder, manifest);
+        if (load_interrupted) goto list_done;
 
         if (!opts->pager) {
             if (wend < show_count)

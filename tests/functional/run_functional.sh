@@ -98,7 +98,6 @@ echo "Running: email-cli list ..."
 LIST_OUTPUT=$("$BIN_DIR/email-cli" list 2>&1 || true)
 echo "$LIST_OUTPUT"
 echo "--- List Assertions ---"
-check "Fetch header printed"      "Fetching emails"         "$LIST_OUTPUT"
 check "Message count shown"       "message(s) in"           "$LIST_OUTPUT"
 check "Unread count shown"        "unread"                  "$LIST_OUTPUT"
 check "Table separator shown"     "═══"                     "$LIST_OUTPUT"

@@ -1035,8 +1035,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     const char *folder = opts->folder ? opts->folder : cfg->folder;
     int list_result = 0;
 
-    printf("--- Fetching emails: %s @ %s/%s ---\n",
-           cfg->user, cfg->host, folder);
+    logger_log(LOG_INFO, "Listing %s @ %s/%s", cfg->user, cfg->host, folder);
 
     /* Fetch UNSEEN set (for N markers) and ALL messages */
     int *unseen_uids = NULL;
@@ -1054,7 +1053,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     if (all_count > 0)
         local_hdr_evict_stale(folder, all_uids, all_count);
 
-    /* Load or create manifest — pre-fetch missing headers */
+    /* Load or create manifest — headers fetched on demand per viewport */
     Manifest *manifest = manifest_load(folder);
     if (!manifest) {
         manifest = calloc(1, sizeof(Manifest));
@@ -1064,24 +1063,6 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     /* Remove entries for UIDs deleted from the server */
     if (all_count > 0)
         manifest_retain(manifest, all_uids, all_count);
-
-    /* Fetch headers for UIDs not yet in the manifest */
-    for (int i = 0; i < all_count; i++) {
-        if (manifest_find(manifest, all_uids[i])) continue;
-        char *hdrs     = fetch_uid_headers_cached(cfg, folder, all_uids[i]);
-        char *from_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
-        char *from     = from_raw ? mime_decode_words(from_raw)  : strdup("");
-        free(from_raw);
-        char *subj_raw = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
-        char *subject  = subj_raw ? mime_decode_words(subj_raw)  : strdup("");
-        free(subj_raw);
-        char *date_raw = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
-        char *date     = date_raw ? mime_format_date(date_raw)   : strdup("");
-        free(date_raw);
-        free(hdrs);
-        manifest_upsert(manifest, all_uids[i], from, subject, date);
-    }
-    manifest_save(folder, manifest);
 
     int show_count = all_count;
 
@@ -1169,7 +1150,28 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         print_dbar(subj_w); printf("  ");
         print_dbar(16);     printf("\n");
 
-        /* Data rows — read from manifest (no file I/O per row) */
+        /* Data rows — fetch missing headers on demand, then read from manifest */
+        {
+            int manifest_dirty = 0;
+            for (int i = wstart; i < wend; i++) {
+                if (!manifest_find(manifest, entries[i].uid)) {
+                    char *hdrs     = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
+                    char *fr_raw   = hdrs ? mime_get_header(hdrs, "From")    : NULL;
+                    char *fr       = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
+                    free(fr_raw);
+                    char *su_raw   = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
+                    char *su       = su_raw ? mime_decode_words(su_raw)      : strdup("");
+                    free(su_raw);
+                    char *dt_raw   = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
+                    char *dt       = dt_raw ? mime_format_date(dt_raw)       : strdup("");
+                    free(dt_raw);
+                    free(hdrs);
+                    manifest_upsert(manifest, entries[i].uid, fr, su, dt);
+                    manifest_dirty = 1;
+                }
+            }
+            if (manifest_dirty) manifest_save(folder, manifest);
+        }
         for (int i = wstart; i < wend; i++) {
             ManifestEntry *me = manifest_find(manifest, entries[i].uid);
             const char *from    = (me && me->from    && me->from[0])    ? me->from    : "(no from)";

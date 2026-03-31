@@ -178,6 +178,90 @@ void test_local_index(void) {
     else unsetenv("HOME");
 }
 
+/* ── Manifest tests ──────────────────────────────────────────────────── */
+
+void test_manifest(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-manifest-test");
+
+    /* Pre-clean */
+    unlink("/tmp/email-cli-manifest-test/.local/share/email-cli/"
+           "accounts/imap.test.example.com/manifests/INBOX.tsv");
+
+    /* 1. Load non-existent manifest returns NULL */
+    Manifest *m = manifest_load("INBOX");
+    ASSERT(m == NULL, "manifest_load: NULL for missing file");
+
+    /* 2. Create manifest, add entries, save */
+    m = calloc(1, sizeof(Manifest));
+    ASSERT(m != NULL, "manifest: calloc");
+    manifest_upsert(m, 42,   strdup("Alice <alice@example.com>"),
+                              strdup("Hello World"),
+                              strdup("2024-03-15 10:00"));
+    manifest_upsert(m, 137,  strdup("Bob <bob@test.org>"),
+                              strdup("Re: Meeting"),
+                              strdup("2024-03-16 14:30"));
+    ASSERT(m->count == 2, "manifest: 2 entries after upsert");
+
+    int rc = manifest_save("INBOX", m);
+    ASSERT(rc == 0, "manifest_save: returns 0");
+
+    /* 3. Load back and verify */
+    manifest_free(m);
+    m = manifest_load("INBOX");
+    ASSERT(m != NULL, "manifest_load: not NULL after save");
+    ASSERT(m->count == 2, "manifest_load: 2 entries");
+
+    ManifestEntry *e42 = manifest_find(m, 42);
+    ASSERT(e42 != NULL, "manifest_find: UID 42 found");
+    ASSERT(strcmp(e42->from, "Alice <alice@example.com>") == 0,
+           "manifest: UID 42 from correct");
+    ASSERT(strcmp(e42->subject, "Hello World") == 0,
+           "manifest: UID 42 subject correct");
+    ASSERT(strcmp(e42->date, "2024-03-15 10:00") == 0,
+           "manifest: UID 42 date correct");
+
+    ManifestEntry *e137 = manifest_find(m, 137);
+    ASSERT(e137 != NULL, "manifest_find: UID 137 found");
+    ASSERT(strcmp(e137->subject, "Re: Meeting") == 0,
+           "manifest: UID 137 subject correct");
+
+    /* 4. Upsert updates existing entry */
+    manifest_upsert(m, 42, strdup("Alice Updated"),
+                           strdup("Updated Subject"),
+                           strdup("2024-03-15 11:00"));
+    ASSERT(m->count == 2, "manifest: still 2 after upsert-update");
+    e42 = manifest_find(m, 42);
+    ASSERT(strcmp(e42->subject, "Updated Subject") == 0,
+           "manifest: upsert updated subject");
+
+    /* 5. manifest_find returns NULL for missing UID */
+    ASSERT(manifest_find(m, 999) == NULL,
+           "manifest_find: NULL for missing UID");
+
+    /* 6. manifest_retain keeps only specified UIDs */
+    int keep[] = {137};
+    manifest_retain(m, keep, 1);
+    ASSERT(m->count == 1, "manifest_retain: 1 entry after retain");
+    ASSERT(manifest_find(m, 137) != NULL, "manifest_retain: UID 137 kept");
+    ASSERT(manifest_find(m, 42) == NULL, "manifest_retain: UID 42 removed");
+
+    /* 7. Nested folder manifest */
+    Manifest *m2 = calloc(1, sizeof(Manifest));
+    manifest_upsert(m2, 1, strdup("Test"), strdup("Nested"), strdup("2024-01-01 00:00"));
+    ASSERT(manifest_save("munka/ai", m2) == 0, "manifest_save: nested folder");
+    manifest_free(m2);
+    m2 = manifest_load("munka/ai");
+    ASSERT(m2 != NULL, "manifest_load: nested folder");
+    ASSERT(m2->count == 1, "manifest: nested has 1 entry");
+    manifest_free(m2);
+
+    /* Cleanup */
+    manifest_free(m);
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
 /* ── UI preferences tests ────────────────────────────────────────────── */
 
 void test_ui_prefs(void) {

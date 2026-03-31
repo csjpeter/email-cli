@@ -2,8 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 
 /**
  * @file mock_imap_server.c
@@ -15,6 +17,10 @@
 void handle_client(int client_sock) {
     char buffer[4096];
     char selected_folder[256] = "";   /* currently selected mailbox */
+
+    /* Set a recv timeout so we don't block forever on half-closed connections */
+    struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
+    setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     // 1. Greeting
     const char *greeting = "* OK Mock IMAP server ready\r\n";

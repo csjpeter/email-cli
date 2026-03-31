@@ -169,10 +169,13 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++)
         if (strcmp(argv[i], "--batch") == 0) batch = 1;
 
-    /* Command: first non --batch arg */
+    /* Command: first non-global-flag arg */
     const char *cmd = NULL;
+    int cmd_idx = 0;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--batch") != 0) { cmd = argv[i]; break; }
+        if (strcmp(argv[i], "--batch") == 0) continue;
+        if (strcmp(argv[i], "--help") == 0) continue;
+        cmd = argv[i]; cmd_idx = i; break;
     }
 
     /* --help anywhere in the args: treat as "help <cmd>" */
@@ -196,12 +199,10 @@ int main(int argc, char *argv[]) {
     int page_size = detect_page_size(batch);
 
     if (cmd && strcmp(cmd, "help") == 0) {
-        /* First non --batch arg after "help" is the topic */
+        /* First arg after the command is the topic */
         const char *topic = NULL;
-        int past_help = 0;
-        for (int i = 1; i < argc; i++) {
+        for (int i = cmd_idx + 1; i < argc; i++) {
             if (strcmp(argv[i], "--batch") == 0) continue;
-            if (!past_help) { past_help = 1; continue; } /* skip "help" itself */
             topic = argv[i]; break;
         }
         if (topic) {
@@ -278,7 +279,7 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(cmd, "list") == 0) {
         EmailListOpts opts = {0, NULL, 0, 0, pager};
         int ok = 1, explicit_limit = -1;
-        for (int i = 2; i < argc && ok; i++) {
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) {
                 continue; /* already handled globally */
             } else if (strcmp(argv[i], "--all") == 0) {
@@ -331,7 +332,7 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(cmd, "show") == 0) {
         /* UID is the first non --batch arg after "show" */
         const char *uid_str = NULL;
-        for (int i = 2; i < argc; i++) {
+        for (int i = cmd_idx + 1; i < argc; i++) {
             if (strcmp(argv[i], "--batch") == 0) continue;
             uid_str = argv[i]; break;
         }
@@ -350,7 +351,7 @@ int main(int argc, char *argv[]) {
 
     } else if (strcmp(cmd, "folders") == 0) {
         int tree = 0, ok = 1;
-        for (int i = 2; i < argc && ok; i++) {
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) continue;
             if (strcmp(argv[i], "--tree") == 0)
                 tree = 1;

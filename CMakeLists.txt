@@ -65,3 +65,4 @@ target_link_libraries(email-cli ${CURL_LIBRARIES})
 # Test Build
 enable_testing()
 add_subdirectory(tests/unit EXCLUDE_FROM_ALL)
+add_subdirectory(tests/pty EXCLUDE_FROM_ALL)

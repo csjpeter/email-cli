@@ -17,6 +17,7 @@ void test_mime_util(void);
 void test_local_msg_store(void);
 void test_local_hdr_evict(void);
 void test_local_index(void);
+void test_manifest(void);
 void test_ui_prefs(void);
 void test_imap_util(void);
 void test_platform(void);
@@ -43,6 +44,7 @@ int main() {
     RUN_TEST(test_local_msg_store);
     RUN_TEST(test_local_hdr_evict);
     RUN_TEST(test_local_index);
+    RUN_TEST(test_manifest);
     RUN_TEST(test_ui_prefs);
     RUN_TEST(test_imap_util);
     RUN_TEST(test_platform);

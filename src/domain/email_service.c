@@ -1054,9 +1054,39 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     if (all_count > 0)
         local_hdr_evict_stale(folder, all_uids, all_count);
 
+    /* Load or create manifest — pre-fetch missing headers */
+    Manifest *manifest = manifest_load(folder);
+    if (!manifest) {
+        manifest = calloc(1, sizeof(Manifest));
+        if (!manifest) { free(unseen_uids); free(all_uids); return -1; }
+    }
+
+    /* Remove entries for UIDs deleted from the server */
+    if (all_count > 0)
+        manifest_retain(manifest, all_uids, all_count);
+
+    /* Fetch headers for UIDs not yet in the manifest */
+    for (int i = 0; i < all_count; i++) {
+        if (manifest_find(manifest, all_uids[i])) continue;
+        char *hdrs     = fetch_uid_headers_cached(cfg, folder, all_uids[i]);
+        char *from_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
+        char *from     = from_raw ? mime_decode_words(from_raw)  : strdup("");
+        free(from_raw);
+        char *subj_raw = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
+        char *subject  = subj_raw ? mime_decode_words(subj_raw)  : strdup("");
+        free(subj_raw);
+        char *date_raw = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
+        char *date     = date_raw ? mime_format_date(date_raw)   : strdup("");
+        free(date_raw);
+        free(hdrs);
+        manifest_upsert(manifest, all_uids[i], from, subject, date);
+    }
+    manifest_save(folder, manifest);
+
     int show_count = all_count;
 
     if (show_count == 0) {
+        manifest_free(manifest);
         free(unseen_uids);
         free(all_uids);
         if (!opts->pager) {
@@ -1139,31 +1169,24 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         print_dbar(subj_w); printf("  ");
         print_dbar(16);     printf("\n");
 
-        /* Data rows */
+        /* Data rows — read from manifest (no file I/O per row) */
         for (int i = wstart; i < wend; i++) {
-            char *hdrs     = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
-            char *from_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
-            char *from     = from_raw ? mime_decode_words(from_raw)  : NULL;
-            free(from_raw);
-            char *subj_raw = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
-            char *subject  = subj_raw ? mime_decode_words(subj_raw)  : NULL;
-            free(subj_raw);
-            char *date_raw = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
-            char *date     = date_raw ? mime_format_date(date_raw)   : NULL;
-            free(date_raw);
+            ManifestEntry *me = manifest_find(manifest, entries[i].uid);
+            const char *from    = (me && me->from    && me->from[0])    ? me->from    : "(no from)";
+            const char *subject = (me && me->subject && me->subject[0]) ? me->subject : "(no subject)";
+            const char *date    = (me && me->date)                       ? me->date    : "";
 
             int sel = opts->pager && (i == cursor);
             if (sel) printf("\033[7m");
 
             printf("  %c  %5d  ", entries[i].unseen ? 'N' : ' ', entries[i].uid);
-            print_padded_col(from    ? from    : "(no from)",    from_w);
+            print_padded_col(from,    from_w);
             printf("  ");
-            print_padded_col(subject ? subject : "(no subject)", subj_w);
-            printf("  %-16.16s", date ? date : "");
+            print_padded_col(subject, subj_w);
+            printf("  %-16.16s", date);
 
             if (sel) printf("\033[K\033[0m");
             printf("\n");
-            free(hdrs); free(from); free(subject); free(date);
         }
 
         if (!opts->pager) {
@@ -1223,6 +1246,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     }
 list_done:
     /* tui_raw is cleaned up automatically via RAII_TERM_RAW */
+    manifest_free(manifest);
     free(entries);
     return list_result;
 }

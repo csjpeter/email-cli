@@ -425,3 +425,169 @@ int ui_pref_set_int(const char *key, int value) {
     logger_log(LOG_DEBUG, "UI pref %s=%d saved", key, value);
     return 0;
 }
+
+/* ── Folder manifest ─────────────────────────────────────────────────── */
+
+static char *manifest_path(const char *folder) {
+    if (!g_account_base[0]) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/manifests/%s.tsv", g_account_base, folder) == -1)
+        return NULL;
+    return path;
+}
+
+/** @brief Duplicates a string, replacing tabs with spaces. */
+static char *sanitise(const char *s) {
+    if (!s) return strdup("");
+    char *d = strdup(s);
+    if (d) for (char *p = d; *p; p++) if (*p == '\t') *p = ' ';
+    return d;
+}
+
+Manifest *manifest_load(const char *folder) {
+    RAII_STRING char *path = manifest_path(folder);
+    if (!path) return NULL;
+
+    char *data = load_file(path);
+    if (!data) return NULL;
+
+    Manifest *m = calloc(1, sizeof(*m));
+    if (!m) { free(data); return NULL; }
+    m->capacity = 64;
+    m->entries = malloc((size_t)m->capacity * sizeof(ManifestEntry));
+    if (!m->entries) { free(m); free(data); return NULL; }
+
+    char *line = data;
+    while (*line) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+
+        /* Parse: uid\tfrom\tsubject\tdate */
+        char *end;
+        long uid = strtol(line, &end, 10);
+        if (end == line || *end != '\t' || uid <= 0) {
+            line = nl ? nl + 1 : line + strlen(line);
+            continue;
+        }
+        char *from_start = end + 1;
+        char *t2 = strchr(from_start, '\t');
+        if (!t2) { line = nl ? nl + 1 : line + strlen(line); continue; }
+        *t2 = '\0';
+        char *subj_start = t2 + 1;
+        char *t3 = strchr(subj_start, '\t');
+        if (!t3) { line = nl ? nl + 1 : line + strlen(line); continue; }
+        *t3 = '\0';
+        char *date_start = t3 + 1;
+
+        if (m->count == m->capacity) {
+            m->capacity *= 2;
+            ManifestEntry *tmp = realloc(m->entries,
+                                         (size_t)m->capacity * sizeof(ManifestEntry));
+            if (!tmp) break;
+            m->entries = tmp;
+        }
+        ManifestEntry *e = &m->entries[m->count++];
+        e->uid     = (int)uid;
+        e->from    = strdup(from_start);
+        e->subject = strdup(subj_start);
+        e->date    = strdup(date_start);
+
+        line = nl ? nl + 1 : line + strlen(line);
+    }
+    free(data);
+    return m;
+}
+
+int manifest_save(const char *folder, const Manifest *m) {
+    if (!g_account_base[0] || !m) return -1;
+
+    RAII_STRING char *dir = NULL;
+    if (asprintf(&dir, "%s/manifests", g_account_base) == -1) return -1;
+    if (fs_mkdir_p(dir, 0700) != 0) return -1;
+
+    /* For nested folders like "munka/ai" we need the parent dir */
+    RAII_STRING char *path = manifest_path(folder);
+    if (!path) return -1;
+
+    /* Ensure parent directory exists (folder path may have slashes) */
+    char *last_slash = strrchr(path, '/');
+    if (last_slash) {
+        char saved = *last_slash;
+        *last_slash = '\0';
+        fs_mkdir_p(path, 0700);
+        *last_slash = saved;
+    }
+
+    RAII_FILE FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+
+    for (int i = 0; i < m->count; i++) {
+        ManifestEntry *e = &m->entries[i];
+        RAII_STRING char *f = sanitise(e->from);
+        RAII_STRING char *s = sanitise(e->subject);
+        RAII_STRING char *d = sanitise(e->date);
+        fprintf(fp, "%d\t%s\t%s\t%s\n", e->uid, f ? f : "", s ? s : "", d ? d : "");
+    }
+    logger_log(LOG_DEBUG, "Manifest saved: %s (%d entries)", folder, m->count);
+    return 0;
+}
+
+void manifest_free(Manifest *m) {
+    if (!m) return;
+    for (int i = 0; i < m->count; i++) {
+        free(m->entries[i].from);
+        free(m->entries[i].subject);
+        free(m->entries[i].date);
+    }
+    free(m->entries);
+    free(m);
+}
+
+ManifestEntry *manifest_find(const Manifest *m, int uid) {
+    if (!m) return NULL;
+    for (int i = 0; i < m->count; i++)
+        if (m->entries[i].uid == uid) return &m->entries[i];
+    return NULL;
+}
+
+void manifest_upsert(Manifest *m, int uid,
+                     char *from, char *subject, char *date) {
+    if (!m) return;
+    ManifestEntry *existing = manifest_find(m, uid);
+    if (existing) {
+        free(existing->from);    existing->from    = from;
+        free(existing->subject); existing->subject = subject;
+        free(existing->date);    existing->date    = date;
+        return;
+    }
+    if (m->count == m->capacity) {
+        int new_cap = m->capacity ? m->capacity * 2 : 64;
+        ManifestEntry *tmp = realloc(m->entries,
+                                     (size_t)new_cap * sizeof(ManifestEntry));
+        if (!tmp) { free(from); free(subject); free(date); return; }
+        m->entries = tmp;
+        m->capacity = new_cap;
+    }
+    ManifestEntry *e = &m->entries[m->count++];
+    e->uid = uid; e->from = from; e->subject = subject; e->date = date;
+}
+
+void manifest_retain(Manifest *m, const int *keep_uids, int keep_count) {
+    if (!m) return;
+    int dst = 0;
+    for (int i = 0; i < m->count; i++) {
+        int found = 0;
+        for (int j = 0; j < keep_count; j++) {
+            if (keep_uids[j] == m->entries[i].uid) { found = 1; break; }
+        }
+        if (found) {
+            if (dst != i) m->entries[dst] = m->entries[i];
+            dst++;
+        } else {
+            free(m->entries[i].from);
+            free(m->entries[i].subject);
+            free(m->entries[i].date);
+        }
+    }
+    m->count = dst;
+}

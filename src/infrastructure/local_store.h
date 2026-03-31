@@ -74,6 +74,40 @@ void  local_hdr_evict_stale(const char *folder,
  */
 int local_index_update(const char *folder, int uid, const char *raw_msg);
 
+/* ── Folder manifest (fast list cache) ────────────────────────────────── */
+
+typedef struct {
+    int   uid;
+    char *from;      /**< MIME-decoded, display-ready */
+    char *subject;   /**< MIME-decoded, display-ready */
+    char *date;      /**< Formatted "YYYY-MM-DD HH:MM" */
+} ManifestEntry;
+
+typedef struct {
+    ManifestEntry *entries;
+    int count;
+    int capacity;
+} Manifest;
+
+/** @brief Loads the manifest for a folder. Returns NULL if not found. */
+Manifest *manifest_load(const char *folder);
+
+/** @brief Saves the manifest for a folder. Returns 0 on success. */
+int manifest_save(const char *folder, const Manifest *m);
+
+/** @brief Frees a manifest and all its entries. */
+void manifest_free(Manifest *m);
+
+/** @brief Finds an entry by UID. Returns pointer into manifest or NULL. */
+ManifestEntry *manifest_find(const Manifest *m, int uid);
+
+/** @brief Adds or updates a manifest entry (takes ownership of strings). */
+void manifest_upsert(Manifest *m, int uid,
+                     char *from, char *subject, char *date);
+
+/** @brief Removes entries whose UID is not in keep_uids (sorted). */
+void manifest_retain(Manifest *m, const int *keep_uids, int keep_count);
+
 /* ── UI preferences ──────────────────────────────────────────────────── */
 
 /** @brief Reads an integer UI preference. */

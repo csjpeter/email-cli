@@ -1138,19 +1138,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         int from_w = avail / 2;
         int subj_w = avail - from_w;
 
-        if (opts->pager) printf("\033[H\033[2J");
-
-        /* Count / status line */
-        printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
-               wstart + 1, wend, show_count, folder, unseen_count);
-        printf("  S  %5s  %-*s  %-*s  %s\n",
-               "UID", from_w, "From", subj_w, "Subject", "Date");
-        printf("  \u2550  \u2550\u2550\u2550\u2550\u2550  ");
-        print_dbar(from_w); printf("  ");
-        print_dbar(subj_w); printf("  ");
-        print_dbar(16);     printf("\n");
-
-        /* Data rows — fetch missing headers on demand, then read from manifest */
+        /* Fetch missing headers for viewport BEFORE clearing screen */
         {
             int manifest_dirty = 0;
             for (int i = wstart; i < wend; i++) {
@@ -1172,6 +1160,19 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             }
             if (manifest_dirty) manifest_save(folder, manifest);
         }
+
+        if (opts->pager) printf("\033[H\033[2J");
+
+        /* Count / status line */
+        printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
+               wstart + 1, wend, show_count, folder, unseen_count);
+        printf("  S  %5s  %-*s  %-*s  %s\n",
+               "UID", from_w, "From", subj_w, "Subject", "Date");
+        printf("  \u2550  \u2550\u2550\u2550\u2550\u2550  ");
+        print_dbar(from_w); printf("  ");
+        print_dbar(subj_w); printf("  ");
+        print_dbar(16);     printf("\n");
+
         for (int i = wstart; i < wend; i++) {
             ManifestEntry *me = manifest_find(manifest, entries[i].uid);
             const char *from    = (me && me->from    && me->from[0])    ? me->from    : "(no from)";

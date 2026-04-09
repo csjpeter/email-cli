@@ -98,4 +98,22 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size);
  */
 int email_service_sync(const Config *cfg);
 
+/**
+ * @brief Installs a user crontab entry to run 'email-cli sync' periodically.
+ *
+ * Uses cfg->sync_interval (minutes) to set the cron frequency.
+ * Does nothing if an entry already exists; prints guidance to remove it first.
+ *
+ * @param cfg  Connection configuration (must have sync_interval > 0).
+ * @return 0 on success or already-exists, -1 on error.
+ */
+int email_service_cron_setup(const Config *cfg);
+
+/**
+ * @brief Removes the 'email-cli sync' crontab entry added by cron_setup.
+ *
+ * @return 0 on success or not-found, -1 on error.
+ */
+int email_service_cron_remove(void);
+
 #endif /* EMAIL_SERVICE_H */

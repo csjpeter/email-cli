@@ -12,7 +12,8 @@ typedef struct {
     char *user;
     char *pass;
     char *folder;
-    int   ssl_no_verify; /**< 1 = disable SSL peer verification (for self-signed certs in test envs) */
+    int   ssl_no_verify;   /**< 1 = disable SSL peer verification (for self-signed certs in test envs) */
+    int   sync_interval;   /**< Sync interval in minutes; 0 = online mode, >0 = cron mode */
 } Config;
 
 /**

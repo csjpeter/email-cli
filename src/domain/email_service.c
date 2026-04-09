@@ -549,6 +549,7 @@ static int search_uids_with_curl(CURL *curl, const Config *cfg,
 }
 
 /** Convenience wrapper that creates its own curl handle. */
+__attribute__((unused))
 static int search_uids_in(const Config *cfg, const char *folder,
                            const char *criteria, int **uids_out) {
     RAII_CURL CURL *curl = make_curl(cfg);
@@ -1110,51 +1111,117 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 
     logger_log(LOG_INFO, "Listing %s @ %s/%s", cfg->user, cfg->host, folder);
 
-    /* Fetch UNSEEN and ALL UID sets via a shared connection.
-     * Using one CURL handle means a single TCP+TLS+AUTH setup; libcurl
-     * keeps the IMAP session alive between the two SEARCH commands. */
-    RAII_CURL CURL *list_curl = make_curl(cfg);
-    if (!list_curl) { fprintf(stderr, "Failed to connect.\n"); return -1; }
-
-    int *unseen_uids = NULL;
-    int unseen_count = search_uids_with_curl(list_curl, cfg, folder, "UNSEEN", &unseen_uids);
-    if (unseen_count < 0) { fprintf(stderr, "Failed to search mailbox.\n"); return -1; }
-
-    int *all_uids  = NULL;
-    int  all_count = search_uids_with_curl(list_curl, cfg, folder, "ALL", &all_uids);
-    if (all_count < 0) {
-        free(unseen_uids);
-        fprintf(stderr, "Failed to search mailbox.\n");
-        return -1;
-    }
-    /* Evict headers for messages deleted from the server */
-    if (all_count > 0)
-        local_hdr_evict_stale(folder, all_uids, all_count);
-
-    /* Load or create manifest — headers fetched on demand per viewport */
+    /* Load manifest (needed in both online and cron modes) */
     Manifest *manifest = manifest_load(folder);
     if (!manifest) {
         manifest = calloc(1, sizeof(Manifest));
-        if (!manifest) { free(unseen_uids); free(all_uids); return -1; }
+        if (!manifest) { return -1; }
     }
 
-    /* Remove entries for UIDs deleted from the server */
-    if (all_count > 0)
-        manifest_retain(manifest, all_uids, all_count);
+    int show_count = 0;
+    int unseen_count = 0;
+    UIDEntry *entries = NULL;
 
-    int show_count = all_count;
+    if (cfg->sync_interval > 0) {
+        /* ── Cron / cache-only mode: serve entirely from manifest ──────── */
+        if (manifest->count == 0) {
+            manifest_free(manifest);
+            printf("No cached data. Run 'email-cli sync' first.\n");
+            return 0;
+        }
+        show_count = manifest->count;
+        entries = malloc((size_t)show_count * sizeof(UIDEntry));
+        if (!entries) { manifest_free(manifest); return -1; }
+        for (int i = 0; i < show_count; i++) {
+            entries[i].uid    = manifest->entries[i].uid;
+            entries[i].unseen = manifest->entries[i].unseen;
+        }
+        for (int i = 0; i < show_count; i++)
+            if (entries[i].unseen) unseen_count++;
+    } else {
+        /* ── Online mode: contact the server ───────────────────────────── */
+
+        /* Fetch UNSEEN and ALL UID sets via a shared connection.
+         * Using one CURL handle means a single TCP+TLS+AUTH setup; libcurl
+         * keeps the IMAP session alive between the two SEARCH commands. */
+        RAII_CURL CURL *list_curl = make_curl(cfg);
+        if (!list_curl) {
+            manifest_free(manifest);
+            fprintf(stderr, "Failed to connect.\n");
+            return -1;
+        }
+
+        int *unseen_uids = NULL;
+        unseen_count = search_uids_with_curl(list_curl, cfg, folder, "UNSEEN", &unseen_uids);
+        if (unseen_count < 0) {
+            manifest_free(manifest);
+            fprintf(stderr, "Failed to search mailbox.\n");
+            return -1;
+        }
+
+        int *all_uids  = NULL;
+        int  all_count = search_uids_with_curl(list_curl, cfg, folder, "ALL", &all_uids);
+        if (all_count < 0) {
+            free(unseen_uids);
+            manifest_free(manifest);
+            fprintf(stderr, "Failed to search mailbox.\n");
+            return -1;
+        }
+        /* Evict headers for messages deleted from the server */
+        if (all_count > 0)
+            local_hdr_evict_stale(folder, all_uids, all_count);
+
+        /* Remove entries for UIDs deleted from the server */
+        if (all_count > 0)
+            manifest_retain(manifest, all_uids, all_count);
+
+        show_count = all_count;
+
+        if (show_count == 0) {
+            manifest_free(manifest);
+            free(unseen_uids);
+            free(all_uids);
+            if (!opts->pager) {
+                printf("No messages in %s.\n", folder);
+                return 0;
+            }
+            /* Interactive mode: show empty-folder screen and wait for input.
+             * Returning immediately would drop the user back to the OS — instead
+             * let them navigate away with Backspace (→ folder list) or ESC/^C. */
+            RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
+            printf("\033[H\033[2J");
+            printf("No messages in %s.\n\n", folder);
+            printf("\033[2m  Backspace=folders  ESC=quit\033[0m\n");
+            fflush(stdout);
+            for (;;) {
+                TermKey key = terminal_read_key();
+                if (key == TERM_KEY_BACK)  return 1; /* go to folder list */
+                if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
+            }
+        }
+
+        /* Build tagged entry array */
+        entries = malloc((size_t)show_count * sizeof(UIDEntry));
+        if (!entries) { free(unseen_uids); free(all_uids); manifest_free(manifest); return -1; }
+
+        for (int i = 0; i < show_count; i++) {
+            entries[i].uid    = all_uids[i];
+            entries[i].unseen = 0;
+            for (int j = 0; j < unseen_count; j++) {
+                if (unseen_uids[j] == all_uids[i]) { entries[i].unseen = 1; break; }
+            }
+        }
+        free(unseen_uids);
+        free(all_uids);
+    }
 
     if (show_count == 0) {
         manifest_free(manifest);
-        free(unseen_uids);
-        free(all_uids);
+        free(entries);
         if (!opts->pager) {
             printf("No messages in %s.\n", folder);
             return 0;
         }
-        /* Interactive mode: show empty-folder screen and wait for input.
-         * Returning immediately would drop the user back to the OS — instead
-         * let them navigate away with Backspace (→ folder list) or ESC/^C. */
         RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
         printf("\033[H\033[2J");
         printf("No messages in %s.\n\n", folder);
@@ -1162,24 +1229,10 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         fflush(stdout);
         for (;;) {
             TermKey key = terminal_read_key();
-            if (key == TERM_KEY_BACK)  return 1; /* go to folder list */
+            if (key == TERM_KEY_BACK)  return 1;
             if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
         }
     }
-
-    /* Build tagged entry array */
-    UIDEntry *entries = malloc((size_t)show_count * sizeof(UIDEntry));
-    if (!entries) { free(unseen_uids); free(all_uids); return -1; }
-
-    for (int i = 0; i < show_count; i++) {
-        entries[i].uid    = all_uids[i];
-        entries[i].unseen = 0;
-        for (int j = 0; j < unseen_count; j++) {
-            if (unseen_uids[j] == all_uids[i]) { entries[i].unseen = 1; break; }
-        }
-    }
-    free(unseen_uids);
-    free(all_uids);
 
     /* Sort: unseen first, then descending UID */
     qsort(entries, (size_t)show_count, sizeof(UIDEntry), cmp_uid_entry);
@@ -1258,7 +1311,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                 char *dt       = dt_raw ? mime_format_date(dt_raw)       : strdup("");
                 free(dt_raw);
                 free(hdrs);
-                manifest_upsert(manifest, entries[i].uid, fr, su, dt);
+                manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].unseen);
                 manifest_dirty = 1;
             }
 
@@ -1715,13 +1768,16 @@ int email_service_sync(const Config *cfg) {
 
     int total_fetched = 0, total_skipped = 0, errors = 0;
 
+    /* One shared CURL handle for UID SEARCH across all folders */
+    RAII_CURL CURL *search_curl = make_curl(cfg);
+
     for (int fi = 0; fi < folder_count; fi++) {
         const char *folder = folders[fi];
         printf("Syncing %s ...\n", folder);
         fflush(stdout);
 
         int *uids = NULL;
-        int uid_count = search_uids_in(cfg, folder, "ALL", &uids);
+        int uid_count = search_uids_with_curl(search_curl, cfg, folder, "ALL", &uids);
         if (uid_count < 0) {
             fprintf(stderr, "  WARN: SEARCH ALL failed for %s\n", folder);
             errors++;
@@ -1733,26 +1789,76 @@ int email_service_sync(const Config *cfg) {
             continue;
         }
 
-        int fetched = 0, skipped = 0;
-        for (int i = 0; i < uid_count; i++) {
-            int uid = uids[i];
-            if (local_msg_exists(folder, uid)) {
-                skipped++;
-                continue;
-            }
-            char *raw = fetch_uid_content_in(cfg, folder, uid, 0);
-            if (!raw) {
-                fprintf(stderr, "  WARN: failed to fetch UID %d in %s\n", uid, folder);
+        /* Load or create manifest for this folder */
+        Manifest *manifest = manifest_load(folder);
+        if (!manifest) {
+            manifest = calloc(1, sizeof(Manifest));
+            if (!manifest) {
+                fprintf(stderr, "  WARN: out of memory for manifest %s\n", folder);
+                free(uids);
                 errors++;
                 continue;
             }
-            local_msg_save(folder, uid, raw, strlen(raw));
-            local_index_update(folder, uid, raw);
-            free(raw);
-            fetched++;
-            printf("  [%d/%d] UID %d fetched\r", i + 1, uid_count, uid);
+        }
+
+        /* Get UNSEEN set to mark entries */
+        int *unseen_uids = NULL;
+        int unseen_count = search_uids_with_curl(search_curl, cfg, folder, "UNSEEN", &unseen_uids);
+        if (unseen_count < 0) unseen_count = 0;
+
+        /* Evict deleted messages from manifest */
+        manifest_retain(manifest, uids, uid_count);
+
+        int fetched = 0, skipped = 0;
+        for (int i = 0; i < uid_count; i++) {
+            int uid = uids[i];
+            int is_unseen = 0;
+            for (int j = 0; j < unseen_count; j++)
+                if (unseen_uids[j] == uid) { is_unseen = 1; break; }
+
+            /* Fetch full body if not cached */
+            if (!local_msg_exists(folder, uid)) {
+                char *raw = fetch_uid_content_in(cfg, folder, uid, 0);
+                if (raw) {
+                    local_msg_save(folder, uid, raw, strlen(raw));
+                    local_index_update(folder, uid, raw);
+                    free(raw);
+                    fetched++;
+                } else {
+                    fprintf(stderr, "  WARN: failed to fetch UID %d in %s\n", uid, folder);
+                    errors++;
+                    continue;
+                }
+            } else {
+                skipped++;
+            }
+
+            /* Update manifest entry (headers from cache) */
+            ManifestEntry *me = manifest_find(manifest, uid);
+            if (!me) {
+                char *hdrs   = fetch_uid_headers_cached(cfg, folder, uid);
+                char *fr_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
+                char *fr     = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
+                free(fr_raw);
+                char *su_raw = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
+                char *su     = su_raw ? mime_decode_words(su_raw)      : strdup("");
+                free(su_raw);
+                char *dt_raw = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
+                char *dt     = dt_raw ? mime_format_date(dt_raw)       : strdup("");
+                free(dt_raw);
+                free(hdrs);
+                manifest_upsert(manifest, uid, fr, su, dt, is_unseen);
+            } else {
+                /* update unseen flag on existing entry */
+                me->unseen = is_unseen;
+            }
+
+            printf("  [%d/%d] UID %d\r", i + 1, uid_count, uid);
             fflush(stdout);
         }
+        free(unseen_uids);
+        manifest_save(folder, manifest);
+        manifest_free(manifest);
         free(uids);
 
         printf("  %d fetched, %d already stored%s\n",
@@ -1768,4 +1874,144 @@ int email_service_sync(const Config *cfg) {
     if (errors) printf(", %d errors", errors);
     printf("\n");
     return errors ? -1 : 0;
+}
+
+int email_service_cron_setup(const Config *cfg) {
+    if (cfg->sync_interval <= 0) {
+        fprintf(stderr, "sync_interval is 0; set it in config first.\n");
+        return -1;
+    }
+
+    /* Find the path to this binary */
+    char self_path[1024] = {0};
+#ifdef __linux__
+    ssize_t n = readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
+    if (n < 0) {
+        fprintf(stderr, "Cannot determine binary path.\n");
+        return -1;
+    }
+    self_path[n] = '\0';
+#else
+    /* fallback: use 'which email-cli' */
+    FILE *wp = popen("which email-cli", "r");
+    if (!wp || !fgets(self_path, sizeof(self_path), wp)) {
+        if (wp) pclose(wp);
+        fprintf(stderr, "Cannot determine binary path.\n");
+        return -1;
+    }
+    if (wp) pclose(wp);
+    /* trim newline */
+    self_path[strcspn(self_path, "\n")] = '\0';
+#endif
+
+    /* Build the cron line */
+    char cron_line[2048];
+    snprintf(cron_line, sizeof(cron_line),
+             "*/%d * * * * %s sync >> ~/.cache/email-cli/sync.log 2>&1",
+             cfg->sync_interval, self_path);
+
+    /* Read existing crontab */
+    FILE *fp = popen("crontab -l 2>/dev/null", "r");
+    char existing[65536] = {0};
+    size_t total = 0;
+    if (fp) {
+        size_t n2;
+        while ((n2 = fread(existing + total, 1, sizeof(existing) - total - 1, fp)) > 0)
+            total += n2;
+        pclose(fp);
+    }
+    existing[total] = '\0';
+
+    /* Check if already present */
+    if (strstr(existing, "email-cli sync")) {
+        printf("Cron entry already exists:\n");
+        char *p = existing;
+        while (*p) {
+            char *nl = strchr(p, '\n');
+            char *end = nl ? nl : p + strlen(p);
+            char saved = *end; *end = '\0';
+            if (strstr(p, "email-cli sync"))
+                printf("  %s\n", p);
+            *end = saved;
+            p = nl ? nl + 1 : end;
+        }
+        printf("Remove it first with: email-cli cron remove\n");
+        return 0;
+    }
+
+    /* Append our line (ensure existing ends with newline) */
+    if (total > 0 && existing[total - 1] != '\n')
+        strncat(existing, "\n", sizeof(existing) - total - 1);
+    strncat(existing, cron_line, sizeof(existing) - strlen(existing) - 1);
+    strncat(existing, "\n", sizeof(existing) - strlen(existing) - 1);
+
+    FILE *cp = popen("crontab -", "w");
+    if (!cp) {
+        fprintf(stderr, "Failed to update crontab.\n");
+        return -1;
+    }
+    fputs(existing, cp);
+    int rc = pclose(cp);
+    if (rc != 0) {
+        fprintf(stderr, "crontab update failed (exit %d).\n", rc);
+        return -1;
+    }
+
+    printf("Cron entry added (every %d minutes):\n  %s\n",
+           cfg->sync_interval, cron_line);
+    return 0;
+}
+
+int email_service_cron_remove(void) {
+    FILE *fp = popen("crontab -l 2>/dev/null", "r");
+    char existing[65536] = {0};
+    size_t total = 0;
+    if (fp) {
+        size_t n;
+        while ((n = fread(existing + total, 1, sizeof(existing) - total - 1, fp)) > 0)
+            total += n;
+        pclose(fp);
+    }
+    existing[total] = '\0';
+
+    if (!strstr(existing, "email-cli sync")) {
+        printf("No email-cli cron entry found.\n");
+        return 0;
+    }
+
+    /* Filter out lines containing "email-cli sync" */
+    char filtered[65536] = {0};
+    size_t flen = 0;
+    char *p = existing;
+    while (*p) {
+        char *nl = strchr(p, '\n');
+        char *end = nl ? nl : p + strlen(p);
+        char saved = *end; *end = '\0';
+        if (!strstr(p, "email-cli sync")) {
+            size_t llen = strlen(p);
+            if (flen + llen + 2 < sizeof(filtered)) {
+                memcpy(filtered + flen, p, llen);
+                flen += llen;
+                filtered[flen++] = '\n';
+                filtered[flen]   = '\0';
+            }
+        }
+        *end = saved;
+        p = nl ? nl + 1 : end;
+    }
+
+    FILE *cp = popen("crontab -", "w");
+    if (!cp) {
+        fprintf(stderr, "Failed to update crontab.\n");
+        return -1;
+    }
+    fputs(filtered, cp);
+    int rc = pclose(cp);
+    if (rc != 0) {
+        fprintf(stderr, "crontab update failed.\n");
+        return -1;
+    }
+
+    printf("Cron entry removed.\n");
+    return 0;
 }

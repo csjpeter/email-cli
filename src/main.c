@@ -43,6 +43,8 @@ static void help_general(void) {
         "  show <uid>        Display the full content of a message by its UID\n"
         "  folders           List available IMAP folders\n"
         "  sync              Download all messages in all folders to local store\n"
+        "  cron setup        Install a crontab entry to run sync automatically\n"
+        "  cron remove       Remove the automatic sync crontab entry\n"
         "  help [command]    Show this help, or detailed help for a command\n"
         "\n"
         "Run 'email-cli help <command>' for more information.\n",
@@ -361,6 +363,17 @@ int main(int argc, char *argv[]) {
 
     } else if (strcmp(cmd, "sync") == 0) {
         result = email_service_sync(cfg);
+
+    } else if (strcmp(cmd, "cron") == 0) {
+        const char *subcmd = argc > cmd_idx + 1 ? argv[cmd_idx + 1] : "";
+        if (strcmp(subcmd, "setup") == 0) {
+            return email_service_cron_setup(cfg) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        } else if (strcmp(subcmd, "remove") == 0) {
+            return email_service_cron_remove() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        } else {
+            fprintf(stderr, "Usage: email-cli cron <setup|remove>\n");
+            return EXIT_FAILURE;
+        }
 
     } else {
         fprintf(stderr, "Unknown command '%s'.\n", cmd);

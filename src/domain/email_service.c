@@ -1877,10 +1877,6 @@ int email_service_sync(const Config *cfg) {
 }
 
 int email_service_cron_setup(const Config *cfg) {
-    if (cfg->sync_interval <= 0) {
-        fprintf(stderr, "sync_interval is 0; set it in config first.\n");
-        return -1;
-    }
 
     /* Find the path to this binary */
     char self_path[1024] = {0};
@@ -2013,5 +2009,26 @@ int email_service_cron_remove(void) {
     }
 
     printf("Cron entry removed.\n");
+    return 0;
+}
+
+int email_service_cron_status(void) {
+    FILE *fp = popen("crontab -l 2>/dev/null", "r");
+    if (!fp) {
+        printf("No crontab found for this user.\n");
+        return 0;
+    }
+    char line[1024];
+    int found = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (strstr(line, "email-cli sync")) {
+            if (!found) printf("Active sync cron entry:\n");
+            printf("  %s", line);
+            found = 1;
+        }
+    }
+    pclose(fp);
+    if (!found)
+        printf("No email-cli sync cron entry is installed.\n");
     return 0;
 }

@@ -81,6 +81,7 @@ typedef struct {
     char *from;      /**< MIME-decoded, display-ready */
     char *subject;   /**< MIME-decoded, display-ready */
     char *date;      /**< Formatted "YYYY-MM-DD HH:MM" */
+    int   unseen;    /**< 1 = message is unread, 0 = read */
 } ManifestEntry;
 
 typedef struct {
@@ -103,7 +104,7 @@ ManifestEntry *manifest_find(const Manifest *m, int uid);
 
 /** @brief Adds or updates a manifest entry (takes ownership of strings). */
 void manifest_upsert(Manifest *m, int uid,
-                     char *from, char *subject, char *date);
+                     char *from, char *subject, char *date, int unseen);
 
 /** @brief Removes entries whose UID is not in keep_uids (sorted). */
 void manifest_retain(Manifest *m, const int *keep_uids, int keep_count);

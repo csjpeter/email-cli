@@ -56,6 +56,7 @@ Config* config_load_from_store(void) {
             else if (strcmp(key, "EMAIL_PASS") == 0) cfg->pass = strdup(val);
             else if (strcmp(key, "EMAIL_FOLDER") == 0) cfg->folder = strdup(val);
             else if (strcmp(key, "SSL_NO_VERIFY") == 0) cfg->ssl_no_verify = atoi(val);
+            else if (strcmp(key, "SYNC_INTERVAL") == 0) cfg->sync_interval = atoi(val);
         }
     }
 
@@ -117,6 +118,7 @@ int config_save_to_store(const Config *cfg) {
     fprintf(fp, "EMAIL_FOLDER=%s\n", cfg->folder ? cfg->folder : "INBOX");
     if (cfg->ssl_no_verify)
         fprintf(fp, "SSL_NO_VERIFY=1\n");
+    fprintf(fp, "SYNC_INTERVAL=%d\n", cfg->sync_interval);
 
     logger_log(LOG_INFO, "Config saved to %s", path);
     return 0;

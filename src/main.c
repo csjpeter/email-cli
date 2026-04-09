@@ -423,10 +423,8 @@ int main(int argc, char *argv[]) {
     logger_log(LOG_INFO, "--- email-cli session finished ---");
     logger_close();
 
-    if (result >= 0) {
-        printf("\nSuccess: Fetch complete.\n");
+    if (result >= 0)
         return EXIT_SUCCESS;
-    }
     fprintf(stderr, "\nFailed. Check logs in %s\n", log_file);
     return EXIT_FAILURE;
 }

@@ -109,6 +109,40 @@ void manifest_upsert(Manifest *m, int uid,
 /** @brief Removes entries whose UID is not in keep_uids (sorted). */
 void manifest_retain(Manifest *m, const int *keep_uids, int keep_count);
 
+/* ── Folder list cache ───────────────────────────────────────────────── */
+
+/**
+ * @brief Saves the list of folder names to a local cache file.
+ *
+ * @param folders  Array of UTF-8 folder name strings.
+ * @param count    Number of entries.
+ * @param sep      Hierarchy separator character (e.g. '.').
+ * @return 0 on success, -1 on error.
+ */
+int local_folder_list_save(const char **folders, int count, char sep);
+
+/**
+ * @brief Loads the cached folder list.
+ *
+ * @param count_out  Set to the number of folders returned.
+ * @param sep_out    Set to the hierarchy separator (may be NULL).
+ * @return Heap-allocated array of heap-allocated strings, or NULL if not cached.
+ *         Caller must free each string and then the array.
+ */
+char **local_folder_list_load(int *count_out, char *sep_out);
+
+/**
+ * @brief Counts total and unseen messages in a folder from its manifest.
+ *
+ * Loads the manifest (if present) and counts entries.  If the manifest does
+ * not exist both outputs are set to 0.
+ *
+ * @param folder     Folder name.
+ * @param total_out  Set to total message count.
+ * @param unseen_out Set to unseen message count.
+ */
+void manifest_count_folder(const char *folder, int *total_out, int *unseen_out);
+
 /* ── UI preferences ──────────────────────────────────────────────────── */
 
 /** @brief Reads an integer UI preference. */

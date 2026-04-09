@@ -451,34 +451,15 @@ static int search_uids_with_curl(CURL *curl, const Config *cfg,
 
 typedef struct { int messages; int unseen; } FolderStatus;
 
-/** Count UIDs matching criteria in folder using an existing curl handle. */
-static int search_count_in(CURL *curl, const Config *cfg,
-                            const char *folder, const char *criteria) {
-    int *uids = NULL;
-    int n = search_uids_with_curl(curl, cfg, folder, criteria, &uids);
-    free(uids);
-    return n < 0 ? 0 : n;
-}
-
-/** Fetch total and unseen message counts for each folder via UID SEARCH.
- *  Uses a single CURL handle so the server connection is reused.
- *  Returns heap-allocated array of count entries; caller must free(). */
-static FolderStatus *fetch_all_folder_statuses(const Config *cfg,
+/** Read total and unseen counts for each folder from their local manifests.
+ *  Instant — no server connection needed.
+ *  Returns heap-allocated array; caller must free(). */
+static FolderStatus *fetch_all_folder_statuses(const Config *cfg __attribute__((unused)),
                                                 char **folders, int count) {
     FolderStatus *st = calloc((size_t)count, sizeof(FolderStatus));
     if (!st || count == 0) return st;
-
-    RAII_CURL CURL *curl = make_curl(cfg);
-    if (!curl) return st;
-
-    for (int i = 0; i < count; i++) {
-        int total  = search_count_in(curl, cfg, folders[i], "ALL");
-        int unseen = (total > 0)
-                     ? search_count_in(curl, cfg, folders[i], "UNSEEN")
-                     : 0;
-        st[i].messages = total  > 0 ? total  : 0;
-        st[i].unseen   = unseen > 0 ? unseen : 0;
-    }
+    for (int i = 0; i < count; i++)
+        manifest_count_folder(folders[i], &st[i].messages, &st[i].unseen);
     return st;
 }
 
@@ -1285,8 +1266,9 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         int manifest_dirty = 0;
         int load_interrupted = 0;
         for (int i = wstart; i < wend; i++) {
-            /* Fetch into manifest if missing */
-            if (!manifest_find(manifest, entries[i].uid)) {
+            /* Fetch into manifest if missing; always sync unseen flag */
+            ManifestEntry *cached_me = manifest_find(manifest, entries[i].uid);
+            if (!cached_me) {
                 /* Check for user interrupt before slow network fetch */
                 if (opts->pager) {
                     struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN};
@@ -1312,6 +1294,10 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                 free(dt_raw);
                 free(hdrs);
                 manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].unseen);
+                manifest_dirty = 1;
+            } else if (cached_me->unseen != entries[i].unseen) {
+                /* Keep manifest unseen flag in sync (relevant in online mode) */
+                cached_me->unseen = entries[i].unseen;
                 manifest_dirty = 1;
             }
 
@@ -1400,7 +1386,8 @@ list_done:
 }
 
 /** Fetch the folder list into a heap-allocated array; caller owns entries and array. */
-static char **fetch_folder_list(const Config *cfg, int *count_out, char *sep_out) {
+static char **fetch_folder_list_from_server(const Config *cfg,
+                                             int *count_out, char *sep_out) {
     RAII_CURL CURL *curl = make_curl(cfg);
     if (!curl) return NULL;
 
@@ -1444,6 +1431,22 @@ static char **fetch_folder_list(const Config *cfg, int *count_out, char *sep_out
 
     *count_out = count;
     if (sep_out) *sep_out = sep;
+    return folders;
+}
+
+static char **fetch_folder_list(const Config *cfg, int *count_out, char *sep_out) {
+    /* Try local cache first (populated by sync). */
+    char **cached = local_folder_list_load(count_out, sep_out);
+    if (cached && *count_out > 0) return cached;
+    if (cached) { free(cached); }
+
+    /* Fall back to server. */
+    char sep = '.';
+    char **folders = fetch_folder_list_from_server(cfg, count_out, &sep);
+    if (folders && *count_out > 0) {
+        local_folder_list_save((const char **)folders, *count_out, sep);
+        if (sep_out) *sep_out = sep;
+    }
     return folders;
 }
 
@@ -1758,13 +1761,17 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 int email_service_sync(const Config *cfg) {
     int folder_count = 0;
     char sep = '.';
-    char **folders = fetch_folder_list(cfg, &folder_count, &sep);
+    /* Always fetch from server during sync to get the latest folder list */
+    char **folders = fetch_folder_list_from_server(cfg, &folder_count, &sep);
     if (!folders || folder_count == 0) {
         fprintf(stderr, "sync: could not retrieve folder list.\n");
         if (folders) free(folders);
         return -1;
     }
     qsort(folders, (size_t)folder_count, sizeof(char *), cmp_str);
+
+    /* Persist folder list so the next 'folders' command is instant */
+    local_folder_list_save((const char **)folders, folder_count, sep);
 
     int total_fetched = 0, total_skipped = 0, errors = 0;
 

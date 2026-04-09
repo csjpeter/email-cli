@@ -130,6 +130,27 @@ static void help_sync(void) {
     );
 }
 
+static void help_cron(void) {
+    printf(
+        "Usage: email-cli cron <setup|remove|status>\n"
+        "\n"
+        "Manages automatic background synchronisation via user crontab.\n"
+        "No sudo or system-level access is required.\n"
+        "\n"
+        "Subcommands:\n"
+        "  setup    Install a crontab entry to run 'email-cli sync' periodically.\n"
+        "           Uses SYNC_INTERVAL from config (default: 5 minutes if not set).\n"
+        "           Saves the interval to config if a default was applied.\n"
+        "  remove   Remove the 'email-cli sync' crontab entry.\n"
+        "  status   Show whether an automatic sync entry is currently installed.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli cron setup\n"
+        "  email-cli cron status\n"
+        "  email-cli cron remove\n"
+    );
+}
+
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
 static int parse_uid(const char *s) {
@@ -189,6 +210,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "show")    == 0) { help_show();    return EXIT_SUCCESS; }
                 if (strcmp(cmd, "folders") == 0) { help_folders(); return EXIT_SUCCESS; }
                 if (strcmp(cmd, "sync")    == 0) { help_sync();    return EXIT_SUCCESS; }
+                if (strcmp(cmd, "cron")    == 0) { help_cron();    return EXIT_SUCCESS; }
             }
             /* email-cli --help  or  email-cli help --help */
             help_general();
@@ -208,10 +230,11 @@ int main(int argc, char *argv[]) {
             topic = argv[i]; break;
         }
         if (topic) {
-            if (strcmp(topic, "list")    == 0) { help_list();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "show")    == 0) { help_show();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "folders") == 0) { help_folders(); return EXIT_SUCCESS; }
-            if (strcmp(topic, "sync")    == 0) { help_sync();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "list")           == 0) { help_list();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "show")           == 0) { help_show();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "folders")        == 0) { help_folders(); return EXIT_SUCCESS; }
+            if (strcmp(topic, "sync")           == 0) { help_sync();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "cron")           == 0) { help_cron();    return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli help' for available commands.\n");
             return EXIT_FAILURE;
@@ -224,6 +247,15 @@ int main(int argc, char *argv[]) {
     if (!cmd && !pager) {
         help_general();
         return EXIT_SUCCESS;
+    }
+
+    /* Config-free commands: dispatch before loading config. */
+    if (cmd && strcmp(cmd, "cron") == 0) {
+        const char *subcmd = argc > cmd_idx + 1 ? argv[cmd_idx + 1] : "";
+        if (strcmp(subcmd, "status") == 0)
+            return email_service_cron_status() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        if (strcmp(subcmd, "remove") == 0)
+            return email_service_cron_remove() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     /* 3. Initialize logger */
@@ -365,13 +397,19 @@ int main(int argc, char *argv[]) {
         result = email_service_sync(cfg);
 
     } else if (strcmp(cmd, "cron") == 0) {
+        /* 'cron status' and 'cron remove' are handled before config loading above.
+         * Only 'cron setup' reaches here. */
         const char *subcmd = argc > cmd_idx + 1 ? argv[cmd_idx + 1] : "";
         if (strcmp(subcmd, "setup") == 0) {
+            if (cfg->sync_interval <= 0) {
+                cfg->sync_interval = 5;
+                printf("sync_interval not configured; using default of 5 minutes.\n");
+                if (config_save_to_store(cfg) != 0)
+                    fprintf(stderr, "Warning: could not save sync_interval to config.\n");
+            }
             return email_service_cron_setup(cfg) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else if (strcmp(subcmd, "remove") == 0) {
-            return email_service_cron_remove() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
         } else {
-            fprintf(stderr, "Usage: email-cli cron <setup|remove>\n");
+            fprintf(stderr, "Usage: email-cli cron <setup|remove|status>\n");
             return EXIT_FAILURE;
         }
 

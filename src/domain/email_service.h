@@ -104,7 +104,8 @@ int email_service_sync(const Config *cfg);
  * Uses cfg->sync_interval (minutes) to set the cron frequency.
  * Does nothing if an entry already exists; prints guidance to remove it first.
  *
- * @param cfg  Connection configuration (must have sync_interval > 0).
+ * @param cfg  Connection configuration.  cfg->sync_interval must be > 0;
+ *             the caller is responsible for setting a default before calling.
  * @return 0 on success or already-exists, -1 on error.
  */
 int email_service_cron_setup(const Config *cfg);
@@ -115,5 +116,13 @@ int email_service_cron_setup(const Config *cfg);
  * @return 0 on success or not-found, -1 on error.
  */
 int email_service_cron_remove(void);
+
+/**
+ * @brief Prints the current status of the 'email-cli sync' crontab entry.
+ *
+ * Shows whether an entry exists and what it looks like.
+ * @return 0 always.
+ */
+int email_service_cron_status(void);
 
 #endif /* EMAIL_SERVICE_H */

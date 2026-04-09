@@ -637,6 +637,37 @@ static char *fetch_uid_content_in(const Config *cfg, const char *folder,
     char *utf7 = imap_utf7_encode(folder);
     char *enc_folder = curl_easy_escape(curl, utf7 ? utf7 : folder, 0);
     free(utf7);
+
+    if (!headers_only) {
+        /* Full message fetch: use a message URL (imaps://host/FOLDER/;UID=N).
+         * libcurl issues BODY.PEEK[] internally and routes the entire message
+         * through WRITEFUNCTION — reliable for any message size. */
+        RAII_STRING char *url = NULL;
+        if (asprintf(&url, "%s/%s/;UID=%d",
+                     cfg->host, enc_folder ? enc_folder : folder, uid) == -1) {
+            curl_free(enc_folder);
+            return NULL;
+        }
+        curl_free(enc_folder);
+
+        Buffer buf = {NULL, 0};
+        CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
+        if (res != CURLE_OK) {
+            logger_log(LOG_WARN, "Fetch UID %d failed: %s", uid, curl_easy_strerror(res));
+            free(buf.data);
+            return NULL;
+        }
+        if (!buf.data || buf.size == 0) {
+            logger_log(LOG_WARN, "Fetch UID %d: empty response", uid);
+            free(buf.data);
+            return NULL;
+        }
+        return buf.data;
+    }
+
+    /* Headers-only fetch: use folder URL + CUSTOMREQUEST.
+     * The IMAP FETCH response for BODY.PEEK[HEADER] is small enough that the
+     * debug-callback literal capture is reliable. */
     RAII_STRING char *url = NULL;
     RAII_STRING char *cmd = NULL;
     if (asprintf(&url, "%s/%s", cfg->host, enc_folder ? enc_folder : folder) == -1) {
@@ -644,29 +675,24 @@ static char *fetch_uid_content_in(const Config *cfg, const char *folder,
         return NULL;
     }
     curl_free(enc_folder);
-    if (headers_only) {
-        if (asprintf(&cmd, "UID FETCH %d BODY.PEEK[HEADER]", uid) == -1) return NULL;
-    } else {
-        if (asprintf(&cmd, "UID FETCH %d BODY.PEEK[]", uid) == -1) return NULL;
-    }
+    if (asprintf(&cmd, "UID FETCH %d BODY.PEEK[HEADER]", uid) == -1) return NULL;
 
     PeekCapture cap = {{NULL, 0}, 0, 0};
     curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, peek_debug_cb);
     curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &cap);
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
 
-    /* WRITEFUNCTION is set but receives only the FETCH envelope (ignored). */
     Buffer envelope = {NULL, 0};
     CURLcode res = curl_adapter_fetch(curl, url, &envelope, buffer_append);
     free(envelope.data);
 
     if (res != CURLE_OK) {
-        logger_log(LOG_WARN, "Fetch UID %d failed: %s", uid, curl_easy_strerror(res));
+        logger_log(LOG_WARN, "Fetch headers UID %d failed: %s", uid, curl_easy_strerror(res));
         free(cap.literal.data);
         return NULL;
     }
     if (!cap.literal.data || cap.literal.size == 0) {
-        logger_log(LOG_WARN, "BODY.PEEK fetch UID %d: no literal captured", uid);
+        logger_log(LOG_WARN, "BODY.PEEK[HEADER] UID %d: no literal captured", uid);
         free(cap.literal.data);
         return NULL;
     }

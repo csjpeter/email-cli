@@ -446,51 +446,47 @@ static CURL *make_curl(const Config *cfg) {
 
 typedef struct { int messages; int unseen; } FolderStatus;
 
-/** Build a double-quoted IMAP string with backslash-escaped specials.
- *  Caller must free(). */
-static char *imap_quote(const char *s) {
-    size_t len = strlen(s);
-    char *out = malloc(len * 2 + 3);
-    if (!out) return NULL;
-    char *p = out;
-    *p++ = '"';
-    for (size_t i = 0; i < len; i++) {
-        if (s[i] == '"' || s[i] == '\\') *p++ = '\\';
-        *p++ = s[i];
+/** UID SEARCH count helper that reuses an external curl handle.
+ *  Encodes the folder name with Modified UTF-7 + URL percent-encoding.
+ *  Returns the count of matching UIDs, or 0 on error. */
+static int search_count_in(CURL *curl, const Config *cfg,
+                            const char *folder, const char *criteria) {
+    char *utf7 = imap_utf7_encode(folder);
+    char *enc  = curl_easy_escape(curl, utf7 ? utf7 : folder, 0);
+    free(utf7);
+
+    char *url = NULL;
+    if (asprintf(&url, "%s/%s", cfg->host, enc ? enc : folder) == -1) {
+        curl_free(enc);
+        return 0;
     }
-    *p++ = '"';
-    *p = '\0';
-    return out;
+    curl_free(enc);
+
+    char *cmd = NULL;
+    if (asprintf(&cmd, "UID SEARCH %s", criteria) == -1) { free(url); return 0; }
+
+    Buffer buf = {NULL, 0};
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
+    CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
+    free(url);
+    free(cmd);
+
+    int count = 0;
+    if (res != CURLE_OK)
+        logger_log(LOG_WARN, "UID SEARCH %s in %s failed: %s",
+                   criteria, folder, curl_easy_strerror(res));
+    else {
+        int *uids = NULL;
+        count = parse_uid_list(buf.data, &uids);
+        free(uids);
+    }
+    free(buf.data);
+    return count;
 }
 
-/** Parse "* STATUS mailbox (MESSAGES n UNSEEN m)" response into *st. */
-static void parse_status_response(const char *resp, FolderStatus *st) {
-    st->messages = 0; st->unseen = 0;
-    if (!resp) return;
-    const char *p = strstr(resp, "* STATUS");
-    if (!p) return;
-    p = strchr(p, '(');
-    if (!p) return;
-    p++;
-    while (*p && *p != ')') {
-        while (*p == ' ') p++;
-        if (strncmp(p, "MESSAGES", 8) == 0 && (p[8] == ' ' || p[8] == ')')) {
-            p += 8;
-            st->messages = (int)strtol(p, (char **)&p, 10);
-        } else if (strncmp(p, "UNSEEN", 6) == 0 && (p[6] == ' ' || p[6] == ')')) {
-            p += 6;
-            st->unseen = (int)strtol(p, (char **)&p, 10);
-        } else {
-            /* skip unknown keyword and its value */
-            while (*p && *p != ' ' && *p != ')') p++;
-            strtol(p, (char **)&p, 10);
-        }
-    }
-}
-
-/** Fetch IMAP STATUS (MESSAGES UNSEEN) for each folder.
- *  Returns heap-allocated array of count entries; caller must free().
- *  Uses a single CURL handle so the server connection can be reused. */
+/** Fetch total and unseen message counts for each folder via UID SEARCH.
+ *  Uses a single CURL handle so the server connection is reused.
+ *  Returns heap-allocated array of count entries; caller must free(). */
 static FolderStatus *fetch_all_folder_statuses(const Config *cfg,
                                                 char **folders, int count) {
     FolderStatus *st = calloc((size_t)count, sizeof(FolderStatus));
@@ -499,26 +495,13 @@ static FolderStatus *fetch_all_folder_statuses(const Config *cfg,
     RAII_CURL CURL *curl = make_curl(cfg);
     if (!curl) return st;
 
-    RAII_STRING char *root_url = NULL;
-    if (asprintf(&root_url, "%s/", cfg->host) == -1) return st;
-
     for (int i = 0; i < count; i++) {
-        char *quoted = imap_quote(folders[i]);
-        if (!quoted) continue;
-        char *cmd = NULL;
-        if (asprintf(&cmd, "STATUS %s (MESSAGES UNSEEN)", quoted) != -1) {
-            Buffer buf = {NULL, 0};
-            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
-            CURLcode res = curl_adapter_fetch(curl, root_url, &buf, buffer_append);
-            if (res == CURLE_OK)
-                parse_status_response(buf.data, &st[i]);
-            else
-                logger_log(LOG_WARN, "STATUS %s failed: %s",
-                           folders[i], curl_easy_strerror(res));
-            free(buf.data);
-            free(cmd);
-        }
-        free(quoted);
+        int total  = search_count_in(curl, cfg, folders[i], "ALL");
+        int unseen = (total > 0)
+                     ? search_count_in(curl, cfg, folders[i], "UNSEEN")
+                     : 0;
+        st[i].messages = total  > 0 ? total  : 0;
+        st[i].unseen   = unseen > 0 ? unseen : 0;
     }
     return st;
 }
@@ -563,7 +546,9 @@ static int search_uids_in(const Config *cfg, const char *folder,
     RAII_CURL CURL *curl = make_curl(cfg);
     if (!curl) return -1;
 
-    char *enc_folder = curl_easy_escape(curl, folder, 0);
+    char *utf7 = imap_utf7_encode(folder);
+    char *enc_folder = curl_easy_escape(curl, utf7 ? utf7 : folder, 0);
+    free(utf7);
     RAII_STRING char *url = NULL;
     RAII_STRING char *cmd = NULL;
     if (asprintf(&url, "%s/%s", cfg->host, enc_folder ? enc_folder : folder) == -1) {
@@ -681,7 +666,9 @@ static char *fetch_uid_content_in(const Config *cfg, const char *folder,
     RAII_CURL CURL *curl = make_curl(cfg);
     if (!curl) return NULL;
 
-    char *enc_folder = curl_easy_escape(curl, folder, 0);
+    char *utf7 = imap_utf7_encode(folder);
+    char *enc_folder = curl_easy_escape(curl, utf7 ? utf7 : folder, 0);
+    free(utf7);
     RAII_STRING char *url = NULL;
     RAII_STRING char *cmd = NULL;
     if (asprintf(&url, "%s/%s", cfg->host, enc_folder ? enc_folder : folder) == -1) {

@@ -7,6 +7,8 @@
 #include "raii.h"
 #include "logger.h"
 #include "platform/terminal.h"
+#include "platform/path.h"
+#include "platform/process.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1798,6 +1800,32 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 }
 
 int email_service_sync(const Config *cfg) {
+    /* ── PID-file lock: exit immediately if another sync is running ──────── */
+    char pid_path[2048] = {0};
+    const char *cache_base = platform_cache_dir();
+    if (cache_base)
+        snprintf(pid_path, sizeof(pid_path),
+                 "%s/email-cli/sync.pid", cache_base);
+
+    if (pid_path[0]) {
+        FILE *pf = fopen(pid_path, "r");
+        if (pf) {
+            int other = 0;
+            if (fscanf(pf, "%d", &other) != 1) other = 0;
+            fclose(pf);
+            if (other > 0 && (pid_t)other != platform_getpid() &&
+                platform_pid_is_program((pid_t)other, "email-cli")) {
+                fprintf(stderr,
+                        "email-cli sync is already running (PID %d). Skipping.\n",
+                        other);
+                return 0;
+            }
+        }
+        /* Write our own PID */
+        pf = fopen(pid_path, "w");
+        if (pf) { fprintf(pf, "%d\n", (int)platform_getpid()); fclose(pf); }
+    }
+
     int folder_count = 0;
     char sep = '.';
     /* Always fetch from server during sync to get the latest folder list */
@@ -1805,6 +1833,7 @@ int email_service_sync(const Config *cfg) {
     if (!folders || folder_count == 0) {
         fprintf(stderr, "sync: could not retrieve folder list.\n");
         if (folders) free(folders);
+        if (pid_path[0]) unlink(pid_path);
         return -1;
     }
     qsort(folders, (size_t)folder_count, sizeof(char *), cmp_str);
@@ -1919,6 +1948,10 @@ int email_service_sync(const Config *cfg) {
     printf("\nSync complete: %d fetched, %d already stored", total_fetched, total_skipped);
     if (errors) printf(", %d errors", errors);
     printf("\n");
+
+    /* Release PID lock */
+    if (pid_path[0]) unlink(pid_path);
+
     return errors ? -1 : 0;
 }
 

@@ -442,6 +442,87 @@ static CURL *make_curl(const Config *cfg) {
     return curl_adapter_init(cfg->user, cfg->pass, !cfg->ssl_no_verify);
 }
 
+/* ── Folder status ───────────────────────────────────────────────────── */
+
+typedef struct { int messages; int unseen; } FolderStatus;
+
+/** Build a double-quoted IMAP string with backslash-escaped specials.
+ *  Caller must free(). */
+static char *imap_quote(const char *s) {
+    size_t len = strlen(s);
+    char *out = malloc(len * 2 + 3);
+    if (!out) return NULL;
+    char *p = out;
+    *p++ = '"';
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == '"' || s[i] == '\\') *p++ = '\\';
+        *p++ = s[i];
+    }
+    *p++ = '"';
+    *p = '\0';
+    return out;
+}
+
+/** Parse "* STATUS mailbox (MESSAGES n UNSEEN m)" response into *st. */
+static void parse_status_response(const char *resp, FolderStatus *st) {
+    st->messages = 0; st->unseen = 0;
+    if (!resp) return;
+    const char *p = strstr(resp, "* STATUS");
+    if (!p) return;
+    p = strchr(p, '(');
+    if (!p) return;
+    p++;
+    while (*p && *p != ')') {
+        while (*p == ' ') p++;
+        if (strncmp(p, "MESSAGES", 8) == 0 && (p[8] == ' ' || p[8] == ')')) {
+            p += 8;
+            st->messages = (int)strtol(p, (char **)&p, 10);
+        } else if (strncmp(p, "UNSEEN", 6) == 0 && (p[6] == ' ' || p[6] == ')')) {
+            p += 6;
+            st->unseen = (int)strtol(p, (char **)&p, 10);
+        } else {
+            /* skip unknown keyword and its value */
+            while (*p && *p != ' ' && *p != ')') p++;
+            strtol(p, (char **)&p, 10);
+        }
+    }
+}
+
+/** Fetch IMAP STATUS (MESSAGES UNSEEN) for each folder.
+ *  Returns heap-allocated array of count entries; caller must free().
+ *  Uses a single CURL handle so the server connection can be reused. */
+static FolderStatus *fetch_all_folder_statuses(const Config *cfg,
+                                                char **folders, int count) {
+    FolderStatus *st = calloc((size_t)count, sizeof(FolderStatus));
+    if (!st || count == 0) return st;
+
+    RAII_CURL CURL *curl = make_curl(cfg);
+    if (!curl) return st;
+
+    RAII_STRING char *root_url = NULL;
+    if (asprintf(&root_url, "%s/", cfg->host) == -1) return st;
+
+    for (int i = 0; i < count; i++) {
+        char *quoted = imap_quote(folders[i]);
+        if (!quoted) continue;
+        char *cmd = NULL;
+        if (asprintf(&cmd, "STATUS %s (MESSAGES UNSEEN)", quoted) != -1) {
+            Buffer buf = {NULL, 0};
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
+            CURLcode res = curl_adapter_fetch(curl, root_url, &buf, buffer_append);
+            if (res == CURLE_OK)
+                parse_status_response(buf.data, &st[i]);
+            else
+                logger_log(LOG_WARN, "STATUS %s failed: %s",
+                           folders[i], curl_easy_strerror(res));
+            free(buf.data);
+            free(cmd);
+        }
+        free(quoted);
+    }
+    return st;
+}
+
 /**
  * Extract the message literal from a raw IMAP FETCH response.
  *
@@ -482,9 +563,14 @@ static int search_uids_in(const Config *cfg, const char *folder,
     RAII_CURL CURL *curl = make_curl(cfg);
     if (!curl) return -1;
 
+    char *enc_folder = curl_easy_escape(curl, folder, 0);
     RAII_STRING char *url = NULL;
     RAII_STRING char *cmd = NULL;
-    if (asprintf(&url, "%s/%s", cfg->host, folder) == -1) return -1;
+    if (asprintf(&url, "%s/%s", cfg->host, enc_folder ? enc_folder : folder) == -1) {
+        curl_free(enc_folder);
+        return -1;
+    }
+    curl_free(enc_folder);
     if (asprintf(&cmd, "UID SEARCH %s", criteria) == -1) return -1;
 
     Buffer buf = {NULL, 0};
@@ -595,9 +681,14 @@ static char *fetch_uid_content_in(const Config *cfg, const char *folder,
     RAII_CURL CURL *curl = make_curl(cfg);
     if (!curl) return NULL;
 
+    char *enc_folder = curl_easy_escape(curl, folder, 0);
     RAII_STRING char *url = NULL;
     RAII_STRING char *cmd = NULL;
-    if (asprintf(&url, "%s/%s", cfg->host, folder) == -1) return NULL;
+    if (asprintf(&url, "%s/%s", cfg->host, enc_folder ? enc_folder : folder) == -1) {
+        curl_free(enc_folder);
+        return NULL;
+    }
+    curl_free(enc_folder);
     if (headers_only) {
         if (asprintf(&cmd, "UID FETCH %d BODY.PEEK[HEADER]", uid) == -1) return NULL;
     } else {
@@ -982,7 +1073,8 @@ static int build_flat_view(char **names, int count, char sep,
 
 /** Print one folder item with its tree/flat prefix and optional selection highlight. */
 static void print_folder_item(char **names, int count, int i, char sep,
-                               int tree_mode, int selected, int has_kids) {
+                               int tree_mode, int selected, int has_kids,
+                               int messages, int unseen) {
     if (selected) printf("\033[7m");
 
     if (tree_mode) {
@@ -1004,11 +1096,15 @@ static void print_folder_item(char **names, int count, int i, char sep,
         printf("  %s%s", display, has_kids ? "/" : "");
     }
 
+    if (messages > 0 || unseen > 0)
+        printf(" (%d/%d)", unseen, messages);
+
     if (selected) printf("\033[K\033[0m");
     printf("\n");
 }
 
-static void render_folder_tree(char **names, int count, char sep) {
+static void render_folder_tree(char **names, int count, char sep,
+                                const FolderStatus *statuses) {
     for (int i = 0; i < count; i++) {
         int depth = 0;
         for (const char *p = names[i]; *p; p++)
@@ -1026,7 +1122,10 @@ static void render_folder_tree(char **names, int count, char sep) {
 
         /* Component name (last segment) */
         const char *comp = strrchr(names[i], sep);
-        printf("%s\n", comp ? comp + 1 : names[i]);
+        printf("%s", comp ? comp + 1 : names[i]);
+        if (statuses && (statuses[i].messages > 0 || statuses[i].unseen > 0))
+            printf(" (%d/%d)", statuses[i].unseen, statuses[i].messages);
+        printf("\n");
     }
 }
 
@@ -1330,11 +1429,21 @@ int email_service_list_folders(const Config *cfg, int tree) {
 
     qsort(folders, (size_t)count, sizeof(char *), cmp_str);
 
-    if (tree)
-        render_folder_tree(folders, count, sep);
-    else
-        for (int i = 0; i < count; i++) printf("%s\n", folders[i]);
+    FolderStatus *statuses = fetch_all_folder_statuses(cfg, folders, count);
 
+    if (tree) {
+        render_folder_tree(folders, count, sep, statuses);
+    } else {
+        for (int i = 0; i < count; i++) {
+            if (statuses && (statuses[i].messages > 0 || statuses[i].unseen > 0))
+                printf("%s (%d/%d)\n", folders[i],
+                       statuses[i].unseen, statuses[i].messages);
+            else
+                printf("%s\n", folders[i]);
+        }
+    }
+
+    free(statuses);
     for (int i = 0; i < count; i++) free(folders[i]);
     free(folders);
     return 0;
@@ -1352,8 +1461,11 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
     qsort(folders, (size_t)count, sizeof(char *), cmp_str);
 
+    FolderStatus *statuses = fetch_all_folder_statuses(cfg, folders, count);
+
     int *vis = malloc((size_t)count * sizeof(int));
     if (!vis) {
+        free(statuses);
         for (int i = 0; i < count; i++) free(folders[i]);
         free(folders);
         return NULL;
@@ -1426,11 +1538,17 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
         for (int i = wstart; i < wend; i++) {
             if (tree_mode) {
-                print_folder_item(folders, count, i, sep, 1, i == cursor, 0);
+                int msgs = statuses ? statuses[i].messages : 0;
+                int unsn = statuses ? statuses[i].unseen   : 0;
+                print_folder_item(folders, count, i, sep, 1, i == cursor, 0,
+                                  msgs, unsn);
             } else {
                 int fi = vis[i];
                 int hk = folder_has_children(folders, count, folders[fi], sep);
-                print_folder_item(folders, count, fi, sep, 0, i == cursor, hk);
+                int msgs = statuses ? statuses[fi].messages : 0;
+                int unsn = statuses ? statuses[fi].unseen   : 0;
+                print_folder_item(folders, count, fi, sep, 0, i == cursor, hk,
+                                  msgs, unsn);
             }
         }
 
@@ -1512,6 +1630,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
         }
     }
 folders_int_done:
+    free(statuses);
     free(vis);
     for (int i = 0; i < count; i++) free(folders[i]);
     free(folders);

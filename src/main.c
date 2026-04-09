@@ -43,8 +43,7 @@ static void help_general(void) {
         "  show <uid>        Display the full content of a message by its UID\n"
         "  folders           List available IMAP folders\n"
         "  sync              Download all messages in all folders to local store\n"
-        "  cron setup        Install a crontab entry to run sync automatically\n"
-        "  cron remove       Remove the automatic sync crontab entry\n"
+        "  cron              Manage automatic background sync (setup/remove/status)\n"
         "  help [command]    Show this help, or detailed help for a command\n"
         "\n"
         "Run 'email-cli help <command>' for more information.\n",

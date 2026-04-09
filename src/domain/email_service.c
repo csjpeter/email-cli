@@ -442,46 +442,22 @@ static CURL *make_curl(const Config *cfg) {
     return curl_adapter_init(cfg->user, cfg->pass, !cfg->ssl_no_verify);
 }
 
+/* Forward declaration — defined after the fetch helpers below. */
+static int search_uids_with_curl(CURL *curl, const Config *cfg,
+                                  const char *folder, const char *criteria,
+                                  int **uids_out);
+
 /* ── Folder status ───────────────────────────────────────────────────── */
 
 typedef struct { int messages; int unseen; } FolderStatus;
 
-/** UID SEARCH count helper that reuses an external curl handle.
- *  Encodes the folder name with Modified UTF-7 + URL percent-encoding.
- *  Returns the count of matching UIDs, or 0 on error. */
+/** Count UIDs matching criteria in folder using an existing curl handle. */
 static int search_count_in(CURL *curl, const Config *cfg,
                             const char *folder, const char *criteria) {
-    char *utf7 = imap_utf7_encode(folder);
-    char *enc  = curl_easy_escape(curl, utf7 ? utf7 : folder, 0);
-    free(utf7);
-
-    char *url = NULL;
-    if (asprintf(&url, "%s/%s", cfg->host, enc ? enc : folder) == -1) {
-        curl_free(enc);
-        return 0;
-    }
-    curl_free(enc);
-
-    char *cmd = NULL;
-    if (asprintf(&cmd, "UID SEARCH %s", criteria) == -1) { free(url); return 0; }
-
-    Buffer buf = {NULL, 0};
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
-    CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
-    free(url);
-    free(cmd);
-
-    int count = 0;
-    if (res != CURLE_OK)
-        logger_log(LOG_WARN, "UID SEARCH %s in %s failed: %s",
-                   criteria, folder, curl_easy_strerror(res));
-    else {
-        int *uids = NULL;
-        count = parse_uid_list(buf.data, &uids);
-        free(uids);
-    }
-    free(buf.data);
-    return count;
+    int *uids = NULL;
+    int n = search_uids_with_curl(curl, cfg, folder, criteria, &uids);
+    free(uids);
+    return n < 0 ? 0 : n;
 }
 
 /** Fetch total and unseen message counts for each folder via UID SEARCH.
@@ -541,26 +517,28 @@ static char *extract_fetch_literal(const char *response, size_t response_len) {
 }
 
 /** Issues UID SEARCH <criteria> in <folder>. Caller must free *uids_out. */
-static int search_uids_in(const Config *cfg, const char *folder,
-                          const char *criteria, int **uids_out) {
-    RAII_CURL CURL *curl = make_curl(cfg);
-    if (!curl) return -1;
-
+/** Core UID SEARCH implementation; reuses the provided curl handle so the
+ *  caller can share one IMAP connection across multiple searches. */
+static int search_uids_with_curl(CURL *curl, const Config *cfg,
+                                  const char *folder, const char *criteria,
+                                  int **uids_out) {
     char *utf7 = imap_utf7_encode(folder);
     char *enc_folder = curl_easy_escape(curl, utf7 ? utf7 : folder, 0);
     free(utf7);
-    RAII_STRING char *url = NULL;
-    RAII_STRING char *cmd = NULL;
+    char *url = NULL;
     if (asprintf(&url, "%s/%s", cfg->host, enc_folder ? enc_folder : folder) == -1) {
         curl_free(enc_folder);
         return -1;
     }
     curl_free(enc_folder);
-    if (asprintf(&cmd, "UID SEARCH %s", criteria) == -1) return -1;
+    char *cmd = NULL;
+    if (asprintf(&cmd, "UID SEARCH %s", criteria) == -1) { free(url); return -1; }
 
     Buffer buf = {NULL, 0};
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
     CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
+    free(url);
+    free(cmd);
     int count = 0;
     if (res != CURLE_OK)
         logger_log(LOG_WARN, "UID SEARCH %s failed: %s", criteria, curl_easy_strerror(res));
@@ -568,6 +546,14 @@ static int search_uids_in(const Config *cfg, const char *folder,
         count = parse_uid_list(buf.data, uids_out);
     free(buf.data);
     return count;
+}
+
+/** Convenience wrapper that creates its own curl handle. */
+static int search_uids_in(const Config *cfg, const char *folder,
+                           const char *criteria, int **uids_out) {
+    RAII_CURL CURL *curl = make_curl(cfg);
+    if (!curl) return -1;
+    return search_uids_with_curl(curl, cfg, folder, criteria, uids_out);
 }
 
 /**
@@ -1124,13 +1110,18 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 
     logger_log(LOG_INFO, "Listing %s @ %s/%s", cfg->user, cfg->host, folder);
 
-    /* Fetch UNSEEN set (for N markers) and ALL messages */
+    /* Fetch UNSEEN and ALL UID sets via a shared connection.
+     * Using one CURL handle means a single TCP+TLS+AUTH setup; libcurl
+     * keeps the IMAP session alive between the two SEARCH commands. */
+    RAII_CURL CURL *list_curl = make_curl(cfg);
+    if (!list_curl) { fprintf(stderr, "Failed to connect.\n"); return -1; }
+
     int *unseen_uids = NULL;
-    int unseen_count = search_uids_in(cfg, folder, "UNSEEN", &unseen_uids);
+    int unseen_count = search_uids_with_curl(list_curl, cfg, folder, "UNSEEN", &unseen_uids);
     if (unseen_count < 0) { fprintf(stderr, "Failed to search mailbox.\n"); return -1; }
 
     int *all_uids  = NULL;
-    int  all_count = search_uids_in(cfg, folder, "ALL", &all_uids);
+    int  all_count = search_uids_with_curl(list_curl, cfg, folder, "ALL", &all_uids);
     if (all_count < 0) {
         free(unseen_uids);
         fprintf(stderr, "Failed to search mailbox.\n");

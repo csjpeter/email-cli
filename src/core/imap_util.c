@@ -114,3 +114,91 @@ char *imap_utf7_decode(const char *s) {
     *dst = '\0';
     return out;
 }
+
+char *imap_utf7_encode(const char *s) {
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    /* Upper bound: every input byte can expand to at most 8 output chars. */
+    char *out = malloc(len * 8 + 4);
+    if (!out) return NULL;
+    char *dst = out;
+
+    static const char mod64[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,";
+
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p) {
+        if (*p >= 0x20 && *p <= 0x7E && *p != '&') {
+            /* Printable ASCII (except '&'): pass through */
+            *dst++ = (char)*p++;
+        } else if (*p == '&') {
+            /* '&' is escaped as "&-" */
+            *dst++ = '&';
+            *dst++ = '-';
+            p++;
+        } else {
+            /* Non-ASCII run: encode as UTF-16BE in modified Base64 */
+            *dst++ = '&';
+            unsigned int bits = 0;
+            int bit_cnt = 0;
+
+            while (*p && !(*p >= 0x20 && *p <= 0x7E)) {
+                /* Decode one UTF-8 code point. */
+                uint32_t cp;
+                int seqlen;
+                if      (*p < 0x80) { cp = *p;         seqlen = 1; }
+                else if (*p < 0xC2) { cp = 0xFFFD;     seqlen = 1; }
+                else if (*p < 0xE0) { cp = *p & 0x1Fu; seqlen = 2; }
+                else if (*p < 0xF0) { cp = *p & 0x0Fu; seqlen = 3; }
+                else                { cp = *p & 0x07u; seqlen = 4; }
+                for (int i = 1; i < seqlen; i++) {
+                    if ((p[i] & 0xC0) != 0x80) { seqlen = i; cp = 0xFFFD; break; }
+                    cp = (cp << 6) | (p[i] & 0x3Fu);
+                }
+                p += seqlen;
+
+                /* Emit as UTF-16BE (BMP char or surrogate pair). */
+                uint16_t units[2];
+                int nunit;
+                if (cp <= 0xFFFFu) {
+                    units[0] = (uint16_t)cp;
+                    nunit = 1;
+                } else {
+                    cp -= 0x10000u;
+                    units[0] = (uint16_t)(0xD800u | (cp >> 10));
+                    units[1] = (uint16_t)(0xDC00u | (cp & 0x3FFu));
+                    nunit = 2;
+                }
+
+                /* Feed each byte of UTF-16BE into the Base64 bit stream. */
+                for (int j = 0; j < nunit; j++) {
+                    uint8_t hi = (uint8_t)(units[j] >> 8);
+                    uint8_t lo = (uint8_t)(units[j] & 0xFF);
+
+                    bits = (bits << 8) | hi;
+                    bit_cnt += 8;
+                    while (bit_cnt >= 6) {
+                        bit_cnt -= 6;
+                        *dst++ = mod64[(bits >> bit_cnt) & 0x3F];
+                        bits &= (1u << bit_cnt) - 1u;
+                    }
+
+                    bits = (bits << 8) | lo;
+                    bit_cnt += 8;
+                    while (bit_cnt >= 6) {
+                        bit_cnt -= 6;
+                        *dst++ = mod64[(bits >> bit_cnt) & 0x3F];
+                        bits &= (1u << bit_cnt) - 1u;
+                    }
+                }
+            }
+            /* Flush remaining bits (zero-padded to the next 6-bit boundary). */
+            if (bit_cnt > 0)
+                *dst++ = mod64[(bits << (6 - bit_cnt)) & 0x3F];
+
+            *dst++ = '-';
+        }
+    }
+    *dst = '\0';
+    return out;
+}

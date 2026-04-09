@@ -601,3 +601,68 @@ void manifest_retain(Manifest *m, const int *keep_uids, int keep_count) {
     }
     m->count = dst;
 }
+
+/* ── Folder list cache ───────────────────────────────────────────────── */
+
+int local_folder_list_save(const char **folders, int count, char sep) {
+    if (!g_account_base[0]) return -1;
+    RAII_STRING char *path = NULL;
+    if (asprintf(&path, "%s/folders.cache", g_account_base) == -1) return -1;
+    RAII_FILE FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+    fprintf(fp, "sep=%c\n", sep);
+    for (int i = 0; i < count; i++)
+        fprintf(fp, "%s\n", folders[i] ? folders[i] : "");
+    logger_log(LOG_DEBUG, "Folder list cache saved: %d folders", count);
+    return 0;
+}
+
+char **local_folder_list_load(int *count_out, char *sep_out) {
+    *count_out = 0;
+    if (!g_account_base[0]) return NULL;
+    RAII_STRING char *path = NULL;
+    if (asprintf(&path, "%s/folders.cache", g_account_base) == -1) return NULL;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+
+    char line[1024];
+    char sep = '.';
+    /* First line: sep=<char> */
+    if (!fgets(line, sizeof(line), fp)) return NULL;
+    if (strncmp(line, "sep=", 4) == 0 && line[4] != '\n')
+        sep = line[4];
+
+    int cap = 32, cnt = 0;
+    char **folders = malloc((size_t)cap * sizeof(char *));
+    if (!folders) return NULL;
+    while (fgets(line, sizeof(line), fp)) {
+        /* strip trailing newline */
+        size_t len = strlen(line);
+        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
+            line[--len] = '\0';
+        if (len == 0) continue;
+        if (cnt == cap) {
+            cap *= 2;
+            char **tmp = realloc(folders, (size_t)cap * sizeof(char *));
+            if (!tmp) { for (int i = 0; i < cnt; i++) free(folders[i]); free(folders); return NULL; }
+            folders = tmp;
+        }
+        folders[cnt] = strdup(line);
+        if (!folders[cnt]) { for (int i = 0; i < cnt; i++) free(folders[i]); free(folders); return NULL; }
+        cnt++;
+    }
+    *count_out = cnt;
+    if (sep_out) *sep_out = sep;
+    logger_log(LOG_DEBUG, "Folder list cache loaded: %d folders", cnt);
+    return folders;
+}
+
+void manifest_count_folder(const char *folder, int *total_out, int *unseen_out) {
+    *total_out = 0; *unseen_out = 0;
+    Manifest *m = manifest_load(folder);
+    if (!m) return;
+    *total_out  = m->count;
+    for (int i = 0; i < m->count; i++)
+        if (m->entries[i].unseen) (*unseen_out)++;
+    manifest_free(m);
+}

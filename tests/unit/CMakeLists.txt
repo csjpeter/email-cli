@@ -12,11 +12,13 @@ if(WIN32)
     set(TEST_PLATFORM_SOURCES
         ../../src/platform/windows/terminal.c
         ../../src/platform/windows/path.c
+        ../../src/platform/windows/process.c
     )
 else()
     set(TEST_PLATFORM_SOURCES
         ../../src/platform/posix/terminal.c
         ../../src/platform/posix/path.c
+        ../../src/platform/posix/process.c
     )
 endif()
 

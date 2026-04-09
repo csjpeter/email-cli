@@ -32,12 +32,14 @@ if(WIN32)
         src/platform/windows/terminal.c
         src/platform/windows/path.c
         src/platform/windows/html_medium.c
+        src/platform/windows/process.c
     )
 else()
     set(PLATFORM_SOURCES
         src/platform/posix/terminal.c
         src/platform/posix/path.c
         src/platform/posix/html_medium.c
+        src/platform/posix/process.c
     )
 endif()
 

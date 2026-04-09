@@ -1107,8 +1107,21 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         /* ── Cron / cache-only mode: serve entirely from manifest ──────── */
         if (manifest->count == 0) {
             manifest_free(manifest);
-            printf("No cached data. Run 'email-cli sync' first.\n");
-            return 0;
+            if (!opts->pager) {
+                printf("No cached data for %s. Run 'email-cli sync' first.\n", folder);
+                return 0;
+            }
+            RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
+            printf("\033[H\033[2J");
+            printf("No cached data for %s.\n\n", folder);
+            printf("Run 'email-cli sync' to download messages.\n\n");
+            printf("\033[2m  Backspace=folders  ESC=quit\033[0m\n");
+            fflush(stdout);
+            for (;;) {
+                TermKey key = terminal_read_key();
+                if (key == TERM_KEY_BACK) return 1;
+                if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
+            }
         }
         show_count = manifest->count;
         entries = malloc((size_t)show_count * sizeof(UIDEntry));

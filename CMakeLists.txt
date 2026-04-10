@@ -16,14 +16,14 @@ if(ENABLE_COVERAGE)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
 endif()
 
-find_package(CURL REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 include_directories(
     src
     src/core
     src/infrastructure
     src/domain
-    ${CURL_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIR}
 )
 
 # Platform-specific sources (CMake selects, no #ifdef in shared code)
@@ -55,14 +55,14 @@ set(SOURCES
     src/core/imap_util.c
     src/infrastructure/config_store.c
     src/infrastructure/setup_wizard.c
-    src/infrastructure/curl_adapter.c
+    src/infrastructure/imap_client.c
     src/infrastructure/local_store.c
     src/domain/email_service.c
     ${PLATFORM_SOURCES}
 )
 
 add_executable(email-cli ${SOURCES})
-target_link_libraries(email-cli ${CURL_LIBRARIES})
+target_link_libraries(email-cli OpenSSL::SSL OpenSSL::Crypto)
 
 # Test Build
 enable_testing()

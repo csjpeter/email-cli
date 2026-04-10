@@ -6,7 +6,6 @@
 #include "config_store.h"
 #include "setup_wizard.h"
 #include "email_service.h"
-#include "curl_adapter.h"
 #include "platform/terminal.h"
 #include "platform/path.h"
 #include "raii.h"
@@ -282,10 +281,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* 5. Initialize local store and libcurl */
+    /* 5. Initialize local store */
     if (local_store_init(cfg->host) != 0)
         logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
-    curl_global_init(CURL_GLOBAL_ALL);
 
     /* 6. Dispatch */
     int result = -1;
@@ -419,7 +417,6 @@ int main(int argc, char *argv[]) {
 
     /* 7. Cleanup */
     config_free(cfg);
-    curl_global_cleanup();
     logger_log(LOG_INFO, "--- email-cli session finished ---");
     logger_close();
 

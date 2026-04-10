@@ -19,48 +19,6 @@ void test_email_service(void) {
     setlocale(LC_ALL, "");
     local_store_init("imaps://test.example.com");
 
-    /* ── parse_uid_list ──────────────────────────────────────────────── */
-
-    /* NULL input */
-    {
-        int *uids = NULL;
-        int n = parse_uid_list(NULL, &uids);
-        ASSERT(n == 0 && uids == NULL, "parse_uid_list: NULL input → 0");
-    }
-
-    /* Response has no "* SEARCH" token */
-    {
-        int *uids = NULL;
-        int n = parse_uid_list("* OK done\r\n", &uids);
-        ASSERT(n == 0 && uids == NULL, "parse_uid_list: no SEARCH line → 0");
-    }
-
-    /* Basic three-UID list */
-    {
-        int *uids = NULL;
-        int n = parse_uid_list("* SEARCH 10 20 30\r\n", &uids);
-        ASSERT(n == 3, "parse_uid_list: basic count");
-        ASSERT(uids[0] == 10 && uids[1] == 20 && uids[2] == 30,
-               "parse_uid_list: basic values");
-        free(uids);
-    }
-
-    /* 40 UIDs — triggers the realloc branch (initial cap == 32) */
-    {
-        char big[1024];
-        strcpy(big, "* SEARCH");
-        for (int i = 1; i <= 40; i++) {
-            char tmp[16];
-            snprintf(tmp, sizeof(tmp), " %d", i);
-            strcat(big, tmp);
-        }
-        int *uids = NULL;
-        int n = parse_uid_list(big, &uids);
-        ASSERT(n == 40, "parse_uid_list: 40 UIDs count");
-        ASSERT(uids[0] == 1 && uids[39] == 40, "parse_uid_list: 40 UIDs boundary values");
-        free(uids);
-    }
-
     /* ── count_visual_rows ───────────────────────────────────────────── */
 
     /* Short lines: visual rows == logical lines (all fit within term_cols) */
@@ -589,49 +547,6 @@ void test_email_service(void) {
         ASSERT(cmp_uid_entry(&e, &f) == 0, "cmp_uid_entry: equal entries → 0");
     }
 
-    /* ── parse_list_line ─────────────────────────────────────────────── */
-
-    /* Non-LIST line → NULL */
-    {
-        char sep = '.';
-        char *r = parse_list_line("* OK done", &sep);
-        ASSERT(r == NULL, "parse_list_line: non-LIST line → NULL");
-    }
-
-    /* Quoted separator + quoted mailbox */
-    {
-        char sep = '?';
-        char *r = parse_list_line(
-            "* LIST (\\HasChildren) \".\" \"INBOX.Sent\"", &sep);
-        ASSERT(r != NULL, "parse_list_line: quoted mailbox not NULL");
-        ASSERT(strcmp(r, "INBOX.Sent") == 0,
-               "parse_list_line: quoted mailbox value");
-        ASSERT(sep == '.', "parse_list_line: quoted separator value");
-        free(r);
-    }
-
-    /* Unquoted separator (line 540) + unquoted mailbox (lines 552-554) */
-    {
-        char sep = '?';
-        char *r = parse_list_line("* LIST () . INBOX", &sep);
-        ASSERT(r != NULL, "parse_list_line: unquoted mailbox not NULL");
-        ASSERT(strcmp(r, "INBOX") == 0,
-               "parse_list_line: unquoted mailbox value");
-        ASSERT(sep == '.', "parse_list_line: unquoted separator value");
-        free(r);
-    }
-
-    /* Separator field absent (space only — unquoted, *p == ' ', no sep advance) */
-    {
-        char sep = '?';
-        /* "* LIST ()  INBOX": after flags skip-spaces puts us at 'I' which
-         * is not ' ' → sep='I', p advances, rest is parsed as mailbox "NBOX" */
-        char *r = parse_list_line("* LIST ()  INBOX", &sep);
-        /* We only check it doesn't crash and returns non-NULL */
-        ASSERT(r != NULL, "parse_list_line: double-space sep does not crash");
-        free(r);
-    }
-
     /* ── is_last_sibling ─────────────────────────────────────────────── */
 
     /* Root-level two items: first is not last, second is */
@@ -710,59 +625,6 @@ void test_email_service(void) {
         /* All entries share root "INBOX"; nothing at a different root → last=1 */
         int r = ancestor_is_last(names, 4, 2, 0, '.');
         ASSERT(r == 1, "ancestor_is_last: INBOX is only root → 1");
-    }
-
-    /* ── extract_fetch_literal ───────────────────────────────────────── */
-
-    /* NULL input */
-    {
-        char *r = extract_fetch_literal(NULL, 0);
-        ASSERT(r == NULL, "extract_fetch_literal: NULL → NULL");
-    }
-
-    /* No literal marker */
-    {
-        const char *resp = "* 1 FETCH (FLAGS (\\Seen))\r\n";
-        char *r = extract_fetch_literal(resp, strlen(resp));
-        ASSERT(r == NULL, "extract_fetch_literal: no literal → NULL");
-    }
-
-    /* Basic FETCH response: BODY.PEEK[] literal */
-    {
-        const char *msg = "From: alice@example.com\r\nSubject: Hi\r\n\r\nHello!\r\n";
-        char resp[256];
-        int n = snprintf(resp, sizeof(resp),
-                         "* 1 FETCH (BODY[] {%zu}\r\n%s)\r\nA001 OK FETCH done\r\n",
-                         strlen(msg), msg);
-        char *r = extract_fetch_literal(resp, (size_t)n);
-        ASSERT(r != NULL, "extract_fetch_literal: basic response → non-NULL");
-        ASSERT(strcmp(r, msg) == 0, "extract_fetch_literal: content matches");
-        free(r);
-    }
-
-    /* Response with \\r\\n line ending before literal */
-    {
-        const char *msg = "Subject: Test\r\n\r\nbody\r\n";
-        char resp[256];
-        int n = snprintf(resp, sizeof(resp),
-                         "* 3 FETCH (BODY[] {%zu}\r\n%s)\r\n",
-                         strlen(msg), msg);
-        char *r = extract_fetch_literal(resp, (size_t)n);
-        ASSERT(r != NULL, "extract_fetch_literal: CRLF before literal → non-NULL");
-        ASSERT(strcmp(r, msg) == 0, "extract_fetch_literal: CRLF content correct");
-        free(r);
-    }
-
-    /* Truncated response (reported size > available bytes) */
-    {
-        const char *resp = "* 1 FETCH (BODY[] {1000}\r\nshort)\r\n";
-        size_t len = strlen(resp);
-        char *r = extract_fetch_literal(resp, len);
-        /* size (1000) > available bytes after CRLF → clamp to available */
-        ASSERT(r != NULL, "extract_fetch_literal: truncated → non-NULL (clamped)");
-        ASSERT(strncmp(r, "short)\r\n", 8) == 0,
-               "extract_fetch_literal: truncated content clamped correctly");
-        free(r);
     }
 
     /* ── HTML-only MIME: CSS must not leak into rendered output ──────── */

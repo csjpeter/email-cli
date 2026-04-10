@@ -438,6 +438,20 @@ static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
     return hdrs;
 }
 
+/**
+ * Like fetch_uid_headers_cached but uses an already-connected and folder-selected
+ * ImapClient instead of opening a new connection.  Falls back to the cache first.
+ * Caller must free the returned string.
+ */
+static char *fetch_uid_headers_via(ImapClient *imap, const char *folder, int uid) {
+    if (local_hdr_exists(folder, uid))
+        return local_hdr_load(folder, uid);
+    char *hdrs = imap_uid_fetch_headers(imap, uid);
+    if (hdrs)
+        local_hdr_save(folder, uid, hdrs, strlen(hdrs));
+    return hdrs;
+}
+
 /* ── Show helpers ────────────────────────────────────────────────────── */
 
 #define SHOW_WIDTH 80
@@ -816,6 +830,10 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     int unseen_count = 0;
     UIDEntry *entries = NULL;
 
+    /* Shared IMAP connection — populated in online mode, NULL in cron mode.
+     * Kept alive for the full rendering loop so header fetches reuse it. */
+    RAII_IMAP ImapClient *list_imap = NULL;
+
     if (cfg->sync_interval > 0) {
         /* ── Cron / cache-only mode: serve entirely from manifest ──────── */
         if (manifest->count == 0) {
@@ -849,7 +867,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         /* ── Online mode: contact the server ───────────────────────────── */
 
         /* Fetch UNSEEN and ALL UID sets via a shared IMAP connection. */
-        RAII_IMAP ImapClient *list_imap = make_imap(cfg);
+        list_imap = make_imap(cfg);
         if (!list_imap) {
             manifest_free(manifest);
             fprintf(stderr, "Failed to connect.\n");
@@ -1010,7 +1028,9 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                         }
                     }
                 }
-                char *hdrs     = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
+                char *hdrs     = list_imap
+                                 ? fetch_uid_headers_via(list_imap, folder, entries[i].uid)
+                                 : fetch_uid_headers_cached(cfg, folder, entries[i].uid);
                 char *fr_raw   = hdrs ? mime_get_header(hdrs, "From")    : NULL;
                 char *fr       = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
                 free(fr_raw);
@@ -1576,10 +1596,10 @@ int email_service_sync(const Config *cfg) {
                 skipped++;
             }
 
-            /* Update manifest entry (headers from local cache) */
+            /* Update manifest entry (headers from local cache or server) */
             ManifestEntry *me = manifest_find(manifest, uid);
             if (!me) {
-                char *hdrs   = fetch_uid_headers_cached(cfg, folder, uid);
+                char *hdrs   = fetch_uid_headers_via(sync_imap, folder, uid);
                 char *fr_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
                 char *fr     = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
                 free(fr_raw);

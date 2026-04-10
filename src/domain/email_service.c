@@ -641,16 +641,20 @@ static char *fetch_uid_content_in(const Config *cfg, const char *folder,
     free(utf7);
 
     if (!headers_only) {
-        /* Full message fetch: use a message URL (imaps://host/FOLDER/;UID=N).
-         * libcurl issues BODY.PEEK[] internally and routes the entire message
-         * through WRITEFUNCTION — reliable for any message size. */
+        /* Full message fetch: use a message URL (imaps://host/FOLDER/;UID=N)
+         * so libcurl routes the entire message through WRITEFUNCTION — reliable
+         * for any message size.  Use CURLOPT_CUSTOMREQUEST with BODY.PEEK[] so
+         * the IMAP \Seen flag is NOT set (libcurl's default BODY[] marks as read). */
         RAII_STRING char *url = NULL;
+        RAII_STRING char *cmd = NULL;
         if (asprintf(&url, "%s/%s/;UID=%d",
                      cfg->host, enc_folder ? enc_folder : folder, uid) == -1) {
             curl_free(enc_folder);
             return NULL;
         }
         curl_free(enc_folder);
+        if (asprintf(&cmd, "UID FETCH %d BODY.PEEK[]", uid) == -1) return NULL;
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
 
         Buffer buf = {NULL, 0};
         CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);

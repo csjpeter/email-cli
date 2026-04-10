@@ -1,5 +1,5 @@
 #include "email_service.h"
-#include "curl_adapter.h"
+#include "imap_client.h"
 #include "local_store.h"
 #include "mime_util.h"
 #include "html_render.h"
@@ -15,53 +15,6 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <poll.h>
-
-/* ── Internal buffer ─────────────────────────────────────────────────── */
-
-typedef struct { char *data; size_t size; } Buffer;
-
-static size_t buffer_append(char *ptr, size_t size, size_t nmemb, void *ud) {
-    Buffer *buf = ud;
-    size_t n = size * nmemb;
-    char *tmp = realloc(buf->data, buf->size + n + 1);
-    if (!tmp) return 0;
-    buf->data = tmp;
-    memcpy(buf->data + buf->size, ptr, n);
-    buf->size += n;
-    buf->data[buf->size] = '\0';
-    return n;
-}
-
-/* ── UID list parser ─────────────────────────────────────────────────── */
-
-static int parse_uid_list(const char *resp, int **uids_out) {
-    *uids_out = NULL;
-    if (!resp) return 0;
-    const char *p = strstr(resp, "* SEARCH");
-    if (!p) return 0;
-    p += strlen("* SEARCH");
-
-    int cap = 32, cnt = 0;
-    int *uids = malloc((size_t)cap * sizeof(int));
-    if (!uids) return 0;
-    while (*p) {
-        char *end;
-        long uid = strtol(p, &end, 10);
-        if (end == p) { p++; continue; }
-        if (uid > 0) {
-            if (cnt == cap) {
-                cap *= 2;
-                int *tmp = realloc(uids, (size_t)cap * sizeof(int));
-                if (!tmp) { free(uids); return 0; }
-                uids = tmp;
-            }
-            uids[cnt++] = (int)uid;
-        }
-        p = end;
-    }
-    *uids_out = uids;
-    return cnt;
-}
 
 /* ── Column-aware printing ───────────────────────────────────────────── */
 
@@ -440,14 +393,9 @@ static void print_body_page(const char *body, int from_vrow, int vrow_budget,
 
 /* ── IMAP helpers ────────────────────────────────────────────────────── */
 
-static CURL *make_curl(const Config *cfg) {
-    return curl_adapter_init(cfg->user, cfg->pass, !cfg->ssl_no_verify);
+static ImapClient *make_imap(const Config *cfg) {
+    return imap_connect(cfg->host, cfg->user, cfg->pass, !cfg->ssl_no_verify);
 }
-
-/* Forward declaration — defined after the fetch helpers below. */
-static int search_uids_with_curl(CURL *curl, const Config *cfg,
-                                  const char *folder, const char *criteria,
-                                  int **uids_out);
 
 /* ── Folder status ───────────────────────────────────────────────────── */
 
@@ -465,244 +413,16 @@ static FolderStatus *fetch_all_folder_statuses(const Config *cfg __attribute__((
     return st;
 }
 
-/**
- * Extract the message literal from a raw IMAP FETCH response.
- *
- * IMAP literals use the format: {SIZE}\r\n<SIZE bytes>
- * This helper finds the first literal marker and returns a heap-allocated copy
- * of exactly SIZE bytes of content, NUL-terminated.  Returns NULL on failure.
- *
- * Used when fetching via CURLOPT_CUSTOMREQUEST (folder URL), which delivers the
- * full IMAP response — including the "* N FETCH (BODY[] {N}" envelope — to the
- * write callback.  Callers using a message URL in download mode do not need this.
- */
-static char *extract_fetch_literal(const char *response, size_t response_len)
-    __attribute__((unused));
-static char *extract_fetch_literal(const char *response, size_t response_len) {
-    if (!response) return NULL;
-    const char *brace = strchr(response, '{');
-    if (!brace) return NULL;
-    char *end;
-    long size = strtol(brace + 1, &end, 10);
-    if (*end != '}' || size <= 0) return NULL;
-    const char *data = end + 1;
-    if (*data == '\r') data++;
-    if (*data == '\n') data++;
-    size_t offset = (size_t)(data - response);
-    if (offset >= response_len) return NULL;
-    size_t avail = response_len - offset;
-    if ((size_t)size > avail) size = (long)avail;
-    char *result = malloc((size_t)size + 1);
-    if (!result) return NULL;
-    memcpy(result, data, (size_t)size);
-    result[size] = '\0';
-    return result;
-}
-
-/** Issues UID SEARCH <criteria> in <folder>. Caller must free *uids_out. */
-/** Core UID SEARCH implementation; reuses the provided curl handle so the
- *  caller can share one IMAP connection across multiple searches. */
-static int search_uids_with_curl(CURL *curl, const Config *cfg,
-                                  const char *folder, const char *criteria,
-                                  int **uids_out) {
-    char *utf7 = imap_utf7_encode(folder);
-    char *enc_folder = curl_easy_escape(curl, utf7 ? utf7 : folder, 0);
-    free(utf7);
-    char *url = NULL;
-    if (asprintf(&url, "%s/%s", cfg->host, enc_folder ? enc_folder : folder) == -1) {
-        curl_free(enc_folder);
-        return -1;
-    }
-    curl_free(enc_folder);
-    char *cmd = NULL;
-    if (asprintf(&cmd, "UID SEARCH %s", criteria) == -1) { free(url); return -1; }
-
-    Buffer buf = {NULL, 0};
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
-    CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
-    free(url);
-    free(cmd);
-    int count = 0;
-    if (res != CURLE_OK)
-        logger_log(LOG_WARN, "UID SEARCH %s failed: %s", criteria, curl_easy_strerror(res));
-    else
-        count = parse_uid_list(buf.data, uids_out);
-    free(buf.data);
-    return count;
-}
-
-/** Convenience wrapper that creates its own curl handle. */
-__attribute__((unused))
-static int search_uids_in(const Config *cfg, const char *folder,
-                           const char *criteria, int **uids_out) {
-    RAII_CURL CURL *curl = make_curl(cfg);
-    if (!curl) return -1;
-    return search_uids_with_curl(curl, cfg, folder, criteria, uids_out);
-}
-
-/**
- * State for the BODY.PEEK[] literal capture via the CURLINFO_DATA_IN debug hook.
- *
- * When CURLOPT_CUSTOMREQUEST is active, libcurl delivers the entire raw IMAP
- * server response (envelope + literal bytes) to CURLINFO_DATA_IN but does NOT
- * route it to WRITEFUNCTION.  We intercept DATA_IN to extract the literal.
- */
-typedef struct {
-    Buffer  literal;      /* accumulated literal bytes */
-    int     in_literal;   /* currently reading a literal */
-    long    bytes_left;   /* bytes still needed for the current literal */
-} PeekCapture;
-
-/** Debug callback that combines normal IMAP logging with literal capture. */
-static int peek_debug_cb(CURL *handle, curl_infotype type,
-                         char *data, size_t size, void *userp) {
-    (void)handle;
-    PeekCapture *cap = (PeekCapture *)userp;
-
-    /* Normal IMAP traffic logging */
-    if (type == CURLINFO_HEADER_IN || type == CURLINFO_HEADER_OUT ||
-        type == CURLINFO_DATA_IN   || type == CURLINFO_DATA_OUT) {
-        char buf[4096];
-        size_t n = size < sizeof(buf) - 1 ? size : sizeof(buf) - 1;
-        memcpy(buf, data, n);
-        buf[n] = '\0';
-        while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r' || buf[n-1] == ' '))
-            buf[--n] = '\0';
-        if (n > 0)
-            logger_log(LOG_DEBUG, "IMAP [%s] %s",
-                       (type == CURLINFO_HEADER_OUT ||
-                        type == CURLINFO_DATA_OUT) ? "OUT" : " IN", buf);
-    }
-
-    /* Literal capture from HEADER_IN: with CUSTOMREQUEST+folder URL, libcurl
-     * routes the entire IMAP response (envelope + literal) through HEADER_IN.
-     * DATA_IN only carries the FETCH envelope echo — not the literal bytes. */
-    if (!cap || type != CURLINFO_HEADER_IN || size == 0) return 0;
-
-    const char *p   = data;
-    const char *end = data + size;
-
-    while (p < end) {
-        if (!cap->in_literal) {
-            /* Scan for the IMAP literal size marker: {N}\r\n */
-            const char *brace = memchr(p, '{', (size_t)(end - p));
-            if (!brace) break;
-            char *numend;
-            long sz = strtol(brace + 1, &numend, 10);
-            if (*numend != '}' || sz <= 0) { p = brace + 1; continue; }
-            cap->in_literal  = 1;
-            cap->bytes_left  = sz;
-            /* Advance past }\r\n to the start of the literal bytes */
-            p = numend + 1;
-            if (p < end && *p == '\r') p++;
-            if (p < end && *p == '\n') p++;
-            /* Fall through to accumulate any bytes already in this chunk */
-        }
-
-        if (cap->in_literal && cap->bytes_left > 0) {
-            size_t avail   = (size_t)(end - p);
-            size_t to_copy = (size_t)cap->bytes_left < avail
-                             ? (size_t)cap->bytes_left : avail;
-            char *tmp = realloc(cap->literal.data,
-                                cap->literal.size + to_copy + 1);
-            if (tmp) {
-                cap->literal.data = tmp;
-                memcpy(cap->literal.data + cap->literal.size, p, to_copy);
-                cap->literal.size += to_copy;
-                cap->literal.data[cap->literal.size] = '\0';
-            }
-            cap->bytes_left -= (long)to_copy;
-            p               += to_copy;
-            if (cap->bytes_left <= 0) {
-                cap->in_literal = 0;
-                break;  /* literal complete — stop processing this chunk */
-            }
-        } else {
-            break;
-        }
-    }
-
-    return 0;
-}
-
 /** Fetches headers or full message for a UID in <folder>.  Caller must free.
- *
- *  Issues BODY.PEEK[HEADER] or BODY.PEEK[] — both NEVER set the \Seen flag
- *  per RFC 3501 §6.4.5.  When CURLOPT_CUSTOMREQUEST is active, libcurl routes
- *  all server data to CURLINFO_DATA_IN rather than WRITEFUNCTION.  We capture
- *  the message literal via peek_debug_cb which intercepts CURLINFO_DATA_IN. */
+ *  Opens a new IMAP connection each call.  For bulk fetching (sync), use
+ *  the imap_client API directly with a shared connection. */
 static char *fetch_uid_content_in(const Config *cfg, const char *folder,
                                   int uid, int headers_only) {
-    RAII_CURL CURL *curl = make_curl(cfg);
-    if (!curl) return NULL;
-
-    char *utf7 = imap_utf7_encode(folder);
-    char *enc_folder = curl_easy_escape(curl, utf7 ? utf7 : folder, 0);
-    free(utf7);
-
-    if (!headers_only) {
-        /* Full message fetch: use a message URL (imaps://host/FOLDER/;UID=N)
-         * so libcurl routes the entire message through WRITEFUNCTION — reliable
-         * for any message size.  Use CURLOPT_CUSTOMREQUEST with BODY.PEEK[] so
-         * the IMAP \Seen flag is NOT set (libcurl's default BODY[] marks as read). */
-        RAII_STRING char *url = NULL;
-        RAII_STRING char *cmd = NULL;
-        if (asprintf(&url, "%s/%s/;UID=%d",
-                     cfg->host, enc_folder ? enc_folder : folder, uid) == -1) {
-            curl_free(enc_folder);
-            return NULL;
-        }
-        curl_free(enc_folder);
-        if (asprintf(&cmd, "UID FETCH %d BODY.PEEK[]", uid) == -1) return NULL;
-        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
-
-        Buffer buf = {NULL, 0};
-        CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
-        if (res != CURLE_OK) {
-            logger_log(LOG_WARN, "Fetch UID %d failed: %s", uid, curl_easy_strerror(res));
-            free(buf.data);
-            return NULL;
-        }
-        if (!buf.data || buf.size == 0) {
-            logger_log(LOG_WARN, "Fetch UID %d: empty response", uid);
-            free(buf.data);
-            return NULL;
-        }
-        return buf.data;
-    }
-
-    /* Headers-only fetch: use folder URL + CUSTOMREQUEST.
-     * The IMAP FETCH response for BODY.PEEK[HEADER] is small enough that the
-     * debug-callback literal capture is reliable. */
-    RAII_STRING char *url = NULL;
-    RAII_STRING char *cmd = NULL;
-    if (asprintf(&url, "%s/%s", cfg->host, enc_folder ? enc_folder : folder) == -1) {
-        curl_free(enc_folder);
-        return NULL;
-    }
-    curl_free(enc_folder);
-    if (asprintf(&cmd, "UID FETCH %d BODY.PEEK[HEADER]", uid) == -1) return NULL;
-
-    PeekCapture cap = {{NULL, 0}, 0, 0};
-    curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, peek_debug_cb);
-    curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &cap);
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cmd);
-
-    Buffer envelope = {NULL, 0};
-    CURLcode res = curl_adapter_fetch(curl, url, &envelope, buffer_append);
-    free(envelope.data);
-
-    if (res != CURLE_OK) {
-        logger_log(LOG_WARN, "Fetch headers UID %d failed: %s", uid, curl_easy_strerror(res));
-        free(cap.literal.data);
-        return NULL;
-    }
-    if (!cap.literal.data || cap.literal.size == 0) {
-        logger_log(LOG_WARN, "BODY.PEEK[HEADER] UID %d: no literal captured", uid);
-        free(cap.literal.data);
-        return NULL;
-    }
-    return cap.literal.data;
+    RAII_IMAP ImapClient *imap = make_imap(cfg);
+    if (!imap) return NULL;
+    if (imap_select(imap, folder) != 0) return NULL;
+    return headers_only ? imap_uid_fetch_headers(imap, uid)
+                        : imap_uid_fetch_body(imap, uid);
 }
 
 /* ── Cached header fetch ─────────────────────────────────────────────── */
@@ -901,45 +621,6 @@ static int cmp_uid_entry(const void *a, const void *b) {
 
 static int cmp_str(const void *a, const void *b) {
     return strcmp(*(const char **)a, *(const char **)b);
-}
-
-/**
- * Parses one "* LIST (\flags) sep mailbox" line.
- * Sets *sep_out to the hierarchy separator character.
- * Returns a heap-allocated mailbox name, or NULL.
- */
-static char *parse_list_line(const char *line, char *sep_out) {
-    if (strncmp(line, "* LIST", 6) != 0) return NULL;
-    const char *p = line + 6;
-    while (*p == ' ') p++;
-
-    /* Skip flags (...) */
-    if (*p == '(') { while (*p && *p != ')') p++; if (*p) p++; }
-    while (*p == ' ') p++;
-
-    /* Separator field */
-    char sep = '.';
-    if (*p == '"') {
-        p++;
-        if (*p != '"') sep = *p;
-        while (*p && *p != '"') p++;
-        if (*p) p++;
-    } else {
-        if (*p && *p != ' ') sep = *p++;
-    }
-    if (sep_out) *sep_out = sep;
-    while (*p == ' ') p++;
-
-    /* Mailbox name */
-    if (*p == '"') {
-        p++;
-        const char *s = p;
-        while (*p && *p != '"') p++;
-        return strndup(s, (size_t)(p - s));
-    }
-    const char *s = p;
-    while (*p && *p != '\r' && *p != '\n') p++;
-    return strndup(s, (size_t)(p - s));
 }
 
 /* ── Folder tree renderer ────────────────────────────────────────────── */
@@ -1167,27 +848,29 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
     } else {
         /* ── Online mode: contact the server ───────────────────────────── */
 
-        /* Fetch UNSEEN and ALL UID sets via a shared connection.
-         * Using one CURL handle means a single TCP+TLS+AUTH setup; libcurl
-         * keeps the IMAP session alive between the two SEARCH commands. */
-        RAII_CURL CURL *list_curl = make_curl(cfg);
-        if (!list_curl) {
+        /* Fetch UNSEEN and ALL UID sets via a shared IMAP connection. */
+        RAII_IMAP ImapClient *list_imap = make_imap(cfg);
+        if (!list_imap) {
             manifest_free(manifest);
             fprintf(stderr, "Failed to connect.\n");
             return -1;
         }
+        if (imap_select(list_imap, folder) != 0) {
+            manifest_free(manifest);
+            fprintf(stderr, "Failed to select folder %s.\n", folder);
+            return -1;
+        }
 
         int *unseen_uids = NULL;
-        unseen_count = search_uids_with_curl(list_curl, cfg, folder, "UNSEEN", &unseen_uids);
-        if (unseen_count < 0) {
+        if (imap_uid_search(list_imap, "UNSEEN", &unseen_uids, &unseen_count) != 0) {
             manifest_free(manifest);
             fprintf(stderr, "Failed to search mailbox.\n");
             return -1;
         }
 
         int *all_uids  = NULL;
-        int  all_count = search_uids_with_curl(list_curl, cfg, folder, "ALL", &all_uids);
-        if (all_count < 0) {
+        int  all_count = 0;
+        if (imap_uid_search(list_imap, "ALL", &all_uids, &all_count) != 0) {
             free(unseen_uids);
             manifest_free(manifest);
             fprintf(stderr, "Failed to search mailbox.\n");
@@ -1433,46 +1116,13 @@ list_done:
 /** Fetch the folder list into a heap-allocated array; caller owns entries and array. */
 static char **fetch_folder_list_from_server(const Config *cfg,
                                              int *count_out, char *sep_out) {
-    RAII_CURL CURL *curl = make_curl(cfg);
-    if (!curl) return NULL;
-
-    RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/", cfg->host) == -1) return NULL;
-
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "LIST \"\" \"*\"");
-
-    Buffer buf = {NULL, 0};
-    CURLcode res = curl_adapter_fetch(curl, url, &buf, buffer_append);
-    if (res != CURLE_OK) {
-        logger_log(LOG_WARN, "LIST failed: %s", curl_easy_strerror(res));
-        free(buf.data);
-        return NULL;
-    }
+    RAII_IMAP ImapClient *imap = make_imap(cfg);
+    if (!imap) return NULL;
 
     char **folders = NULL;
-    int count = 0, cap = 0;
+    int count = 0;
     char sep = '.';
-
-    const char *p = buf.data;
-    while (p && *p) {
-        char got_sep = '.';
-        char *raw_name = parse_list_line(p, &got_sep);
-        char *name = raw_name ? imap_utf7_decode(raw_name) : NULL;
-        free(raw_name);
-        if (name) {
-            sep = got_sep;
-            if (count == cap) {
-                cap = cap ? cap * 2 : 16;
-                char **tmp = realloc(folders, (size_t)cap * sizeof(char *));
-                if (!tmp) { free(name); break; }
-                folders = tmp;
-            }
-            folders[count++] = name;
-        }
-        p = strchr(p, '\n');
-        if (p) p++;
-    }
-    free(buf.data);
+    if (imap_list(imap, &folders, &count, &sep) != 0) return NULL;
 
     *count_out = count;
     if (sep_out) *sep_out = sep;
@@ -1847,17 +1497,30 @@ int email_service_sync(const Config *cfg) {
 
     int total_fetched = 0, total_skipped = 0, errors = 0;
 
-    /* One shared CURL handle for UID SEARCH across all folders */
-    RAII_CURL CURL *search_curl = make_curl(cfg);
+    /* One shared IMAP connection for all folder operations */
+    RAII_IMAP ImapClient *sync_imap = make_imap(cfg);
+    if (!sync_imap) {
+        fprintf(stderr, "sync: could not connect to IMAP server.\n");
+        for (int i = 0; i < folder_count; i++) free(folders[i]);
+        free(folders);
+        if (pid_path[0]) unlink(pid_path);
+        return -1;
+    }
 
     for (int fi = 0; fi < folder_count; fi++) {
         const char *folder = folders[fi];
         printf("Syncing %s ...\n", folder);
         fflush(stdout);
 
+        if (imap_select(sync_imap, folder) != 0) {
+            fprintf(stderr, "  WARN: SELECT failed for %s\n", folder);
+            errors++;
+            continue;
+        }
+
         int *uids = NULL;
-        int uid_count = search_uids_with_curl(search_curl, cfg, folder, "ALL", &uids);
-        if (uid_count < 0) {
+        int  uid_count = 0;
+        if (imap_uid_search(sync_imap, "ALL", &uids, &uid_count) != 0) {
             fprintf(stderr, "  WARN: SEARCH ALL failed for %s\n", folder);
             errors++;
             continue;
@@ -1882,8 +1545,9 @@ int email_service_sync(const Config *cfg) {
 
         /* Get UNSEEN set to mark entries */
         int *unseen_uids = NULL;
-        int unseen_count = search_uids_with_curl(search_curl, cfg, folder, "UNSEEN", &unseen_uids);
-        if (unseen_count < 0) unseen_count = 0;
+        int  unseen_count = 0;
+        if (imap_uid_search(sync_imap, "UNSEEN", &unseen_uids, &unseen_count) != 0)
+            unseen_count = 0;
 
         /* Evict deleted messages from manifest */
         manifest_retain(manifest, uids, uid_count);
@@ -1897,7 +1561,7 @@ int email_service_sync(const Config *cfg) {
 
             /* Fetch full body if not cached */
             if (!local_msg_exists(folder, uid)) {
-                char *raw = fetch_uid_content_in(cfg, folder, uid, 0);
+                char *raw = imap_uid_fetch_body(sync_imap, uid);
                 if (raw) {
                     local_msg_save(folder, uid, raw, strlen(raw));
                     local_index_update(folder, uid, raw);
@@ -1912,7 +1576,7 @@ int email_service_sync(const Config *cfg) {
                 skipped++;
             }
 
-            /* Update manifest entry (headers from cache) */
+            /* Update manifest entry (headers from local cache) */
             ManifestEntry *me = manifest_find(manifest, uid);
             if (!me) {
                 char *hdrs   = fetch_uid_headers_cached(cfg, folder, uid);

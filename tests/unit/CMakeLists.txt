@@ -29,7 +29,7 @@ set(TEST_SOURCES
     test_config.c
     test_logger.c
     test_wizard.c
-    test_curl.c
+    test_imap_client.c
     test_mime.c
     test_local_store.c
     test_imap_util.c
@@ -45,13 +45,13 @@ set(TEST_SOURCES
     ../../src/core/imap_util.c
     ../../src/infrastructure/config_store.c
     ../../src/infrastructure/setup_wizard.c
-    ../../src/infrastructure/curl_adapter.c
+    ../../src/infrastructure/imap_client.c
     ../../src/infrastructure/local_store.c
     html_medium_stub.c
     ${TEST_PLATFORM_SOURCES}
 )
 
 add_executable(test-runner ${TEST_SOURCES})
-target_link_libraries(test-runner ${CURL_LIBRARIES})
+target_link_libraries(test-runner OpenSSL::SSL OpenSSL::Crypto)
 
 add_test(NAME UnitTests COMMAND test-runner)

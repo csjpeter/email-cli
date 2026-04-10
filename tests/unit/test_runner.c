@@ -12,7 +12,7 @@ void test_fs_util(void);
 void test_config_store(void);
 void test_logger(void);
 void test_wizard(void);
-void test_curl_adapter(void);
+void test_imap_client(void);
 void test_mime_util(void);
 void test_local_msg_store(void);
 void test_local_hdr_evict(void);
@@ -39,7 +39,7 @@ int main() {
     RUN_TEST(test_config_store);
     RUN_TEST(test_logger);
     RUN_TEST(test_wizard);
-    RUN_TEST(test_curl_adapter);
+    RUN_TEST(test_imap_client);
     RUN_TEST(test_mime_util);
     RUN_TEST(test_local_msg_store);
     RUN_TEST(test_local_hdr_evict);

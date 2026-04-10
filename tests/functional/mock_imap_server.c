@@ -9,7 +9,7 @@
 
 /**
  * @file mock_imap_server.c
- * @brief Minimal IMAP server to satisfy libcurl for testing.
+ * @brief Minimal IMAP server for integration testing.
  */
 
 #define PORT 9993

@@ -583,15 +583,17 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
         fflush(stdout);
         char sb[160];
         snprintf(sb, sizeof(sb),
-                 "  \u2191\u2193=select  Enter=save to ~/Downloads  ESC=back");
+                 "  \u2191\u2193=select  Enter=save to ~/Downloads"
+                 "  Backspace=back  ESC=quit");
         print_statusbar(trows, tcols, sb);
 
         TermKey key = terminal_read_key();
         switch (key) {
         case TERM_KEY_BACK:
+            return -1;   /* back to show view */
         case TERM_KEY_ESC:
         case TERM_KEY_QUIT:
-            return -1;
+            return -2;   /* quit program */
         case TERM_KEY_ENTER:
             return cursor;
         case TERM_KEY_NEXT_LINE:
@@ -739,6 +741,10 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
             if (ch == 'a' && att_count > 0) {
                 int sel = show_attachment_picker(atts, att_count,
                                                  term_cols, term_rows);
+                if (sel == -2) {
+                    result = 1;  /* ESC/q in picker → quit program */
+                    goto show_int_done;
+                }
                 if (sel >= 0) {
                     char *dir = attachment_save_dir();
                     char *fname = safe_filename_for_path(atts[sel].filename);
@@ -1211,10 +1217,10 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         if (wend > show_count)           wend = show_count;
 
         /* Compute adaptive column widths.
-         * Fixed overhead per data row: "  UID  " (7) + "  DATE  " (18) + "  Sts  " (7) = 34
+         * Fixed overhead per data row: "  UID  "(7) + "  DATE  "(18) + "  Sts   "(8) = 35
          * subj_w gets ~60% of remaining space, from_w ~40%. */
         int tcols    = terminal_cols();
-        int overhead = 34;
+        int overhead = 35;
         int avail    = tcols - overhead;
         if (avail < 40) avail = 40;
         int subj_w = avail * 3 / 5;
@@ -1225,11 +1231,11 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         /* Count / status line */
         printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
                wstart + 1, wend, show_count, folder, unseen_count);
-        printf("  %5s  %-16s  %-3s  %-*s  %s\n",
+        printf("  %5s  %-16s  %-4s  %-*s  %s\n",
                "UID", "Date", "Sts", subj_w, "Subject", "From");
         printf("  \u2550\u2550\u2550\u2550\u2550  ");
         print_dbar(16); printf("  ");
-        printf("\u2550\u2550\u2550  ");
+        printf("\u2550\u2550\u2550\u2550  ");
         print_dbar(subj_w); printf("  ");
         print_dbar(from_w); printf("\n");
 
@@ -1265,6 +1271,11 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                 char *dt_raw   = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
                 char *dt       = dt_raw ? mime_format_date(dt_raw)       : strdup("");
                 free(dt_raw);
+                /* Detect attachment: Content-Type: multipart/mixed */
+                char *ct_raw = hdrs ? mime_get_header(hdrs, "Content-Type") : NULL;
+                if (ct_raw && strcasestr(ct_raw, "multipart/mixed"))
+                    entries[i].flags |= MSG_FLAG_ATTACH;
+                free(ct_raw);
                 free(hdrs);
                 manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].flags);
                 manifest_dirty = 1;
@@ -1283,10 +1294,11 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             int sel = opts->pager && (i == cursor);
             if (sel) printf("\033[7m");
 
-            char sts[4] = {
+            char sts[5] = {
                 (entries[i].flags & MSG_FLAG_UNSEEN)  ? 'N' : '-',
                 (entries[i].flags & MSG_FLAG_FLAGGED) ? '*' : '-',
                 (entries[i].flags & MSG_FLAG_DONE)    ? 'D' : '-',
+                (entries[i].flags & MSG_FLAG_ATTACH)  ? 'A' : '-',
                 '\0'
             };
             printf("  %5d  %-16.16s  %s  ", entries[i].uid, date, sts);

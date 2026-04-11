@@ -813,8 +813,36 @@ static void render_folder_tree(char **names, int count, char sep,
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
+/**
+ * Case-insensitive match of `name` against the cached server folder list.
+ * Returns a heap-allocated canonical name if the case differs, or NULL if
+ * the name is already canonical (or the cache is unavailable).
+ * Caller must free() the returned string.
+ */
+static char *resolve_folder_name_dup(const char *name) {
+    int fcount = 0;
+    char **fl = local_folder_list_load(&fcount, NULL);
+    if (!fl) return NULL;
+    char *result = NULL;
+    for (int i = 0; i < fcount; i++) {
+        if (strcasecmp(fl[i], name) == 0 && strcmp(fl[i], name) != 0) {
+            result = strdup(fl[i]);   /* canonical differs from input */
+            break;
+        }
+    }
+    for (int i = 0; i < fcount; i++) free(fl[i]);
+    free(fl);
+    return result;
+}
+
 int email_service_list(const Config *cfg, const EmailListOpts *opts) {
-    const char *folder = opts->folder ? opts->folder : cfg->folder;
+    const char *raw_folder = opts->folder ? opts->folder : cfg->folder;
+
+    /* Normalise to the server-canonical name so the manifest key matches
+     * what sync stored (e.g. config "Inbox" → server "INBOX"). */
+    RAII_STRING char *folder_canonical = resolve_folder_name_dup(raw_folder);
+    const char *folder = folder_canonical ? folder_canonical : raw_folder;
+
     int list_result = 0;
 
     logger_log(LOG_INFO, "Listing %s @ %s/%s", cfg->user, cfg->host, folder);
@@ -1127,7 +1155,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         }
     }
 list_done:
-    /* tui_raw is cleaned up automatically via RAII_TERM_RAW */
+    /* tui_raw / folder_canonical cleaned up automatically via RAII macros */
     manifest_free(manifest);
     free(entries);
     return list_result;

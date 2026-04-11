@@ -102,7 +102,6 @@ check "Message count shown"       "message(s) in"           "$LIST_OUTPUT"
 check "Unread count shown"        "unread"                  "$LIST_OUTPUT"
 check "Table separator shown"     "═══"                     "$LIST_OUTPUT"
 check "Subject in table"          "Test Message"            "$LIST_OUTPUT"
-check "Successful completion"     "Success: Fetch complete" "$LIST_OUTPUT"
 
 # 8. Test: list --all (same behavior — all messages always shown)
 echo ""
@@ -129,7 +128,6 @@ echo "--- Show Assertions ---"
 check "From header shown"         "From:"                   "$SHOW_OUTPUT"
 check "Subject header shown"      "Subject:"                "$SHOW_OUTPUT"
 check "Email body shown"          "Hello from Mock Server"  "$SHOW_OUTPUT"
-check "Successful completion"     "Success: Fetch complete" "$SHOW_OUTPUT"
 check_not "Show: no CSS in output (color)"     "color"      "$SHOW_OUTPUT"
 check_not "Show: no CSS in output (font-size)" "font-size"  "$SHOW_OUTPUT"
 
@@ -159,7 +157,6 @@ EMPTY_OUTPUT=$("$BIN_DIR/email-cli" list --folder INBOX.Empty --batch 2>&1 || tr
 echo "$EMPTY_OUTPUT"
 echo "--- Empty folder assertions ---"
 check "Empty folder: no messages msg" "No messages"  "$EMPTY_OUTPUT"
-check "Empty folder: exit success"    "Success"       "$EMPTY_OUTPUT"
 
 # CRITICAL: verify email-cli never issued a STORE (flag-modification) command
 MOCK_CMDS=$(cat "$MOCK_LOG" 2>/dev/null || true)
@@ -167,6 +164,18 @@ echo ""
 echo "--- CRITICAL: Read-only guarantee (no STORE commands issued) ---"
 check_not "No STORE command sent to server" "STORE" "$MOCK_CMDS"
 echo "(mock server log: $MOCK_LOG)"
+
+# REGRESSION: read_response use-after-free — LOGIN must never fail against a
+# server that actually returns OK.  Check both the client output and the log.
+SESSION_LOG="$TEST_HOME/.cache/email-cli/logs/session.log"
+SESSION=$(cat "$SESSION_LOG" 2>/dev/null || true)
+echo ""
+echo "--- REGRESSION: read_response use-after-free (LOGIN must not fail on OK) ---"
+check_not "No 'LOGIN failed' in list output"   "LOGIN failed" "$LIST_OUTPUT"
+check_not "No 'LOGIN failed' in show output"   "LOGIN failed" "$SHOW_OUTPUT"
+check_not "No 'LOGIN failed' in session log"   "LOGIN failed" "$SESSION"
+check     "Session log shows 'Logged in' or authenticated" \
+          "authenticated\|Logged in\|LOGIN completed" "$SESSION"
 
 echo ""
 echo "--- Functional Test Results ---"

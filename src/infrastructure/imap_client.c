@@ -177,11 +177,13 @@ static int send_cmd(ImapClient *c, char tag_out[16], const char *fmt, ...) {
     /* Log command (mask password) */
     logger_log(LOG_DEBUG, "IMAP [OUT] %s %.*s", tag_out, len, buf);
 
-    /* Write: tag + space + command + CRLF */
-    char hdr[32];
-    int hlen = snprintf(hdr, sizeof(hdr), "%s ", tag_out);
-    if (net_write(c, hdr, (size_t)hlen) != 0) return -1;
-    if (net_write(c, buf, (size_t)(len + 2)) != 0) return -1;
+    /* Write tag + space + command + CRLF as a single buffer so the entire
+     * command arrives in one TCP segment and a line-reading server can parse
+     * it correctly (two separate writes would be two packets on loopback). */
+    char full[4096 + 32];
+    int flen = snprintf(full, sizeof(full), "%s %s", tag_out, buf);
+    if (flen < 0 || (size_t)flen >= sizeof(full)) return -1;
+    if (net_write(c, full, (size_t)flen) != 0) return -1;
     return 0;
 }
 

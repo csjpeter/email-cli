@@ -269,10 +269,11 @@ static int read_response(ImapClient *c, const char *tag, Response *r) {
         size_t tlen = strlen(tag);
         if (strncmp(line, tag, tlen) == 0 && line[tlen] == ' ') {
             const char *status = line + tlen + 1;
-            linebuf_free(&lb);
-            if (strncasecmp(status, "OK", 2) == 0) return 0;
-            logger_log(LOG_WARN, "IMAP %s", line);
-            return -1;
+            int ok = (strncasecmp(status, "OK", 2) == 0);
+            if (!ok)
+                logger_log(LOG_WARN, "IMAP %s", line);
+            linebuf_free(&lb);  /* free AFTER all accesses to line/status */
+            return ok ? 0 : -1;
         }
 
         /* Untagged: check for literal */

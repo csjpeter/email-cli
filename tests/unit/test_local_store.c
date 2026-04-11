@@ -197,7 +197,7 @@ void test_manifest(void) {
     ASSERT(m != NULL, "manifest: calloc");
     manifest_upsert(m, 42,   strdup("Alice <alice@example.com>"),
                               strdup("Hello World"),
-                              strdup("2024-03-15 10:00"), 1);
+                              strdup("2024-03-15 10:00"), MSG_FLAG_UNSEEN);
     manifest_upsert(m, 137,  strdup("Bob <bob@test.org>"),
                               strdup("Re: Meeting"),
                               strdup("2024-03-16 14:30"), 0);
@@ -229,7 +229,7 @@ void test_manifest(void) {
     /* 4. Upsert updates existing entry */
     manifest_upsert(m, 42, strdup("Alice Updated"),
                            strdup("Updated Subject"),
-                           strdup("2024-03-15 11:00"), 0);
+                           strdup("2024-03-15 11:00"), 0 /* no flags */);
     ASSERT(m->count == 2, "manifest: still 2 after upsert-update");
     e42 = manifest_find(m, 42);
     ASSERT(strcmp(e42->subject, "Updated Subject") == 0,
@@ -248,7 +248,7 @@ void test_manifest(void) {
 
     /* 7. Nested folder manifest */
     Manifest *m2 = calloc(1, sizeof(Manifest));
-    manifest_upsert(m2, 1, strdup("Test"), strdup("Nested"), strdup("2024-01-01 00:00"), 0);
+    manifest_upsert(m2, 1, strdup("Test"), strdup("Nested"), strdup("2024-01-01 00:00"), 0 /* no flags */);
     ASSERT(manifest_save("munka/ai", m2) == 0, "manifest_save: nested folder");
     manifest_free(m2);
     m2 = manifest_load("munka/ai");

@@ -622,12 +622,13 @@ show_int_done:
 
 /* ── List helpers ────────────────────────────────────────────────────── */
 
-typedef struct { int uid; int unseen; } UIDEntry;
+typedef struct { int uid; int flags; } UIDEntry;
 
 static int cmp_uid_entry(const void *a, const void *b) {
     const UIDEntry *ea = a, *eb = b;
-    if (ea->unseen != eb->unseen)
-        return eb->unseen - ea->unseen;   /* unseen first */
+    int ua = (ea->flags & MSG_FLAG_UNSEEN) ? 1 : 0;
+    int ub = (eb->flags & MSG_FLAG_UNSEEN) ? 1 : 0;
+    if (ua != ub) return ub - ua;         /* unseen first */
     return eb->uid - ea->uid;             /* newer (higher UID) first */
 }
 
@@ -886,11 +887,11 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         entries = malloc((size_t)show_count * sizeof(UIDEntry));
         if (!entries) { manifest_free(manifest); return -1; }
         for (int i = 0; i < show_count; i++) {
-            entries[i].uid    = manifest->entries[i].uid;
-            entries[i].unseen = manifest->entries[i].unseen;
+            entries[i].uid   = manifest->entries[i].uid;
+            entries[i].flags = manifest->entries[i].flags;
         }
         for (int i = 0; i < show_count; i++)
-            if (entries[i].unseen) unseen_count++;
+            if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
     } else {
         /* ── Online mode: contact the server ───────────────────────────── */
 
@@ -908,16 +909,27 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         }
 
         int *unseen_uids = NULL;
-        if (imap_uid_search(list_imap, "UNSEEN", &unseen_uids, &unseen_count) != 0) {
+        int  unseen_uid_count = 0;
+        if (imap_uid_search(list_imap, "UNSEEN", &unseen_uids, &unseen_uid_count) != 0) {
             manifest_free(manifest);
             fprintf(stderr, "Failed to search mailbox.\n");
             return -1;
         }
 
+        int *flagged_uids = NULL, flagged_count = 0;
+        imap_uid_search(list_imap, "FLAGGED", &flagged_uids, &flagged_count);
+        /* ignore errors — treat as 0 flagged */
+
+        int *done_uids = NULL, done_count = 0;
+        imap_uid_search(list_imap, "KEYWORD $Done", &done_uids, &done_count);
+        /* ignore errors — treat as 0 done */
+
         int *all_uids  = NULL;
         int  all_count = 0;
         if (imap_uid_search(list_imap, "ALL", &all_uids, &all_count) != 0) {
             free(unseen_uids);
+            free(flagged_uids);
+            free(done_uids);
             manifest_free(manifest);
             fprintf(stderr, "Failed to search mailbox.\n");
             return -1;
@@ -935,6 +947,8 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         if (show_count == 0) {
             manifest_free(manifest);
             free(unseen_uids);
+            free(flagged_uids);
+            free(done_uids);
             free(all_uids);
             if (!opts->pager) {
                 printf("No messages in %s.\n", folder);
@@ -957,16 +971,24 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 
         /* Build tagged entry array */
         entries = malloc((size_t)show_count * sizeof(UIDEntry));
-        if (!entries) { free(unseen_uids); free(all_uids); manifest_free(manifest); return -1; }
+        if (!entries) { free(unseen_uids); free(flagged_uids); free(done_uids); free(all_uids); manifest_free(manifest); return -1; }
 
         for (int i = 0; i < show_count; i++) {
-            entries[i].uid    = all_uids[i];
-            entries[i].unseen = 0;
-            for (int j = 0; j < unseen_count; j++) {
-                if (unseen_uids[j] == all_uids[i]) { entries[i].unseen = 1; break; }
-            }
+            entries[i].uid   = all_uids[i];
+            entries[i].flags = 0;
+            for (int j = 0; j < unseen_uid_count;  j++)
+                if (unseen_uids[j]  == all_uids[i]) { entries[i].flags |= MSG_FLAG_UNSEEN;  break; }
+            for (int j = 0; j < flagged_count; j++)
+                if (flagged_uids[j] == all_uids[i]) { entries[i].flags |= MSG_FLAG_FLAGGED; break; }
+            for (int j = 0; j < done_count;    j++)
+                if (done_uids[j]    == all_uids[i]) { entries[i].flags |= MSG_FLAG_DONE;    break; }
         }
+        /* Compute unseen_count for the status line */
+        for (int i = 0; i < show_count; i++)
+            if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
         free(unseen_uids);
+        free(flagged_uids);
+        free(done_uids);
         free(all_uids);
     }
 
@@ -1015,26 +1037,27 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         if (wend > show_count)           wend = show_count;
 
         /* Compute adaptive column widths.
-         * Fixed overhead per data row: "  S  UID  " (12) + "  " (2) + "  DATE" (18) = 32
-         * from_w and subj_w share the remaining space evenly (min 20 each). */
+         * Fixed overhead per data row: "  UID  " (7) + "  DATE  " (18) + "  Sts  " (7) = 34
+         * subj_w gets ~60% of remaining space, from_w ~40%. */
         int tcols    = terminal_cols();
-        int overhead = 32;
+        int overhead = 34;
         int avail    = tcols - overhead;
         if (avail < 40) avail = 40;
-        int from_w = avail / 2;
-        int subj_w = avail - from_w;
+        int subj_w = avail * 3 / 5;
+        int from_w = avail - subj_w;
 
         if (opts->pager) printf("\033[H\033[2J");
 
         /* Count / status line */
         printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
                wstart + 1, wend, show_count, folder, unseen_count);
-        printf("  S  %5s  %-*s  %-*s  %s\n",
-               "UID", from_w, "From", subj_w, "Subject", "Date");
-        printf("  \u2550  \u2550\u2550\u2550\u2550\u2550  ");
-        print_dbar(from_w); printf("  ");
+        printf("  %5s  %-16s  %-3s  %-*s  %s\n",
+               "UID", "Date", "Sts", subj_w, "Subject", "From");
+        printf("  \u2550\u2550\u2550\u2550\u2550  ");
+        print_dbar(16); printf("  ");
+        printf("\u2550\u2550\u2550  ");
         print_dbar(subj_w); printf("  ");
-        print_dbar(16);     printf("\n");
+        print_dbar(from_w); printf("\n");
 
         /* Data rows: fetch-on-demand + immediate render per row */
         int manifest_dirty = 0;
@@ -1069,11 +1092,11 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                 char *dt       = dt_raw ? mime_format_date(dt_raw)       : strdup("");
                 free(dt_raw);
                 free(hdrs);
-                manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].unseen);
+                manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].flags);
                 manifest_dirty = 1;
-            } else if (cached_me->unseen != entries[i].unseen) {
-                /* Keep manifest unseen flag in sync (relevant in online mode) */
-                cached_me->unseen = entries[i].unseen;
+            } else if (cached_me->flags != entries[i].flags) {
+                /* Keep manifest flags in sync (relevant in online mode) */
+                cached_me->flags = entries[i].flags;
                 manifest_dirty = 1;
             }
 
@@ -1086,11 +1109,16 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             int sel = opts->pager && (i == cursor);
             if (sel) printf("\033[7m");
 
-            printf("  %c  %5d  ", entries[i].unseen ? 'N' : ' ', entries[i].uid);
-            print_padded_col(from,    from_w);
-            printf("  ");
+            char sts[4] = {
+                (entries[i].flags & MSG_FLAG_UNSEEN)  ? 'N' : '-',
+                (entries[i].flags & MSG_FLAG_FLAGGED) ? '*' : '-',
+                (entries[i].flags & MSG_FLAG_DONE)    ? 'D' : '-',
+                '\0'
+            };
+            printf("  %5d  %-16.16s  %s  ", entries[i].uid, date, sts);
             print_padded_col(subject, subj_w);
-            printf("  %-16.16s", date);
+            printf("  ");
+            print_padded_col(from,    from_w);
 
             if (sel) printf("\033[K\033[0m");
             printf("\n");
@@ -1114,7 +1142,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             char sb[256];
             snprintf(sb, sizeof(sb),
                      "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                     "  Backspace=folders  ESC=quit  [%d/%d]",
+                     "  f=flag  d=done  Backspace=folders  ESC=quit  [%d/%d]",
                      cursor + 1, show_count);
             print_statusbar(trows, tcols, sb);
         }
@@ -1136,6 +1164,22 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                 /* ret == 0: Backspace → back to list; ret == -1: error → stay */
             }
             break;
+        case TERM_KEY_IGNORE: {
+            int ch = terminal_last_printable();
+            if (ch == 'f' || ch == 'd') {
+                int uid  = entries[cursor].uid;
+                int bit  = (ch == 'f') ? MSG_FLAG_FLAGGED : MSG_FLAG_DONE;
+                const char *flag_name = (ch == 'f') ? "\\Flagged" : "$Done";
+                int currently = entries[cursor].flags & bit;
+                if (list_imap)
+                    imap_uid_set_flag(list_imap, uid, flag_name, !currently);
+                entries[cursor].flags ^= bit;
+                ManifestEntry *me = manifest_find(manifest, uid);
+                if (me) me->flags = entries[cursor].flags;
+                manifest_save(folder, manifest);
+            }
+            break;
+        }
         case TERM_KEY_NEXT_LINE:
             if (cursor < show_count - 1) cursor++;
             break;
@@ -1149,8 +1193,6 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         case TERM_KEY_PREV_PAGE:
             cursor -= limit;
             if (cursor < 0) cursor = 0;
-            break;
-        case TERM_KEY_IGNORE:
             break;
         }
     }
@@ -1622,15 +1664,25 @@ int email_service_sync(const Config *cfg) {
         if (imap_uid_search(sync_imap, "UNSEEN", &unseen_uids, &unseen_count) != 0)
             unseen_count = 0;
 
+        int *flagged_uids = NULL, flagged_count = 0;
+        imap_uid_search(sync_imap, "FLAGGED", &flagged_uids, &flagged_count);
+
+        int *done_uids = NULL, done_count = 0;
+        imap_uid_search(sync_imap, "KEYWORD $Done", &done_uids, &done_count);
+
         /* Evict deleted messages from manifest */
         manifest_retain(manifest, uids, uid_count);
 
         int fetched = 0, skipped = 0;
         for (int i = 0; i < uid_count; i++) {
             int uid = uids[i];
-            int is_unseen = 0;
-            for (int j = 0; j < unseen_count; j++)
-                if (unseen_uids[j] == uid) { is_unseen = 1; break; }
+            int uid_flags = 0;
+            for (int j = 0; j < unseen_count;  j++)
+                if (unseen_uids[j]  == uid) { uid_flags |= MSG_FLAG_UNSEEN;  break; }
+            for (int j = 0; j < flagged_count; j++)
+                if (flagged_uids[j] == uid) { uid_flags |= MSG_FLAG_FLAGGED; break; }
+            for (int j = 0; j < done_count;    j++)
+                if (done_uids[j]    == uid) { uid_flags |= MSG_FLAG_DONE;    break; }
 
             /* Show progress BEFORE the potentially slow network fetch */
             printf("  [%d/%d] UID %d...\r", i + 1, uid_count, uid);
@@ -1677,16 +1729,18 @@ int email_service_sync(const Config *cfg) {
                 char *dt     = dt_raw ? mime_format_date(dt_raw)       : strdup("");
                 free(dt_raw);
                 free(hdrs);
-                manifest_upsert(manifest, uid, fr, su, dt, is_unseen);
+                manifest_upsert(manifest, uid, fr, su, dt, uid_flags);
             } else {
-                /* update unseen flag on existing entry */
-                me->unseen = is_unseen;
+                /* update flags on existing entry */
+                me->flags = uid_flags;
             }
 
             printf("  [%d/%d] UID %d   \r", i + 1, uid_count, uid);
             fflush(stdout);
         }
         free(unseen_uids);
+        free(flagged_uids);
+        free(done_uids);
         manifest_save(folder, manifest);
         manifest_free(manifest);
         free(uids);

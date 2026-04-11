@@ -3,6 +3,12 @@
 
 #include <stddef.h>
 
+/* ── Message flag bitmask constants ─────────────────────────────────────── */
+
+#define MSG_FLAG_UNSEEN   (1 << 0)  /* \Seen not set on server */
+#define MSG_FLAG_FLAGGED  (1 << 1)  /* \Flagged — starred / important */
+#define MSG_FLAG_DONE     (1 << 2)  /* $Done keyword */
+
 /**
  * @file local_store.h
  * @brief Provider-native local storage with reverse digit bucketing and text indexes.
@@ -81,7 +87,7 @@ typedef struct {
     char *from;      /**< MIME-decoded, display-ready */
     char *subject;   /**< MIME-decoded, display-ready */
     char *date;      /**< Formatted "YYYY-MM-DD HH:MM" */
-    int   unseen;    /**< 1 = message is unread, 0 = read */
+    int   flags;     /**< Bitmask of MSG_FLAG_* constants */
 } ManifestEntry;
 
 typedef struct {
@@ -104,7 +110,7 @@ ManifestEntry *manifest_find(const Manifest *m, int uid);
 
 /** @brief Adds or updates a manifest entry (takes ownership of strings). */
 void manifest_upsert(Manifest *m, int uid,
-                     char *from, char *subject, char *date, int unseen);
+                     char *from, char *subject, char *date, int flags);
 
 /** @brief Removes entries whose UID is not in keep_uids (sorted). */
 void manifest_retain(Manifest *m, const int *keep_uids, int keep_count);

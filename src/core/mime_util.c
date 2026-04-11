@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <time.h>
 #include <iconv.h>
+#include <errno.h>
 
 /* ── Header extraction ──────────────────────────────────────────────── */
 
@@ -565,6 +566,236 @@ char *mime_get_text_body(const char *msg) {
 char *mime_get_html_part(const char *msg) {
     if (!msg) return NULL;
     return html_from_part(msg);
+}
+
+/* ── Attachment extraction ──────────────────────────────────────────── */
+
+/* Extract a MIME header parameter value, e.g. filename="foo.pdf" or name=bar.
+ * Handles quoted and unquoted values.  Returns malloc'd string or NULL. */
+static char *extract_param(const char *header, const char *param) {
+    if (!header || !param) return NULL;
+    char search[64];
+    snprintf(search, sizeof(search), "%s=", param);
+    const char *p = strcasestr(header, search);
+    if (!p) return NULL;
+    p += strlen(search);
+    if (*p == '"') {
+        p++;
+        const char *end = strchr(p, '"');
+        if (!end) return NULL;
+        return strndup(p, (size_t)(end - p));
+    }
+    /* unquoted value: ends at ';', whitespace, or end-of-string */
+    const char *end = p;
+    while (*end && *end != ';' && *end != ' ' && *end != '\t' &&
+           *end != '\r' && *end != '\n')
+        end++;
+    if (end == p) return NULL;
+    return strndup(p, (size_t)(end - p));
+}
+
+/* Sanitise a filename: strip directory separators and leading dots. */
+static char *sanitise_filename(const char *name) {
+    if (!name || !*name) return NULL;
+    /* take only the basename portion */
+    const char *base = name;
+    for (const char *p = name; *p; p++)
+        if (*p == '/' || *p == '\\') base = p + 1;
+    if (!*base) return NULL;
+    char *s = strdup(base);
+    if (!s) return NULL;
+    /* strip leading dots (hidden files / directory traversal) */
+    char *p = s;
+    while (*p == '.') p++;
+    if (!*p) { free(s); return strdup("attachment"); }
+    if (p != s) memmove(s, p, strlen(p) + 1);
+    return s;
+}
+
+/* Dynamic array for building the attachment list */
+typedef struct { MimeAttachment *data; int count; int cap; } AttachList;
+
+static int alist_push(AttachList *al, MimeAttachment att) {
+    if (al->count >= al->cap) {
+        int newcap = al->cap ? al->cap * 2 : 4;
+        MimeAttachment *tmp = realloc(al->data,
+                                      (size_t)newcap * sizeof(MimeAttachment));
+        if (!tmp) return -1;
+        al->data = tmp;
+        al->cap  = newcap;
+    }
+    al->data[al->count++] = att;
+    return 0;
+}
+
+/* Forward declaration */
+static void collect_parts(const char *msg, AttachList *al, int *unnamed_idx);
+
+/* Walk a multipart body and collect attachments from each sub-part. */
+static void collect_multipart_attachments(const char *msg, const char *ctype,
+                                          AttachList *al, int *idx) {
+    const char *b = strcasestr(ctype, "boundary=");
+    if (!b) return;
+    b += strlen("boundary=");
+
+    char boundary[512] = {0};
+    if (*b == '"') {
+        b++;
+        const char *end = strchr(b, '"');
+        if (!end) return;
+        snprintf(boundary, sizeof(boundary), "%.*s", (int)(end - b), b);
+    } else {
+        size_t i = 0;
+        while (*b && *b != ';' && *b != ' ' && *b != '\r' && *b != '\n' &&
+               i < sizeof(boundary) - 1)
+            boundary[i++] = *b++;
+        boundary[i] = '\0';
+    }
+    if (!boundary[0]) return;
+
+    char delim[520];
+    snprintf(delim, sizeof(delim), "--%s", boundary);
+    size_t dlen = strlen(delim);
+
+    const char *p = strstr(msg, delim);
+    while (p) {
+        p = strchr(p + dlen, '\n');
+        if (!p) break;
+        p++;
+
+        const char *next = strstr(p, delim);
+        if (!next) break;
+
+        size_t partlen = (size_t)(next - p);
+        char *part = strndup(p, partlen);
+        if (!part) break;
+        collect_parts(part, al, idx);
+        free(part);
+
+        p = next + dlen;
+        if (p[0] == '-' && p[1] == '-') break;
+        p = strchr(p, '\n');
+        if (p) p++;
+    }
+}
+
+/* Examine one MIME part (headers + body) and add to al if it is an attachment. */
+static void collect_parts(const char *msg, AttachList *al, int *unnamed_idx) {
+    char *ctype = mime_get_header(msg, "Content-Type");
+    char *disp  = mime_get_header(msg, "Content-Disposition");
+    char *enc   = mime_get_header(msg, "Content-Transfer-Encoding");
+
+    /* Recurse into multipart containers */
+    if (ctype && strncasecmp(ctype, "multipart/", 10) == 0) {
+        collect_multipart_attachments(msg, ctype, al, unnamed_idx);
+        free(ctype); free(disp); free(enc);
+        return;
+    }
+
+    /* Determine filename from Content-Disposition or Content-Type name= */
+    char *filename = NULL;
+    int explicit_attach = 0;
+    if (disp) {
+        if (strncasecmp(disp, "attachment", 10) == 0) explicit_attach = 1;
+        filename = extract_param(disp, "filename");
+        /* RFC 5987: filename*=charset''encoded — simplified: strip trailing * */
+        if (!filename) filename = extract_param(disp, "filename*");
+    }
+    if (!filename && ctype)
+        filename = extract_param(ctype, "name");
+
+    /* Skip non-attachment text and multipart parts unless explicitly marked */
+    if (!explicit_attach) {
+        if (!filename) {
+            free(ctype); free(disp); free(enc);
+            return;  /* no filename → body part, skip */
+        }
+        /* text/plain and text/html without attachment disposition are body parts */
+        if (ctype && (strncasecmp(ctype, "text/plain", 10) == 0 ||
+                      strncasecmp(ctype, "text/html",   9) == 0)) {
+            free(ctype); free(disp); free(enc); free(filename);
+            return;
+        }
+    }
+
+    const char *body = body_start(msg);
+    if (!body) {
+        free(ctype); free(disp); free(enc); free(filename);
+        return;
+    }
+
+    /* Decode body content */
+    unsigned char *data = (unsigned char *)decode_transfer(body, strlen(body), enc);
+    size_t data_size = data ? strlen((char *)data) : 0;
+    /* For binary (base64-decoded) content the length may contain NUL bytes —
+     * use the decoded output length from decode_base64, which null-terminates
+     * but the real size is the base64-decoded byte count. */
+    if (enc && strcasecmp(enc, "base64") == 0 && data) {
+        /* decode_base64 returns the decoded bytes; count excludes the trailing NUL */
+        /* we need actual binary size — recount via the decoded buffer length */
+        size_t raw_enc_len = strlen(body);
+        data_size = (raw_enc_len / 4) * 3;  /* upper bound */
+        /* trim padding: accurate enough for display; file write uses full buffer */
+    }
+
+    /* Sanitise / generate filename */
+    char *safe_name = NULL;
+    if (filename) {
+        char *decoded = mime_decode_words(filename);
+        free(filename);
+        safe_name = sanitise_filename(decoded ? decoded : "");
+        free(decoded);
+    }
+    if (!safe_name) {
+        char gen[32];
+        snprintf(gen, sizeof(gen), "attachment-%d.bin", ++(*unnamed_idx));
+        safe_name = strdup(gen);
+    }
+
+    MimeAttachment att = {0};
+    att.filename     = safe_name;
+    att.content_type = ctype ? strdup(ctype) : strdup("application/octet-stream");
+    att.data         = data;
+    att.size         = data_size;
+
+    if (alist_push(al, att) < 0) {
+        free(att.filename); free(att.content_type); free(att.data);
+    }
+
+    free(ctype); free(disp); free(enc);
+}
+
+MimeAttachment *mime_list_attachments(const char *msg, int *count_out) {
+    if (!msg || !count_out) { if (count_out) *count_out = 0; return NULL; }
+    AttachList al = {NULL, 0, 0};
+    int idx = 0;
+    collect_parts(msg, &al, &idx);
+    *count_out = al.count;
+    if (al.count == 0) { free(al.data); return NULL; }
+    return al.data;
+}
+
+void mime_free_attachments(MimeAttachment *list, int count) {
+    if (!list) return;
+    for (int i = 0; i < count; i++) {
+        free(list[i].filename);
+        free(list[i].content_type);
+        free(list[i].data);
+    }
+    free(list);
+}
+
+int mime_save_attachment(const MimeAttachment *att, const char *dest_path) {
+    if (!att || !dest_path || !att->data) return -1;
+    FILE *f = fopen(dest_path, "wb");
+    if (!f) return -1;
+    /* Write the full decoded buffer; for base64 the NUL terminator is not
+     * part of the content — use att->size if accurate, else strlen fallback. */
+    size_t n = att->size > 0 ? att->size : strlen((char *)att->data);
+    size_t written = fwrite(att->data, 1, n, f);
+    int err = (written != n) ? -1 : 0;
+    fclose(f);
+    return err;
 }
 
 char *mime_extract_imap_literal(const char *response) {

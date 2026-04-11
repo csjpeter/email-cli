@@ -131,6 +131,25 @@ char *imap_uid_fetch_headers(ImapClient *c, int uid);
  */
 char *imap_uid_fetch_body(ImapClient *c, int uid);
 
+/**
+ * @brief Progress callback type for large literal downloads.
+ *
+ * @param received  Bytes received so far.
+ * @param total     Total bytes expected (literal size announced by server).
+ * @param ctx       User-supplied context pointer passed to imap_set_progress().
+ */
+typedef void (*ImapProgressFn)(size_t received, size_t total, void *ctx);
+
+/**
+ * @brief Install (or clear) a download-progress callback on the client.
+ *
+ * The callback is invoked periodically while reading large IMAP literals
+ * (bodies >= ~100 KB).  Pass fn=NULL to disable.
+ * The callback is NOT cleared automatically after a fetch; call
+ * imap_set_progress(c, NULL, NULL) when no longer needed.
+ */
+void imap_set_progress(ImapClient *c, ImapProgressFn fn, void *ctx);
+
 /* ── Inline RAII cleanup ─────────────────────────────────────────────── */
 
 static inline void imap_disconnect_ptr(ImapClient **p) {

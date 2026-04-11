@@ -1142,7 +1142,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             char sb[256];
             snprintf(sb, sizeof(sb),
                      "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                     "  f=flag  d=done  Backspace=folders  ESC=quit  [%d/%d]",
+                     "  n=new  f=flag  d=done  Backspace=folders  ESC=quit  [%d/%d]",
                      cursor + 1, show_count);
             print_statusbar(trows, tcols, sb);
         }
@@ -1166,13 +1166,26 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             break;
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
-            if (ch == 'f' || ch == 'd') {
+            if (ch == 'n' || ch == 'f' || ch == 'd') {
                 int uid  = entries[cursor].uid;
-                int bit  = (ch == 'f') ? MSG_FLAG_FLAGGED : MSG_FLAG_DONE;
-                const char *flag_name = (ch == 'f') ? "\\Flagged" : "$Done";
+                int bit;
+                const char *flag_name;
+                if (ch == 'n') {
+                    bit = MSG_FLAG_UNSEEN;  flag_name = "\\Seen";
+                } else if (ch == 'f') {
+                    bit = MSG_FLAG_FLAGGED; flag_name = "\\Flagged";
+                } else {
+                    bit = MSG_FLAG_DONE;    flag_name = "$Done";
+                }
                 int currently = entries[cursor].flags & bit;
-                if (list_imap)
-                    imap_uid_set_flag(list_imap, uid, flag_name, !currently);
+                if (list_imap) {
+                    if (ch == 'n') {
+                        /* \Seen is the inverse of UNSEEN: UNSEEN set → mark read (add \Seen) */
+                        imap_uid_set_flag(list_imap, uid, flag_name, currently ? 1 : 0);
+                    } else {
+                        imap_uid_set_flag(list_imap, uid, flag_name, !currently);
+                    }
+                }
                 entries[cursor].flags ^= bit;
                 ManifestEntry *me = manifest_find(manifest, uid);
                 if (me) me->flags = entries[cursor].flags;

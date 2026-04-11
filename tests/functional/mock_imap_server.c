@@ -14,12 +14,31 @@
 
 #define PORT 9993
 
+/**
+ * Read one CRLF-terminated line from fd into buf (max len-1 chars + NUL).
+ * Strips the trailing CR and LF.  Returns the number of characters placed
+ * in buf (excluding NUL), or -1 on EOF/error.
+ */
+static int readline_crlf(int fd, char *buf, int len) {
+    int n = 0;
+    char c;
+    while (n < len - 1) {
+        int r = recv(fd, &c, 1, 0);
+        if (r <= 0) return -1;
+        if (c == '\r') continue;   /* skip CR */
+        if (c == '\n') break;      /* LF = end of line */
+        buf[n++] = c;
+    }
+    buf[n] = '\0';
+    return n;
+}
+
 void handle_client(int client_sock) {
     char buffer[4096];
     char selected_folder[256] = "";   /* currently selected mailbox */
 
     /* Set a recv timeout so we don't block forever on half-closed connections */
-    struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
+    struct timeval tv = {.tv_sec = 3, .tv_usec = 0};
     setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     // 1. Greeting
@@ -27,10 +46,11 @@ void handle_client(int client_sock) {
     send(client_sock, greeting, strlen(greeting), 0);
 
     while (1) {
-        int bytes = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
-        if (bytes <= 0) break;
-        buffer[bytes] = 0;
-        printf("Client requested: %s", buffer);
+        /* Read one complete line (CRLF-terminated) at a time so fragmented
+         * TCP writes from the client don't split a command across two recvs. */
+        int bytes = readline_crlf(client_sock, buffer, (int)sizeof(buffer));
+        if (bytes < 0) break;
+        printf("Client requested: %s\n", buffer);
 
         // Extract Tag
         char tag[16] = {0};

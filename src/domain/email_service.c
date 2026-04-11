@@ -15,6 +15,8 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <poll.h>
+#include <sys/stat.h>
+#include <time.h>
 
 /* ── Column-aware printing ───────────────────────────────────────────── */
 
@@ -275,6 +277,25 @@ static void print_statusbar(int trows, int width, const char *text) {
 }
 
 /**
+ * Print a plain (non-reverse) info line at terminal row trows-1.
+ * Used as the second-from-bottom status row for persistent informational messages.
+ * If text is empty, the line is cleared to blank.
+ */
+static void print_infoline(int trows, int width, const char *text) {
+    fprintf(stderr, "\033[%d;1H\033[0m", trows - 1);
+    if (text && *text) {
+        fputs(text, stderr);
+        int used = visible_line_cols(text, text + strlen(text));
+        int pad  = width - used;
+        for (int i = 0; i < pad; i++) fputc(' ', stderr);
+    } else {
+        for (int i = 0; i < width; i++) fputc(' ', stderr);
+    }
+    fprintf(stderr, "\033[0m");
+    fflush(stderr);
+}
+
+/**
  * ANSI SGR state tracked while scanning skipped body lines.
  * Only the subset emitted by html_render() is handled.
  */
@@ -504,6 +525,89 @@ static void print_show_headers(const char *from, const char *subject,
     printf(SHOW_SEPARATOR);
 }
 
+/* ── Attachment picker ───────────────────────────────────────────────── */
+
+/* Determine the best directory to save attachments into.
+ * Prefers ~/Downloads if it exists, else falls back to ~.
+ * Returns a heap-allocated string the caller must free(). */
+static char *attachment_save_dir(void) {
+    const char *home = platform_home_dir();
+    if (!home) return strdup(".");
+    char dl[1024];
+    snprintf(dl, sizeof(dl), "%s/Downloads", home);
+    struct stat st;
+    if (stat(dl, &st) == 0 && S_ISDIR(st.st_mode))
+        return strdup(dl);
+    return strdup(home);
+}
+
+/* Sanitise a filename component for use in a path (strip path separators). */
+static char *safe_filename_for_path(const char *name) {
+    if (!name || !*name) return strdup("attachment");
+    char *s = strdup(name);
+    if (!s) return NULL;
+    for (char *p = s; *p; p++)
+        if (*p == '/' || *p == '\\') *p = '_';
+    return s;
+}
+
+/* Interactive attachment picker.
+ * Shows attachment list, lets user navigate with arrows and press Enter to
+ * pick one (or ESC/Backspace to cancel).
+ * Returns selected index (0-based), or -1 if cancelled. */
+static int show_attachment_picker(const MimeAttachment *atts, int count,
+                                  int tcols, int trows) {
+    int cursor = 0;
+    for (;;) {
+        printf("\033[0m\033[H\033[2J");
+        printf("  Attachments (%d):\n\n", count);
+        for (int i = 0; i < count; i++) {
+            const char *name  = atts[i].filename     ? atts[i].filename     : "(no name)";
+            const char *ctype = atts[i].content_type ? atts[i].content_type : "";
+            /* Format decoded size */
+            char sz[32];
+            if (atts[i].size >= 1024 * 1024)
+                snprintf(sz, sizeof(sz), "%.1f MB",
+                         (double)atts[i].size / (1024.0 * 1024.0));
+            else if (atts[i].size >= 1024)
+                snprintf(sz, sizeof(sz), "%.0f KB",
+                         (double)atts[i].size / 1024.0);
+            else
+                snprintf(sz, sizeof(sz), "%zu B", atts[i].size);
+
+            if (i == cursor)
+                printf("  \033[7m> %-36s  %-28s  %8s\033[0m\n", name, ctype, sz);
+            else
+                printf("    %-36s  %-28s  %8s\n", name, ctype, sz);
+        }
+        fflush(stdout);
+        char sb[160];
+        snprintf(sb, sizeof(sb),
+                 "  \u2191\u2193=select  Enter=save to ~/Downloads  ESC=back");
+        print_statusbar(trows, tcols, sb);
+
+        TermKey key = terminal_read_key();
+        switch (key) {
+        case TERM_KEY_BACK:
+        case TERM_KEY_ESC:
+        case TERM_KEY_QUIT:
+            return -1;
+        case TERM_KEY_ENTER:
+            return cursor;
+        case TERM_KEY_NEXT_LINE:
+        case TERM_KEY_NEXT_PAGE:
+            if (cursor < count - 1) cursor++;
+            break;
+        case TERM_KEY_PREV_LINE:
+        case TERM_KEY_PREV_PAGE:
+            if (cursor > 0) cursor--;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
 /**
  * Show a message in interactive pager mode.
  * Returns 0 = ESC (go back to list), 1 = q/quit entirely, -1 = error.
@@ -554,12 +658,21 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
     const char *body_text = body ? body : "(no readable text body)";
     char *body_wrapped = NULL; /* kept for free() at cleanup */
 
-#define SHOW_HDR_LINES_INT 5
+    /* Detect attachments once */
+    int att_count = 0;
+    MimeAttachment *atts = mime_list_attachments(raw, &att_count);
+
+/* Bottom two rows: row (trows-1) = info line, row trows = shortcut hints.
+ * Reserve one extra row compared to the previous single-line footer. */
+#define SHOW_HDR_LINES_INT 6
     int rows_avail  = (page_size > SHOW_HDR_LINES_INT)
                       ? page_size - SHOW_HDR_LINES_INT : 1;
     int body_vrows  = count_visual_rows(body_text, term_cols);
     int total_pages = (body_vrows + rows_avail - 1) / rows_avail;
     if (total_pages < 1) total_pages = 1;
+
+    /* Persistent info message — stays until replaced by a newer one */
+    char info_msg[2048] = "";
 
     int result = 0;
     for (int cur_line = 0;;) {
@@ -570,12 +683,24 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         fflush(stdout);
 
         int cur_page = cur_line / rows_avail + 1;
+
+        /* Info line (second from bottom) — persistent until overwritten */
+        print_infoline(term_rows, wrap_cols, info_msg);
+
+        /* Shortcut hints (bottom row) */
         {
             char sb[256];
-            snprintf(sb, sizeof(sb),
-                     "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                     "  Backspace=list  ESC=quit --",
-                     cur_page, total_pages);
+            if (att_count > 0) {
+                snprintf(sb, sizeof(sb),
+                         "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
+                         "  a=attach(%d)  Backspace=list  ESC=quit --",
+                         cur_page, total_pages, att_count);
+            } else {
+                snprintf(sb, sizeof(sb),
+                         "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
+                         "  Backspace=list  ESC=quit --",
+                         cur_page, total_pages);
+            }
             print_statusbar(term_rows, wrap_cols, sb);
         }
 
@@ -595,11 +720,10 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         {
             int next = cur_line + rows_avail;
             if (next < body_vrows) cur_line = next;
-            /* else: already on last page — stay */
         }
             break;
         case TERM_KEY_ENTER:
-            break;               /* Enter does not scroll */
+            break;
         case TERM_KEY_PREV_PAGE:
             cur_line -= rows_avail;
             if (cur_line < 0) cur_line = 0;
@@ -610,26 +734,72 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         case TERM_KEY_PREV_LINE:
             if (cur_line > 0) cur_line--;
             break;
-        case TERM_KEY_IGNORE:
+        case TERM_KEY_IGNORE: {
+            int ch = terminal_last_printable();
+            if (ch == 'a' && att_count > 0) {
+                int sel = show_attachment_picker(atts, att_count,
+                                                 term_cols, term_rows);
+                if (sel >= 0) {
+                    char *dir = attachment_save_dir();
+                    char *fname = safe_filename_for_path(atts[sel].filename);
+                    char dest[1024];
+                    snprintf(dest, sizeof(dest), "%s/%s",
+                             dir ? dir : ".", fname ? fname : "attachment");
+                    int r = mime_save_attachment(&atts[sel], dest);
+                    if (r == 0)
+                        snprintf(info_msg, sizeof(info_msg),
+                                 "  Saved: %.1900s", dest);
+                    else
+                        snprintf(info_msg, sizeof(info_msg),
+                                 "  Save FAILED: %.1900s", dest);
+                    free(dir);
+                    free(fname);
+                }
+            }
             break;
+        }
         }
     }
 show_int_done:
 #undef SHOW_HDR_LINES_INT
+    mime_free_attachments(atts, att_count);
     free(body); free(body_wrapped); free(from); free(subject); free(date); free(raw);
     return result;
 }
 
 /* ── List helpers ────────────────────────────────────────────────────── */
 
-typedef struct { int uid; int flags; } UIDEntry;
+typedef struct { int uid; int flags; time_t epoch; } MsgEntry;
+
+/* Parse "YYYY-MM-DD HH:MM" (manifest date format) to time_t in local time.
+ * Returns 0 on failure. */
+static time_t parse_manifest_date(const char *d) {
+    if (!d || !*d) return 0;
+    struct tm tm = {0};
+    if (sscanf(d, "%d-%d-%d %d:%d",
+               &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+               &tm.tm_hour, &tm.tm_min) != 5) return 0;
+    tm.tm_year -= 1900;
+    tm.tm_mon  -= 1;
+    tm.tm_isdst = -1;
+    return mktime(&tm);
+}
+
+/* Sort group: 0=unseen, 1=flagged (read), 2=rest */
+static int msg_group(int flags) {
+    if (flags & MSG_FLAG_UNSEEN)  return 0;
+    if (flags & MSG_FLAG_FLAGGED) return 1;
+    return 2;
+}
 
 static int cmp_uid_entry(const void *a, const void *b) {
-    const UIDEntry *ea = a, *eb = b;
-    int ua = (ea->flags & MSG_FLAG_UNSEEN) ? 1 : 0;
-    int ub = (eb->flags & MSG_FLAG_UNSEEN) ? 1 : 0;
-    if (ua != ub) return ub - ua;         /* unseen first */
-    return eb->uid - ea->uid;             /* newer (higher UID) first */
+    const MsgEntry *ea = a, *eb = b;
+    int ga = msg_group(ea->flags);
+    int gb = msg_group(eb->flags);
+    if (ga != gb) return ga - gb;         /* group order: unseen, flagged, rest */
+    /* Within group: newer date first; fall back to UID if date unavailable */
+    if (eb->epoch != ea->epoch) return (eb->epoch > ea->epoch) ? 1 : -1;
+    return eb->uid - ea->uid;
 }
 
 /* ── Folder list helpers ─────────────────────────────────────────────── */
@@ -857,7 +1027,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 
     int show_count = 0;
     int unseen_count = 0;
-    UIDEntry *entries = NULL;
+    MsgEntry *entries = NULL;
 
     /* Shared IMAP connection — populated in online mode, NULL in cron mode.
      * Kept alive for the full rendering loop so header fetches reuse it. */
@@ -884,11 +1054,12 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             }
         }
         show_count = manifest->count;
-        entries = malloc((size_t)show_count * sizeof(UIDEntry));
+        entries = malloc((size_t)show_count * sizeof(MsgEntry));
         if (!entries) { manifest_free(manifest); return -1; }
         for (int i = 0; i < show_count; i++) {
             entries[i].uid   = manifest->entries[i].uid;
             entries[i].flags = manifest->entries[i].flags;
+            entries[i].epoch = parse_manifest_date(manifest->entries[i].date);
         }
         for (int i = 0; i < show_count; i++)
             if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
@@ -970,7 +1141,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         }
 
         /* Build tagged entry array */
-        entries = malloc((size_t)show_count * sizeof(UIDEntry));
+        entries = malloc((size_t)show_count * sizeof(MsgEntry));
         if (!entries) { free(unseen_uids); free(flagged_uids); free(done_uids); free(all_uids); manifest_free(manifest); return -1; }
 
         for (int i = 0; i < show_count; i++) {
@@ -982,6 +1153,9 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                 if (flagged_uids[j] == all_uids[i]) { entries[i].flags |= MSG_FLAG_FLAGGED; break; }
             for (int j = 0; j < done_count;    j++)
                 if (done_uids[j]    == all_uids[i]) { entries[i].flags |= MSG_FLAG_DONE;    break; }
+            /* Try to get date from cached manifest (may be 0 if not yet fetched) */
+            ManifestEntry *me = manifest_find(manifest, all_uids[i]);
+            entries[i].epoch = me ? parse_manifest_date(me->date) : 0;
         }
         /* Compute unseen_count for the status line */
         for (int i = 0; i < show_count; i++)
@@ -1011,8 +1185,8 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         }
     }
 
-    /* Sort: unseen first, then descending UID */
-    qsort(entries, (size_t)show_count, sizeof(UIDEntry), cmp_uid_entry);
+    /* Sort: unseen → flagged → rest, within each group newest (highest UID) first */
+    qsort(entries, (size_t)show_count, sizeof(MsgEntry), cmp_uid_entry);
 
     int limit  = (opts->limit > 0) ? opts->limit : show_count;
     int cursor = (opts->offset > 1) ? opts->offset - 1 : 0;

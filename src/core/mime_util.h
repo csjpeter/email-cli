@@ -1,6 +1,8 @@
 #ifndef MIME_UTIL_H
 #define MIME_UTIL_H
 
+#include <stddef.h>
+
 /**
  * @file mime_util.h
  * @brief RFC 2822 header extraction and MIME body parsing utilities.
@@ -79,5 +81,46 @@ char *mime_get_html_part(const char *msg);
  * @return Heap-allocated content of exactly 'size' bytes, or NULL. Caller must free.
  */
 char *mime_extract_imap_literal(const char *response);
+
+/* ── Attachment support ─────────────────────────────────────────────── */
+
+/**
+ * @brief Describes one MIME attachment part (decoded, ready to save).
+ */
+typedef struct {
+    char          *filename;     /**< UTF-8 filename (may be auto-generated). */
+    char          *content_type; /**< MIME type, e.g. "application/pdf". */
+    unsigned char *data;         /**< Decoded binary content. */
+    size_t         size;         /**< Byte length of decoded content. */
+} MimeAttachment;
+
+/**
+ * @brief List all attachment parts in a MIME message.
+ *
+ * Walks the MIME tree and collects non-body parts.  Each attachment's body
+ * is decoded (base64 / quoted-printable) so that mime_save_attachment() can
+ * write it directly without re-parsing the original message.
+ *
+ * @param msg        Raw RFC 2822 message string.
+ * @param count_out  Set to the number of attachments found (0 = none).
+ * @return Heap-allocated array of MimeAttachment, or NULL if count is 0 or on
+ *         allocation failure.  Caller must free with mime_free_attachments().
+ */
+MimeAttachment *mime_list_attachments(const char *msg, int *count_out);
+
+/**
+ * @brief Free an attachment list returned by mime_list_attachments().
+ * Safe to call with NULL/0.
+ */
+void mime_free_attachments(MimeAttachment *list, int count);
+
+/**
+ * @brief Save a decoded attachment to a file path.
+ *
+ * @param att        Attachment from mime_list_attachments().
+ * @param dest_path  Destination file path (will be created or overwritten).
+ * @return 0 on success, -1 on error.
+ */
+int mime_save_attachment(const MimeAttachment *att, const char *dest_path);
 
 #endif /* MIME_UTIL_H */

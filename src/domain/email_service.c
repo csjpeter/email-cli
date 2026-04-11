@@ -1579,10 +1579,21 @@ int email_service_sync(const Config *cfg) {
             for (int j = 0; j < unseen_count; j++)
                 if (unseen_uids[j] == uid) { is_unseen = 1; break; }
 
+            /* Show progress BEFORE the potentially slow network fetch */
+            printf("  [%d/%d] UID %d...\r", i + 1, uid_count, uid);
+            fflush(stdout);
+
             /* Fetch full body if not cached */
             if (!local_msg_exists(folder, uid)) {
                 char *raw = imap_uid_fetch_body(sync_imap, uid);
                 if (raw) {
+                    /* Cache the header section extracted from the full body so
+                     * the subsequent manifest update needs no extra IMAP round-trip. */
+                    if (!local_hdr_exists(folder, uid)) {
+                        const char *sep4 = strstr(raw, "\r\n\r\n");
+                        size_t hlen = sep4 ? (size_t)(sep4 - raw + 4) : strlen(raw);
+                        local_hdr_save(folder, uid, raw, hlen);
+                    }
                     local_msg_save(folder, uid, raw, strlen(raw));
                     local_index_update(folder, uid, raw);
                     free(raw);
@@ -1596,7 +1607,7 @@ int email_service_sync(const Config *cfg) {
                 skipped++;
             }
 
-            /* Update manifest entry (headers from local cache or server) */
+            /* Update manifest entry (headers from local cache — now always warm) */
             ManifestEntry *me = manifest_find(manifest, uid);
             if (!me) {
                 char *hdrs   = fetch_uid_headers_via(sync_imap, folder, uid);
@@ -1616,7 +1627,7 @@ int email_service_sync(const Config *cfg) {
                 me->unseen = is_unseen;
             }
 
-            printf("  [%d/%d] UID %d\r", i + 1, uid_count, uid);
+            printf("  [%d/%d] UID %d   \r", i + 1, uid_count, uid);
             fflush(stdout);
         }
         free(unseen_uids);

@@ -1,5 +1,6 @@
 #include "imap_client.h"
 #include "imap_util.h"
+#include "local_store.h"
 #include "logger.h"
 #include "raii.h"
 #include <openssl/ssl.h>
@@ -709,4 +710,57 @@ char *imap_uid_fetch_headers(ImapClient *c, int uid) {
 
 char *imap_uid_fetch_body(ImapClient *c, int uid) {
     return uid_fetch_part(c, uid, "BODY.PEEK[]");
+}
+
+/* ── UID FETCH FLAGS ─────────────────────────────────────────────────── */
+
+/**
+ * Parse a `* N FETCH (... FLAGS (\Flag1 $keyword ...) ...)` untagged line
+ * and return a MSG_FLAG_* bitmask.
+ */
+static int parse_imap_flags(const char *line) {
+    /* Find FLAGS ( ... ) in the line */
+    const char *p = strstr(line, "FLAGS (");
+    if (!p) return 0;
+    p += 7; /* skip "FLAGS (" */
+    int flags = 0;
+    /* Check for known flags */
+    if (strstr(p, "\\Seen") == NULL) flags |= MSG_FLAG_UNSEEN;  /* absence of \Seen = unseen */
+    if (strstr(p, "\\Flagged") != NULL) flags |= MSG_FLAG_FLAGGED;
+    if (strstr(p, "$Done")     != NULL) flags |= MSG_FLAG_DONE;
+    return flags;
+}
+
+int imap_uid_fetch_flags(ImapClient *c, int uid) {
+    char tag[16];
+    if (send_cmd(c, tag, "UID FETCH %d (UID FLAGS)", uid) != 0) return -1;
+
+    Response resp = {0};
+    if (read_response(c, tag, &resp) != 0) {
+        response_free(&resp);
+        return -1;
+    }
+
+    int flags = -1;
+    for (int i = 0; i < resp.count; i++) {
+        if (strstr(resp.untagged[i], "FETCH") && strstr(resp.untagged[i], "FLAGS")) {
+            flags = parse_imap_flags(resp.untagged[i]);
+            break;
+        }
+    }
+    response_free(&resp);
+    return flags < 0 ? 0 : flags;
+}
+
+/* ── UID STORE (set/clear flag) ──────────────────────────────────────── */
+
+int imap_uid_set_flag(ImapClient *c, int uid, const char *flag_name, int add) {
+    char tag[16];
+    if (send_cmd(c, tag, "UID STORE %d %sFLAGS (%s)",
+                 uid, add ? "+" : "-", flag_name) != 0)
+        return -1;
+    Response resp = {0};
+    int rc = read_response(c, tag, &resp);
+    response_free(&resp);
+    return rc;
 }

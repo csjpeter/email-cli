@@ -498,7 +498,7 @@ Manifest *manifest_load(const char *folder) {
         e->from    = strdup(from_start);
         e->subject = strdup(subj_start);
         e->date    = strdup(date_start);
-        e->unseen  = unseen_val;
+        e->flags   = unseen_val;
 
         line = nl ? nl + 1 : line + strlen(line);
     }
@@ -534,7 +534,7 @@ int manifest_save(const char *folder, const Manifest *m) {
         RAII_STRING char *f = sanitise(e->from);
         RAII_STRING char *s = sanitise(e->subject);
         RAII_STRING char *d = sanitise(e->date);
-        fprintf(fp, "%d\t%s\t%s\t%s\t%d\n", e->uid, f ? f : "", s ? s : "", d ? d : "", e->unseen);
+        fprintf(fp, "%d\t%s\t%s\t%s\t%d\n", e->uid, f ? f : "", s ? s : "", d ? d : "", e->flags);
     }
     logger_log(LOG_DEBUG, "Manifest saved: %s (%d entries)", folder, m->count);
     return 0;
@@ -559,14 +559,14 @@ ManifestEntry *manifest_find(const Manifest *m, int uid) {
 }
 
 void manifest_upsert(Manifest *m, int uid,
-                     char *from, char *subject, char *date, int unseen) {
+                     char *from, char *subject, char *date, int flags) {
     if (!m) return;
     ManifestEntry *existing = manifest_find(m, uid);
     if (existing) {
         free(existing->from);    existing->from    = from;
         free(existing->subject); existing->subject = subject;
         free(existing->date);    existing->date    = date;
-        existing->unseen = unseen;
+        existing->flags = flags;
         return;
     }
     if (m->count == m->capacity) {
@@ -579,7 +579,7 @@ void manifest_upsert(Manifest *m, int uid,
     }
     ManifestEntry *e = &m->entries[m->count++];
     e->uid = uid; e->from = from; e->subject = subject; e->date = date;
-    e->unseen = unseen;
+    e->flags = flags;
 }
 
 void manifest_retain(Manifest *m, const int *keep_uids, int keep_count) {
@@ -663,6 +663,6 @@ void manifest_count_folder(const char *folder, int *total_out, int *unseen_out) 
     if (!m) return;
     *total_out  = m->count;
     for (int i = 0; i < m->count; i++)
-        if (m->entries[i].unseen) (*unseen_out)++;
+        if (m->entries[i].flags & MSG_FLAG_UNSEEN) (*unseen_out)++;
     manifest_free(m);
 }

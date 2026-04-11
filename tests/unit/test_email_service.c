@@ -527,16 +527,16 @@ void test_email_service(void) {
 
     /* ── cmp_uid_entry ───────────────────────────────────────────────── */
     {
-        UIDEntry a = {100, 1};  /* unseen */
-        UIDEntry b = {200, 0};  /* seen   */
-        /* unseen before seen (line 507-508) */
+        UIDEntry a = {100, MSG_FLAG_UNSEEN};  /* unseen */
+        UIDEntry b = {200, 0};               /* seen   */
+        /* unseen before seen */
         ASSERT(cmp_uid_entry(&a, &b) < 0, "cmp_uid_entry: unseen before seen");
         ASSERT(cmp_uid_entry(&b, &a) > 0, "cmp_uid_entry: seen after unseen");
     }
     {
-        UIDEntry c = {100, 1};
-        UIDEntry d = {200, 1};
-        /* both unseen: higher UID first (line 509) */
+        UIDEntry c = {100, MSG_FLAG_UNSEEN};
+        UIDEntry d = {200, MSG_FLAG_UNSEEN};
+        /* both unseen: higher UID first */
         ASSERT(cmp_uid_entry(&c, &d) > 0, "cmp_uid_entry: lower UID after higher");
         ASSERT(cmp_uid_entry(&d, &c) < 0, "cmp_uid_entry: higher UID before lower");
     }

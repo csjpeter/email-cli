@@ -132,6 +132,23 @@ char *imap_uid_fetch_headers(ImapClient *c, int uid);
 char *imap_uid_fetch_body(ImapClient *c, int uid);
 
 /**
+ * @brief Fetch the IMAP FLAGS for a single message (UID FETCH uid (UID FLAGS)).
+ *
+ * Returns a bitmask of MSG_FLAG_* from local_store.h, or -1 on error.
+ * Does NOT affect \Seen.
+ */
+int imap_uid_fetch_flags(ImapClient *c, int uid);
+
+/**
+ * @brief Set or clear a single IMAP flag on a message (UID STORE).
+ *
+ * @param flag_name  IMAP flag string, e.g. "\\Flagged" or "$Done".
+ * @param add        1 = add flag (+FLAGS), 0 = remove flag (-FLAGS).
+ * @return 0 on success, -1 on error.
+ */
+int imap_uid_set_flag(ImapClient *c, int uid, const char *flag_name, int add);
+
+/**
  * @brief Progress callback type for large literal downloads.
  *
  * @param received  Bytes received so far.

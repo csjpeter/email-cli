@@ -1473,6 +1473,31 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
     return 0;
 }
 
+/* ── Sync progress callback ──────────────────────────────────────────────── */
+
+typedef struct {
+    int    loop_i;     /* 1-based index of current UID in the loop */
+    int    loop_total; /* total UIDs in this folder */
+    int    uid;
+} SyncProgressCtx;
+
+static void fmt_size(char *buf, size_t bufsz, size_t bytes) {
+    if (bytes >= 1024 * 1024)
+        snprintf(buf, bufsz, "%.1f MB", (double)bytes / (1024.0 * 1024.0));
+    else
+        snprintf(buf, bufsz, "%zu KB", bytes / 1024);
+}
+
+static void sync_progress_cb(size_t received, size_t total, void *ctx) {
+    SyncProgressCtx *p = ctx;
+    char recv_s[32], total_s[32];
+    fmt_size(recv_s,  sizeof(recv_s),  received);
+    fmt_size(total_s, sizeof(total_s), total);
+    printf("  [%d/%d] UID %d  %s / %s ...\r",
+           p->loop_i, p->loop_total, p->uid, recv_s, total_s);
+    fflush(stdout);
+}
+
 int email_service_sync(const Config *cfg) {
     /* ── PID-file lock: exit immediately if another sync is running ──────── */
     char pid_path[2048] = {0};
@@ -1585,7 +1610,10 @@ int email_service_sync(const Config *cfg) {
 
             /* Fetch full body if not cached */
             if (!local_msg_exists(folder, uid)) {
+                SyncProgressCtx pctx = { i + 1, uid_count, uid };
+                imap_set_progress(sync_imap, sync_progress_cb, &pctx);
                 char *raw = imap_uid_fetch_body(sync_imap, uid);
+                imap_set_progress(sync_imap, NULL, NULL);
                 if (raw) {
                     /* Cache the header section extracted from the full body so
                      * the subsequent manifest update needs no extra IMAP round-trip. */

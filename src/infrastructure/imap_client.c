@@ -30,6 +30,10 @@ struct ImapClient {
     char     rbuf[RBUF_SIZE];
     size_t   rbuf_pos;  /* read position */
     size_t   rbuf_len;  /* bytes available */
+
+    /* Optional download-progress callback (set via imap_set_progress) */
+    ImapProgressFn on_progress;
+    void          *progress_ctx;
 };
 
 /* ── Low-level I/O ───────────────────────────────────────────────────── */
@@ -189,10 +193,16 @@ static int send_cmd(ImapClient *c, char tag_out[16], const char *fmt, ...) {
 
 /* ── Literal reader ──────────────────────────────────────────────────── */
 
+/* Minimum literal size (bytes) before the progress callback is invoked */
+#define PROGRESS_THRESHOLD (100 * 1024)
+/* Progress is reported every this many bytes */
+#define PROGRESS_CHUNK     (128 * 1024)
+
 /**
  * If line ends with `{N}`, read N literal bytes into a heap buffer.
  * `*lit_out` is set to the allocated buffer (NUL-terminated) and
  * `*lit_len` to N.  Returns 0 (no literal), N > 0 (literal read), -1 on error.
+ * Calls c->on_progress (if set) every PROGRESS_CHUNK bytes for large literals.
  */
 static long read_literal_if_present(ImapClient *c, const char *line,
                                     char **lit_out, size_t *lit_len) {
@@ -206,17 +216,45 @@ static long read_literal_if_present(ImapClient *c, const char *line,
     long sz = strtol(p + 1, &end, 10);
     if (*end != '}' || sz < 0) return 0;
 
-    /* Allocate and read */
+    /* Allocate output buffer */
     char *buf = malloc((size_t)sz + 1);
     if (!buf) return -1;
-    if (sz > 0 && rbuf_read_exact(c, buf, (size_t)sz) != 0) {
-        free(buf);
-        return -1;
+
+    if (sz > 0) {
+        size_t total = (size_t)sz;
+
+        if (!c->on_progress || total < PROGRESS_THRESHOLD) {
+            /* Small literal or no callback: read all at once */
+            if (rbuf_read_exact(c, buf, total) != 0) { free(buf); return -1; }
+        } else {
+            /* Large literal: read in chunks and report progress */
+            size_t got = 0;
+            size_t next_report = PROGRESS_CHUNK;
+            while (got < total) {
+                size_t want = PROGRESS_CHUNK < (total - got)
+                              ? PROGRESS_CHUNK : (total - got);
+                if (rbuf_read_exact(c, buf + got, want) != 0) {
+                    free(buf); return -1;
+                }
+                got += want;
+                if (got >= next_report || got == total) {
+                    c->on_progress(got, total, c->progress_ctx);
+                    next_report = got + PROGRESS_CHUNK;
+                }
+            }
+        }
     }
+
     buf[sz] = '\0';
     *lit_out = buf;
     *lit_len = (size_t)sz;
     return sz;
+}
+
+void imap_set_progress(ImapClient *c, ImapProgressFn fn, void *ctx) {
+    if (!c) return;
+    c->on_progress   = fn;
+    c->progress_ctx  = ctx;
 }
 
 /* ── Response reader ─────────────────────────────────────────────────── */

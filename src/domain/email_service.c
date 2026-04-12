@@ -800,7 +800,7 @@ static int sync_is_running(void) {
     FILE *pf = fopen(pid_path, "r");
     if (!pf) return 0;
     int pid = 0;
-    fscanf(pf, "%d", &pid);
+    (void)fscanf(pf, "%d", &pid);
     fclose(pf);
     if (pid <= 0) return 0;
     return platform_pid_is_program((pid_t)pid, "email-cli");

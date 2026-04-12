@@ -67,6 +67,27 @@ static void print_dbar(int n) {
 }
 
 /**
+ * Format an integer with space as thousands separator into buf (size >= 16).
+ * Returns buf.  Zero → empty string (blank cell).
+ */
+static char *fmt_thou(char *buf, size_t sz, int n) {
+    if (n <= 0) { buf[0] = '\0'; return buf; }
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%d", n);
+    int len = (int)strlen(tmp);
+    int out = 0;
+    for (int i = 0; i < len; i++) {
+        int rem = len - i;          /* digits remaining including this one */
+        if (i > 0 && rem % 3 == 0)
+            buf[out++] = ' ';
+        buf[out++] = tmp[i];
+    }
+    buf[out] = '\0';
+    (void)sz;
+    return buf;
+}
+
+/**
  * Soft-wrap text at word boundaries so no output line exceeds `width`
  * terminal columns (measured by wcwidth).  Long words that exceed `width`
  * are emitted on a line of their own.  Returns a heap-allocated string;
@@ -971,10 +992,10 @@ static void print_folder_item(char **names, int count, int i, char sep,
         const char *comp = strrchr(names[i], sep);
         printf("%s", comp ? comp + 1 : names[i]);
         /* Inline counts for tree mode */
-        char u[16] = "", f[16] = "", t[16] = "";
-        if (unseen   > 0) snprintf(u, sizeof(u), "%d", unseen);
-        if (flagged  > 0) snprintf(f, sizeof(f), "%d", flagged);
-        if (messages > 0) snprintf(t, sizeof(t), "%d", messages);
+        char u[16], f[16], t[16];
+        fmt_thou(u, sizeof(u), unseen);
+        fmt_thou(f, sizeof(f), flagged);
+        fmt_thou(t, sizeof(t), messages);
         if (u[0] || f[0] || t[0])
             printf("  %s/%s/%s", u, f, t);
     } else {
@@ -983,13 +1004,11 @@ static void print_folder_item(char **names, int count, int i, char sep,
         const char *display = comp ? comp + 1 : names[i];
         char name_buf[256];
         snprintf(name_buf, sizeof(name_buf), "%s%s", display, has_kids ? "/" : "");
-        char u[16] = "", f[16] = "";
-        if (unseen  > 0) snprintf(u, sizeof(u), "%d", unseen);
-        if (flagged > 0) snprintf(f, sizeof(f), "%d", flagged);
-        if (messages > 0)
-            printf("  %6s  %6s  %-*s  %7d", u, f, name_w, name_buf, messages);
-        else
-            printf("  %6s  %6s  %-*s  %7s", u, f, name_w, name_buf, "");
+        char u[16], f[16], t[16];
+        fmt_thou(u, sizeof(u), unseen);
+        fmt_thou(f, sizeof(f), flagged);
+        fmt_thou(t, sizeof(t), messages);
+        printf("  %6s  %6s  %-*s  %7s", u, f, name_w, name_buf, t);
     }
 
     if (selected) printf("\033[K\033[0m");
@@ -1508,15 +1527,16 @@ int email_service_list_folders(const Config *cfg, int tree) {
             int unseen   = statuses ? statuses[i].unseen   : 0;
             int flagged  = statuses ? statuses[i].flagged  : 0;
             int messages = statuses ? statuses[i].messages : 0;
-            char u[16] = "", f[16] = "";
-            if (unseen  > 0) snprintf(u, sizeof(u), "%d", unseen);
-            if (flagged > 0) snprintf(f, sizeof(f), "%d", flagged);
+            char u[16], f[16], t[16];
+            fmt_thou(u, sizeof(u), unseen);
+            fmt_thou(f, sizeof(f), flagged);
+            fmt_thou(t, sizeof(t), messages);
             if (messages == 0)
                 printf("\033[2m  %6s  %6s  %-*s  %7s\033[0m\n",
-                       u, f, name_w, folders[i], "");
+                       u, f, name_w, folders[i], t);
             else
-                printf("  %6s  %6s  %-*s  %7d\n",
-                       u, f, name_w, folders[i], messages);
+                printf("  %6s  %6s  %-*s  %7s\n",
+                       u, f, name_w, folders[i], t);
         }
     }
 

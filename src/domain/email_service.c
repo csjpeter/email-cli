@@ -731,7 +731,7 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
             if (att_count > 0) {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                         "  a=attach(%d)  Backspace=list  ESC=quit --",
+                         "  a=save  A=save-all(%d)  Backspace=list  ESC=quit --",
                          cur_page, total_pages, att_count);
             } else {
                 snprintf(sb, sizeof(sb),
@@ -815,6 +815,38 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
                                  r == 0 ? "  Saved: %.1900s"
                                         : "  Save FAILED: %.1900s", dest);
                     }
+                }
+            } else if (ch == 'A' && att_count > 0) {
+                /* Save ALL attachments to a chosen directory */
+                char *def_dir = attachment_save_dir();
+                char dest_dir[2048];
+                snprintf(dest_dir, sizeof(dest_dir), "%s",
+                         def_dir ? def_dir : ".");
+                free(def_dir);
+                InputLine il;
+                input_line_init(&il, dest_dir, sizeof(dest_dir), dest_dir);
+                path_complete_attach(&il);
+                int ok = input_line_run(&il, term_rows - 1, "Save all to: ");
+                path_complete_reset();
+                /* Clear the edited line and the completion row */
+                printf("\033[%d;1H\033[2K\033[%d;1H\033[2K\033[?25l",
+                       term_rows - 1, term_rows);
+                if (ok == 1) {
+                    int saved = 0;
+                    for (int i = 0; i < att_count; i++) {
+                        char *fname = safe_filename_for_path(atts[i].filename);
+                        char fpath[4096];
+                        snprintf(fpath, sizeof(fpath), "%s/%s",
+                                 dest_dir, fname ? fname : "attachment");
+                        free(fname);
+                        if (mime_save_attachment(&atts[i], fpath) == 0)
+                            saved++;
+                    }
+                    snprintf(info_msg, sizeof(info_msg),
+                             saved == att_count
+                             ? "  Saved %d/%d files to: %.1900s"
+                             : "  Saved %d/%d (errors) to: %.1900s",
+                             saved, att_count, dest_dir);
                 }
             }
             break;

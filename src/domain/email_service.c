@@ -573,7 +573,7 @@ static void print_show_headers(const char *from, const char *subject,
 
 /* Completion state: persists across Tab presses for cycling. */
 static struct {
-    char (*names)[258]; /* sorted match names (with trailing '/' for dirs) */
+    char (*names)[256]; /* sorted match names (bare, no trailing '/') */
     int   count;
     int   idx;          /* currently highlighted entry */
     int   view_start;   /* first visible entry in the display row */
@@ -673,18 +673,13 @@ static void path_tab_fn(InputLine *il) {
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
             if (g_comp.count == cap) {
                 int nc = cap ? cap * 2 : 16;
-                char (*tmp)[258] = realloc(g_comp.names,
+                char (*tmp)[256] = realloc(g_comp.names,
                                            (size_t)nc * sizeof(*g_comp.names));
                 if (!tmp) { closedir(d); g_comp_free(); return; }
                 g_comp.names = tmp;
                 cap = nc;
             }
-            char full[4096];
-            snprintf(full, sizeof(full), "%s%s", g_comp.dir, ent->d_name);
-            struct stat st;
-            int is_dir = (stat(full, &st) == 0 && S_ISDIR(st.st_mode));
-            snprintf(g_comp.names[g_comp.count], 258,
-                     "%s%s", ent->d_name, is_dir ? "/" : "");
+            snprintf(g_comp.names[g_comp.count], 256, "%s", ent->d_name);
             g_comp.count++;
         }
         closedir(d);

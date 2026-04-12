@@ -109,6 +109,7 @@ TermKey terminal_read_key(void) {
             case 'D': result = TERM_KEY_LEFT;      break;  /* ESC[D — Left        */
             case 'H': result = TERM_KEY_HOME;      break;  /* ESC[H — Home        */
             case 'F': result = TERM_KEY_END;       break;  /* ESC[F — End         */
+            case 'Z': result = TERM_KEY_SHIFT_TAB; break;  /* ESC[Z — Shift+Tab   */
             case '1': { int nx=read_byte(); result=(nx=='~')?TERM_KEY_HOME:TERM_KEY_IGNORE; break; } /* ESC[1~ Home */
             case '3': { read_byte(); result = TERM_KEY_DELETE;    break; } /* ESC[3~ Delete */
             case '4': { read_byte(); result = TERM_KEY_END;       break; } /* ESC[4~ End    */

@@ -116,10 +116,11 @@ static void il_render(const InputLine *il, int trow, const char *prompt) {
 
 void input_line_init(InputLine *il, char *buf, size_t bufsz,
                      const char *initial_text) {
-    il->buf          = buf;
-    il->bufsz        = bufsz;
-    il->trow         = 0;
-    il->render_below = NULL;
+    il->buf           = buf;
+    il->bufsz         = bufsz;
+    il->trow          = 0;
+    il->render_below  = NULL;
+    il->shift_tab_fn  = NULL;
     if (initial_text) {
         size_t n = strlen(initial_text);
         if (n >= bufsz) n = bufsz - 1;
@@ -183,6 +184,10 @@ int input_line_run(InputLine *il, int trow, const char *prompt,
 
         case TERM_KEY_TAB:
             if (tab_fn) tab_fn(il);
+            break;
+
+        case TERM_KEY_SHIFT_TAB:
+            if (il->shift_tab_fn) il->shift_tab_fn(il);
             break;
 
         case TERM_KEY_IGNORE: {

@@ -99,15 +99,17 @@ static void il_insert(InputLine *il, char ch) {
 
 /* ── Rendering ───────────────────────────────────────────────────────── */
 
-static void il_render(const InputLine *il, int trow, const char *prompt) {
-    /* Move to row, clear line, print prompt and text */
-    printf("\033[%d;1H\033[2K  %s%s", trow, prompt, il->buf);
+/** Returns the 1-based cursor column for the current insertion point. */
+static int il_cursor_col(const InputLine *il, const char *prompt) {
+    return 3 /* indent */ + display_cols(prompt, strlen(prompt))
+                          + display_cols(il->buf, il->cur);
+}
 
-    /* Position the real terminal cursor at the insertion point */
-    int col = 3 /* indent */ + display_cols(prompt, strlen(prompt))
-                             + display_cols(il->buf, il->cur);
-    printf("\033[%d;%dH\033[?25h", trow, col);
-    fflush(stdout);
+static void il_render(const InputLine *il, int trow, const char *prompt) {
+    /* Move to row, clear line, print prompt and text — do NOT position the
+     * cursor yet; input_line_run does that after render_below so the cursor
+     * always ends up on the input row regardless of what render_below drew. */
+    printf("\033[%d;1H\033[2K  %s%s", trow, prompt, il->buf);
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
@@ -137,6 +139,10 @@ int input_line_run(InputLine *il, int trow, const char *prompt,
     for (;;) {
         il_render(il, trow, prompt);
         if (il->render_below) il->render_below(il);
+        /* Always reposition cursor on the input row after render_below
+         * (which may have left the cursor elsewhere). */
+        printf("\033[%d;%dH\033[?25h", trow, il_cursor_col(il, prompt));
+        fflush(stdout);
 
         TermKey key = terminal_read_key();
         switch (key) {

@@ -103,12 +103,19 @@ TermKey terminal_read_key(void) {
         if (c2 == '[') {
             int c3 = read_byte();
             switch (c3) {
-            case 'A': result = TERM_KEY_PREV_LINE; break;  /* ESC[A — Up arrow    */
-            case 'B': result = TERM_KEY_NEXT_LINE; break;  /* ESC[B — Down arrow  */
-            case 'C': result = TERM_KEY_IGNORE;    break;  /* ESC[C — Right arrow */
-            case 'D': result = TERM_KEY_IGNORE;    break;  /* ESC[D — Left arrow  */
-            case '5': read_byte(); result = TERM_KEY_PREV_PAGE; break; /* ESC[5~ PgUp */
-            case '6': read_byte(); result = TERM_KEY_NEXT_PAGE; break; /* ESC[6~ PgDn */
+            case 'A': result = TERM_KEY_PREV_LINE; break;  /* ESC[A — Up          */
+            case 'B': result = TERM_KEY_NEXT_LINE; break;  /* ESC[B — Down        */
+            case 'C': result = TERM_KEY_RIGHT;     break;  /* ESC[C — Right       */
+            case 'D': result = TERM_KEY_LEFT;      break;  /* ESC[D — Left        */
+            case 'H': result = TERM_KEY_HOME;      break;  /* ESC[H — Home        */
+            case 'F': result = TERM_KEY_END;       break;  /* ESC[F — End         */
+            case '1': { int nx=read_byte(); result=(nx=='~')?TERM_KEY_HOME:TERM_KEY_IGNORE; break; } /* ESC[1~ Home */
+            case '3': { read_byte(); result = TERM_KEY_DELETE;    break; } /* ESC[3~ Delete */
+            case '4': { read_byte(); result = TERM_KEY_END;       break; } /* ESC[4~ End    */
+            case '5': { read_byte(); result = TERM_KEY_PREV_PAGE; break; } /* ESC[5~ PgUp   */
+            case '6': { read_byte(); result = TERM_KEY_NEXT_PAGE; break; } /* ESC[6~ PgDn   */
+            case '7': { read_byte(); result = TERM_KEY_HOME;      break; } /* ESC[7~ Home   */
+            case '8': { read_byte(); result = TERM_KEY_END;       break; } /* ESC[8~ End    */
             default:
                 if (c3 != -1) {
                     int ch;

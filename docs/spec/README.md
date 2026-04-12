@@ -13,6 +13,7 @@ It is written at a level of detail sufficient to re-implement the program from s
 | [local-store.md](local-store.md) | Local store layout, reverse digit bucketing, text indexes, eviction |
 | [pagination.md](pagination.md) | Pagination logic, terminal detection, interactive pager |
 | [html-rendering.md](html-rendering.md) | MIME part selection, HTML parser, renderer, ANSI colour policy, pager integration |
+| [input-line.md](input-line.md) | InputLine single-line editor widget and PathComplete Tab-completion module |
 
 ## Relationship to other docs
 

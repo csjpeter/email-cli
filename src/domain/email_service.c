@@ -1,4 +1,5 @@
 #include "email_service.h"
+#include "input_line.h"
 #include "imap_client.h"
 #include "local_store.h"
 #include "mime_util.h"
@@ -219,6 +220,11 @@ static int pager_prompt(int cur_page, int total_pages, int page_size,
         case TERM_KEY_PREV_LINE: return -1;
         case TERM_KEY_ENTER:
         case TERM_KEY_TAB:
+        case TERM_KEY_LEFT:
+        case TERM_KEY_RIGHT:
+        case TERM_KEY_HOME:
+        case TERM_KEY_END:
+        case TERM_KEY_DELETE:
         case TERM_KEY_IGNORE:    continue;
         }
     }
@@ -664,33 +670,12 @@ static char *safe_filename_for_path(const char *name) {
     return s;
 }
 
-/* Inline single-line path editor rendered at row `trow` of the terminal.
- * `buf` must be pre-filled with the suggested path (NUL-terminated).
- * Returns 0 if user confirmed (Enter), -1 if cancelled (ESC/Backspace/Quit). */
-static int line_edit_path(char *buf, size_t bufsz, int trow, int tcols) {
-    size_t len = strlen(buf);
-    (void)tcols;
-    for (;;) {
-        printf("\033[%d;1H\033[K", trow);
-        printf("  Save as: \033[7m%s \033[0m", buf);
-        fflush(stdout);
-
-        TermKey key = terminal_read_key();
-        if (key == TERM_KEY_ENTER)
-            return 0;
-        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || key == TERM_KEY_BACK)
-            return -1;
-        if (key == TERM_KEY_TAB) {
-            complete_path(buf, bufsz);
-            len = strlen(buf);
-        } else if (key == TERM_KEY_IGNORE) {
-            int ch = terminal_last_printable();
-            if (ch > 0 && (unsigned char)ch < 128 && len + 1 < bufsz) {
-                buf[len++] = (char)ch;
-                buf[len]   = '\0';
-            }
-        }
-    }
+/* Tab-completion callback for path editing: calls complete_path() and
+ * moves the InputLine cursor to the end of the completed string. */
+static void path_tab_fn(InputLine *il) {
+    complete_path(il->buf, il->bufsz);
+    il->len = strlen(il->buf);
+    il->cur = il->len;
 }
 
 /* Attachment picker: full-screen list, navigate with arrows, Enter to select.
@@ -870,6 +855,11 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         case TERM_KEY_PREV_LINE:
             if (cur_line > 0) cur_line--;
             break;
+        case TERM_KEY_LEFT:
+        case TERM_KEY_RIGHT:
+        case TERM_KEY_HOME:
+        case TERM_KEY_END:
+        case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
@@ -893,11 +883,13 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
                              dir ? dir : ".", fname ? fname : "attachment");
                     free(dir);
                     free(fname);
-                    int ok = line_edit_path(dest, sizeof(dest),
-                                            term_rows - 1, term_cols);
+                    InputLine il;
+                    input_line_init(&il, dest, sizeof(dest), dest);
+                    int ok = input_line_run(&il, term_rows - 1,
+                                            "Save as: ", path_tab_fn);
                     /* Clear the edited line */
-                    printf("\033[%d;1H\033[K", term_rows - 1);
-                    if (ok == 0) {
+                    printf("\033[%d;1H\033[2K\033[?25l", term_rows - 1);
+                    if (ok == 1) {
                         int r = mime_save_attachment(&atts[sel], dest);
                         snprintf(info_msg, sizeof(info_msg),
                                  r == 0 ? "  Saved: %.1900s"
@@ -1574,6 +1566,11 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                 /* ret == 0: Backspace → back to list; ret == -1: error → stay */
             }
             break;
+        case TERM_KEY_LEFT:
+        case TERM_KEY_RIGHT:
+        case TERM_KEY_HOME:
+        case TERM_KEY_END:
+        case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
@@ -1892,6 +1889,11 @@ char *email_service_list_folders_interactive(const Config *cfg,
             cursor -= limit;
             if (cursor < 0) cursor = 0;
             break;
+        case TERM_KEY_LEFT:
+        case TERM_KEY_RIGHT:
+        case TERM_KEY_HOME:
+        case TERM_KEY_END:
+        case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
         case TERM_KEY_IGNORE:
             if (terminal_last_printable() == 't') {

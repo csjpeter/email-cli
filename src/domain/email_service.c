@@ -983,11 +983,13 @@ static void print_folder_item(char **names, int count, int i, char sep,
         const char *display = comp ? comp + 1 : names[i];
         char name_buf[256];
         snprintf(name_buf, sizeof(name_buf), "%s%s", display, has_kids ? "/" : "");
-        char u[16] = "", f[16] = "", t[16] = "";
-        if (unseen   > 0) snprintf(u, sizeof(u), "%d", unseen);
-        if (flagged  > 0) snprintf(f, sizeof(f), "%d", flagged);
-        if (messages > 0) snprintf(t, sizeof(t), "%d", messages);
-        printf("  %6s  %6s  %-*s  %7s", u, f, name_w, name_buf, t);
+        char u[16] = "", f[16] = "";
+        if (unseen  > 0) snprintf(u, sizeof(u), "%d", unseen);
+        if (flagged > 0) snprintf(f, sizeof(f), "%d", flagged);
+        if (messages > 0)
+            printf("  %6s  %6s  %-*s  %7d", u, f, name_w, name_buf, messages);
+        else
+            printf("  %6s  %6s  %-*s  %7s", u, f, name_w, name_buf, "");
     }
 
     if (selected) printf("\033[K\033[0m");
@@ -1506,16 +1508,15 @@ int email_service_list_folders(const Config *cfg, int tree) {
             int unseen   = statuses ? statuses[i].unseen   : 0;
             int flagged  = statuses ? statuses[i].flagged  : 0;
             int messages = statuses ? statuses[i].messages : 0;
-            char u[16] = "", f[16] = "", t[16] = "";
-            if (unseen   > 0) snprintf(u, sizeof(u), "%d", unseen);
-            if (flagged  > 0) snprintf(f, sizeof(f), "%d", flagged);
-            if (messages > 0) snprintf(t, sizeof(t), "%d", messages);
+            char u[16] = "", f[16] = "";
+            if (unseen  > 0) snprintf(u, sizeof(u), "%d", unseen);
+            if (flagged > 0) snprintf(f, sizeof(f), "%d", flagged);
             if (messages == 0)
                 printf("\033[2m  %6s  %6s  %-*s  %7s\033[0m\n",
-                       u, f, name_w, folders[i], t);
+                       u, f, name_w, folders[i], "");
             else
-                printf("  %6s  %6s  %-*s  %7s\n",
-                       u, f, name_w, folders[i], t);
+                printf("  %6s  %6s  %-*s  %7d\n",
+                       u, f, name_w, folders[i], messages);
         }
     }
 
@@ -1608,8 +1609,8 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
         /* Compute name column width for flat mode */
         int tcols_f = terminal_cols();
-        /* Fixed: "  " + 6 (unread) + "  " + 6 (flagged) + "  " + name_w + "  " + 7 (total) = name_w + 27 */
-        int name_w = tcols_f - 27;
+        /* Fixed: "  " + 6 (unread) + "  " + 6 (flagged) + "  " + name_w + "  " + 7 (total) = name_w + 27; -1 safety */
+        int name_w = tcols_f - 28;
         if (name_w < 20) name_w = 20;
 
         printf("\033[H\033[2J");

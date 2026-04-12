@@ -1608,8 +1608,8 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
         /* Compute name column width for flat mode */
         int tcols_f = terminal_cols();
-        /* Fixed: "  " + 6 (unread) + "  " + 6 (flagged) + "  " + name_w + "  " + 7 (total) = name_w + 25 */
-        int name_w = tcols_f - 25;
+        /* Fixed: "  " + 6 (unread) + "  " + 6 (flagged) + "  " + name_w + "  " + 7 (total) = name_w + 27 */
+        int name_w = tcols_f - 27;
         if (name_w < 20) name_w = 20;
 
         printf("\033[H\033[2J");

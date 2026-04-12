@@ -114,8 +114,10 @@ static void il_render(const InputLine *il, int trow, const char *prompt) {
 
 void input_line_init(InputLine *il, char *buf, size_t bufsz,
                      const char *initial_text) {
-    il->buf   = buf;
-    il->bufsz = bufsz;
+    il->buf          = buf;
+    il->bufsz        = bufsz;
+    il->trow         = 0;
+    il->render_below = NULL;
     if (initial_text) {
         size_t n = strlen(initial_text);
         if (n >= bufsz) n = bufsz - 1;
@@ -131,19 +133,21 @@ void input_line_init(InputLine *il, char *buf, size_t bufsz,
 
 int input_line_run(InputLine *il, int trow, const char *prompt,
                    InputLineTabFn tab_fn) {
+    il->trow = trow;
     for (;;) {
         il_render(il, trow, prompt);
+        if (il->render_below) il->render_below(il);
 
         TermKey key = terminal_read_key();
         switch (key) {
         case TERM_KEY_ENTER:
-            printf("\033[?25l");
+            printf("\033[%d;1H\033[2K\033[?25l", trow + 1);
             fflush(stdout);
             return 1;
 
         case TERM_KEY_ESC:
         case TERM_KEY_QUIT:
-            printf("\033[?25l");
+            printf("\033[%d;1H\033[2K\033[?25l", trow + 1);
             fflush(stdout);
             return 0;
 

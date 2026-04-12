@@ -949,7 +949,13 @@ static int build_flat_view(char **names, int count, char sep,
 static void print_folder_item(char **names, int count, int i, char sep,
                                int tree_mode, int selected, int has_kids,
                                int messages, int unseen) {
-    if (selected) printf("\033[7m");
+    if (selected) {
+        printf("\033[7m");
+    } else if (unseen > 0) {
+        printf("\033[1m");          /* bold: has unread */
+    } else if (messages == 0) {
+        printf("\033[2m");          /* dim: empty folder */
+    }
 
     if (tree_mode) {
         int depth = 0;
@@ -970,10 +976,15 @@ static void print_folder_item(char **names, int count, int i, char sep,
         printf("  %s%s", display, has_kids ? "/" : "");
     }
 
-    if (messages > 0 || unseen > 0)
-        printf(" (%d/%d)", unseen, messages);
+    if (messages > 0 || unseen > 0) {
+        if (!selected && unseen > 0)
+            printf(" \033[1m(%d\033[0m\033[1m/%d)\033[0m", unseen, messages);
+        else
+            printf(" (%d/%d)", unseen, messages);
+    }
 
     if (selected) printf("\033[K\033[0m");
+    else if (unseen > 0 || messages == 0) printf("\033[0m");
     printf("\n");
 }
 
@@ -1243,10 +1254,19 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 
         if (opts->pager) printf("\033[H\033[2J");
 
-        /* Count / status line — reverse video, full terminal width */
-        printf("\033[7m  %d-%d of %d message(s) in %s (%d unread).%s\033[K\033[0m\n\n",
-               wstart + 1, wend, show_count, folder, unseen_count,
-               sync_is_running() ? "  \u21bb syncing..." : "");
+        /* Count / status line — reverse video, padded to full terminal width */
+        {
+            char cl[512];
+            int sync = sync_is_running();
+            snprintf(cl, sizeof(cl),
+                     "  %d-%d of %d message(s) in %s (%d unread).%s",
+                     wstart + 1, wend, show_count, folder, unseen_count,
+                     sync ? "  \u21bb syncing..." : "");
+            printf("\033[7m%s", cl);
+            int used = visible_line_cols(cl, cl + strlen(cl));
+            for (int p = used; p < tcols; p++) putchar(' ');
+            printf("\033[0m\n\n");
+        }
         printf("  %5s  %-16s  %-4s  %-*s  %s\n",
                "UID", "Date", "Sts", subj_w, "Subject", "From");
         printf("  \u2550\u2550\u2550\u2550\u2550  ");
@@ -1468,12 +1488,21 @@ int email_service_list_folders(const Config *cfg, int tree) {
     if (tree) {
         render_folder_tree(folders, count, sep, statuses);
     } else {
-        for (int i = 0; i < count; i++) {
-            if (statuses && (statuses[i].messages > 0 || statuses[i].unseen > 0))
-                printf("%s (%d/%d)\n", folders[i],
-                       statuses[i].unseen, statuses[i].messages);
-            else
-                printf("%s\n", folders[i]);
+        /* Print unread folders first, then the rest */
+        for (int pass = 0; pass < 2; pass++) {
+            for (int i = 0; i < count; i++) {
+                int unseen  = statuses ? statuses[i].unseen   : 0;
+                int messages = statuses ? statuses[i].messages : 0;
+                if ((pass == 0) != (unseen > 0)) continue;
+                if (unseen > 0)
+                    printf("\033[1m%s (%d/%d)\033[0m\n",
+                           folders[i], unseen, messages);
+                else if (messages > 0)
+                    printf("%s \033[2m(%d/%d)\033[0m\n",
+                           folders[i], unseen, messages);
+                else
+                    printf("\033[2m%s\033[0m\n", folders[i]);
+            }
         }
     }
 
@@ -1554,6 +1583,16 @@ char *email_service_list_folders_interactive(const Config *cfg,
             display_count = count;
         } else {
             vcount = build_flat_view(folders, count, sep, current_prefix, vis);
+            /* Stable partition: folders with unread first */
+            if (statuses) {
+                int tmp[1024];
+                int ni = 0;
+                for (int k = 0; k < vcount; k++)
+                    if (statuses[vis[k]].unseen > 0) tmp[ni++] = vis[k];
+                for (int k = 0; k < vcount; k++)
+                    if (statuses[vis[k]].unseen == 0) tmp[ni++] = vis[k];
+                memcpy(vis, tmp, (size_t)vcount * sizeof(int));
+            }
             display_count = vcount;
         }
         if (cursor >= display_count && display_count > 0)

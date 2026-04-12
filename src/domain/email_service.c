@@ -590,11 +590,12 @@ static int name_cmp(const void *a, const void *b) {
     return strcmp((const char *)a, (const char *)b);
 }
 
-/* Render the completion bar one row below the input line. */
+/* Render the completion bar one row below the input line.
+ * Does nothing when there are no completions (preserves status bar). */
 static void render_completions(const InputLine *il) {
+    if (g_comp.count == 0) return; /* nothing to show; leave status bar intact */
     int row = il->trow + 1;
     printf("\033[%d;1H\033[2K", row);
-    if (g_comp.count == 0) { fflush(stdout); return; }
 
     int tcols = terminal_cols();
 

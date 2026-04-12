@@ -14,7 +14,8 @@ typedef enum {
     TERM_KEY_IGNORE    = 5,  /* unknown / left / right / Space  */
     TERM_KEY_ENTER     = 6,  /* Enter (\n or \r)                */
     TERM_KEY_ESC       = 7,  /* bare ESC                        */
-    TERM_KEY_BACK      = 8   /* Backspace / DEL                 */
+    TERM_KEY_BACK      = 8,  /* Backspace / DEL                 */
+    TERM_KEY_TAB       = 9   /* Tab (\t)                        */
 } TermKey;
 
 /** Opaque saved terminal state (used for raw-mode enter/exit). */

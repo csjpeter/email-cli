@@ -152,6 +152,28 @@ char **local_folder_list_load(int *count_out, char *sep_out);
 void manifest_count_folder(const char *folder, int *total_out,
                             int *unseen_out, int *flagged_out);
 
+/* ── Pending flag changes (server sync queue) ────────────────────────── */
+
+/**
+ * One pending IMAP flag change that has not yet been pushed to the server.
+ */
+typedef struct {
+    int  uid;
+    char flag_name[64];  /**< e.g. "\\Seen", "\\Flagged", "$Done" */
+    int  add;            /**< 1 = add flag, 0 = remove flag */
+} PendingFlag;
+
+/** @brief Appends a flag change to the pending queue for a folder. */
+int local_pending_flag_add(const char *folder, int uid,
+                            const char *flag_name, int add);
+
+/** @brief Loads all pending flag changes for a folder.
+ *  Returns heap-allocated array (caller must free), or NULL if none. */
+PendingFlag *local_pending_flag_load(const char *folder, int *count_out);
+
+/** @brief Removes the pending flag queue file for a folder. */
+void local_pending_flag_clear(const char *folder);
+
 /* ── UI preferences ──────────────────────────────────────────────────── */
 
 /** @brief Reads an integer UI preference. */

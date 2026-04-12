@@ -791,6 +791,21 @@ static time_t parse_manifest_date(const char *d) {
     return mktime(&tm);
 }
 
+/* Return 1 if a background sync process is currently running. */
+static int sync_is_running(void) {
+    const char *cache_base = platform_cache_dir();
+    if (!cache_base) return 0;
+    char pid_path[2048];
+    snprintf(pid_path, sizeof(pid_path), "%s/email-cli/sync.pid", cache_base);
+    FILE *pf = fopen(pid_path, "r");
+    if (!pf) return 0;
+    int pid = 0;
+    fscanf(pf, "%d", &pid);
+    fclose(pf);
+    if (pid <= 0) return 0;
+    return platform_pid_is_program((pid_t)pid, "email-cli");
+}
+
 /* Sort group: 0=unseen, 1=flagged (read), 2=rest */
 static int msg_group(int flags) {
     if (flags & MSG_FLAG_UNSEEN)  return 0;
@@ -1228,9 +1243,10 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
 
         if (opts->pager) printf("\033[H\033[2J");
 
-        /* Count / status line */
-        printf("%d-%d of %d message(s) in %s (%d unread).\n\n",
-               wstart + 1, wend, show_count, folder, unseen_count);
+        /* Count / status line — reverse video, full terminal width */
+        printf("\033[7m  %d-%d of %d message(s) in %s (%d unread).%s\033[K\033[0m\n\n",
+               wstart + 1, wend, show_count, folder, unseen_count,
+               sync_is_running() ? "  \u21bb syncing..." : "");
         printf("  %5s  %-16s  %-4s  %-*s  %s\n",
                "UID", "Date", "Sts", subj_w, "Subject", "From");
         printf("  \u2550\u2550\u2550\u2550\u2550  ");

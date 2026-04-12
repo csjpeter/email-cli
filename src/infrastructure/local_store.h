@@ -145,10 +145,12 @@ char **local_folder_list_load(int *count_out, char *sep_out);
  * not exist both outputs are set to 0.
  *
  * @param folder     Folder name.
- * @param total_out  Set to total message count.
- * @param unseen_out Set to unseen message count.
+ * @param total_out    Set to total message count.
+ * @param unseen_out   Set to unseen message count.
+ * @param flagged_out  Set to flagged message count.
  */
-void manifest_count_folder(const char *folder, int *total_out, int *unseen_out);
+void manifest_count_folder(const char *folder, int *total_out,
+                            int *unseen_out, int *flagged_out);
 
 /* ── UI preferences ──────────────────────────────────────────────────── */
 

@@ -657,12 +657,15 @@ char **local_folder_list_load(int *count_out, char *sep_out) {
     return folders;
 }
 
-void manifest_count_folder(const char *folder, int *total_out, int *unseen_out) {
-    *total_out = 0; *unseen_out = 0;
+void manifest_count_folder(const char *folder, int *total_out,
+                            int *unseen_out, int *flagged_out) {
+    *total_out = 0; *unseen_out = 0; *flagged_out = 0;
     Manifest *m = manifest_load(folder);
     if (!m) return;
-    *total_out  = m->count;
-    for (int i = 0; i < m->count; i++)
-        if (m->entries[i].flags & MSG_FLAG_UNSEEN) (*unseen_out)++;
+    *total_out = m->count;
+    for (int i = 0; i < m->count; i++) {
+        if (m->entries[i].flags & MSG_FLAG_UNSEEN)  (*unseen_out)++;
+        if (m->entries[i].flags & MSG_FLAG_FLAGGED) (*flagged_out)++;
+    }
     manifest_free(m);
 }

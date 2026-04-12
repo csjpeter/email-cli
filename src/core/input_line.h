@@ -13,6 +13,7 @@
  *   Backspace    delete character before cursor
  *   Delete       delete character at cursor
  *   Tab          calls optional tab_fn callback (e.g. path completion)
+ *   Shift+Tab    calls optional shift_tab_fn callback (reverse completion)
  *   Enter        confirm → returns 1
  *   ESC / Ctrl-C cancel → returns 0
  *
@@ -32,6 +33,8 @@ struct InputLine {
     /** Optional hook called after each standard render (e.g. for
      *  drawing a completion list below the input row).  May be NULL. */
     void (*render_below)(const struct InputLine *);
+    /** Callback for Shift+Tab (reverse completion).  May be NULL. */
+    void (*shift_tab_fn)(struct InputLine *);
 };
 
 /** Callback type for Tab key (e.g. path completion).

@@ -220,6 +220,7 @@ static int pager_prompt(int cur_page, int total_pages, int page_size,
         case TERM_KEY_PREV_LINE: return -1;
         case TERM_KEY_ENTER:
         case TERM_KEY_TAB:
+        case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_LEFT:
         case TERM_KEY_RIGHT:
         case TERM_KEY_HOME:
@@ -699,6 +700,17 @@ static void path_tab_fn(InputLine *il) {
     snprintf(g_comp.expected, sizeof(g_comp.expected), "%s", il->buf);
 }
 
+/* Shift+Tab: cycle backwards through the existing completion list. */
+static void path_shift_tab_fn(InputLine *il) {
+    if (g_comp.count == 0 || strcmp(il->buf, g_comp.expected) != 0)
+        return; /* no active list or user edited — ignore */
+    g_comp.idx = (g_comp.idx + g_comp.count - 1) % g_comp.count;
+    snprintf(il->buf, il->bufsz, "%s%s", g_comp.dir, g_comp.names[g_comp.idx]);
+    il->len = strlen(il->buf);
+    il->cur = il->len;
+    snprintf(g_comp.expected, sizeof(g_comp.expected), "%s", il->buf);
+}
+
 /* Determine the best directory to save attachments into.
  * Prefers ~/Downloads if it exists, else falls back to ~.
  * Returns a heap-allocated string the caller must free(). */
@@ -906,6 +918,7 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         case TERM_KEY_END:
         case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
+        case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
             if (ch == 'a' && att_count > 0) {
@@ -931,6 +944,7 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
                     InputLine il;
                     input_line_init(&il, dest, sizeof(dest), dest);
                     il.render_below = render_completions;
+                    il.shift_tab_fn = path_shift_tab_fn;
                     int ok = input_line_run(&il, term_rows - 1,
                                             "Save as: ", path_tab_fn);
                     g_comp_free();
@@ -1620,6 +1634,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         case TERM_KEY_END:
         case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
+        case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
             if (ch == 'n' || ch == 'f' || ch == 'd') {
@@ -1943,6 +1958,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
         case TERM_KEY_END:
         case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
+        case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE:
             if (terminal_last_printable() == 't') {
                 tree_mode = !tree_mode;

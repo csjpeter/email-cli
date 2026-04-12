@@ -1020,7 +1020,7 @@ static void print_folder_item(char **names, int count, int i, char sep,
         fmt_thou(u, sizeof(u), unseen);
         fmt_thou(f, sizeof(f), flagged);
         fmt_thou(t, sizeof(t), messages);
-        printf("  %6s  %6s  %-*s  %7s", u, f,
+        printf("  %6s  %7s  %-*s  %7s", u, f,
                name_w + utf8_extra_bytes(name_buf), name_buf, t);
     }
 
@@ -1531,9 +1531,9 @@ int email_service_list_folders(const Config *cfg, int tree) {
     } else {
         /* Batch flat view: Unread | Flagged | Folder | Total */
         int name_w = 40;
-        printf("  %6s  %6s  %-*s  %7s\n",
+        printf("  %6s  %7s  %-*s  %7s\n",
                "Unread", "Flagged", name_w, "Folder", "Total");
-        printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550  ");
+        printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
         print_dbar(name_w);
         printf("  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
         for (int i = 0; i < count; i++) {
@@ -1546,10 +1546,10 @@ int email_service_list_folders(const Config *cfg, int tree) {
             fmt_thou(t, sizeof(t), messages);
             int nw = name_w + utf8_extra_bytes(folders[i]);
             if (messages == 0)
-                printf("\033[2m  %6s  %6s  %-*s  %7s\033[0m\n",
+                printf("\033[2m  %6s  %7s  %-*s  %7s\033[0m\n",
                        u, f, nw, folders[i], t);
             else
-                printf("  %6s  %6s  %-*s  %7s\n",
+                printf("  %6s  %7s  %-*s  %7s\n",
                        u, f, nw, folders[i], t);
         }
     }
@@ -1643,7 +1643,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
         /* Compute name column width for flat mode */
         int tcols_f = terminal_cols();
-        /* Fixed: "  " + 6 (unread) + "  " + 6 (flagged) + "  " + name_w + "  " + 7 (total) = name_w + 27; -1 safety */
+        /* Fixed: "  " + 6 (unread) + "  " + 7 (flagged) + "  " + name_w + "  " + 7 (total) = name_w + 28 */
         int name_w = tcols_f - 28;
         if (name_w < 20) name_w = 20;
 
@@ -1655,8 +1655,8 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
         /* Column header and separator for flat mode */
         if (!tree_mode) {
-            printf("  %6s  %6s  %-*s  %7s\n", "Unread", "Flagged", name_w, "Folder", "Total");
-            printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550  ");
+            printf("  %6s  %7s  %-*s  %7s\n", "Unread", "Flagged", name_w, "Folder", "Total");
+            printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
             print_dbar(name_w);
             printf("  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
         }

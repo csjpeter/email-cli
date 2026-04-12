@@ -28,6 +28,10 @@ struct InputLine {
     size_t bufsz; /**< Capacity of buf including NUL terminator.   */
     size_t len;   /**< Current string length in bytes.             */
     size_t cur;   /**< Cursor byte offset (0 … len).               */
+    int    trow;  /**< Terminal row (1-based); set by run().        */
+    /** Optional hook called after each standard render (e.g. for
+     *  drawing a completion list below the input row).  May be NULL. */
+    void (*render_below)(const struct InputLine *);
 };
 
 /** Callback type for Tab key (e.g. path completion).

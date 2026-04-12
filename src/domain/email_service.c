@@ -67,6 +67,18 @@ static void print_dbar(int n) {
 }
 
 /**
+ * Count extra bytes introduced by multi-byte UTF-8 sequences in s.
+ * printf("%-*s", w, s) pads by byte count; adding this value corrects
+ * the width for strings containing accented/non-ASCII characters.
+ */
+static int utf8_extra_bytes(const char *s) {
+    int extra = 0;
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++)
+        if ((*p & 0xC0) == 0x80) extra++;   /* continuation byte */
+    return extra;
+}
+
+/**
  * Format an integer with space as thousands separator into buf (size >= 16).
  * Returns buf.  Zero → empty string (blank cell).
  */
@@ -1008,7 +1020,8 @@ static void print_folder_item(char **names, int count, int i, char sep,
         fmt_thou(u, sizeof(u), unseen);
         fmt_thou(f, sizeof(f), flagged);
         fmt_thou(t, sizeof(t), messages);
-        printf("  %6s  %6s  %-*s  %7s", u, f, name_w, name_buf, t);
+        printf("  %6s  %6s  %-*s  %7s", u, f,
+               name_w + utf8_extra_bytes(name_buf), name_buf, t);
     }
 
     if (selected) printf("\033[K\033[0m");
@@ -1531,12 +1544,13 @@ int email_service_list_folders(const Config *cfg, int tree) {
             fmt_thou(u, sizeof(u), unseen);
             fmt_thou(f, sizeof(f), flagged);
             fmt_thou(t, sizeof(t), messages);
+            int nw = name_w + utf8_extra_bytes(folders[i]);
             if (messages == 0)
                 printf("\033[2m  %6s  %6s  %-*s  %7s\033[0m\n",
-                       u, f, name_w, folders[i], t);
+                       u, f, nw, folders[i], t);
             else
                 printf("  %6s  %6s  %-*s  %7s\n",
-                       u, f, name_w, folders[i], t);
+                       u, f, nw, folders[i], t);
         }
     }
 

@@ -36,6 +36,8 @@ set(TEST_SOURCES
     test_email_service.c
     test_html_parser.c
     test_html_render.c
+    test_input_line.c
+    test_path_complete.c
     ../../src/core/fs_util.c
     ../../src/core/logger.c
     ../../src/core/config.c

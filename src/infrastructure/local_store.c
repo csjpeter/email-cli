@@ -669,3 +669,72 @@ void manifest_count_folder(const char *folder, int *total_out,
     }
     manifest_free(m);
 }
+
+/* ── Pending flag changes ─────────────────────────────────────────────── */
+
+static char *pending_flag_path(const char *folder) {
+    if (!g_account_base[0]) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/pending_flags/%s.tsv", g_account_base, folder) == -1)
+        return NULL;
+    return path;
+}
+
+int local_pending_flag_add(const char *folder, int uid,
+                            const char *flag_name, int add) {
+    RAII_STRING char *path = pending_flag_path(folder);
+    if (!path) return -1;
+
+    /* Ensure parent directory exists (folder path may have slashes) */
+    char *dir_end = strrchr(path, '/');
+    if (dir_end) {
+        char saved = *dir_end;
+        *dir_end = '\0';
+        fs_mkdir_p(path, 0700);
+        *dir_end = saved;
+    }
+
+    RAII_FILE FILE *fp = fopen(path, "a");
+    if (!fp) return -1;
+    fprintf(fp, "%d\t%s\t%d\n", uid, flag_name, add);
+    return 0;
+}
+
+PendingFlag *local_pending_flag_load(const char *folder, int *count_out) {
+    *count_out = 0;
+    RAII_STRING char *path = pending_flag_path(folder);
+    if (!path) return NULL;
+
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+
+    int cap = 16, count = 0;
+    PendingFlag *arr = malloc((size_t)cap * sizeof(PendingFlag));
+    if (!arr) return NULL;
+
+    char line[256];
+    while (fgets(line, sizeof(line), fp)) {
+        int uid, add_val;
+        char flag[64];
+        if (sscanf(line, "%d\t%63[^\t]\t%d", &uid, flag, &add_val) != 3)
+            continue;
+        if (count == cap) {
+            cap *= 2;
+            PendingFlag *tmp = realloc(arr, (size_t)cap * sizeof(PendingFlag));
+            if (!tmp) break;
+            arr = tmp;
+        }
+        arr[count].uid = uid;
+        arr[count].add = add_val;
+        strncpy(arr[count].flag_name, flag, sizeof(arr[count].flag_name) - 1);
+        arr[count].flag_name[sizeof(arr[count].flag_name) - 1] = '\0';
+        count++;
+    }
+    *count_out = count;
+    return arr;
+}
+
+void local_pending_flag_clear(const char *folder) {
+    RAII_STRING char *path = pending_flag_path(folder);
+    if (path) remove(path);
+}

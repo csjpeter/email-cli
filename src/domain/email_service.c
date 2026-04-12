@@ -1479,14 +1479,14 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                     bit = MSG_FLAG_DONE;    flag_name = "$Done";
                 }
                 int currently = entries[cursor].flags & bit;
+                /* Determine the IMAP add/remove direction */
+                int add_flag = (ch == 'n') ? (currently ? 1 : 0) : (!currently ? 1 : 0);
                 if (list_imap) {
-                    if (ch == 'n') {
-                        /* \Seen is the inverse of UNSEEN: UNSEEN set → mark read (add \Seen) */
-                        imap_uid_set_flag(list_imap, uid, flag_name, currently ? 1 : 0);
-                    } else {
-                        imap_uid_set_flag(list_imap, uid, flag_name, !currently);
-                    }
+                    /* Online: push immediately */
+                    imap_uid_set_flag(list_imap, uid, flag_name, add_flag);
                 }
+                /* Always queue for sync (covers offline/cron mode and STORE failures) */
+                local_pending_flag_add(folder, uid, flag_name, add_flag);
                 entries[cursor].flags ^= bit;
                 ManifestEntry *me = manifest_find(manifest, uid);
                 if (me) me->flags = entries[cursor].flags;
@@ -2000,6 +2000,19 @@ int email_service_sync(const Config *cfg) {
                 errors++;
                 continue;
             }
+        }
+
+        /* Flush pending local flag changes to the server before reading state */
+        {
+            int pcount = 0;
+            PendingFlag *pending = local_pending_flag_load(folder, &pcount);
+            if (pending && pcount > 0) {
+                for (int pi = 0; pi < pcount; pi++)
+                    imap_uid_set_flag(sync_imap, pending[pi].uid,
+                                      pending[pi].flag_name, pending[pi].add);
+                local_pending_flag_clear(folder);
+            }
+            free(pending);
         }
 
         /* Get UNSEEN set to mark entries */

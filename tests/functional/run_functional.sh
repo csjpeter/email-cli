@@ -177,6 +177,25 @@ check_not "No 'LOGIN failed' in session log"   "LOGIN failed" "$SESSION"
 check     "Session log shows 'Logged in' or authenticated" \
           "authenticated\|Logged in\|LOGIN completed" "$SESSION"
 
+# Count line: reverse-video marker and sync indicator
+CACHE_DIR="$TEST_HOME/.cache/email-cli"
+PID_FILE="$CACHE_DIR/sync.pid"
+echo ""
+echo "--- Count line / sync indicator ---"
+
+# Without pid file: no spurious "syncing"
+rm -f "$PID_FILE"
+NO_SYNC_OUTPUT=$("$BIN_DIR/email-cli" list --batch 2>&1 || true)
+check     "Count line present (no-sync)"     "message(s) in"  "$NO_SYNC_OUTPUT"
+check_not "No spurious syncing (no pid file)" "syncing"        "$NO_SYNC_OUTPUT"
+
+# With a stale pid file (nonexistent PID): still no "syncing"
+mkdir -p "$CACHE_DIR"
+echo "999999" > "$PID_FILE"
+STALE_OUTPUT=$("$BIN_DIR/email-cli" list --batch 2>&1 || true)
+check_not "No spurious syncing (stale pid)"   "syncing"        "$STALE_OUTPUT"
+rm -f "$PID_FILE"
+
 echo ""
 echo "--- Functional Test Results ---"
 echo "Passed: $PASSED / $((PASSED + FAILED))"

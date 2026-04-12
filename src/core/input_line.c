@@ -120,6 +120,7 @@ void input_line_init(InputLine *il, char *buf, size_t bufsz,
     il->bufsz         = bufsz;
     il->trow          = 0;
     il->render_below  = NULL;
+    il->tab_fn        = NULL;
     il->shift_tab_fn  = NULL;
     if (initial_text) {
         size_t n = strlen(initial_text);
@@ -134,8 +135,7 @@ void input_line_init(InputLine *il, char *buf, size_t bufsz,
     il->cur = il->len;   /* cursor starts at end */
 }
 
-int input_line_run(InputLine *il, int trow, const char *prompt,
-                   InputLineTabFn tab_fn) {
+int input_line_run(InputLine *il, int trow, const char *prompt) {
     il->trow = trow;
     for (;;) {
         il_render(il, trow, prompt);
@@ -183,7 +183,7 @@ int input_line_run(InputLine *il, int trow, const char *prompt,
             break;
 
         case TERM_KEY_TAB:
-            if (tab_fn) tab_fn(il);
+            if (il->tab_fn) il->tab_fn(il);
             break;
 
         case TERM_KEY_SHIFT_TAB:

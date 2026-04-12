@@ -12,8 +12,8 @@
  *   Home / End   jump to start / end
  *   Backspace    delete character before cursor
  *   Delete       delete character at cursor
- *   Tab          calls optional tab_fn callback (e.g. path completion)
- *   Shift+Tab    calls optional shift_tab_fn callback (reverse completion)
+ *   Tab          calls optional tab_fn field (e.g. path completion)
+ *   Shift+Tab    calls optional shift_tab_fn field (reverse completion)
  *   Enter        confirm → returns 1
  *   ESC / Ctrl-C cancel → returns 0
  *
@@ -33,13 +33,11 @@ struct InputLine {
     /** Optional hook called after each standard render (e.g. for
      *  drawing a completion list below the input row).  May be NULL. */
     void (*render_below)(const struct InputLine *);
+    /** Callback for Tab key (forward completion).  May be NULL. */
+    void (*tab_fn)(struct InputLine *);
     /** Callback for Shift+Tab (reverse completion).  May be NULL. */
     void (*shift_tab_fn)(struct InputLine *);
 };
-
-/** Callback type for Tab key (e.g. path completion).
- *  May modify il->buf, il->len, il->cur directly. */
-typedef void (*InputLineTabFn)(InputLine *il);
 
 /**
  * @brief Initialise an InputLine with an optional initial string.
@@ -56,11 +54,11 @@ void input_line_init(InputLine *il, char *buf, size_t bufsz,
  * @brief Run the interactive input loop.
  *
  * Renders at terminal row @p trow (1-based).  @p prompt is printed
- * before the editable text.  @p tab_fn may be NULL.
+ * before the editable text.  Completion callbacks are taken from
+ * il->tab_fn, il->shift_tab_fn, and il->render_below (all may be NULL).
  *
  * @return 1 if confirmed (Enter), 0 if cancelled (ESC / Ctrl-C).
  */
-int input_line_run(InputLine *il, int trow, const char *prompt,
-                   InputLineTabFn tab_fn);
+int input_line_run(InputLine *il, int trow, const char *prompt);
 
 #endif /* CORE_INPUT_LINE_H */

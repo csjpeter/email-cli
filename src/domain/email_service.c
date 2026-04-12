@@ -585,10 +585,35 @@ static char *safe_filename_for_path(const char *name) {
     return s;
 }
 
-/* Interactive attachment picker.
- * Shows attachment list, lets user navigate with arrows and press Enter to
- * pick one (or ESC/Backspace to cancel).
- * Returns selected index (0-based), or -1 if cancelled. */
+/* Inline single-line path editor rendered at row `trow` of the terminal.
+ * `buf` must be pre-filled with the suggested path (NUL-terminated).
+ * Returns 0 if user confirmed (Enter), -1 if cancelled (ESC/Backspace/Quit). */
+static int line_edit_path(char *buf, size_t bufsz, int trow, int tcols) {
+    size_t len = strlen(buf);
+    (void)tcols;
+    for (;;) {
+        printf("\033[%d;1H\033[K", trow);
+        printf("  Save as: \033[7m%s \033[0m", buf);
+        fflush(stdout);
+
+        TermKey key = terminal_read_key();
+        if (key == TERM_KEY_ENTER)
+            return 0;
+        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || key == TERM_KEY_BACK)
+            return -1;
+        if (key == TERM_KEY_IGNORE) {
+            int ch = terminal_last_printable();
+            if (ch > 0 && (unsigned char)ch < 128 && len + 1 < bufsz) {
+                buf[len++] = (char)ch;
+                buf[len]   = '\0';
+            }
+        }
+        /* Backspace handled above via TERM_KEY_BACK; also handle within IGNORE */
+    }
+}
+
+/* Attachment picker: full-screen list, navigate with arrows, Enter to select.
+ * Returns selected index (0-based), or -1 if Backspace (back), -2 if ESC/Quit. */
 static int show_attachment_picker(const MimeAttachment *atts, int count,
                                   int tcols, int trows) {
     int cursor = 0;
@@ -598,7 +623,6 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
         for (int i = 0; i < count; i++) {
             const char *name  = atts[i].filename     ? atts[i].filename     : "(no name)";
             const char *ctype = atts[i].content_type ? atts[i].content_type : "";
-            /* Format decoded size */
             char sz[32];
             if (atts[i].size >= 1024 * 1024)
                 snprintf(sz, sizeof(sz), "%.1f MB",
@@ -617,19 +641,15 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
         fflush(stdout);
         char sb[160];
         snprintf(sb, sizeof(sb),
-                 "  \u2191\u2193=select  Enter=save to ~/Downloads"
-                 "  Backspace=back  ESC=quit");
+                 "  \u2191\u2193=select  Enter=choose  Backspace=back  ESC=quit");
         print_statusbar(trows, tcols, sb);
 
         TermKey key = terminal_read_key();
         switch (key) {
-        case TERM_KEY_BACK:
-            return -1;   /* back to show view */
+        case TERM_KEY_BACK:    return -1;
         case TERM_KEY_ESC:
-        case TERM_KEY_QUIT:
-            return -2;   /* quit program */
-        case TERM_KEY_ENTER:
-            return cursor;
+        case TERM_KEY_QUIT:    return -2;
+        case TERM_KEY_ENTER:   return cursor;
         case TERM_KEY_NEXT_LINE:
         case TERM_KEY_NEXT_PAGE:
             if (cursor < count - 1) cursor++;
@@ -638,8 +658,7 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
         case TERM_KEY_PREV_PAGE:
             if (cursor > 0) cursor--;
             break;
-        default:
-            break;
+        default: break;
         }
     }
 }
@@ -773,27 +792,35 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
             if (ch == 'a' && att_count > 0) {
-                int sel = show_attachment_picker(atts, att_count,
+                int sel = 0;
+                if (att_count > 1) {
+                    sel = show_attachment_picker(atts, att_count,
                                                  term_cols, term_rows);
-                if (sel == -2) {
-                    result = 1;  /* ESC/q in picker → quit program */
-                    goto show_int_done;
+                    if (sel == -2) {
+                        result = 1;  /* ESC/q → quit program */
+                        goto show_int_done;
+                    }
+                    if (sel < 0) break;  /* Backspace → back to show */
                 }
-                if (sel >= 0) {
-                    char *dir = attachment_save_dir();
+                /* Build suggested path and let user edit it */
+                {
+                    char *dir  = attachment_save_dir();
                     char *fname = safe_filename_for_path(atts[sel].filename);
-                    char dest[1024];
+                    char dest[2048];
                     snprintf(dest, sizeof(dest), "%s/%s",
                              dir ? dir : ".", fname ? fname : "attachment");
-                    int r = mime_save_attachment(&atts[sel], dest);
-                    if (r == 0)
-                        snprintf(info_msg, sizeof(info_msg),
-                                 "  Saved: %.1900s", dest);
-                    else
-                        snprintf(info_msg, sizeof(info_msg),
-                                 "  Save FAILED: %.1900s", dest);
                     free(dir);
                     free(fname);
+                    int ok = line_edit_path(dest, sizeof(dest),
+                                            term_rows - 1, term_cols);
+                    /* Clear the edited line */
+                    printf("\033[%d;1H\033[K", term_rows - 1);
+                    if (ok == 0) {
+                        int r = mime_save_attachment(&atts[sel], dest);
+                        snprintf(info_msg, sizeof(info_msg),
+                                 r == 0 ? "  Saved: %.1900s"
+                                        : "  Save FAILED: %.1900s", dest);
+                    }
                 }
             }
             break;

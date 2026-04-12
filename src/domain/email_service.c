@@ -992,24 +992,37 @@ static void print_folder_item(char **names, int count, int i, char sep,
         printf("\033[2m");          /* dim: empty folder */
 
     if (tree_mode) {
+        /* Build "tree-prefix + component-name" into name_buf for column layout */
+        char name_buf[512];
+        int pos = 0;
         int depth = 0;
         for (const char *p = names[i]; *p; p++)
             if (*p == sep) depth++;
         for (int lv = 0; lv < depth; lv++) {
-            int last = ancestor_is_last(names, count, i, lv, sep);
-            printf("%s", last ? "    " : "\u2502   ");
+            int anc_last = ancestor_is_last(names, count, i, lv, sep);
+            const char *branch = anc_last ? "    " : "\u2502   ";
+            int blen = (int)strlen(branch);
+            if (pos + blen < (int)sizeof(name_buf) - 1) {
+                memcpy(name_buf + pos, branch, blen);
+                pos += blen;
+            }
         }
         int last = is_last_sibling(names, count, i, sep);
-        printf("%s", last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ");
+        const char *conn = last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ";
+        int clen = (int)strlen(conn);
+        if (pos + clen < (int)sizeof(name_buf) - 1) {
+            memcpy(name_buf + pos, conn, clen);
+            pos += clen;
+        }
         const char *comp = strrchr(names[i], sep);
-        printf("%s", comp ? comp + 1 : names[i]);
-        /* Inline counts for tree mode */
+        snprintf(name_buf + pos, sizeof(name_buf) - pos, "%s",
+                 comp ? comp + 1 : names[i]);
         char u[16], f[16], t[16];
         fmt_thou(u, sizeof(u), unseen);
         fmt_thou(f, sizeof(f), flagged);
         fmt_thou(t, sizeof(t), messages);
-        if (u[0] || f[0] || t[0])
-            printf("  %s/%s/%s", u, f, t);
+        printf("  %6s  %7s  %-*s  %7s", u, f,
+               name_w + utf8_extra_bytes(name_buf), name_buf, t);
     } else {
         /* Flat mode: Unread | Flagged | Folder | Total */
         const char *comp    = strrchr(names[i], sep);
@@ -1031,27 +1044,52 @@ static void print_folder_item(char **names, int count, int i, char sep,
 
 static void render_folder_tree(char **names, int count, char sep,
                                 const FolderStatus *statuses) {
+    int name_w = 40;
+    printf("  %6s  %7s  %-*s  %7s\n", "Unread", "Flagged", name_w, "Folder", "Total");
+    printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
+    print_dbar(name_w);
+    printf("  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
+
     for (int i = 0; i < count; i++) {
+        int unseen   = statuses ? statuses[i].unseen   : 0;
+        int flagged  = statuses ? statuses[i].flagged  : 0;
+        int messages = statuses ? statuses[i].messages : 0;
+
+        /* Build "tree-prefix + component-name" */
+        char name_buf[512];
+        int pos = 0;
         int depth = 0;
         for (const char *p = names[i]; *p; p++)
             if (*p == sep) depth++;
-
-        /* Indent: one column per ancestor level */
         for (int lv = 0; lv < depth; lv++) {
-            int last = ancestor_is_last(names, count, i, lv, sep);
-            printf("%s", last ? "    " : "\u2502   "); /* │   */
+            int anc_last = ancestor_is_last(names, count, i, lv, sep);
+            const char *branch = anc_last ? "    " : "\u2502   ";
+            int blen = (int)strlen(branch);
+            if (pos + blen < (int)sizeof(name_buf) - 1) {
+                memcpy(name_buf + pos, branch, blen);
+                pos += blen;
+            }
         }
-
-        /* Connector */
         int last = is_last_sibling(names, count, i, sep);
-        printf("%s", last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 "); /* └── / ├── */
-
-        /* Component name (last segment) */
+        const char *conn = last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ";
+        int clen = (int)strlen(conn);
+        if (pos + clen < (int)sizeof(name_buf) - 1) {
+            memcpy(name_buf + pos, conn, clen);
+            pos += clen;
+        }
         const char *comp = strrchr(names[i], sep);
-        printf("%s", comp ? comp + 1 : names[i]);
-        if (statuses && (statuses[i].messages > 0 || statuses[i].unseen > 0))
-            printf(" (%d/%d)", statuses[i].unseen, statuses[i].messages);
-        printf("\n");
+        snprintf(name_buf + pos, sizeof(name_buf) - pos, "%s",
+                 comp ? comp + 1 : names[i]);
+
+        char u[16], f[16], t[16];
+        fmt_thou(u, sizeof(u), unseen);
+        fmt_thou(f, sizeof(f), flagged);
+        fmt_thou(t, sizeof(t), messages);
+        int nw = name_w + utf8_extra_bytes(name_buf);
+        if (messages == 0)
+            printf("\033[2m  %6s  %7s  %-*s  %7s\033[0m\n", u, f, nw, name_buf, t);
+        else
+            printf("  %6s  %7s  %-*s  %7s\n", u, f, nw, name_buf, t);
     }
 }
 
@@ -1653,13 +1691,11 @@ char *email_service_list_folders_interactive(const Config *cfg,
         else
             printf("Folders (%d)\n\n", display_count);
 
-        /* Column header and separator for flat mode */
-        if (!tree_mode) {
-            printf("  %6s  %7s  %-*s  %7s\n", "Unread", "Flagged", name_w, "Folder", "Total");
-            printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
-            print_dbar(name_w);
-            printf("  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
-        }
+        /* Column header and separator (both flat and tree mode) */
+        printf("  %6s  %7s  %-*s  %7s\n", "Unread", "Flagged", name_w, "Folder", "Total");
+        printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
+        print_dbar(name_w);
+        printf("  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
 
         for (int i = wstart; i < wend; i++) {
             if (tree_mode) {
@@ -1667,7 +1703,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 int unsn = statuses ? statuses[i].unseen   : 0;
                 int flgd = statuses ? statuses[i].flagged  : 0;
                 print_folder_item(folders, count, i, sep, 1, i == cursor, 0,
-                                  msgs, unsn, flgd, 0);
+                                  msgs, unsn, flgd, name_w);
             } else {
                 int fi = vis[i];
                 int hk = folder_has_children(folders, count, folders[fi], sep);

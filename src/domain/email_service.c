@@ -420,9 +420,9 @@ static ImapClient *make_imap(const Config *cfg) {
 
 /* ── Folder status ───────────────────────────────────────────────────── */
 
-typedef struct { int messages; int unseen; } FolderStatus;
+typedef struct { int messages; int unseen; int flagged; } FolderStatus;
 
-/** Read total and unseen counts for each folder from their local manifests.
+/** Read total, unseen and flagged counts for each folder from their local manifests.
  *  Instant — no server connection needed.
  *  Returns heap-allocated array; caller must free(). */
 static FolderStatus *fetch_all_folder_statuses(const Config *cfg __attribute__((unused)),
@@ -430,7 +430,8 @@ static FolderStatus *fetch_all_folder_statuses(const Config *cfg __attribute__((
     FolderStatus *st = calloc((size_t)count, sizeof(FolderStatus));
     if (!st || count == 0) return st;
     for (int i = 0; i < count; i++)
-        manifest_count_folder(folders[i], &st[i].messages, &st[i].unseen);
+        manifest_count_folder(folders[i], &st[i].messages,
+                              &st[i].unseen, &st[i].flagged);
     return st;
 }
 
@@ -946,22 +947,21 @@ static int build_flat_view(char **names, int count, char sep,
 }
 
 /** Print one folder item with its tree/flat prefix and optional selection highlight. */
+/* Flat mode column layout: Unread | Flagged | Folder | Total
+ * name_w: width of the folder name column (ignored in tree mode).
+ * flagged: number of flagged messages (0 = blank cell). */
 static void print_folder_item(char **names, int count, int i, char sep,
                                int tree_mode, int selected, int has_kids,
-                               int messages, int unseen) {
-    if (selected) {
+                               int messages, int unseen, int flagged, int name_w) {
+    if (selected)
         printf("\033[7m");
-    } else if (unseen > 0) {
-        printf("\033[1m");          /* bold: has unread */
-    } else if (messages == 0) {
+    else if (messages == 0)
         printf("\033[2m");          /* dim: empty folder */
-    }
 
     if (tree_mode) {
         int depth = 0;
         for (const char *p = names[i]; *p; p++)
             if (*p == sep) depth++;
-
         for (int lv = 0; lv < depth; lv++) {
             int last = ancestor_is_last(names, count, i, lv, sep);
             printf("%s", last ? "    " : "\u2502   ");
@@ -970,21 +970,28 @@ static void print_folder_item(char **names, int count, int i, char sep,
         printf("%s", last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ");
         const char *comp = strrchr(names[i], sep);
         printf("%s", comp ? comp + 1 : names[i]);
+        /* Inline counts for tree mode */
+        char u[16] = "", f[16] = "", t[16] = "";
+        if (unseen   > 0) snprintf(u, sizeof(u), "%d", unseen);
+        if (flagged  > 0) snprintf(f, sizeof(f), "%d", flagged);
+        if (messages > 0) snprintf(t, sizeof(t), "%d", messages);
+        if (u[0] || f[0] || t[0])
+            printf("  %s/%s/%s", u, f, t);
     } else {
-        const char *comp = strrchr(names[i], sep);
+        /* Flat mode: Unread | Flagged | Folder | Total */
+        const char *comp    = strrchr(names[i], sep);
         const char *display = comp ? comp + 1 : names[i];
-        printf("  %s%s", display, has_kids ? "/" : "");
-    }
-
-    if (messages > 0 || unseen > 0) {
-        if (!selected && unseen > 0)
-            printf(" \033[1m(%d\033[0m\033[1m/%d)\033[0m", unseen, messages);
-        else
-            printf(" (%d/%d)", unseen, messages);
+        char name_buf[256];
+        snprintf(name_buf, sizeof(name_buf), "%s%s", display, has_kids ? "/" : "");
+        char u[16] = "", f[16] = "", t[16] = "";
+        if (unseen   > 0) snprintf(u, sizeof(u), "%d", unseen);
+        if (flagged  > 0) snprintf(f, sizeof(f), "%d", flagged);
+        if (messages > 0) snprintf(t, sizeof(t), "%d", messages);
+        printf("  %6s  %6s  %-*s  %7s", u, f, name_w, name_buf, t);
     }
 
     if (selected) printf("\033[K\033[0m");
-    else if (unseen > 0 || messages == 0) printf("\033[0m");
+    else if (messages == 0) printf("\033[0m");
     printf("\n");
 }
 
@@ -1488,21 +1495,27 @@ int email_service_list_folders(const Config *cfg, int tree) {
     if (tree) {
         render_folder_tree(folders, count, sep, statuses);
     } else {
-        /* Print unread folders first, then the rest */
-        for (int pass = 0; pass < 2; pass++) {
-            for (int i = 0; i < count; i++) {
-                int unseen  = statuses ? statuses[i].unseen   : 0;
-                int messages = statuses ? statuses[i].messages : 0;
-                if ((pass == 0) != (unseen > 0)) continue;
-                if (unseen > 0)
-                    printf("\033[1m%s (%d/%d)\033[0m\n",
-                           folders[i], unseen, messages);
-                else if (messages > 0)
-                    printf("%s \033[2m(%d/%d)\033[0m\n",
-                           folders[i], unseen, messages);
-                else
-                    printf("\033[2m%s\033[0m\n", folders[i]);
-            }
+        /* Batch flat view: Unread | Flagged | Folder | Total */
+        int name_w = 40;
+        printf("  %6s  %6s  %-*s  %7s\n",
+               "Unread", "Flagged", name_w, "Folder", "Total");
+        printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550  ");
+        print_dbar(name_w);
+        printf("  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
+        for (int i = 0; i < count; i++) {
+            int unseen   = statuses ? statuses[i].unseen   : 0;
+            int flagged  = statuses ? statuses[i].flagged  : 0;
+            int messages = statuses ? statuses[i].messages : 0;
+            char u[16] = "", f[16] = "", t[16] = "";
+            if (unseen   > 0) snprintf(u, sizeof(u), "%d", unseen);
+            if (flagged  > 0) snprintf(f, sizeof(f), "%d", flagged);
+            if (messages > 0) snprintf(t, sizeof(t), "%d", messages);
+            if (messages == 0)
+                printf("\033[2m  %6s  %6s  %-*s  %7s\033[0m\n",
+                       u, f, name_w, folders[i], t);
+            else
+                printf("  %6s  %6s  %-*s  %7s\n",
+                       u, f, name_w, folders[i], t);
         }
     }
 
@@ -1577,22 +1590,12 @@ char *email_service_list_folders_interactive(const Config *cfg,
         int rows  = terminal_rows();
         int limit = (rows > 4) ? rows - 3 : 10;
 
-        /* Rebuild flat view on each iteration */
+        /* Rebuild flat view on each iteration (alphabetical order) */
         int display_count;
         if (tree_mode) {
             display_count = count;
         } else {
             vcount = build_flat_view(folders, count, sep, current_prefix, vis);
-            /* Stable partition: folders with unread first */
-            if (statuses) {
-                int tmp[1024];
-                int ni = 0;
-                for (int k = 0; k < vcount; k++)
-                    if (statuses[vis[k]].unseen > 0) tmp[ni++] = vis[k];
-                for (int k = 0; k < vcount; k++)
-                    if (statuses[vis[k]].unseen == 0) tmp[ni++] = vis[k];
-                memcpy(vis, tmp, (size_t)vcount * sizeof(int));
-            }
             display_count = vcount;
         }
         if (cursor >= display_count && display_count > 0)
@@ -1603,25 +1606,41 @@ char *email_service_list_folders_interactive(const Config *cfg,
         int wend = wstart + limit;
         if (wend > display_count) wend = display_count;
 
+        /* Compute name column width for flat mode */
+        int tcols_f = terminal_cols();
+        /* Fixed: "  " + 6 (unread) + "  " + 6 (flagged) + "  " + name_w + "  " + 7 (total) = name_w + 25 */
+        int name_w = tcols_f - 25;
+        if (name_w < 20) name_w = 20;
+
         printf("\033[H\033[2J");
         if (!tree_mode && current_prefix[0])
             printf("Folders: %s/ (%d)\n\n", current_prefix, display_count);
         else
             printf("Folders (%d)\n\n", display_count);
 
+        /* Column header and separator for flat mode */
+        if (!tree_mode) {
+            printf("  %6s  %6s  %-*s  %7s\n", "Unread", "Flagged", name_w, "Folder", "Total");
+            printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550  ");
+            print_dbar(name_w);
+            printf("  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
+        }
+
         for (int i = wstart; i < wend; i++) {
             if (tree_mode) {
                 int msgs = statuses ? statuses[i].messages : 0;
                 int unsn = statuses ? statuses[i].unseen   : 0;
+                int flgd = statuses ? statuses[i].flagged  : 0;
                 print_folder_item(folders, count, i, sep, 1, i == cursor, 0,
-                                  msgs, unsn);
+                                  msgs, unsn, flgd, 0);
             } else {
                 int fi = vis[i];
                 int hk = folder_has_children(folders, count, folders[fi], sep);
                 int msgs = statuses ? statuses[fi].messages : 0;
                 int unsn = statuses ? statuses[fi].unseen   : 0;
+                int flgd = statuses ? statuses[fi].flagged  : 0;
                 print_folder_item(folders, count, fi, sep, 0, i == cursor, hk,
-                                  msgs, unsn);
+                                  msgs, unsn, flgd, name_w);
             }
         }
 

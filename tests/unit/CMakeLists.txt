@@ -44,6 +44,7 @@ set(TEST_SOURCES
     ../../src/core/html_render.c
     ../../src/core/imap_util.c
     ../../src/core/input_line.c
+    ../../src/core/path_complete.c
     ../../src/infrastructure/config_store.c
     ../../src/infrastructure/setup_wizard.c
     ../../src/infrastructure/imap_client.c

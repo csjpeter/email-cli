@@ -134,6 +134,8 @@ TermKey terminal_read_key(void) {
         result = TERM_KEY_QUIT;
     } else if (c == 127 || c == 8 /* DEL / Backspace */) {
         result = TERM_KEY_BACK;
+    } else if (c == '\t') {
+        result = TERM_KEY_TAB;
     } else if (c >= 32 && c <= 126) {
         g_last_printable = c;
         result = TERM_KEY_IGNORE;

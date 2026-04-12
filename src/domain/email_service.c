@@ -17,6 +17,7 @@
 #include <poll.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <dirent.h>
 
 /* ── Column-aware printing ───────────────────────────────────────────── */
 
@@ -217,6 +218,7 @@ static int pager_prompt(int cur_page, int total_pages, int page_size,
         case TERM_KEY_NEXT_LINE: return  1;
         case TERM_KEY_PREV_LINE: return -1;
         case TERM_KEY_ENTER:
+        case TERM_KEY_TAB:
         case TERM_KEY_IGNORE:    continue;
         }
     }
@@ -561,6 +563,83 @@ static void print_show_headers(const char *from, const char *subject,
 
 /* ── Attachment picker ───────────────────────────────────────────────── */
 
+/* Tab-completion for a filesystem path stored in buf.
+ * Splits buf into dir + prefix, lists matching entries, and completes:
+ *   - one match  → full name (appends '/' for directories)
+ *   - many matches → longest common prefix */
+static void complete_path(char *buf, size_t bufsz) {
+    /* Split into directory part and name prefix */
+    char dir[2048];
+    const char *prefix;
+    char *slash = strrchr(buf, '/');
+    if (slash) {
+        size_t dlen = (size_t)(slash - buf + 1);
+        if (dlen >= sizeof(dir)) return;
+        memcpy(dir, buf, dlen);
+        dir[dlen] = '\0';
+        prefix = slash + 1;
+    } else {
+        strcpy(dir, "./");
+        prefix = buf;
+    }
+
+    /* Collect matching entries */
+    DIR *d = opendir(dir);
+    if (!d) return;
+
+    char (*matches)[256] = NULL;
+    int  cap = 0, count = 0;
+    size_t pfxlen = strlen(prefix);
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (ent->d_name[0] == '.' && pfxlen == 0) continue; /* skip hidden */
+        if (pfxlen > 0 && strncmp(ent->d_name, prefix, pfxlen) != 0) continue;
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+        if (count == cap) {
+            int newcap = cap ? cap * 2 : 16;
+            char (*tmp)[256] = realloc(matches, (size_t)newcap * sizeof(*matches));
+            if (!tmp) { closedir(d); free(matches); return; }
+            matches = tmp;
+            cap = newcap;
+        }
+        snprintf(matches[count], 256, "%s", ent->d_name);
+        count++;
+    }
+    closedir(d);
+
+    if (count == 0) { free(matches); return; }
+
+    /* Longest common prefix among all matches */
+    char common[256];
+    strncpy(common, matches[0], sizeof(common) - 1);
+    common[sizeof(common) - 1] = '\0';
+    for (int i = 1; i < count; i++) {
+        size_t j = 0;
+        while (common[j] && matches[i][j] && common[j] == matches[i][j]) j++;
+        common[j] = '\0';
+    }
+
+    free(matches);
+
+    /* Write result directly into buf (bufsz-limited); only update if longer */
+    size_t old_len = strlen(buf);
+    if (count == 1) {
+        char full[4096];
+        snprintf(full, sizeof(full), "%s%s", dir, common);
+        struct stat st;
+        const char *trail = (stat(full, &st) == 0 && S_ISDIR(st.st_mode)) ? "/" : "";
+        char tmp[4096];
+        snprintf(tmp, sizeof(tmp), "%s%s%s", dir, common, trail);
+        if (strlen(tmp) > old_len)
+            snprintf(buf, bufsz, "%s%s%s", dir, common, trail);
+    } else {
+        char tmp[4096];
+        snprintf(tmp, sizeof(tmp), "%s%s", dir, common);
+        if (strlen(tmp) > old_len)
+            snprintf(buf, bufsz, "%s%s", dir, common);
+    }
+}
+
 /* Determine the best directory to save attachments into.
  * Prefers ~/Downloads if it exists, else falls back to ~.
  * Returns a heap-allocated string the caller must free(). */
@@ -601,14 +680,16 @@ static int line_edit_path(char *buf, size_t bufsz, int trow, int tcols) {
             return 0;
         if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || key == TERM_KEY_BACK)
             return -1;
-        if (key == TERM_KEY_IGNORE) {
+        if (key == TERM_KEY_TAB) {
+            complete_path(buf, bufsz);
+            len = strlen(buf);
+        } else if (key == TERM_KEY_IGNORE) {
             int ch = terminal_last_printable();
             if (ch > 0 && (unsigned char)ch < 128 && len + 1 < bufsz) {
                 buf[len++] = (char)ch;
                 buf[len]   = '\0';
             }
         }
-        /* Backspace handled above via TERM_KEY_BACK; also handle within IGNORE */
     }
 }
 
@@ -789,6 +870,7 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         case TERM_KEY_PREV_LINE:
             if (cur_line > 0) cur_line--;
             break;
+        case TERM_KEY_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
             if (ch == 'a' && att_count > 0) {
@@ -1492,6 +1574,7 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
                 /* ret == 0: Backspace → back to list; ret == -1: error → stay */
             }
             break;
+        case TERM_KEY_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
             if (ch == 'n' || ch == 'f' || ch == 'd') {
@@ -1809,6 +1892,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
             cursor -= limit;
             if (cursor < 0) cursor = 0;
             break;
+        case TERM_KEY_TAB:
         case TERM_KEY_IGNORE:
             if (terminal_last_printable() == 't') {
                 tree_mode = !tree_mode;

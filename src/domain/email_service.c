@@ -579,7 +579,8 @@ static struct {
     int   idx;          /* currently highlighted entry */
     int   view_start;   /* first visible entry in the display row */
     char  dir[2048];    /* directory part (ends with '/') */
-    char  expected[4096]; /* il->buf content when this set was built */
+    char  expected[4096]; /* il->buf[0..cur] when this set was built */
+    char  suffix[4096]; /* il->buf[cur..len] when this set was built */
 } g_comp;
 
 static void g_comp_free(void) {
@@ -640,75 +641,95 @@ static void render_completions(const InputLine *il) {
     fflush(stdout);
 }
 
+/* Apply g_comp.names[g_comp.idx] to il->buf.
+ * Replaces il->buf[0..cur] with dir+name; suffix follows the cursor. */
+static void apply_comp(InputLine *il) {
+    char head[4096];
+    snprintf(head, sizeof(head), "%s%s", g_comp.dir, g_comp.names[g_comp.idx]);
+    snprintf(il->buf, il->bufsz, "%s%s", head, g_comp.suffix);
+    il->len = strlen(il->buf);
+    il->cur = strlen(head);
+    snprintf(g_comp.expected, sizeof(g_comp.expected), "%s", head);
+}
+
+/* Build head = il->buf[0..il->cur] as a NUL-terminated string.
+ * Returns 0 on success, -1 if head would overflow. */
+static int make_head(const InputLine *il, char *head, size_t headsz) {
+    if (il->cur >= headsz) return -1;
+    memcpy(head, il->buf, il->cur);
+    head[il->cur] = '\0';
+    return 0;
+}
+
 /* Tab-completion callback: first Tab collects matches, subsequent Tabs cycle. */
 static void path_tab_fn(InputLine *il) {
-    /* If cycling: buf still matches the last selected entry → go to next */
-    if (g_comp.count > 0 && strcmp(il->buf, g_comp.expected) == 0) {
+    char head[4096];
+    if (make_head(il, head, sizeof(head)) != 0) return;
+
+    /* Cycling: head matches what was set by the last completion → go to next */
+    if (g_comp.count > 0 && strcmp(head, g_comp.expected) == 0) {
         g_comp.idx = (g_comp.idx + 1) % g_comp.count;
-    } else {
-        /* Fresh scan */
-        g_comp_free();
-
-        const char *prefix;
-        char *slash = strrchr(il->buf, '/');
-        if (slash) {
-            size_t dlen = (size_t)(slash - il->buf + 1);
-            if (dlen >= sizeof(g_comp.dir)) return;
-            memcpy(g_comp.dir, il->buf, dlen);
-            g_comp.dir[dlen] = '\0';
-            prefix = slash + 1;
-        } else {
-            strcpy(g_comp.dir, "./");
-            prefix = il->buf;
-        }
-
-        DIR *d = opendir(g_comp.dir);
-        if (!d) return;
-
-        int cap = 0;
-        size_t pfxlen = strlen(prefix);
-        struct dirent *ent;
-        while ((ent = readdir(d)) != NULL) {
-            if (ent->d_name[0] == '.' && pfxlen == 0) continue;
-            if (pfxlen > 0 && strncmp(ent->d_name, prefix, pfxlen) != 0) continue;
-            if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-            if (g_comp.count == cap) {
-                int nc = cap ? cap * 2 : 16;
-                char (*tmp)[256] = realloc(g_comp.names,
-                                           (size_t)nc * sizeof(*g_comp.names));
-                if (!tmp) { closedir(d); g_comp_free(); return; }
-                g_comp.names = tmp;
-                cap = nc;
-            }
-            snprintf(g_comp.names[g_comp.count], 256, "%s", ent->d_name);
-            g_comp.count++;
-        }
-        closedir(d);
-
-        if (g_comp.count == 0) return;
-
-        qsort(g_comp.names, (size_t)g_comp.count,
-              sizeof(g_comp.names[0]), name_cmp);
-        g_comp.idx        = 0;
-        g_comp.view_start = 0;
+        apply_comp(il);
+        return;
     }
 
-    /* Write selected entry into the input buffer */
-    snprintf(il->buf, il->bufsz, "%s%s", g_comp.dir, g_comp.names[g_comp.idx]);
-    il->len = strlen(il->buf);
-    il->cur = il->len;
-    snprintf(g_comp.expected, sizeof(g_comp.expected), "%s", il->buf);
+    /* Fresh scan based on head (everything up to cursor) */
+    g_comp_free();
+    snprintf(g_comp.suffix, sizeof(g_comp.suffix), "%s", il->buf + il->cur);
+
+    const char *prefix;
+    char *slash = strrchr(head, '/');
+    if (slash) {
+        size_t dlen = (size_t)(slash - head + 1);
+        if (dlen >= sizeof(g_comp.dir)) return;
+        memcpy(g_comp.dir, head, dlen);
+        g_comp.dir[dlen] = '\0';
+        prefix = slash + 1;
+    } else {
+        strcpy(g_comp.dir, "./");
+        prefix = head;
+    }
+
+    DIR *d = opendir(g_comp.dir);
+    if (!d) return;
+
+    int cap = 0;
+    size_t pfxlen = strlen(prefix);
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (ent->d_name[0] == '.' && pfxlen == 0) continue;
+        if (pfxlen > 0 && strncmp(ent->d_name, prefix, pfxlen) != 0) continue;
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+        if (g_comp.count == cap) {
+            int nc = cap ? cap * 2 : 16;
+            char (*tmp)[256] = realloc(g_comp.names,
+                                       (size_t)nc * sizeof(*g_comp.names));
+            if (!tmp) { closedir(d); g_comp_free(); return; }
+            g_comp.names = tmp;
+            cap = nc;
+        }
+        snprintf(g_comp.names[g_comp.count], 256, "%s", ent->d_name);
+        g_comp.count++;
+    }
+    closedir(d);
+
+    if (g_comp.count == 0) return;
+
+    qsort(g_comp.names, (size_t)g_comp.count,
+          sizeof(g_comp.names[0]), name_cmp);
+    g_comp.idx        = 0;
+    g_comp.view_start = 0;
+    apply_comp(il);
 }
 
 /* Shift+Tab: cycle backwards through the existing completion list. */
 static void path_shift_tab_fn(InputLine *il) {
-    if (g_comp.count == 0 || strcmp(il->buf, g_comp.expected) != 0)
-        return; /* no active list or user edited — ignore */
+    char head[4096];
+    if (make_head(il, head, sizeof(head)) != 0) return;
+    if (g_comp.count == 0 || strcmp(head, g_comp.expected) != 0)
+        return; /* no active list or head changed — ignore */
     g_comp.idx = (g_comp.idx + g_comp.count - 1) % g_comp.count;
-    snprintf(il->buf, il->bufsz, "%s%s", g_comp.dir, g_comp.names[g_comp.idx]);
-    il->len = strlen(il->buf);
-    il->cur = il->len;
-    snprintf(g_comp.expected, sizeof(g_comp.expected), "%s", il->buf);
+    apply_comp(il);
 }
 
 /* Determine the best directory to save attachments into.

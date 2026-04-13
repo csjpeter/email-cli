@@ -20,14 +20,17 @@ static void fixture_teardown(void) {
     /* Recursively remove the temp tree via shell to keep test code short. */
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);
-    (void)system(cmd);
+    if (system(cmd)) { /* cleanup failure ignored in tests */ }
 }
 
 /* Create a test sub-directory under g_root; return its path in out[outsz]. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
 static void td_make(const char *name, char *out, size_t outsz) {
     snprintf(out, outsz, "%s/%s", g_root, name);
     mkdir(out, 0755);
 }
+#pragma GCC diagnostic pop
 
 /* Create an empty regular file at dir/name. */
 static void make_file(const char *dir, const char *name) {

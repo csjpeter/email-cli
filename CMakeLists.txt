@@ -26,6 +26,9 @@ target_link_libraries(email-cli libemail)
 add_executable(email-cli-ro src/main_ro.c)
 target_link_libraries(email-cli-ro libemail)
 
+add_executable(email-sync src/main_sync.c)
+target_link_libraries(email-sync libemail)
+
 # Test Build
 enable_testing()
 add_subdirectory(tests/unit EXCLUDE_FROM_ALL)

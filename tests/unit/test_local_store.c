@@ -24,11 +24,8 @@ void test_local_msg_store(void) {
     const int   uid    = 137;
 
     /* Pre-clean */
-    RAII_STRING char *cleanup_path = NULL;
-    asprintf(&cleanup_path,
-             "/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-             "imap.test.example.com/store/INBOX/7/3/137.eml");
-    unlink(cleanup_path);
+    unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
+           "imap.test.example.com/store/INBOX/7/3/137.eml");
 
     /* 1. Not stored initially */
     ASSERT(local_msg_exists(folder, uid) == 0,
@@ -66,19 +63,12 @@ void test_local_msg_store(void) {
            "local_msg_exists: UID 5 after save (bucket 5/0)");
 
     /* Cleanup */
-    unlink(cleanup_path);
-    /* UID 42 */
-    RAII_STRING char *p42 = NULL;
-    asprintf(&p42,
-             "/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-             "imap.test.example.com/store/INBOX/2/4/42.eml");
-    unlink(p42);
-    /* UID 5 */
-    RAII_STRING char *p5 = NULL;
-    asprintf(&p5,
-             "/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-             "imap.test.example.com/store/INBOX/5/0/5.eml");
-    unlink(p5);
+    unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
+           "imap.test.example.com/store/INBOX/7/3/137.eml");
+    unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
+           "imap.test.example.com/store/INBOX/2/4/42.eml");
+    unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
+           "imap.test.example.com/store/INBOX/5/0/5.eml");
 
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
@@ -126,12 +116,10 @@ void test_local_index(void) {
     ASSERT(rc == 0, "local_index_update: should return 0");
 
     /* Verify from index exists */
-    RAII_STRING char *from_path = NULL;
-    asprintf(&from_path,
-             "/tmp/email-cli-index-test/.local/share/email-cli/accounts/"
-             "imap.test.example.com/index/from/github.com/noreply");
+    const char *from_path =
+        "/tmp/email-cli-index-test/.local/share/email-cli/accounts/"
+        "imap.test.example.com/index/from/github.com/noreply";
     {
-        RAII_STRING char *content = NULL;
         RAII_FILE FILE *fp = fopen(from_path, "r");
         ASSERT(fp != NULL, "from index file should exist");
         if (fp) {
@@ -144,10 +132,9 @@ void test_local_index(void) {
     }
 
     /* Verify date index exists */
-    RAII_STRING char *date_path = NULL;
-    asprintf(&date_path,
-             "/tmp/email-cli-index-test/.local/share/email-cli/accounts/"
-             "imap.test.example.com/index/date/2026/03/15");
+    const char *date_path =
+        "/tmp/email-cli-index-test/.local/share/email-cli/accounts/"
+        "imap.test.example.com/index/date/2026/03/15";
     {
         RAII_FILE FILE *fp = fopen(date_path, "r");
         ASSERT(fp != NULL, "date index file should exist");

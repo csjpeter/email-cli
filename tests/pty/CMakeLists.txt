@@ -7,6 +7,23 @@ if(NOT APPLE)
     target_link_libraries(test-pty-views util)
 endif()
 
+# ── Mock IMAP server (built inline for PTY tests) ─────────────────────
+add_executable(mock-imap-server EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/tests/functional/mock_imap_server.c
+)
+
+# ── Custom target: run PTY view tests ─────────────────────────────────
+add_custom_target(run-pty-views
+    COMMAND test-pty-views
+        $<TARGET_FILE:email-cli>
+        $<TARGET_FILE:mock-imap-server>
+        $<TARGET_FILE:email-cli-ro>
+        $<TARGET_FILE:email-sync>
+    DEPENDS test-pty-views email-cli email-cli-ro email-sync mock-imap-server
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running PTY view tests"
+)
+
 # ── Platform sources for harness (same selection as main build) ───────
 if(WIN32)
     set(HARNESS_PLATFORM_SOURCES

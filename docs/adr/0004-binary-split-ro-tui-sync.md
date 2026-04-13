@@ -72,11 +72,14 @@ by the build system, not by `#ifdef` guards.
 
 ## Migration path
 
-1. **v0.2** — Extract `libemail` from `src/`; current binary remains
-   `email-cli` (no functional change, build-system restructure only).
-2. **v0.3** — Introduce `email-cli-ro` as a thin wrapper over `libemail`;
-   retire or rename the old `email-cli`.
-3. **v0.4+** — Add write modules; `email-tui` and `email-sync` take shape.
+1. **v0.1.1** — Extract `libemail` from `src/`; current `email-cli` binary
+   remains unchanged (build-system restructure only, no functional change).
+2. **v0.1.2** — Introduce `email-cli-ro` as a read-only binary over
+   `libemail`; the original `email-cli` is kept as-is alongside it.
+3. **v0.1.3** — Introduce `email-sync` as a background sync daemon.
+4. **v0.1.4** — Introduce `email-tui` as the interactive TUI binary.
+5. **v0.1.5** — Transform `email-cli` into the write-capable scriptable CLI
+   (compose, send, flag); links `libemail` + write modules.
 
 ## Consequences
 

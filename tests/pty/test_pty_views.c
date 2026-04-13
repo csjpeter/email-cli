@@ -920,6 +920,47 @@ static void test_show_save_all_confirm(void) {
  *  email-cli-ro EXCLUSIVE TESTS
  * ══════════════════════════════════════════════════════════════════════ */
 
+static void test_ro_help_general(void) {
+    const char *a[] = {"--help", NULL};
+    PtySession *s = cli_open_size(120, 50, a);
+    ASSERT(s != NULL, "ro help: opens");
+    ASSERT_WAIT_FOR(s, "Commands:", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "list");
+    ASSERT_SCREEN_CONTAINS(s, "show");
+    ASSERT_SCREEN_CONTAINS(s, "folders");
+    ASSERT_SCREEN_CONTAINS(s, "attachments");
+    ASSERT_SCREEN_CONTAINS(s, "save-attachment");
+    ASSERT_SCREEN_CONTAINS(s, "help");
+    pty_close(s);
+}
+
+static void test_ro_help_list(void) {
+    const char *a[] = {"list", "--help", NULL};
+    PtySession *s = cli_open_size(120, 50, a);
+    ASSERT(s != NULL, "ro help list: opens");
+    ASSERT_WAIT_FOR(s, "Usage: email-cli-ro list", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "--folder");
+    pty_close(s);
+}
+
+static void test_ro_help_attachments(void) {
+    const char *a[] = {"attachments", "--help", NULL};
+    PtySession *s = cli_open_size(120, 50, a);
+    ASSERT(s != NULL, "ro help attachments: opens");
+    ASSERT_WAIT_FOR(s, "attachments <uid>", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_ro_help_save_attachment(void) {
+    const char *a[] = {"save-attachment", "--help", NULL};
+    PtySession *s = cli_open_size(120, 50, a);
+    ASSERT(s != NULL, "ro help save-attachment: opens");
+    ASSERT_WAIT_FOR(s, "save-attachment", WAIT_MS);
+    pty_close(s);
+}
+
 static void test_ro_list_folder(void) {
     const char *a[] = {"list", "--folder", "INBOX.Sent", NULL};
     PtySession *s = cli_run(a);
@@ -948,12 +989,40 @@ static void test_ro_list_offset(void) {
     pty_close(s);
 }
 
-static void test_ro_sync(void) {
-    restart_mock();
+static void test_ro_sync_unknown(void) {
     const char *a[] = {"sync", NULL};
     PtySession *s = cli_run(a);
-    ASSERT(s != NULL, "ro sync: opens");
-    ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    ASSERT(s != NULL, "ro sync unknown: opens");
+    ASSERT_WAIT_FOR(s, "Unknown command", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_ro_attachments(void) {
+    restart_mock();
+    const char *a[] = {"attachments", "1", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "ro attachments: opens");
+    ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "data.bin");
+    pty_close(s);
+}
+
+static void test_ro_save_attachment(void) {
+    restart_mock();
+    char tmpdir[300];
+    snprintf(tmpdir, sizeof(tmpdir), "%s/att_save", g_test_home);
+    mkdir(tmpdir, 0700);
+    const char *a[] = {"save-attachment", "1", "notes.txt", tmpdir, NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "ro save-attachment: opens");
+    ASSERT_WAIT_FOR(s, "Saved:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    char expected[600];
+    snprintf(expected, sizeof(expected), "%s/notes.txt", tmpdir);
+    struct stat st;
+    ASSERT(stat(expected, &st) == 0, "ro save-attachment: file exists");
+    ASSERT(st.st_size > 0, "ro save-attachment: file non-empty");
     pty_close(s);
 }
 
@@ -1418,16 +1487,16 @@ int main(int argc, char *argv[]) {
     snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_cli_ro_bin);
 
     printf("\n--- email-cli-ro: help pages ---\n");
-    RUN_TEST(test_help_general);
-    RUN_TEST(test_help_list);
+    RUN_TEST(test_ro_help_general);
+    RUN_TEST(test_ro_help_list);
     RUN_TEST(test_help_show);
     RUN_TEST(test_help_folders);
-    RUN_TEST(test_help_sync);
+    RUN_TEST(test_ro_help_attachments);
+    RUN_TEST(test_ro_help_save_attachment);
 
     printf("\n--- email-cli-ro: batch mode ---\n");
     restart_mock();
     RUN_TEST(test_batch_list);
-    RUN_TEST(test_batch_list_all);
     RUN_TEST(test_batch_list_empty);
     RUN_TEST(test_batch_show);
     RUN_TEST(test_batch_folders_flat);
@@ -1437,7 +1506,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_ro_list_folder);
     RUN_TEST(test_ro_list_limit);
     RUN_TEST(test_ro_list_offset);
-    RUN_TEST(test_ro_sync);
+    RUN_TEST(test_ro_sync_unknown);
+    RUN_TEST(test_ro_attachments);
+    RUN_TEST(test_ro_save_attachment);
     RUN_TEST(test_ro_no_config);
 
     /* Restore full email-cli binary for the remaining tests */

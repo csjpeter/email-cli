@@ -79,6 +79,7 @@ JOBS=$(nproc)
 cmake_build() {
     cmake --build "$BUILD_DIR" -- -j"$JOBS"
     cp "$BUILD_DIR/$PROJECT_NAME" "$BIN_DIR/"
+    cp "$BUILD_DIR/${PROJECT_NAME}-ro" "$BIN_DIR/" 2>/dev/null || true
 }
 
 build_release() {

@@ -23,6 +23,9 @@ add_subdirectory(libemail)
 add_executable(email-cli src/main.c)
 target_link_libraries(email-cli libemail)
 
+add_executable(email-cli-ro src/main_ro.c)
+target_link_libraries(email-cli-ro libemail)
+
 # Test Build
 enable_testing()
 add_subdirectory(tests/unit EXCLUDE_FROM_ALL)

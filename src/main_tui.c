@@ -533,20 +533,32 @@ int main(int argc, char *argv[]) {
             result = -1;
         } else {
             for (;;) {
-                EmailListOpts opts = {0, tui_folder, page_size, 0, 1};
+                EmailListOpts opts = {0, tui_folder, page_size, 0, 1, 0};
                 int ret = email_service_list(cfg, &opts);
-                if (ret != 1) { result = (ret >= 0) ? 0 : -1; break; }
-                /* User pressed Backspace → show folder browser */
-                char *sel = email_service_list_folders_interactive(cfg, tui_folder);
-                free(tui_folder);
-                tui_folder = sel;
-                if (!tui_folder) { result = 0; break; }
+                if (ret == 1) {
+                    /* User pressed Backspace → show folder browser */
+                    char *sel = email_service_list_folders_interactive(cfg, tui_folder);
+                    free(tui_folder);
+                    tui_folder = sel;
+                    if (!tui_folder) { result = 0; break; }
+                } else if (ret == 2) {
+                    /* User pressed 'c' → compose new message */
+                    cmd_compose_interactive(cfg, NULL, NULL, NULL);
+                    /* Return to list after compose */
+                } else if (ret == 3) {
+                    /* User pressed 'r' → reply to current message */
+                    cmd_reply(cfg, opts.action_uid);
+                    /* Return to list after reply */
+                } else {
+                    result = (ret >= 0) ? 0 : -1;
+                    break;
+                }
             }
             free(tui_folder);
         }
 
     } else if (strcmp(cmd, "list") == 0) {
-        EmailListOpts opts = {0, NULL, 0, 0, pager};
+        EmailListOpts opts = {0, NULL, 0, 0, pager, 0};
         int ok = 1, explicit_limit = -1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) {

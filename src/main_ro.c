@@ -230,7 +230,7 @@ int main(int argc, char *argv[]) {
     int result = -1;
 
     if (strcmp(cmd, "list") == 0) {
-        EmailListOpts opts = {1, NULL, BATCH_DEFAULT_LIMIT, 0, 0};
+        EmailListOpts opts = {1, NULL, BATCH_DEFAULT_LIMIT, 0, 0, 0};
         int ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) {

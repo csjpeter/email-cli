@@ -1170,7 +1170,7 @@ static char *resolve_folder_name_dup(const char *name) {
     return result;
 }
 
-int email_service_list(const Config *cfg, const EmailListOpts *opts) {
+int email_service_list(const Config *cfg, EmailListOpts *opts) {
     const char *raw_folder = opts->folder ? opts->folder : cfg->folder;
 
     /* Normalise to the server-canonical name so the manifest key matches
@@ -1496,7 +1496,8 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
             char sb[256];
             snprintf(sb, sizeof(sb),
                      "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                     "  n=new  f=flag  d=done  Backspace=folders  ESC=quit  [%d/%d]",
+                     "  c=compose  r=reply  n=new  f=flag  d=done"
+                     "  Backspace=folders  ESC=quit  [%d/%d]",
                      cursor + 1, show_count);
             print_statusbar(trows, tcols, sb);
         }
@@ -1527,6 +1528,15 @@ int email_service_list(const Config *cfg, const EmailListOpts *opts) {
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
+            if (ch == 'c') {
+                list_result = 2;
+                goto list_done;
+            }
+            if (ch == 'r') {
+                opts->action_uid = entries[cursor].uid;
+                list_result = 3;
+                goto list_done;
+            }
             if (ch == 'n' || ch == 'f' || ch == 'd') {
                 int uid  = entries[cursor].uid;
                 int bit;

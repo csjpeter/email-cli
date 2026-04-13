@@ -38,12 +38,14 @@ static void help_general(void) {
         "                    Implied when stdout is redirected to a pipe or file.\n"
         "\n"
         "Commands:\n"
-        "  list              List messages in the configured mailbox\n"
-        "  show <uid>        Display the full content of a message by its UID\n"
-        "  folders           List available IMAP folders\n"
-        "  sync              Download all messages in all folders to local store\n"
-        "  cron              Manage automatic background sync (setup/remove/status)\n"
-        "  help [command]    Show this help, or detailed help for a command\n"
+        "  list                    List messages in the configured mailbox\n"
+        "  show <uid>              Display the full content of a message by its UID\n"
+        "  folders                 List available IMAP folders\n"
+        "  attachments <uid>       List attachments in a message\n"
+        "  save-attachment <uid>   Save a named attachment to disk\n"
+        "  sync                    Download all messages in all folders to local store\n"
+        "  cron                    Manage automatic background sync (setup/remove/status)\n"
+        "  help [command]          Show this help, or detailed help for a command\n"
         "\n"
         "Run 'email-cli help <command>' for more information.\n",
         BATCH_DEFAULT_LIMIT
@@ -128,6 +130,36 @@ static void help_sync(void) {
     );
 }
 
+static void help_attachments(void) {
+    printf(
+        "Usage: email-cli attachments <uid>\n"
+        "\n"
+        "Lists all attachments in the message identified by <uid>.\n"
+        "Prints one line per attachment: filename and decoded size.\n"
+        "\n"
+        "  <uid>   Numeric IMAP UID shown by 'email-cli list'\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli attachments 42\n"
+    );
+}
+
+static void help_save_attachment(void) {
+    printf(
+        "Usage: email-cli save-attachment <uid> <filename> [dir]\n"
+        "\n"
+        "Saves the named attachment from message <uid> to disk.\n"
+        "\n"
+        "  <uid>       Numeric IMAP UID shown by 'email-cli list'\n"
+        "  <filename>  Exact attachment filename shown by 'email-cli attachments'\n"
+        "  [dir]       Destination directory (default: ~/Downloads or ~)\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli save-attachment 42 report.pdf\n"
+        "  email-cli save-attachment 42 report.pdf /tmp\n"
+    );
+}
+
 static void help_cron(void) {
     printf(
         "Usage: email-cli cron <setup|remove|status>\n"
@@ -204,11 +236,13 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[i], "--help") == 0) {
             if (cmd && strcmp(cmd, "--help") != 0) {
                 /* e.g. email-cli list --help */
-                if (strcmp(cmd, "list")    == 0) { help_list();    return EXIT_SUCCESS; }
-                if (strcmp(cmd, "show")    == 0) { help_show();    return EXIT_SUCCESS; }
-                if (strcmp(cmd, "folders") == 0) { help_folders(); return EXIT_SUCCESS; }
-                if (strcmp(cmd, "sync")    == 0) { help_sync();    return EXIT_SUCCESS; }
-                if (strcmp(cmd, "cron")    == 0) { help_cron();    return EXIT_SUCCESS; }
+                if (strcmp(cmd, "list")            == 0) { help_list();            return EXIT_SUCCESS; }
+                if (strcmp(cmd, "show")            == 0) { help_show();            return EXIT_SUCCESS; }
+                if (strcmp(cmd, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
+                if (strcmp(cmd, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
+                if (strcmp(cmd, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
+                if (strcmp(cmd, "sync")            == 0) { help_sync();            return EXIT_SUCCESS; }
+                if (strcmp(cmd, "cron")            == 0) { help_cron();            return EXIT_SUCCESS; }
             }
             /* email-cli --help  or  email-cli help --help */
             help_general();
@@ -228,11 +262,13 @@ int main(int argc, char *argv[]) {
             topic = argv[i]; break;
         }
         if (topic) {
-            if (strcmp(topic, "list")           == 0) { help_list();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "show")           == 0) { help_show();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "folders")        == 0) { help_folders(); return EXIT_SUCCESS; }
-            if (strcmp(topic, "sync")           == 0) { help_sync();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "cron")           == 0) { help_cron();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "list")            == 0) { help_list();            return EXIT_SUCCESS; }
+            if (strcmp(topic, "show")            == 0) { help_show();            return EXIT_SUCCESS; }
+            if (strcmp(topic, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
+            if (strcmp(topic, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
+            if (strcmp(topic, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
+            if (strcmp(topic, "sync")            == 0) { help_sync();            return EXIT_SUCCESS; }
+            if (strcmp(topic, "cron")            == 0) { help_cron();            return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli help' for available commands.\n");
             return EXIT_FAILURE;
@@ -297,7 +333,7 @@ int main(int argc, char *argv[]) {
             result = -1;
         } else {
             for (;;) {
-                EmailListOpts opts = {0, tui_folder, page_size, 0, 1};
+                EmailListOpts opts = {0, tui_folder, page_size, 0, 1, 0};
                 int ret = email_service_list(cfg, &opts);
                 if (ret != 1) { result = (ret >= 0) ? 0 : -1; break; }
                 /* User pressed Backspace → show folder browser */
@@ -310,7 +346,7 @@ int main(int argc, char *argv[]) {
         }
 
     } else if (strcmp(cmd, "list") == 0) {
-        EmailListOpts opts = {0, NULL, 0, 0, pager};
+        EmailListOpts opts = {0, NULL, 0, 0, pager, 0};
         int ok = 1, explicit_limit = -1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) {
@@ -391,6 +427,50 @@ int main(int argc, char *argv[]) {
             else { unknown_option("folders", argv[i]); ok = 0; }
         }
         if (ok) result = email_service_list_folders(cfg, tree);
+
+    } else if (strcmp(cmd, "attachments") == 0) {
+        const char *uid_str = NULL;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            uid_str = argv[i]; break;
+        }
+        if (!uid_str) {
+            fprintf(stderr, "Error: 'attachments' requires a UID argument.\n");
+            help_attachments();
+        } else {
+            int uid = parse_uid(uid_str);
+            if (!uid)
+                fprintf(stderr,
+                        "Error: UID must be a positive integer (got '%s').\n",
+                        uid_str);
+            else
+                result = email_service_list_attachments(cfg, uid);
+        }
+
+    } else if (strcmp(cmd, "save-attachment") == 0) {
+        const char *uid_str  = NULL;
+        const char *filename = NULL;
+        const char *outdir   = NULL;
+        int argn = 0;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (argn == 0)      { uid_str  = argv[i]; argn++; }
+            else if (argn == 1) { filename = argv[i]; argn++; }
+            else if (argn == 2) { outdir   = argv[i]; argn++; }
+        }
+        if (!uid_str || !filename) {
+            fprintf(stderr,
+                    "Error: 'save-attachment' requires a UID and a filename.\n");
+            help_save_attachment();
+        } else {
+            int uid = parse_uid(uid_str);
+            if (!uid)
+                fprintf(stderr,
+                        "Error: UID must be a positive integer (got '%s').\n",
+                        uid_str);
+            else
+                result = email_service_save_attachment(cfg, uid, filename, outdir);
+        }
 
     } else if (strcmp(cmd, "sync") == 0) {
         result = email_service_sync(cfg);

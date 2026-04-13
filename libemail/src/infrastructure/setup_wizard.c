@@ -101,3 +101,96 @@ Config* setup_wizard_run_internal(FILE *stream) {
 Config* setup_wizard_run(void) {
     return setup_wizard_run_internal(stdin);
 }
+
+/* ── SMTP sub-wizard ─────────────────────────────────────────────────── */
+
+/**
+ * Derive a plausible default SMTP URL from the IMAP URL in cfg->host.
+ * Writes into buf (size bytes).  buf[0] == 0 if derivation is not possible.
+ */
+static void derive_smtp_url(const Config *cfg, char *buf, size_t size) {
+    buf[0] = '\0';
+    if (!cfg->host) return;
+    if (strncmp(cfg->host, "imaps://", 8) == 0)
+        snprintf(buf, size, "smtps://%s", cfg->host + 8);
+    else if (strncmp(cfg->host, "imap://", 7) == 0)
+        snprintf(buf, size, "smtp://%s", cfg->host + 7);
+}
+
+int setup_wizard_smtp(Config *cfg) {
+    printf("\n--- SMTP (outgoing mail) configuration ---\n");
+    printf("Press Enter on any field to keep the shown default.\n\n");
+
+    /* ── SMTP Host ────────────────────────────────────────────────── */
+    char derived[512];
+    derive_smtp_url(cfg, derived, sizeof(derived));
+
+    char host_prompt[1024];
+    if (cfg->smtp_host)
+        snprintf(host_prompt, sizeof(host_prompt),
+                 "SMTP Host [current: %s]", cfg->smtp_host);
+    else if (derived[0])
+        snprintf(host_prompt, sizeof(host_prompt),
+                 "SMTP Host [Enter = %s]", derived);
+    else
+        snprintf(host_prompt, sizeof(host_prompt),
+                 "SMTP Host (e.g. smtp://smtp.example.com or smtps://...)");
+
+    char *host = get_input(host_prompt, 0, stdin);
+    if (!host) return -1;   /* EOF / Ctrl-D → abort */
+    if (host[0]) {
+        free(cfg->smtp_host);
+        cfg->smtp_host = host;
+    } else {
+        free(host);
+        if (!cfg->smtp_host && derived[0])
+            cfg->smtp_host = strdup(derived);
+        /* else keep whatever was there */
+    }
+
+    /* ── SMTP Port ────────────────────────────────────────────────── */
+    int cur_port = cfg->smtp_port ? cfg->smtp_port : 587;
+    char port_prompt[64];
+    snprintf(port_prompt, sizeof(port_prompt), "SMTP Port [%d]", cur_port);
+    char *port_str = get_input(port_prompt, 0, stdin);
+    if (port_str && port_str[0])
+        cfg->smtp_port = atoi(port_str);
+    else
+        cfg->smtp_port = cur_port;
+    free(port_str);
+
+    /* ── SMTP Username ────────────────────────────────────────────── */
+    char user_prompt[768];
+    if (cfg->smtp_user)
+        snprintf(user_prompt, sizeof(user_prompt),
+                 "SMTP Username [current: %s]", cfg->smtp_user);
+    else
+        snprintf(user_prompt, sizeof(user_prompt),
+                 "SMTP Username [Enter = same as IMAP (%s)]",
+                 cfg->user ? cfg->user : "");
+    char *su = get_input(user_prompt, 0, stdin);
+    if (su && su[0]) {
+        free(cfg->smtp_user);
+        cfg->smtp_user = su;
+    } else {
+        free(su);
+        /* NULL means "use IMAP username" — keep as-is */
+    }
+
+    /* ── SMTP Password ────────────────────────────────────────────── */
+    char pass_prompt[64];
+    snprintf(pass_prompt, sizeof(pass_prompt), "%s",
+             cfg->smtp_pass ? "SMTP Password [Enter = keep current]"
+                            : "SMTP Password [Enter = same as IMAP]");
+    char *sp = get_input(pass_prompt, 1, stdin);
+    if (sp && sp[0]) {
+        free(cfg->smtp_pass);
+        cfg->smtp_pass = sp;
+    } else {
+        free(sp);
+        /* NULL means "use IMAP password" — keep as-is */
+    }
+
+    printf("\nSMTP configuration updated.\n");
+    return 0;
+}

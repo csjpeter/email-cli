@@ -12,6 +12,7 @@
  */
 
 #include "pty_internal.h"
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -76,6 +77,9 @@ static void apply_csi(PtyScreen *scr, const char *params, int param_len, char fi
         args[argc++] = val;
         if (p < end && *p == ';') p++;
     }
+
+    /* Any CSI sequence cancels pending wrap */
+    scr->pending_wrap = 0;
 
     switch (final) {
     case 'H': case 'f': /* CUP — cursor position */
@@ -189,6 +193,7 @@ void pty_screen_feed(PtyScreen *scr, const char *data, size_t len) {
 
         /* Control characters */
         if (ch == '\n') {
+            scr->pending_wrap = 0;
             scr->cur_row++;
             if (scr->cur_row >= scr->rows) {
                 scr->cur_row = scr->rows - 1;
@@ -198,16 +203,19 @@ void pty_screen_feed(PtyScreen *scr, const char *data, size_t len) {
             continue;
         }
         if (ch == '\r') {
+            scr->pending_wrap = 0;
             scr->cur_col = 0;
             p++;
             continue;
         }
         if (ch == '\b') {
+            scr->pending_wrap = 0;
             if (scr->cur_col > 0) scr->cur_col--;
             p++;
             continue;
         }
         if (ch == '\t') {
+            scr->pending_wrap = 0;
             scr->cur_col = (scr->cur_col + 8) & ~7;
             if (scr->cur_col >= scr->cols) scr->cur_col = scr->cols - 1;
             p++;
@@ -220,6 +228,17 @@ void pty_screen_feed(PtyScreen *scr, const char *data, size_t len) {
 
         /* Printable character (ASCII or UTF-8 lead byte) */
         {
+            /* Pending wrap: deferred line advance, matching real terminal behaviour */
+            if (scr->pending_wrap) {
+                scr->pending_wrap = 0;
+                scr->cur_col = 0;
+                scr->cur_row++;
+                if (scr->cur_row >= scr->rows) {
+                    scr->cur_row = scr->rows - 1;
+                    scroll_up(scr);
+                }
+            }
+
             PtyCell *cl = cell_at(scr, scr->cur_row, scr->cur_col);
             if (!cl) { p++; continue; }
 
@@ -238,12 +257,9 @@ void pty_screen_feed(PtyScreen *scr, const char *data, size_t len) {
 
             scr->cur_col++;
             if (scr->cur_col >= scr->cols) {
-                scr->cur_col = 0;
-                scr->cur_row++;
-                if (scr->cur_row >= scr->rows) {
-                    scr->cur_row = scr->rows - 1;
-                    scroll_up(scr);
-                }
+                /* Pending wrap: stay at last column until next char */
+                scr->cur_col = scr->cols - 1;
+                scr->pending_wrap = 1;
             }
 
             p += bytes;

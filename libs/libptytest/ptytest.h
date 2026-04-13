@@ -140,6 +140,11 @@ int pty_screen_contains(PtySession *s, const char *text);
 char *pty_row_text(PtySession *s, int row, char *buf, size_t size);
 
 /**
+ * @brief Enable/disable raw byte tracing from master fd to stdout.
+ */
+void pty_trace_enable(int on);
+
+/**
  * @brief Returns the terminal dimensions.
  */
 void pty_get_size(PtySession *s, int *cols, int *rows);

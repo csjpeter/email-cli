@@ -8,6 +8,7 @@
 
 #include "pty_internal.h"
 #include <poll.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <time.h>
 
@@ -21,11 +22,24 @@ static long now_ms(void) {
 
 /* ── Read and feed ───────────────────────────────────────────────────── */
 
+int g_trace_active = 0;
+void pty_trace_enable(int on) { g_trace_active = on; }
+
 /** @brief Reads available data from master fd and feeds to screen. */
 static int read_and_feed(PtySession *s) {
     char buf[8192];
     ssize_t n = read(s->master_fd, buf, sizeof(buf));
     if (n > 0) {
+        if (g_trace_active) {
+            printf("  [TRACE %zd bytes]:", n);
+            for (ssize_t i = 0; i < n && i < 120; i++) {
+                unsigned char c = (unsigned char)buf[i];
+                if (c == 0x1B) printf(" ESC");
+                else if (c < 0x20 || c > 0x7E) printf(" %02X", c);
+                else printf(" %c", c);
+            }
+            printf("\n"); fflush(stdout);
+        }
         pty_screen_feed(s->screen, buf, (size_t)n);
         return (int)n;
     }

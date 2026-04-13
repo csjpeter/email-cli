@@ -21,8 +21,9 @@ typedef struct {
 typedef struct PtyScreen {
     int      cols, rows;
     int      cur_row, cur_col;
-    int      cur_attr;     /**< Current SGR attribute state */
-    PtyCell *cells;        /**< rows × cols cell array */
+    int      cur_attr;        /**< Current SGR attribute state */
+    int      pending_wrap;    /**< 1 = cursor is past last column, wrap on next char */
+    PtyCell *cells;           /**< rows × cols cell array */
 } PtyScreen;
 
 PtyScreen  *pty_screen_new(int cols, int rows);

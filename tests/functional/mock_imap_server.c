@@ -136,18 +136,38 @@ void handle_client(int client_sock) {
                 "Subject: Test Message\r\n"
                 "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
                 "\r\n";
-            /* HTML-only message (no text/plain part) with an embedded
-             * <style> block — CSS must be suppressed in rendered output. */
+            /* multipart/mixed message: HTML body + two attachments.
+             * notes.txt  = base64("Hello World")
+             * data.bin   = base64("test data")
+             * The HTML part is intentionally identical to the old plain
+             * HTML message so that existing show-view tests still pass. */
             const char *full_msg =
                 "From: Test User <test@example.com>\r\n"
                 "Subject: Test Message\r\n"
                 "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+                "MIME-Version: 1.0\r\n"
+                "Content-Type: multipart/mixed; boundary=\"B001\"\r\n"
+                "\r\n"
+                "--B001\r\n"
                 "Content-Type: text/html; charset=UTF-8\r\n"
                 "\r\n"
                 "<html>"
                 "<head><style>body { color: red; font-size: 14px; }</style></head>"
                 "<body><b>Hello from Mock Server!</b></body>"
-                "</html>";
+                "</html>\r\n"
+                "--B001\r\n"
+                "Content-Type: text/plain; name=\"notes.txt\"\r\n"
+                "Content-Disposition: attachment; filename=\"notes.txt\"\r\n"
+                "Content-Transfer-Encoding: base64\r\n"
+                "\r\n"
+                "SGVsbG8gV29ybGQ=\r\n"
+                "--B001\r\n"
+                "Content-Type: application/octet-stream; name=\"data.bin\"\r\n"
+                "Content-Disposition: attachment; filename=\"data.bin\"\r\n"
+                "Content-Transfer-Encoding: base64\r\n"
+                "\r\n"
+                "dGVzdCBkYXRh\r\n"
+                "--B001--\r\n";
 
             int is_header = strstr(buffer, "HEADER") != NULL;
             const char *content = is_header ? headers : full_msg;

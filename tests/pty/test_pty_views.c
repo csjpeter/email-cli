@@ -303,7 +303,7 @@ static void test_interactive_list_esc_quit(void) {
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "Success", WAIT_MS);
+    pty_settle(s, SETTLE_MS); /* program exits quietly — no output to wait for */
     pty_close(s);
 }
 
@@ -482,6 +482,148 @@ static void test_interactive_empty_folder(void) {
     pty_close(s);
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  ATTACHMENT SAVE TESTS
+ *
+ * The mock server message is multipart/mixed with two attachments:
+ *   notes.txt  (content: "Hello World")
+ *   data.bin   (content: "test data")
+ *
+ * attachment_save_dir() returns $HOME (= g_test_home) because there is
+ * no ~/Downloads in the isolated test environment.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Helper: open the show view of the single test message.
+ *  Waits until both headers AND attachment status bar are fully rendered. */
+static PtySession *open_show_view(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    if (!s) return NULL;
+    if (pty_wait_for(s, "Test Message", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    /* Wait for the attachment status bar — proves the full show view rendered */
+    if (pty_wait_for(s, "A=save-all", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/** Status bar shows  a=save  A=save-all(2) when attachments present. */
+static void test_show_attachment_statusbar(void) {
+    PtySession *s = open_show_view();
+    ASSERT(s != NULL, "att statusbar: opens");
+
+    ASSERT_SCREEN_CONTAINS(s, "a=save");
+    ASSERT_SCREEN_CONTAINS(s, "A=save-all(2)");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** Attachment picker is shown when 'a' is pressed (2 attachments). */
+static void test_show_attachment_picker(void) {
+    PtySession *s = open_show_view();
+    ASSERT(s != NULL, "att picker: opens");
+
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Attachments", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");
+    ASSERT_SCREEN_CONTAINS(s, "data.bin");
+
+    /* Backspace returns to show view */
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** Pressing 'a', selecting first attachment, confirming saves it. */
+static void test_show_save_single(void) {
+    PtySession *s = open_show_view();
+    ASSERT(s != NULL, "save single: opens");
+
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Attachments", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Select first attachment (notes.txt) */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Accept pre-filled path */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Saved:", WAIT_MS);
+
+    /* File must exist on disk */
+    char path[512];
+    snprintf(path, sizeof(path), "%s/notes.txt", g_test_home);
+    ASSERT(access(path, F_OK) == 0, "notes.txt saved to disk");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** Pressing 'A' then ESC cancels without saving any file. */
+static void test_show_save_all_cancel(void) {
+    PtySession *s = open_show_view();
+    ASSERT(s != NULL, "save-all cancel: opens");
+
+    /* Remove any pre-existing file from a previous test run */
+    char path[512];
+    snprintf(path, sizeof(path), "%s/data.bin", g_test_home);
+    remove(path);
+
+    pty_send_str(s, "A");
+    ASSERT_WAIT_FOR(s, "Save all to:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+
+    /* No "Saved" status must appear after ESC */
+    ASSERT(pty_screen_contains(s, "Saved 2/2") == 0, "no save on ESC");
+    ASSERT(access(path, F_OK) != 0, "data.bin NOT on disk after ESC");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** Pressing 'A' then Enter saves all attachments to the default dir. */
+static void test_show_save_all_confirm(void) {
+    PtySession *s = open_show_view();
+    ASSERT(s != NULL, "save-all confirm: opens");
+
+    pty_send_str(s, "A");
+    ASSERT_WAIT_FOR(s, "Save all to:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Accept the pre-filled default (g_test_home) */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Saved 2/2", WAIT_MS);
+
+    /* Both files must exist on disk */
+    char p1[512], p2[512];
+    snprintf(p1, sizeof(p1), "%s/notes.txt", g_test_home);
+    snprintf(p2, sizeof(p2), "%s/data.bin",  g_test_home);
+    ASSERT(access(p1, F_OK) == 0, "notes.txt saved");
+    ASSERT(access(p2, F_OK) == 0, "data.bin saved");
+
+    /* Verify content of notes.txt ("Hello World") */
+    FILE *f = fopen(p1, "r");
+    if (f) {
+        char buf[64] = "";
+        size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+        fclose(f);
+        buf[n] = '\0';
+        ASSERT(strcmp(buf, "Hello World") == 0, "notes.txt content correct");
+    }
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 #define RUN_TEST(fn) do { printf("  %s...\n", #fn); fn(); } while(0)
@@ -545,6 +687,13 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_folders_statusbar);
     RUN_TEST(test_interactive_folders_toggle);
     RUN_TEST(test_interactive_folders_select);
+
+    printf("\n--- Attachment save ---\n");
+    RUN_TEST(test_show_attachment_statusbar);
+    RUN_TEST(test_show_attachment_picker);
+    RUN_TEST(test_show_save_single);
+    RUN_TEST(test_show_save_all_cancel);
+    RUN_TEST(test_show_save_all_confirm);
 
     printf("\n--- Empty folder ---\n");
     RUN_TEST(test_interactive_empty_folder);

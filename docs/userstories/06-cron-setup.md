@@ -13,15 +13,16 @@ email-cli cron setup
 1. Reads `sync_interval` from config (minutes between syncs).
 2. If `sync_interval` is not configured (≤ 0), defaults to 5 minutes, saves the
    default to config, and informs the user.
-3. Checks the current user crontab for an existing `email-cli sync` entry.
+3. Checks the current user crontab for an existing `email-sync` entry.
 4. If an entry already exists, prints a message and exits without modifying the crontab.
-5. Otherwise, adds a new crontab entry: `*/<interval> * * * * /path/to/email-cli sync`
-   where `/path/to/email-cli` is resolved from `/proc/self/exe` (Linux) or `argv[0]`.
+5. Otherwise, adds a new crontab entry:
+   `*/<interval> * * * * /path/to/email-sync >> ~/.cache/email-cli/sync.log 2>&1`
+   where `/path/to/email-sync` is resolved from `/proc/self/exe` (Linux) or `argv[0]`.
 
 ## Example Output (new installation)
 ```
 sync_interval not configured; using default of 5 minutes.
-Cron job installed: */5 * * * * /usr/local/bin/email-cli sync
+Cron job installed: */5 * * * * /usr/local/bin/email-sync >> ~/.cache/email-cli/sync.log 2>&1
 ```
 
 ## Example Output (already installed)

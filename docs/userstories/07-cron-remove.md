@@ -10,7 +10,7 @@ email-cli cron remove
 
 ## Behaviour
 1. Reads the current user crontab.
-2. Removes any line containing `email-cli sync`.
+2. Removes any line containing `email-sync` (or legacy `email-cli sync`).
 3. Installs the filtered crontab.
 4. If no such entry was found, prints a message and exits normally.
 
@@ -21,7 +21,7 @@ Cron job removed.
 
 ## Example Output (not found)
 ```
-No email-cli sync cron entry found.
+No email-sync cron entry found.
 ```
 
 ## Note

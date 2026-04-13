@@ -136,10 +136,10 @@ static void help_cron(void) {
         "No sudo or system-level access is required.\n"
         "\n"
         "Subcommands:\n"
-        "  setup    Install a crontab entry to run 'email-cli sync' periodically.\n"
+        "  setup    Install a crontab entry to run email-sync periodically.\n"
         "           Uses SYNC_INTERVAL from config (default: 5 minutes if not set).\n"
         "           Saves the interval to config if a default was applied.\n"
-        "  remove   Remove the 'email-cli sync' crontab entry.\n"
+        "  remove   Remove the email-sync crontab entry.\n"
         "  status   Show whether an automatic sync entry is currently installed.\n"
         "\n"
         "Examples:\n"
@@ -272,6 +272,8 @@ int main(int argc, char *argv[]) {
             if (config_save_to_store(cfg) != 0) {
                 logger_log(LOG_ERROR, "Failed to save configuration.");
                 fprintf(stderr, "Error: Failed to save configuration to disk.\n");
+            } else {
+                printf("Configuration saved. Run 'email-cli sync' to download your mail.\n");
             }
         } else {
             logger_log(LOG_ERROR, "Configuration aborted by user.");

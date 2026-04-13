@@ -2244,18 +2244,8 @@ int email_service_cron_setup(const Config *cfg) {
     /* Check if already present (email-sync or legacy email-cli sync) */
     if (strstr(existing, "email-sync") ||
         (strstr(existing, "email-cli") && strstr(existing, " sync"))) {
-        printf("Cron entry already exists:\n");
-        char *p = existing;
-        while (*p) {
-            char *nl = strchr(p, '\n');
-            char *end = nl ? nl : p + strlen(p);
-            char saved = *end; *end = '\0';
-            if (strstr(p, "email-cli sync"))
-                printf("  %s\n", p);
-            *end = saved;
-            p = nl ? nl + 1 : end;
-        }
-        printf("Remove it first with: email-cli cron remove\n");
+        printf("Cron job already installed. "
+               "Run 'email-cli cron remove' first to change the interval.\n");
         return 0;
     }
 
@@ -2277,8 +2267,7 @@ int email_service_cron_setup(const Config *cfg) {
         return -1;
     }
 
-    printf("Cron entry added (every %d minutes):\n  %s\n",
-           cfg->sync_interval, cron_line);
+    printf("Cron job installed: %s\n", cron_line);
     return 0;
 }
 
@@ -2336,7 +2325,7 @@ int email_service_cron_remove(void) {
         return -1;
     }
 
-    printf("Cron entry removed.\n");
+    printf("Cron job removed.\n");
     return 0;
 }
 
@@ -2350,14 +2339,14 @@ int email_service_cron_status(void) {
     int found = 0;
     while (fgets(line, sizeof(line), fp)) {
         if (IS_SYNC_LINE(line)) {
-            if (!found) printf("Active sync cron entry:\n");
+            if (!found) printf("Cron entry found:\n");
             printf("  %s", line);
             found = 1;
         }
     }
     pclose(fp);
     if (!found)
-        printf("No email-sync cron entry is installed.\n");
+        printf("No email-sync cron entry found.\n");
 #undef IS_SYNC_LINE
     return 0;
 }

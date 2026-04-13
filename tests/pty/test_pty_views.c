@@ -59,6 +59,26 @@ static void write_config(void) {
     chmod(path, 0600);
 }
 
+static void write_config_with_interval(int interval) {
+    char d1[300], d2[300], path[350];
+    snprintf(d1, sizeof(d1), "%s/.config", g_test_home);
+    snprintf(d2, sizeof(d2), "%s/.config/email-cli", g_test_home);
+    mkdir(g_test_home, 0700);
+    mkdir(d1, 0700);
+    mkdir(d2, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", d2);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp,
+        "EMAIL_HOST=imap://localhost:9993\n"
+        "EMAIL_USER=testuser\n"
+        "EMAIL_PASS=testpass\n"
+        "EMAIL_FOLDER=INBOX\n"
+        "SYNC_INTERVAL=%d\n", interval);
+    fclose(fp);
+    chmod(path, 0600);
+}
+
 static int start_mock_server(void) {
     g_mock_pid = fork();
     if (g_mock_pid < 0) return -1;
@@ -304,9 +324,8 @@ static void test_batch_cron_status(void) {
     const char *a[] = {"cron", "status", NULL};
     PtySession *s = cli_run(a);
     ASSERT(s != NULL, "batch cron status: opens");
-    /* Matches either "No email-cli sync cron entry is installed." or
-     * "Active sync cron entry:" — both contain "cron" */
-    ASSERT_WAIT_FOR(s, "cron", WAIT_MS);
+    /* Matches "No email-sync cron entry found." or "Cron entry found:" */
+    ASSERT_WAIT_FOR(s, "ron", WAIT_MS);
     pty_close(s);
 }
 
@@ -906,6 +925,222 @@ static void test_ro_no_config(void) {
     setenv("HOME", g_test_home, 1);
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  NON-TTY FALLBACK (US 01)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_nonttty_shows_help(void) {
+    /* Run email-cli with stdout piped (non-TTY) — must print help and exit 0. */
+    char cmd[768];
+    snprintf(cmd, sizeof(cmd), "%s 2>/dev/null", g_cli_bin);
+    FILE *fp = popen(cmd, "r");
+    ASSERT(fp != NULL, "non-tty: popen");
+    char out[4096] = {0};
+    if (fp) {
+        size_t n = fread(out, 1, sizeof(out) - 1, fp);
+        (void)n;
+        pclose(fp);
+    }
+    ASSERT(strstr(out, "Commands:") != NULL, "non-tty: shows general help (Commands:)");
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  SETUP WIZARD (US 10)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_wizard_abort(void) {
+    char wiz_home[300];
+    snprintf(wiz_home, sizeof(wiz_home), "%s/wizard_abort", g_test_home);
+    mkdir(wiz_home, 0700);
+    setenv("HOME", wiz_home, 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "wizard abort: opens");
+    ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);  /* EOF on stdin → getline returns -1 → wizard aborts */
+    ASSERT_WAIT_FOR(s, "borted", WAIT_MS);
+    pty_close(s);
+
+    setenv("HOME", g_test_home, 1);
+}
+
+static void test_wizard_complete(void) {
+    char wiz_home[300];
+    snprintf(wiz_home, sizeof(wiz_home), "%s/wizard_complete", g_test_home);
+    mkdir(wiz_home, 0700);
+    setenv("HOME", wiz_home, 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "wizard complete: opens");
+    ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
+    pty_send_str(s, "imap://localhost:9993\n");
+    ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
+    pty_send_str(s, "testuser\n");
+    ASSERT_WAIT_FOR(s, "assword", WAIT_MS);
+    pty_send_str(s, "testpass\n");
+    ASSERT_WAIT_FOR(s, "older", WAIT_MS);
+    pty_send_str(s, "INBOX\n");
+    ASSERT_WAIT_FOR(s, "Configuration saved", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    setenv("HOME", g_test_home, 1);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  CRON MANAGEMENT (US 06, 07, 08)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Remove any email-sync cron entry — used for cleanup between cron tests. */
+static void cron_cleanup(void) {
+    const char *a[] = {"cron", "remove", NULL};
+    PtySession *s = cli_run(a);
+    if (!s) return;
+    /* Wait until crontab is fully written before closing */
+    pty_wait_for(s, "ron", WAIT_MS); /* "Cron job removed." or "No email-sync cron entry found." */
+    pty_close(s);
+}
+
+static void test_cron_status_not_found(void) {
+    cron_cleanup(); /* ensure clean state */
+    const char *a[] = {"cron", "status", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "cron status not found: opens");
+    ASSERT_WAIT_FOR(s, "No email-sync cron entry found", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_cron_setup_default_interval(void) {
+    /* Standard config has no SYNC_INTERVAL → defaults to 5 min */
+    write_config();
+    const char *a[] = {"cron", "setup", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "cron setup default interval: opens");
+    ASSERT_WAIT_FOR(s, "sync_interval not configured", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Cron job installed:", WAIT_MS);
+    pty_close(s);
+    cron_cleanup();
+}
+
+static void test_cron_setup_installs(void) {
+    cron_cleanup();
+    write_config_with_interval(15);
+    const char *a[] = {"cron", "setup", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "cron setup installs: opens");
+    ASSERT_WAIT_FOR(s, "Cron job installed:", WAIT_MS);
+    pty_close(s);
+    /* leave entry for next test */
+}
+
+static void test_cron_status_found(void) {
+    /* Entry was left by test_cron_setup_installs */
+    const char *a[] = {"cron", "status", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "cron status found: opens");
+    ASSERT_WAIT_FOR(s, "Cron entry found:", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_cron_setup_already_installed(void) {
+    /* Entry still present from test_cron_setup_installs */
+    const char *a[] = {"cron", "setup", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "cron setup already installed: opens");
+    ASSERT_WAIT_FOR(s, "already installed", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_cron_remove_entry(void) {
+    /* Entry still present — remove it */
+    const char *a[] = {"cron", "remove", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "cron remove entry: opens");
+    ASSERT_WAIT_FOR(s, "Cron job removed", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_cron_remove_not_found(void) {
+    /* Entry was removed by test_cron_remove_entry */
+    const char *a[] = {"cron", "remove", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "cron remove not found: opens");
+    ASSERT_WAIT_FOR(s, "No email-sync cron entry found", WAIT_MS);
+    pty_close(s);
+    write_config(); /* restore standard config (no sync_interval) */
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  SYNC PROGRESS (US 05)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_sync_progress(void) {
+    restart_mock();
+    const char *a[] = {"sync", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "sync progress: opens");
+    ASSERT_WAIT_FOR(s, "Syncing", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "fetched", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  SHOW CACHE HIT (US 03)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_show_cache_hit(void) {
+    /* Sync to populate local store */
+    restart_mock();
+    { const char *a[] = {"sync", NULL};
+      PtySession *s = cli_run(a);
+      ASSERT(s != NULL, "show cache: sync opens");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    /* Show must work from cache even with no server */
+    stop_mock_server();
+    { const char *a[] = {"show", "1", "--batch", NULL};
+      PtySession *s = cli_run(a);
+      ASSERT(s != NULL, "show cache: show opens");
+      ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+      pty_close(s); }
+
+    restart_mock();
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  OFFLINE / CRON MODE (US 11)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_offline_list(void) {
+    /* Sync first to populate manifest */
+    restart_mock();
+    { const char *a[] = {"sync", NULL};
+      PtySession *s = cli_run(a);
+      ASSERT(s != NULL, "offline list: sync opens");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    /* Switch to cron/offline mode (sync_interval > 0) */
+    write_config_with_interval(5);
+
+    /* Stop server — list must be served entirely from manifest */
+    stop_mock_server();
+    { const char *a[] = {"list", "--batch", NULL};
+      PtySession *s = cli_run(a);
+      ASSERT(s != NULL, "offline list: list opens");
+      ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+      pty_close(s); }
+
+    /* Restore */
+    write_config();
+    restart_mock();
+}
+
 /* ── email-sync tests ────────────────────────────────────────────────── */
 
 static PtySession *sync_run(const char **args) {
@@ -1056,6 +1291,15 @@ int main(int argc, char *argv[]) {
     printf("\n--- Empty folder ---\n");
     RUN_TEST(test_interactive_empty_folder);
 
+    printf("\n--- Sync progress ---\n");
+    RUN_TEST(test_sync_progress);
+
+    printf("\n--- Show cache hit ---\n");
+    RUN_TEST(test_show_cache_hit);
+
+    printf("\n--- Offline / cron mode ---\n");
+    RUN_TEST(test_offline_list);
+
     /* ── email-cli-ro: batch-only subset ─────────────────────────────── */
     snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_cli_ro_bin);
 
@@ -1081,6 +1325,28 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_ro_list_offset);
     RUN_TEST(test_ro_sync);
     RUN_TEST(test_ro_no_config);
+
+    /* Restore full email-cli binary for the remaining tests */
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", argv[1]);
+
+    /* ── Setup wizard ────────────────────────────────────────────────── */
+    printf("\n--- Setup wizard ---\n");
+    RUN_TEST(test_wizard_abort);
+    RUN_TEST(test_wizard_complete);
+
+    /* ── Non-TTY fallback ────────────────────────────────────────────── */
+    printf("\n--- Non-TTY fallback ---\n");
+    RUN_TEST(test_nonttty_shows_help);
+
+    /* ── Cron management ─────────────────────────────────────────────── */
+    printf("\n--- Cron management ---\n");
+    RUN_TEST(test_cron_status_not_found);
+    RUN_TEST(test_cron_setup_default_interval);
+    RUN_TEST(test_cron_setup_installs);
+    RUN_TEST(test_cron_status_found);
+    RUN_TEST(test_cron_setup_already_installed);
+    RUN_TEST(test_cron_remove_entry);
+    RUN_TEST(test_cron_remove_not_found);
 
     /* ── email-sync: standalone sync binary ──────────────────────────── */
     printf("\n--- email-sync ---\n");

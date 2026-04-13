@@ -11,19 +11,19 @@ email-cli cron status
 
 ## Behaviour
 1. Reads the current user crontab.
-2. Searches for any line containing `email-cli sync`.
+2. Searches for any line containing `email-sync` (or legacy `email-cli sync`).
 3. If found, prints the matching crontab entry.
 4. If not found, prints a message indicating no entry is installed.
 
 ## Example Output (entry installed)
 ```
 Cron entry found:
-*/5 * * * * /usr/local/bin/email-cli sync
+  */5 * * * * /usr/local/bin/email-sync >> ~/.cache/email-cli/sync.log 2>&1
 ```
 
 ## Example Output (not installed)
 ```
-No email-cli sync cron entry found.
+No email-sync cron entry found.
 ```
 
 ## Note

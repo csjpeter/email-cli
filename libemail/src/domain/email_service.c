@@ -648,7 +648,7 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
 
 /**
  * Show a message in interactive pager mode.
- * Returns 0 = ESC (go back to list), 1 = q/quit entirely, -1 = error.
+ * Returns 0 = back to list (Backspace/ESC/q), -1 = error.
  */
 static int show_uid_interactive(const Config *cfg, const char *folder,
                                 int uid, int page_size) {
@@ -731,12 +731,12 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
             if (att_count > 0) {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                         "  a=save  A=save-all(%d)  Backspace=list  ESC=quit --",
+                         "  a=save  A=save-all(%d)  Backspace/ESC/q=list --",
                          cur_page, total_pages, att_count);
             } else {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                         "  Backspace=list  ESC=quit --",
+                         "  Backspace/ESC/q=list --",
                          cur_page, total_pages);
             }
             print_statusbar(term_rows, wrap_cols, sb);
@@ -748,11 +748,9 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
 
         switch (key) {
         case TERM_KEY_BACK:
-            result = 0;          /* back to list */
-            goto show_int_done;
         case TERM_KEY_ESC:
         case TERM_KEY_QUIT:
-            result = 1;          /* quit entirely */
+            result = 0;          /* back to list */
             goto show_int_done;
         case TERM_KEY_NEXT_PAGE:
         {
@@ -781,14 +779,16 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
-            if (ch == 'a' && att_count > 0) {
+            if (ch == 'q') {
+                result = 0;      /* back to list */
+                goto show_int_done;
+            } else if (ch == 'a' && att_count > 0) {
                 int sel = 0;
                 if (att_count > 1) {
                     sel = show_attachment_picker(atts, att_count,
                                                  term_cols, term_rows);
                     if (sel == -2) {
-                        result = 1;  /* ESC/q → quit program */
-                        goto show_int_done;
+                        break;       /* ESC/q → back to show view */
                     }
                     if (sel < 0) break;  /* Backspace → back to show */
                 }
@@ -1789,7 +1789,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
             else
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
-                         "  t=%s  Backspace/ESC=quit  [%d/%d]",
+                         "  t=%s  Backspace=back  ESC=quit  [%d/%d]",
                          tree_mode ? "flat" : "tree",
                          display_count > 0 ? cursor + 1 : 0, display_count);
             print_statusbar(trows_f, tcols_f, sb);
@@ -1808,8 +1808,12 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 if (last_sep) *last_sep = '\0';
                 else          current_prefix[0] = '\0';
                 cursor = 0; wstart = 0;
+            } else {
+                /* at root: go back to list with the current folder unchanged */
+                if (current_folder && *current_folder)
+                    selected = strdup(current_folder);
+                goto folders_int_done;
             }
-            /* at root (tree mode or flat root): ignore Backspace — use ESC */
             break;
         case TERM_KEY_ENTER:
             if (tree_mode) {

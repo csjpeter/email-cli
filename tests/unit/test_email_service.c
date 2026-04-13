@@ -749,8 +749,8 @@ void test_email_service(void) {
         dup2(saved_stdout, STDOUT_FILENO); close(saved_stdout);
         dup2(saved_stderr, STDERR_FILENO); close(saved_stderr);
 
-        /* ESC → returns 1; "not found in INBOX" → returns -1 */
-        ASSERT(sf_ret == 1,
+        /* ESC → returns 0 (back to list); "not found in INBOX" → returns -1 */
+        ASSERT(sf_ret == 0,
                "show_uid_interactive: uses correct folder (not cfg->folder)");
 
         skip_subfolder_test:;

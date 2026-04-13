@@ -184,6 +184,16 @@ static void test_help_sync(void) {
     pty_close(s);
 }
 
+static void test_help_cron(void) {
+    const char *a[] = {"cron", "--help", NULL};
+    PtySession *s = cli_open_size(120, 50, a);
+    ASSERT(s != NULL, "help cron: opens");
+    ASSERT_WAIT_FOR(s, "Usage: email-cli", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "cron");
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  BATCH MODE TESTS
  * ══════════════════════════════════════════════════════════════════════ */
@@ -252,6 +262,53 @@ static void test_batch_folders_tree(void) {
     pty_close(s);
 }
 
+static void test_batch_list_folder(void) {
+    const char *a[] = {"list", "--folder", "INBOX.Sent", "--batch", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "batch list --folder: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "INBOX.Sent");
+    pty_close(s);
+}
+
+static void test_batch_list_limit(void) {
+    const char *a[] = {"list", "--limit", "1", "--batch", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "batch list --limit: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_close(s);
+}
+
+static void test_batch_list_offset(void) {
+    const char *a[] = {"list", "--offset", "1", "--batch", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "batch list --offset: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_batch_sync(void) {
+    restart_mock();
+    const char *a[] = {"sync", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "batch sync: opens");
+    ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_batch_cron_status(void) {
+    const char *a[] = {"cron", "status", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "batch cron status: opens");
+    /* Matches either "No email-cli sync cron entry is installed." or
+     * "Active sync cron entry:" — both contain "cron" */
+    ASSERT_WAIT_FOR(s, "cron", WAIT_MS);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  INTERACTIVE LIST VIEW
  * ══════════════════════════════════════════════════════════════════════ */
@@ -312,6 +369,49 @@ static void test_interactive_list_esc_quit(void) {
     pty_close(s);
 }
 
+static void test_interactive_list_nav(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "list nav: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* With one message, UP/DOWN keep cursor in place — no crash expected */
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_send_key(s, PTY_KEY_PGDN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_send_key(s, PTY_KEY_PGUP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_list_flags(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "list flags: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Flag keys: n=new, f=flagged, d=done — server accepts silently */
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_send_str(s, "f");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_send_str(s, "d");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  INTERACTIVE SHOW VIEW
  * ══════════════════════════════════════════════════════════════════════ */
@@ -356,10 +456,10 @@ static void test_interactive_show_statusbar(void) {
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    int sb = find_row(s, "Backspace=list");
-    ASSERT(sb >= 0, "show sb: found Backspace=list");
+    int sb = find_row(s, "Backspace/ESC/q=list");
+    ASSERT(sb >= 0, "show sb: found Backspace/ESC/q=list");
     if (sb >= 0) {
-        ASSERT(pty_row_contains(s, sb, "ESC=quit"), "show sb: ESC=quit");
+        ASSERT(pty_row_contains(s, sb, "PgDn"), "show sb: PgDn");
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
     }
     pty_send_key(s, PTY_KEY_ESC);
@@ -378,6 +478,64 @@ static void test_interactive_show_backspace(void) {
     /* Backspace returns to list */
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_show_esc_to_list(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "show ESC→list: opens");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* ESC from show view returns to the message list */
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_show_q_to_list(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "show q→list: opens");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* 'q' from show view returns to the message list */
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_show_pgdn(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "show PgDn: opens");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* PgDn/PgUp on a single-page message — no crash expected */
+    pty_send_key(s, PTY_KEY_PGDN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_send_key(s, PTY_KEY_PGUP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "From:");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -456,6 +614,65 @@ static void test_interactive_folders_select(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_folders_nav(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "folders nav: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Navigate down and back up — folders remain visible */
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    pty_send_key(s, PTY_KEY_PGDN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    pty_send_key(s, PTY_KEY_PGUP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_folders_back_to_list(void) {
+    /* Backspace from folder browser (root) returns to message list */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "folders back→list: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Backspace returns to the message list */
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_folders_esc_quit(void) {
+    /* ESC from folder browser quits the entire application */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "folders ESC quit: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* ESC exits the application from the folder browser */
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
     pty_close(s);
 }
 
@@ -629,6 +846,65 @@ static void test_show_save_all_confirm(void) {
     pty_close(s);
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  email-cli-ro EXCLUSIVE TESTS
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_ro_list_folder(void) {
+    const char *a[] = {"list", "--folder", "INBOX.Sent", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "ro list --folder: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "INBOX.Sent");
+    pty_close(s);
+}
+
+static void test_ro_list_limit(void) {
+    const char *a[] = {"list", "--limit", "1", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "ro list --limit: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_close(s);
+}
+
+static void test_ro_list_offset(void) {
+    const char *a[] = {"list", "--offset", "1", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "ro list --offset: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_ro_sync(void) {
+    restart_mock();
+    const char *a[] = {"sync", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "ro sync: opens");
+    ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_ro_no_config(void) {
+    /* Run with a HOME that contains no email-cli configuration */
+    char no_home[300];
+    snprintf(no_home, sizeof(no_home), "%s/no_config", g_test_home);
+    mkdir(no_home, 0700);
+    setenv("HOME", no_home, 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    const char *a[] = {"list", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "ro no config: opens");
+    ASSERT_WAIT_FOR(s, "No configuration found", WAIT_MS);
+    pty_close(s);
+
+    /* Restore test HOME */
+    setenv("HOME", g_test_home, 1);
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 #define RUN_TEST(fn) do { printf("  %s...\n", #fn); fn(); } while(0)
@@ -661,6 +937,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_help_show);
     RUN_TEST(test_help_folders);
     RUN_TEST(test_help_sync);
+    RUN_TEST(test_help_cron);
 
     printf("\n--- Starting mock IMAP server ---\n");
     if (start_mock_server() != 0) {
@@ -672,27 +949,40 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_batch_list);
     RUN_TEST(test_batch_list_all);
     RUN_TEST(test_batch_list_empty);
+    RUN_TEST(test_batch_list_folder);
+    RUN_TEST(test_batch_list_limit);
+    RUN_TEST(test_batch_list_offset);
     RUN_TEST(test_batch_show);
     RUN_TEST(test_batch_folders_flat);
     RUN_TEST(test_batch_folders_tree);
+    RUN_TEST(test_batch_sync);
+    RUN_TEST(test_batch_cron_status);
 
     printf("\n--- Interactive list ---\n");
     RUN_TEST(test_interactive_list_content);
     RUN_TEST(test_interactive_list_separator);
     RUN_TEST(test_interactive_list_statusbar);
     RUN_TEST(test_interactive_list_esc_quit);
+    RUN_TEST(test_interactive_list_nav);
+    RUN_TEST(test_interactive_list_flags);
 
     printf("\n--- Interactive show ---\n");
     RUN_TEST(test_interactive_show_content);
     RUN_TEST(test_interactive_show_separator);
     RUN_TEST(test_interactive_show_statusbar);
     RUN_TEST(test_interactive_show_backspace);
+    RUN_TEST(test_interactive_show_esc_to_list);
+    RUN_TEST(test_interactive_show_q_to_list);
+    RUN_TEST(test_interactive_show_pgdn);
 
     printf("\n--- Interactive folders ---\n");
     RUN_TEST(test_interactive_folders_content);
     RUN_TEST(test_interactive_folders_statusbar);
     RUN_TEST(test_interactive_folders_toggle);
     RUN_TEST(test_interactive_folders_select);
+    RUN_TEST(test_interactive_folders_nav);
+    RUN_TEST(test_interactive_folders_back_to_list);
+    RUN_TEST(test_interactive_folders_esc_quit);
 
     printf("\n--- Attachment save ---\n");
     RUN_TEST(test_show_attachment_statusbar);
@@ -722,6 +1012,13 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_batch_show);
     RUN_TEST(test_batch_folders_flat);
     RUN_TEST(test_batch_folders_tree);
+
+    printf("\n--- email-cli-ro: exclusive capabilities ---\n");
+    RUN_TEST(test_ro_list_folder);
+    RUN_TEST(test_ro_list_limit);
+    RUN_TEST(test_ro_list_offset);
+    RUN_TEST(test_ro_sync);
+    RUN_TEST(test_ro_no_config);
 
 done:
     stop_mock_server();

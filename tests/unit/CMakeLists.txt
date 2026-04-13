@@ -1,8 +1,8 @@
 include_directories(
-    ../../src
-    ../../src/core
-    ../../src/infrastructure
-    ../../src/domain
+    ../../libemail/src
+    ../../libemail/src/core
+    ../../libemail/src/infrastructure
+    ../../libemail/src/domain
     ../common
 )
 
@@ -10,15 +10,15 @@ include_directories(
 # html_medium_stub.c replaces platform html_medium.c for deterministic tests
 if(WIN32)
     set(TEST_PLATFORM_SOURCES
-        ../../src/platform/windows/terminal.c
-        ../../src/platform/windows/path.c
-        ../../src/platform/windows/process.c
+        ../../libemail/src/platform/windows/terminal.c
+        ../../libemail/src/platform/windows/path.c
+        ../../libemail/src/platform/windows/process.c
     )
 else()
     set(TEST_PLATFORM_SOURCES
-        ../../src/platform/posix/terminal.c
-        ../../src/platform/posix/path.c
-        ../../src/platform/posix/process.c
+        ../../libemail/src/platform/posix/terminal.c
+        ../../libemail/src/platform/posix/path.c
+        ../../libemail/src/platform/posix/process.c
     )
 endif()
 
@@ -38,19 +38,19 @@ set(TEST_SOURCES
     test_html_render.c
     test_input_line.c
     test_path_complete.c
-    ../../src/core/fs_util.c
-    ../../src/core/logger.c
-    ../../src/core/config.c
-    ../../src/core/mime_util.c
-    ../../src/core/html_parser.c
-    ../../src/core/html_render.c
-    ../../src/core/imap_util.c
-    ../../src/core/input_line.c
-    ../../src/core/path_complete.c
-    ../../src/infrastructure/config_store.c
-    ../../src/infrastructure/setup_wizard.c
-    ../../src/infrastructure/imap_client.c
-    ../../src/infrastructure/local_store.c
+    ../../libemail/src/core/fs_util.c
+    ../../libemail/src/core/logger.c
+    ../../libemail/src/core/config.c
+    ../../libemail/src/core/mime_util.c
+    ../../libemail/src/core/html_parser.c
+    ../../libemail/src/core/html_render.c
+    ../../libemail/src/core/imap_util.c
+    ../../libemail/src/core/input_line.c
+    ../../libemail/src/core/path_complete.c
+    ../../libemail/src/infrastructure/config_store.c
+    ../../libemail/src/infrastructure/setup_wizard.c
+    ../../libemail/src/infrastructure/imap_client.c
+    ../../libemail/src/infrastructure/local_store.c
     html_medium_stub.c
     ${TEST_PLATFORM_SOURCES}
 )

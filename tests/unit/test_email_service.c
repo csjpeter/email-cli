@@ -12,7 +12,7 @@
  * as a separate source — the #include below is the only compilation unit
  * that defines its symbols.
  */
-#include "../../src/domain/email_service.c"
+#include "../../libemail/src/domain/email_service.c"
 
 void test_email_service(void) {
 

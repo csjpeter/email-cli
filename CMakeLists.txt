@@ -18,53 +18,10 @@ endif()
 
 find_package(OpenSSL REQUIRED)
 
-include_directories(
-    src
-    src/core
-    src/infrastructure
-    src/domain
-    ${OPENSSL_INCLUDE_DIR}
-)
+add_subdirectory(libemail)
 
-# Platform-specific sources (CMake selects, no #ifdef in shared code)
-if(WIN32)
-    set(PLATFORM_SOURCES
-        src/platform/windows/terminal.c
-        src/platform/windows/path.c
-        src/platform/windows/html_medium.c
-        src/platform/windows/process.c
-    )
-else()
-    set(PLATFORM_SOURCES
-        src/platform/posix/terminal.c
-        src/platform/posix/path.c
-        src/platform/posix/html_medium.c
-        src/platform/posix/process.c
-    )
-endif()
-
-# Application Source Files
-set(SOURCES
-    src/main.c
-    src/core/logger.c
-    src/core/fs_util.c
-    src/core/config.c
-    src/core/mime_util.c
-    src/core/html_parser.c
-    src/core/html_render.c
-    src/core/imap_util.c
-    src/core/input_line.c
-    src/core/path_complete.c
-    src/infrastructure/config_store.c
-    src/infrastructure/setup_wizard.c
-    src/infrastructure/imap_client.c
-    src/infrastructure/local_store.c
-    src/domain/email_service.c
-    ${PLATFORM_SOURCES}
-)
-
-add_executable(email-cli ${SOURCES})
-target_link_libraries(email-cli OpenSSL::SSL OpenSSL::Crypto)
+add_executable(email-cli src/main.c)
+target_link_libraries(email-cli libemail)
 
 # Test Build
 enable_testing()

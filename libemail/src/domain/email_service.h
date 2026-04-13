@@ -11,12 +11,14 @@
 /**
  * @brief Options for email_service_list().
  *
- * all    0 = show UNSEEN messages only (default)
- *        1 = show ALL messages; unread ones are marked in the table
- * folder NULL = use cfg->folder; non-NULL overrides for this call only
- * limit  Maximum number of rows to display per page (0 = no limit)
- * offset 1-based index of the first message to show (0 or 1 = start)
- * pager  1 = interactive pager (less-like); 0 = one-shot with hint line
+ * all        0 = show UNSEEN messages only (default)
+ *            1 = show ALL messages; unread ones are marked in the table
+ * folder     NULL = use cfg->folder; non-NULL overrides for this call only
+ * limit      Maximum number of rows to display per page (0 = no limit)
+ * offset     1-based index of the first message to show (0 or 1 = start)
+ * pager      1 = interactive pager (less-like); 0 = one-shot with hint line
+ * action_uid Output: UID of the message the user acted on (set when return
+ *            value is 3 = reply). Unused for other return values.
  */
 typedef struct {
     int         all;
@@ -24,6 +26,7 @@ typedef struct {
     int         limit;
     int         offset;
     int         pager;
+    int         action_uid;   /**< Output: UID for reply action (ret==3) */
 } EmailListOpts;
 
 /**
@@ -38,9 +41,11 @@ typedef struct {
  * @param opts  Listing options.
  * @return  0 = user quit normally,
  *          1 = user pressed Backspace (go to folder list, pager mode only),
+ *          2 = user pressed 'c' (compose new message),
+ *          3 = user pressed 'r' (reply; opts->action_uid holds the target UID),
  *         -1 = error.
  */
-int email_service_list(const Config *cfg, const EmailListOpts *opts);
+int email_service_list(const Config *cfg, EmailListOpts *opts);
 
 /**
  * @brief Lists all available IMAP folders.

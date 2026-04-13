@@ -126,6 +126,19 @@ int email_service_cron_remove(void);
 int email_service_cron_status(void);
 
 /**
+ * @brief Load (or fetch) the raw RFC 2822 message for a given UID.
+ *
+ * Checks the local cache first; fetches from the server on a cache miss
+ * and caches the result.  Returns a heap-allocated string the caller must
+ * free(), or NULL on error.
+ *
+ * @param cfg  Connection configuration.
+ * @param uid  IMAP UID of the message.
+ * @return Heap-allocated raw message, or NULL on failure.
+ */
+char *email_service_fetch_raw(const Config *cfg, int uid);
+
+/**
  * @brief Lists all attachments in a message identified by IMAP UID.
  *
  * Loads the message from local cache or fetches it from the server.

@@ -66,3 +66,30 @@ if(NOT APPLE)
     target_link_libraries(test-pty-input-line util)
 endif()
 add_dependencies(test-pty-input-line input-line-harness)
+
+# ── Mock SMTP server ──────────────────────────────────────────────────
+add_executable(mock-smtp-server EXCLUDE_FROM_ALL
+    mock_smtp_server.c
+)
+
+# ── Compose / send PTY tests ──────────────────────────────────────────
+add_executable(test-pty-compose EXCLUDE_FROM_ALL
+    test_compose_pty.c
+)
+target_include_directories(test-pty-compose PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-compose ptytest)
+if(NOT APPLE)
+    target_link_libraries(test-pty-compose util)
+endif()
+add_dependencies(test-pty-compose email-tui mock-smtp-server)
+
+add_custom_target(run-pty-compose
+    COMMAND test-pty-compose
+        $<TARGET_FILE:email-tui>
+        $<TARGET_FILE:mock-smtp-server>
+    DEPENDS test-pty-compose email-tui mock-smtp-server
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running PTY compose/send tests"
+)

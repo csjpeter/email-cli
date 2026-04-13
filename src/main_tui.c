@@ -1,15 +1,13 @@
 /**
  * @file main_tui.c
- * @brief Entry point for email-tui — interactive TUI and future write-capable CLI.
+ * @brief Entry point for email-tui — interactive TUI and write-capable CLI.
  *
  * email-tui is the full-featured binary:
  *   - Interactive full-screen TUI (folder browser, message list, message reader).
  *   - Setup wizard on first run.
  *   - Cron management (setup/remove/status).
  *   - Batch/scriptable mode (--batch or non-TTY stdout).
- *
- * Future versions will add write operations (compose, reply, send, flag, draft
- * management) that are intentionally absent from email-cli-ro and email-sync.
+ *   - Compose, reply, and send operations (linked via libwrite).
  */
 
 #include <stdio.h>
@@ -26,6 +24,9 @@
 #include "logger.h"
 #include "local_store.h"
 #include "fs_util.h"
+#include "input_line.h"
+#include "smtp_adapter.h"
+#include "compose_service.h"
 
 /* Number of non-data lines printed around the message table */
 #define LIST_HEADER_LINES 6
@@ -57,6 +58,9 @@ static void help_general(void) {
         "  folders           List available IMAP folders\n"
         "  sync              Download all messages in all folders to local store\n"
         "  cron              Manage automatic background sync (setup/remove/status)\n"
+        "  compose           Compose and send a new message interactively\n"
+        "  reply <uid>       Reply to a message\n"
+        "  send              Send a message non-interactively\n"
         "  help [command]    Show this help, or detailed help for a command\n"
         "\n"
         "Run 'email-tui help <command>' for more information.\n",
@@ -142,6 +146,50 @@ static void help_sync(void) {
     );
 }
 
+static void help_compose(void) {
+    printf(
+        "Usage: email-tui compose\n"
+        "\n"
+        "Opens an interactive compose form to write and send a new message.\n"
+        "\n"
+        "  To         : recipient address\n"
+        "  Subject    : message subject\n"
+        "  Body       : message text; enter '.' alone on a line to send\n"
+        "\n"
+        "Press Ctrl-C or leave the To: field empty to abort.\n"
+        "\n"
+        "SMTP settings are read from configuration (run 'email-tui' to re-run\n"
+        "the setup wizard if SMTP is not yet configured).\n"
+    );
+}
+
+static void help_reply(void) {
+    printf(
+        "Usage: email-tui reply <uid>\n"
+        "\n"
+        "Fetches message <uid> and opens the compose form pre-filled with\n"
+        "the recipient address and 'Re: <original subject>'.\n"
+        "\n"
+        "  <uid>   Numeric IMAP UID shown by 'email-tui list'\n"
+    );
+}
+
+static void help_send(void) {
+    printf(
+        "Usage: email-tui send --to <addr> --subject <text> --body <text>\n"
+        "\n"
+        "Sends a message non-interactively (scriptable / batch mode).\n"
+        "\n"
+        "Options:\n"
+        "  --to <addr>       Recipient email address (required)\n"
+        "  --subject <text>  Subject line (required)\n"
+        "  --body <text>     Message body text (required)\n"
+        "\n"
+        "Examples:\n"
+        "  email-tui send --to friend@example.com --subject \"Hello\" --body \"Hi there!\"\n"
+    );
+}
+
 static void help_cron(void) {
     printf(
         "Usage: email-tui cron <setup|remove|status>\n"
@@ -161,6 +209,174 @@ static void help_cron(void) {
         "  email-tui cron status\n"
         "  email-tui cron remove\n"
     );
+}
+
+/* ── Compose / send helpers ──────────────────────────────────────────── */
+
+/**
+ * @brief Check that SMTP is configured; print guidance and return -1 if not.
+ */
+static int require_smtp(const Config *cfg) {
+    if (!cfg->smtp_host && !cfg->host) {
+        fprintf(stderr,
+                "Error: No SMTP server configured.\n"
+                "Run 'email-tui' (no arguments) to re-run the setup wizard\n"
+                "and configure outgoing mail.\n");
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * @brief Build from address from config (SMTP user or IMAP user).
+ * Returns a pointer into cfg — do NOT free.
+ */
+static const char *from_address(const Config *cfg) {
+    return cfg->smtp_user ? cfg->smtp_user : cfg->user;
+}
+
+/**
+ * @brief Interactive compose form.
+ *
+ * Clears the screen, prompts for To, Subject, and Body via input_line and
+ * getline. Body entry ends with a lone '.' on a line. Returns 0 on
+ * successful send, -1 on abort or SMTP error.
+ */
+static int cmd_compose_interactive(const Config *cfg,
+                                   const char *prefill_to,
+                                   const char *prefill_subject,
+                                   const char *reply_to_msg_id) {
+    if (require_smtp(cfg) != 0) return -1;
+
+    /* Clear screen */
+    printf("\033[H\033[2J");
+    printf("  Compose Message\n"
+           "  (Ctrl-C / empty To: = abort   '.' alone on body line = send)\n\n");
+    fflush(stdout);
+
+    char to_buf[512] = "";
+    char subj_buf[512] = "";
+
+    InputLine il_to = {0};
+    input_line_init(&il_to, to_buf, sizeof(to_buf), prefill_to ? prefill_to : "");
+    if (!input_line_run(&il_to, 4, "  To      : ") || !to_buf[0]) {
+        printf("\n  Aborted.\n");
+        return -1;
+    }
+
+    InputLine il_subj = {0};
+    input_line_init(&il_subj, subj_buf, sizeof(subj_buf),
+                    prefill_subject ? prefill_subject : "");
+    if (!input_line_run(&il_subj, 6, "  Subject : ")) {
+        printf("\n  Aborted.\n");
+        return -1;
+    }
+
+    /* Move cursor below fields and print body prompt */
+    printf("\033[8;1H");
+    printf("  Body (enter '.' alone on a line to send):\n");
+    fflush(stdout);
+
+    /* Collect body lines in cooked mode (input_line restored the terminal) */
+    char body[8192] = "";
+    size_t body_len = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), stdin)) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+        if (strcmp(line, ".") == 0) break;          /* send signal */
+        if (strcmp(line, "\x03") == 0) goto abort;  /* Ctrl-C fallback */
+        size_t llen = strlen(line);
+        if (body_len + llen + 2 < sizeof(body)) {
+            memcpy(body + body_len, line, llen);
+            body_len += llen;
+            body[body_len++] = '\n';
+            body[body_len]   = '\0';
+        }
+    }
+
+    {
+        const char *from = from_address(cfg);
+        ComposeParams p = {from, to_buf, subj_buf, body, reply_to_msg_id};
+        char *msg = NULL;
+        size_t msg_len = 0;
+        if (compose_build_message(&p, &msg, &msg_len) != 0) {
+            fprintf(stderr, "Error: Failed to build message.\n");
+            return -1;
+        }
+        printf("  Sending...\n");
+        fflush(stdout);
+        int rc = smtp_send(cfg, from, to_buf, msg, msg_len);
+        free(msg);
+        if (rc == 0)
+            printf("  Message sent.\n");
+        return rc;
+    }
+
+abort:
+    printf("\n  Aborted.\n");
+    return -1;
+}
+
+/**
+ * @brief Reply to a message identified by UID.
+ * Loads the message, extracts reply metadata, opens compose form.
+ */
+static int cmd_reply(const Config *cfg, int uid) {
+    if (require_smtp(cfg) != 0) return -1;
+
+    /* Load raw message */
+    char *raw = NULL;
+    if (local_msg_exists(cfg->folder, uid))
+        raw = local_msg_load(cfg->folder, uid);
+    else
+        raw = email_service_fetch_raw(cfg, uid);
+
+    if (!raw) {
+        fprintf(stderr, "Error: Could not load message UID %d.\n", uid);
+        return -1;
+    }
+
+    char *reply_to = NULL, *subject = NULL, *msg_id = NULL;
+    int rc = compose_extract_reply_meta(raw, &reply_to, &subject, &msg_id);
+    free(raw);
+    if (rc != 0) {
+        fprintf(stderr, "Error: Could not parse message headers.\n");
+        return -1;
+    }
+
+    rc = cmd_compose_interactive(cfg, reply_to, subject, msg_id);
+    free(reply_to);
+    free(subject);
+    free(msg_id);
+    return rc;
+}
+
+/**
+ * @brief Send a message non-interactively (batch/scriptable).
+ */
+static int cmd_send_batch(const Config *cfg,
+                          const char *to, const char *subject, const char *body) {
+    if (!to || !to[0] || !subject || !body) {
+        fprintf(stderr, "Error: --to, --subject, and --body are all required.\n");
+        help_send();
+        return -1;
+    }
+    if (require_smtp(cfg) != 0) return -1;
+
+    const char *from = from_address(cfg);
+    ComposeParams p = {from, to, subject, body, NULL};
+    char *msg = NULL;
+    size_t msg_len = 0;
+    if (compose_build_message(&p, &msg, &msg_len) != 0) {
+        fprintf(stderr, "Error: Failed to build message.\n");
+        return -1;
+    }
+    int rc = smtp_send(cfg, from, to, msg, msg_len);
+    free(msg);
+    if (rc == 0)
+        printf("Message sent.\n");
+    return rc;
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
@@ -223,6 +439,9 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "folders") == 0) { help_folders(); return EXIT_SUCCESS; }
                 if (strcmp(cmd, "sync")    == 0) { help_sync();    return EXIT_SUCCESS; }
                 if (strcmp(cmd, "cron")    == 0) { help_cron();    return EXIT_SUCCESS; }
+                if (strcmp(cmd, "compose") == 0) { help_compose(); return EXIT_SUCCESS; }
+                if (strcmp(cmd, "reply")   == 0) { help_reply();   return EXIT_SUCCESS; }
+                if (strcmp(cmd, "send")    == 0) { help_send();    return EXIT_SUCCESS; }
             }
             /* email-tui --help  or  email-tui help --help */
             help_general();
@@ -242,11 +461,14 @@ int main(int argc, char *argv[]) {
             topic = argv[i]; break;
         }
         if (topic) {
-            if (strcmp(topic, "list")           == 0) { help_list();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "show")           == 0) { help_show();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "folders")        == 0) { help_folders(); return EXIT_SUCCESS; }
-            if (strcmp(topic, "sync")           == 0) { help_sync();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "cron")           == 0) { help_cron();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "list")    == 0) { help_list();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "show")    == 0) { help_show();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "folders") == 0) { help_folders(); return EXIT_SUCCESS; }
+            if (strcmp(topic, "sync")    == 0) { help_sync();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "cron")    == 0) { help_cron();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "compose") == 0) { help_compose(); return EXIT_SUCCESS; }
+            if (strcmp(topic, "reply")   == 0) { help_reply();   return EXIT_SUCCESS; }
+            if (strcmp(topic, "send")    == 0) { help_send();    return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-tui help' for available commands.\n");
             return EXIT_FAILURE;
@@ -425,6 +647,51 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Usage: email-tui cron <setup|remove|status>\n");
             return EXIT_FAILURE;
         }
+
+    } else if (strcmp(cmd, "compose") == 0) {
+        result = cmd_compose_interactive(cfg, NULL, NULL, NULL);
+
+    } else if (strcmp(cmd, "reply") == 0) {
+        const char *uid_str = NULL;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            uid_str = argv[i]; break;
+        }
+        if (!uid_str) {
+            fprintf(stderr, "Error: 'reply' requires a UID argument.\n");
+            help_reply();
+        } else {
+            int uid = parse_uid(uid_str);
+            if (!uid)
+                fprintf(stderr,
+                        "Error: UID must be a positive integer (got '%s').\n",
+                        uid_str);
+            else
+                result = cmd_reply(cfg, uid);
+        }
+
+    } else if (strcmp(cmd, "send") == 0) {
+        const char *to = NULL, *subject = NULL, *body = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--to") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --to requires an address.\n"); ok = 0;
+                } else to = argv[++i];
+            } else if (strcmp(argv[i], "--subject") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --subject requires text.\n"); ok = 0;
+                } else subject = argv[++i];
+            } else if (strcmp(argv[i], "--body") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --body requires text.\n"); ok = 0;
+                } else body = argv[++i];
+            } else {
+                unknown_option("send", argv[i]); ok = 0;
+            }
+        }
+        if (ok) result = cmd_send_batch(cfg, to, subject, body);
 
     } else {
         fprintf(stderr, "Unknown command '%s'.\n", cmd);

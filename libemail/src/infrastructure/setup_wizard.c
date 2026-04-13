@@ -62,9 +62,38 @@ Config* setup_wizard_run_internal(FILE *stream) {
         cfg->folder = strdup("INBOX");
     }
 
-    if (stream == stdin && is_tty) {
-        printf("\nConfiguration collected. Checking connection...\n");
+    /* SMTP configuration (optional) */
+    if (stream == stdin && is_tty)
+        printf("\n--- SMTP (outgoing mail) — press Enter to skip ---\n");
+
+    char *smtp_host = get_input("SMTP Host (e.g. smtp://smtp.example.com) [Enter=skip]", 0, stream);
+    if (smtp_host && smtp_host[0] != '\0') {
+        cfg->smtp_host = smtp_host;
+
+        char *port_str = get_input("SMTP Port [587]", 0, stream);
+        if (port_str && port_str[0] != '\0')
+            cfg->smtp_port = atoi(port_str);
+        else
+            cfg->smtp_port = 587;
+        free(port_str);
+
+        char *su = get_input("SMTP Username [Enter=same as IMAP]", 0, stream);
+        if (su && su[0] != '\0')
+            cfg->smtp_user = su;
+        else
+            free(su);
+
+        char *sp = get_input("SMTP Password [Enter=same as IMAP]", 1, stream);
+        if (sp && sp[0] != '\0')
+            cfg->smtp_pass = sp;
+        else
+            free(sp);
+    } else {
+        free(smtp_host);
     }
+
+    if (stream == stdin && is_tty)
+        printf("\nConfiguration collected. Checking connection...\n");
 
     return cfg;
 }

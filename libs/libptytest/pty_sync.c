@@ -7,6 +7,7 @@
 #define _XOPEN_SOURCE 600
 
 #include "pty_internal.h"
+#include <errno.h>
 #include <poll.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -43,16 +44,25 @@ static int read_and_feed(PtySession *s) {
         pty_screen_feed(s->screen, buf, (size_t)n);
         return (int)n;
     }
+    /* Return -2 to distinguish EAGAIN from EIO/EOF */
+    if (n < 0 && errno == EAGAIN) return -2;
     return 0;
 }
 
 int pty_drain(PtySession *s) {
     if (!s || s->master_fd < 0) return 0;
     int total = 0;
-    for (;;) {
-        int n = read_and_feed(s);
-        if (n <= 0) break;
-        total += n;
+    /* Retry on EAGAIN — kernel may need a moment to deliver buffered PTY data
+     * after the slave side closes (POLLHUP race on non-blocking master fds). */
+    for (int attempt = 0; attempt < 3; attempt++) {
+        for (;;) {
+            int n = read_and_feed(s);
+            if (n > 0) { total += n; continue; }
+            if (n == -2) break; /* EAGAIN: no data right now, retry after sleep */
+            return total;       /* EIO/EOF: slave closed and buffer empty */
+        }
+        if (total > 0) break;   /* Got data — no need to retry */
+        usleep(5000);           /* 5 ms: give kernel time to deliver buffered data */
     }
     return total;
 }
@@ -78,7 +88,11 @@ int pty_wait_for(PtySession *s, const char *text, int timeout_ms) {
         } else if (ret == 0) {
             return -1; /* Timeout */
         } else {
-            /* POLLERR/POLLHUP — child may have exited */
+            /* POLLERR/POLLHUP — child may have exited; drain any buffered output */
+            pty_drain(s);
+            if (pty_screen_contains(s, text)) return 0;
+            /* One more short drain in case the kernel delivered data after the HUP */
+            usleep(10000);
             pty_drain(s);
             return pty_screen_contains(s, text) ? 0 : -1;
         }

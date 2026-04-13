@@ -61,7 +61,6 @@ static void help_general(void) {
         "  compose           Compose and send a new message interactively\n"
         "  reply <uid>       Reply to a message\n"
         "  send              Send a message non-interactively\n"
-        "  config            View or update configuration (e.g. SMTP settings)\n"
         "  help [command]    Show this help, or detailed help for a command\n"
         "\n"
         "Run 'email-tui help <command>' for more information.\n",
@@ -188,22 +187,6 @@ static void help_send(void) {
         "\n"
         "Examples:\n"
         "  email-tui send --to friend@example.com --subject \"Hello\" --body \"Hi there!\"\n"
-    );
-}
-
-static void help_config(void) {
-    printf(
-        "Usage: email-tui config <subcommand>\n"
-        "\n"
-        "View or update configuration settings.\n"
-        "\n"
-        "Subcommands:\n"
-        "  show    Print current configuration (passwords masked)\n"
-        "  smtp    Interactively configure SMTP (outgoing mail) settings\n"
-        "\n"
-        "Examples:\n"
-        "  email-tui config show\n"
-        "  email-tui config smtp\n"
     );
 }
 
@@ -476,7 +459,6 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "compose") == 0) { help_compose(); return EXIT_SUCCESS; }
                 if (strcmp(cmd, "reply")   == 0) { help_reply();   return EXIT_SUCCESS; }
                 if (strcmp(cmd, "send")    == 0) { help_send();    return EXIT_SUCCESS; }
-                if (strcmp(cmd, "config")  == 0) { help_config();  return EXIT_SUCCESS; }
             }
             /* email-tui --help  or  email-tui help --help */
             help_general();
@@ -504,7 +486,6 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "compose") == 0) { help_compose(); return EXIT_SUCCESS; }
             if (strcmp(topic, "reply")   == 0) { help_reply();   return EXIT_SUCCESS; }
             if (strcmp(topic, "send")    == 0) { help_send();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "config")  == 0) { help_config();  return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-tui help' for available commands.\n");
             return EXIT_FAILURE;
@@ -563,34 +544,58 @@ int main(int argc, char *argv[]) {
     int result = -1;
 
     if (!cmd) {
-        /* Interactive TUI: start with unread messages in the configured folder. */
-        char *tui_folder = strdup(cfg->folder ? cfg->folder : "INBOX");
-        if (!tui_folder) {
-            result = -1;
-        } else {
-            for (;;) {
+        /* Interactive TUI — three-level navigation:
+         *   Accounts screen  (top)
+         *     └─ Folder browser  (Backspace from message list)
+         *           └─ Message list  (Enter on folder)
+         *   Backspace at folder-root → back to Accounts
+         *   ESC anywhere → quit
+         */
+        result = 0;
+        for (;;) {  /* outer: accounts screen */
+            int acc = email_service_account_interactive(cfg);
+            if (acc == 0) break;  /* ESC/quit */
+            if (acc == 2) {
+                /* 'e' → edit SMTP settings inline */
+                if (setup_wizard_smtp(cfg) == 0)
+                    config_save_to_store(cfg);
+                continue;  /* re-display accounts screen with updated info */
+            }
+
+            /* acc == 1: Enter → open account, enter folder/message loop */
+            char *tui_folder = strdup(cfg->folder ? cfg->folder : "INBOX");
+            if (!tui_folder) { result = -1; break; }
+
+            int back_to_accounts = 0;
+            for (;;) {  /* inner: message list + folder browser */
                 EmailListOpts opts = {0, tui_folder, page_size, 0, 1, 0};
                 int ret = email_service_list(cfg, &opts);
                 if (ret == 1) {
-                    /* User pressed Backspace → show folder browser */
-                    char *sel = email_service_list_folders_interactive(cfg, tui_folder);
+                    /* Backspace from message list → folder browser */
+                    int go_up = 0;
+                    char *sel = email_service_list_folders_interactive(
+                                    cfg, tui_folder, &go_up);
                     free(tui_folder);
                     tui_folder = sel;
-                    if (!tui_folder) { result = 0; break; }
+                    if (go_up) {
+                        /* Backspace at folder root → back to accounts */
+                        back_to_accounts = 1;
+                        break;
+                    }
+                    if (!tui_folder) break;  /* ESC from folder browser → quit */
                 } else if (ret == 2) {
-                    /* User pressed 'c' → compose new message */
+                    /* 'c' → compose new message */
                     cmd_compose_interactive(cfg, NULL, NULL, NULL);
-                    /* Return to list after compose */
                 } else if (ret == 3) {
-                    /* User pressed 'r' → reply to current message */
+                    /* 'r' → reply to current message */
                     cmd_reply(cfg, opts.action_uid);
-                    /* Return to list after reply */
                 } else {
                     result = (ret >= 0) ? 0 : -1;
                     break;
                 }
             }
             free(tui_folder);
+            if (!back_to_accounts) break;  /* ESC/quit → exit outer loop too */
         }
 
     } else if (strcmp(cmd, "list") == 0) {
@@ -740,45 +745,6 @@ int main(int argc, char *argv[]) {
             }
         }
         if (ok) result = cmd_send_batch(cfg, to, subject, body);
-
-    } else if (strcmp(cmd, "config") == 0) {
-        const char *subcmd = (argc > cmd_idx + 1) ? argv[cmd_idx + 1] : "";
-
-        if (strcmp(subcmd, "show") == 0) {
-            printf("\nemail-tui configuration:\n\n");
-            printf("  IMAP:\n");
-            printf("    Host:     %s\n", cfg->host   ? cfg->host   : "(not set)");
-            printf("    User:     %s\n", cfg->user   ? cfg->user   : "(not set)");
-            printf("    Password: %s\n", cfg->pass   ? "****"      : "(not set)");
-            printf("    Folder:   %s\n", cfg->folder ? cfg->folder : "INBOX");
-            printf("\n  SMTP:\n");
-            if (cfg->smtp_host) {
-                printf("    Host:     %s\n", cfg->smtp_host);
-                printf("    Port:     %d\n", cfg->smtp_port ? cfg->smtp_port : 587);
-                printf("    User:     %s\n", cfg->smtp_user ? cfg->smtp_user : "(same as IMAP)");
-                printf("    Password: %s\n", cfg->smtp_pass ? "****"         : "(same as IMAP)");
-            } else {
-                printf("    (not configured — will be derived from IMAP host)\n");
-            }
-            printf("\n");
-            result = 0;
-
-        } else if (strcmp(subcmd, "smtp") == 0) {
-            if (setup_wizard_smtp(cfg) == 0) {
-                if (config_save_to_store(cfg) == 0) {
-                    printf("SMTP configuration saved.\n");
-                    result = 0;
-                } else {
-                    fprintf(stderr, "Error: Could not save configuration.\n");
-                }
-            }
-
-        } else {
-            if (subcmd[0])
-                fprintf(stderr, "Unknown config subcommand '%s'.\n", subcmd);
-            help_config();
-            result = subcmd[0] ? -1 : 0;
-        }
 
     } else {
         fprintf(stderr, "Unknown command '%s'.\n", cmd);

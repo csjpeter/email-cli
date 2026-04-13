@@ -43,6 +43,7 @@ static void help_general(void) {
         "  folders                 List available IMAP folders\n"
         "  attachments <uid>       List attachments in a message\n"
         "  save-attachment <uid>   Save a named attachment to disk\n"
+        "  config                  View or update configuration (incl. SMTP for email-tui)\n"
         "  sync                    Download all messages in all folders to local store\n"
         "  cron                    Manage automatic background sync (setup/remove/status)\n"
         "  help [command]          Show this help, or detailed help for a command\n"
@@ -127,6 +128,25 @@ static void help_sync(void) {
         "Examples:\n"
         "  email-cli sync\n"
         "  email-cli sync --batch\n"
+    );
+}
+
+static void help_config(void) {
+    printf(
+        "Usage: email-cli config <subcommand>\n"
+        "\n"
+        "View or update configuration settings.\n"
+        "\n"
+        "Subcommands:\n"
+        "  show    Print current configuration (passwords masked)\n"
+        "  smtp    Interactively configure SMTP (outgoing mail) settings\n"
+        "\n"
+        "SMTP settings are used by email-tui for composing and sending mail.\n"
+        "Configuring them here writes to the shared config file.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli config show\n"
+        "  email-cli config smtp\n"
     );
 }
 
@@ -241,6 +261,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
                 if (strcmp(cmd, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
+                if (strcmp(cmd, "config")          == 0) { help_config();          return EXIT_SUCCESS; }
                 if (strcmp(cmd, "sync")            == 0) { help_sync();            return EXIT_SUCCESS; }
                 if (strcmp(cmd, "cron")            == 0) { help_cron();            return EXIT_SUCCESS; }
             }
@@ -267,6 +288,7 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
             if (strcmp(topic, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
             if (strcmp(topic, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
+            if (strcmp(topic, "config")          == 0) { help_config();          return EXIT_SUCCESS; }
             if (strcmp(topic, "sync")            == 0) { help_sync();            return EXIT_SUCCESS; }
             if (strcmp(topic, "cron")            == 0) { help_cron();            return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
@@ -337,7 +359,7 @@ int main(int argc, char *argv[]) {
                 int ret = email_service_list(cfg, &opts);
                 if (ret != 1) { result = (ret >= 0) ? 0 : -1; break; }
                 /* User pressed Backspace → show folder browser */
-                char *sel = email_service_list_folders_interactive(cfg, tui_folder);
+                char *sel = email_service_list_folders_interactive(cfg, tui_folder, NULL);
                 free(tui_folder);
                 tui_folder = sel;
                 if (!tui_folder) { result = 0; break; }
@@ -470,6 +492,45 @@ int main(int argc, char *argv[]) {
                         uid_str);
             else
                 result = email_service_save_attachment(cfg, uid, filename, outdir);
+        }
+
+    } else if (strcmp(cmd, "config") == 0) {
+        const char *subcmd = (argc > cmd_idx + 1) ? argv[cmd_idx + 1] : "";
+
+        if (strcmp(subcmd, "show") == 0) {
+            printf("\nemail-cli configuration:\n\n");
+            printf("  IMAP:\n");
+            printf("    Host:     %s\n", cfg->host   ? cfg->host   : "(not set)");
+            printf("    User:     %s\n", cfg->user   ? cfg->user   : "(not set)");
+            printf("    Password: %s\n", cfg->pass   ? "****"      : "(not set)");
+            printf("    Folder:   %s\n", cfg->folder ? cfg->folder : "INBOX");
+            printf("\n  SMTP:\n");
+            if (cfg->smtp_host) {
+                printf("    Host:     %s\n", cfg->smtp_host);
+                printf("    Port:     %d\n", cfg->smtp_port ? cfg->smtp_port : 587);
+                printf("    User:     %s\n", cfg->smtp_user ? cfg->smtp_user : "(same as IMAP)");
+                printf("    Password: %s\n", cfg->smtp_pass ? "****"         : "(same as IMAP)");
+            } else {
+                printf("    (not configured — will be derived from IMAP host)\n");
+            }
+            printf("\n");
+            result = 0;
+
+        } else if (strcmp(subcmd, "smtp") == 0) {
+            if (setup_wizard_smtp(cfg) == 0) {
+                if (config_save_to_store(cfg) == 0) {
+                    printf("SMTP configuration saved.\n");
+                    result = 0;
+                } else {
+                    fprintf(stderr, "Error: Could not save configuration.\n");
+                }
+            }
+
+        } else {
+            if (subcmd[0])
+                fprintf(stderr, "Unknown config subcommand '%s'.\n", subcmd);
+            help_config();
+            result = subcmd[0] ? -1 : 0;
         }
 
     } else if (strcmp(cmd, "sync") == 0) {

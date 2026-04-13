@@ -10,29 +10,29 @@ endif()
 # ── Platform sources for harness (same selection as main build) ───────
 if(WIN32)
     set(HARNESS_PLATFORM_SOURCES
-        ${CMAKE_SOURCE_DIR}/src/platform/windows/terminal.c
-        ${CMAKE_SOURCE_DIR}/src/platform/windows/path.c
+        ${CMAKE_SOURCE_DIR}/libemail/src/platform/windows/terminal.c
+        ${CMAKE_SOURCE_DIR}/libemail/src/platform/windows/path.c
     )
 else()
     set(HARNESS_PLATFORM_SOURCES
-        ${CMAKE_SOURCE_DIR}/src/platform/posix/terminal.c
-        ${CMAKE_SOURCE_DIR}/src/platform/posix/path.c
+        ${CMAKE_SOURCE_DIR}/libemail/src/platform/posix/terminal.c
+        ${CMAKE_SOURCE_DIR}/libemail/src/platform/posix/path.c
     )
 endif()
 
 # ── InputLine / PathComplete harness ─────────────────────────────────
 add_executable(input-line-harness EXCLUDE_FROM_ALL
     input_line_harness.c
-    ${CMAKE_SOURCE_DIR}/src/core/input_line.c
-    ${CMAKE_SOURCE_DIR}/src/core/path_complete.c
-    ${CMAKE_SOURCE_DIR}/src/core/logger.c
-    ${CMAKE_SOURCE_DIR}/src/core/fs_util.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/core/input_line.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/core/path_complete.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/core/logger.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/core/fs_util.c
     ${HARNESS_PLATFORM_SOURCES}
 )
 target_include_directories(input-line-harness PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/core
-    ${CMAKE_SOURCE_DIR}/src/platform
+    ${CMAKE_SOURCE_DIR}/libemail/src
+    ${CMAKE_SOURCE_DIR}/libemail/src/core
+    ${CMAKE_SOURCE_DIR}/libemail/src/platform
 )
 target_link_libraries(input-line-harness OpenSSL::SSL OpenSSL::Crypto)
 

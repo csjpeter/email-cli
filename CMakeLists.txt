@@ -19,6 +19,7 @@ endif()
 find_package(OpenSSL REQUIRED)
 
 add_subdirectory(libemail)
+add_subdirectory(libwrite)
 
 add_executable(email-cli src/main.c)
 target_link_libraries(email-cli libemail)
@@ -30,7 +31,7 @@ add_executable(email-sync src/main_sync.c)
 target_link_libraries(email-sync libemail)
 
 add_executable(email-tui src/main_tui.c)
-target_link_libraries(email-tui libemail)
+target_link_libraries(email-tui libemail libwrite)
 
 # Test Build
 enable_testing()

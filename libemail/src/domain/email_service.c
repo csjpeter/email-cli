@@ -2366,6 +2366,10 @@ static char *load_raw_message(const Config *cfg, int uid) {
     return raw;
 }
 
+char *email_service_fetch_raw(const Config *cfg, int uid) {
+    return load_raw_message(cfg, uid);
+}
+
 int email_service_list_attachments(const Config *cfg, int uid) {
     char *raw = load_raw_message(cfg, uid);
     if (!raw) {

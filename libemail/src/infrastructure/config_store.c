@@ -57,6 +57,10 @@ Config* config_load_from_store(void) {
             else if (strcmp(key, "EMAIL_FOLDER") == 0) cfg->folder = strdup(val);
             else if (strcmp(key, "SSL_NO_VERIFY") == 0) cfg->ssl_no_verify = atoi(val);
             else if (strcmp(key, "SYNC_INTERVAL") == 0) cfg->sync_interval = atoi(val);
+            else if (strcmp(key, "SMTP_HOST") == 0) cfg->smtp_host = strdup(val);
+            else if (strcmp(key, "SMTP_PORT") == 0) cfg->smtp_port = atoi(val);
+            else if (strcmp(key, "SMTP_USER") == 0) cfg->smtp_user = strdup(val);
+            else if (strcmp(key, "SMTP_PASS") == 0) cfg->smtp_pass = strdup(val);
         }
     }
 
@@ -119,6 +123,10 @@ int config_save_to_store(const Config *cfg) {
     if (cfg->ssl_no_verify)
         fprintf(fp, "SSL_NO_VERIFY=1\n");
     fprintf(fp, "SYNC_INTERVAL=%d\n", cfg->sync_interval);
+    if (cfg->smtp_host) fprintf(fp, "SMTP_HOST=%s\n", cfg->smtp_host);
+    if (cfg->smtp_port) fprintf(fp, "SMTP_PORT=%d\n", cfg->smtp_port);
+    if (cfg->smtp_user) fprintf(fp, "SMTP_USER=%s\n", cfg->smtp_user);
+    if (cfg->smtp_pass) fprintf(fp, "SMTP_PASS=%s\n", cfg->smtp_pass);
 
     logger_log(LOG_INFO, "Config saved to %s", path);
     return 0;

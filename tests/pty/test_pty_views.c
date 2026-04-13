@@ -1102,6 +1102,8 @@ static void test_wizard_complete(void) {
     pty_send_str(s, "testpass\n");
     ASSERT_WAIT_FOR(s, "older", WAIT_MS);
     pty_send_str(s, "INBOX\n");
+    ASSERT_WAIT_FOR(s, "SMTP Host", WAIT_MS);
+    pty_send_str(s, "\n");  /* skip SMTP config */
     ASSERT_WAIT_FOR(s, "Configuration saved", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);

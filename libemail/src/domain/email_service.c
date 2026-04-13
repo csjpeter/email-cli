@@ -2350,3 +2350,95 @@ int email_service_cron_status(void) {
 #undef IS_SYNC_LINE
     return 0;
 }
+
+/* ── Attachment service functions ───────────────────────────────────── */
+
+/* Load raw message for uid (cache or fetch). Returns heap string or NULL. */
+static char *load_raw_message(const Config *cfg, int uid) {
+    if (local_msg_exists(cfg->folder, uid)) {
+        return local_msg_load(cfg->folder, uid);
+    }
+    char *raw = fetch_uid_content_in(cfg, cfg->folder, uid, 0);
+    if (raw) {
+        local_msg_save(cfg->folder, uid, raw, strlen(raw));
+        local_index_update(cfg->folder, uid, raw);
+    }
+    return raw;
+}
+
+int email_service_list_attachments(const Config *cfg, int uid) {
+    char *raw = load_raw_message(cfg, uid);
+    if (!raw) {
+        fprintf(stderr, "Could not load message UID %d.\n", uid);
+        return -1;
+    }
+    int count = 0;
+    MimeAttachment *atts = mime_list_attachments(raw, &count);
+    free(raw);
+    if (count == 0) {
+        printf("No attachments.\n");
+        mime_free_attachments(atts, count);
+        return 0;
+    }
+    for (int i = 0; i < count; i++) {
+        const char *name = atts[i].filename ? atts[i].filename : "(no name)";
+        size_t sz = atts[i].size;
+        if (sz >= 1024 * 1024)
+            printf("%-40s  %.1f MB\n", name, (double)sz / (1024.0 * 1024.0));
+        else if (sz >= 1024)
+            printf("%-40s  %.0f KB\n", name, (double)sz / 1024.0);
+        else
+            printf("%-40s  %zu B\n", name, sz);
+    }
+    mime_free_attachments(atts, count);
+    return 0;
+}
+
+int email_service_save_attachment(const Config *cfg, int uid,
+                                  const char *name, const char *outdir) {
+    char *raw = load_raw_message(cfg, uid);
+    if (!raw) {
+        fprintf(stderr, "Could not load message UID %d.\n", uid);
+        return -1;
+    }
+    int count = 0;
+    MimeAttachment *atts = mime_list_attachments(raw, &count);
+    free(raw);
+    if (count == 0) {
+        fprintf(stderr, "Message UID %d has no attachments.\n", uid);
+        mime_free_attachments(atts, count);
+        return -1;
+    }
+
+    /* Find attachment by filename (case-sensitive). */
+    int idx = -1;
+    for (int i = 0; i < count; i++) {
+        const char *fn = atts[i].filename ? atts[i].filename : "";
+        if (strcmp(fn, name) == 0) { idx = i; break; }
+    }
+    if (idx < 0) {
+        fprintf(stderr, "Attachment '%s' not found in message UID %d.\n", name, uid);
+        mime_free_attachments(atts, count);
+        return -1;
+    }
+
+    /* Build destination path. */
+    const char *dir = outdir ? outdir : attachment_save_dir();
+    char *dir_heap = NULL;
+    if (!outdir) dir_heap = (char *)dir; /* attachment_save_dir returns heap */
+
+    char *safe = safe_filename_for_path(name);
+    char dest[2048];
+    snprintf(dest, sizeof(dest), "%s/%s", dir, safe ? safe : "attachment");
+    free(safe);
+
+    int rc = mime_save_attachment(&atts[idx], dest);
+    if (rc == 0)
+        printf("Saved: %s\n", dest);
+    else
+        fprintf(stderr, "Failed to save attachment to %s\n", dest);
+
+    mime_free_attachments(atts, count);
+    free(dir_heap);
+    return rc;
+}

@@ -125,4 +125,32 @@ int email_service_cron_remove(void);
  */
 int email_service_cron_status(void);
 
+/**
+ * @brief Lists all attachments in a message identified by IMAP UID.
+ *
+ * Loads the message from local cache or fetches it from the server.
+ * Prints one line per attachment: filename and decoded size.
+ *
+ * @param cfg  Connection configuration.
+ * @param uid  IMAP UID of the message.
+ * @return 0 on success, -1 on failure.
+ */
+int email_service_list_attachments(const Config *cfg, int uid);
+
+/**
+ * @brief Saves one named attachment from a message to a directory.
+ *
+ * Loads the message, finds the attachment by filename, and writes the
+ * decoded content to @p outdir/@p name.
+ *
+ * @param cfg     Connection configuration.
+ * @param uid     IMAP UID of the message.
+ * @param name    Exact filename of the attachment to save.
+ * @param outdir  Destination directory path, or NULL to use ~/Downloads
+ *                (falling back to ~).
+ * @return 0 on success, -1 on failure.
+ */
+int email_service_save_attachment(const Config *cfg, int uid,
+                                  const char *name, const char *outdir);
+
 #endif /* EMAIL_SERVICE_H */

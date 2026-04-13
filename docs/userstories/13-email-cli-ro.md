@@ -15,15 +15,18 @@ email-cli-ro --help
 ## Supported Commands
 | Command | Description |
 |---------|-------------|
-| `list`    | List messages in the configured folder |
-| `show`    | Display a message by UID |
-| `folders` | List available IMAP folders |
-| `sync`    | Download all messages to local store |
-| `help`    | Show help |
+| `list`                     | List messages in the configured folder |
+| `show`                     | Display a message by UID |
+| `folders`                  | List available IMAP folders |
+| `attachments <uid>`        | List attachments in a message |
+| `save-attachment <uid> <filename> [dir]` | Save an attachment to disk |
+| `help`                     | Show help |
 
 ## Differences from email-cli
 - No interactive TUI: all output is batch/non-interactive.
+- No `sync` command (no bulk fetch cron scheduling).
 - No `cron` command (no crontab writes).
+- No `--all` flag on `list` (all messages are always shown).
 - No setup wizard: configuration must already exist.
 - No SMTP, no `\Seen` flag changes, no STORE commands.
 
@@ -36,8 +39,8 @@ email-cli-ro --help
   ```
 
 ## Options
-All options from `email-cli list` and `email-cli show` are supported, except `--batch`
-(which is a no-op accepted for backward compatibility).
+All options from `email-cli list` and `email-cli show` are supported (except `--all`
+and `--batch`; `--batch` is a no-op accepted for backward compatibility).
 
 ## Security Guarantee
 The `email-cli-ro` binary is linked only against `libemail` read/fetch paths.
@@ -49,7 +52,9 @@ email-cli-ro list
 email-cli-ro list --folder INBOX.Sent --limit 20
 email-cli-ro show 42
 email-cli-ro folders
-email-cli-ro sync
+email-cli-ro attachments 42
+email-cli-ro save-attachment 42 report.pdf
+email-cli-ro save-attachment 42 report.pdf /tmp
 ```
 
 ## Exit Codes

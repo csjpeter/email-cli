@@ -8,7 +8,7 @@
  *   - No setup wizard — configuration must already exist.
  *   - Safe to give to AI agents: there is no code path that sends email.
  *
- * Supported commands: list, show, folders, sync, help.
+ * Supported commands: list, show, folders, attachments, save-attachment, help.
  */
 
 #include <stdio.h>
@@ -36,11 +36,13 @@ static void help_general(void) {
         "Safe for use by AI agents: no send or write operations are available.\n"
         "\n"
         "Commands:\n"
-        "  list              List messages in the configured mailbox\n"
-        "  show <uid>        Display the full content of a message by its UID\n"
-        "  folders           List available IMAP folders\n"
-        "  sync              Download all messages in all folders to local store\n"
-        "  help [command]    Show this help, or detailed help for a command\n"
+        "  list                       List messages in the configured mailbox\n"
+        "  show <uid>                 Display the full content of a message by its UID\n"
+        "  folders                    List available IMAP folders\n"
+        "  attachments <uid>          List attachments in a message\n"
+        "  save-attachment <uid> <filename> [dir]\n"
+        "                             Save an attachment to disk\n"
+        "  help [command]             Show this help, or detailed help for a command\n"
         "\n"
         "Run 'email-cli-ro help <command>' for more information.\n"
     );
@@ -51,11 +53,9 @@ static void help_list(void) {
         "Usage: email-cli-ro list [options]\n"
         "\n"
         "Lists messages in the configured mailbox folder.\n"
+        "All messages are shown; unread ones are marked with 'N' and listed first.\n"
         "\n"
         "Options:\n"
-        "  --all              All messages are always shown; this flag has no\n"
-        "                     effect and is kept for backwards compatibility.\n"
-        "                     Unread messages are marked with 'N' and listed first.\n"
         "  --folder <name>    Use <name> instead of the configured folder.\n"
         "  --limit <n>        Show at most <n> messages (default: %d).\n"
         "  --offset <n>       Start listing from the <n>-th message (1-based).\n"
@@ -96,15 +96,33 @@ static void help_folders(void) {
     );
 }
 
-static void help_sync(void) {
+static void help_attachments(void) {
     printf(
-        "Usage: email-cli-ro sync\n"
+        "Usage: email-cli-ro attachments <uid>\n"
         "\n"
-        "Downloads all messages in every IMAP folder to the local store.\n"
-        "Messages already stored locally are skipped.\n"
+        "Lists all attachments in the message identified by <uid>.\n"
+        "Prints one line per attachment: filename and decoded size.\n"
+        "\n"
+        "  <uid>   Numeric IMAP UID shown by 'email-cli-ro list'\n"
         "\n"
         "Examples:\n"
-        "  email-cli-ro sync\n"
+        "  email-cli-ro attachments 42\n"
+    );
+}
+
+static void help_save_attachment(void) {
+    printf(
+        "Usage: email-cli-ro save-attachment <uid> <filename> [dir]\n"
+        "\n"
+        "Saves the named attachment from message <uid> to disk.\n"
+        "\n"
+        "  <uid>       Numeric IMAP UID shown by 'email-cli-ro list'\n"
+        "  <filename>  Exact attachment filename shown by 'email-cli-ro attachments'\n"
+        "  [dir]       Destination directory (default: ~/Downloads or ~)\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli-ro save-attachment 42 report.pdf\n"
+        "  email-cli-ro save-attachment 42 report.pdf /tmp\n"
     );
 }
 
@@ -154,10 +172,11 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
             if (cmd && strcmp(cmd, "--help") != 0) {
-                if (strcmp(cmd, "list")    == 0) { help_list();    return EXIT_SUCCESS; }
-                if (strcmp(cmd, "show")    == 0) { help_show();    return EXIT_SUCCESS; }
-                if (strcmp(cmd, "folders") == 0) { help_folders(); return EXIT_SUCCESS; }
-                if (strcmp(cmd, "sync")    == 0) { help_sync();    return EXIT_SUCCESS; }
+                if (strcmp(cmd, "list")            == 0) { help_list();            return EXIT_SUCCESS; }
+                if (strcmp(cmd, "show")            == 0) { help_show();            return EXIT_SUCCESS; }
+                if (strcmp(cmd, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
+                if (strcmp(cmd, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
+                if (strcmp(cmd, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
             }
             help_general();
             return EXIT_SUCCESS;
@@ -168,10 +187,11 @@ int main(int argc, char *argv[]) {
         const char *topic = NULL;
         for (int i = cmd_idx + 1; i < argc; i++) { topic = argv[i]; break; }
         if (topic) {
-            if (strcmp(topic, "list")    == 0) { help_list();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "show")    == 0) { help_show();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "folders") == 0) { help_folders(); return EXIT_SUCCESS; }
-            if (strcmp(topic, "sync")    == 0) { help_sync();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "list")            == 0) { help_list();            return EXIT_SUCCESS; }
+            if (strcmp(topic, "show")            == 0) { help_show();            return EXIT_SUCCESS; }
+            if (strcmp(topic, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
+            if (strcmp(topic, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
+            if (strcmp(topic, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli-ro help' for available commands.\n");
             return EXIT_FAILURE;
@@ -210,13 +230,11 @@ int main(int argc, char *argv[]) {
     int result = -1;
 
     if (strcmp(cmd, "list") == 0) {
-        EmailListOpts opts = {0, NULL, BATCH_DEFAULT_LIMIT, 0, 0};
+        EmailListOpts opts = {1, NULL, BATCH_DEFAULT_LIMIT, 0, 0};
         int ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) {
                 /* accepted as no-op: email-cli-ro is always batch mode */
-            } else if (strcmp(argv[i], "--all") == 0) {
-                opts.all = 1;
             } else if (strcmp(argv[i], "--folder") == 0) {
                 if (i + 1 >= argc) {
                     fprintf(stderr, "Error: --folder requires a folder name.\n");
@@ -288,8 +306,49 @@ int main(int argc, char *argv[]) {
         }
         if (ok) result = email_service_list_folders(cfg, tree);
 
-    } else if (strcmp(cmd, "sync") == 0) {
-        result = email_service_sync(cfg);
+    } else if (strcmp(cmd, "attachments") == 0) {
+        const char *uid_str = NULL;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            uid_str = argv[i]; break;
+        }
+        if (!uid_str) {
+            fprintf(stderr, "Error: 'attachments' requires a UID argument.\n");
+            help_attachments();
+        } else {
+            int uid = parse_uid(uid_str);
+            if (!uid)
+                fprintf(stderr,
+                        "Error: UID must be a positive integer (got '%s').\n",
+                        uid_str);
+            else
+                result = email_service_list_attachments(cfg, uid);
+        }
+
+    } else if (strcmp(cmd, "save-attachment") == 0) {
+        const char *uid_str  = NULL;
+        const char *filename = NULL;
+        const char *outdir   = NULL;
+        int argn = 0;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (argn == 0)      { uid_str  = argv[i]; argn++; }
+            else if (argn == 1) { filename = argv[i]; argn++; }
+            else if (argn == 2) { outdir   = argv[i]; argn++; }
+        }
+        if (!uid_str || !filename) {
+            fprintf(stderr,
+                    "Error: 'save-attachment' requires a UID and a filename.\n");
+            help_save_attachment();
+        } else {
+            int uid = parse_uid(uid_str);
+            if (!uid)
+                fprintf(stderr,
+                        "Error: UID must be a positive integer (got '%s').\n",
+                        uid_str);
+            else
+                result = email_service_save_attachment(cfg, uid, filename, outdir);
+        }
 
     } else {
         fprintf(stderr, "Unknown command '%s'.\n", cmd);

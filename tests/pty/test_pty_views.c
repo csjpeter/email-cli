@@ -30,6 +30,7 @@ int g_tests_failed = 0;
 static pid_t g_mock_pid = -1;
 static char  g_test_home[256];
 static char  g_cli_bin[512];
+static char  g_cli_ro_bin[512];
 static char  g_mock_bin[512];
 static char  g_old_home[512];
 
@@ -148,7 +149,7 @@ static void test_help_list(void) {
     const char *a[] = {"list", "--help", NULL};
     PtySession *s = cli_open_size(120, 50, a);
     ASSERT(s != NULL, "help list: opens");
-    ASSERT_WAIT_FOR(s, "email-cli list", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Usage: email-cli", WAIT_MS); /* common prefix for -ro too */
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "--all");
     ASSERT_SCREEN_CONTAINS(s, "--folder");
@@ -159,7 +160,7 @@ static void test_help_show(void) {
     const char *a[] = {"show", "--help", NULL};
     PtySession *s = cli_open_size(120, 50, a);
     ASSERT(s != NULL, "help show: opens");
-    ASSERT_WAIT_FOR(s, "email-cli show", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "show <uid>", WAIT_MS);
     pty_close(s);
 }
 
@@ -167,7 +168,9 @@ static void test_help_folders(void) {
     const char *a[] = {"folders", "--help", NULL};
     PtySession *s = cli_open_size(120, 50, a);
     ASSERT(s != NULL, "help folders: opens");
-    ASSERT_WAIT_FOR(s, "email-cli folders", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Usage: email-cli", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "--tree");
     pty_close(s);
 }
 
@@ -175,7 +178,9 @@ static void test_help_sync(void) {
     const char *a[] = {"sync", "--help", NULL};
     PtySession *s = cli_open_size(120, 50, a);
     ASSERT(s != NULL, "help sync: opens");
-    ASSERT_WAIT_FOR(s, "email-cli sync", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Usage: email-cli", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "sync");
     pty_close(s);
 }
 
@@ -631,12 +636,13 @@ static void test_show_save_all_confirm(void) {
 int main(int argc, char *argv[]) {
     printf("--- email-cli PTY View Tests ---\n\n");
 
-    if (argc < 3) {
-        fprintf(stderr, "Usage: %s <email-cli> <mock-server>\n", argv[0]);
+    if (argc < 4) {
+        fprintf(stderr, "Usage: %s <email-cli> <mock-server> <email-cli-ro>\n", argv[0]);
         return EXIT_FAILURE;
     }
-    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", argv[1]);
-    snprintf(g_mock_bin, sizeof(g_mock_bin), "%s", argv[2]);
+    snprintf(g_cli_bin,    sizeof(g_cli_bin),    "%s", argv[1]);
+    snprintf(g_mock_bin,   sizeof(g_mock_bin),   "%s", argv[2]);
+    snprintf(g_cli_ro_bin, sizeof(g_cli_ro_bin), "%s", argv[3]);
 
     const char *home = getenv("HOME");
     if (home) snprintf(g_old_home, sizeof(g_old_home), "%s", home);
@@ -697,6 +703,25 @@ int main(int argc, char *argv[]) {
 
     printf("\n--- Empty folder ---\n");
     RUN_TEST(test_interactive_empty_folder);
+
+    /* ── email-cli-ro: batch-only subset ─────────────────────────────── */
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_cli_ro_bin);
+
+    printf("\n--- email-cli-ro: help pages ---\n");
+    RUN_TEST(test_help_general);
+    RUN_TEST(test_help_list);
+    RUN_TEST(test_help_show);
+    RUN_TEST(test_help_folders);
+    RUN_TEST(test_help_sync);
+
+    printf("\n--- email-cli-ro: batch mode ---\n");
+    restart_mock();
+    RUN_TEST(test_batch_list);
+    RUN_TEST(test_batch_list_all);
+    RUN_TEST(test_batch_list_empty);
+    RUN_TEST(test_batch_show);
+    RUN_TEST(test_batch_folders_flat);
+    RUN_TEST(test_batch_folders_tree);
 
 done:
     stop_mock_server();

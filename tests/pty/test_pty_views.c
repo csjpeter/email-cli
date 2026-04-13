@@ -544,19 +544,40 @@ static void test_interactive_show_pgdn(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* PgDn/PgUp on a single-page message — no crash expected */
+    /* PgDn scrolls a full page; header (From:) stays pinned at top */
     pty_send_key(s, PTY_KEY_PGDN);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "From:");
     pty_send_key(s, PTY_KEY_PGUP);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "From:");
-    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_show_arrow_scroll(void) {
+    /* US 12: ↓/↑ scroll one line at a time (not a full page like PgDn/PgUp).
+     * Use a small terminal (10 rows → rows_avail=4) with a 9-line body so
+     * there are 3 pages.  PgDn jumps to page 2; ↑ steps back to page 1;
+     * ↓ steps forward to page 2 again — confirming single-line granularity. */
+    restart_mock();
+    PtySession *s = cli_open_size(COLS, 10, NULL); /* small rows → multi-page */
+    ASSERT(s != NULL, "show arrow scroll: opens");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Jump a full page to page 2 */
+    pty_send_key(s, PTY_KEY_PGDN);
+    ASSERT_WAIT_FOR(s, "2/", WAIT_MS);
+    /* ↑ steps back one line → page 1 */
     pty_send_key(s, PTY_KEY_UP);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "From:");
+    ASSERT_SCREEN_CONTAINS(s, "1/");
+    /* ↓ steps forward one line → page 2 again */
+    pty_send_key(s, PTY_KEY_DOWN);
+    ASSERT_WAIT_FOR(s, "2/", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -677,6 +698,34 @@ static void test_interactive_folders_back_to_list(void) {
     /* Backspace returns to the message list */
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_folders_flat_navigate_up(void) {
+    /* US 15: in flat view, Enter on a folder with children navigates into it
+     * (sets current_prefix); Backspace navigates back up one level. */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "folders flat nav up: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);            /* open folder browser */
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "t");                     /* toggle to flat view */
+    ASSERT_WAIT_FOR(s, "t=tree", WAIT_MS);    /* flat mode: hint shows "t=tree" */
+    pty_settle(s, SETTLE_MS);
+    /* Flat view at root shows only top-level folders (no '.' in name) */
+    ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    pty_send_key(s, PTY_KEY_ENTER);           /* navigate into INBOX */
+    ASSERT_WAIT_FOR(s, "Backspace=up", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Header shows "Folders: INBOX/ (3)"; flat mode shows last component only */
+    ASSERT_SCREEN_CONTAINS(s, "INBOX/");
+    ASSERT_SCREEN_CONTAINS(s, "Sent");
+    pty_send_key(s, PTY_KEY_BACK);            /* navigate up to root */
+    ASSERT_WAIT_FOR(s, "Backspace=back", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -1142,6 +1191,22 @@ static void test_offline_list(void) {
     restart_mock();
 }
 
+static void test_offline_show_not_cached(void) {
+    /* US 11: opening a non-cached message in cron/offline mode shows an error */
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* UID 999 has never been synced → not in local store */
+    const char *a[] = {"show", "999", "--batch", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "offline show not cached: opens");
+    ASSERT_WAIT_FOR(s, "Could not load", WAIT_MS);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
 /* ── email-tui help tests ────────────────────────────────────────────── */
 
 static void test_tui_help_general(void) {
@@ -1172,6 +1237,17 @@ static void test_tui_help_cron(void) {
     PtySession *s = cli_open_size(120, 50, a);
     ASSERT(s != NULL, "tui help cron: opens");
     ASSERT_WAIT_FOR(s, "Usage: email-tui cron", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_tui_interactive_launch(void) {
+    /* US 18: email-tui with no args in a TTY starts the interactive TUI */
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "tui no-args launch: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
 
@@ -1306,6 +1382,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_show_esc_to_list);
     RUN_TEST(test_interactive_show_q_to_list);
     RUN_TEST(test_interactive_show_pgdn);
+    RUN_TEST(test_interactive_show_arrow_scroll);
 
     printf("\n--- Interactive folders ---\n");
     RUN_TEST(test_interactive_folders_content);
@@ -1314,6 +1391,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_folders_select);
     RUN_TEST(test_interactive_folders_nav);
     RUN_TEST(test_interactive_folders_back_to_list);
+    RUN_TEST(test_interactive_folders_flat_navigate_up);
     RUN_TEST(test_interactive_folders_esc_quit);
 
     printf("\n--- Attachment save ---\n");
@@ -1334,6 +1412,7 @@ int main(int argc, char *argv[]) {
 
     printf("\n--- Offline / cron mode ---\n");
     RUN_TEST(test_offline_list);
+    RUN_TEST(test_offline_show_not_cached);
 
     /* ── email-cli-ro: batch-only subset ─────────────────────────────── */
     snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_cli_ro_bin);
@@ -1409,6 +1488,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_list_content);
     RUN_TEST(test_interactive_list_esc_quit);
     RUN_TEST(test_interactive_show_esc_to_list);
+
+    printf("\n--- email-tui: TUI launch ---\n");
+    restart_mock();
+    RUN_TEST(test_tui_interactive_launch);
 
     printf("\n--- email-tui: wizard + cron ---\n");
     RUN_TEST(test_wizard_abort);

@@ -1669,7 +1669,9 @@ int email_service_list_folders(const Config *cfg, int tree) {
 }
 
 char *email_service_list_folders_interactive(const Config *cfg,
-                                             const char *current_folder) {
+                                             const char *current_folder,
+                                             int *go_up) {
+    if (go_up) *go_up = 0;
     int count = 0;
     char sep = '.';
     char **folders = fetch_folder_list(cfg, &count, &sep);
@@ -1819,9 +1821,14 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 else          current_prefix[0] = '\0';
                 cursor = 0; wstart = 0;
             } else {
-                /* at root: go back to list with the current folder unchanged */
-                if (current_folder && *current_folder)
-                    selected = strdup(current_folder);
+                /* at root: go up to accounts screen (if caller supports it),
+                 * or return unchanged current folder (legacy behaviour). */
+                if (go_up) {
+                    *go_up = 1; /* selected stays NULL */
+                } else {
+                    if (current_folder && *current_folder)
+                        selected = strdup(current_folder);
+                }
                 goto folders_int_done;
             }
             break;
@@ -1879,6 +1886,82 @@ folders_int_done:
     for (int i = 0; i < count; i++) free(folders[i]);
     free(folders);
     return selected;
+}
+
+int email_service_account_interactive(const Config *cfg) {
+    RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
+    (void)tui_raw;
+
+    for (;;) {
+        int trows = terminal_rows();
+        int tcols = terminal_cols();
+        if (trows <= 0) trows = 24;
+        if (tcols <= 0) tcols = 80;
+
+        printf("\033[H\033[2J");
+        printf("  Email Account\n\n");
+
+        /* ── Account details ─────────────────────────────────────── */
+        const char *user = cfg->user ? cfg->user : "(unknown)";
+        const char *host = cfg->host ? cfg->host : "(not set)";
+        printf("  \u2192 %s\n", user);
+        printf("    IMAP:  %s\n", host);
+
+        /* SMTP status */
+        if (cfg->smtp_host) {
+            printf("    SMTP:  %s", cfg->smtp_host);
+            if (cfg->smtp_port) printf(":%d", cfg->smtp_port);
+            if (cfg->smtp_user)
+                printf("  (user: %s)", cfg->smtp_user);
+            printf("\n");
+        } else {
+            /* Show what will be derived automatically at send time */
+            char derived[256] = "";
+            if (cfg->host) {
+                if (strncmp(cfg->host, "imaps://", 8) == 0)
+                    snprintf(derived, sizeof(derived), "smtps://%s", cfg->host + 8);
+                else if (strncmp(cfg->host, "imap://", 7) == 0)
+                    snprintf(derived, sizeof(derived), "smtp://%s", cfg->host + 7);
+            }
+            if (derived[0])
+                printf("    SMTP:  \033[33mnot configured\033[0m"
+                       "  (will try %s)\n", derived);
+            else
+                printf("    SMTP:  \033[33mnot configured\033[0m\n");
+            printf("           Press \033[1me\033[0m to set up outgoing mail.\n");
+        }
+
+        fflush(stdout);
+
+        char sb[256];
+        snprintf(sb, sizeof(sb),
+                 "  Enter=open folders  e=SMTP settings  ESC=quit");
+        print_statusbar(trows, tcols, sb);
+
+        TermKey key = terminal_read_key();
+        fprintf(stderr, "\r\033[K"); fflush(stderr);
+
+        switch (key) {
+        case TERM_KEY_QUIT:
+        case TERM_KEY_ESC:
+        case TERM_KEY_BACK:
+            return 0;
+        case TERM_KEY_ENTER:
+            return 1;
+        case TERM_KEY_LEFT:
+        case TERM_KEY_RIGHT:
+        case TERM_KEY_HOME:
+        case TERM_KEY_END:
+        case TERM_KEY_DELETE:
+        case TERM_KEY_TAB:
+        case TERM_KEY_SHIFT_TAB:
+        case TERM_KEY_IGNORE:
+            if (terminal_last_printable() == 'e') return 2;
+            break;
+        default:
+            break;
+        }
+    }
 }
 
 int email_service_read(const Config *cfg, int uid, int pager, int page_size) {

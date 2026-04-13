@@ -65,16 +65,40 @@ int email_service_list_folders(const Config *cfg, int tree);
  * Displays a full-screen cursor-driven folder list with tree/flat toggle.
  * In flat mode the browser opens at the level containing @p current_folder
  * so the user lands back where they came from.
- * Backspace navigates up one level; at root it is a no-op (use ESC to quit).
+ * Backspace navigates up one level in flat mode; at root it signals "go up"
+ * by setting @p *go_up (if non-NULL) to 1 and returning NULL.
  *
  * @param cfg            Connection configuration.
  * @param current_folder Folder active before opening the browser; used to
  *                       pre-position the flat-mode view. May be NULL.
- * @return Heap-allocated selected folder name, or NULL if the user quit.
- *         Caller must free() the returned string.
+ * @param go_up          Optional output flag.  Set to 1 when Backspace is
+ *                       pressed at the root level (caller should navigate to
+ *                       the accounts screen).  Set to 0 on ESC/select.
+ *                       If NULL the old behaviour is preserved: Backspace at
+ *                       root returns the current folder unchanged.
+ * @return Heap-allocated selected folder name, or NULL if the user quit or
+ *         pressed Backspace at root.  Caller must free() the returned string.
  */
 char *email_service_list_folders_interactive(const Config *cfg,
-                                             const char *current_folder);
+                                             const char *current_folder,
+                                             int *go_up);
+
+/**
+ * @brief Interactive account overview screen (TUI).
+ *
+ * Displays the configured account (IMAP host, user, SMTP status) and waits
+ * for the user to choose an action.  This is the top-level TUI entry point,
+ * sitting above the folder browser in the navigation hierarchy.
+ *
+ * Keys:
+ *   Enter  — open the account (proceed to folder browser): returns 1
+ *   e      — edit SMTP settings: returns 2
+ *   ESC / Q / Backspace — quit: returns 0
+ *
+ * @param cfg  Current account configuration.
+ * @return 0 = quit, 1 = open account, 2 = edit SMTP settings.
+ */
+int email_service_account_interactive(const Config *cfg);
 
 /**
  * @brief Reads and displays one message identified by its IMAP UID.

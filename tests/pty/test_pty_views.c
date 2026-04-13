@@ -32,6 +32,7 @@ static char  g_test_home[256];
 static char  g_cli_bin[512];
 static char  g_cli_ro_bin[512];
 static char  g_sync_bin[512];
+static char  g_tui_bin[512];
 static char  g_mock_bin[512];
 static char  g_old_home[512];
 
@@ -1141,6 +1142,39 @@ static void test_offline_list(void) {
     restart_mock();
 }
 
+/* ── email-tui help tests ────────────────────────────────────────────── */
+
+static void test_tui_help_general(void) {
+    const char *a[] = {"--help", NULL};
+    PtySession *s = cli_open_size(120, 50, a);
+    ASSERT(s != NULL, "tui help: opens");
+    ASSERT_WAIT_FOR(s, "Usage: email-tui", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "Commands:");
+    ASSERT_SCREEN_CONTAINS(s, "list");
+    ASSERT_SCREEN_CONTAINS(s, "cron");
+    pty_close(s);
+}
+
+static void test_tui_help_list(void) {
+    const char *a[] = {"list", "--help", NULL};
+    PtySession *s = cli_open_size(120, 50, a);
+    ASSERT(s != NULL, "tui help list: opens");
+    ASSERT_WAIT_FOR(s, "Usage: email-tui list", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "--all");
+    ASSERT_SCREEN_CONTAINS(s, "--folder");
+    pty_close(s);
+}
+
+static void test_tui_help_cron(void) {
+    const char *a[] = {"cron", "--help", NULL};
+    PtySession *s = cli_open_size(120, 50, a);
+    ASSERT(s != NULL, "tui help cron: opens");
+    ASSERT_WAIT_FOR(s, "Usage: email-tui cron", WAIT_MS);
+    pty_close(s);
+}
+
 /* ── email-sync tests ────────────────────────────────────────────────── */
 
 static PtySession *sync_run(const char **args) {
@@ -1208,14 +1242,15 @@ static void test_sync_no_config(void) {
 int main(int argc, char *argv[]) {
     printf("--- email-cli PTY View Tests ---\n\n");
 
-    if (argc < 5) {
-        fprintf(stderr, "Usage: %s <email-cli> <mock-server> <email-cli-ro> <email-sync>\n", argv[0]);
+    if (argc < 6) {
+        fprintf(stderr, "Usage: %s <email-cli> <mock-server> <email-cli-ro> <email-sync> <email-tui>\n", argv[0]);
         return EXIT_FAILURE;
     }
     snprintf(g_cli_bin,    sizeof(g_cli_bin),    "%s", argv[1]);
     snprintf(g_mock_bin,   sizeof(g_mock_bin),   "%s", argv[2]);
     snprintf(g_cli_ro_bin, sizeof(g_cli_ro_bin), "%s", argv[3]);
     snprintf(g_sync_bin,   sizeof(g_sync_bin),   "%s", argv[4]);
+    snprintf(g_tui_bin,    sizeof(g_tui_bin),    "%s", argv[5]);
 
     const char *home = getenv("HOME");
     if (home) snprintf(g_old_home, sizeof(g_old_home), "%s", home);
@@ -1354,6 +1389,33 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_sync_run);
     RUN_TEST(test_sync_unknown_opt);
     RUN_TEST(test_sync_no_config);
+
+    /* ── email-tui: full interactive TUI + future write operations ─────── */
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_tui_bin);
+
+    printf("\n--- email-tui: help pages ---\n");
+    RUN_TEST(test_tui_help_general);
+    RUN_TEST(test_tui_help_list);
+    RUN_TEST(test_tui_help_cron);
+
+    printf("\n--- email-tui: batch mode ---\n");
+    restart_mock();
+    RUN_TEST(test_batch_list);
+    RUN_TEST(test_batch_list_all);
+    RUN_TEST(test_batch_show);
+    RUN_TEST(test_batch_folders_flat);
+
+    printf("\n--- email-tui: interactive ---\n");
+    RUN_TEST(test_interactive_list_content);
+    RUN_TEST(test_interactive_list_esc_quit);
+    RUN_TEST(test_interactive_show_esc_to_list);
+
+    printf("\n--- email-tui: wizard + cron ---\n");
+    RUN_TEST(test_wizard_abort);
+    RUN_TEST(test_cron_status_not_found);
+
+    /* Restore full email-cli binary */
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", argv[1]);
 
 done:
     stop_mock_server();

@@ -19,7 +19,8 @@ add_custom_target(run-pty-views
         $<TARGET_FILE:mock-imap-server>
         $<TARGET_FILE:email-cli-ro>
         $<TARGET_FILE:email-sync>
-    DEPENDS test-pty-views email-cli email-cli-ro email-sync mock-imap-server
+        $<TARGET_FILE:email-tui>
+    DEPENDS test-pty-views email-cli email-cli-ro email-sync mock-imap-server email-tui
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running PTY view tests"
 )

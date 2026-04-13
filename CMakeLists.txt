@@ -29,6 +29,9 @@ target_link_libraries(email-cli-ro libemail)
 add_executable(email-sync src/main_sync.c)
 target_link_libraries(email-sync libemail)
 
+add_executable(email-tui src/main_tui.c)
+target_link_libraries(email-tui libemail)
+
 # Test Build
 enable_testing()
 add_subdirectory(tests/unit EXCLUDE_FROM_ALL)

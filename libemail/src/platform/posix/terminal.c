@@ -92,7 +92,7 @@ TermKey terminal_read_key(void) {
     if (c == '\033') {
         /* Temporarily switch to VMIN=0 VTIME=1 (100 ms timeout) to drain
          * the escape sequence without blocking if it is a bare ESC. */
-        struct termios t;
+        struct termios t = {0};
         tcgetattr(STDIN_FILENO, &t);
         struct termios drain = t;
         drain.c_cc[VMIN]  = 0;

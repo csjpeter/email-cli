@@ -2,7 +2,7 @@
  * @file test_pty_views.c
  * @brief PTY-based tests for all email-cli views and modes.
  *
- * Usage: test-pty-views <email-cli-binary> <mock-imap-server-binary>
+ * Usage: test-pty-views <email-cli> <mock-imap-server> <email-cli-ro> <email-sync>
  */
 
 #define _DEFAULT_SOURCE
@@ -31,6 +31,7 @@ static pid_t g_mock_pid = -1;
 static char  g_test_home[256];
 static char  g_cli_bin[512];
 static char  g_cli_ro_bin[512];
+static char  g_sync_bin[512];
 static char  g_mock_bin[512];
 static char  g_old_home[512];
 
@@ -905,6 +906,66 @@ static void test_ro_no_config(void) {
     setenv("HOME", g_test_home, 1);
 }
 
+/* ── email-sync tests ────────────────────────────────────────────────── */
+
+static PtySession *sync_run(const char **args) {
+    const char *argv[16];
+    int n = 0;
+    argv[n++] = g_sync_bin;
+    if (args)
+        for (int i = 0; args[i] && n < 15; i++)
+            argv[n++] = args[i];
+    argv[n] = NULL;
+
+    PtySession *s = pty_open(COLS, ROWS);
+    if (!s) return NULL;
+    if (pty_run(s, argv) != 0) { pty_close(s); return NULL; }
+    return s;
+}
+
+static void test_sync_help(void) {
+    const char *a[] = {"--help", NULL};
+    PtySession *s = sync_run(a);
+    ASSERT(s != NULL, "sync --help: opens");
+    ASSERT_WAIT_FOR(s, "email-sync", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "--help", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Exit Codes", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_sync_run(void) {
+    restart_mock();
+    const char *a[] = {NULL};
+    PtySession *s = sync_run(a);
+    ASSERT(s != NULL, "sync run: opens");
+    ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_sync_unknown_opt(void) {
+    const char *a[] = {"--bogus-option", NULL};
+    PtySession *s = sync_run(a);
+    ASSERT(s != NULL, "sync unknown opt: opens");
+    ASSERT_WAIT_FOR(s, "Unknown option", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_sync_no_config(void) {
+    char no_home[300];
+    snprintf(no_home, sizeof(no_home), "%s/no_config_sync", g_test_home);
+    mkdir(no_home, 0700);
+    setenv("HOME", no_home, 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    const char *a[] = {NULL};
+    PtySession *s = sync_run(a);
+    ASSERT(s != NULL, "sync no config: opens");
+    ASSERT_WAIT_FOR(s, "No configuration found", WAIT_MS);
+    pty_close(s);
+
+    setenv("HOME", g_test_home, 1);
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 #define RUN_TEST(fn) do { printf("  %s...\n", #fn); fn(); } while(0)
@@ -912,13 +973,14 @@ static void test_ro_no_config(void) {
 int main(int argc, char *argv[]) {
     printf("--- email-cli PTY View Tests ---\n\n");
 
-    if (argc < 4) {
-        fprintf(stderr, "Usage: %s <email-cli> <mock-server> <email-cli-ro>\n", argv[0]);
+    if (argc < 5) {
+        fprintf(stderr, "Usage: %s <email-cli> <mock-server> <email-cli-ro> <email-sync>\n", argv[0]);
         return EXIT_FAILURE;
     }
     snprintf(g_cli_bin,    sizeof(g_cli_bin),    "%s", argv[1]);
     snprintf(g_mock_bin,   sizeof(g_mock_bin),   "%s", argv[2]);
     snprintf(g_cli_ro_bin, sizeof(g_cli_ro_bin), "%s", argv[3]);
+    snprintf(g_sync_bin,   sizeof(g_sync_bin),   "%s", argv[4]);
 
     const char *home = getenv("HOME");
     if (home) snprintf(g_old_home, sizeof(g_old_home), "%s", home);
@@ -1019,6 +1081,13 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_ro_list_offset);
     RUN_TEST(test_ro_sync);
     RUN_TEST(test_ro_no_config);
+
+    /* ── email-sync: standalone sync binary ──────────────────────────── */
+    printf("\n--- email-sync ---\n");
+    RUN_TEST(test_sync_help);
+    RUN_TEST(test_sync_run);
+    RUN_TEST(test_sync_unknown_opt);
+    RUN_TEST(test_sync_no_config);
 
 done:
     stop_mock_server();

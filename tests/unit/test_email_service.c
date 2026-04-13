@@ -721,7 +721,8 @@ void test_email_service(void) {
             goto skip_subfolder_test;
         }
         unsigned char esc_byte = '\033';
-        write(sf_pipe[1], &esc_byte, 1);
+        ssize_t _w = write(sf_pipe[1], &esc_byte, 1);
+        (void)_w;
         close(sf_pipe[1]);
 
         /* Redirect stdin to pipe read end */

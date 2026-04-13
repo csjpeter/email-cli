@@ -2216,11 +2216,18 @@ int email_service_cron_setup(const Config *cfg) {
     self_path[strcspn(self_path, "\n")] = '\0';
 #endif
 
+    /* Build path to email-sync (same directory as current binary) */
+    char sync_bin[1024] = "email-sync";
+    char *last_slash = strrchr(self_path, '/');
+    if (last_slash)
+        snprintf(sync_bin, sizeof(sync_bin), "%.*s/email-sync",
+                 (int)(last_slash - self_path), self_path);
+
     /* Build the cron line */
     char cron_line[2048];
     snprintf(cron_line, sizeof(cron_line),
-             "*/%d * * * * %s sync >> ~/.cache/email-cli/sync.log 2>&1",
-             cfg->sync_interval, self_path);
+             "*/%d * * * * %s >> ~/.cache/email-cli/sync.log 2>&1",
+             cfg->sync_interval, sync_bin);
 
     /* Read existing crontab */
     FILE *fp = popen("crontab -l 2>/dev/null", "r");
@@ -2234,8 +2241,9 @@ int email_service_cron_setup(const Config *cfg) {
     }
     existing[total] = '\0';
 
-    /* Check if already present */
-    if (strstr(existing, "email-cli sync")) {
+    /* Check if already present (email-sync or legacy email-cli sync) */
+    if (strstr(existing, "email-sync") ||
+        (strstr(existing, "email-cli") && strstr(existing, " sync"))) {
         printf("Cron entry already exists:\n");
         char *p = existing;
         while (*p) {
@@ -2286,12 +2294,16 @@ int email_service_cron_remove(void) {
     }
     existing[total] = '\0';
 
-    if (!strstr(existing, "email-cli sync")) {
-        printf("No email-cli cron entry found.\n");
+#define IS_SYNC_LINE(s) \
+    (strstr((s), "email-sync") || \
+     (strstr((s), "email-cli") && strstr((s), " sync")))
+
+    if (!IS_SYNC_LINE(existing)) {
+        printf("No email-sync cron entry found.\n");
         return 0;
     }
 
-    /* Filter out lines containing "email-cli sync" */
+    /* Filter out sync cron lines */
     char filtered[65536] = {0};
     size_t flen = 0;
     char *p = existing;
@@ -2299,7 +2311,7 @@ int email_service_cron_remove(void) {
         char *nl = strchr(p, '\n');
         char *end = nl ? nl : p + strlen(p);
         char saved = *end; *end = '\0';
-        if (!strstr(p, "email-cli sync")) {
+        if (!IS_SYNC_LINE(p)) {
             size_t llen = strlen(p);
             if (flen + llen + 2 < sizeof(filtered)) {
                 memcpy(filtered + flen, p, llen);
@@ -2337,7 +2349,7 @@ int email_service_cron_status(void) {
     char line[1024];
     int found = 0;
     while (fgets(line, sizeof(line), fp)) {
-        if (strstr(line, "email-cli sync")) {
+        if (IS_SYNC_LINE(line)) {
             if (!found) printf("Active sync cron entry:\n");
             printf("  %s", line);
             found = 1;
@@ -2345,6 +2357,7 @@ int email_service_cron_status(void) {
     }
     pclose(fp);
     if (!found)
-        printf("No email-cli sync cron entry is installed.\n");
+        printf("No email-sync cron entry is installed.\n");
+#undef IS_SYNC_LINE
     return 0;
 }

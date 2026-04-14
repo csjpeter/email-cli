@@ -18,27 +18,23 @@ int local_store_init(const char *host_url, const char *username) {
     const char *data_base = platform_data_dir();
     if (!data_base || !host_url) return -1;
 
-    /* Extract hostname from URL: imaps://host:port → host */
-    const char *p = strstr(host_url, "://");
-    p = p ? p + 3 : host_url;
-
-    char hostname[512];
-    int i = 0;
-    while (*p && *p != ':' && *p != '/' && i < (int)sizeof(hostname) - 1)
-        hostname[i++] = *p++;
-    hostname[i] = '\0';
-
-    /* Lowercase the hostname */
-    for (char *c = hostname; *c; c++) *c = (char)tolower((unsigned char)*c);
-
-    /* Include the username so two accounts on the same server get separate
-     * local stores and do not share manifests, headers, or cached messages. */
+    /* The email address (username) uniquely identifies an account.
+     * Use it directly as the directory key so two accounts on the same
+     * server get separate local stores without a double-@ suffix.
+     * Falls back to hostname-only for legacy single-account setups. */
     if (username && username[0]) {
         snprintf(g_account_base, sizeof(g_account_base),
-                 "%s/email-cli/accounts/%s@%s", data_base, username, hostname);
+                 "%s/email-cli/accounts/%s", data_base, username);
     } else {
-        /* Fallback: hostname only (backward compat for single-account setups
-         * where username is not yet available at init time). */
+        /* Extract hostname from URL: imaps://host:port → host */
+        const char *p = strstr(host_url, "://");
+        p = p ? p + 3 : host_url;
+        char hostname[512];
+        int i = 0;
+        while (*p && *p != ':' && *p != '/' && i < (int)sizeof(hostname) - 1)
+            hostname[i++] = *p++;
+        hostname[i] = '\0';
+        for (char *c = hostname; *c; c++) *c = (char)tolower((unsigned char)*c);
         snprintf(g_account_base, sizeof(g_account_base),
                  "%s/email-cli/accounts/imap.%s", data_base, hostname);
     }

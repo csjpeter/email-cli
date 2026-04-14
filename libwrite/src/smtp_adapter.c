@@ -86,6 +86,20 @@ int smtp_send(const Config *cfg,
         return -1;
     }
 
+    /* Hard enforcement: only smtps:// (implicit TLS) is allowed.
+     * Exception: cfg->ssl_no_verify=1 permits smtp:// for test environments. */
+    if (strncmp(url, "smtps://", 8) != 0 && !cfg->ssl_no_verify) {
+        fprintf(stderr,
+                "smtp_send: refused to send via %s — "
+                "only smtps:// is allowed (TLS required).\n"
+                "Set SMTP_HOST=smtps://smtp.example.com in your config.\n"
+                "For test environments only: add SSL_NO_VERIFY=1 to config.\n", url);
+        logger_log(LOG_ERROR,
+                   "smtp_send: rejected insecure SMTP URL: %s", url);
+        free(url);
+        return -1;
+    }
+
     CURL *curl = curl_easy_init();
     if (!curl) {
         fprintf(stderr, "smtp_send: curl_easy_init() failed.\n");
@@ -129,9 +143,8 @@ int smtp_send(const Config *cfg,
     curl_easy_setopt(curl, CURLOPT_READDATA,      &rctx);
     curl_easy_setopt(curl, CURLOPT_UPLOAD,        1L);
 
-    /* smtps:// requires implicit TLS; for smtp:// leave TLS at default (off) */
-    if (strncmp(url, "smtps://", 8) == 0)
-        curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
+    /* smtps:// = implicit TLS (port 465); enforce TLS on the connection */
+    curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
 
     /* Honour ssl_no_verify for self-signed certs in test environments */
     if (cfg->ssl_no_verify) {

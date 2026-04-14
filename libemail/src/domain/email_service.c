@@ -2232,7 +2232,7 @@ int email_service_account_interactive(Config **cfg_out) {
 
         char sb[256];
         snprintf(sb, sizeof(sb),
-                 "  \u2191\u2193=select  Enter=open  n=add  d=delete  e=SMTP  ESC=quit");
+                 "  \u2191\u2193=select  Enter=open  n=add  d=delete  i=IMAP  e=SMTP  ESC=quit");
         print_statusbar(trows, tcols, sb);
 
         TermKey key = terminal_read_key();
@@ -2268,6 +2268,7 @@ int email_service_account_interactive(Config **cfg_out) {
                 { "Enter",            "Open selected account"       },
                 { "n",               "Add new account"             },
                 { "d",               "Delete selected account"     },
+                { "i",               "Edit IMAP for account"       },
                 { "e",               "Edit SMTP for account"       },
                 { "ESC / q",         "Quit"                        },
                 { "h / ?",           "Show this help"              },
@@ -2276,6 +2277,12 @@ int email_service_account_interactive(Config **cfg_out) {
                             help, (int)(sizeof(help)/sizeof(help[0])));
             config_free_account_list(accounts, count);
             continue;
+        }
+        if (ch == 'i' && count > 0) {
+            *cfg_out = accounts[cursor].cfg;
+            accounts[cursor].cfg = NULL;
+            config_free_account_list(accounts, count);
+            return 4;
         }
         if (ch == 'e' && count > 0) {
             *cfg_out = accounts[cursor].cfg;

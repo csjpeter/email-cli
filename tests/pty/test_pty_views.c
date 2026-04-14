@@ -55,7 +55,8 @@ static void write_config(void) {
         "EMAIL_HOST=imap://localhost:9993\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
-        "EMAIL_FOLDER=INBOX\n");
+        "EMAIL_FOLDER=INBOX\n"
+        "SSL_NO_VERIFY=1\n");   /* permit non-TLS mock server in tests */
     fclose(fp);
     chmod(path, 0600);
 }
@@ -75,6 +76,7 @@ static void write_config_with_interval(int interval) {
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
+        "SSL_NO_VERIFY=1\n"   /* permit non-TLS mock server in tests */
         "SYNC_INTERVAL=%d\n", interval);
     fclose(fp);
     chmod(path, 0600);
@@ -1456,7 +1458,8 @@ static void write_second_account(const char *name) {
         "EMAIL_HOST=imap://localhost:9993\n"
         "EMAIL_USER=%s\n"
         "EMAIL_PASS=pass2\n"
-        "EMAIL_FOLDER=INBOX\n", name);
+        "EMAIL_FOLDER=INBOX\n"
+        "SSL_NO_VERIFY=1\n", name);  /* permit non-TLS mock server in tests */
     fclose(fp);
     chmod(path, 0600);
 }
@@ -1645,6 +1648,104 @@ static void test_tui_help_panel_question_mark(void) {
     ASSERT_SCREEN_CONTAINS(s, "message(s) in");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TLS ENFORCEMENT (US-23)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Write a config with an insecure imap:// URL and WITHOUT SSL_NO_VERIFY=1.
+ * Used to test that the application rejects plain-text IMAP connections.
+ */
+static void write_config_no_ssl_verify_imap(void) {
+    char d1[300], d2[300], path[350];
+    snprintf(d1, sizeof(d1), "%s/.config", g_test_home);
+    snprintf(d2, sizeof(d2), "%s/.config/email-cli", g_test_home);
+    mkdir(g_test_home, 0700);
+    mkdir(d1, 0700);
+    mkdir(d2, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", d2);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp,
+        "EMAIL_HOST=imap://localhost:9993\n"
+        "EMAIL_USER=testuser\n"
+        "EMAIL_PASS=testpass\n"
+        "EMAIL_FOLDER=INBOX\n");
+    /* No SSL_NO_VERIFY=1 — insecure URL must be rejected */
+    fclose(fp);
+    chmod(path, 0600);
+}
+
+/**
+ * Write a config with a secure imaps:// IMAP URL but an insecure smtp:// SMTP
+ * URL and WITHOUT SSL_NO_VERIFY=1.  Used to test that plain-text SMTP is
+ * rejected.
+ */
+static void write_config_no_ssl_verify_smtp(void) {
+    char d1[300], d2[300], path[350];
+    snprintf(d1, sizeof(d1), "%s/.config", g_test_home);
+    snprintf(d2, sizeof(d2), "%s/.config/email-cli", g_test_home);
+    mkdir(g_test_home, 0700);
+    mkdir(d1, 0700);
+    mkdir(d2, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", d2);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp,
+        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_USER=testuser\n"
+        "EMAIL_PASS=testpass\n"
+        "EMAIL_FOLDER=INBOX\n"
+        "SMTP_HOST=smtp://localhost:9025\n"
+        "SMTP_PORT=9025\n"
+        "SMTP_USER=testuser\n"
+        "SMTP_PASS=testpass\n");
+    /* No SSL_NO_VERIFY=1 — insecure smtp:// URL must be rejected */
+    fclose(fp);
+    chmod(path, 0600);
+}
+
+static void test_tls_imap_rejected(void) {
+    /* US-23 AC1: imap:// in EMAIL_HOST without SSL_NO_VERIFY=1 must be
+     * rejected with an error message mentioning imaps:// */
+    write_config_no_ssl_verify_imap();
+    const char *a[] = {"list", "--batch", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "tls imap rejected: opens");
+    ASSERT_WAIT_FOR(s, "imaps://", WAIT_MS);
+    pty_close(s);
+    write_config(); /* restore safe config */
+}
+
+static void test_tls_smtp_rejected(void) {
+    /* US-23 AC2: smtp:// in SMTP_HOST without SSL_NO_VERIFY=1 must be
+     * rejected with an error message mentioning smtps:// */
+    write_config_no_ssl_verify_smtp();
+    /* Use email-tui in batch send mode to exercise the SMTP path */
+    const char *a[] = {"--batch", "send",
+        "--to",      "recipient@example.com",
+        "--subject", "TLS test",
+        "--body",    "body",
+        NULL};
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "tls smtp rejected: pty_open");
+    if (s) {
+        const char *args[32];
+        int n = 0;
+        args[n++] = g_tui_bin;
+        for (int i = 0; a[i] && n < 31; i++)
+            args[n++] = a[i];
+        args[n] = NULL;
+        if (pty_run(s, args) != 0) { pty_close(s); s = NULL; }
+    }
+    ASSERT(s != NULL, "tls smtp rejected: pty_run");
+    if (s) {
+        ASSERT_WAIT_FOR(s, "smtps://", WAIT_MS);
+        pty_close(s);
+    }
+    write_config(); /* restore safe config */
 }
 
 /* ── Main ────────────────────────────────────────────────────────────── */
@@ -1853,6 +1954,11 @@ int main(int argc, char *argv[]) {
 
     /* Restore full email-cli binary */
     snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", argv[1]);
+
+    /* ── TLS enforcement (US-23) ──────────────────────────────────────── */
+    printf("\n--- TLS enforcement (US-23) ---\n");
+    RUN_TEST(test_tls_imap_rejected);
+    RUN_TEST(test_tls_smtp_rejected);
 
 done:
     stop_mock_server();

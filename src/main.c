@@ -133,12 +133,17 @@ static void help_sync(void) {
 
 static void help_config(void) {
     printf(
-        "Usage: email-cli config <subcommand>\n"
+        "Usage: email-cli [--account <email>] config <subcommand>\n"
         "\n"
         "View or update configuration settings.\n"
         "\n"
+        "Global options:\n"
+        "  --account <email>  Select a specific account by email address.\n"
+        "                     Required when multiple accounts are configured.\n"
+        "\n"
         "Subcommands:\n"
         "  show    Print current configuration (passwords masked)\n"
+        "  imap    Interactively configure IMAP (incoming mail) settings\n"
         "  smtp    Interactively configure SMTP (outgoing mail) settings\n"
         "\n"
         "SMTP settings are used by email-tui for composing and sending mail.\n"
@@ -146,7 +151,9 @@ static void help_config(void) {
         "\n"
         "Examples:\n"
         "  email-cli config show\n"
+        "  email-cli config imap\n"
         "  email-cli config smtp\n"
+        "  email-cli --account user@example.com config show\n"
     );
 }
 
@@ -237,10 +244,15 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* 2. Global flags: scan all args for --batch */
+    /* 2. Global flags: scan all args for --batch and --account */
     int batch = 0;
-    for (int i = 1; i < argc; i++)
-        if (strcmp(argv[i], "--batch") == 0) batch = 1;
+    const char *account_arg = NULL;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--batch") == 0) { batch = 1; continue; }
+        if (strcmp(argv[i], "--account") == 0 && i + 1 < argc) {
+            account_arg = argv[++i]; continue;
+        }
+    }
 
     /* Command: first non-global-flag arg */
     const char *cmd = NULL;
@@ -248,11 +260,13 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--batch") == 0) continue;
         if (strcmp(argv[i], "--help") == 0) continue;
+        if (strcmp(argv[i], "--account") == 0) { i++; continue; }
         cmd = argv[i]; cmd_idx = i; break;
     }
 
     /* --help anywhere in the args: treat as "help <cmd>" */
     for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--account") == 0) { i++; continue; }
         if (strcmp(argv[i], "--help") == 0) {
             if (cmd && strcmp(cmd, "--help") != 0) {
                 /* e.g. email-cli list --help */
@@ -495,10 +509,66 @@ int main(int argc, char *argv[]) {
         }
 
     } else if (strcmp(cmd, "config") == 0) {
+        /* Determine which account to operate on.
+         * --account <email> selects a specific named account.
+         * If omitted and exactly one account exists, use it (already loaded as cfg).
+         * If omitted and multiple accounts exist, list them and exit. */
+        if (account_arg) {
+            /* Load the requested account, replacing the default cfg */
+            int acc_count = 0;
+            AccountEntry *accounts = config_list_accounts(&acc_count);
+            Config *acc_cfg = NULL;
+            for (int i = 0; i < acc_count; i++) {
+                if (accounts[i].name && strcmp(accounts[i].name, account_arg) == 0) {
+                    acc_cfg = accounts[i].cfg;
+                    accounts[i].cfg = NULL; /* transfer ownership */
+                    break;
+                }
+                /* also match by user field */
+                if (accounts[i].cfg && accounts[i].cfg->user &&
+                    strcmp(accounts[i].cfg->user, account_arg) == 0) {
+                    acc_cfg = accounts[i].cfg;
+                    accounts[i].cfg = NULL;
+                    break;
+                }
+            }
+            config_free_account_list(accounts, acc_count);
+            if (!acc_cfg) {
+                fprintf(stderr,
+                        "Error: Account '%s' not found.\n"
+                        "Run 'email-cli config show' to list available accounts.\n",
+                        account_arg);
+                config_free(cfg);
+                logger_close();
+                return EXIT_FAILURE;
+            }
+            config_free(cfg);
+            cfg = acc_cfg;
+        } else {
+            /* No --account: check if multiple accounts exist */
+            int acc_count = 0;
+            AccountEntry *accounts = config_list_accounts(&acc_count);
+            if (acc_count > 1) {
+                fprintf(stderr,
+                        "Multiple accounts configured. "
+                        "Re-run with --account <email>:\n");
+                for (int i = 0; i < acc_count; i++)
+                    fprintf(stderr, "  %s\n", accounts[i].name ? accounts[i].name
+                                                               : "(unknown)");
+                config_free_account_list(accounts, acc_count);
+                config_free(cfg);
+                logger_close();
+                return EXIT_FAILURE;
+            }
+            config_free_account_list(accounts, acc_count);
+        }
+
         const char *subcmd = (argc > cmd_idx + 1) ? argv[cmd_idx + 1] : "";
 
         if (strcmp(subcmd, "show") == 0) {
-            printf("\nemail-cli configuration:\n\n");
+            printf("\nemail-cli configuration");
+            if (cfg->user) printf(" (%s)", cfg->user);
+            printf(":\n\n");
             printf("  IMAP:\n");
             printf("    Host:     %s\n", cfg->host   ? cfg->host   : "(not set)");
             printf("    User:     %s\n", cfg->user   ? cfg->user   : "(not set)");
@@ -515,6 +585,16 @@ int main(int argc, char *argv[]) {
             }
             printf("\n");
             result = 0;
+
+        } else if (strcmp(subcmd, "imap") == 0) {
+            if (setup_wizard_imap(cfg) == 0) {
+                if (config_save_to_store(cfg) == 0) {
+                    printf("IMAP configuration saved.\n");
+                    result = 0;
+                } else {
+                    fprintf(stderr, "Error: Could not save configuration.\n");
+                }
+            }
 
         } else if (strcmp(subcmd, "smtp") == 0) {
             if (setup_wizard_smtp(cfg) == 0) {

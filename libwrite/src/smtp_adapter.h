@@ -8,14 +8,15 @@
  * @file smtp_adapter.h
  * @brief Send a pre-built RFC 2822 message via SMTP using libcurl.
  *
- * URL scheme inference:
- *   cfg->smtp_host = "smtp://…"   → STARTTLS (CURLOPT_USE_SSL = CURLUSESSL_ALL)
- *   cfg->smtp_host = "smtps://…"  → Implicit TLS (port 465 default)
- *   cfg->smtp_host = NULL         → Derived from cfg->host by replacing
- *                                   imap:// → smtp:// / imaps:// → smtps://
+ * **TLS is mandatory.** Only smtps:// (implicit TLS, port 465) is accepted.
+ * smtp:// is rejected at runtime to prevent credentials being sent in plaintext.
  *
- * Credentials: cfg->smtp_user / cfg->smtp_pass are used; if NULL, falls back to
- * cfg->user / cfg->pass.
+ * URL resolution:
+ *   cfg->smtp_host = "smtps://…"  → used as-is (implicit TLS, port 465)
+ *   cfg->smtp_host = NULL         → derived from cfg->host:
+ *                                   imaps://host → smtps://host
+ *
+ * Credentials: cfg->smtp_user / cfg->smtp_pass; falls back to cfg->user / cfg->pass.
  */
 
 /**

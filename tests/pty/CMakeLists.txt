@@ -11,6 +11,8 @@ endif()
 add_executable(mock-imap-server EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/tests/functional/mock_imap_server.c
 )
+add_dependencies(mock-imap-server test-tls-certs)
+target_link_libraries(mock-imap-server OpenSSL::SSL OpenSSL::Crypto)
 
 # ── Custom target: run PTY view tests ─────────────────────────────────
 add_custom_target(run-pty-views
@@ -71,6 +73,8 @@ add_dependencies(test-pty-input-line input-line-harness)
 add_executable(mock-smtp-server EXCLUDE_FROM_ALL
     mock_smtp_server.c
 )
+add_dependencies(mock-smtp-server test-tls-certs)
+target_link_libraries(mock-smtp-server OpenSSL::SSL OpenSSL::Crypto)
 
 # ── Compose / send PTY tests ──────────────────────────────────────────
 add_executable(test-pty-compose EXCLUDE_FROM_ALL
@@ -83,13 +87,14 @@ target_link_libraries(test-pty-compose ptytest)
 if(NOT APPLE)
     target_link_libraries(test-pty-compose util)
 endif()
-add_dependencies(test-pty-compose email-tui mock-smtp-server)
+add_dependencies(test-pty-compose email-tui mock-smtp-server email-cli)
 
 add_custom_target(run-pty-compose
     COMMAND test-pty-compose
         $<TARGET_FILE:email-tui>
         $<TARGET_FILE:mock-smtp-server>
-    DEPENDS test-pty-compose email-tui mock-smtp-server
+        $<TARGET_FILE:email-cli>
+    DEPENDS test-pty-compose email-tui mock-smtp-server email-cli
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running PTY compose/send tests"
 )

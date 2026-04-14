@@ -57,5 +57,6 @@ set(TEST_SOURCES
 
 add_executable(test-runner ${TEST_SOURCES})
 target_link_libraries(test-runner OpenSSL::SSL OpenSSL::Crypto)
+add_dependencies(test-runner test-tls-certs)
 
 add_test(NAME UnitTests COMMAND test-runner)

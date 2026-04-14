@@ -2,7 +2,7 @@
  * @file test_compose_pty.c
  * @brief PTY tests for email-tui compose/reply/send commands.
  *
- * Usage: test-pty-compose <email-tui-bin> <mock-smtp-server-bin>
+ * Usage: test-pty-compose <email-tui-bin> <mock-smtp-server-bin> <email-cli-bin>
  */
 
 #include "ptytest.h"
@@ -30,6 +30,7 @@ static int  g_tests_run    = 0;
 static int  g_tests_failed = 0;
 
 static char g_tui_bin[512];
+static char g_cli_bin[512];
 static char g_smtp_mock_bin[512];
 static char g_test_home[512];
 static pid_t g_smtp_pid = -1;
@@ -61,7 +62,8 @@ static void write_config(void) {
         "SMTP_HOST=smtp://localhost:9025\n"
         "SMTP_PORT=9025\n"
         "SMTP_USER=testuser\n"
-        "SMTP_PASS=testpass\n");
+        "SMTP_PASS=testpass\n"
+        "SSL_NO_VERIFY=1\n");   /* permit non-TLS mock servers in tests */
     fclose(fp);
     chmod(path, 0600);
 }
@@ -132,6 +134,25 @@ static PtySession *tui_open_size(int cols, int rows, const char **extra_args) {
 
 static PtySession *tui_run(const char **extra_args) {
     return tui_open_size(COLS, ROWS, extra_args);
+}
+
+static PtySession *cli_open_size(int cols, int rows, const char **extra_args) {
+    const char *args[32];
+    int n = 0;
+    args[n++] = g_cli_bin;
+    if (extra_args)
+        for (int i = 0; extra_args[i] && n < 31; i++)
+            args[n++] = extra_args[i];
+    args[n] = NULL;
+
+    PtySession *s = pty_open(cols, rows);
+    if (!s) return NULL;
+    if (pty_run(s, args) != 0) { pty_close(s); return NULL; }
+    return s;
+}
+
+static PtySession *cli_run(const char **extra_args) {
+    return cli_open_size(COLS, ROWS, extra_args);
 }
 
 /* ── Help page tests ─────────────────────────────────────────────────── */
@@ -207,7 +228,8 @@ static void test_send_no_smtp_config(void) {
             "EMAIL_HOST=imap://localhost:9993\n"
             "EMAIL_USER=testuser\n"
             "EMAIL_PASS=testpass\n"
-            "EMAIL_FOLDER=INBOX\n");
+            "EMAIL_FOLDER=INBOX\n"
+            "SSL_NO_VERIFY=1\n");  /* permit non-TLS mock server in tests */
         fclose(fp);
         chmod(path, 0600);
     }
@@ -351,16 +373,63 @@ static void test_reply_missing_uid(void) {
     pty_close(s);
 }
 
+/* ── Config command tests (US-24) ────────────────────────────────────── */
+
+/**
+ * config show: batch mode prints IMAP settings including user and folder.
+ * Passwords are masked; the account user and folder must be visible.
+ */
+static void test_config_show(void) {
+    write_config();
+    const char *a[] = {"config", "show", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "config show: opens");
+    ASSERT_WAIT_FOR(s, "IMAP", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "testuser");
+    ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    pty_close(s);
+}
+
+/**
+ * config --help: must mention imap, smtp, and --account subcommands.
+ */
+static void test_config_help(void) {
+    const char *a[] = {"config", "--help", NULL};
+    PtySession *s = cli_open_size(120, 50, a);
+    ASSERT(s != NULL, "config help: opens");
+    ASSERT_WAIT_FOR(s, "Usage: email-cli", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "imap");
+    ASSERT_SCREEN_CONTAINS(s, "smtp");
+    ASSERT_SCREEN_CONTAINS(s, "--account");
+    pty_close(s);
+}
+
+/**
+ * config imap --help: must print usage information and exit.
+ */
+static void test_config_imap_help(void) {
+    const char *a[] = {"config", "imap", "--help", NULL};
+    PtySession *s = cli_open_size(120, 50, a);
+    ASSERT(s != NULL, "config imap help: opens");
+    ASSERT_WAIT_FOR(s, "Usage: email-cli", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "imap");
+    pty_close(s);
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: %s <email-tui> <mock-smtp-server>\n", argv[0]);
+    if (argc < 4) {
+        fprintf(stderr, "Usage: %s <email-tui> <mock-smtp-server> <email-cli>\n", argv[0]);
         return 1;
     }
 
     snprintf(g_tui_bin,       sizeof(g_tui_bin),       "%s", argv[1]);
     snprintf(g_smtp_mock_bin, sizeof(g_smtp_mock_bin),  "%s", argv[2]);
+    snprintf(g_cli_bin,       sizeof(g_cli_bin),        "%s", argv[3]);
 
     /* Isolated HOME for tests */
     snprintf(g_test_home, sizeof(g_test_home), "/tmp/email_cli_compose_test_%d", getpid());
@@ -389,6 +458,11 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_compose_editor_send);
     RUN_TEST(test_reply_missing_uid);
     RUN_TEST(test_reply_no_cr_in_quote);
+
+    printf("\n--- Config command (US-24) ---\n");
+    RUN_TEST(test_config_show);
+    RUN_TEST(test_config_help);
+    RUN_TEST(test_config_imap_help);
 
     stop_smtp_server();
 

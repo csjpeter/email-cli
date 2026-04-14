@@ -404,18 +404,23 @@ static int cmd_compose_interactive(Config *cfg,
 }
 
 /**
- * @brief Reply to a message identified by UID.
+ * @brief Reply to a message identified by UID in the given folder.
  * Loads the message, extracts reply metadata, opens compose form.
  */
-static int cmd_reply(Config *cfg, int uid) {
+static int cmd_reply(Config *cfg, int uid, const char *folder) {
     ensure_smtp_configured(cfg);
 
-    /* Load raw message */
+    /* Load raw message from the actual current folder */
     char *raw = NULL;
-    if (local_msg_exists(cfg->folder, uid))
-        raw = local_msg_load(cfg->folder, uid);
-    else
+    if (local_msg_exists(folder, uid))
+        raw = local_msg_load(folder, uid);
+    else {
+        /* Temporarily override cfg->folder so fetch uses the right mailbox */
+        char *saved_folder = cfg->folder;
+        cfg->folder = (char *)folder;
         raw = email_service_fetch_raw(cfg, uid);
+        cfg->folder = saved_folder;
+    }
 
     if (!raw) {
         fprintf(stderr, "Error: Could not load message UID %d.\n", uid);
@@ -464,7 +469,8 @@ static int cmd_reply(Config *cfg, int uid) {
                 while (*p && off < (int)qcap - 4) {
                     const char *nl = strchr(p, '\n');
                     size_t len = nl ? (size_t)(nl - p) : strlen(p);
-                    if (len > 0 && p[len - 1] == '\r') len--;  /* strip CR */
+                    size_t advance = len + (nl ? 1 : 0);  /* bytes to skip incl. \n */
+                    if (len > 0 && p[len - 1] == '\r') len--;  /* strip CR from output */
                     if (off + 2 + (int)len + 1 < (int)qcap) {
                         quoted[off++] = '>';
                         quoted[off++] = ' ';
@@ -473,7 +479,7 @@ static int cmd_reply(Config *cfg, int uid) {
                         quoted[off++] = '\n';
                         quoted[off]   = '\0';
                     }
-                    p += len + (nl ? 1 : 0);
+                    p += advance;
                     if (!nl) break;
                 }
             }
@@ -689,6 +695,13 @@ int main(int argc, char *argv[]) {
                 continue;  /* re-display accounts screen */
             }
             if (!sel_cfg) continue;
+            if (acc == 4) {
+                /* 'i' → edit IMAP settings for selected account */
+                if (setup_wizard_imap(sel_cfg) == 0)
+                    config_save_account(sel_cfg);
+                config_free(sel_cfg);
+                continue;  /* re-display accounts screen with updated info */
+            }
             if (acc == 2) {
                 /* 'e' → edit SMTP settings for selected account */
                 if (setup_wizard_smtp(sel_cfg) == 0)
@@ -733,7 +746,7 @@ int main(int argc, char *argv[]) {
                     }
                 } else if (ret == 3) {
                     /* 'r' → reply to current message */
-                    cmd_reply(sel_cfg, opts.action_uid);
+                    cmd_reply(sel_cfg, opts.action_uid, tui_folder);
                     printf("\n  [Press any key to return to inbox]\n");
                     fflush(stdout);
                     {
@@ -876,7 +889,7 @@ int main(int argc, char *argv[]) {
                         "Error: UID must be a positive integer (got '%s').\n",
                         uid_str);
             else
-                result = cmd_reply(cfg, uid);
+                result = cmd_reply(cfg, uid, cfg->folder ? cfg->folder : "INBOX");
         }
 
     } else if (strcmp(cmd, "send") == 0) {

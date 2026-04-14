@@ -113,8 +113,7 @@ static void derive_smtp_url(const Config *cfg, char *buf, size_t size) {
     if (!cfg->host) return;
     if (strncmp(cfg->host, "imaps://", 8) == 0)
         snprintf(buf, size, "smtps://%s", cfg->host + 8);
-    else if (strncmp(cfg->host, "imap://", 7) == 0)
-        snprintf(buf, size, "smtp://%s", cfg->host + 7);
+    /* imap:// is no longer accepted; no derivation for it */
 }
 
 int setup_wizard_smtp(Config *cfg) {
@@ -134,7 +133,7 @@ int setup_wizard_smtp(Config *cfg) {
                  "SMTP Host [Enter = %s]", derived);
     else
         snprintf(host_prompt, sizeof(host_prompt),
-                 "SMTP Host (e.g. smtp://smtp.example.com or smtps://...)");
+                 "SMTP Host (e.g. smtps://smtp.example.com)");
 
     char *host = get_input(host_prompt, 0, stdin);
     if (!host) return -1;   /* EOF / Ctrl-D → abort */
@@ -192,5 +191,87 @@ int setup_wizard_smtp(Config *cfg) {
     }
 
     printf("\nSMTP configuration updated.\n");
+    return 0;
+}
+
+/* ── IMAP sub-wizard ─────────────────────────────────────────────────── */
+
+int setup_wizard_imap(Config *cfg) {
+    printf("\n--- IMAP (incoming mail) configuration ---\n");
+    printf("Press Enter on any field to keep the shown default.\n\n");
+
+    /* ── IMAP Host ────────────────────────────────────────────────── */
+    for (;;) {
+        char host_prompt[1024];
+        if (cfg->host)
+            snprintf(host_prompt, sizeof(host_prompt),
+                     "IMAP Host [current: %s]", cfg->host);
+        else
+            snprintf(host_prompt, sizeof(host_prompt),
+                     "IMAP Host (e.g. imaps://imap.example.com)");
+
+        char *host = get_input(host_prompt, 0, stdin);
+        if (!host) return -1;   /* EOF / Ctrl-D → abort */
+        if (host[0] == '\0') {
+            free(host);
+            break;  /* keep current */
+        }
+        if (strncmp(host, "imaps://", 8) != 0) {
+            fprintf(stderr,
+                    "Error: IMAP host must start with 'imaps://' (got '%s').\n",
+                    host);
+            free(host);
+            continue;  /* re-prompt */
+        }
+        free(cfg->host);
+        cfg->host = host;
+        break;
+    }
+
+    /* ── IMAP Username ────────────────────────────────────────────── */
+    char user_prompt[768];
+    if (cfg->user)
+        snprintf(user_prompt, sizeof(user_prompt),
+                 "IMAP Username [current: %s]", cfg->user);
+    else
+        snprintf(user_prompt, sizeof(user_prompt), "IMAP Username");
+
+    char *user = get_input(user_prompt, 0, stdin);
+    if (user && user[0]) {
+        free(cfg->user);
+        cfg->user = user;
+    } else {
+        free(user);
+    }
+
+    /* ── IMAP Password ────────────────────────────────────────────── */
+    const char *pass_prompt = cfg->pass
+        ? "IMAP Password [Enter=keep current]"
+        : "IMAP Password";
+    char *pass = get_input(pass_prompt, 1, stdin);
+    if (pass && pass[0]) {
+        free(cfg->pass);
+        cfg->pass = pass;
+    } else {
+        free(pass);
+    }
+
+    /* ── Default Folder ───────────────────────────────────────────── */
+    char folder_prompt[768];
+    const char *cur_folder = cfg->folder ? cfg->folder : "INBOX";
+    snprintf(folder_prompt, sizeof(folder_prompt),
+             "Default Folder [current: %s]", cur_folder);
+
+    char *folder = get_input(folder_prompt, 0, stdin);
+    if (folder && folder[0]) {
+        free(cfg->folder);
+        cfg->folder = folder;
+    } else {
+        free(folder);
+        if (!cfg->folder)
+            cfg->folder = strdup("INBOX");
+    }
+
+    printf("\nIMAP configuration updated.\n");
     return 0;
 }

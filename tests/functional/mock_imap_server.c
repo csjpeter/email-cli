@@ -6,24 +6,26 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
 /**
  * @file mock_imap_server.c
- * @brief Minimal IMAP server for integration testing.
+ * @brief Minimal TLS IMAP server for integration testing.
  */
 
 #define PORT 9993
 
 /**
- * Read one CRLF-terminated line from fd into buf (max len-1 chars + NUL).
+ * Read one CRLF-terminated line from ssl into buf (max len-1 chars + NUL).
  * Strips the trailing CR and LF.  Returns the number of characters placed
  * in buf (excluding NUL), or -1 on EOF/error.
  */
-static int readline_crlf(int fd, char *buf, int len) {
+static int readline_crlf_ssl(SSL *ssl, char *buf, int len) {
     int n = 0;
     char c;
     while (n < len - 1) {
-        int r = recv(fd, &c, 1, 0);
+        int r = SSL_read(ssl, &c, 1);
         if (r <= 0) return -1;
         if (c == '\r') continue;   /* skip CR */
         if (c == '\n') break;      /* LF = end of line */
@@ -33,42 +35,43 @@ static int readline_crlf(int fd, char *buf, int len) {
     return n;
 }
 
-void handle_client(int client_sock) {
+static void handle_client(SSL *ssl) {
     char buffer[4096];
     char selected_folder[256] = "";   /* currently selected mailbox */
 
     /* Set a recv timeout so we don't block forever on half-closed connections */
+    int fd = SSL_get_fd(ssl);
     struct timeval tv = {.tv_sec = 3, .tv_usec = 0};
-    setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    // 1. Greeting
+    /* 1. Greeting */
     const char *greeting = "* OK Mock IMAP server ready\r\n";
-    send(client_sock, greeting, strlen(greeting), 0);
+    SSL_write(ssl, greeting, (int)strlen(greeting));
 
     while (1) {
         /* Read one complete line (CRLF-terminated) at a time so fragmented
          * TCP writes from the client don't split a command across two recvs. */
-        int bytes = readline_crlf(client_sock, buffer, (int)sizeof(buffer));
+        int bytes = readline_crlf_ssl(ssl, buffer, (int)sizeof(buffer));
         if (bytes < 0) break;
         printf("Client requested: %s\n", buffer);
 
-        // Extract Tag
+        /* Extract Tag */
         char tag[16] = {0};
         if (sscanf(buffer, "%15s", tag) != 1) {
             strcpy(tag, "*");
         }
 
-        // Simple State Machine
+        /* Simple State Machine */
         if (strstr(buffer, "CAPABILITY")) {
             const char *resp = "* CAPABILITY IMAP4rev1\r\n";
-            send(client_sock, resp, strlen(resp), 0);
+            SSL_write(ssl, resp, (int)strlen(resp));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK CAPABILITY completed\r\n", tag);
-            send(client_sock, ok, strlen(ok), 0);
+            SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "LOGIN")) {
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK LOGIN completed\r\n", tag);
-            send(client_sock, ok, strlen(ok), 0);
+            SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "SELECT")) {
             /* Track selected folder — handle both quoted and unquoted names */
             char *sel = strstr(buffer, "SELECT ");
@@ -78,58 +81,58 @@ void handle_client(int client_sock) {
                     /* quoted: SELECT "INBOX.Empty" */
                     sel++;
                     char *q2 = strchr(sel, '"');
-                    size_t len = q2 ? (size_t)(q2 - sel) : strlen(sel);
-                    if (len >= sizeof(selected_folder)) len = sizeof(selected_folder) - 1;
-                    strncpy(selected_folder, sel, len);
-                    selected_folder[len] = '\0';
+                    size_t slen = q2 ? (size_t)(q2 - sel) : strlen(sel);
+                    if (slen >= sizeof(selected_folder)) slen = sizeof(selected_folder) - 1;
+                    strncpy(selected_folder, sel, slen);
+                    selected_folder[slen] = '\0';
                 } else {
                     /* unquoted: SELECT INBOX.Empty */
-                    size_t len = strcspn(sel, " \r\n");
-                    if (len >= sizeof(selected_folder)) len = sizeof(selected_folder) - 1;
-                    strncpy(selected_folder, sel, len);
-                    selected_folder[len] = '\0';
+                    size_t slen = strcspn(sel, " \r\n");
+                    if (slen >= sizeof(selected_folder)) slen = sizeof(selected_folder) - 1;
+                    strncpy(selected_folder, sel, slen);
+                    selected_folder[slen] = '\0';
                 }
             }
             int is_empty = (strstr(selected_folder, "Empty") != NULL);
             const char *exists = is_empty
                 ? "* 0 EXISTS\r\n* 0 RECENT\r\n* OK [UIDVALIDITY 1] UIDs are valid\r\n"
                 : "* 1 EXISTS\r\n* 1 RECENT\r\n* OK [UIDVALIDITY 1] UIDs are valid\r\n";
-            send(client_sock, exists, strlen(exists), 0);
+            SSL_write(ssl, exists, (int)strlen(exists));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK [READ-WRITE] SELECT completed\r\n", tag);
-            send(client_sock, ok, strlen(ok), 0);
+            SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "LIST")) {
             const char *list_resp =
                 "* LIST (\\HasNoChildren) \".\" \"INBOX\"\r\n"
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Sent\"\r\n"
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Trash\"\r\n"
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Empty\"\r\n";
-            send(client_sock, list_resp, strlen(list_resp), 0);
+            SSL_write(ssl, list_resp, (int)strlen(list_resp));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK LIST completed\r\n", tag);
-            send(client_sock, ok, strlen(ok), 0);
+            SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "SEARCH")) {
             int is_empty = (strstr(selected_folder, "Empty") != NULL);
             const char *search_resp = is_empty ? "* SEARCH\r\n" : "* SEARCH 1\r\n";
-            send(client_sock, search_resp, strlen(search_resp), 0);
+            SSL_write(ssl, search_resp, (int)strlen(search_resp));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK SEARCH completed\r\n", tag);
-            send(client_sock, ok, strlen(ok), 0);
+            SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "FETCH") && strstr(buffer, "FLAGS")) {
             /* FLAGS-only fetch — no literal payload, inline response */
             char resp[64];
             snprintf(resp, sizeof(resp), "* 1 FETCH (FLAGS ())\r\n");
-            send(client_sock, resp, strlen(resp), 0);
+            SSL_write(ssl, resp, (int)strlen(resp));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);
-            send(client_sock, ok, strlen(ok), 0);
+            SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "STORE")) {
             /* Flag update (e.g. restore \Seen) */
             const char *resp = "* 1 FETCH (FLAGS ())\r\n";
-            send(client_sock, resp, strlen(resp), 0);
+            SSL_write(ssl, resp, (int)strlen(resp));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK STORE completed\r\n", tag);
-            send(client_sock, ok, strlen(ok), 0);
+            SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "FETCH")) {
             const char *headers =
                 "From: Test User <test@example.com>\r\n"
@@ -177,47 +180,69 @@ void handle_client(int client_sock) {
 
             char head[128];
             snprintf(head, sizeof(head), "* 1 FETCH (%s {%zu}\r\n", section, strlen(content));
-            send(client_sock, head, strlen(head), 0);
+            SSL_write(ssl, head, (int)strlen(head));
 
-            // Send content in chunks to be realistic
-            send(client_sock, content, strlen(content), 0);
+            /* Send content in chunks to be realistic */
+            SSL_write(ssl, content, (int)strlen(content));
 
             const char *tail = ")\r\n";
-            send(client_sock, tail, strlen(tail), 0);
+            SSL_write(ssl, tail, (int)strlen(tail));
 
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);
-            send(client_sock, ok, strlen(ok), 0);
+            SSL_write(ssl, ok, (int)strlen(ok));
             printf("Mock server sent FETCH response for %s\n", section);
         } else if (strstr(buffer, "LOGOUT")) {
             const char *bye = "* BYE Mock IMAP server logging out\r\n";
-            send(client_sock, bye, strlen(bye), 0);
+            SSL_write(ssl, bye, (int)strlen(bye));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK LOGOUT completed\r\n", tag);
-            send(client_sock, ok, strlen(ok), 0);
+            SSL_write(ssl, ok, (int)strlen(ok));
             break;
         } else {
             char bad[64];
             snprintf(bad, sizeof(bad), "%s BAD Unknown command\r\n", tag);
-            send(client_sock, bad, strlen(bad), 0);
+            SSL_write(ssl, bad, (int)strlen(bad));
         }
     }
-    close(client_sock);
 }
 
-int main() {
-    int server_fd, client_sock;
+int main(void) {
+    int server_fd;
     struct sockaddr_in address;
     int opt = 1;
-    int addrlen = sizeof(address);
+    socklen_t addrlen = sizeof(address);
+
+    /* Load TLS certificate and key */
+    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+    if (!ctx) {
+        fprintf(stderr, "SSL_CTX_new failed\n");
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+    if (SSL_CTX_use_certificate_file(ctx, "tests/certs/test.crt", SSL_FILETYPE_PEM) <= 0) {
+        fprintf(stderr, "Failed to load certificate: tests/certs/test.crt\n");
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(ctx);
+        exit(EXIT_FAILURE);
+    }
+    if (SSL_CTX_use_PrivateKey_file(ctx, "tests/certs/test.key", SSL_FILETYPE_PEM) <= 0) {
+        fprintf(stderr, "Failed to load private key: tests/certs/test.key\n");
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(ctx);
+        exit(EXIT_FAILURE);
+    }
 
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
         perror("socket failed");
+        SSL_CTX_free(ctx);
         exit(EXIT_FAILURE);
     }
 
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
         perror("setsockopt");
+        close(server_fd);
+        SSL_CTX_free(ctx);
         exit(EXIT_FAILURE);
     }
 
@@ -227,22 +252,39 @@ int main() {
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("bind failed");
+        close(server_fd);
+        SSL_CTX_free(ctx);
         exit(EXIT_FAILURE);
     }
 
     if (listen(server_fd, 3) < 0) {
         perror("listen");
+        close(server_fd);
+        SSL_CTX_free(ctx);
         exit(EXIT_FAILURE);
     }
 
-    printf("Mock IMAP Server listening on port %d\n", PORT);
+    printf("Mock IMAP Server (TLS) listening on port %d\n", PORT);
 
-    while ((client_sock = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) >= 0) {
+    int client_sock;
+    while ((client_sock = accept(server_fd, (struct sockaddr *)&address, &addrlen)) >= 0) {
         printf("Connection accepted from client\n");
-        handle_client(client_sock);
+        SSL *ssl = SSL_new(ctx);
+        SSL_set_fd(ssl, client_sock);
+        if (SSL_accept(ssl) <= 0) {
+            ERR_print_errors_fp(stderr);
+            SSL_free(ssl);
+            close(client_sock);
+            continue;
+        }
+        handle_client(ssl);
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
+        close(client_sock);
         printf("Connection closed\n");
     }
 
     close(server_fd);
+    SSL_CTX_free(ctx);
     return 0;
 }

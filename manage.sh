@@ -119,13 +119,13 @@ case "$1" in
         echo "Running unit tests with ASAN..."
         build_debug
         build_test_runner
-        "$BUILD_DIR/tests/unit/test-runner"
+        (cd "$BUILD_DIR" && ./tests/unit/test-runner)
         ;;
     valgrind)
         echo "Running unit tests with Valgrind..."
         build_release
         build_test_runner
-        valgrind --leak-check=full --error-exitcode=1 "$BUILD_DIR/tests/unit/test-runner"
+        (cd "$BUILD_DIR" && valgrind --leak-check=full --error-exitcode=1 ./tests/unit/test-runner)
         ;;
     coverage)
         cmake_configure Debug "-DENABLE_COVERAGE=ON"
@@ -133,7 +133,7 @@ case "$1" in
         build_test_runner
         # Remove stale .gcda files to avoid checksum mismatch errors
         find "$BUILD_DIR" -name "*.gcda" -delete
-        "$BUILD_DIR/tests/unit/test-runner"
+        (cd "$BUILD_DIR" && ./tests/unit/test-runner)
         ./tests/functional/run_functional.sh
         echo "Generating coverage report..."
         lcov --capture --directory . --output-file "$BUILD_DIR/coverage.info"

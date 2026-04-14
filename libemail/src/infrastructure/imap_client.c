@@ -180,8 +180,29 @@ static int send_cmd(ImapClient *c, char tag_out[16], const char *fmt, ...) {
     buf[len + 1] = '\n';
     buf[len + 2] = '\0';
 
-    /* Log command (mask password) */
-    logger_log(LOG_DEBUG, "IMAP [OUT] %s %.*s", tag_out, len, buf);
+    /* Log command — mask password in LOGIN commands */
+    if (strncmp(buf, "LOGIN ", 6) == 0) {
+        /* Extract user (first quoted token) and replace password with xxxxx */
+        const char *p = buf + 6;
+        /* skip optional leading space */
+        while (*p == ' ') p++;
+        /* find end of username token (quoted or unquoted) */
+        const char *user_end = NULL;
+        if (*p == '"') {
+            user_end = strchr(p + 1, '"');
+            if (user_end) user_end++;  /* include closing quote */
+        } else {
+            user_end = strchr(p, ' ');
+        }
+        if (user_end) {
+            logger_log(LOG_DEBUG, "IMAP [OUT] %s LOGIN %.*s xxxxx",
+                       tag_out, (int)(user_end - p), p);
+        } else {
+            logger_log(LOG_DEBUG, "IMAP [OUT] %s LOGIN <redacted>", tag_out);
+        }
+    } else {
+        logger_log(LOG_DEBUG, "IMAP [OUT] %s %.*s", tag_out, len, buf);
+    }
 
     /* Write tag + space + command + CRLF as a single buffer so the entire
      * command arrives in one TCP segment and a line-reading server can parse
@@ -390,6 +411,20 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         return NULL;
     }
 
+    /* Hard enforcement: never connect without TLS unless verify_tls == 0
+     * (SSL_NO_VERIFY=1 in config — test/dev environments only). */
+    if (!use_tls && verify_tls) {
+        logger_log(LOG_ERROR,
+                   "imap_connect: refused to connect to %s without TLS — "
+                   "use imaps:// to protect credentials", host_url);
+        fprintf(stderr,
+                "Error: Refused to connect to %s without TLS.\n"
+                "Use imaps:// in EMAIL_HOST to protect your password.\n"
+                "For test environments only: add SSL_NO_VERIFY=1 to config.\n",
+                host_url);
+        return NULL;
+    }
+
     /* TCP connect */
     struct addrinfo hints = {0};
     hints.ai_family   = AF_UNSPEC;
@@ -459,6 +494,12 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         }
         c->ctx = ctx;
         c->ssl = ssl;
+        logger_log(LOG_DEBUG, "IMAP TLS handshake OK with %s (TLS/%s)",
+                   host, SSL_get_version(ssl));
+    } else {
+        logger_log(LOG_WARN,
+                   "IMAP connecting to %s:%s WITHOUT TLS — "
+                   "credentials will be sent in plaintext!", host, port);
     }
 
     /* Read server greeting */
@@ -804,11 +845,23 @@ int imap_append(ImapClient *c, const char *folder,
     }
 
     /* Send message literal */
-    if (net_write(c, msg, msg_len) != 0) return -1;
+    logger_log(LOG_DEBUG, "IMAP APPEND: sending %zu-byte literal", msg_len);
+    if (net_write(c, msg, msg_len) != 0) {
+        logger_log(LOG_ERROR, "IMAP APPEND: literal write failed");
+        return -1;
+    }
 
-    /* Read tagged response */
-    Response resp = {0};
-    int rc = read_response(c, tag, &resp);
-    response_free(&resp);
-    return rc;
+    /* APPEND can take longer than normal commands (server-side processing,
+     * AV/spam plugins, quota checks).  Temporarily raise SO_RCVTIMEO to
+     * 120 seconds, then restore the standard 15-second timeout. */
+    {
+        struct timeval long_tv  = { .tv_sec = 120, .tv_usec = 0 };
+        struct timeval short_tv = { .tv_sec =  15, .tv_usec = 0 };
+        setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &long_tv,  sizeof(long_tv));
+        Response resp = {0};
+        int rc = read_response(c, tag, &resp);
+        response_free(&resp);
+        setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &short_tv, sizeof(short_tv));
+        return rc;
+    }
 }

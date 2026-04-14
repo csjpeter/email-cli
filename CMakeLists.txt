@@ -18,6 +18,24 @@ endif()
 
 find_package(OpenSSL REQUIRED)
 
+# ── Test TLS certificates (self-signed, localhost only) ───────────────
+find_program(OPENSSL_EXECUTABLE openssl REQUIRED)
+set(TEST_CERT_DIR ${CMAKE_BINARY_DIR}/tests/certs)
+set(TEST_CERT ${TEST_CERT_DIR}/test.crt)
+set(TEST_KEY  ${TEST_CERT_DIR}/test.key)
+add_custom_command(
+    OUTPUT ${TEST_CERT} ${TEST_KEY}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${TEST_CERT_DIR}
+    COMMAND ${OPENSSL_EXECUTABLE} req -x509 -newkey rsa:2048
+            -keyout ${TEST_KEY}
+            -out ${TEST_CERT}
+            -days 3650 -nodes
+            -subj "/CN=localhost"
+    COMMENT "Generating test TLS certificates (self-signed, localhost)"
+    VERBATIM
+)
+add_custom_target(test-tls-certs DEPENDS ${TEST_CERT} ${TEST_KEY})
+
 add_subdirectory(libemail)
 add_subdirectory(libwrite)
 

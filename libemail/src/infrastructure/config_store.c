@@ -78,17 +78,48 @@ Config* config_load_from_store(void) {
         return NULL;
     }
 
-    if (strncmp(cfg->host, "imap://", 7) != 0 &&
-        strncmp(cfg->host, "imaps://", 8) != 0) {
-        fprintf(stderr,
-            "Error: EMAIL_HOST must start with imap:// or imaps://\n"
-            "  Got:      %s\n"
-            "  Example:  imaps://imap.example.com\n\n"
-            "Delete ~/.config/email-cli/config.ini and run again to reconfigure.\n",
-            cfg->host);
-        logger_log(LOG_ERROR, "Invalid EMAIL_HOST (missing protocol): %s", cfg->host);
-        config_free(cfg);
-        return NULL;
+    /* TLS enforcement — only imaps:// / smtps:// are accepted.
+     * Exception: SSL_NO_VERIFY=1 also permits imap:// and smtp:// for local
+     * test environments (self-signed or no-TLS mock servers). */
+    if (!cfg->ssl_no_verify) {
+        if (strncmp(cfg->host, "imaps://", 8) != 0) {
+            fprintf(stderr,
+                "Error: EMAIL_HOST must start with imaps:// (TLS required).\n"
+                "  Got:      %s\n"
+                "  Example:  imaps://imap.example.com\n\n"
+                "Plain imap:// is rejected to protect your password.\n"
+                "For test environments only, add SSL_NO_VERIFY=1 to config.\n",
+                cfg->host);
+            logger_log(LOG_ERROR,
+                       "Rejected insecure EMAIL_HOST (use imaps://): %s", cfg->host);
+            config_free(cfg);
+            return NULL;
+        }
+        if (cfg->smtp_host && cfg->smtp_host[0] &&
+            strncmp(cfg->smtp_host, "smtps://", 8) != 0) {
+            fprintf(stderr,
+                "Error: SMTP_HOST must start with smtps:// (TLS required).\n"
+                "  Got:      %s\n"
+                "  Example:  smtps://smtp.example.com\n\n"
+                "Plain smtp:// is rejected to protect your password.\n"
+                "For test environments only, add SSL_NO_VERIFY=1 to config.\n",
+                cfg->smtp_host);
+            logger_log(LOG_ERROR,
+                       "Rejected insecure SMTP_HOST (use smtps://): %s",
+                       cfg->smtp_host);
+            config_free(cfg);
+            return NULL;
+        }
+    } else {
+        if (strncmp(cfg->host, "imaps://", 8) != 0)
+            logger_log(LOG_WARN,
+                       "SSL_NO_VERIFY=1: connecting without TLS to %s "
+                       "(test/dev mode only)", cfg->host);
+        if (cfg->smtp_host && cfg->smtp_host[0] &&
+            strncmp(cfg->smtp_host, "smtps://", 8) != 0)
+            logger_log(LOG_WARN,
+                       "SSL_NO_VERIFY=1: SMTP without TLS to %s "
+                       "(test/dev mode only)", cfg->smtp_host);
     }
 
     return cfg;
@@ -241,6 +272,41 @@ static Config *load_config_from_path(const char *path) {
     fclose(fp);
     if (!cfg->folder) cfg->folder = strdup("INBOX");
     if (!cfg->host || !cfg->user || !cfg->pass) { config_free(cfg); return NULL; }
+
+    /* TLS enforcement (same rules as config_load_from_store) */
+    if (!cfg->ssl_no_verify) {
+        if (strncmp(cfg->host, "imaps://", 8) != 0) {
+            fprintf(stderr,
+                "Error: EMAIL_HOST must start with imaps:// (TLS required).\n"
+                "  Got: %s\n", cfg->host);
+            logger_log(LOG_ERROR,
+                       "Rejected insecure EMAIL_HOST in account config: %s",
+                       cfg->host);
+            config_free(cfg);
+            return NULL;
+        }
+        if (cfg->smtp_host && cfg->smtp_host[0] &&
+            strncmp(cfg->smtp_host, "smtps://", 8) != 0) {
+            fprintf(stderr,
+                "Error: SMTP_HOST must start with smtps:// (TLS required).\n"
+                "  Got: %s\n", cfg->smtp_host);
+            logger_log(LOG_ERROR,
+                       "Rejected insecure SMTP_HOST in account config: %s",
+                       cfg->smtp_host);
+            config_free(cfg);
+            return NULL;
+        }
+    } else {
+        if (strncmp(cfg->host, "imaps://", 8) != 0)
+            logger_log(LOG_WARN,
+                       "SSL_NO_VERIFY=1: connecting without TLS to %s "
+                       "(test/dev mode only)", cfg->host);
+        if (cfg->smtp_host && cfg->smtp_host[0] &&
+            strncmp(cfg->smtp_host, "smtps://", 8) != 0)
+            logger_log(LOG_WARN,
+                       "SSL_NO_VERIFY=1: SMTP without TLS to %s "
+                       "(test/dev mode only)", cfg->smtp_host);
+    }
     return cfg;
 }
 

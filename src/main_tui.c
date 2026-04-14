@@ -27,6 +27,8 @@
 #include "input_line.h"
 #include "smtp_adapter.h"
 #include "compose_service.h"
+#include "mime_util.h"
+#include "html_render.h"
 
 /* Number of non-data lines printed around the message table */
 #define LIST_HEADER_LINES 6
@@ -257,13 +259,16 @@ static const char *from_address(const Config *cfg) {
  * @brief Interactive compose form.
  *
  * Clears the screen, prompts for To, Subject, and Body via input_line and
- * getline. Body entry ends with a lone '.' on a line. Returns 0 on
- * successful send, -1 on abort or SMTP error.
+ * getline. Body entry ends with a lone '.' on a line.
+ * If @p prefill_body is non-NULL it is displayed as quoted text and appended
+ * to the body after the user's own response (top-posting convention).
+ * Returns 0 on successful send, -1 on abort or SMTP error.
  */
 static int cmd_compose_interactive(Config *cfg,
                                    const char *prefill_to,
                                    const char *prefill_subject,
-                                   const char *reply_to_msg_id) {
+                                   const char *reply_to_msg_id,
+                                   const char *prefill_body) {
     ensure_smtp_configured(cfg);
 
     /* Restore cursor (TUI screens hide it with \033[?25l) */
@@ -294,11 +299,25 @@ static int cmd_compose_interactive(Config *cfg,
 
     /* Move cursor below fields and print body prompt */
     printf("\033[8;1H");
-    printf("  Body (enter '.' alone on a line to send):\n");
+    if (prefill_body && prefill_body[0]) {
+        printf("  Quoted text (will appear below your reply):\n");
+        /* Print quoted content so the user can see context */
+        const char *p = prefill_body;
+        while (*p) {
+            const char *nl = strchr(p, '\n');
+            size_t len = nl ? (size_t)(nl - p) : strlen(p);
+            int plen = (int)len > 100 ? 100 : (int)len;
+            printf("\033[2m  %.*s\033[0m\n", plen, p);
+            p += len + (nl ? 1 : 0);
+            if (!nl) break;
+        }
+        printf("\n");
+    }
+    printf("  Your reply (enter '.' alone on a line to send):\n");
     fflush(stdout);
 
     /* Collect body lines in cooked mode (input_line restored the terminal) */
-    char body[8192] = "";
+    char body[16384] = "";
     size_t body_len = 0;
     char line[512];
     while (fgets(line, sizeof(line), stdin)) {
@@ -312,6 +331,17 @@ static int cmd_compose_interactive(Config *cfg,
             body_len += llen;
             body[body_len++] = '\n';
             body[body_len]   = '\0';
+        }
+    }
+
+    /* Append quoted content below user's reply (top-posting) */
+    if (prefill_body && prefill_body[0]) {
+        size_t qlen = strlen(prefill_body);
+        if (body_len + 2 + qlen < sizeof(body)) {
+            body[body_len++] = '\n';
+            body[body_len]   = '\0';
+            memcpy(body + body_len, prefill_body, qlen + 1);
+            body_len += qlen;
         }
     }
 
@@ -359,13 +389,67 @@ static int cmd_reply(Config *cfg, int uid) {
 
     char *reply_to = NULL, *subject = NULL, *msg_id = NULL;
     int rc = compose_extract_reply_meta(raw, &reply_to, &subject, &msg_id);
-    free(raw);
     if (rc != 0) {
+        free(raw);
         fprintf(stderr, "Error: Could not parse message headers.\n");
         return -1;
     }
 
-    rc = cmd_compose_interactive(cfg, reply_to, subject, msg_id);
+    /* Extract body text for quoting (try HTML first, then plain text) */
+    char *body_text = NULL;
+    {
+        char *html_raw = mime_get_html_part(raw);
+        if (html_raw) {
+            body_text = html_render(html_raw, 72, 0);
+            free(html_raw);
+        }
+        if (!body_text)
+            body_text = mime_get_text_body(raw);
+    }
+
+    /* Build attribution + "> "-prefixed quoted block */
+    char *quoted = NULL;
+    {
+        char *from_raw = mime_get_header(raw, "From");
+        char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;
+        free(from_raw);
+        char *date_raw = mime_get_header(raw, "Date");
+        char *date_fmt = date_raw ? mime_format_date(date_raw) : NULL;
+        free(date_raw);
+
+        /* "On <date>, <from> wrote:\n> line1\n> line2\n..." */
+        size_t qcap = 4096 + (body_text ? strlen(body_text) * 2 : 0);
+        quoted = malloc(qcap);
+        if (quoted) {
+            int off = snprintf(quoted, qcap, "On %s, %s wrote:\n",
+                               date_fmt ? date_fmt : "?",
+                               from_dec ? from_dec : "?");
+            if (body_text) {
+                const char *p = body_text;
+                while (*p && off < (int)qcap - 4) {
+                    const char *nl = strchr(p, '\n');
+                    size_t len = nl ? (size_t)(nl - p) : strlen(p);
+                    if (off + 2 + (int)len + 1 < (int)qcap) {
+                        quoted[off++] = '>';
+                        quoted[off++] = ' ';
+                        memcpy(quoted + off, p, len);
+                        off += (int)len;
+                        quoted[off++] = '\n';
+                        quoted[off]   = '\0';
+                    }
+                    p += len + (nl ? 1 : 0);
+                    if (!nl) break;
+                }
+            }
+        }
+        free(from_dec);
+        free(date_fmt);
+    }
+    free(body_text);
+    free(raw);
+
+    rc = cmd_compose_interactive(cfg, reply_to, subject, msg_id, quoted);
+    free(quoted);
     free(reply_to);
     free(subject);
     free(msg_id);
@@ -587,7 +671,7 @@ int main(int argc, char *argv[]) {
                     if (!tui_folder) break;  /* ESC from folder browser → quit */
                 } else if (ret == 2) {
                     /* 'c' → compose new message */
-                    cmd_compose_interactive(cfg, NULL, NULL, NULL);
+                    cmd_compose_interactive(cfg, NULL, NULL, NULL, NULL);
                 } else if (ret == 3) {
                     /* 'r' → reply to current message */
                     cmd_reply(cfg, opts.action_uid);
@@ -707,7 +791,7 @@ int main(int argc, char *argv[]) {
         }
 
     } else if (strcmp(cmd, "compose") == 0) {
-        result = cmd_compose_interactive(cfg, NULL, NULL, NULL);
+        result = cmd_compose_interactive(cfg, NULL, NULL, NULL, NULL);
 
     } else if (strcmp(cmd, "reply") == 0) {
         const char *uid_str = NULL;

@@ -774,12 +774,12 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
             if (att_count > 0) {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                         "  a=save  A=save-all(%d)  Backspace/ESC/q=list --",
+                         "  r=reply  a=save  A=save-all(%d)  Backspace/ESC/q=list --",
                          cur_page, total_pages, att_count);
             } else {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                         "  Backspace/ESC/q=list --",
+                         "  r=reply  Backspace/ESC/q=list --",
                          cur_page, total_pages);
             }
             print_statusbar(term_rows, wrap_cols, sb);
@@ -822,7 +822,10 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
-            if (ch == 'q') {
+            if (ch == 'r') {
+                result = 2;      /* reply to this message */
+                goto show_int_done;
+            } else if (ch == 'q') {
                 result = 0;      /* back to list */
                 goto show_int_done;
             } else if (ch == 'a' && att_count > 0) {
@@ -1617,8 +1620,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             char sb[256];
             snprintf(sb, sizeof(sb),
                      "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                     "  s=sync  R=refresh"
-                     "  Backspace=folders  ESC=quit  [%d/%d]",
+                     "  Backspace=folders  ESC=quit"
+                     "  c=compose  r=reply  n=new  f=flag  d=done"
+                     "  s=sync  R=refresh  [%d/%d]",
                      cursor + 1, show_count);
             print_statusbar(trows, tcols, sb);
         }
@@ -1648,6 +1652,12 @@ read_key_again: ;
             {
                 int ret = show_uid_interactive(cfg, folder, entries[cursor].uid, opts->limit);
                 if (ret == 1) goto list_done;  /* user quit from show */
+                if (ret == 2) {
+                    /* 'r' pressed in reader → reply to this message */
+                    opts->action_uid = entries[cursor].uid;
+                    list_result = 3;
+                    goto list_done;
+                }
                 /* ret == 0: Backspace → back to list; ret == -1: error → stay */
             }
             break;

@@ -14,7 +14,7 @@
 
 static char g_account_base[8192];
 
-int local_store_init(const char *host_url) {
+int local_store_init(const char *host_url, const char *username) {
     const char *data_base = platform_data_dir();
     if (!data_base || !host_url) return -1;
 
@@ -31,8 +31,17 @@ int local_store_init(const char *host_url) {
     /* Lowercase the hostname */
     for (char *c = hostname; *c; c++) *c = (char)tolower((unsigned char)*c);
 
-    snprintf(g_account_base, sizeof(g_account_base),
-             "%s/email-cli/accounts/imap.%s", data_base, hostname);
+    /* Include the username so two accounts on the same server get separate
+     * local stores and do not share manifests, headers, or cached messages. */
+    if (username && username[0]) {
+        snprintf(g_account_base, sizeof(g_account_base),
+                 "%s/email-cli/accounts/%s@%s", data_base, username, hostname);
+    } else {
+        /* Fallback: hostname only (backward compat for single-account setups
+         * where username is not yet available at init time). */
+        snprintf(g_account_base, sizeof(g_account_base),
+                 "%s/email-cli/accounts/imap.%s", data_base, hostname);
+    }
 
     logger_log(LOG_DEBUG, "local_store: account base = %s", g_account_base);
     return 0;

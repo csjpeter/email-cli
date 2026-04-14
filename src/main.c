@@ -356,7 +356,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* 5. Initialize local store */
-    if (local_store_init(cfg->host) != 0)
+    if (local_store_init(cfg->host, cfg->user) != 0)
         logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
 
     /* 6. Dispatch */

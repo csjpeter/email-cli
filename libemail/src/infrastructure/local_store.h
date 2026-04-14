@@ -34,7 +34,7 @@
  * @param host_url  IMAP host URL (e.g. "imaps://mail.example.com:993").
  * @return 0 on success, -1 on failure.
  */
-int local_store_init(const char *host_url);
+int local_store_init(const char *host_url, const char *username);
 
 /* ── Message store ───────────────────────────────────────────────────── */
 

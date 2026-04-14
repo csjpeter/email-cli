@@ -266,6 +266,8 @@ static int cmd_compose_interactive(Config *cfg,
                                    const char *reply_to_msg_id) {
     ensure_smtp_configured(cfg);
 
+    /* Restore cursor (TUI screens hide it with \033[?25l) */
+    printf("\033[?25h");
     /* Clear screen */
     printf("\033[H\033[2J");
     printf("  Compose Message\n"
@@ -589,6 +591,9 @@ int main(int argc, char *argv[]) {
                 } else if (ret == 3) {
                     /* 'r' → reply to current message */
                     cmd_reply(cfg, opts.action_uid);
+                } else if (ret == 4) {
+                    /* background sync finished → re-list to show new messages */
+                    continue;
                 } else {
                     result = (ret >= 0) ? 0 : -1;
                     break;

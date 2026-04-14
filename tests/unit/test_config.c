@@ -20,8 +20,11 @@ void test_config_store(void) {
     char *old_home = getenv("HOME");
     char *old_xdg  = getenv("XDG_CONFIG_HOME");
     setenv("HOME", "/tmp/email-cli-test-home", 1);
-    unsetenv("XDG_CONFIG_HOME");   /* ensure we use the HOME-based path */
-    fs_mkdir_p("/tmp/email-cli-test-home/.config/email-cli", 0700);
+    unsetenv("XDG_CONFIG_HOME");
+    /* Pre-clean: remove any leftover account from previous test runs */
+    unlink("/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
+    rmdir("/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com");
+    rmdir("/tmp/email-cli-test-home/.config/email-cli/accounts");
 
     // 1. Test Save
     {
@@ -33,7 +36,7 @@ void test_config_store(void) {
 
         int res = config_save_to_store(&cfg);
         ASSERT(res == 0, "config_save_to_store should return 0");
-        
+
         free(cfg.host);
         free(cfg.user);
         free(cfg.pass);
@@ -51,20 +54,21 @@ void test_config_store(void) {
 
     // 3. Test Load - incomplete config (missing host) → should return NULL
     {
-        FILE *fp = fopen("/tmp/email-cli-test-home/.config/email-cli/config.ini", "w");
+        const char *acct_path =
+            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+        FILE *fp = fopen(acct_path, "w");
         if (fp) {
             fprintf(fp, "EMAIL_USER=test@test.com\n");
             fprintf(fp, "EMAIL_PASS=password123\n");
             fclose(fp);
         }
-        /* logger not initialised → logger_log() returns early, no output */
         RAII_WITH_CLEANUP(config_cleanup) Config *loaded = config_load_from_store();
         ASSERT(loaded == NULL, "config_load_from_store should return NULL for incomplete config");
     }
 
     // 4. Test Load - no config file → should return NULL
     {
-        unlink("/tmp/email-cli-test-home/.config/email-cli/config.ini");
+        unlink("/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
         RAII_WITH_CLEANUP(config_cleanup) Config *loaded = config_load_from_store();
         ASSERT(loaded == NULL, "config_load_from_store should return NULL when file is missing");
     }
@@ -84,7 +88,7 @@ void test_config_store(void) {
         RAII_WITH_CLEANUP(config_cleanup) Config *loaded2 = config_load_from_store();
         ASSERT(loaded2 != NULL, "config_load_from_store should not return NULL");
         ASSERT(loaded2->ssl_no_verify == 1, "ssl_no_verify should be 1 after load");
-        
+
         free(cfg2.host);
         free(cfg2.user);
         free(cfg2.pass);
@@ -93,23 +97,24 @@ void test_config_store(void) {
 
     // 6. Test Load - host without protocol prefix → should return NULL with error
     {
-        FILE *fp = fopen("/tmp/email-cli-test-home/.config/email-cli/config.ini", "w");
+        const char *acct_path =
+            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+        FILE *fp = fopen(acct_path, "w");
         if (fp) {
             fprintf(fp, "EMAIL_HOST=box.example.com\n");
             fprintf(fp, "EMAIL_USER=test@test.com\n");
             fprintf(fp, "EMAIL_PASS=password123\n");
             fclose(fp);
         }
-        /* logger not initialised → logger_log() returns early, no output */
         RAII_WITH_CLEANUP(config_cleanup) Config *loaded = config_load_from_store();
         ASSERT(loaded == NULL, "config_load_from_store should return NULL for host without protocol");
-        unlink("/tmp/email-cli-test-home/.config/email-cli/config.ini");
+        unlink(acct_path);
     }
 
     // 7. Test config_free with NULL (should not crash)
     config_free(NULL);
 
-    // 8. config_save_to_store fails: fs_mkdir_p fails (lines 96-97)
+    // 8. config_save_to_store fails: fs_mkdir_p fails
     // Make .config directory non-writable so subdirectory creation fails
     {
         setenv("HOME", "/tmp/email-cli-test-home-fail", 1);
@@ -132,13 +137,15 @@ void test_config_store(void) {
         free(cfg_fail.folder);
     }
 
-    // 9. config_save_to_store fails: fopen fails (lines 105-106)
-    // Create config dir, then create the config file as a directory
+    // 9. config_save_to_store fails: fopen fails
+    // Create account dir, then place a directory at the config.ini path
     {
         setenv("HOME", "/tmp/email-cli-test-home-fopen", 1);
-        fs_mkdir_p("/tmp/email-cli-test-home-fopen/.config/email-cli", 0700);
+        fs_mkdir_p("/tmp/email-cli-test-home-fopen/.config/email-cli/accounts/test@test.com",
+                   0700);
         // Create a directory at the config file path to make fopen("w") fail
-        mkdir("/tmp/email-cli-test-home-fopen/.config/email-cli/config.ini", 0700);
+        mkdir("/tmp/email-cli-test-home-fopen/.config/email-cli/accounts/test@test.com/config.ini",
+              0700);
 
         Config cfg_fopen = {0};
         cfg_fopen.host   = strdup("imaps://imap.test.com");
@@ -149,7 +156,7 @@ void test_config_store(void) {
         int res = config_save_to_store(&cfg_fopen);
         ASSERT(res == -1, "config_save_to_store: fopen on dir should return -1");
 
-        rmdir("/tmp/email-cli-test-home-fopen/.config/email-cli/config.ini");
+        rmdir("/tmp/email-cli-test-home-fopen/.config/email-cli/accounts/test@test.com/config.ini");
         free(cfg_fopen.host);
         free(cfg_fopen.user);
         free(cfg_fopen.pass);

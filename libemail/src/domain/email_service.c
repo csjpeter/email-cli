@@ -2296,9 +2296,7 @@ int email_service_account_interactive(Config **cfg_out) {
         }
         if (ch == 'd' && count > 0) {
             const char *name = accounts[cursor].name;
-            if (!accounts[cursor].legacy)
-                config_delete_account(name);
-            /* else legacy config.ini: don't delete silently; just skip */
+            config_delete_account(name);
             config_free_account_list(accounts, count);
             if (cursor > 0) cursor--;
             continue;  /* re-render */

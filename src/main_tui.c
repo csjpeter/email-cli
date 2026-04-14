@@ -384,7 +384,16 @@ static int cmd_compose_interactive(Config *cfg,
             rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
             if (rc == 0) {
                 printf("  Message sent.\n");
-                email_service_save_sent(cfg, msg, msg_len);
+                /* Save a copy to the Sent folder in a background fork so
+                 * the IMAP APPEND does not block the TUI. */
+                pid_t child = fork();
+                if (child == 0) {
+                    /* child: do the save and exit */
+                    email_service_save_sent(cfg, msg, msg_len);
+                    _exit(0);
+                }
+                /* parent: continue immediately; child is reaped by SIGCHLD
+                 * handler or by the OS when the parent exits. */
             }
             free(msg);
         }
@@ -454,6 +463,7 @@ static int cmd_reply(Config *cfg, int uid) {
                 while (*p && off < (int)qcap - 4) {
                     const char *nl = strchr(p, '\n');
                     size_t len = nl ? (size_t)(nl - p) : strlen(p);
+                    if (len > 0 && p[len - 1] == '\r') len--;  /* strip CR */
                     if (off + 2 + (int)len + 1 < (int)qcap) {
                         quoted[off++] = '>';
                         quoted[off++] = ' ';
@@ -664,28 +674,42 @@ int main(int argc, char *argv[]) {
          */
         result = 0;
         for (;;) {  /* outer: accounts screen */
-            int acc = email_service_account_interactive(cfg);
+            Config *sel_cfg = NULL;
+            int acc = email_service_account_interactive(&sel_cfg);
             if (acc == 0) break;  /* ESC/quit */
+            if (acc == 3) {
+                /* 'n' → add new account via wizard */
+                Config *new_cfg = setup_wizard_run();
+                if (new_cfg) {
+                    if (config_save_account(new_cfg) != 0)
+                        fprintf(stderr, "Warning: Failed to save new account.\n");
+                    config_free(new_cfg);
+                }
+                continue;  /* re-display accounts screen */
+            }
+            if (!sel_cfg) continue;
             if (acc == 2) {
-                /* 'e' → edit SMTP settings inline */
-                if (setup_wizard_smtp(cfg) == 0)
-                    config_save_to_store(cfg);
+                /* 'e' → edit SMTP settings for selected account */
+                if (setup_wizard_smtp(sel_cfg) == 0)
+                    config_save_account(sel_cfg);
+                config_free(sel_cfg);
                 continue;  /* re-display accounts screen with updated info */
             }
 
             /* acc == 1: Enter → open account, enter folder/message loop */
-            char *tui_folder = strdup(cfg->folder ? cfg->folder : "INBOX");
-            if (!tui_folder) { result = -1; break; }
+            local_store_init(sel_cfg->host);
+            char *tui_folder = strdup(sel_cfg->folder ? sel_cfg->folder : "INBOX");
+            if (!tui_folder) { config_free(sel_cfg); result = -1; break; }
 
             int back_to_accounts = 0;
             for (;;) {  /* inner: message list + folder browser */
                 EmailListOpts opts = {0, tui_folder, page_size, 0, 1, 0};
-                int ret = email_service_list(cfg, &opts);
+                int ret = email_service_list(sel_cfg, &opts);
                 if (ret == 1) {
                     /* Backspace from message list → folder browser */
                     int go_up = 0;
                     char *sel = email_service_list_folders_interactive(
-                                    cfg, tui_folder, &go_up);
+                                    sel_cfg, tui_folder, &go_up);
                     free(tui_folder);
                     tui_folder = sel;
                     if (go_up) {
@@ -696,10 +720,10 @@ int main(int argc, char *argv[]) {
                     if (!tui_folder) break;  /* ESC from folder browser → quit */
                 } else if (ret == 2) {
                     /* 'c' → compose new message */
-                    cmd_compose_interactive(cfg, NULL, NULL, NULL, NULL);
+                    cmd_compose_interactive(sel_cfg, NULL, NULL, NULL, NULL);
                 } else if (ret == 3) {
                     /* 'r' → reply to current message */
-                    cmd_reply(cfg, opts.action_uid);
+                    cmd_reply(sel_cfg, opts.action_uid);
                 } else if (ret == 4) {
                     /* background sync finished → re-list to show new messages */
                     continue;
@@ -709,6 +733,7 @@ int main(int argc, char *argv[]) {
                 }
             }
             free(tui_folder);
+            config_free(sel_cfg);
             if (!back_to_accounts) break;  /* ESC/quit → exit outer loop too */
         }
 

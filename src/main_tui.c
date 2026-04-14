@@ -24,7 +24,6 @@
 #include "logger.h"
 #include "local_store.h"
 #include "fs_util.h"
-#include "input_line.h"
 #include "smtp_adapter.h"
 #include "compose_service.h"
 #include "mime_util.h"
@@ -256,12 +255,17 @@ static const char *from_address(const Config *cfg) {
 }
 
 /**
- * @brief Interactive compose form.
+ * @brief Interactive compose form — opens $EDITOR on a draft temp file.
  *
- * Clears the screen, prompts for To, Subject, and Body via input_line and
- * getline. Body entry ends with a lone '.' on a line.
- * If @p prefill_body is non-NULL it is displayed as quoted text and appended
- * to the body after the user's own response (top-posting convention).
+ * Writes a RFC 2822–style draft (editable headers + body) to a temp file,
+ * launches $EDITOR (fallback: vim → vi), then reads the result back and sends.
+ *
+ * All header fields (From, To, Subject, In-Reply-To) are editable inside the
+ * editor.  Abort if the user leaves To: empty or quits without saving.
+ *
+ * If @p prefill_body is non-NULL it is written into the draft (top-post
+ * convention: user types above the quoted text).
+ *
  * Returns 0 on successful send, -1 on abort or SMTP error.
  */
 static int cmd_compose_interactive(Config *cfg,
@@ -271,101 +275,120 @@ static int cmd_compose_interactive(Config *cfg,
                                    const char *prefill_body) {
     ensure_smtp_configured(cfg);
 
-    /* Restore cursor (TUI screens hide it with \033[?25l) */
+    /* 1. Create temp file */
+    char tmppath[] = "/tmp/email-tui-XXXXXX";
+    int fd = mkstemp(tmppath);
+    if (fd < 0) {
+        perror("email-tui: mkstemp");
+        return -1;
+    }
+
+    /* 2. Write draft (editable headers + body) */
+    {
+        FILE *f = fdopen(fd, "w");
+        if (!f) { close(fd); unlink(tmppath); return -1; }
+        const char *from = from_address(cfg);
+        fprintf(f, "From: %s\n",    from ? from : "");
+        fprintf(f, "To: %s\n",      prefill_to      ? prefill_to      : "");
+        fprintf(f, "Subject: %s\n", prefill_subject ? prefill_subject : "");
+        if (reply_to_msg_id && reply_to_msg_id[0])
+            fprintf(f, "In-Reply-To: %s\n", reply_to_msg_id);
+        fprintf(f, "\n");
+        if (prefill_body && prefill_body[0])
+            fprintf(f, "%s", prefill_body);
+        fclose(f);
+    }
+
+    /* 3. Restore cursor, then launch $EDITOR */
     printf("\033[?25h");
-    /* Clear screen */
-    printf("\033[H\033[2J");
-    printf("  Compose Message\n"
-           "  (Ctrl-C / empty To: = abort   '.' alone on body line = send)\n\n");
     fflush(stdout);
+    fflush(stderr);
 
-    char to_buf[512] = "";
-    char subj_buf[512] = "";
+    const char *editor = getenv("EDITOR");
+    if (!editor || !editor[0]) editor = "vim";
 
-    InputLine il_to = {0};
-    input_line_init(&il_to, to_buf, sizeof(to_buf), prefill_to ? prefill_to : "");
-    if (!input_line_run(&il_to, 4, "  To      : ") || !to_buf[0]) {
-        printf("\n  Aborted.\n");
+    /* Build: EDITOR tmppath  (shell handles EDITOR with args, e.g. "nvim -u NONE") */
+    {
+        char cmd_buf[1024];
+        snprintf(cmd_buf, sizeof(cmd_buf), "%s %s", editor, tmppath);
+        int rc = system(cmd_buf);
+        (void)rc; /* editor exit status not reliable across editors */
+    }
+
+    /* 4. Read back edited file */
+    FILE *rf = fopen(tmppath, "r");
+    unlink(tmppath);
+    if (!rf) {
+        fprintf(stderr, "Error: Could not read draft after editing.\n");
         return -1;
     }
 
-    InputLine il_subj = {0};
-    input_line_init(&il_subj, subj_buf, sizeof(subj_buf),
-                    prefill_subject ? prefill_subject : "");
-    if (!input_line_run(&il_subj, 6, "  Subject : ")) {
-        printf("\n  Aborted.\n");
-        return -1;
-    }
-
-    /* Move cursor below fields and print body prompt */
-    printf("\033[8;1H");
-    if (prefill_body && prefill_body[0]) {
-        printf("  Quoted text (will appear below your reply):\n");
-        /* Print quoted content so the user can see context */
-        const char *p = prefill_body;
-        while (*p) {
-            const char *nl = strchr(p, '\n');
-            size_t len = nl ? (size_t)(nl - p) : strlen(p);
-            int plen = (int)len > 100 ? 100 : (int)len;
-            printf("\033[2m  %.*s\033[0m\n", plen, p);
-            p += len + (nl ? 1 : 0);
-            if (!nl) break;
-        }
-        printf("\n");
-    }
-    printf("  Your reply (enter '.' alone on a line to send):\n");
-    fflush(stdout);
-
-    /* Collect body lines in cooked mode (input_line restored the terminal) */
-    char body[16384] = "";
+    /* 5. Parse headers then body */
+    char from_buf[512]   = "";
+    char to_buf[512]     = "";
+    char subj_buf[512]   = "";
+    char msgid_buf[512]  = "";
+    char *body = NULL;
     size_t body_len = 0;
-    char line[512];
-    while (fgets(line, sizeof(line), stdin)) {
-        char *nl = strchr(line, '\n');
-        if (nl) *nl = '\0';
-        if (strcmp(line, ".") == 0) break;          /* send signal */
-        if (strcmp(line, "\x03") == 0) goto abort;  /* Ctrl-C fallback */
-        size_t llen = strlen(line);
-        if (body_len + llen + 2 < sizeof(body)) {
-            memcpy(body + body_len, line, llen);
-            body_len += llen;
-            body[body_len++] = '\n';
-            body[body_len]   = '\0';
-        }
-    }
-
-    /* Append quoted content below user's reply (top-posting) */
-    if (prefill_body && prefill_body[0]) {
-        size_t qlen = strlen(prefill_body);
-        if (body_len + 2 + qlen < sizeof(body)) {
-            body[body_len++] = '\n';
-            body[body_len]   = '\0';
-            memcpy(body + body_len, prefill_body, qlen + 1);
-            body_len += qlen;
-        }
-    }
 
     {
-        const char *from = from_address(cfg);
-        ComposeParams p = {from, to_buf, subj_buf, body, reply_to_msg_id};
-        char *msg = NULL;
-        size_t msg_len = 0;
-        if (compose_build_message(&p, &msg, &msg_len) != 0) {
-            fprintf(stderr, "Error: Failed to build message.\n");
-            return -1;
+        char line[4096];
+        int in_body = 0;
+        while (fgets(line, sizeof(line), rf)) {
+            /* strip trailing CRLF */
+            size_t ll = strlen(line);
+            while (ll > 0 && (line[ll-1] == '\n' || line[ll-1] == '\r'))
+                line[--ll] = '\0';
+
+            if (!in_body) {
+                if (ll == 0) { in_body = 1; continue; } /* blank → body starts */
+                if (strncasecmp(line, "From: ",       6)  == 0) { strncpy(from_buf,  line + 6,  sizeof(from_buf)  - 1); from_buf[sizeof(from_buf)-1]  = '\0'; }
+                else if (strncasecmp(line, "To: ",    4)  == 0) { strncpy(to_buf,    line + 4,  sizeof(to_buf)    - 1); to_buf[sizeof(to_buf)-1]      = '\0'; }
+                else if (strncasecmp(line, "Subject: ",9) == 0) { strncpy(subj_buf,  line + 9,  sizeof(subj_buf)  - 1); subj_buf[sizeof(subj_buf)-1]  = '\0'; }
+                else if (strncasecmp(line, "In-Reply-To: ", 13) == 0) { strncpy(msgid_buf, line + 13, sizeof(msgid_buf) - 1); msgid_buf[sizeof(msgid_buf)-1] = '\0'; }
+            } else {
+                size_t add = ll + 1; /* line + \n */
+                char *nb = realloc(body, body_len + add + 1);
+                if (!nb) break;
+                body = nb;
+                memcpy(body + body_len, line, ll);
+                body_len += ll;
+                body[body_len++] = '\n';
+                body[body_len]   = '\0';
+            }
         }
-        printf("  Sending...\n");
-        fflush(stdout);
-        int rc = smtp_send(cfg, from, to_buf, msg, msg_len);
-        free(msg);
-        if (rc == 0)
-            printf("  Message sent.\n");
-        return rc;
+        fclose(rf);
     }
 
-abort:
-    printf("\n  Aborted.\n");
-    return -1;
+    /* 6. Validate — abort if To: is empty */
+    if (!to_buf[0]) {
+        printf("  Aborted (To: is empty).\n");
+        free(body);
+        return -1;
+    }
+
+    /* 7. Build and send */
+    {
+        const char *from_send = from_buf[0] ? from_buf : from_address(cfg);
+        const char *reply_id  = msgid_buf[0] ? msgid_buf : reply_to_msg_id;
+        const char *body_str  = body ? body : "";
+        ComposeParams p = {from_send, to_buf, subj_buf, body_str, reply_id};
+        char *msg = NULL;
+        size_t msg_len = 0;
+        int rc = -1;
+        if (compose_build_message(&p, &msg, &msg_len) != 0) {
+            fprintf(stderr, "Error: Failed to build message.\n");
+        } else {
+            printf("  Sending...\n");
+            fflush(stdout);
+            rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
+            free(msg);
+            if (rc == 0)
+                printf("  Message sent.\n");
+        }
+        free(body);
+        return rc;
+    }
 }
 
 /**

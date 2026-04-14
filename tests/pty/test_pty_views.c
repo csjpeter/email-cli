@@ -1438,6 +1438,215 @@ static void test_sync_no_config(void) {
     setenv("HOME", g_test_home, 1);
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  MULTI-ACCOUNT TUI (US-21)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Write a second account config under accounts/<name>/ */
+static void write_second_account(const char *name) {
+    char dir1[400], dir2[450], path[500];
+    snprintf(dir1, sizeof(dir1), "%s/.config/email-cli/accounts",  g_test_home);
+    snprintf(dir2, sizeof(dir2), "%s/.config/email-cli/accounts/%s", g_test_home, name);
+    mkdir(dir1, 0700);
+    mkdir(dir2, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", dir2);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp,
+        "EMAIL_HOST=imap://localhost:9993\n"
+        "EMAIL_USER=%s\n"
+        "EMAIL_PASS=pass2\n"
+        "EMAIL_FOLDER=INBOX\n", name);
+    fclose(fp);
+    chmod(path, 0600);
+}
+
+static void test_tui_accounts_screen_shows(void) {
+    /* US-21 AC1: launching email-tui always shows the Accounts screen */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts screen: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "testuser");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_accounts_esc_quit(void) {
+    /* US-21: ESC/q from accounts screen exits the TUI */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts ESC quit: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    pty_close(s);
+}
+
+static void test_tui_accounts_enter_opens_list(void) {
+    /* US-21 AC3: Enter on account opens inbox */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "accounts Enter: opens message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_accounts_backspace_from_list(void) {
+    /* US-21 AC7: Backspace from folder root returns to accounts screen */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "accounts backspace: opens message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Backspace → folder browser */
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Backspace at root → accounts screen */
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_accounts_multiple_shown(void) {
+    /* US-21 AC2: multiple accounts are listed */
+    write_second_account("second@example.com");
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts multiple: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "testuser");
+    ASSERT_SCREEN_CONTAINS(s, "second@example.com");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    /* cleanup */
+    char path[500];
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/second@example.com/config.ini",
+             g_test_home);
+    unlink(path);
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/second@example.com", g_test_home);
+    rmdir(path);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  HELP PANEL (US-22)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_tui_accounts_help_panel(void) {
+    /* US-22 AC7: 'h' in accounts screen shows help overlay */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts help: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "h");
+    ASSERT_WAIT_FOR(s, "Accounts shortcuts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Press any key to close");
+    /* dismiss with any key */
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    /* should be back on accounts screen */
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_list_help_panel(void) {
+    /* US-22 AC7: 'h' in message list shows help overlay */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "list help: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "h");
+    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Press any key to close");
+    ASSERT_SCREEN_CONTAINS(s, "Compose new message");
+    /* dismiss */
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    /* still in list view */
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_show_help_panel(void) {
+    /* US-22 AC7: 'h' in message reader shows help overlay */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "show help: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "h");
+    ASSERT_WAIT_FOR(s, "Message reader shortcuts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Press any key to close");
+    ASSERT_SCREEN_CONTAINS(s, "Reply to this message");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    /* back in reader */
+    ASSERT_SCREEN_CONTAINS(s, "r=reply");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_folders_help_panel(void) {
+    /* US-22 AC7: 'h' in folder browser shows help overlay */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "folders help: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "h");
+    ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Press any key to close");
+    ASSERT_SCREEN_CONTAINS(s, "Toggle tree");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    /* back in folder browser */
+    ASSERT_SCREEN_CONTAINS(s, "Folders");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_help_panel_question_mark(void) {
+    /* US-22 AC1: '?' also opens the help panel (same as 'h') */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "? help: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);   /* any key dismisses */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 #define RUN_TEST(fn) do { printf("  %s...\n", #fn); fn(); } while(0)
@@ -1621,6 +1830,22 @@ int main(int argc, char *argv[]) {
     printf("\n--- email-tui: TUI launch ---\n");
     restart_mock();
     RUN_TEST(test_tui_interactive_launch);
+
+    printf("\n--- email-tui: multi-account (US-21) ---\n");
+    restart_mock();
+    RUN_TEST(test_tui_accounts_screen_shows);
+    RUN_TEST(test_tui_accounts_esc_quit);
+    RUN_TEST(test_tui_accounts_enter_opens_list);
+    RUN_TEST(test_tui_accounts_backspace_from_list);
+    RUN_TEST(test_tui_accounts_multiple_shown);
+
+    printf("\n--- email-tui: help panel (US-22) ---\n");
+    restart_mock();
+    RUN_TEST(test_tui_accounts_help_panel);
+    RUN_TEST(test_tui_list_help_panel);
+    RUN_TEST(test_tui_show_help_panel);
+    RUN_TEST(test_tui_folders_help_panel);
+    RUN_TEST(test_tui_help_panel_question_mark);
 
     printf("\n--- email-tui: wizard + cron ---\n");
     RUN_TEST(test_wizard_abort);

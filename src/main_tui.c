@@ -721,9 +721,25 @@ int main(int argc, char *argv[]) {
                 } else if (ret == 2) {
                     /* 'c' → compose new message */
                     cmd_compose_interactive(sel_cfg, NULL, NULL, NULL, NULL);
+                    /* Pause so the user can read the send result before the
+                     * list re-renders and clears the screen. */
+                    printf("\n  [Press any key to return to inbox]\n");
+                    fflush(stdout);
+                    {
+                        TermRawState *_r = terminal_raw_enter();
+                        char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
+                        terminal_raw_exit(&_r);
+                    }
                 } else if (ret == 3) {
                     /* 'r' → reply to current message */
                     cmd_reply(sel_cfg, opts.action_uid);
+                    printf("\n  [Press any key to return to inbox]\n");
+                    fflush(stdout);
+                    {
+                        TermRawState *_r = terminal_raw_enter();
+                        char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
+                        terminal_raw_exit(&_r);
+                    }
                 } else if (ret == 4) {
                     /* background sync finished → re-list to show new messages */
                     continue;

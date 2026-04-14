@@ -280,6 +280,65 @@ static void test_compose_editor_send(void) {
 }
 
 /**
+ * \r stripping (US-20): reply quote must not contain carriage-return bytes.
+ *
+ * We set up an editor that captures the draft to a temp file for inspection.
+ * The mock IMAP server delivers messages with CRLF line endings (RFC 2822);
+ * after quote extraction those CRs must be stripped before the draft is
+ * written.  The editor mock simply outputs a fixed reply so the send
+ * completes; we inspect the captured draft file instead of the sent message.
+ */
+static void test_reply_no_cr_in_quote(void) {
+    write_config();
+    restart_smtp();
+
+    /* Editor mock: capture draft to a known path, then fill in a valid reply */
+    char capture_path[256];
+    snprintf(capture_path, sizeof(capture_path),
+             "/tmp/draft_capture_%d.txt", (int)getpid());
+
+    char editor_script[300];
+    snprintf(editor_script, sizeof(editor_script),
+             "/tmp/test_editor_cr_%d.sh", (int)getpid());
+    FILE *ef = fopen(editor_script, "w");
+    if (ef) {
+        fprintf(ef, "#!/bin/sh\n");
+        /* Copy draft to capture path for inspection */
+        fprintf(ef, "cp \"$1\" '%s'\n", capture_path);
+        /* Fill valid To: so compose sends */
+        fprintf(ef,
+            "printf 'From: testuser@example.com\\n"
+            "To: recipient@example.com\\n"
+            "Subject: Re: Test\\n\\nReply body\\n' > \"$1\"\n");
+        fclose(ef);
+        chmod(editor_script, 0755);
+    }
+    setenv("EDITOR", editor_script, 1);
+
+    /* Launch as batch reply UID 1 (mock server has message UID 1) */
+    const char *a[] = {"reply", "1", NULL};
+    PtySession *s = tui_run(a);
+    ASSERT(s != NULL, "no CR in quote: opens");
+    /* Wait until the editor has run and the draft was captured */
+    pty_settle(s, WAIT_MS);
+    pty_close(s);
+
+    /* Inspect captured draft: must not contain \r */
+    FILE *fp = fopen(capture_path, "r");
+    if (fp) {
+        int found_cr = 0;
+        int c;
+        while ((c = fgetc(fp)) != EOF)
+            if (c == '\r') { found_cr = 1; break; }
+        fclose(fp);
+        ASSERT(!found_cr, "no CR in quoted body: draft must not contain \\r");
+        unlink(capture_path);
+    }
+    /* cleanup */
+    unlink(editor_script);
+}
+
+/**
  * reply abort: batch reply with EDITOR=true → empty To: → "Aborted"
  * (cmd_reply is invoked; the raw message may not exist → error before editor)
  */
@@ -329,6 +388,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_compose_abort_no_to);
     RUN_TEST(test_compose_editor_send);
     RUN_TEST(test_reply_missing_uid);
+    RUN_TEST(test_reply_no_cr_in_quote);
 
     stop_smtp_server();
 

@@ -671,7 +671,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* 5. Initialize local store */
-    if (local_store_init(cfg->host) != 0)
+    if (local_store_init(cfg->host, cfg->user) != 0)
         logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
 
     /* 6. Dispatch */
@@ -717,7 +717,7 @@ int main(int argc, char *argv[]) {
             }
 
             /* acc == 1: Enter → open account, enter folder/message loop */
-            local_store_init(sel_cfg->host);
+            local_store_init(sel_cfg->host, sel_cfg->user);
             char *tui_folder = strdup(sel_cfg->folder ? sel_cfg->folder : "INBOX");
             if (!tui_folder) { config_free(sel_cfg); result = -1; break; }
 

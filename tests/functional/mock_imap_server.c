@@ -192,6 +192,41 @@ static void handle_client(SSL *ssl) {
             snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
             printf("Mock server sent FETCH response for %s\n", section);
+        } else if (strstr(buffer, "APPEND")) {
+            /* Handle APPEND with synchronising {N} or non-synchronising {N+} literal.
+             * Both forms must be handled: the client may use either. */
+            char *lbrace = strrchr(buffer, '{');
+            long literal_size = 0;
+            int  sync_literal = 1;  /* 1 = synchronising, 0 = LITERAL+ */
+            if (lbrace) {
+                char *end = NULL;
+                literal_size = strtol(lbrace + 1, &end, 10);
+                if (end && *end == '+') sync_literal = 0;
+            }
+            if (literal_size <= 0) {
+                char bad[64];
+                snprintf(bad, sizeof(bad), "%s BAD Missing literal size\r\n", tag);
+                SSL_write(ssl, bad, (int)strlen(bad));
+            } else {
+                if (sync_literal) {
+                    /* Synchronising literal: send continuation before reading data */
+                    SSL_write(ssl, "+ OK\r\n", 6);
+                }
+                /* Read and discard the literal bytes */
+                char *litbuf = malloc((size_t)literal_size + 1);
+                if (!litbuf) break;
+                long remaining = literal_size;
+                while (remaining > 0) {
+                    int n = SSL_read(ssl, litbuf, remaining > 4096 ? 4096 : (int)remaining);
+                    if (n <= 0) break;
+                    remaining -= n;
+                }
+                free(litbuf);
+                printf("Mock server: APPEND received %ld-byte message\n", literal_size);
+                char ok[64];
+                snprintf(ok, sizeof(ok), "%s OK [APPENDUID 1 42] APPEND completed\r\n", tag);
+                SSL_write(ssl, ok, (int)strlen(ok));
+            }
         } else if (strstr(buffer, "LOGOUT")) {
             const char *bye = "* BYE Mock IMAP server logging out\r\n";
             SSL_write(ssl, bye, (int)strlen(bye));

@@ -112,6 +112,48 @@ static void run_mock_server(int listen_fd,
 
         if (strstr(buf, "LOGIN")) {
             SSL_write(ssl, login_reply, (int)strlen(login_reply));
+        } else if (strstr(buf, "APPEND")) {
+            /* Handle LITERAL+ {N+} and synchronising {N} literals */
+            char *lbrace = strrchr(buf, '{');
+            long lsize = 0;
+            int  sync  = 1;
+            if (lbrace) {
+                char *end = NULL;
+                lsize = strtol(lbrace + 1, &end, 10);
+                if (end && *end == '+') sync = 0;
+            }
+            if (lsize <= 0) {
+                char bad2[64];
+                snprintf(bad2, sizeof(bad2), "%s BAD Missing size\r\n", tag);
+                SSL_write(ssl, bad2, (int)strlen(bad2));
+            } else {
+                if (sync) SSL_write(ssl, "+ OK\r\n", 6);
+                /* Drain the literal bytes already in buf + remaining reads */
+                char *ptr = lbrace ? strchr(lbrace, '}') : NULL;
+                long already = 0;
+                if (ptr) {
+                    /* skip past '}' and optional '+' and '\r\n' */
+                    ptr++;
+                    if (*ptr == '+') ptr++;
+                    if (*ptr == '\r') ptr++;
+                    if (*ptr == '\n') ptr++;
+                    already = (long)(buf + n - ptr);
+                    if (already > lsize) already = lsize;
+                }
+                long remaining = lsize - already;
+                char tmp[512];
+                while (remaining > 0) {
+                    int r2 = SSL_read(ssl, tmp,
+                                     remaining > (long)sizeof(tmp) ?
+                                     (int)sizeof(tmp) : (int)remaining);
+                    if (r2 <= 0) break;
+                    remaining -= r2;
+                }
+                char ok2[80];
+                snprintf(ok2, sizeof(ok2),
+                         "%s OK [APPENDUID 1 99] APPEND completed\r\n", tag);
+                SSL_write(ssl, ok2, (int)strlen(ok2));
+            }
         } else if (strstr(buf, "LOGOUT")) {
             const char *bye = "* BYE Logging out\r\n";
             SSL_write(ssl, bye, (int)strlen(bye));
@@ -228,6 +270,46 @@ void test_imap_connect_login_rejected(void) {
     waitpid(pid, &status, 0);
 }
 
+/*
+ * Verify that imap_append() correctly uses LITERAL+ (non-synchronising
+ * literal, "{N+}") and the server returns OK after receiving the message.
+ */
+void test_imap_append_literal_plus(void) {
+    int port = 0;
+    int lfd  = make_listener(&port);
+    ASSERT(lfd >= 0, "make_listener: could not bind");
+
+    SSL_CTX *ctx = create_server_ctx();
+    ASSERT(ctx != NULL, "create_server_ctx failed");
+
+    const char *greeting    = "* OK Mock ready\r\n";
+    const char *login_reply =
+        "A0001 OK [CAPABILITY IMAP4rev1 LITERAL+] Logged in\r\n";
+
+    pid_t pid = fork();
+    ASSERT(pid >= 0, "fork failed");
+
+    if (pid == 0) {
+        run_mock_server(lfd, greeting, login_reply, ctx);
+    }
+    close(lfd);
+    SSL_CTX_free(ctx);
+
+    char url[64];
+    snprintf(url, sizeof(url), "imaps://127.0.0.1:%d", port);
+    ImapClient *c = imap_connect(url, "user", "pass", 0);
+    ASSERT(c != NULL, "imap_append test: imap_connect must succeed");
+
+    const char *msg = "From: a@b.com\r\nSubject: Test\r\n\r\nHello.\r\n";
+    int rc = imap_append(c, "Sent", msg, strlen(msg));
+    ASSERT(rc == 0, "imap_append must return 0 (OK) with LITERAL+");
+
+    imap_disconnect(c);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+}
+
 /* ── Test suite entry point ──────────────────────────────────────────────── */
 
 void test_imap_client(void) {
@@ -241,4 +323,5 @@ void test_imap_client(void) {
 
     test_imap_connect_login_ok();
     test_imap_connect_login_rejected();
+    test_imap_append_literal_plus();
 }

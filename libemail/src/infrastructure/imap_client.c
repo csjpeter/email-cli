@@ -816,44 +816,42 @@ int imap_uid_set_flag(ImapClient *c, int uid, const char *flag_name, int add) {
 
 int imap_append(ImapClient *c, const char *folder,
                 const char *msg, size_t msg_len) {
-    /* Build: tag APPEND "folder" (\Seen) {size}\r\n */
+    /* Use LITERAL+ (RFC 7888 non-synchronising literal, "{N+}") which all
+     * modern IMAP servers advertise.  This sends the command line and the
+     * message body in a single write, eliminating the two-phase
+     * synchronising-literal handshake that caused Dovecot to wait 120 s
+     * for data that never arrived due to TLS-layer buffering. */
     c->tag_num++;
     char tag[16];
     snprintf(tag, sizeof(tag), "A%04d", c->tag_num);
 
     char cmd[1024];
     int cmdlen = snprintf(cmd, sizeof(cmd),
-                          "%s APPEND \"%s\" (\\Seen) {%zu}\r\n",
+                          "%s APPEND \"%s\" (\\Seen) {%zu+}\r\n",
                           tag, folder, msg_len);
     if (cmdlen < 0 || (size_t)cmdlen >= sizeof(cmd)) return -1;
 
-    logger_log(LOG_DEBUG, "IMAP [OUT] %s APPEND \"%s\" (\\Seen) {%zu}",
+    /* Allocate a single buffer: command line + message body.
+     * Sending them together guarantees they go in one TLS record. */
+    char *buf = malloc((size_t)cmdlen + msg_len);
+    if (!buf) return -1;
+    memcpy(buf,              cmd, (size_t)cmdlen);
+    memcpy(buf + cmdlen,     msg, msg_len);
+
+    logger_log(LOG_DEBUG, "IMAP [OUT] %s APPEND \"%s\" (\\Seen) {%zu+}",
                tag, folder, msg_len);
-    if (net_write(c, cmd, (size_t)cmdlen) != 0) return -1;
-
-    /* Server must respond with a continuation '+ ...' before we send data */
-    LineBuf lb = {NULL, 0, 0};
-    if (read_line(c, &lb) != 0) { linebuf_free(&lb); return -1; }
-    const char *line = lb.data ? lb.data : "";
-    logger_log(LOG_DEBUG, "IMAP [ IN] %s", line);
-    int is_cont = (line[0] == '+');
-    linebuf_free(&lb);
-
-    if (!is_cont) {
-        logger_log(LOG_WARN, "IMAP APPEND: expected continuation response");
-        return -1;
-    }
-
-    /* Send message literal */
     logger_log(LOG_DEBUG, "IMAP APPEND: sending %zu-byte literal", msg_len);
-    if (net_write(c, msg, msg_len) != 0) {
-        logger_log(LOG_ERROR, "IMAP APPEND: literal write failed");
+
+    int wrc = net_write(c, buf, (size_t)cmdlen + msg_len);
+    free(buf);
+    if (wrc != 0) {
+        logger_log(LOG_ERROR, "IMAP APPEND: write failed");
         return -1;
     }
 
-    /* APPEND can take longer than normal commands (server-side processing,
-     * AV/spam plugins, quota checks).  Temporarily raise SO_RCVTIMEO to
-     * 120 seconds, then restore the standard 15-second timeout. */
+    /* Wait for the server's tagged response.  APPEND can take longer than
+     * other commands (server-side AV/spam plugins, quota checks).
+     * Temporarily raise SO_RCVTIMEO to 120 s and restore to 15 s after. */
     {
         struct timeval long_tv  = { .tv_sec = 120, .tv_usec = 0 };
         struct timeval short_tv = { .tv_sec =  15, .tv_usec = 0 };

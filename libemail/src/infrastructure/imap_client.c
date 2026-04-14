@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <ctype.h>
+#include <time.h>
 
 /* ── Read buffer ─────────────────────────────────────────────────────── */
 
@@ -413,6 +414,13 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     if (fd < 0) {
         logger_log(LOG_ERROR, "connect to %s:%s failed: %s", host, port, strerror(errno));
         return NULL;
+    }
+
+    /* Apply a 15-second read/write timeout so blocking ops don't hang forever */
+    {
+        struct timeval tv = { .tv_sec = 15, .tv_usec = 0 };
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     }
 
     ImapClient *c = calloc(1, sizeof(ImapClient));

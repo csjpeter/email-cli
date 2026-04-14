@@ -1,4 +1,5 @@
 #include "email_service.h"
+#include "config_store.h"
 #include "input_line.h"
 #include "path_complete.h"
 #include "imap_client.h"
@@ -377,6 +378,91 @@ static void print_infoline(int trows, int width, const char *text) {
         for (int i = 0; i < width; i++) fputc(' ', stderr);
     }
     fprintf(stderr, "\033[0m");
+    fflush(stderr);
+}
+
+/**
+ * Show a two-column help popup overlay and wait for any key to dismiss.
+ *
+ * @param title  Title displayed in the popup header.
+ * @param rows   Array of {key_label, description} string pairs.
+ * @param n      Number of rows.
+ */
+static void show_help_popup(const char *title,
+                            const char *rows[][2], int n) {
+    int tcols = terminal_cols();
+    int trows = terminal_rows();
+    if (tcols <= 0) tcols = 80;
+    if (trows <= 0) trows = 24;
+
+    /* Compute popup dimensions */
+    int key_col_w = 12;   /* width of the key column */
+    int desc_col_w = 44;  /* width of the description column */
+    int inner_w = key_col_w + 2 + desc_col_w; /* key + "  " + desc */
+    int box_w   = inner_w + 4;  /* "| " + inner + " |" */
+    int box_h   = n + 4;        /* title + separator + n rows + bottom border */
+
+    /* Center the popup */
+    int col0 = (tcols - box_w) / 2;
+    int row0 = (trows - box_h) / 2;
+    if (col0 < 1) col0 = 1;
+    if (row0 < 1) row0 = 1;
+
+    /* Draw popup using stderr so it overlays stdout content */
+    /* Top border */
+    fprintf(stderr, "\033[%d;%dH\033[7m", row0, col0);
+    fprintf(stderr, "\u250c");
+    for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
+    fprintf(stderr, "\u2510\033[0m");
+
+    /* Title row */
+    fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 1, col0);
+    int tlen = (int)strlen(title);
+    int pad_left  = (box_w - 4 - tlen) / 2;
+    int pad_right = (box_w - 4 - tlen) - pad_left;
+    for (int i = 0; i < pad_left;  i++) fputc(' ', stderr);
+    fprintf(stderr, "%s", title);
+    for (int i = 0; i < pad_right; i++) fputc(' ', stderr);
+    fprintf(stderr, " \u2502\033[0m");
+
+    /* Separator */
+    fprintf(stderr, "\033[%d;%dH\033[7m\u251c", row0 + 2, col0);
+    for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
+    fprintf(stderr, "\u2524\033[0m");
+
+    /* Data rows */
+    for (int i = 0; i < n; i++) {
+        fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 3 + i, col0);
+        /* key label — bold, left-padded to key_col_w */
+        fprintf(stderr, "\033[1m%-*.*s\033[22m", key_col_w, key_col_w, rows[i][0]);
+        fprintf(stderr, "  ");
+        /* description — truncated to desc_col_w */
+        fprintf(stderr, "%-*.*s", desc_col_w, desc_col_w, rows[i][1]);
+        fprintf(stderr, " \u2502\033[0m");
+    }
+
+    /* Bottom border */
+    fprintf(stderr, "\033[%d;%dH\033[7m\u2514", row0 + 3 + n, col0);
+    for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
+    fprintf(stderr, "\u2518\033[0m");
+
+    /* Footer: "Press any key to close" */
+    const char *footer = " Press any key to close ";
+    int flen = (int)strlen(footer);
+    if (flen < box_w - 2) {
+        int fc = col0 + (box_w - flen) / 2;
+        fprintf(stderr, "\033[%d;%dH\033[2m%s\033[0m", row0 + 4 + n, fc, footer);
+    }
+    fflush(stderr);
+
+    /* Wait for any key */
+    terminal_read_key();
+
+    /* Clear the popup area */
+    for (int r = row0; r <= row0 + 4 + n; r++) {
+        fprintf(stderr, "\033[%d;%dH\033[K", r, col0);
+        for (int c = 0; c < box_w; c++) fputc(' ', stderr);
+    }
     fflush(stderr);
 }
 
@@ -828,6 +914,20 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
             } else if (ch == 'q') {
                 result = 0;      /* back to list */
                 goto show_int_done;
+            } else if (ch == 'h' || ch == '?') {
+                static const char *help[][2] = {
+                    { "PgDn / \u2193",   "Scroll down one page / one line"  },
+                    { "PgUp / \u2191",   "Scroll up one page / one line"    },
+                    { "r",              "Reply to this message"             },
+                    { "a",              "Save an attachment"                },
+                    { "A",              "Save all attachments"              },
+                    { "Backspace",      "Back to message list"              },
+                    { "ESC / q",        "Back to message list"              },
+                    { "h / ?",          "Show this help"                    },
+                };
+                show_help_popup("Message reader shortcuts",
+                                help, (int)(sizeof(help)/sizeof(help[0])));
+                break;
             } else if (ch == 'a' && att_count > 0) {
                 int sel = 0;
                 if (att_count > 1) {
@@ -1689,6 +1789,26 @@ read_key_again: ;
                 list_result = 4;
                 goto list_done;
             }
+            if (ch == 'h' || ch == '?') {
+                static const char *help[][2] = {
+                    { "\u2191 / \u2193",   "Move cursor up / down"               },
+                    { "PgUp / PgDn",        "Move cursor one page up / down"      },
+                    { "Enter",             "Open selected message"               },
+                    { "r",                 "Reply to selected message"           },
+                    { "c",                 "Compose new message"                 },
+                    { "n",                 "Toggle New (unread) flag"            },
+                    { "f",                 "Toggle Flagged (starred) flag"       },
+                    { "d",                 "Toggle Done flag"                    },
+                    { "s",                 "Start background sync"               },
+                    { "R",                 "Refresh after sync"                  },
+                    { "Backspace",         "Open folder browser"                 },
+                    { "ESC / q",           "Quit"                                },
+                    { "h / ?",             "Show this help"                      },
+                };
+                show_help_popup("Message list shortcuts",
+                                help, (int)(sizeof(help)/sizeof(help[0])));
+                break;
+            }
             if (ch == 'n' || ch == 'f' || ch == 'd') {
                 int uid  = entries[cursor].uid;
                 int bit;
@@ -2022,14 +2142,28 @@ char *email_service_list_folders_interactive(const Config *cfg,
         case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
         case TERM_KEY_SHIFT_TAB:
-        case TERM_KEY_IGNORE:
-            if (terminal_last_printable() == 't') {
+        case TERM_KEY_IGNORE: {
+            int ch = terminal_last_printable();
+            if (ch == 't') {
                 tree_mode = !tree_mode;
                 ui_pref_set_int("folder_view_mode", tree_mode);
                 cursor = 0; wstart = 0;
                 if (!tree_mode) current_prefix[0] = '\0';
+            } else if (ch == 'h' || ch == '?') {
+                static const char *help[][2] = {
+                    { "\u2191 / \u2193",   "Move cursor up / down"                   },
+                    { "PgUp / PgDn",        "Move cursor one page up / down"          },
+                    { "Enter",             "Open folder / navigate into subfolder"   },
+                    { "t",                 "Toggle tree / flat view"                 },
+                    { "Backspace",         "Go up one level (or back to accounts)"   },
+                    { "ESC / q",           "Quit"                                    },
+                    { "h / ?",             "Show this help"                          },
+                };
+                show_help_popup("Folder browser shortcuts",
+                                help, (int)(sizeof(help)/sizeof(help[0])));
             }
             break;
+        }
         }
     }
 folders_int_done:
@@ -2040,79 +2174,130 @@ folders_int_done:
     return selected;
 }
 
-int email_service_account_interactive(const Config *cfg) {
+/** Print one account row; cursor=1 draws the selection arrow. */
+static void print_account_row(const Config *cfg, int cursor, int tcols) {
+    const char *user = cfg->user ? cfg->user : "(unknown)";
+    const char *host = cfg->host ? cfg->host : "";
+    /* Strip protocol prefix for compact display */
+    if (strncmp(host, "imaps://", 8) == 0) host += 8;
+    else if (strncmp(host, "imap://",  7) == 0) host += 7;
+
+    if (cursor)
+        printf("  \033[1m\u2192 %-38.38s  %s\033[0m\n", user, host);
+    else
+        printf("    %-38.38s  %s\n", user, host);
+    (void)tcols;
+}
+
+int email_service_account_interactive(Config **cfg_out) {
+    *cfg_out = NULL;
     RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
     (void)tui_raw;
 
+    int cursor = 0;
+
     for (;;) {
+        /* Reload account list on every iteration (list may change after add/delete) */
+        int count = 0;
+        AccountEntry *accounts = config_list_accounts(&count);
+
         int trows = terminal_rows();
         int tcols = terminal_cols();
         if (trows <= 0) trows = 24;
         if (tcols <= 0) tcols = 80;
+        if (cursor >= count) cursor = count > 0 ? count - 1 : 0;
 
         printf("\033[H\033[2J");
-        printf("  Email Account\n\n");
+        printf("  Email Accounts (%d)\n\n", count);
 
-        /* ── Account details ─────────────────────────────────────── */
-        const char *user = cfg->user ? cfg->user : "(unknown)";
-        const char *host = cfg->host ? cfg->host : "(not set)";
-        printf("  \u2192 %s\n", user);
-        printf("    IMAP:  %s\n", host);
-
-        /* SMTP status */
-        if (cfg->smtp_host) {
-            printf("    SMTP:  %s", cfg->smtp_host);
-            if (cfg->smtp_port) printf(":%d", cfg->smtp_port);
-            if (cfg->smtp_user)
-                printf("  (user: %s)", cfg->smtp_user);
-            printf("\n");
+        if (count == 0) {
+            printf("  No accounts configured.\n");
         } else {
-            /* Show what will be derived automatically at send time */
-            char derived[256] = "";
-            if (cfg->host) {
-                if (strncmp(cfg->host, "imaps://", 8) == 0)
-                    snprintf(derived, sizeof(derived), "smtps://%s", cfg->host + 8);
-                else if (strncmp(cfg->host, "imap://", 7) == 0)
-                    snprintf(derived, sizeof(derived), "smtp://%s", cfg->host + 7);
-            }
-            if (derived[0])
-                printf("    SMTP:  \033[33mnot configured\033[0m"
-                       "  (will try %s)\n", derived);
-            else
-                printf("    SMTP:  \033[33mnot configured\033[0m\n");
-            printf("           Press \033[1me\033[0m to set up outgoing mail.\n");
-        }
+            for (int i = 0; i < count; i++)
+                print_account_row(accounts[i].cfg, i == cursor, tcols);
 
+            /* Show detail for selected account */
+            printf("\n");
+            const Config *sel = accounts[cursor].cfg;
+            if (sel->smtp_host) {
+                printf("    SMTP: %s", sel->smtp_host);
+                if (sel->smtp_port) printf(":%d", sel->smtp_port);
+                printf("\n");
+            } else {
+                printf("    SMTP: \033[33mnot configured\033[0m"
+                       "  — press \033[1me\033[0m to set up\n");
+            }
+        }
         fflush(stdout);
 
         char sb[256];
         snprintf(sb, sizeof(sb),
-                 "  Enter=open folders  e=SMTP settings  ESC=quit");
+                 "  \u2191\u2193=select  Enter=open  n=add  d=delete  e=SMTP  ESC=quit");
         print_statusbar(trows, tcols, sb);
 
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K"); fflush(stderr);
 
-        switch (key) {
-        case TERM_KEY_QUIT:
-        case TERM_KEY_ESC:
-        case TERM_KEY_BACK:
+        int ch = terminal_last_printable();
+
+        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC || key == TERM_KEY_BACK) {
+            config_free_account_list(accounts, count);
             return 0;
-        case TERM_KEY_ENTER:
-            return 1;
-        case TERM_KEY_LEFT:
-        case TERM_KEY_RIGHT:
-        case TERM_KEY_HOME:
-        case TERM_KEY_END:
-        case TERM_KEY_DELETE:
-        case TERM_KEY_TAB:
-        case TERM_KEY_SHIFT_TAB:
-        case TERM_KEY_IGNORE:
-            if (terminal_last_printable() == 'e') return 2;
-            break;
-        default:
-            break;
         }
+        if (key == TERM_KEY_NEXT_LINE || key == TERM_KEY_NEXT_PAGE) {
+            if (cursor < count - 1) cursor++;
+            config_free_account_list(accounts, count);
+            continue;
+        }
+        if (key == TERM_KEY_PREV_LINE || key == TERM_KEY_PREV_PAGE) {
+            if (cursor > 0) cursor--;
+            config_free_account_list(accounts, count);
+            continue;
+        }
+        if (key == TERM_KEY_ENTER && count > 0) {
+            *cfg_out = accounts[cursor].cfg;
+            accounts[cursor].cfg = NULL; /* transfer ownership */
+            config_free_account_list(accounts, count);
+            return 1;
+        }
+
+        /* Printable keys */
+        if (ch == 'h' || ch == '?') {
+            static const char *help[][2] = {
+                { "\u2191 / \u2193",   "Move cursor up / down"      },
+                { "Enter",            "Open selected account"       },
+                { "n",               "Add new account"             },
+                { "d",               "Delete selected account"     },
+                { "e",               "Edit SMTP for account"       },
+                { "ESC / q",         "Quit"                        },
+                { "h / ?",           "Show this help"              },
+            };
+            show_help_popup("Accounts shortcuts",
+                            help, (int)(sizeof(help)/sizeof(help[0])));
+            config_free_account_list(accounts, count);
+            continue;
+        }
+        if (ch == 'e' && count > 0) {
+            *cfg_out = accounts[cursor].cfg;
+            accounts[cursor].cfg = NULL;
+            config_free_account_list(accounts, count);
+            return 2;
+        }
+        if (ch == 'n') {
+            config_free_account_list(accounts, count);
+            return 3;  /* caller runs setup wizard */
+        }
+        if (ch == 'd' && count > 0) {
+            const char *name = accounts[cursor].name;
+            if (!accounts[cursor].legacy)
+                config_delete_account(name);
+            /* else legacy config.ini: don't delete silently; just skip */
+            config_free_account_list(accounts, count);
+            if (cursor > 0) cursor--;
+            continue;  /* re-render */
+        }
+
+        config_free_account_list(accounts, count);
     }
 }
 

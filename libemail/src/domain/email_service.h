@@ -86,21 +86,25 @@ char *email_service_list_folders_interactive(const Config *cfg,
                                              int *go_up);
 
 /**
- * @brief Interactive account overview screen (TUI).
+ * @brief Interactive accounts list screen (TUI).
  *
- * Displays the configured account (IMAP host, user, SMTP status) and waits
- * for the user to choose an action.  This is the top-level TUI entry point,
- * sitting above the folder browser in the navigation hierarchy.
+ * Shows all configured accounts in a navigable cursor list.
+ * This is the top-level TUI entry point, sitting above the message list
+ * in the navigation hierarchy.
  *
  * Keys:
- *   Enter  — open the account (proceed to folder browser): returns 1
- *   e      — edit SMTP settings: returns 2
- *   ESC / Q / Backspace — quit: returns 0
+ *   ↑/↓    — move cursor
+ *   Enter   — open selected account: returns 1, *cfg_out set
+ *   n       — add new account: returns 3, *cfg_out NULL
+ *   d       — delete selected account: re-displays list
+ *   e       — edit SMTP for selected account: returns 2, *cfg_out set
+ *   ESC / q / Backspace — quit: returns 0
  *
- * @param cfg  Current account configuration.
- * @return 0 = quit, 1 = open account, 2 = edit SMTP settings.
+ * @param cfg_out  Output: heap-allocated selected account Config (ret 1 or 2).
+ *                 Caller must config_free() it.  NULL on ret 0 or 3.
+ * @return 0 = quit, 1 = open account, 2 = edit SMTP, 3 = add new account.
  */
-int email_service_account_interactive(const Config *cfg);
+int email_service_account_interactive(Config **cfg_out);
 
 /**
  * @brief Reads and displays one message identified by its IMAP UID.

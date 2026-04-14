@@ -221,17 +221,74 @@ static void test_send_no_smtp_config(void) {
     pty_close(s);
 }
 
-/* ── Compose TUI tests ───────────────────────────────────────────────── */
+/* ── Compose TUI tests (editor-based) ───────────────────────────────── */
 
+/**
+ * Helper: write a shell script that replaces the draft file ($1) with a
+ * complete message and returns.  Sets $EDITOR to that script path.
+ * Returns the script path (caller must unlink when done).
+ */
+static char g_editor_script[256];
+
+static void setup_editor_mock(const char *from, const char *to,
+                              const char *subject, const char *body) {
+    snprintf(g_editor_script, sizeof(g_editor_script),
+             "/tmp/test_editor_%d.sh", (int)getpid());
+    FILE *ef = fopen(g_editor_script, "w");
+    if (!ef) return;
+    fprintf(ef, "#!/bin/sh\n");
+    fprintf(ef,
+            "printf 'From: %s\\nTo: %s\\nSubject: %s\\n\\n%s\\n' > \"$1\"\n",
+            from, to, subject, body);
+    fclose(ef);
+    chmod(g_editor_script, 0755);
+    setenv("EDITOR", g_editor_script, 1);
+}
+
+static void cleanup_editor_mock(void) {
+    unlink(g_editor_script);
+    g_editor_script[0] = '\0';
+}
+
+/**
+ * compose abort: EDITOR=true → editor exits without changing To: → "Aborted"
+ */
 static void test_compose_abort_no_to(void) {
     write_config();
+    setenv("EDITOR", "true", 1);  /* no-op editor: exits without saving */
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_open_size(120, 50, a);
     ASSERT(s != NULL, "compose abort no-to: opens");
-    ASSERT_WAIT_FOR(s, "Compose Message", WAIT_MS);
-    /* Leave To: empty and press Enter → aborts */
-    pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Aborted", WAIT_MS);
+    pty_close(s);
+}
+
+/**
+ * compose success: mock editor fills in all headers + body → "Message sent"
+ */
+static void test_compose_editor_send(void) {
+    write_config();
+    restart_smtp();
+    setup_editor_mock("testuser@example.com", "recipient@example.com",
+                      "PTY test subject", "Hello from editor mock test");
+    const char *a[] = {"compose", NULL};
+    PtySession *s = tui_run(a);
+    ASSERT(s != NULL, "compose editor send: opens");
+    ASSERT_WAIT_FOR(s, "Message sent", WAIT_MS * 2);
+    pty_close(s);
+    cleanup_editor_mock();
+}
+
+/**
+ * reply abort: batch reply with EDITOR=true → empty To: → "Aborted"
+ * (cmd_reply is invoked; the raw message may not exist → error before editor)
+ */
+static void test_reply_missing_uid(void) {
+    write_config();
+    const char *a[] = {"--batch", "reply", NULL};
+    PtySession *s = tui_run(a);
+    ASSERT(s != NULL, "reply missing uid: opens");
+    ASSERT_WAIT_FOR(s, "requires", WAIT_MS);
     pty_close(s);
 }
 
@@ -270,6 +327,8 @@ int main(int argc, char *argv[]) {
 
     printf("\n--- Compose/send: interactive compose ---\n");
     RUN_TEST(test_compose_abort_no_to);
+    RUN_TEST(test_compose_editor_send);
+    RUN_TEST(test_reply_missing_uid);
 
     stop_smtp_server();
 

@@ -384,16 +384,17 @@ static int cmd_compose_interactive(Config *cfg,
             rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
             if (rc == 0) {
                 printf("  Message sent.\n");
-                /* Save a copy to the Sent folder in a background fork so
-                 * the IMAP APPEND does not block the TUI. */
-                pid_t child = fork();
-                if (child == 0) {
-                    /* child: do the save and exit */
-                    email_service_save_sent(cfg, msg, msg_len);
-                    _exit(0);
-                }
-                /* parent: continue immediately; child is reaped by SIGCHLD
-                 * handler or by the OS when the parent exits. */
+                /* Save a copy to the Sent folder synchronously.
+                 * imap_connect uses SO_RCVTIMEO/SO_SNDTIMEO (15 s) so this
+                 * never blocks longer than the server timeout. */
+                printf("  Saving to Sent folder...\n");
+                fflush(stdout);
+                if (email_service_save_sent(cfg, msg, msg_len) != 0)
+                    fprintf(stderr, "  (Could not save to Sent folder — "
+                            "check EMAIL_SENT_FOLDER in config.)\n");
+                else
+                    printf("  Saved.\n");
+                fflush(stdout);
             }
             free(msg);
         }

@@ -43,6 +43,7 @@ typedef struct {
  *          1 = user pressed Backspace (go to folder list, pager mode only),
  *          2 = user pressed 'c' (compose new message),
  *          3 = user pressed 'r' (reply; opts->action_uid holds the target UID),
+ *          4 = background sync finished; caller should re-list to show new mail,
  *         -1 = error.
  */
 int email_service_list(const Config *cfg, EmailListOpts *opts);

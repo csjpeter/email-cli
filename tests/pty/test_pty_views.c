@@ -1278,6 +1278,61 @@ static void test_offline_show_not_cached(void) {
     restart_mock();
 }
 
+/* ── email-tui helper: open interactive TUI and navigate to message list ── */
+
+/**
+ * Open email-tui with no args, navigate through the accounts screen (Enter),
+ * and return the PTY session sitting on the message list view.
+ * Returns NULL if any step fails.
+ */
+static PtySession *tui_open_to_list(void) {
+    PtySession *s = cli_run(NULL);
+    if (!s) return NULL;
+    /* email-tui opens the accounts screen first; press Enter to open account */
+    if (pty_wait_for(s, "Email Account", WAIT_MS) != 0) {
+        pty_close(s);
+        return NULL;
+    }
+    pty_send_key(s, PTY_KEY_ENTER);
+    return s;
+}
+
+static void test_tui_list_content(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "tui list content: opens through accounts screen");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_list_esc_quit(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "tui list ESC: opens through accounts screen");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    pty_close(s);
+}
+
+static void test_tui_show_esc_to_list(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "tui show ESC→list: opens through accounts screen");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ── email-tui help tests ────────────────────────────────────────────── */
 
 static void test_tui_help_general(void) {
@@ -1312,9 +1367,10 @@ static void test_tui_help_cron(void) {
 }
 
 static void test_tui_interactive_launch(void) {
-    /* US 18: email-tui with no args in a TTY starts the interactive TUI */
-    PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "tui no-args launch: opens");
+    /* US 18: email-tui with no args in a TTY shows accounts screen,
+     * then opens the message list after Enter */
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "tui no-args launch: opens through accounts screen");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "INBOX");
@@ -1558,9 +1614,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_batch_folders_flat);
 
     printf("\n--- email-tui: interactive ---\n");
-    RUN_TEST(test_interactive_list_content);
-    RUN_TEST(test_interactive_list_esc_quit);
-    RUN_TEST(test_interactive_show_esc_to_list);
+    RUN_TEST(test_tui_list_content);
+    RUN_TEST(test_tui_list_esc_quit);
+    RUN_TEST(test_tui_show_esc_to_list);
 
     printf("\n--- email-tui: TUI launch ---\n");
     restart_mock();

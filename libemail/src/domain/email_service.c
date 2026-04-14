@@ -18,6 +18,9 @@
 #include <stdint.h>
 #include <poll.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <signal.h>
 #include <time.h>
 
 /* ── Column-aware printing ───────────────────────────────────────────── */
@@ -308,10 +311,50 @@ static int count_visual_rows(const char *body, int term_cols) {
  * Print a reverse-video status bar at terminal row trows, exactly width columns wide.
  * text must not contain ANSI escapes that move the cursor off the line.
  */
+/**
+ * Return a pointer one past the last byte of @p text that still fits in
+ * @p max_cols visible columns, skipping ANSI escape sequences.
+ * The returned slice can be fputs'd directly; its visible width is <= max_cols.
+ */
+static const char *text_end_at_cols(const char *text, int max_cols) {
+    const char *p = text;
+    int cols = 0;
+    while (*p) {
+        unsigned char c = (unsigned char)*p;
+        /* Skip ANSI CSI escape */
+        if (c == 0x1b && (unsigned char)*(p + 1) == '[') {
+            const char *q = p + 2;
+            while (*q && ((unsigned char)*q < 0x40 || (unsigned char)*q > 0x7e))
+                q++;
+            if (*q) q++;
+            p = q;
+            continue;
+        }
+        /* Decode UTF-8 codepoint width */
+        uint32_t cp; int sl;
+        if      (c < 0x80) { cp = c;        sl = 1; }
+        else if (c < 0xC2) { cp = 0xFFFD;   sl = 1; }
+        else if (c < 0xE0) { cp = c & 0x1F; sl = 2; }
+        else if (c < 0xF0) { cp = c & 0x0F; sl = 3; }
+        else if (c < 0xF8) { cp = c & 0x07; sl = 4; }
+        else               { cp = 0xFFFD;   sl = 1; }
+        for (int i = 1; i < sl && p[i]; i++) {
+            if (((unsigned char)p[i] & 0xC0) != 0x80) { sl = i; cp = 0xFFFD; break; }
+            cp = (cp << 6) | ((unsigned char)p[i] & 0x3F);
+        }
+        int w = terminal_wcwidth((wchar_t)cp);
+        if (w > 0 && cols + w > max_cols) break;
+        if (w > 0) cols += w;
+        p += sl;
+    }
+    return p;
+}
+
 static void print_statusbar(int trows, int width, const char *text) {
     fprintf(stderr, "\033[%d;1H\033[7m", trows);
-    fputs(text, stderr);
-    int used = visible_line_cols(text, text + strlen(text));
+    const char *end = text_end_at_cols(text, width);
+    fwrite(text, 1, (size_t)(end - text), stderr);
+    int used = visible_line_cols(text, end);
     int pad  = width - used;
     for (int i = 0; i < pad; i++) fputc(' ', stderr);
     fprintf(stderr, "\033[0m");
@@ -890,7 +933,79 @@ static int sync_is_running(void) {
     if (fscanf(pf, "%d", &pid) != 1) pid = 0;
     fclose(pf);
     if (pid <= 0) return 0;
-    return platform_pid_is_program((pid_t)pid, "email-cli");
+    /* Accept any of the binary names that may be running sync */
+    return platform_pid_is_program((pid_t)pid, "email-cli") ||
+           platform_pid_is_program((pid_t)pid, "email-sync") ||
+           platform_pid_is_program((pid_t)pid, "email-tui");
+}
+
+/* Build path to email-sync binary (same directory as the running binary). */
+static void get_sync_bin_path(char *buf, size_t size) {
+    snprintf(buf, size, "email-sync"); /* fallback: PATH lookup */
+#ifdef __linux__
+    char self[1024] = {0};
+    ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
+    if (n > 0) {
+        self[n] = '\0';
+        char *slash = strrchr(self, '/');
+        if (slash)
+            snprintf(buf, size, "%.*s/email-sync", (int)(slash - self), self);
+    }
+#endif
+}
+
+/* Set by the SIGCHLD handler when the background sync child exits. */
+static volatile sig_atomic_t bg_sync_done = 0;
+static pid_t bg_sync_pid = -1;
+
+static void bg_sync_sigchld(int sig) {
+    (void)sig;
+    if (bg_sync_pid > 0) {
+        int status;
+        if (waitpid(bg_sync_pid, &status, WNOHANG) == bg_sync_pid) {
+            bg_sync_pid = -1;
+            bg_sync_done = 1;
+        }
+    }
+}
+
+/**
+ * Fork and exec email-sync in the background.
+ * Installs a SIGCHLD handler (without SA_RESTART) so the blocked read() in
+ * terminal_read_key() is interrupted when the child exits — this lets the TUI
+ * react immediately without any polling.
+ * Returns 1 if the child was spawned, 0 if already running, -1 on error.
+ */
+static int sync_start_background(void) {
+    if (sync_is_running()) return 0;
+
+    struct sigaction sa = {0};
+    sa.sa_handler = bg_sync_sigchld;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0; /* no SA_RESTART: read() must be interrupted on SIGCHLD */
+    sigaction(SIGCHLD, &sa, NULL);
+
+    char sync_bin[1024];
+    get_sync_bin_path(sync_bin, sizeof(sync_bin));
+
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        /* Child: detach from the TUI session */
+        setsid();
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            if (devnull > STDERR_FILENO) close(devnull);
+        }
+        char *args[] = {sync_bin, NULL};
+        execvp(sync_bin, args);
+        _exit(1); /* exec failed */
+    }
+    bg_sync_pid = pid;
+    return 1;
 }
 
 /* Sort group: 0=unseen, 1=flagged (read), 2=rest */
@@ -1390,10 +1505,16 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         {
             char cl[512];
             int sync = sync_is_running();
+            const char *suffix;
+            if (bg_sync_done)
+                suffix = "  \u2709 New mail may have arrived!  R=refresh";
+            else if (sync)
+                suffix = "  \u21bb syncing...";
+            else
+                suffix = "";
             snprintf(cl, sizeof(cl),
                      "  %d-%d of %d message(s) in %s (%d unread).%s",
-                     wstart + 1, wend, show_count, folder, unseen_count,
-                     sync ? "  \u21bb syncing..." : "");
+                     wstart + 1, wend, show_count, folder, unseen_count, suffix);
             printf("\033[7m%s", cl);
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
@@ -1496,14 +1617,25 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             char sb[256];
             snprintf(sb, sizeof(sb),
                      "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                     "  c=compose  r=reply  n=new  f=flag  d=done"
+                     "  s=sync  R=refresh"
                      "  Backspace=folders  ESC=quit  [%d/%d]",
                      cursor + 1, show_count);
             print_statusbar(trows, tcols, sb);
         }
 
+        /* terminal_read_key() blocks in read().  When the background sync child
+         * exits, SIGCHLD fires (SA_RESTART not set) and interrupts read() with
+         * EINTR — terminal_read_key() returns TERM_KEY_IGNORE (last_printable=0).
+         * We detect this by checking whether bg_sync_done changed, and if so
+         * jump back here to wait for the next real keypress without re-rendering.
+         * The notification will appear the next time the user presses a key. */
+read_key_again: ;
+        int prev_sync_done = bg_sync_done;
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K"); fflush(stderr);
+        if (bg_sync_done && !prev_sync_done) {
+            goto read_key_again; /* SIGCHLD woke us — wait for real keypress */
+        }
 
         switch (key) {
         case TERM_KEY_BACK:
@@ -1535,6 +1667,16 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             if (ch == 'r') {
                 opts->action_uid = entries[cursor].uid;
                 list_result = 3;
+                goto list_done;
+            }
+            if (ch == 's') {
+                sync_start_background();
+                break; /* re-render: shows ⟳ syncing... indicator */
+            }
+            if (ch == 'R') {
+                /* Explicit refresh after sync notification */
+                bg_sync_done = 0;
+                list_result = 4;
                 goto list_done;
             }
             if (ch == 'n' || ch == 'f' || ch == 'd') {
@@ -1970,6 +2112,10 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
     if (local_msg_exists(cfg->folder, uid)) {
         logger_log(LOG_DEBUG, "Cache hit for UID %d in %s", uid, cfg->folder);
         raw = local_msg_load(cfg->folder, uid);
+    } else if (cfg->sync_interval > 0) {
+        /* cron/offline mode: serve only from local cache; do not connect */
+        fprintf(stderr, "Could not load message UID %d.\n", uid);
+        return -1;
     } else {
         raw = fetch_uid_content_in(cfg, cfg->folder, uid, 0);
         if (raw) {

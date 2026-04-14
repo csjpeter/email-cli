@@ -1,6 +1,7 @@
 #ifndef EMAIL_SERVICE_H
 #define EMAIL_SERVICE_H
 
+#include <stddef.h>
 #include "config.h"
 
 /**
@@ -167,6 +168,20 @@ int email_service_cron_status(void);
  * @return Heap-allocated raw message, or NULL on failure.
  */
 char *email_service_fetch_raw(const Config *cfg, int uid);
+
+/**
+ * @brief Saves a sent message to the Sent folder on the IMAP server.
+ *
+ * Connects to the IMAP server, appends @p msg to the folder configured in
+ * cfg->sent_folder (default: "Sent"), and marks it as \\Seen.
+ * A non-fatal warning is printed on failure — the message was already sent.
+ *
+ * @param cfg      Connection configuration.
+ * @param msg      Raw RFC 2822 message bytes (as returned by compose_build_message).
+ * @param msg_len  Length of @p msg in bytes.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_save_sent(const Config *cfg, const char *msg, size_t msg_len);
 
 /**
  * @brief Lists all attachments in a message identified by IMAP UID.

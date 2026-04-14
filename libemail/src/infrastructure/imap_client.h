@@ -149,6 +149,21 @@ int imap_uid_fetch_flags(ImapClient *c, int uid);
 int imap_uid_set_flag(ImapClient *c, int uid, const char *flag_name, int add);
 
 /**
+ * @brief Append a message to an IMAP folder (IMAP APPEND command).
+ *
+ * Saves @p msg (a complete RFC 2822 message) to @p folder on the server,
+ * flagged as \\Seen.  Used to store a copy of sent messages in the Sent folder.
+ *
+ * @param c        Connected and authenticated IMAP client.
+ * @param folder   Destination folder name (e.g. "Sent").
+ * @param msg      Raw RFC 2822 message bytes.
+ * @param msg_len  Length of @p msg in bytes.
+ * @return 0 on success, -1 on error.
+ */
+int imap_append(ImapClient *c, const char *folder,
+                const char *msg, size_t msg_len);
+
+/**
  * @brief Progress callback type for large literal downloads.
  *
  * @param received  Bytes received so far.

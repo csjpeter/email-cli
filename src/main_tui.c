@@ -382,9 +382,11 @@ static int cmd_compose_interactive(Config *cfg,
             printf("  Sending...\n");
             fflush(stdout);
             rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
-            free(msg);
-            if (rc == 0)
+            if (rc == 0) {
                 printf("  Message sent.\n");
+                email_service_save_sent(cfg, msg, msg_len);
+            }
+            free(msg);
         }
         free(body);
         return rc;

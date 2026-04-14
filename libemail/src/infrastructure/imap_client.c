@@ -764,3 +764,43 @@ int imap_uid_set_flag(ImapClient *c, int uid, const char *flag_name, int add) {
     response_free(&resp);
     return rc;
 }
+
+int imap_append(ImapClient *c, const char *folder,
+                const char *msg, size_t msg_len) {
+    /* Build: tag APPEND "folder" (\Seen) {size}\r\n */
+    c->tag_num++;
+    char tag[16];
+    snprintf(tag, sizeof(tag), "A%04d", c->tag_num);
+
+    char cmd[1024];
+    int cmdlen = snprintf(cmd, sizeof(cmd),
+                          "%s APPEND \"%s\" (\\Seen) {%zu}\r\n",
+                          tag, folder, msg_len);
+    if (cmdlen < 0 || (size_t)cmdlen >= sizeof(cmd)) return -1;
+
+    logger_log(LOG_DEBUG, "IMAP [OUT] %s APPEND \"%s\" (\\Seen) {%zu}",
+               tag, folder, msg_len);
+    if (net_write(c, cmd, (size_t)cmdlen) != 0) return -1;
+
+    /* Server must respond with a continuation '+ ...' before we send data */
+    LineBuf lb = {NULL, 0, 0};
+    if (read_line(c, &lb) != 0) { linebuf_free(&lb); return -1; }
+    const char *line = lb.data ? lb.data : "";
+    logger_log(LOG_DEBUG, "IMAP [ IN] %s", line);
+    int is_cont = (line[0] == '+');
+    linebuf_free(&lb);
+
+    if (!is_cont) {
+        logger_log(LOG_WARN, "IMAP APPEND: expected continuation response");
+        return -1;
+    }
+
+    /* Send message literal */
+    if (net_write(c, msg, msg_len) != 0) return -1;
+
+    /* Read tagged response */
+    Response resp = {0};
+    int rc = read_response(c, tag, &resp);
+    response_free(&resp);
+    return rc;
+}

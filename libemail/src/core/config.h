@@ -13,6 +13,7 @@ typedef struct {
     char *user;            /**< IMAP / default username (often an email address). */
     char *pass;            /**< IMAP password. */
     char *folder;          /**< Default IMAP folder name. */
+    char *sent_folder;     /**< Folder to save sent messages into (default: "Sent"). */
     int   ssl_no_verify;   /**< 1 = disable SSL peer verification (for self-signed certs in test envs). */
     int   sync_interval;   /**< Sync interval in minutes; 0 = online mode, >0 = cron mode. */
     /* SMTP (outgoing) */

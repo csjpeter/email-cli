@@ -2695,3 +2695,16 @@ int email_service_save_attachment(const Config *cfg, int uid,
     free(dir_heap);
     return rc;
 }
+
+int email_service_save_sent(const Config *cfg, const char *msg, size_t msg_len) {
+    RAII_IMAP ImapClient *imap = make_imap(cfg);
+    if (!imap) {
+        fprintf(stderr, "Warning: could not connect to save message to Sent folder.\n");
+        return -1;
+    }
+    const char *sent_folder = cfg->sent_folder ? cfg->sent_folder : "Sent";
+    int rc = imap_append(imap, sent_folder, msg, msg_len);
+    if (rc != 0)
+        fprintf(stderr, "Warning: could not save message to '%s' folder.\n", sent_folder);
+    return rc;
+}

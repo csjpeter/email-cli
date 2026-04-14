@@ -5,12 +5,10 @@
  * @file config_store.h
  * @brief Secure configuration management (load/save to disk).
  *
- * Accounts are stored as:
- *   ~/.config/email-cli/accounts/<name>/config.ini   (named profiles)
- *   ~/.config/email-cli/config.ini                   (legacy / active)
+ * Accounts are stored exclusively as:
+ *   ~/.config/email-cli/accounts/<email>/config.ini
  *
- * CLI tools use config_load_from_store() which returns the legacy config.ini
- * or the first named profile if no legacy file exists.
+ * CLI tools use config_load_from_store() which returns the first account found.
  * The TUI accounts screen uses config_list_accounts() to show all profiles.
  */
 
@@ -23,16 +21,12 @@
  * config_free_account_list() or individually (free(name), config_free(cfg)).
  */
 typedef struct {
-    char   *name;   /**< Profile name / directory name (usually the email address). */
+    char   *name;   /**< Profile name / directory name (email address). */
     Config *cfg;    /**< Loaded configuration. */
-    int     legacy; /**< 1 if loaded from the root config.ini (not accounts/). */
 } AccountEntry;
 
 /**
- * @brief Lists all configured accounts.
- *
- * Includes the legacy root config.ini (if present) followed by all named
- * profiles under ~/.config/email-cli/accounts/.
+ * @brief Lists all configured accounts from ~/.config/email-cli/accounts/.
  *
  * @param count_out  Set to the number of entries returned.
  * @return Heap-allocated array of AccountEntry, or NULL if none found.
@@ -49,8 +43,7 @@ void config_free_account_list(AccountEntry *list, int count);
  * @brief Saves a named account profile to
  *        ~/.config/email-cli/accounts/<cfg->user>/config.ini (mode 0600).
  *
- * Creates the directory if necessary.  Also updates the legacy root
- * config.ini so that CLI tools always reflect the last-written account.
+ * Creates the directory if necessary.
  *
  * @param cfg  Configuration to save; cfg->user is used as the profile name.
  * @return 0 on success, -1 on failure.

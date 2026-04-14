@@ -22,22 +22,24 @@ email-tui [--batch] [command] [options]
 
 ### Message List (reached from accounts screen)
 6. The message list behaves identically to `email-cli`, plus additional write-capable keys:
-   - `c` — open compose window for a new message.
-   - `r` — open reply window for the selected message.
+   - `c` — compose a new message (opens `$EDITOR`; see [US-20](20-compose-reply.md)).
+   - `r` — reply to the selected message (opens `$EDITOR` with quoted body).
    - `s` — start background sync (see US-19).
    - `R` — refresh the list from local cache.
    - `n` / `f` / `d` — set IMAP keyword flags on the selected message.
-7. Status bar in list view (100-column terminal):
+7. In the message reader, `r` also opens a reply (see [US-20](20-compose-reply.md)).
+8. Status bar in list view (100-column terminal):
    ```
-     ↑↓=step  PgDn/PgUp=page  Enter=open  s=sync  R=refresh  Backspace=folders  ESC=quit  [n/N]
+     ↑↓=step  PgDn/PgUp=page  Enter=open  Backspace=folders  ESC=quit
+     c=compose  r=reply  n=new  f=flag  d=done  s=sync  R=refresh  [n/N]
    ```
 
 ### General
-8. Supports all read commands: `list`, `show`, `folders`, `sync`.
-9. Supports cron management: `cron setup`, `cron remove`, `cron status`.
-10. Runs the IMAP setup wizard on first launch (no existing configuration).
-11. In non-TTY mode (or with `--batch`), outputs in batch/scriptable format.
-12. All help pages use `email-tui` in usage lines.
+9. Supports all read commands: `list`, `show`, `folders`, `sync`.
+10. Supports cron management: `cron setup`, `cron remove`, `cron status`.
+11. Runs the IMAP setup wizard on first launch (no existing configuration).
+12. In non-TTY mode (or with `--batch`), outputs in batch/scriptable format.
+13. All help pages use `email-tui` in usage lines.
 
 ## Commands
 

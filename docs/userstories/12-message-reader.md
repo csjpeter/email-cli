@@ -19,9 +19,13 @@ Pressing Enter on a message in the interactive message list.
    |-----|--------|
    | PgDn / ↓ | Scroll forward one page / one line |
    | PgUp / ↑ | Scroll back one page / one line |
+   | `r` | Reply to this message (email-tui only; opens `$EDITOR`) |
+   | `a` | Save attachment (if present) |
    | ESC / q  | Return to message list |
    | Backspace | Return to message list |
-6. A status bar at the bottom shows: `[page/total] PgDn=scroll PgUp=back ESC=quit`
+6. A status bar at the bottom shows:
+   `-- [page/total] PgDn/↓=scroll  PgUp/↑=back  r=reply  Backspace/ESC/q=list --`
+   (attachments add `a=save  A=save-all(N)` before `Backspace`)
 
 ## Caching
 - Raw message is saved to `~/.local/share/email-cli/accounts/<host>/messages/<folder>/<uid>.eml`

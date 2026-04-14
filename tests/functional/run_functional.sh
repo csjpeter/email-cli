@@ -9,6 +9,8 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BIN_DIR="$PROJECT_ROOT/bin"
 MOCK_SERVER_SRC="$PROJECT_ROOT/tests/functional/mock_imap_server.c"
 MOCK_SERVER_BIN="$PROJECT_ROOT/build/tests/functional/mock_imap_server"
+MOCK_SMTP_SRC="$PROJECT_ROOT/tests/pty/mock_smtp_server.c"
+MOCK_SMTP_BIN="$PROJECT_ROOT/build/tests/functional/mock_smtp_server"
 
 echo "--- email-cli Functional Tests ---"
 
@@ -25,24 +27,32 @@ if [ ! -f "$TEST_CERT" ] || [ ! -f "$TEST_KEY" ]; then
         -subj "/CN=localhost"
 fi
 
-# 1. Compile Mock Server (needs OpenSSL for TLS)
+# 1. Compile Mock Servers (needs OpenSSL for TLS)
 mkdir -p "$PROJECT_ROOT/build/tests/functional"
 gcc "$MOCK_SERVER_SRC" -o "$MOCK_SERVER_BIN" -lssl -lcrypto
+gcc "$MOCK_SMTP_SRC"   -o "$MOCK_SMTP_BIN"   -lssl -lcrypto
 
-# 2. Start Mock Server in background, capturing its stdout for later assertions
+# 2. Start Mock IMAP Server in background
 # Run from BUILD_DIR so that relative path "tests/certs/test.crt" resolves correctly
 echo "Starting Mock IMAP Server..."
 MOCK_LOG="$PROJECT_ROOT/build/tests/functional/mock_server.log"
 (cd "$PROJECT_ROOT/build" && "$MOCK_SERVER_BIN") >"$MOCK_LOG" 2>&1 &
 SERVER_PID=$!
 
-# Ensure cleanup on exit
-trap "kill $SERVER_PID || true" EXIT
+# 2b. Start Mock SMTP Server in background
+SMTP_PORT=9465
+echo "Starting Mock SMTP Server on port $SMTP_PORT..."
+SMTP_LOG="$PROJECT_ROOT/build/tests/functional/mock_smtp.log"
+(cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP_PORT "$MOCK_SMTP_BIN") >"$SMTP_LOG" 2>&1 &
+SMTP_PID=$!
 
-# Give it a second to start
+# Ensure cleanup on exit
+trap "kill $SERVER_PID $SMTP_PID 2>/dev/null || true" EXIT
+
+# Give servers a moment to start
 sleep 1
 
-# 3. Create a temporary config for the test
+# 3. Create a temporary config for the test (IMAP + SMTP)
 TEST_HOME="/tmp/email-cli-func-test"
 rm -rf "$TEST_HOME"
 mkdir -p "$TEST_HOME/.config/email-cli"
@@ -52,6 +62,10 @@ EMAIL_USER=testuser
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
 SSL_NO_VERIFY=1
+SMTP_HOST=smtps://localhost:$SMTP_PORT
+SMTP_USER=testuser
+SMTP_PASS=testpass
+EMAIL_SENT_FOLDER=Sent
 EOF
 
 export HOME="$TEST_HOME"
@@ -210,6 +224,30 @@ echo "999999" > "$PID_FILE"
 STALE_OUTPUT=$("$BIN_DIR/email-cli" list --batch 2>&1 || true)
 check_not "No spurious syncing (stale pid)"   "syncing"        "$STALE_OUTPUT"
 rm -f "$PID_FILE"
+
+# CRITICAL: send + save-to-Sent (IMAP APPEND LITERAL+)
+# This test covers the full compose → SMTP send → IMAP APPEND path.
+# A regression here means the Sent folder save is broken (e.g. TLS buffering hang).
+echo ""
+echo "--- CRITICAL: send + save-to-Sent (IMAP APPEND via LITERAL+) ---"
+echo "Running: email-tui --batch send ..."
+SEND_OUTPUT=$("$BIN_DIR/email-tui" --batch send \
+    --to "recipient@test.example.com" \
+    --subject "Functional Test Mail" \
+    --body "Hello from functional test." \
+    2>&1 || true)
+echo "$SEND_OUTPUT"
+check "Send: message sent confirmation"  "Message sent"  "$SEND_OUTPUT"
+check "Send: saved-to-Sent confirmation" "Saved"         "$SEND_OUTPUT"
+
+# Verify the SMTP mock received the message
+SMTP_LOG_CONTENT=$(cat "$SMTP_LOG" 2>/dev/null || true)
+check "SMTP mock: RECEIVED confirmation" "RECEIVED" "$SMTP_LOG_CONTENT"
+
+# Verify the IMAP client issued an APPEND command (email-tui logs to tui-session.log)
+TUI_LOG="$TEST_HOME/.cache/email-cli/logs/tui-session.log"
+TUI_SESSION=$(cat "$TUI_LOG" 2>/dev/null || true)
+check "TUI session log: APPEND command issued to IMAP server" "APPEND" "$TUI_SESSION"
 
 echo ""
 echo "--- Functional Test Results ---"

@@ -518,9 +518,15 @@ static int cmd_send_batch(const Config *cfg,
         return -1;
     }
     int rc = smtp_send(cfg, from, to, msg, msg_len);
-    free(msg);
-    if (rc == 0)
+    if (rc == 0) {
         printf("Message sent.\n");
+        if (email_service_save_sent(cfg, msg, msg_len) == 0)
+            printf("Saved.\n");
+        else
+            fprintf(stderr, "(Could not save to Sent folder — "
+                    "check EMAIL_SENT_FOLDER in config.)\n");
+    }
+    free(msg);
     return rc;
 }
 

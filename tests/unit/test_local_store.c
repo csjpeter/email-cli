@@ -25,7 +25,7 @@ void test_local_msg_store(void) {
 
     /* Pre-clean */
     unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser@test.example.com/store/INBOX/7/3/137.eml");
+           "testuser/store/INBOX/7/3/137.eml");
 
     /* 1. Not stored initially */
     ASSERT(local_msg_exists(folder, uid) == 0,
@@ -64,11 +64,11 @@ void test_local_msg_store(void) {
 
     /* Cleanup */
     unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser@test.example.com/store/INBOX/7/3/137.eml");
+           "testuser/store/INBOX/7/3/137.eml");
     unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser@test.example.com/store/INBOX/2/4/42.eml");
+           "testuser/store/INBOX/2/4/42.eml");
     unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser@test.example.com/store/INBOX/5/0/5.eml");
+           "testuser/store/INBOX/5/0/5.eml");
 
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
@@ -118,7 +118,7 @@ void test_local_index(void) {
     /* Verify from index exists */
     const char *from_path =
         "/tmp/email-cli-index-test/.local/share/email-cli/accounts/"
-        "testuser@test.example.com/index/from/github.com/noreply";
+        "testuser/index/from/github.com/noreply";
     {
         RAII_FILE FILE *fp = fopen(from_path, "r");
         ASSERT(fp != NULL, "from index file should exist");
@@ -134,7 +134,7 @@ void test_local_index(void) {
     /* Verify date index exists */
     const char *date_path =
         "/tmp/email-cli-index-test/.local/share/email-cli/accounts/"
-        "testuser@test.example.com/index/date/2026/03/15";
+        "testuser/index/date/2026/03/15";
     {
         RAII_FILE FILE *fp = fopen(date_path, "r");
         ASSERT(fp != NULL, "date index file should exist");
@@ -173,7 +173,7 @@ void test_manifest(void) {
 
     /* Pre-clean */
     unlink("/tmp/email-cli-manifest-test/.local/share/email-cli/"
-           "accounts/testuser@test.example.com/manifests/INBOX.tsv");
+           "accounts/testuser/manifests/INBOX.tsv");
 
     /* 1. Load non-existent manifest returns NULL */
     Manifest *m = manifest_load("INBOX");

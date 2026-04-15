@@ -130,20 +130,25 @@ static void help_folders(void) {
 
 static void help_sync(void) {
     printf(
-        "Usage: email-tui sync\n"
+        "Usage: email-tui sync [--account <email>]\n"
         "\n"
         "Downloads all messages in every IMAP folder to the local store.\n"
+        "Without --account, every configured account is synced in alphabetical\n"
+        "order.  With --account, only the specified account is synced.\n"
         "Messages already stored locally are skipped.\n"
         "Attachments are stored as part of the raw RFC 2822 message data\n"
         "(not extracted to separate files).\n"
+        "\n"
+        "Options:\n"
+        "  --account <email>   Sync only the account with this email address\n"
         "\n"
         "Progress is printed per folder:\n"
         "  Syncing INBOX ...\n"
         "  42 fetched, 10 already stored\n"
         "\n"
         "Examples:\n"
-        "  email-tui sync\n"
-        "  email-tui sync --batch\n"
+        "  email-tui sync                              # all accounts\n"
+        "  email-tui sync --account user@example.com  # one account\n"
     );
 }
 
@@ -860,7 +865,24 @@ int main(int argc, char *argv[]) {
         if (ok) result = email_service_list_folders(cfg, tree);
 
     } else if (strcmp(cmd, "sync") == 0) {
-        result = email_service_sync(cfg);
+        const char *account_filter = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--account") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --account requires an email address.\n");
+                    ok = 0;
+                } else {
+                    account_filter = argv[++i];
+                }
+            } else {
+                unknown_option("sync", argv[i]);
+                ok = 0;
+            }
+        }
+        if (ok)
+            result = email_service_sync_all(account_filter);
 
     } else if (strcmp(cmd, "cron") == 0) {
         /* 'cron status' and 'cron remove' are handled before config loading above.

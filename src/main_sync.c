@@ -14,25 +14,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <locale.h>
-#include "config_store.h"
 #include "email_service.h"
 #include "platform/path.h"
 #include "raii.h"
 #include "logger.h"
-#include "local_store.h"
 #include "fs_util.h"
 
 static void help(void) {
     printf(
-        "Usage: email-sync [options]\n"
+        "Usage: email-sync [--account <email>]\n"
         "\n"
         "Downloads all messages from all IMAP folders to the local store.\n"
+        "Without --account, every configured account is synced in alphabetical\n"
+        "order.  With --account, only the specified account is synced.\n"
         "Messages already stored locally are skipped.\n"
         "\n"
         "Designed to be run from cron (installed by 'email-cli cron setup').\n"
         "\n"
         "Options:\n"
-        "  --help, -h    Show this help message\n"
+        "  --account <email>   Sync only the account with this email address\n"
+        "  --help, -h          Show this help message\n"
         "\n"
         "Exit Codes:\n"
         "  0   Sync completed successfully (or already up to date)\n"
@@ -43,10 +44,19 @@ static void help(void) {
 int main(int argc, char *argv[]) {
     setlocale(LC_ALL, "");
 
+    const char *account_filter = NULL;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             help();
             return EXIT_SUCCESS;
+        }
+        if (strcmp(argv[i], "--account") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: --account requires an email address.\n");
+                return EXIT_FAILURE;
+            }
+            account_filter = argv[++i];
+            continue;
         }
         fprintf(stderr, "Unknown option '%s'.\nRun 'email-sync --help' for usage.\n",
                 argv[i]);
@@ -75,24 +85,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Warning: Logging system failed to initialize.\n");
     logger_log(LOG_INFO, "--- email-sync starting ---");
 
-    /* 3. Load configuration — no wizard: must already exist */
-    Config *cfg = config_load_from_store();
-    if (!cfg) {
-        fprintf(stderr,
-                "Error: No configuration found.\n"
-                "Run 'email-cli' once to complete the setup wizard.\n");
-        logger_close();
-        return EXIT_FAILURE;
-    }
+    /* 3. Run sync (handles account loading, local_store_init, and iteration) */
+    int result = email_service_sync_all(account_filter);
 
-    /* 4. Initialize local store */
-    if (local_store_init(cfg->host, cfg->user) != 0)
-        logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
-
-    /* 5. Run sync */
-    int result = email_service_sync(cfg);
-
-    config_free(cfg);
     logger_log(LOG_INFO, "--- email-sync finished (result: %d) ---", result);
     logger_close();
 

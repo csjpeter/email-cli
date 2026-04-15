@@ -1227,6 +1227,26 @@ static int folder_has_children(char **names, int count, const char *name, char s
     return 0;
 }
 
+/** Sum unseen/flagged/messages for a folder and all its descendants. */
+static void sum_subtree(char **names, int count, char sep,
+                        const char *prefix, const FolderStatus *statuses,
+                        int *msgs_out, int *unseen_out, int *flagged_out) {
+    size_t plen = strlen(prefix);
+    int msgs = 0, unseen = 0, flagged = 0;
+    for (int i = 0; i < count; i++) {
+        const char *n = names[i];
+        if (strcmp(n, prefix) == 0 ||
+            (strncmp(n, prefix, plen) == 0 && n[plen] == sep)) {
+            msgs   += statuses ? statuses[i].messages : 0;
+            unseen += statuses ? statuses[i].unseen   : 0;
+            flagged+= statuses ? statuses[i].flagged  : 0;
+        }
+    }
+    *msgs_out   = msgs;
+    *unseen_out = unseen;
+    *flagged_out= flagged;
+}
+
 /**
  * Build filtered index (into names[]) of direct children of `prefix`.
  * prefix="" means root level (folders with no sep in their name).
@@ -2057,9 +2077,17 @@ char *email_service_list_folders_interactive(const Config *cfg,
             } else {
                 int fi = vis[i];
                 int hk = folder_has_children(folders, count, folders[fi], sep);
-                int msgs = statuses ? statuses[fi].messages : 0;
-                int unsn = statuses ? statuses[fi].unseen   : 0;
-                int flgd = statuses ? statuses[fi].flagged  : 0;
+                int msgs, unsn, flgd;
+                if (hk) {
+                    /* Aggregate own + all descendant counts so the user can see
+                     * total unread/flagged even when children are not expanded. */
+                    sum_subtree(folders, count, sep, folders[fi], statuses,
+                                &msgs, &unsn, &flgd);
+                } else {
+                    msgs = statuses ? statuses[fi].messages : 0;
+                    unsn = statuses ? statuses[fi].unseen   : 0;
+                    flgd = statuses ? statuses[fi].flagged  : 0;
+                }
                 print_folder_item(folders, count, fi, sep, 0, i == cursor, hk,
                                   msgs, unsn, flgd, name_w);
             }
@@ -2180,18 +2208,47 @@ folders_int_done:
     return selected;
 }
 
+/**
+ * Sum unread and flagged counts across all locally-cached folders for one
+ * account.  Temporarily switches g_account_base via local_store_init; the
+ * caller must restore the correct account after iterating all accounts.
+ */
+static void get_account_totals(const Config *cfg, int *unseen_out, int *flagged_out) {
+    *unseen_out = 0; *flagged_out = 0;
+    if (!cfg || !cfg->host) return;
+    local_store_init(cfg->host, cfg->user);
+    int fcount = 0;
+    char **flist = local_folder_list_load(&fcount, NULL);
+    if (!flist) return;
+    for (int i = 0; i < fcount; i++) {
+        int total = 0, unseen = 0, flagged = 0;
+        manifest_count_folder(flist[i], &total, &unseen, &flagged);
+        *unseen_out  += unseen;
+        *flagged_out += flagged;
+        free(flist[i]);
+    }
+    free(flist);
+}
+
 /** Print one account row; cursor=1 draws the selection arrow. */
-static void print_account_row(const Config *cfg, int cursor, int tcols) {
+static void print_account_row(const Config *cfg, int cursor, int tcols,
+                               int unseen, int flagged) {
     const char *user = cfg->user ? cfg->user : "(unknown)";
     const char *host = cfg->host ? cfg->host : "";
     /* Strip protocol prefix for compact display */
     if (strncmp(host, "imaps://", 8) == 0) host += 8;
     else if (strncmp(host, "imap://",  7) == 0) host += 7;
 
+    char u[16], f[16];
+    fmt_thou(u, sizeof(u), unseen);
+    fmt_thou(f, sizeof(f), flagged);
+
     if (cursor)
-        printf("  \033[1m\u2192 %-38.38s  %s\033[0m\n", user, host);
+        printf("  \033[1m\u2192 %6s  %7s  %-32.32s  %s\033[0m\n",
+               u, f, user, host);
     else
-        printf("    %-38.38s  %s\n", user, host);
+        printf("    %6s  %7s  %-32.32s  %s\n",
+               u, f, user, host);
     (void)tcols;
 }
 
@@ -2213,14 +2270,27 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
         if (tcols <= 0) tcols = 80;
         if (cursor >= count) cursor = count > 0 ? count - 1 : 0;
 
+        /* Compute unread/flagged totals for each account (local manifests only) */
+        int *acc_unseen  = calloc(count > 0 ? (size_t)count : 1, sizeof(int));
+        int *acc_flagged = calloc(count > 0 ? (size_t)count : 1, sizeof(int));
+        for (int i = 0; i < count; i++)
+            get_account_totals(accounts[i].cfg, &acc_unseen[i], &acc_flagged[i]);
+
         printf("\033[H\033[2J");
         printf("  Email Accounts (%d)\n\n", count);
 
         if (count == 0) {
             printf("  No accounts configured.\n");
         } else {
+            printf("  %6s  %7s  %-32s  %s\n", "Unread", "Flagged", "Account", "Server");
+            printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
+            print_dbar(32);
+            printf("  ");
+            print_dbar(tcols > 54 ? tcols - 54 : 10);
+            printf("\n");
             for (int i = 0; i < count; i++)
-                print_account_row(accounts[i].cfg, i == cursor, tcols);
+                print_account_row(accounts[i].cfg, i == cursor, tcols,
+                                  acc_unseen[i], acc_flagged[i]);
 
             /* Show detail for selected account */
             printf("\n");
@@ -2246,32 +2316,30 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
 
         int ch = terminal_last_printable();
 
+#define ACC_FREE() do { free(acc_unseen); free(acc_flagged); \
+                        config_free_account_list(accounts, count); } while(0)
+
         if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) {
             if (cursor_inout) *cursor_inout = cursor;
-            config_free_account_list(accounts, count);
-            return 0;
+            ACC_FREE(); return 0;
         }
         if (key == TERM_KEY_BACK) {
             /* Backspace has no meaning at the top-level accounts screen; ignore. */
-            config_free_account_list(accounts, count);
-            continue;
+            ACC_FREE(); continue;
         }
         if (key == TERM_KEY_NEXT_LINE || key == TERM_KEY_NEXT_PAGE) {
             if (cursor < count - 1) cursor++;
-            config_free_account_list(accounts, count);
-            continue;
+            ACC_FREE(); continue;
         }
         if (key == TERM_KEY_PREV_LINE || key == TERM_KEY_PREV_PAGE) {
             if (cursor > 0) cursor--;
-            config_free_account_list(accounts, count);
-            continue;
+            ACC_FREE(); continue;
         }
         if (key == TERM_KEY_ENTER && count > 0) {
             if (cursor_inout) *cursor_inout = cursor;
             *cfg_out = accounts[cursor].cfg;
             accounts[cursor].cfg = NULL; /* transfer ownership */
-            config_free_account_list(accounts, count);
-            return 1;
+            ACC_FREE(); return 1;
         }
 
         /* Printable keys */
@@ -2288,37 +2356,34 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
             };
             show_help_popup("Accounts shortcuts",
                             help, (int)(sizeof(help)/sizeof(help[0])));
-            config_free_account_list(accounts, count);
-            continue;
+            ACC_FREE(); continue;
         }
         if (ch == 'i' && count > 0) {
             if (cursor_inout) *cursor_inout = cursor;
             *cfg_out = accounts[cursor].cfg;
             accounts[cursor].cfg = NULL;
-            config_free_account_list(accounts, count);
-            return 4;
+            ACC_FREE(); return 4;
         }
         if (ch == 'e' && count > 0) {
             if (cursor_inout) *cursor_inout = cursor;
             *cfg_out = accounts[cursor].cfg;
             accounts[cursor].cfg = NULL;
-            config_free_account_list(accounts, count);
-            return 2;
+            ACC_FREE(); return 2;
         }
         if (ch == 'n') {
-            config_free_account_list(accounts, count);
-            return 3;  /* caller runs setup wizard */
+            ACC_FREE(); return 3;  /* caller runs setup wizard */
         }
         if (ch == 'd' && count > 0) {
             const char *name = accounts[cursor].name;
             config_delete_account(name);
-            config_free_account_list(accounts, count);
+            ACC_FREE();
             if (cursor > 0) cursor--;
             continue;  /* re-render */
         }
 
-        config_free_account_list(accounts, count);
+        ACC_FREE();
     }
+#undef ACC_FREE
 }
 
 int email_service_read(const Config *cfg, int uid, int pager, int page_size) {

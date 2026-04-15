@@ -40,7 +40,7 @@ add_subdirectory(libemail)
 add_subdirectory(libwrite)
 
 add_executable(email-cli src/main.c)
-target_link_libraries(email-cli libemail)
+target_link_libraries(email-cli libemail libwrite)
 
 add_executable(email-cli-ro src/main_ro.c)
 target_link_libraries(email-cli-ro libemail)

@@ -2195,12 +2195,12 @@ static void print_account_row(const Config *cfg, int cursor, int tcols) {
     (void)tcols;
 }
 
-int email_service_account_interactive(Config **cfg_out) {
+int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
     *cfg_out = NULL;
     RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
     (void)tui_raw;
 
-    int cursor = 0;
+    int cursor = (cursor_inout && *cursor_inout > 0) ? *cursor_inout : 0;
 
     for (;;) {
         /* Reload account list on every iteration (list may change after add/delete) */
@@ -2246,9 +2246,15 @@ int email_service_account_interactive(Config **cfg_out) {
 
         int ch = terminal_last_printable();
 
-        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC || key == TERM_KEY_BACK) {
+        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) {
+            if (cursor_inout) *cursor_inout = cursor;
             config_free_account_list(accounts, count);
             return 0;
+        }
+        if (key == TERM_KEY_BACK) {
+            /* Backspace has no meaning at the top-level accounts screen; ignore. */
+            config_free_account_list(accounts, count);
+            continue;
         }
         if (key == TERM_KEY_NEXT_LINE || key == TERM_KEY_NEXT_PAGE) {
             if (cursor < count - 1) cursor++;
@@ -2261,6 +2267,7 @@ int email_service_account_interactive(Config **cfg_out) {
             continue;
         }
         if (key == TERM_KEY_ENTER && count > 0) {
+            if (cursor_inout) *cursor_inout = cursor;
             *cfg_out = accounts[cursor].cfg;
             accounts[cursor].cfg = NULL; /* transfer ownership */
             config_free_account_list(accounts, count);
@@ -2285,12 +2292,14 @@ int email_service_account_interactive(Config **cfg_out) {
             continue;
         }
         if (ch == 'i' && count > 0) {
+            if (cursor_inout) *cursor_inout = cursor;
             *cfg_out = accounts[cursor].cfg;
             accounts[cursor].cfg = NULL;
             config_free_account_list(accounts, count);
             return 4;
         }
         if (ch == 'e' && count > 0) {
+            if (cursor_inout) *cursor_inout = cursor;
             *cfg_out = accounts[cursor].cfg;
             accounts[cursor].cfg = NULL;
             config_free_account_list(accounts, count);

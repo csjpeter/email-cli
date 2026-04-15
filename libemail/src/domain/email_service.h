@@ -134,6 +134,19 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size);
 int email_service_sync(const Config *cfg);
 
 /**
+ * @brief Sync all configured accounts, or only the one matching only_account.
+ *
+ * Iterates config_list_accounts() in alphabetical order.  For each account
+ * (or the single matching account when only_account is non-NULL) it calls
+ * local_store_init() then email_service_sync().
+ *
+ * @param only_account  Email address to restrict sync to, or NULL for all.
+ * @return 0 if every account synced successfully, -1 if any failed or the
+ *         requested account was not found.
+ */
+int email_service_sync_all(const char *only_account);
+
+/**
  * @brief Installs a user crontab entry to run 'email-cli sync' periodically.
  *
  * Uses cfg->sync_interval (minutes) to set the cron frequency.

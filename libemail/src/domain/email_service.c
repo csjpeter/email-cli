@@ -2637,6 +2637,38 @@ int email_service_sync(const Config *cfg) {
     return errors ? -1 : 0;
 }
 
+int email_service_sync_all(const char *only_account) {
+    int count = 0;
+    AccountEntry *accounts = config_list_accounts(&count);
+    if (!accounts || count == 0) {
+        fprintf(stderr, "No accounts configured.\n");
+        config_free_account_list(accounts, count);
+        return -1;
+    }
+
+    int errors = 0;
+    int synced = 0;
+    for (int i = 0; i < count; i++) {
+        if (only_account && only_account[0] &&
+            strcmp(accounts[i].name, only_account) != 0)
+            continue;
+        if (count > 1)
+            printf("\n=== Syncing account: %s ===\n", accounts[i].name);
+        local_store_init(accounts[i].cfg->host, accounts[i].cfg->user);
+        if (email_service_sync(accounts[i].cfg) < 0)
+            errors++;
+        synced++;
+    }
+    config_free_account_list(accounts, count);
+
+    if (synced == 0) {
+        fprintf(stderr, "Account '%s' not found.\n",
+                only_account ? only_account : "");
+        return -1;
+    }
+    return errors > 0 ? -1 : 0;
+}
+
 int email_service_cron_setup(const Config *cfg) {
 
     /* Find the path to this binary */

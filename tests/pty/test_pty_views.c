@@ -1541,6 +1541,74 @@ static void test_tui_accounts_multiple_shown(void) {
     rmdir(path);
 }
 
+static void test_tui_accounts_backspace_ignored(void) {
+    /* US-21 AC10: Backspace at accounts screen is ignored, does not quit */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts backspace ignored: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    pty_settle(s, SETTLE_MS);
+    /* Must still be on the accounts screen */
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_accounts_columns(void) {
+    /* US-21 AC2: accounts screen shows Unread/Flagged/Account/Server columns */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts columns: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Unread");
+    ASSERT_SCREEN_CONTAINS(s, "Flagged");
+    ASSERT_SCREEN_CONTAINS(s, "Account");
+    ASSERT_SCREEN_CONTAINS(s, "Server");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_accounts_cursor_restored(void) {
+    /* US-21 AC11: cursor is restored to previously open account on return */
+    write_second_account("second@example.com");
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "cursor restore: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Move to second account and open it */
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Navigate back to accounts via Backspace × 2 */
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Selection arrow must be visible and second account must be on screen */
+    ASSERT_SCREEN_CONTAINS(s, "second@example.com");
+    /* The → arrow (UTF-8: \xe2\x86\x92) and second account must both appear */
+    ASSERT_SCREEN_CONTAINS(s, "\xe2\x86\x92");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    /* cleanup */
+    char path[500];
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/second@example.com/config.ini",
+             g_test_home);
+    unlink(path);
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/second@example.com", g_test_home);
+    rmdir(path);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  HELP PANEL (US-22)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -1939,6 +2007,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_tui_accounts_enter_opens_list);
     RUN_TEST(test_tui_accounts_backspace_from_list);
     RUN_TEST(test_tui_accounts_multiple_shown);
+    RUN_TEST(test_tui_accounts_backspace_ignored);
+    RUN_TEST(test_tui_accounts_columns);
+    RUN_TEST(test_tui_accounts_cursor_restored);
 
     printf("\n--- email-tui: help panel (US-22) ---\n");
     restart_mock();

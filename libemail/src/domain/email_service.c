@@ -1616,8 +1616,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             else
                 suffix = "";
             snprintf(cl, sizeof(cl),
-                     "  %d-%d of %d message(s) in %s (%d unread).%s",
-                     wstart + 1, wend, show_count, folder, unseen_count, suffix);
+                     "  %d-%d of %d message(s) in %s (%d unread) [%s].%s",
+                     wstart + 1, wend, show_count, folder, unseen_count,
+                     cfg->user ? cfg->user : "?", suffix);
             printf("\033[7m%s", cl);
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');

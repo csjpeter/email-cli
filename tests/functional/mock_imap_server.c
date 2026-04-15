@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <signal.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -12,9 +11,18 @@
 /**
  * @file mock_imap_server.c
  * @brief Minimal TLS IMAP server for integration testing.
+ *
+ * Environment variables:
+ *   MOCK_IMAP_PORT    - TCP port to listen on (default 9993)
+ *   MOCK_IMAP_SUBJECT - Subject returned in FETCH responses (default "Test Message")
+ *
+ * Launching two instances with different ports and subjects allows testing
+ * that account isolation works correctly (each account connects to its own
+ * server and sees its own messages).
  */
 
-#define PORT 9993
+static int         g_port    = 9993;
+static const char *g_subject = "Test Message";
 
 /**
  * Read one CRLF-terminated line from ssl into buf (max len-1 chars + NUL).
@@ -134,45 +142,47 @@ static void handle_client(SSL *ssl) {
             snprintf(ok, sizeof(ok), "%s OK STORE completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "FETCH")) {
-            const char *headers =
-                "From: Test User <test@example.com>\r\n"
-                "Subject: Test Message\r\n"
-                "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
-                "\r\n";
-            /* multipart/mixed message: HTML body + two attachments.
-             * notes.txt  = base64("Hello World")
-             * data.bin   = base64("test data")
-             * The HTML part is intentionally identical to the old plain
-             * HTML message so that existing show-view tests still pass. */
-            const char *full_msg =
-                "From: Test User <test@example.com>\r\n"
-                "Subject: Test Message\r\n"
-                "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
-                "MIME-Version: 1.0\r\n"
-                "Content-Type: multipart/mixed; boundary=\"B001\"\r\n"
-                "\r\n"
-                "--B001\r\n"
-                "Content-Type: text/html; charset=UTF-8\r\n"
-                "\r\n"
-                "<html>"
-                "<head><style>body { color: red; font-size: 14px; }</style></head>"
-                "<body><b>Hello from Mock Server!</b><br>"
-                "Line 2<br>Line 3<br>Line 4<br>Line 5<br>"
-                "Line 6<br>Line 7<br>Line 8<br>Line 9</body>"
-                "</html>\r\n"
-                "--B001\r\n"
-                "Content-Type: text/plain; name=\"notes.txt\"\r\n"
-                "Content-Disposition: attachment; filename=\"notes.txt\"\r\n"
-                "Content-Transfer-Encoding: base64\r\n"
-                "\r\n"
-                "SGVsbG8gV29ybGQ=\r\n"
-                "--B001\r\n"
-                "Content-Type: application/octet-stream; name=\"data.bin\"\r\n"
-                "Content-Disposition: attachment; filename=\"data.bin\"\r\n"
-                "Content-Transfer-Encoding: base64\r\n"
-                "\r\n"
-                "dGVzdCBkYXRh\r\n"
-                "--B001--\r\n";
+            /* Build header and full-message content using the configurable subject.
+             * This allows two server instances to serve distinguishable content. */
+            char headers[512];
+            snprintf(headers, sizeof(headers),
+                     "From: Test User <test@example.com>\r\n"
+                     "Subject: %s\r\n"
+                     "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+                     "\r\n",
+                     g_subject);
+
+            char full_msg[4096];
+            snprintf(full_msg, sizeof(full_msg),
+                     "From: Test User <test@example.com>\r\n"
+                     "Subject: %s\r\n"
+                     "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+                     "MIME-Version: 1.0\r\n"
+                     "Content-Type: multipart/mixed; boundary=\"B001\"\r\n"
+                     "\r\n"
+                     "--B001\r\n"
+                     "Content-Type: text/html; charset=UTF-8\r\n"
+                     "\r\n"
+                     "<html>"
+                     "<head><style>body { color: red; font-size: 14px; }</style></head>"
+                     "<body><b>Hello from Mock Server!</b><br>"
+                     "Line 2<br>Line 3<br>Line 4<br>Line 5<br>"
+                     "Line 6<br>Line 7<br>Line 8<br>Line 9</body>"
+                     "</html>\r\n"
+                     "--B001\r\n"
+                     "Content-Type: text/plain; name=\"notes.txt\"\r\n"
+                     "Content-Disposition: attachment; filename=\"notes.txt\"\r\n"
+                     "Content-Transfer-Encoding: base64\r\n"
+                     "\r\n"
+                     "SGVsbG8gV29ybGQ=\r\n"
+                     "--B001\r\n"
+                     "Content-Type: application/octet-stream; name=\"data.bin\"\r\n"
+                     "Content-Disposition: attachment; filename=\"data.bin\"\r\n"
+                     "Content-Transfer-Encoding: base64\r\n"
+                     "\r\n"
+                     "dGVzdCBkYXRh\r\n"
+                     "--B001--\r\n",
+                     g_subject);
 
             int is_header = strstr(buffer, "HEADER") != NULL;
             const char *content = is_header ? headers : full_msg;
@@ -243,6 +253,12 @@ static void handle_client(SSL *ssl) {
 }
 
 int main(void) {
+    /* Configure port and subject from environment */
+    const char *port_env = getenv("MOCK_IMAP_PORT");
+    if (port_env && atoi(port_env) > 0) g_port = atoi(port_env);
+    const char *subj_env = getenv("MOCK_IMAP_SUBJECT");
+    if (subj_env && subj_env[0]) g_subject = subj_env;
+
     int server_fd;
     struct sockaddr_in address;
     int opt = 1;
@@ -283,7 +299,7 @@ int main(void) {
 
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
+    address.sin_port = htons((uint16_t)g_port);
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("bind failed");
@@ -299,7 +315,8 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
-    printf("Mock IMAP Server (TLS) listening on port %d\n", PORT);
+    printf("Mock IMAP Server (TLS) listening on port %d (subject: %s)\n",
+           g_port, g_subject);
 
     int client_sock;
     while ((client_sock = accept(server_fd, (struct sockaddr *)&address, &addrlen)) >= 0) {

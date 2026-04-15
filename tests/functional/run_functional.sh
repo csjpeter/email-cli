@@ -32,12 +32,20 @@ mkdir -p "$PROJECT_ROOT/build/tests/functional"
 gcc "$MOCK_SERVER_SRC" -o "$MOCK_SERVER_BIN" -lssl -lcrypto
 gcc "$MOCK_SMTP_SRC"   -o "$MOCK_SMTP_BIN"   -lssl -lcrypto
 
-# 2. Start Mock IMAP Server in background
+# 2. Start Mock IMAP Server 1 (port 9993, subject "Test Message")
 # Run from BUILD_DIR so that relative path "tests/certs/test.crt" resolves correctly
-echo "Starting Mock IMAP Server..."
+echo "Starting Mock IMAP Server 1 (port 9993)..."
 MOCK_LOG="$PROJECT_ROOT/build/tests/functional/mock_server.log"
-(cd "$PROJECT_ROOT/build" && "$MOCK_SERVER_BIN") >"$MOCK_LOG" 2>&1 &
-SERVER_PID=$!
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=9993 MOCK_IMAP_SUBJECT="Test Message" \
+    "$MOCK_SERVER_BIN") >"$MOCK_LOG" 2>&1 &
+SERVER1_PID=$!
+
+# 2a. Start Mock IMAP Server 2 (port 9994, different subject for account isolation tests)
+echo "Starting Mock IMAP Server 2 (port 9994)..."
+MOCK_LOG2="$PROJECT_ROOT/build/tests/functional/mock_server2.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=9994 MOCK_IMAP_SUBJECT="InboxMsgAccountBeta" \
+    "$MOCK_SERVER_BIN") >"$MOCK_LOG2" 2>&1 &
+SERVER2_PID=$!
 
 # 2b. Start Mock SMTP Server in background
 SMTP_PORT=9465
@@ -47,30 +55,32 @@ SMTP_LOG="$PROJECT_ROOT/build/tests/functional/mock_smtp.log"
 SMTP_PID=$!
 
 # Ensure cleanup on exit
-trap "kill $SERVER_PID $SMTP_PID 2>/dev/null || true" EXIT
+trap "kill $SERVER1_PID $SERVER2_PID $SMTP_PID 2>/dev/null || true" EXIT
 
 # Give servers a moment to start
 sleep 1
 
-# 3. Create a temporary config for the test (IMAP + SMTP)
+# 3. Create test home with account1 config
+#    Accounts are stored under accounts/<email>/config.ini (no legacy root config.ini).
+SMTP_PORT=9465
 TEST_HOME="/tmp/email-cli-func-test"
 rm -rf "$TEST_HOME"
-mkdir -p "$TEST_HOME/.config/email-cli"
-cat <<EOF > "$TEST_HOME/.config/email-cli/config.ini"
+mkdir -p "$TEST_HOME/.config/email-cli/accounts/testuser@account1.local"
+cat <<EOF > "$TEST_HOME/.config/email-cli/accounts/testuser@account1.local/config.ini"
 EMAIL_HOST=imaps://localhost:9993
-EMAIL_USER=testuser
+EMAIL_USER=testuser@account1.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
 SSL_NO_VERIFY=1
 SMTP_HOST=smtps://localhost:$SMTP_PORT
-SMTP_USER=testuser
+SMTP_USER=testuser@account1.local
 SMTP_PASS=testpass
 EMAIL_SENT_FOLDER=Sent
 EOF
 
 export HOME="$TEST_HOME"
 # Ensure XDG overrides do not redirect the binary to a different config/cache path
-unset XDG_CONFIG_HOME XDG_CACHE_HOME
+unset XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME
 
 PASSED=0
 FAILED=0
@@ -100,6 +110,8 @@ check_not() {
         FAILED=$((FAILED + 1))
     fi
 }
+
+# ── Phase 1: Single-account tests (account1, server port 9993) ───────────────
 
 # 4. Test: help (no args)
 echo "Running: email-cli (no args) ..."
@@ -131,6 +143,7 @@ check "Message count shown"       "message(s) in"           "$LIST_OUTPUT"
 check "Unread count shown"        "unread"                  "$LIST_OUTPUT"
 check "Table separator shown"     "═══"                     "$LIST_OUTPUT"
 check "Subject in table"          "Test Message"            "$LIST_OUTPUT"
+check "Account email in header"   "testuser@account1.local" "$LIST_OUTPUT"
 
 # 8. Test: list --all (same behavior — all messages always shown)
 echo ""
@@ -194,8 +207,7 @@ echo "--- CRITICAL: Read-only guarantee (no STORE commands issued) ---"
 check_not "No STORE command sent to server" "STORE" "$MOCK_CMDS"
 echo "(mock server log: $MOCK_LOG)"
 
-# REGRESSION: read_response use-after-free — LOGIN must never fail against a
-# server that actually returns OK.  Check both the client output and the log.
+# REGRESSION: read_response use-after-free
 SESSION_LOG="$TEST_HOME/.cache/email-cli/logs/session.log"
 SESSION=$(cat "$SESSION_LOG" 2>/dev/null || true)
 echo ""
@@ -206,7 +218,7 @@ check_not "No 'LOGIN failed' in session log"   "LOGIN failed" "$SESSION"
 check     "Session log shows 'Logged in' or authenticated" \
           "authenticated\|Logged in\|LOGIN completed" "$SESSION"
 
-# Count line: reverse-video marker and sync indicator
+# Count line: sync indicator
 CACHE_DIR="$TEST_HOME/.cache/email-cli"
 PID_FILE="$CACHE_DIR/sync.pid"
 echo ""
@@ -226,8 +238,6 @@ check_not "No spurious syncing (stale pid)"   "syncing"        "$STALE_OUTPUT"
 rm -f "$PID_FILE"
 
 # CRITICAL: send + save-to-Sent (IMAP APPEND LITERAL+)
-# This test covers the full compose → SMTP send → IMAP APPEND path.
-# A regression here means the Sent folder save is broken (e.g. TLS buffering hang).
 echo ""
 echo "--- CRITICAL: send + save-to-Sent (IMAP APPEND via LITERAL+) ---"
 echo "Running: email-tui --batch send ..."
@@ -248,6 +258,115 @@ check "SMTP mock: RECEIVED confirmation" "RECEIVED" "$SMTP_LOG_CONTENT"
 TUI_LOG="$TEST_HOME/.cache/email-cli/logs/tui-session.log"
 TUI_SESSION=$(cat "$TUI_LOG" 2>/dev/null || true)
 check "TUI session log: APPEND command issued to IMAP server" "APPEND" "$TUI_SESSION"
+
+# ── Phase 2: Multi-account local store isolation ──────────────────────────────
+#
+# Two IMAP servers serve distinct subjects:
+#   Server 1 (port 9993): "Test Message"          → account1
+#   Server 2 (port 9994): "InboxMsgAccountBeta"   → account2
+#
+# We use a shared XDG_DATA_HOME so that both accounts' local stores live
+# side-by-side in the same data directory, making cross-contamination visible.
+#
+# Critical isolation scenario:
+#   1. Run account1 → populates local store for testuser@account1.local/
+#      (manifest has UID 1, subject "Test Message")
+#   2. Run account2 (separate config HOME) → must use its OWN local store dir
+#      (testuser2@account2.local/ — initially empty)
+#      → must fetch header from server 2 → shows "InboxMsgAccountBeta"
+#   3. Run with BOTH accounts in same HOME (account2 is alphabetically first
+#      since '2' < '@') → config_load_from_store returns account2
+#      → must show "InboxMsgAccountBeta", NOT "Test Message" from account1 cache
+
+SHARED_DATA="/tmp/email-cli-func-shared-data"
+rm -rf "$SHARED_DATA"
+
+# Home A: only account1
+HOME_A="/tmp/email-cli-func-acct1"
+rm -rf "$HOME_A"
+mkdir -p "$HOME_A/.config/email-cli/accounts/testuser@account1.local"
+cat <<EOF2 > "$HOME_A/.config/email-cli/accounts/testuser@account1.local/config.ini"
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=testuser@account1.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+EOF2
+
+# Home B: only account2
+HOME_B="/tmp/email-cli-func-acct2"
+rm -rf "$HOME_B"
+mkdir -p "$HOME_B/.config/email-cli/accounts/testuser2@account2.local"
+cat <<EOF3 > "$HOME_B/.config/email-cli/accounts/testuser2@account2.local/config.ini"
+EMAIL_HOST=imaps://localhost:9994
+EMAIL_USER=testuser2@account2.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+EOF3
+
+# Home BOTH: both accounts — testuser2@account2.local sorts before testuser@account1.local
+# because '2' (ASCII 50) < '@' (ASCII 64), so account2 is returned first.
+HOME_BOTH="/tmp/email-cli-func-both"
+rm -rf "$HOME_BOTH"
+mkdir -p "$HOME_BOTH/.config/email-cli/accounts/testuser@account1.local"
+mkdir -p "$HOME_BOTH/.config/email-cli/accounts/testuser2@account2.local"
+cp "$HOME_A/.config/email-cli/accounts/testuser@account1.local/config.ini" \
+   "$HOME_BOTH/.config/email-cli/accounts/testuser@account1.local/config.ini"
+cp "$HOME_B/.config/email-cli/accounts/testuser2@account2.local/config.ini" \
+   "$HOME_BOTH/.config/email-cli/accounts/testuser2@account2.local/config.ini"
+
+echo ""
+echo "--- Multi-account isolation ---"
+
+# Step 1: run account1 to populate its local store cache
+export HOME="$HOME_A"
+export XDG_DATA_HOME="$SHARED_DATA"
+unset XDG_CONFIG_HOME XDG_CACHE_HOME
+ACCT1_OUTPUT=$("$BIN_DIR/email-cli" list --batch 2>&1 || true)
+echo "Account1 output: $ACCT1_OUTPUT"
+check "Account1: connects to server1 (shows 'Test Message')" \
+      "Test Message"             "$ACCT1_OUTPUT"
+check "Account1: header shows account1 email" \
+      "testuser@account1.local"  "$ACCT1_OUTPUT"
+
+# Verify account1 local store was created at the correct path
+ACCT1_DATA="$SHARED_DATA/email-cli/accounts/testuser@account1.local"
+check "Account1: local store dir created" \
+      "." "$(test -d "$ACCT1_DATA" && echo found || echo missing)"
+
+# Step 2: run account2 (separate config HOME, SAME shared data dir)
+# Account1's local store exists; account2's is empty → must fetch from server2
+export HOME="$HOME_B"
+ACCT2_OUTPUT=$("$BIN_DIR/email-cli" list --batch 2>&1 || true)
+echo "Account2 output: $ACCT2_OUTPUT"
+check "Account2: connects to server2 (shows 'InboxMsgAccountBeta')" \
+      "InboxMsgAccountBeta"        "$ACCT2_OUTPUT"
+check "Account2: header shows account2 email" \
+      "testuser2@account2.local"   "$ACCT2_OUTPUT"
+check_not "Account2: NOT showing account1 cached subject" \
+          "Test Message"            "$ACCT2_OUTPUT"
+
+# Verify account2 local store was created in its OWN directory
+ACCT2_DATA="$SHARED_DATA/email-cli/accounts/testuser2@account2.local"
+check "Account2: local store dir is separate from account1" \
+      "." "$(test -d "$ACCT2_DATA" && echo found || echo missing)"
+
+# Step 3 — CRITICAL isolation: both configs present, account2 is alphabetically first.
+# Account1's local store cache (subject "Test Message") must NOT bleed into account2.
+export HOME="$HOME_BOTH"
+ISOLATION_OUTPUT=$("$BIN_DIR/email-cli" list --batch 2>&1 || true)
+echo "Isolation test output: $ISOLATION_OUTPUT"
+check "Isolation: account2 (alphabetically first) shows own subject" \
+      "InboxMsgAccountBeta"       "$ISOLATION_OUTPUT"
+check "Isolation: account2 email shown in header" \
+      "testuser2@account2.local"  "$ISOLATION_OUTPUT"
+check_not "Isolation: account1 cached subject does NOT appear" \
+          "Test Message"           "$ISOLATION_OUTPUT"
+
+# Restore original HOME for any post-test cleanup
+export HOME="$TEST_HOME"
+unset XDG_DATA_HOME
 
 echo ""
 echo "--- Functional Test Results ---"

@@ -121,22 +121,18 @@ static Config *load_config_from_path(const char *path) {
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
 Config* config_load_from_store(void) {
-    RAII_STRING char *accounts_dir = get_accounts_dir();
-    if (!accounts_dir) return NULL;
-
-    DIR *d = opendir(accounts_dir);
-    if (!d) return NULL;
-
-    Config *result = NULL;
-    struct dirent *ent;
-    while ((ent = readdir(d)) != NULL && result == NULL) {
-        if (ent->d_name[0] == '.') continue;
-        char path[1024];
-        snprintf(path, sizeof(path), "%s/%s/config.ini",
-                 accounts_dir, ent->d_name);
-        result = load_config_from_path(path);
+    /* Reuse config_list_accounts which loads and sorts all accounts
+     * alphabetically.  Take the first entry (lowest name) for a
+     * deterministic result regardless of readdir ordering. */
+    int count = 0;
+    AccountEntry *list = config_list_accounts(&count);
+    if (!list || count == 0) {
+        config_free_account_list(list, count);
+        return NULL;
     }
-    closedir(d);
+    Config *result = list[0].cfg;
+    list[0].cfg = NULL; /* transfer ownership */
+    config_free_account_list(list, count);
     return result;
 }
 

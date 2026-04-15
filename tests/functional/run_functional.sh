@@ -549,7 +549,7 @@ echo ""
 echo "--- Phase 11: SMTP send ---"
 
 SEND_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-tui" --batch send \
+    "$BIN_DIR/email-cli" --batch send \
         --to "recipient@example.com" \
         --subject "Functional Test Mail" \
         --body "Hello from functional test." \
@@ -560,9 +560,9 @@ check "11.2 send: saved-to-Sent confirmation"   "Saved"         "$SEND_OUT"
 SMTP_CONTENT=$(cat "$SMTP_LOG" 2>/dev/null || true)
 check "11.3 SMTP mock: RECEIVED confirmation"   "RECEIVED"      "$SMTP_CONTENT"
 
-TUI_LOG="$H_ALPHA/.cache/email-cli/logs/tui-session.log"
-TUI_CONTENT=$(cat "$TUI_LOG" 2>/dev/null || true)
-check "11.4 IMAP APPEND command issued"         "APPEND"        "$TUI_CONTENT"
+CLI_LOG="$H_ALPHA/.cache/email-cli/logs/session.log"
+CLI_CONTENT=$(cat "$CLI_LOG" 2>/dev/null || true)
+check "11.4 IMAP APPEND command issued"         "APPEND"        "$CLI_CONTENT"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 12 — Sync pid-file indicator

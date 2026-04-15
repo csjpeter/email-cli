@@ -12,6 +12,8 @@
 #include "logger.h"
 #include "local_store.h"
 #include "fs_util.h"
+#include "smtp_adapter.h"
+#include "compose_service.h"
 
 /* Number of non-data lines printed around the message table */
 #define LIST_HEADER_LINES 6
@@ -43,12 +45,13 @@ static void help_general(void) {
         "  folders                 List available IMAP folders\n"
         "  attachments <uid>       List attachments in a message\n"
         "  save-attachment <uid>   Save a named attachment to disk\n"
-        "  config                  View or update configuration (incl. SMTP for email-tui)\n"
-        "  sync                    Download all messages in all folders to local store\n"
+        "  send                    Send a message non-interactively\n"
+        "  config                  View or update configuration (incl. SMTP)\n"
         "  cron                    Manage automatic background sync (setup/remove/status)\n"
         "  help [command]          Show this help, or detailed help for a command\n"
         "\n"
-        "Run 'email-cli help <command>' for more information.\n",
+        "Run 'email-cli help <command>' for more information.\n"
+        "For background sync use email-sync or 'email-cli cron setup'.\n",
         BATCH_DEFAULT_LIMIT
     );
 }
@@ -112,27 +115,21 @@ static void help_folders(void) {
     );
 }
 
-static void help_sync(void) {
+static void help_send(void) {
     printf(
-        "Usage: email-cli sync [--account <email>]\n"
+        "Usage: email-cli send --to <addr> --subject <text> --body <text>\n"
         "\n"
-        "Downloads all messages in every IMAP folder to the local store.\n"
-        "Without --account, every configured account is synced in alphabetical\n"
-        "order.  With --account, only the specified account is synced.\n"
-        "Messages already stored locally are skipped.\n"
-        "Attachments are stored as part of the raw RFC 2822 message data\n"
-        "(not extracted to separate files).\n"
+        "Sends a message non-interactively (scriptable / batch mode).\n"
         "\n"
         "Options:\n"
-        "  --account <email>   Sync only the account with this email address\n"
+        "  --to <addr>       Recipient email address (required)\n"
+        "  --subject <text>  Subject line (required)\n"
+        "  --body <text>     Message body text (required)\n"
         "\n"
-        "Progress is printed per folder:\n"
-        "  Syncing INBOX ...\n"
-        "  42 fetched, 10 already stored\n"
+        "SMTP settings must be configured (run 'email-cli config smtp').\n"
         "\n"
         "Examples:\n"
-        "  email-cli sync                              # all accounts\n"
-        "  email-cli sync --account user@example.com  # one account\n"
+        "  email-cli send --to friend@example.com --subject \"Hello\" --body \"Hi there!\"\n"
     );
 }
 
@@ -280,8 +277,8 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
                 if (strcmp(cmd, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
+                if (strcmp(cmd, "send")            == 0) { help_send();            return EXIT_SUCCESS; }
                 if (strcmp(cmd, "config")          == 0) { help_config();          return EXIT_SUCCESS; }
-                if (strcmp(cmd, "sync")            == 0) { help_sync();            return EXIT_SUCCESS; }
                 if (strcmp(cmd, "cron")            == 0) { help_cron();            return EXIT_SUCCESS; }
             }
             /* email-cli --help  or  email-cli help --help */
@@ -307,8 +304,8 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
             if (strcmp(topic, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
             if (strcmp(topic, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
+            if (strcmp(topic, "send")            == 0) { help_send();            return EXIT_SUCCESS; }
             if (strcmp(topic, "config")          == 0) { help_config();          return EXIT_SUCCESS; }
-            if (strcmp(topic, "sync")            == 0) { help_sync();            return EXIT_SUCCESS; }
             if (strcmp(topic, "cron")            == 0) { help_cron();            return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli help' for available commands.\n");
@@ -618,25 +615,52 @@ int main(int argc, char *argv[]) {
             result = subcmd[0] ? -1 : 0;
         }
 
-    } else if (strcmp(cmd, "sync") == 0) {
-        const char *account_filter = NULL;
+    } else if (strcmp(cmd, "send") == 0) {
+        const char *to = NULL, *subject = NULL, *body = NULL;
         int ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) continue;
-            if (strcmp(argv[i], "--account") == 0) {
+            if (strcmp(argv[i], "--to") == 0) {
                 if (i + 1 >= argc) {
-                    fprintf(stderr, "Error: --account requires an email address.\n");
-                    ok = 0;
-                } else {
-                    account_filter = argv[++i];
-                }
+                    fprintf(stderr, "Error: --to requires an address.\n"); ok = 0;
+                } else to = argv[++i];
+            } else if (strcmp(argv[i], "--subject") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --subject requires text.\n"); ok = 0;
+                } else subject = argv[++i];
+            } else if (strcmp(argv[i], "--body") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --body requires text.\n"); ok = 0;
+                } else body = argv[++i];
             } else {
-                unknown_option("sync", argv[i]);
-                ok = 0;
+                unknown_option("send", argv[i]); ok = 0;
             }
         }
-        if (ok)
-            result = email_service_sync_all(account_filter);
+        if (ok) {
+            if (!to || !to[0] || !subject || !body) {
+                fprintf(stderr, "Error: --to, --subject, and --body are all required.\n");
+                help_send();
+            } else {
+                const char *from = cfg->smtp_user ? cfg->smtp_user : cfg->user;
+                ComposeParams p = {from, to, subject, body, NULL};
+                char *msg = NULL;
+                size_t msg_len = 0;
+                if (compose_build_message(&p, &msg, &msg_len) != 0) {
+                    fprintf(stderr, "Error: Failed to build message.\n");
+                } else {
+                    result = smtp_send(cfg, from, to, msg, msg_len);
+                    if (result == 0) {
+                        printf("Message sent.\n");
+                        if (email_service_save_sent(cfg, msg, msg_len) == 0)
+                            printf("Saved.\n");
+                        else
+                            fprintf(stderr, "(Could not save to Sent folder — "
+                                    "check EMAIL_SENT_FOLDER in config.)\n");
+                    }
+                    free(msg);
+                }
+            }
+        }
 
     } else if (strcmp(cmd, "cron") == 0) {
         /* 'cron status' and 'cron remove' are handled before config loading above.

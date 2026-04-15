@@ -370,8 +370,7 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
         /* Unexpected positional argument */
-        fprintf(stderr, "email-tui does not accept subcommands.\n"
-                        "For scriptable operations use email-cli.\n"
+        fprintf(stderr, "email-tui does not accept arguments.\n"
                         "Run 'email-tui --help' for usage.\n");
         return EXIT_FAILURE;
     }

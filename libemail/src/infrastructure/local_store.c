@@ -451,6 +451,8 @@ static char *sanitise(const char *s) {
 
 Manifest *manifest_load(const char *folder) {
     RAII_STRING char *path = manifest_path(folder);
+    logger_log(LOG_DEBUG, "manifest_load: folder=%s account_base=%s path=%s",
+               folder, g_account_base, path ? path : "(null)");
     if (!path) return NULL;
 
     char *data = load_file(path);

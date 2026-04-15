@@ -1389,6 +1389,10 @@ static char *resolve_folder_name_dup(const char *name) {
 }
 
 int email_service_list(const Config *cfg, EmailListOpts *opts) {
+    /* Always re-initialise the local store so the correct account's manifests
+     * and header cache are used, regardless of which account was active before. */
+    local_store_init(cfg->host, cfg->user);
+
     const char *raw_folder = opts->folder ? opts->folder : cfg->folder;
 
     /* Normalise to the server-canonical name so the manifest key matches
@@ -1944,6 +1948,7 @@ int email_service_list_folders(const Config *cfg, int tree) {
 char *email_service_list_folders_interactive(const Config *cfg,
                                              const char *current_folder,
                                              int *go_up) {
+    local_store_init(cfg->host, cfg->user);
     if (go_up) *go_up = 0;
     int count = 0;
     char sep = '.';

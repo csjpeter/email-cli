@@ -717,6 +717,9 @@ int main(int argc, char *argv[]) {
             }
 
             /* acc == 1: Enter → open account, enter folder/message loop */
+            logger_log(LOG_INFO, "Switching to account: user=%s host=%s",
+                       sel_cfg->user ? sel_cfg->user : "(null)",
+                       sel_cfg->host ? sel_cfg->host : "(null)");
             local_store_init(sel_cfg->host, sel_cfg->user);
             char *tui_folder = strdup(sel_cfg->folder ? sel_cfg->folder : "INBOX");
             if (!tui_folder) { config_free(sel_cfg); result = -1; break; }

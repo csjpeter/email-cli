@@ -226,6 +226,18 @@ AccountEntry *config_list_accounts(int *count_out) {
     closedir(d);
 
     if (count == 0) { free(list); return NULL; }
+
+    /* Sort alphabetically by name for consistent ordering. */
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (strcmp(list[i].name, list[j].name) > 0) {
+                AccountEntry tmp = list[i];
+                list[i] = list[j];
+                list[j] = tmp;
+            }
+        }
+    }
+
     *count_out = count;
     return list;
 }

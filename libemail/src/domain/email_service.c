@@ -2282,11 +2282,11 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
         if (count == 0) {
             printf("  No accounts configured.\n");
         } else {
-            printf("  %6s  %7s  %-32s  %s\n", "Unread", "Flagged", "Account", "Server");
-            printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
+            printf("    %6s  %7s  %-32s  %s\n", "Unread", "Flagged", "Account", "Server");
+            printf("    \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
             print_dbar(32);
             printf("  ");
-            print_dbar(tcols > 54 ? tcols - 54 : 10);
+            print_dbar(tcols > 56 ? tcols - 56 : 10);
             printf("\n");
             for (int i = 0; i < count; i++)
                 print_account_row(accounts[i].cfg, i == cursor, tcols,

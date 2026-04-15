@@ -100,11 +100,16 @@ char *email_service_list_folders_interactive(const Config *cfg,
  *   e       — edit SMTP for selected account: returns 2, *cfg_out set
  *   ESC / q / Backspace — quit: returns 0
  *
- * @param cfg_out  Output: heap-allocated selected account Config (ret 1 or 2).
- *                 Caller must config_free() it.  NULL on ret 0 or 3.
+ * @param cfg_out      Output: heap-allocated selected account Config (ret 1 or 2).
+ *                     Caller must config_free() it.  NULL on ret 0 or 3.
+ * @param cursor_inout Optional in/out cursor position.  On entry the cursor is
+ *                     placed at this index (clamped to valid range).  On any
+ *                     return the current cursor index is written back so the
+ *                     caller can restore it on the next call.  Pass NULL to
+ *                     always start at position 0.
  * @return 0 = quit, 1 = open account, 2 = edit SMTP, 3 = add new account.
  */
-int email_service_account_interactive(Config **cfg_out);
+int email_service_account_interactive(Config **cfg_out, int *cursor_inout);
 
 /**
  * @brief Reads and displays one message identified by its IMAP UID.

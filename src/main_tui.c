@@ -431,9 +431,10 @@ int main(int argc, char *argv[]) {
      *   ESC anywhere → quit
      */
     int result = 0;
+    int account_cursor = 0;  /* persists across re-entries to accounts screen */
     for (;;) {  /* outer: accounts screen */
         Config *sel_cfg = NULL;
-        int acc = email_service_account_interactive(&sel_cfg);
+        int acc = email_service_account_interactive(&sel_cfg, &account_cursor);
         if (acc == 0) break;  /* ESC/quit */
         if (acc == 3) {
             /* 'n' → add new account via wizard */

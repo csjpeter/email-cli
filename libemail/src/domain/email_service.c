@@ -2051,10 +2051,21 @@ char *email_service_list_folders_interactive(const Config *cfg,
         if (name_w < 20) name_w = 20;
 
         printf("\033[H\033[2J");
-        if (!tree_mode && current_prefix[0])
-            printf("Folders: %s/ (%d)\n\n", current_prefix, display_count);
-        else
-            printf("Folders (%d)\n\n", display_count);
+        {
+            char cl[512];
+            if (!tree_mode && current_prefix[0])
+                snprintf(cl, sizeof(cl), "  Folders \u2014 %s  \u203a %s/  (%d)",
+                         cfg->user ? cfg->user : "?",
+                         current_prefix, display_count);
+            else
+                snprintf(cl, sizeof(cl), "  Folders \u2014 %s  (%d)",
+                         cfg->user ? cfg->user : "?",
+                         display_count);
+            printf("\033[7m%s", cl);
+            int used = visible_line_cols(cl, cl + strlen(cl));
+            for (int p = used; p < tcols_f; p++) putchar(' ');
+            printf("\033[0m\n\n");
+        }
 
         /* Column header and separator (both flat and tree mode) */
         printf("  %6s  %7s  %-*s  %7s\n", "Unread", "Flagged", name_w, "Folder", "Total");

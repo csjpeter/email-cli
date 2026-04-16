@@ -35,5 +35,42 @@ a folder in the folder browser).
 
 ## Status Bar Format
 ```
-  ↑↓=step  PgDn/PgUp=page  Enter=open  n=new  f=flag  d=done  Backspace=folders  ESC=quit  [cursor/total]
+  ↑↓=step  PgDn/PgUp=page  Enter=open  Backspace=folders  ESC=quit  c=compose  r=reply  n=new  f=flag  d=done  s=sync  R=refresh  [cursor/total]
 ```
+
+## Empty Folder Layout
+
+When a folder contains no messages the list view still renders the full formal
+layout — it does **not** fall back to a plain-text message.
+
+### Screen structure (empty folder)
+```
+  0 of 0 message(s) in <Folder> (0 unread) [<user>].    ← inverse-video, full-width
+                                                         ← blank line
+  UID    Date              Sts   Subject            From
+  ═════  ════════════════  ════  ═════════════════  ════
+                                                         ← blank line
+  (empty)
+```
+
+Bottom status bar (same position as normal list):
+```
+  ↑↓=step  PgDn/PgUp=page  Enter=open  Backspace=folders  ESC=quit  c=compose  r=reply  n=new  f=flag  d=done  s=sync  R=refresh  [0/0]
+```
+
+### Cron / no-cache variant
+When `sync_interval > 0` and the local manifest is empty the title line includes
+a warning:
+```
+  0 of 0 message(s) in <Folder> (0 unread) [<user>].  ⚠ No cached data — run 'email-sync' or 's=sync'
+```
+The status bar shows only `s=sync  R=refresh` (no compose/reply keys).
+
+### Navigation from empty folder
+| Key | Action |
+|-----|--------|
+| Backspace | Return to folder browser (same as normal list) |
+| ESC / q | Quit |
+| `c` | Compose new message (online mode only) |
+| `s` | Start background sync |
+| `R` | Refresh (re-open the message list, which may now have messages) |

@@ -775,13 +775,36 @@ static void test_interactive_empty_folder(void) {
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ENTER);
 
-    if (pty_wait_for(s, "No messages", WAIT_MS) == 0) {
-        ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
-        pty_send_key(s, PTY_KEY_BACK);
-        ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
-    }
+    /* Formal empty-folder layout: inverse title + column headers + (empty) */
+    ASSERT_WAIT_FOR(s, "0 of 0 message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "UID");
+    ASSERT_SCREEN_CONTAINS(s, "Subject");
+    ASSERT_SCREEN_CONTAINS(s, "(empty)");
+    ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
+
+    /* Backspace returns to folder browser */
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
+}
+
+static void test_interactive_empty_folder_cron(void) {
+    /* Cron mode with no local cache: formal layout with ⚠ warning in title */
+    write_config_with_interval(15);
+    restart_mock();
+    const char *a[] = {"list", "--folder", "INBOX.Empty", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "empty cron: opens");
+    ASSERT_WAIT_FOR(s, "0 of 0 message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "(empty)");
+    ASSERT_SCREEN_CONTAINS(s, "No cached data");
+    ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    write_config();  /* restore normal config */
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -2275,6 +2298,7 @@ int main(int argc, char *argv[]) {
 
     printf("\n--- Empty folder ---\n");
     RUN_TEST(test_interactive_empty_folder);
+    RUN_TEST(test_interactive_empty_folder_cron);
 
     printf("\n--- Sync progress ---\n");
     RUN_TEST(test_sync_progress);

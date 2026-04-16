@@ -1,5 +1,23 @@
 cmake_minimum_required(VERSION 3.10)
-project(email-cli C)
+project(email-cli VERSION 0.1.5 LANGUAGES C)
+
+# Version string: prefer "git describe", fall back to project version
+find_program(GIT_EXECUTABLE git)
+if(GIT_EXECUTABLE)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE _GIT_DESCRIBE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
+if(_GIT_DESCRIBE)
+    string(REGEX REPLACE "^v" "" EMAIL_CLI_VERSION "${_GIT_DESCRIBE}")
+else()
+    set(EMAIL_CLI_VERSION "${PROJECT_VERSION}")
+endif()
+add_compile_definitions(EMAIL_CLI_VERSION="${EMAIL_CLI_VERSION}")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Werror -pedantic -D_GNU_SOURCE")

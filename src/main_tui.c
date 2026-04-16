@@ -433,9 +433,7 @@ int main(int argc, char *argv[]) {
     int result = 0;
     int account_cursor = 0;  /* persists across re-entries to accounts screen */
 
-    /* On warm start, skip accounts screen and jump straight to the last-used
-     * account's folder browser. */
-    Config *pending_cfg = NULL;
+    /* Restore account cursor position from last session. */
     {
         char *last = ui_pref_get_str("last_account");
         if (last) {
@@ -445,8 +443,6 @@ int main(int argc, char *argv[]) {
                 for (int i = 0; i < acount; i++) {
                     if (alist[i].cfg && alist[i].cfg->user &&
                         strcmp(alist[i].cfg->user, last) == 0) {
-                        pending_cfg = alist[i].cfg;
-                        alist[i].cfg = NULL;  /* take ownership */
                         account_cursor = i;
                         break;
                     }
@@ -460,11 +456,7 @@ int main(int argc, char *argv[]) {
     for (;;) {  /* outer: accounts screen */
         Config *sel_cfg = NULL;
 
-        if (pending_cfg) {
-            /* warm start: bypass accounts screen */
-            sel_cfg = pending_cfg;
-            pending_cfg = NULL;
-        } else {
+        {
             int acc = email_service_account_interactive(&sel_cfg, &account_cursor);
             if (acc == 0) break;  /* ESC/quit */
             if (acc == 3) {
@@ -504,12 +496,23 @@ int main(int argc, char *argv[]) {
         if (sel_cfg->user)
             ui_pref_set_str("last_account", sel_cfg->user);
 
+        /* Per-account folder cursor: restore last used folder for this account */
+        char fc_key[256];
+        snprintf(fc_key, sizeof(fc_key), "folder_cursor_%s",
+                 sel_cfg->user ? sel_cfg->user : "default");
+        char *saved_folder = ui_pref_get_str(fc_key);
+        const char *init_folder = (saved_folder && saved_folder[0])
+                                  ? saved_folder
+                                  : (sel_cfg->folder ? sel_cfg->folder : "INBOX");
+
         /* Open folder browser first — user picks which folder to enter */
         int go_up = 0;
         char *tui_folder = email_service_list_folders_interactive(
-                               sel_cfg,
-                               sel_cfg->folder ? sel_cfg->folder : "INBOX",
-                               &go_up);
+                               sel_cfg, init_folder, &go_up);
+        free(saved_folder);
+        if (tui_folder)
+            ui_pref_set_str(fc_key, tui_folder);  /* persist selected folder */
+
         if (go_up) {
             /* Backspace at folder root → back to accounts screen */
             config_free(sel_cfg);
@@ -531,6 +534,8 @@ int main(int argc, char *argv[]) {
                                 sel_cfg, tui_folder, &go_up);
                 free(tui_folder);
                 tui_folder = sel;
+                if (tui_folder)
+                    ui_pref_set_str(fc_key, tui_folder);  /* persist new folder */
                 if (go_up) {
                     /* Backspace at folder root → back to accounts */
                     back_to_accounts = 1;

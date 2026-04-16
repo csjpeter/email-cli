@@ -1678,6 +1678,75 @@ static void test_tui_accounts_cursor_restored(void) {
     rmdir(path);
 }
 
+/* US-18: email-tui always starts at accounts screen (no warm-start bypass) */
+static void test_tui_always_starts_at_accounts(void) {
+    /* First session: navigate to inbox and quit — sets last_account pref */
+    {
+        PtySession *s = tui_open_to_list();
+        ASSERT(s != NULL, "always accounts: first run opens to list");
+        ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+    /* Second session: must still show accounts screen, NOT jump to inbox */
+    {
+        PtySession *s = cli_run(NULL);
+        ASSERT(s != NULL, "always accounts: second run opens");
+        ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        /* Accounts screen is showing — not the inbox */
+        ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+}
+
+/* US-18: per-account folder cursor persisted to ui.ini */
+static void test_tui_folder_cursor_persisted(void) {
+    /* Navigate to a non-default folder (Down once = INBOX.Sent on mock server) */
+    {
+        PtySession *s = cli_run(NULL);
+        ASSERT(s != NULL, "folder cursor: first run opens");
+        ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+        pty_send_key(s, PTY_KEY_ENTER);
+        ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_DOWN);   /* move to second folder */
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ENTER);  /* open it */
+        pty_settle(s, WAIT_MS);
+        pty_send_key(s, PTY_KEY_ESC);    /* quit */
+        pty_close(s);
+    }
+    /* Verify ui.ini has folder_cursor_testuser key */
+    char pref_path[512];
+    snprintf(pref_path, sizeof(pref_path),
+             "%s/.local/share/email-cli/ui.ini", g_test_home);
+    FILE *fp = fopen(pref_path, "r");
+    ASSERT(fp != NULL, "folder cursor: ui.ini exists after session");
+    if (fp) {
+        int found = 0;
+        char line[512];
+        while (fgets(line, sizeof(line), fp))
+            if (strncmp(line, "folder_cursor_testuser=", 23) == 0) { found = 1; break; }
+        fclose(fp);
+        ASSERT(found, "folder cursor: folder_cursor_testuser key saved in ui.ini");
+    }
+    /* Second session: folder browser must open on the saved folder */
+    {
+        PtySession *s = cli_run(NULL);
+        ASSERT(s != NULL, "folder cursor: second run opens");
+        ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+        pty_send_key(s, PTY_KEY_ENTER);
+        ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        /* Cursor arrow (→) must be visible — folder browser is showing */
+        ASSERT_SCREEN_CONTAINS(s, "\xe2\x86\x92");
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  HELP PANEL (US-22)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -2299,6 +2368,11 @@ int main(int argc, char *argv[]) {
     printf("\n--- email-tui: TUI launch ---\n");
     restart_mock();
     RUN_TEST(test_tui_interactive_launch);
+
+    printf("\n--- email-tui: startup behaviour (US-18) ---\n");
+    restart_mock();
+    RUN_TEST(test_tui_always_starts_at_accounts);
+    RUN_TEST(test_tui_folder_cursor_persisted);
 
     printf("\n--- email-tui: multi-account (US-21) ---\n");
     restart_mock();

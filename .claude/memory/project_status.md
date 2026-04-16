@@ -19,7 +19,7 @@ All 3 workflows passing on main:
 | Core | fs_util.c | 23/25 = 92% |
 | Core | raii.h | 18/18 = 100% |
 | Infra | config_store.c | 63/69 = 91.3% |
-| Infra | curl_adapter.c | 34/34 = 100% |
+| Infra | imap_client.c | (needs re-measurement) |
 | Infra | setup_wizard.c | 37/43 = 86% |
 | **Core+Infra total** | | **242/257 = 94.2% ✅** |
 | Domain | email_service.c | 71/86 = 82.6% |
@@ -31,10 +31,10 @@ require a PTY (openpty) to test. 6 uncovered lines are interactive-terminal only
 
 ## Completed Features
 - 4-layer CLEAN architecture (Core/Infra/Domain/App)
-- RAII memory safety (RAII_STRING, RAII_CURL, RAII_FILE, RAII_SLIST)
+- RAII memory safety (RAII_STRING, RAII_FILE, RAII_DIR, RAII_HTML_NODE)
 - IMAP email fetch: UID SEARCH ALL + per-message FETCH, shows last 10
-- TLS 1.2+ enforcement (CURL_SSLVERSION_TLSv1_2), ssl_no_verify for tests
-- CURL debug logging forwarding all IMAP traffic to logger at DEBUG level
+- TLS 1.2+ enforcement (OpenSSL), ssl_no_verify for tests
+- IMAP debug logging forwarding all traffic to logger at DEBUG level
 - Config store (~/.config/email-cli/config.ini, mode 0600)
 - Setup wizard (interactive + testable via FILE* stream)
 - Log rotation (5 files x 5MB), --clean-logs CLI

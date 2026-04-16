@@ -1030,11 +1030,10 @@ static int sync_is_running(void) {
     if (!cache_base) return 0;
     char pid_path[2048];
     snprintf(pid_path, sizeof(pid_path), "%s/email-cli/sync.pid", cache_base);
-    FILE *pf = fopen(pid_path, "r");
+    RAII_FILE FILE *pf = fopen(pid_path, "r");
     if (!pf) return 0;
     int pid = 0;
     if (fscanf(pf, "%d", &pid) != 1) pid = 0;
-    fclose(pf);
     if (pid <= 0) return 0;
     /* Accept any of the binary names that may be running sync */
     return platform_pid_is_program((pid_t)pid, "email-cli") ||
@@ -1045,16 +1044,12 @@ static int sync_is_running(void) {
 /* Build path to email-sync binary (same directory as the running binary). */
 static void get_sync_bin_path(char *buf, size_t size) {
     snprintf(buf, size, "email-sync"); /* fallback: PATH lookup */
-#ifdef __linux__
     char self[1024] = {0};
-    ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
-    if (n > 0) {
-        self[n] = '\0';
+    if (platform_executable_path(self, sizeof(self)) == 0) {
         char *slash = strrchr(self, '/');
         if (slash)
             snprintf(buf, size, "%.*s/email-sync", (int)(slash - self), self);
     }
-#endif
 }
 
 /* Set by the SIGCHLD handler when the background sync child exits. */
@@ -2511,22 +2506,23 @@ int email_service_sync(const Config *cfg) {
                  "%s/email-cli/sync.pid", cache_base);
 
     if (pid_path[0]) {
-        FILE *pf = fopen(pid_path, "r");
-        if (pf) {
-            int other = 0;
-            if (fscanf(pf, "%d", &other) != 1) other = 0;
-            fclose(pf);
-            if (other > 0 && (pid_t)other != platform_getpid() &&
-                platform_pid_is_program((pid_t)other, "email-cli")) {
-                fprintf(stderr,
-                        "email-cli sync is already running (PID %d). Skipping.\n",
-                        other);
-                return 0;
+        {
+            RAII_FILE FILE *pf = fopen(pid_path, "r");
+            if (pf) {
+                int other = 0;
+                if (fscanf(pf, "%d", &other) != 1) other = 0;
+                if (other > 0 && (pid_t)other != platform_getpid() &&
+                    platform_pid_is_program((pid_t)other, "email-cli")) {
+                    fprintf(stderr,
+                            "email-cli sync is already running (PID %d). Skipping.\n",
+                            other);
+                    return 0;
+                }
             }
         }
         /* Write our own PID */
-        pf = fopen(pid_path, "w");
-        if (pf) { fprintf(pf, "%d\n", (int)platform_getpid()); fclose(pf); }
+        RAII_FILE FILE *pf = fopen(pid_path, "w");
+        if (pf) fprintf(pf, "%d\n", (int)platform_getpid());
     }
 
     int folder_count = 0;
@@ -2747,25 +2743,10 @@ int email_service_cron_setup(const Config *cfg) {
 
     /* Find the path to this binary */
     char self_path[1024] = {0};
-#ifdef __linux__
-    ssize_t n = readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
-    if (n < 0) {
+    if (platform_executable_path(self_path, sizeof(self_path)) != 0) {
         fprintf(stderr, "Cannot determine binary path.\n");
         return -1;
     }
-    self_path[n] = '\0';
-#else
-    /* fallback: use 'which email-cli' */
-    FILE *wp = popen("which email-cli", "r");
-    if (!wp || !fgets(self_path, sizeof(self_path), wp)) {
-        if (wp) pclose(wp);
-        fprintf(stderr, "Cannot determine binary path.\n");
-        return -1;
-    }
-    if (wp) pclose(wp);
-    /* trim newline */
-    self_path[strcspn(self_path, "\n")] = '\0';
-#endif
 
     /* Build path to email-sync (same directory as current binary) */
     char sync_bin[1024] = "email-sync";
@@ -2781,14 +2762,15 @@ int email_service_cron_setup(const Config *cfg) {
              cfg->sync_interval, sync_bin);
 
     /* Read existing crontab */
-    FILE *fp = popen("crontab -l 2>/dev/null", "r");
     char existing[65536] = {0};
     size_t total = 0;
-    if (fp) {
-        size_t n2;
-        while ((n2 = fread(existing + total, 1, sizeof(existing) - total - 1, fp)) > 0)
-            total += n2;
-        pclose(fp);
+    {
+        RAII_PFILE FILE *fp = popen("crontab -l 2>/dev/null", "r");
+        if (fp) {
+            size_t n2;
+            while ((n2 = fread(existing + total, 1, sizeof(existing) - total - 1, fp)) > 0)
+                total += n2;
+        }
     }
     existing[total] = '\0';
 
@@ -2806,13 +2788,14 @@ int email_service_cron_setup(const Config *cfg) {
     strncat(existing, cron_line, sizeof(existing) - strlen(existing) - 1);
     strncat(existing, "\n", sizeof(existing) - strlen(existing) - 1);
 
-    FILE *cp = popen("crontab -", "w");
+    RAII_PFILE FILE *cp = popen("crontab -", "w");
     if (!cp) {
         fprintf(stderr, "Failed to update crontab.\n");
         return -1;
     }
     fputs(existing, cp);
     int rc = pclose(cp);
+    cp = NULL; /* prevent RAII double-close */
     if (rc != 0) {
         fprintf(stderr, "crontab update failed (exit %d).\n", rc);
         return -1;
@@ -2823,14 +2806,15 @@ int email_service_cron_setup(const Config *cfg) {
 }
 
 int email_service_cron_remove(void) {
-    FILE *fp = popen("crontab -l 2>/dev/null", "r");
     char existing[65536] = {0};
     size_t total = 0;
-    if (fp) {
-        size_t n;
-        while ((n = fread(existing + total, 1, sizeof(existing) - total - 1, fp)) > 0)
-            total += n;
-        pclose(fp);
+    {
+        RAII_PFILE FILE *fp = popen("crontab -l 2>/dev/null", "r");
+        if (fp) {
+            size_t n;
+            while ((n = fread(existing + total, 1, sizeof(existing) - total - 1, fp)) > 0)
+                total += n;
+        }
     }
     existing[total] = '\0';
 
@@ -2864,13 +2848,14 @@ int email_service_cron_remove(void) {
         p = nl ? nl + 1 : end;
     }
 
-    FILE *cp = popen("crontab -", "w");
+    RAII_PFILE FILE *cp = popen("crontab -", "w");
     if (!cp) {
         fprintf(stderr, "Failed to update crontab.\n");
         return -1;
     }
     fputs(filtered, cp);
     int rc = pclose(cp);
+    cp = NULL; /* prevent RAII double-close */
     if (rc != 0) {
         fprintf(stderr, "crontab update failed.\n");
         return -1;
@@ -2881,7 +2866,7 @@ int email_service_cron_remove(void) {
 }
 
 int email_service_cron_status(void) {
-    FILE *fp = popen("crontab -l 2>/dev/null", "r");
+    RAII_PFILE FILE *fp = popen("crontab -l 2>/dev/null", "r");
     if (!fp) {
         printf("No crontab found for this user.\n");
         return 0;
@@ -2895,7 +2880,6 @@ int email_service_cron_status(void) {
             found = 1;
         }
     }
-    pclose(fp);
     if (!found)
         printf("No email-sync cron entry found.\n");
 #undef IS_SYNC_LINE

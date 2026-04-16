@@ -53,11 +53,11 @@ static void write_config_to_fp(FILE *fp, const Config *cfg) {
 
 /** Load a config from a specific file path. */
 static Config *load_config_from_path(const char *path) {
-    FILE *fp = fopen(path, "r");
+    RAII_FILE FILE *fp = fopen(path, "r");
     if (!fp) return NULL;
 
     Config *cfg = calloc(1, sizeof(Config));
-    if (!cfg) { fclose(fp); return NULL; }
+    if (!cfg) return NULL;
 
     char line[512];
     while (fgets(line, sizeof(line), fp)) {
@@ -77,7 +77,6 @@ static Config *load_config_from_path(const char *path) {
         else if (strcmp(key, "SMTP_USER") == 0) cfg->smtp_user = strdup(val);
         else if (strcmp(key, "SMTP_PASS") == 0) cfg->smtp_pass = strdup(val);
     }
-    fclose(fp);
     if (!cfg->folder) cfg->folder = strdup("INBOX");
     if (!cfg->host || !cfg->user || !cfg->pass) { config_free(cfg); return NULL; }
 
@@ -150,10 +149,9 @@ int config_save_account(const Config *cfg) {
     char path[1088];
     snprintf(path, sizeof(path), "%s/config.ini", account_dir);
 
-    FILE *fp = fopen(path, "w");
+    RAII_FILE FILE *fp = fopen(path, "w");
     if (!fp) return -1;
     write_config_to_fp(fp, cfg);
-    fclose(fp);
     fs_ensure_permissions(path, 0600);
 
     logger_log(LOG_INFO, "Account saved: %s", cfg->user);
@@ -190,12 +188,12 @@ AccountEntry *config_list_accounts(int *count_out) {
     RAII_STRING char *accounts_dir = get_accounts_dir();
     if (!accounts_dir) return NULL;
 
-    DIR *d = opendir(accounts_dir);
+    RAII_DIR DIR *d = opendir(accounts_dir);
     if (!d) return NULL;
 
     int cap = 8;
     AccountEntry *list = malloc((size_t)cap * sizeof(AccountEntry));
-    if (!list) { closedir(d); return NULL; }
+    if (!list) return NULL;
     int count = 0;
 
     struct dirent *ent;
@@ -219,7 +217,6 @@ AccountEntry *config_list_accounts(int *count_out) {
         list[count].cfg  = cfg;
         count++;
     }
-    closedir(d);
 
     if (count == 0) { free(list); return NULL; }
 

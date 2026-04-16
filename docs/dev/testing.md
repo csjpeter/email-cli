@@ -18,17 +18,20 @@ Each source module has a corresponding test file:
 
 | Test file | Module under test |
 |-----------|-------------------|
-| `test_fs_util.c` | `src/core/fs_util.c` |
-| `test_logger.c` | `src/core/logger.c` |
-| `test_config.c` | `src/infrastructure/config_store.c` |
-| `test_wizard.c` | `src/infrastructure/setup_wizard.c` |
-| `test_curl.c` | `src/infrastructure/curl_adapter.c` |
-| `test_local_store.c` | `src/infrastructure/local_store.c` |
-| `test_mime.c` | `src/core/mime_util.c` |
-| `test_imap_util.c` | `src/core/imap_util.c` |
-| `test_email_service.c` | `src/domain/email_service.c` |
-| `test_html_parser.c` | `src/core/html_parser.c` |
-| `test_html_render.c` | `src/core/html_render.c` |
+| `test_fs_util.c` | `libemail/src/core/fs_util.c` |
+| `test_logger.c` | `libemail/src/core/logger.c` |
+| `test_config.c` | `libemail/src/infrastructure/config_store.c` |
+| `test_wizard.c` | `libemail/src/infrastructure/setup_wizard.c` |
+| `test_local_store.c` | `libemail/src/infrastructure/local_store.c` |
+| `test_imap_client.c` | `libemail/src/infrastructure/imap_client.c` |
+| `test_mime.c` | `libemail/src/core/mime_util.c` |
+| `test_imap_util.c` | `libemail/src/core/imap_util.c` |
+| `test_email_service.c` | `libemail/src/domain/email_service.c` |
+| `test_html_parser.c` | `libemail/src/core/html_parser.c` |
+| `test_html_render.c` | `libemail/src/core/html_render.c` |
+| `test_input_line.c` | `libemail/src/core/input_line.c` |
+| `test_path_complete.c` | `libemail/src/core/path_complete.c` |
+| `test_platform.c` | `libemail/src/platform/` |
 
 ### Writing a New Test
 
@@ -150,8 +153,8 @@ ASSERT_WAIT_FOR(s, "text", timeout_ms);
 
 | Scope | Target |
 |-------|--------|
-| `src/core/` + `src/infrastructure/` combined | >90% line coverage |
-| `src/domain/` | best-effort |
+| `libemail/src/core/` + `libemail/src/infrastructure/` combined | >90% line coverage |
+| `libemail/src/domain/` | best-effort |
 | `src/main.c` | best-effort (wiring code) |
 
 Known uncoverable lines in `setup_wizard.c`: TTY manipulation branches

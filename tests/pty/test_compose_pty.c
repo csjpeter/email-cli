@@ -45,13 +45,17 @@ static pid_t g_smtp_pid = -1;
 /* ── Config helpers ──────────────────────────────────────────────────── */
 
 static void write_config(void) {
-    char d1[600], d2[620], path[640];
+    char d1[600], d2[620], d3[640], d4[660], path[700];
     snprintf(d1, sizeof(d1), "%s/.config", g_test_home);
     snprintf(d2, sizeof(d2), "%s/.config/email-cli", g_test_home);
+    snprintf(d3, sizeof(d3), "%s/.config/email-cli/accounts", g_test_home);
+    snprintf(d4, sizeof(d4), "%s/.config/email-cli/accounts/testuser", g_test_home);
     mkdir(g_test_home, 0700);
     mkdir(d1, 0700);
     mkdir(d2, 0700);
-    snprintf(path, sizeof(path), "%s/config.ini", d2);
+    mkdir(d3, 0700);
+    mkdir(d4, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", d4);
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
@@ -217,11 +221,14 @@ static void test_send_batch_ok(void) {
 
 static void test_send_no_smtp_config(void) {
     /* Write config without SMTP settings */
-    char d1[600], d2[620], path[640];
+    char d1[600], d2[620], d3[640], d4[660], path[700];
     snprintf(d1, sizeof(d1), "%s/.config", g_test_home);
     snprintf(d2, sizeof(d2), "%s/.config/email-cli", g_test_home);
+    snprintf(d3, sizeof(d3), "%s/.config/email-cli/accounts", g_test_home);
+    snprintf(d4, sizeof(d4), "%s/.config/email-cli/accounts/testuser", g_test_home);
     mkdir(g_test_home, 0700); mkdir(d1, 0700); mkdir(d2, 0700);
-    snprintf(path, sizeof(path), "%s/config.ini", d2);
+    mkdir(d3, 0700); mkdir(d4, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", d4);
     FILE *fp = fopen(path, "w");
     if (fp) {
         fprintf(fp,
@@ -373,6 +380,23 @@ static void test_reply_missing_uid(void) {
     pty_close(s);
 }
 
+/**
+ * compose sent folder (US-20): after a successful send, "Saving to Sent folder"
+ * appears in output confirming the sent copy is stored locally/remotely.
+ */
+static void test_compose_sent_folder(void) {
+    write_config();
+    restart_smtp();
+    setup_editor_mock("testuser@example.com", "recipient@example.com",
+                      "Sent folder test", "Body for sent folder test");
+    const char *a[] = {"compose", NULL};
+    PtySession *s = tui_run(a);
+    ASSERT(s != NULL, "compose sent folder: opens");
+    ASSERT_WAIT_FOR(s, "Saving to Sent folder", WAIT_MS * 2);
+    pty_close(s);
+    cleanup_editor_mock();
+}
+
 /* ── Config command tests (US-24) ────────────────────────────────────── */
 
 /**
@@ -456,6 +480,7 @@ int main(int argc, char *argv[]) {
     printf("\n--- Compose/send: interactive compose ---\n");
     RUN_TEST(test_compose_abort_no_to);
     RUN_TEST(test_compose_editor_send);
+    RUN_TEST(test_compose_sent_folder);
     RUN_TEST(test_reply_missing_uid);
     RUN_TEST(test_reply_no_cr_in_quote);
 

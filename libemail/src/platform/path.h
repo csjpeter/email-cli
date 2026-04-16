@@ -1,6 +1,8 @@
 #ifndef PLATFORM_PATH_H
 #define PLATFORM_PATH_H
 
+#include <stddef.h>
+
 /**
  * @file path.h
  * @brief Platform-specific base directory resolution.
@@ -38,5 +40,16 @@ const char *platform_config_dir(void);
  * The returned string is owned by the platform layer (do not free).
  */
 const char *platform_data_dir(void);
+
+/**
+ * Returns the full path to the currently running executable.
+ * POSIX/Linux: readlink("/proc/self/exe")
+ * POSIX/macOS: _NSGetExecutablePath or realpath("/proc/curproc/file")
+ * Windows: GetModuleFileNameA(NULL, ...)
+ *
+ * Writes into the caller-provided buffer.
+ * Returns 0 on success, -1 if the path cannot be determined.
+ */
+int platform_executable_path(char *buf, size_t size);
 
 #endif /* PLATFORM_PATH_H */

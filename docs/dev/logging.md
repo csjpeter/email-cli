@@ -3,13 +3,13 @@
 ## Overview
 
 The logger writes to a rotating file at `~/.cache/email-cli/logs/session.log`.
-All IMAP traffic is captured at DEBUG level via a libcurl debug callback.
+All IMAP traffic is captured at DEBUG level via the imap_client logging integration.
 
 ## Log Levels
 
 | Level | Meaning |
 |-------|---------|
-| `LOG_DEBUG` | Full IMAP traffic dump (every byte in/out via CURL) |
+| `LOG_DEBUG` | Full IMAP traffic dump (every byte in/out) |
 | `LOG_INFO` | Application milestones: startup, config loaded, session end |
 | `LOG_WARN` | Non-fatal issues: incomplete config, permission warnings |
 | `LOG_ERROR` | Fatal errors: connection failure, config write error (also to stderr) |
@@ -31,9 +31,8 @@ Rotation triggers when `session.log` exceeds **5 MB**. The oldest file
 
 ## IMAP Traffic Capture
 
-libcurl's debug callback (`curl_debug_cb` in `curl_adapter.c`) is always
-registered. It forwards `CURLINFO_HEADER_IN`, `CURLINFO_HEADER_OUT`,
-`CURLINFO_DATA_IN`, and `CURLINFO_DATA_OUT` to `logger_log(LOG_DEBUG, ...)`.
+The imap_client module logs all sent commands and received responses to
+`logger_log(LOG_DEBUG, ...)`.
 At runtime LOG_INFO level the logger filters these out silently.
 
 To capture a full traffic dump, set `logger_init(path, LOG_DEBUG)` (already the

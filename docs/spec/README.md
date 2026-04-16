@@ -14,10 +14,11 @@ It is written at a level of detail sufficient to re-implement the program from s
 | [pagination.md](pagination.md) | Pagination logic, terminal detection, interactive pager |
 | [html-rendering.md](html-rendering.md) | MIME part selection, HTML parser, renderer, ANSI colour policy, pager integration |
 | [input-line.md](input-line.md) | InputLine single-line editor widget and PathComplete Tab-completion module |
+| [email-sync.md](email-sync.md) | email-sync binary: background sync and cron management |
+| [manifest-cache.md](manifest-cache.md) | Manifest cache for instant folder listing on warm start |
 
 ## Relationship to other docs
 
-- `docs/user/` — end-user guides (getting started, configuration, usage)
 - `docs/dev/` — developer guides (testing, logging)
 - `docs/adr/` — Architecture Decision Records (why, not what)
 - `docs/spec/` — **this directory**: authoritative what-and-how specification

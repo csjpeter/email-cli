@@ -39,7 +39,7 @@ Dovecot = MIAB IMAP komponense, de pár másodperc alatt indul.
 
 ## Minimális függőségek
 
-**Döntés:** Csak C stdlib, POSIX, libcurl és libssl engedélyezett runtime függőségként.
+**Döntés:** Csak C stdlib, POSIX, libssl (OpenSSL) és libcurl (SMTP, libwrite) engedélyezett runtime függőségként.
 **Why:** A felhasználó explicit elvként rögzítette: a függőségeket minimálisan kell tartani.
 **How to apply:** Új könyvtár hozzáadása előtt mindig ki kell meríteni a stdlib/POSIX lehetőségeket. Új runtime függőség csak indoklással és felhasználói jóváhagyással kerülhet be.
 

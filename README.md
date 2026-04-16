@@ -33,7 +33,7 @@ and replying to messages.
 
 | Binary | Write ops | Intended use |
 |--------|-----------|--------------|
-| `email-cli` | No | Interactive TUI and batch scripting; no compose/send |
+| `email-cli` | Send only | Interactive TUI and batch scripting; supports send but no compose UI |
 | `email-tui` | Yes | Full-featured interactive TUI; compose, reply, send, flag |
 | `email-cli-ro` | No | Truly read-only; no sync, no flag changes |
 | `email-sync` | No | Standalone background sync daemon / cron helper |
@@ -76,7 +76,7 @@ Run the interactive client:
 
 ```bash
 bin/email-tui       # full-featured TUI (compose, reply, send)
-bin/email-cli       # read + flag TUI (no compose/send)
+bin/email-cli       # read + flag TUI (batch send, no compose)
 ```
 
 ---

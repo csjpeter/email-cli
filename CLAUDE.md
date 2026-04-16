@@ -24,13 +24,15 @@ There is no Makefile — `manage.sh` calls CMake directly. There is no mechanism
 The project follows a strict layered CLEAN architecture with zero circular dependencies:
 
 ```
-Application    →  src/main.c
-Domain         →  src/domain/email_service.c
-Infrastructure →  src/infrastructure/{config_store,local_store,curl_adapter,setup_wizard}.c
-Core           →  src/core/{logger,fs_util}.c + raii.h
-Platform       →  src/platform/{terminal,path}.h
-                    src/platform/posix/{terminal,path}.c    (Linux/macOS/Android)
-                    src/platform/windows/{terminal,path}.c  (MinGW-w64)
+Application    →  src/main.c, main_ro.c, main_sync.c, main_tui.c
+Domain         →  libemail/src/domain/email_service.c
+Infrastructure →  libemail/src/infrastructure/{config_store,local_store,imap_client,setup_wizard}.c
+Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_parser,html_render,
+                                     imap_util,input_line,path_complete}.c + raii.h
+Platform       →  libemail/src/platform/{terminal,path}.h
+                    libemail/src/platform/posix/{terminal,path}.c    (Linux/macOS/Android)
+                    libemail/src/platform/windows/{terminal,path}.c  (MinGW-w64)
+Write library  →  libwrite/src/{smtp_adapter,compose_service}.c
 ```
 
 Dependency rule: every layer may depend on layers below it; `platform/` sits
@@ -38,7 +40,7 @@ alongside `core/` and is depended upon by `domain/` and `infrastructure/`.
 No layer may contain `#ifdef` guards for platform selection — that is the
 build system's (CMake's) responsibility.
 
-**Data flow:** `main.c` initializes logger, paths, and local store → loads config (or runs `setup_wizard` on first run) → calls `email_service` → which uses `curl_adapter` to talk to the IMAP server → results go to stdout, messages stored in `~/.local/share/email-cli/accounts/`, diagnostics to `~/.cache/email-cli/logs/`.
+**Data flow:** `main.c` initializes logger, paths, and local store → loads config (or runs `setup_wizard` on first run) → calls `email_service` → which uses `imap_client` (direct OpenSSL) to talk to the IMAP server → results go to stdout, messages stored in `~/.local/share/email-cli/accounts/`, diagnostics to `~/.cache/email-cli/logs/`.
 
 **Config** is stored at `~/.config/email-cli/config.ini` with mode 0600 (IMAP host, user, password, folder).
 
@@ -46,7 +48,7 @@ build system's (CMake's) responsibility.
 
 ## RAII Memory Safety
 
-The project uses GNU `__attribute__((cleanup(...)))` for automatic resource deallocation — see `src/core/raii.h`. Macros like `RAII_STRING`, `RAII_CURL`, `RAII_FILE` eliminate manual `free()`/cleanup boilerplate. New resources should use these macros rather than manual cleanup.
+The project uses GNU `__attribute__((cleanup(...)))` for automatic resource deallocation — see `libemail/src/core/raii.h`. Macros like `RAII_STRING`, `RAII_FILE`, `RAII_DIR` eliminate manual `free()`/cleanup boilerplate. New resources should use these macros rather than manual cleanup.
 
 ## Custom Test Framework
 
@@ -54,7 +56,7 @@ No external test libraries are used. Tests use `ASSERT(condition, message)` and 
 
 ## Language & Standard
 
-C11 (`-std=c11`). Linked against libcurl + libssl. All public functions should have Doxygen-style comments.
+C11 (`-std=c11`). Linked against libssl (OpenSSL) for IMAP, and libcurl for SMTP (in libwrite). All public functions should have Doxygen-style comments.
 
 ## GNU/Linux CLI Conventions
 
@@ -71,7 +73,7 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 
 ## Dependency Policy
 
-**Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libcurl, and libssl.  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
+**Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libssl (OpenSSL), and libcurl (SMTP only, in libwrite).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
 ## Portability
 
@@ -152,7 +154,6 @@ endif()
 docs/
   README.md               ← index
   spec/                   ← behavioural specification (commands, local-store, etc.)
-  user/                   ← end-user guides (getting-started, configuration, usage)
   dev/                    ← developer guides (testing, logging)
   adr/                    ← Architecture Decision Records (CLEAN arch, RAII, test framework)
 libs/

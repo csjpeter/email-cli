@@ -42,13 +42,17 @@ static char  g_old_home[512];
 #define COLS 100
 
 static void write_config(void) {
-    char d1[300], d2[300], path[350];
+    char d1[300], d2[300], d3[350], d4[400], path[450];
     snprintf(d1, sizeof(d1), "%s/.config", g_test_home);
     snprintf(d2, sizeof(d2), "%s/.config/email-cli", g_test_home);
+    snprintf(d3, sizeof(d3), "%s/.config/email-cli/accounts", g_test_home);
+    snprintf(d4, sizeof(d4), "%s/.config/email-cli/accounts/testuser", g_test_home);
     mkdir(g_test_home, 0700);
     mkdir(d1, 0700);
     mkdir(d2, 0700);
-    snprintf(path, sizeof(path), "%s/config.ini", d2);
+    mkdir(d3, 0700);
+    mkdir(d4, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", d4);
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
@@ -62,13 +66,17 @@ static void write_config(void) {
 }
 
 static void write_config_with_interval(int interval) {
-    char d1[300], d2[300], path[350];
+    char d1[300], d2[300], d3[350], d4[400], path[450];
     snprintf(d1, sizeof(d1), "%s/.config", g_test_home);
     snprintf(d2, sizeof(d2), "%s/.config/email-cli", g_test_home);
+    snprintf(d3, sizeof(d3), "%s/.config/email-cli/accounts", g_test_home);
+    snprintf(d4, sizeof(d4), "%s/.config/email-cli/accounts/testuser", g_test_home);
     mkdir(g_test_home, 0700);
     mkdir(d1, 0700);
     mkdir(d2, 0700);
-    snprintf(path, sizeof(path), "%s/config.ini", d2);
+    mkdir(d3, 0700);
+    mkdir(d4, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", d4);
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
@@ -1296,6 +1304,13 @@ static PtySession *tui_open_to_list(void) {
         return NULL;
     }
     pty_send_key(s, PTY_KEY_ENTER);
+    /* commit 5b4053b added a folder browser step between accounts and list;
+     * press Enter again to select the default folder (INBOX) */
+    if (pty_wait_for(s, "Folders", WAIT_MS) != 0) {
+        pty_close(s);
+        return NULL;
+    }
+    pty_send_key(s, PTY_KEY_ENTER);
     return s;
 }
 
@@ -1583,6 +1598,9 @@ static void test_tui_accounts_cursor_restored(void) {
     pty_send_key(s, PTY_KEY_DOWN);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
+    /* commit 5b4053b added folder browser step; press Enter to select INBOX */
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     /* Navigate back to accounts via Backspace × 2 */
@@ -1727,13 +1745,17 @@ static void test_tui_help_panel_question_mark(void) {
  * Used to test that the application rejects plain-text IMAP connections.
  */
 static void write_config_no_ssl_verify_imap(void) {
-    char d1[300], d2[300], path[350];
+    char d1[300], d2[300], d3[350], d4[400], path[450];
     snprintf(d1, sizeof(d1), "%s/.config", g_test_home);
     snprintf(d2, sizeof(d2), "%s/.config/email-cli", g_test_home);
+    snprintf(d3, sizeof(d3), "%s/.config/email-cli/accounts", g_test_home);
+    snprintf(d4, sizeof(d4), "%s/.config/email-cli/accounts/testuser", g_test_home);
     mkdir(g_test_home, 0700);
     mkdir(d1, 0700);
     mkdir(d2, 0700);
-    snprintf(path, sizeof(path), "%s/config.ini", d2);
+    mkdir(d3, 0700);
+    mkdir(d4, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", d4);
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
@@ -1752,13 +1774,17 @@ static void write_config_no_ssl_verify_imap(void) {
  * rejected.
  */
 static void write_config_no_ssl_verify_smtp(void) {
-    char d1[300], d2[300], path[350];
+    char d1[300], d2[300], d3[350], d4[400], path[450];
     snprintf(d1, sizeof(d1), "%s/.config", g_test_home);
     snprintf(d2, sizeof(d2), "%s/.config/email-cli", g_test_home);
+    snprintf(d3, sizeof(d3), "%s/.config/email-cli/accounts", g_test_home);
+    snprintf(d4, sizeof(d4), "%s/.config/email-cli/accounts/testuser", g_test_home);
     mkdir(g_test_home, 0700);
     mkdir(d1, 0700);
     mkdir(d2, 0700);
-    snprintf(path, sizeof(path), "%s/config.ini", d2);
+    mkdir(d3, 0700);
+    mkdir(d4, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", d4);
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
@@ -1814,6 +1840,227 @@ static void test_tls_smtp_rejected(void) {
         pty_close(s);
     }
     write_config(); /* restore safe config */
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TUI LIST: COMPOSE / REPLY FROM LIST (US-20)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_tui_list_compose_key(void) {
+    /* US-20: 'c' in TUI list launches compose; EDITOR=true → abort → back to list */
+    restart_mock();
+    setenv("EDITOR", "true", 1);  /* no-op editor exits without writing To: */
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "tui list compose key: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "Aborted", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "[Press any key to return to inbox]", WAIT_MS);
+    pty_send_str(s, " ");   /* any key — return to list */
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_list_reply_key(void) {
+    /* US-20: 'r' in TUI list launches reply; editor clears To: → abort → back to list */
+    restart_mock();
+    /* Write an editor script that blanks To: so compose aborts cleanly */
+    char editor_script[256];
+    snprintf(editor_script, sizeof(editor_script),
+             "/tmp/test_reply_list_editor_%d.sh", (int)getpid());
+    FILE *ef = fopen(editor_script, "w");
+    if (ef) {
+        fprintf(ef, "#!/bin/sh\n");
+        fprintf(ef,
+            "printf 'From: test@x.com\\nTo: \\nSubject: Re\\n\\nbody\\n' > \"$1\"\n");
+        fclose(ef);
+        chmod(editor_script, 0755);
+    }
+    setenv("EDITOR", editor_script, 1);
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "tui list reply key: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "r");
+    ASSERT_WAIT_FOR(s, "Aborted", WAIT_MS * 2);
+    ASSERT_WAIT_FOR(s, "[Press any key to return to inbox]", WAIT_MS);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    unlink(editor_script);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TUI LIST: BACKGROUND SYNC + SIGCHLD NOTIFICATION (US-19)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_tui_list_sync_and_refresh(void) {
+    /* US-19: 's' starts background sync; next keypress shows notification;
+     * 'R' clears it and re-renders the normal count line */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "tui sync+refresh: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "s");          /* start background sync */
+    ASSERT_WAIT_FOR(s, "syncing", WAIT_MS);
+    pty_settle(s, 3000);           /* wait for sync child to complete */
+    pty_send_key(s, PTY_KEY_DOWN); /* any keypress triggers SIGCHLD notification check */
+    ASSERT_WAIT_FOR(s, "New mail", WAIT_MS);
+    pty_send_str(s, "R");          /* refresh: clear notification, reload list */
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_screen_contains(s, "New mail") == 0,
+           "tui sync+refresh: New mail notification cleared after R");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TUI ACCOUNTS: ADD / DELETE / EDIT IMAP (US-21 AC4/5/13)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_tui_accounts_new_key(void) {
+    /* US-21 AC4: 'n' launches Setup Wizard; Ctrl-D aborts → accounts screen */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts new key: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "n");
+    ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);  /* EOF aborts wizard */
+    ASSERT_WAIT_FOR(s, "borted", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_accounts_delete_key(void) {
+    /* US-21 AC5: 'd' deletes the selected account; it disappears from the list */
+    write_second_account("todelete@example.com");
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts delete key: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "todelete@example.com");
+    /* accounts are sorted alphabetically; "todelete" sorts after "testuser" */
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "d");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_screen_contains(s, "todelete@example.com") == 0,
+           "accounts delete: account removed from list");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    /* cleanup: directory already removed by the TUI; unlink is defensive */
+    char path[500];
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/todelete@example.com/config.ini",
+             g_test_home);
+    unlink(path);
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/todelete@example.com", g_test_home);
+    rmdir(path);
+}
+
+static void test_tui_accounts_imap_edit_key(void) {
+    /* US-21 AC13: 'i' opens IMAP wizard for selected account; Ctrl-D aborts */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts imap edit: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "i");
+    ASSERT_WAIT_FOR(s, "current:", WAIT_MS);   /* "IMAP Host [current: ...]" prompt */
+    pty_send_key(s, PTY_KEY_CTRL_D);           /* abort wizard */
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  EMAIL-SYNC --ACCOUNT FILTER (US-25)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_sync_account_filter_known(void) {
+    /* US-25: --account syncs only the named account */
+    write_second_account("testacct@test.com");
+    restart_mock();
+    const char *a[] = {"--account", "testacct@test.com", NULL};
+    PtySession *s = sync_run(a);
+    ASSERT(s != NULL, "sync account filter known: opens");
+    ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    pty_close(s);
+    /* cleanup */
+    char path[500];
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/testacct@test.com/config.ini",
+             g_test_home);
+    unlink(path);
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/testacct@test.com", g_test_home);
+    rmdir(path);
+}
+
+static void test_sync_account_filter_unknown(void) {
+    /* US-25: --account with unknown name prints "not found" and exits non-zero */
+    const char *a[] = {"--account", "nobody@nowhere.invalid", NULL};
+    PtySession *s = sync_run(a);
+    ASSERT(s != NULL, "sync account filter unknown: opens");
+    ASSERT_WAIT_FOR(s, "not found", WAIT_MS);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  PENDING FLAG OFFLINE QUEUE (US-26)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_pending_flags_offline_queue(void) {
+    /* US-26: flag a message in offline/cron mode → manifest updated optimistically,
+     * pending_flags file created on disk for next sync to consume */
+
+    /* Sync first to populate manifest with known UIDs */
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "pending flags: sync opens");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    /* Switch to offline/cron mode and stop the server */
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* Open TUI list — works offline in cron mode (served from manifest) */
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "pending flags: tui opens offline");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Press 'f' to toggle Flagged on the first message */
+    pty_send_str(s, "f");
+    pty_settle(s, SETTLE_MS);
+    /* Status column must now show '*' for MSG_FLAG_FLAGGED */
+    ASSERT_SCREEN_CONTAINS(s, "*");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    /* pending_flags file must exist on disk */
+    char pf_path[512];
+    snprintf(pf_path, sizeof(pf_path),
+             "%s/.local/share/email-cli/accounts/testuser/pending_flags/INBOX.tsv",
+             g_test_home);
+    ASSERT(access(pf_path, F_OK) == 0,
+           "pending flags: INBOX.tsv written to disk after offline flag change");
+
+    /* Restore standard config (no sync_interval) */
+    write_config();
+    restart_mock();
 }
 
 /* ── Main ────────────────────────────────────────────────────────────── */
@@ -2022,6 +2269,30 @@ int main(int argc, char *argv[]) {
     printf("\n--- email-tui: wizard + cron ---\n");
     RUN_TEST(test_wizard_abort);
     RUN_TEST(test_cron_status_not_found);
+
+    printf("\n--- email-tui: list compose/reply (US-20) ---\n");
+    restart_mock();
+    RUN_TEST(test_tui_list_compose_key);
+    RUN_TEST(test_tui_list_reply_key);
+
+    printf("\n--- email-tui: sync and refresh (US-19) ---\n");
+    restart_mock();
+    RUN_TEST(test_tui_list_sync_and_refresh);
+
+    printf("\n--- email-tui: accounts management (US-21) ---\n");
+    restart_mock();
+    RUN_TEST(test_tui_accounts_new_key);
+    RUN_TEST(test_tui_accounts_delete_key);
+    RUN_TEST(test_tui_accounts_imap_edit_key);
+
+    printf("\n--- email-sync: account filter (US-25) ---\n");
+    restart_mock();
+    RUN_TEST(test_sync_account_filter_known);
+    RUN_TEST(test_sync_account_filter_unknown);
+
+    printf("\n--- pending flags offline queue (US-26) ---\n");
+    restart_mock();
+    RUN_TEST(test_pending_flags_offline_queue);
 
     /* Restore full email-cli binary */
     snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", argv[1]);

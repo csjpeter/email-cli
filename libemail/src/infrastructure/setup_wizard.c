@@ -47,8 +47,19 @@ Config* setup_wizard_run_internal(FILE *stream) {
     Config *cfg = calloc(1, sizeof(Config));
     if (!cfg) return NULL;
 
-    cfg->host = get_input("IMAP Host — include protocol (e.g., imaps://imap.example.com)", 0, stream);
-    if (!cfg->host) { config_free(cfg); return NULL; }
+    for (;;) {
+        char *host = get_input("IMAP Host (e.g. imaps://imap.example.com)", 0, stream);
+        if (!host) { config_free(cfg); return NULL; }
+        if (strncmp(host, "imaps://", 8) != 0) {
+            fprintf(stderr,
+                    "Error: IMAP host must start with 'imaps://' (got '%s').\n",
+                    host);
+            free(host);
+            continue;
+        }
+        cfg->host = host;
+        break;
+    }
 
     cfg->user = get_input("Email Username", 0, stream);
     if (!cfg->user) { config_free(cfg); return NULL; }

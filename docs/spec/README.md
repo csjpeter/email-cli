@@ -16,6 +16,7 @@ It is written at a level of detail sufficient to re-implement the program from s
 | [input-line.md](input-line.md) | InputLine single-line editor widget and PathComplete Tab-completion module |
 | [email-sync.md](email-sync.md) | email-sync binary: background sync and cron management |
 | [manifest-cache.md](manifest-cache.md) | Manifest cache for instant folder listing on warm start |
+| [gmail-api.md](gmail-api.md) | Gmail native API: OAuth2, label model, local store, sync, TUI behaviour |
 
 ## Relationship to other docs
 

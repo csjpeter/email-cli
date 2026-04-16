@@ -14,5 +14,8 @@ void config_free(Config *cfg) {
     free(cfg->smtp_host);
     free(cfg->smtp_user);
     free(cfg->smtp_pass);
+    free(cfg->gmail_refresh_token);
+    free(cfg->gmail_client_id);
+    free(cfg->gmail_client_secret);
     free(cfg);
 }

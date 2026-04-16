@@ -49,6 +49,10 @@ static void write_config_to_fp(FILE *fp, const Config *cfg) {
     if (cfg->smtp_port) fprintf(fp, "SMTP_PORT=%d\n", cfg->smtp_port);
     if (cfg->smtp_user) fprintf(fp, "SMTP_USER=%s\n", cfg->smtp_user);
     if (cfg->smtp_pass) fprintf(fp, "SMTP_PASS=%s\n", cfg->smtp_pass);
+    if (cfg->gmail_mode) fprintf(fp, "GMAIL_MODE=1\n");
+    if (cfg->gmail_refresh_token) fprintf(fp, "GMAIL_REFRESH_TOKEN=%s\n", cfg->gmail_refresh_token);
+    if (cfg->gmail_client_id) fprintf(fp, "GMAIL_CLIENT_ID=%s\n", cfg->gmail_client_id);
+    if (cfg->gmail_client_secret) fprintf(fp, "GMAIL_CLIENT_SECRET=%s\n", cfg->gmail_client_secret);
 }
 
 /** Load a config from a specific file path. */
@@ -76,12 +80,22 @@ static Config *load_config_from_path(const char *path) {
         else if (strcmp(key, "SMTP_PORT") == 0) cfg->smtp_port = atoi(val);
         else if (strcmp(key, "SMTP_USER") == 0) cfg->smtp_user = strdup(val);
         else if (strcmp(key, "SMTP_PASS") == 0) cfg->smtp_pass = strdup(val);
+        else if (strcmp(key, "GMAIL_MODE") == 0) cfg->gmail_mode = atoi(val);
+        else if (strcmp(key, "GMAIL_REFRESH_TOKEN") == 0) cfg->gmail_refresh_token = strdup(val);
+        else if (strcmp(key, "GMAIL_CLIENT_ID") == 0) cfg->gmail_client_id = strdup(val);
+        else if (strcmp(key, "GMAIL_CLIENT_SECRET") == 0) cfg->gmail_client_secret = strdup(val);
     }
     if (!cfg->folder) cfg->folder = strdup("INBOX");
-    if (!cfg->host || !cfg->user || !cfg->pass) { config_free(cfg); return NULL; }
 
-    /* TLS enforcement */
-    if (!cfg->ssl_no_verify) {
+    /* Gmail mode requires user + refresh token; IMAP mode requires host + user + pass */
+    if (cfg->gmail_mode) {
+        if (!cfg->user || !cfg->gmail_refresh_token) { config_free(cfg); return NULL; }
+    } else {
+        if (!cfg->host || !cfg->user || !cfg->pass) { config_free(cfg); return NULL; }
+    }
+
+    /* TLS enforcement (IMAP mode only — Gmail uses OAuth2 over HTTPS) */
+    if (!cfg->gmail_mode && !cfg->ssl_no_verify) {
         if (strncmp(cfg->host, "imaps://", 8) != 0) {
             fprintf(stderr,
                 "Error: EMAIL_HOST must start with imaps:// (TLS required).\n"

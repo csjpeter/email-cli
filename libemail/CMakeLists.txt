@@ -24,6 +24,7 @@ add_library(libemail STATIC
     src/core/imap_util.c
     src/core/input_line.c
     src/core/path_complete.c
+    src/core/json_util.c
     src/infrastructure/config_store.c
     src/infrastructure/setup_wizard.c
     src/infrastructure/imap_client.c
@@ -41,4 +42,5 @@ target_include_directories(libemail PUBLIC
     ${OPENSSL_INCLUDE_DIR}
 )
 
-target_link_libraries(libemail PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+find_package(CURL REQUIRED)
+target_link_libraries(libemail PUBLIC OpenSSL::SSL OpenSSL::Crypto CURL::libcurl)

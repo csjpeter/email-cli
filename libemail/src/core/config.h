@@ -21,6 +21,11 @@ typedef struct {
     int   smtp_port;       /**< SMTP port override; 0 = use protocol default (587 / 465). */
     char *smtp_user;       /**< SMTP username; NULL = reuse cfg->user. */
     char *smtp_pass;       /**< SMTP password; NULL = reuse cfg->pass. */
+    /* Gmail (native API) */
+    int   gmail_mode;      /**< 1 = use Gmail REST API instead of IMAP/SMTP; 0 = standard IMAP. */
+    char *gmail_refresh_token; /**< OAuth2 long-lived refresh token (persisted to config). */
+    char *gmail_client_id;     /**< OAuth2 client ID override; NULL = use built-in default. */
+    char *gmail_client_secret; /**< OAuth2 client secret override; NULL = use built-in default. */
 } Config;
 
 /**

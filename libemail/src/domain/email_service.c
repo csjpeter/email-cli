@@ -2237,25 +2237,40 @@ static void get_account_totals(const Config *cfg, int *unseen_out, int *flagged_
 }
 
 /** Print one account row; cursor=1 draws the selection arrow. */
-static void print_account_row(const Config *cfg, int cursor, int tcols,
-                               int unseen, int flagged) {
+static void print_account_row(const Config *cfg, int cursor,
+                               int unseen, int flagged,
+                               int imap_w, int smtp_w) {
     const char *user = cfg->user ? cfg->user : "(unknown)";
-    const char *host = cfg->host ? cfg->host : "";
-    /* Strip protocol prefix for compact display */
-    if (strncmp(host, "imaps://", 8) == 0) host += 8;
-    else if (strncmp(host, "imap://",  7) == 0) host += 7;
+    const char *imap = cfg->host ? cfg->host : "";
+
+    /* Build SMTP display string (no ANSI — safe to truncate with %.*s) */
+    char smtp_buf[256];
+    int smtp_configured = cfg->smtp_host && cfg->smtp_host[0];
+    if (smtp_configured) {
+        if (cfg->smtp_port)
+            snprintf(smtp_buf, sizeof(smtp_buf), "%s:%d",
+                     cfg->smtp_host, cfg->smtp_port);
+        else
+            snprintf(smtp_buf, sizeof(smtp_buf), "%s", cfg->smtp_host);
+    } else {
+        snprintf(smtp_buf, sizeof(smtp_buf), "\u2014");  /* em dash: not configured */
+    }
 
     char u[16], f[16];
     fmt_thou(u, sizeof(u), unseen);
     fmt_thou(f, sizeof(f), flagged);
 
-    if (cursor)
-        printf("  \033[1m\u2192 %6s  %7s  %-32.32s  %s\033[0m\n",
-               u, f, user, host);
-    else
-        printf("    %6s  %7s  %-32.32s  %s\n",
-               u, f, user, host);
-    (void)tcols;
+    if (cursor) {
+        printf("  \033[1m\u2192 %6s  %7s  %-32.32s  %-*.*s  %.*s\033[0m\n",
+               u, f, user, imap_w, imap_w, imap, smtp_w, smtp_buf);
+    } else if (!smtp_configured) {
+        /* dim the em dash to indicate SMTP is not yet set up */
+        printf("    %6s  %7s  %-32.32s  %-*.*s  \033[2m%.*s\033[0m\n",
+               u, f, user, imap_w, imap_w, imap, smtp_w, smtp_buf);
+    } else {
+        printf("    %6s  %7s  %-32.32s  %-*.*s  %.*s\n",
+               u, f, user, imap_w, imap_w, imap, smtp_w, smtp_buf);
+    }
 }
 
 int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
@@ -2282,33 +2297,43 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
         for (int i = 0; i < count; i++)
             get_account_totals(accounts[i].cfg, &acc_unseen[i], &acc_flagged[i]);
 
+        /* Column widths:
+         * Fixed overhead: 4(indent) + 6(unread) + 2 + 7(flagged) + 2
+         *                 + 32(account) + 2 + 2(sep) = 57
+         * Remaining split evenly between IMAP and SMTP columns. */
+        int avail = tcols - 59;
+        if (avail < 0) avail = 0;
+        int imap_w = avail / 2;
+        int smtp_w = avail - imap_w;
+        if (imap_w < 10) imap_w = 10;
+        if (smtp_w <  8) smtp_w =  8;
+
         printf("\033[H\033[2J");
-        printf("  Email Accounts (%d)\n\n", count);
+        {
+            char cl[128];
+            snprintf(cl, sizeof(cl), "  Email Accounts (%d)", count);
+            printf("\033[7m%s", cl);
+            int used = visible_line_cols(cl, cl + strlen(cl));
+            for (int p = used; p < tcols; p++) putchar(' ');
+            printf("\033[0m\n\n");
+        }
 
         if (count == 0) {
             printf("  No accounts configured.\n");
         } else {
-            printf("    %6s  %7s  %-32s  %s\n", "Unread", "Flagged", "Account", "Server");
+            printf("    %6s  %7s  %-32s  %-*s  %s\n",
+                   "Unread", "Flagged", "Account", imap_w, "IMAP", "SMTP");
             printf("    \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
             print_dbar(32);
             printf("  ");
-            print_dbar(tcols > 56 ? tcols - 56 : 10);
+            print_dbar(imap_w);
+            printf("  ");
+            print_dbar(smtp_w);
             printf("\n");
             for (int i = 0; i < count; i++)
-                print_account_row(accounts[i].cfg, i == cursor, tcols,
-                                  acc_unseen[i], acc_flagged[i]);
-
-            /* Show detail for selected account */
-            printf("\n");
-            const Config *sel = accounts[cursor].cfg;
-            if (sel->smtp_host) {
-                printf("    SMTP: %s", sel->smtp_host);
-                if (sel->smtp_port) printf(":%d", sel->smtp_port);
-                printf("\n");
-            } else {
-                printf("    SMTP: \033[33mnot configured\033[0m"
-                       "  — press \033[1me\033[0m to set up\n");
-            }
+                print_account_row(accounts[i].cfg, i == cursor,
+                                  acc_unseen[i], acc_flagged[i],
+                                  imap_w, smtp_w);
         }
         fflush(stdout);
 

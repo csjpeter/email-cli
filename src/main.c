@@ -190,11 +190,13 @@ static void help_save_attachment(void) {
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
-static int parse_uid(const char *s) {
-    if (!s || !*s) return 0;
+static int parse_uid(const char *s, char uid_out[17]) {
+    if (!s || !*s) return -1;
     char *end;
-    long v = strtol(s, &end, 10);
-    return (*end == '\0' && v > 0) ? (int)v : 0;
+    unsigned long v = strtoul(s, &end, 10);
+    if (*end != '\0' || v == 0 || v > 4294967295UL) return -1;
+    snprintf(uid_out, 17, "%016lu", v);
+    return 0;
 }
 
 static void unknown_option(const char *cmd, const char *opt) {
@@ -347,7 +349,7 @@ int main(int argc, char *argv[]) {
             result = -1;
         } else {
             for (;;) {
-                EmailListOpts opts = {0, tui_folder, page_size, 0, 1, 0};
+                EmailListOpts opts = {0, tui_folder, page_size, 0, 1, {0}};
                 int ret = email_service_list(cfg, &opts);
                 if (ret != 1) { result = (ret >= 0) ? 0 : -1; break; }
                 /* User pressed Backspace → show folder browser */
@@ -360,7 +362,7 @@ int main(int argc, char *argv[]) {
         }
 
     } else if (strcmp(cmd, "list") == 0) {
-        EmailListOpts opts = {0, NULL, 0, 0, pager, 0};
+        EmailListOpts opts = {0, NULL, 0, 0, pager, {0}};
         int ok = 1, explicit_limit = -1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) {
@@ -423,8 +425,8 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Error: 'show' requires a UID argument.\n");
             help_show();
         } else {
-            int uid = parse_uid(uid_str);
-            if (!uid)
+            char uid[17];
+            if (parse_uid(uid_str, uid) != 0)
                 fprintf(stderr,
                         "Error: UID must be a positive integer (got '%s').\n",
                         uid_str);
@@ -452,8 +454,8 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Error: 'attachments' requires a UID argument.\n");
             help_attachments();
         } else {
-            int uid = parse_uid(uid_str);
-            if (!uid)
+            char uid[17];
+            if (parse_uid(uid_str, uid) != 0)
                 fprintf(stderr,
                         "Error: UID must be a positive integer (got '%s').\n",
                         uid_str);
@@ -477,8 +479,8 @@ int main(int argc, char *argv[]) {
                     "Error: 'save-attachment' requires a UID and a filename.\n");
             help_save_attachment();
         } else {
-            int uid = parse_uid(uid_str);
-            if (!uid)
+            char uid[17];
+            if (parse_uid(uid_str, uid) != 0)
                 fprintf(stderr,
                         "Error: UID must be a positive integer (got '%s').\n",
                         uid_str);

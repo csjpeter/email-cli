@@ -527,28 +527,28 @@ void test_email_service(void) {
 
     /* ── cmp_uid_entry ───────────────────────────────────────────────── */
     {
-        MsgEntry a = {100, MSG_FLAG_UNSEEN, 1000};  /* unseen */
-        MsgEntry b = {200, 0,               2000};  /* seen   */
+        MsgEntry a = {"0000000000000100", MSG_FLAG_UNSEEN, 1000};  /* unseen */
+        MsgEntry b = {"0000000000000200", 0,               2000};  /* seen   */
         /* unseen before seen regardless of date */
         ASSERT(cmp_uid_entry(&a, &b) < 0, "cmp_uid_entry: unseen before seen");
         ASSERT(cmp_uid_entry(&b, &a) > 0, "cmp_uid_entry: seen after unseen");
     }
     {
-        MsgEntry c = {100, MSG_FLAG_UNSEEN, 1000};
-        MsgEntry d = {200, MSG_FLAG_UNSEEN, 2000};
+        MsgEntry c = {"0000000000000100", MSG_FLAG_UNSEEN, 1000};
+        MsgEntry d = {"0000000000000200", MSG_FLAG_UNSEEN, 2000};
         /* both unseen: newer date (higher epoch) first */
         ASSERT(cmp_uid_entry(&c, &d) > 0, "cmp_uid_entry: older date after newer");
         ASSERT(cmp_uid_entry(&d, &c) < 0, "cmp_uid_entry: newer date before older");
     }
     {
-        MsgEntry e = {100, MSG_FLAG_FLAGGED, 500};
-        MsgEntry f = {200, 0,                500};
+        MsgEntry e = {"0000000000000100", MSG_FLAG_FLAGGED, 500};
+        MsgEntry f = {"0000000000000200", 0,                500};
         /* flagged (read) before plain read */
         ASSERT(cmp_uid_entry(&e, &f) < 0, "cmp_uid_entry: flagged before rest");
     }
     {
-        MsgEntry g = {100, 0, 0};
-        MsgEntry h = {100, 0, 0};
+        MsgEntry g = {"0000000000000100", 0, 0};
+        MsgEntry h = {"0000000000000100", 0, 0};
         /* equal: cmp == 0 */
         ASSERT(cmp_uid_entry(&g, &h) == 0, "cmp_uid_entry: equal entries → 0");
     }
@@ -702,7 +702,7 @@ void test_email_service(void) {
             "Subfolder message body.\r\n";
 
         /* Pre-populate cache under the correct subfolder */
-        int saved_rc = local_msg_save("test_subfolder", 7777,
+        int saved_rc = local_msg_save("test_subfolder", "0000000000007777",
                                   sf_mime, strlen(sf_mime));
         if (saved_rc != 0) {
             ASSERT(0, "show_uid_interactive subfolder: local_msg_save failed");
@@ -742,7 +742,7 @@ void test_email_service(void) {
         }
 
         /* Call with new signature: explicit folder parameter */
-        int sf_ret = show_uid_interactive(&sf_cfg, "test_subfolder", 7777, 25);
+        int sf_ret = show_uid_interactive(&sf_cfg, "test_subfolder", "0000000000007777", 25);
 
         /* Restore stdin, stdout, stderr */
         fflush(stdout); fflush(stderr);

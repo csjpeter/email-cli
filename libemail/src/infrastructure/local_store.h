@@ -21,8 +21,9 @@
  *     index/from/<domain>/<localpart>     (one ref per line)
  *     index/date/<year>/<month>/<day>     (one ref per line)
  *
- * Reverse digit bucketing: d1 = uid % 10, d2 = (uid/10) % 10.
- * Reference format (IMAP): "<folder>/<uid>" per line.
+ * Reverse digit bucketing: d1 = uid[last char], d2 = uid[second-to-last char].
+ * UIDs are fixed-width 16-character strings (IMAP: zero-padded decimal, Gmail: hex).
+ * Reference format: "<folder>/<uid>" per line.
  */
 
 /**
@@ -39,31 +40,31 @@ int local_store_init(const char *host_url, const char *username);
 /* ── Message store ───────────────────────────────────────────────────── */
 
 /** @brief Checks whether a locally stored message exists. */
-int local_msg_exists(const char *folder, int uid);
+int local_msg_exists(const char *folder, const char *uid);
 
 /** @brief Writes raw message content to the local store. */
-int local_msg_save(const char *folder, int uid, const char *content, size_t len);
+int local_msg_save(const char *folder, const char *uid, const char *content, size_t len);
 
 /** @brief Reads a locally stored message. Caller must free. */
-char *local_msg_load(const char *folder, int uid);
+char *local_msg_load(const char *folder, const char *uid);
 
 /** @brief Deletes a locally stored message and its index entries. */
-int local_msg_delete(const char *folder, int uid);
+int local_msg_delete(const char *folder, const char *uid);
 
 /* ── Header store ────────────────────────────────────────────────────── */
 
 /** @brief Checks whether a locally stored header exists. */
-int   local_hdr_exists(const char *folder, int uid);
+int   local_hdr_exists(const char *folder, const char *uid);
 
 /** @brief Writes header content to the local store. */
-int   local_hdr_save(const char *folder, int uid, const char *content, size_t len);
+int   local_hdr_save(const char *folder, const char *uid, const char *content, size_t len);
 
 /** @brief Reads a locally stored header. Caller must free. */
-char *local_hdr_load(const char *folder, int uid);
+char *local_hdr_load(const char *folder, const char *uid);
 
 /** @brief Removes header files whose UID is not in @p keep_uids. */
 void  local_hdr_evict_stale(const char *folder,
-                              const int *keep_uids, int keep_count);
+                              const char (*keep_uids)[17], int keep_count);
 
 /* ── Index ───────────────────────────────────────────────────────────── */
 
@@ -79,12 +80,12 @@ void  local_hdr_evict_stale(const char *folder,
  * @param raw_msg  Raw RFC 2822 message content.
  * @return 0 on success, -1 on error.
  */
-int local_index_update(const char *folder, int uid, const char *raw_msg);
+int local_index_update(const char *folder, const char *uid, const char *raw_msg);
 
 /* ── Folder manifest (fast list cache) ────────────────────────────────── */
 
 typedef struct {
-    int   uid;
+    char  uid[17];   /**< 16-char UID string + NUL (IMAP: zero-padded decimal, Gmail: hex) */
     char *from;      /**< MIME-decoded, display-ready */
     char *subject;   /**< MIME-decoded, display-ready */
     char *date;      /**< Formatted "YYYY-MM-DD HH:MM" */
@@ -107,14 +108,14 @@ int manifest_save(const char *folder, const Manifest *m);
 void manifest_free(Manifest *m);
 
 /** @brief Finds an entry by UID. Returns pointer into manifest or NULL. */
-ManifestEntry *manifest_find(const Manifest *m, int uid);
+ManifestEntry *manifest_find(const Manifest *m, const char *uid);
 
 /** @brief Adds or updates a manifest entry (takes ownership of strings). */
-void manifest_upsert(Manifest *m, int uid,
+void manifest_upsert(Manifest *m, const char *uid,
                      char *from, char *subject, char *date, int flags);
 
 /** @brief Removes entries whose UID is not in keep_uids (sorted). */
-void manifest_retain(Manifest *m, const int *keep_uids, int keep_count);
+void manifest_retain(Manifest *m, const char (*keep_uids)[17], int keep_count);
 
 /* ── Folder list cache ───────────────────────────────────────────────── */
 
@@ -158,13 +159,13 @@ void manifest_count_folder(const char *folder, int *total_out,
  * One pending IMAP flag change that has not yet been pushed to the server.
  */
 typedef struct {
-    int  uid;
+    char uid[17];        /**< 16-char UID string + NUL */
     char flag_name[64];  /**< e.g. "\\Seen", "\\Flagged", "$Done" */
     int  add;            /**< 1 = add flag, 0 = remove flag */
 } PendingFlag;
 
 /** @brief Appends a flag change to the pending queue for a folder. */
-int local_pending_flag_add(const char *folder, int uid,
+int local_pending_flag_add(const char *folder, const char *uid,
                             const char *flag_name, int add);
 
 /** @brief Loads all pending flag changes for a folder.

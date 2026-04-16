@@ -259,7 +259,7 @@ static int cmd_compose_interactive(Config *cfg,
  * @brief Reply to a message identified by UID in the given folder.
  * Loads the message, extracts reply metadata, opens compose form.
  */
-static int cmd_reply(Config *cfg, int uid, const char *folder) {
+static int cmd_reply(Config *cfg, const char *uid, const char *folder) {
     ensure_smtp_configured(cfg);
 
     /* Load raw message from the actual current folder */
@@ -275,7 +275,7 @@ static int cmd_reply(Config *cfg, int uid, const char *folder) {
     }
 
     if (!raw) {
-        fprintf(stderr, "Error: Could not load message UID %d.\n", uid);
+        fprintf(stderr, "Error: Could not load message UID %s.\n", uid);
         return -1;
     }
 
@@ -534,7 +534,7 @@ int main(int argc, char *argv[]) {
 
         int back_to_accounts = 0;
         for (;;) {  /* inner: message list + folder browser */
-            EmailListOpts opts = {0, tui_folder, page_size, 0, 1, 0};
+            EmailListOpts opts = {0, tui_folder, page_size, 0, 1, {0}};
             int ret = email_service_list(sel_cfg, &opts);
             if (ret == 1) {
                 /* Backspace from message list → folder browser */

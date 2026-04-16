@@ -678,7 +678,7 @@ int imap_select(ImapClient *c, const char *folder) {
 /* ── UID SEARCH ──────────────────────────────────────────────────────── */
 
 int imap_uid_search(ImapClient *c, const char *criteria,
-                    int **uids_out, int *count_out) {
+                    char (**uids_out)[17], int *count_out) {
     *uids_out  = NULL;
     *count_out = 0;
 
@@ -693,7 +693,7 @@ int imap_uid_search(ImapClient *c, const char *criteria,
 
     /* Parse "* SEARCH uid uid uid ..." */
     int cap = 32, cnt = 0;
-    int *uids = NULL;
+    char (*uids)[17] = NULL;
 
     for (int i = 0; i < resp.count; i++) {
         const char *line = resp.untagged[i];
@@ -703,20 +703,21 @@ int imap_uid_search(ImapClient *c, const char *criteria,
             while (*p == ' ') p++;
             if (!*p) break;
             char *e;
-            long uid = strtol(p, &e, 10);
+            unsigned long uid = strtoul(p, &e, 10);
             if (e == p) break;
-            if (uid > 0) {
+            if (uid > 0 && uid <= 4294967295UL) {
                 if (!uids) {
-                    uids = malloc((size_t)cap * sizeof(int));
+                    uids = malloc((size_t)cap * sizeof(char[17]));
                     if (!uids) { response_free(&resp); return -1; }
                 }
                 if (cnt == cap) {
                     cap *= 2;
-                    int *tmp = realloc(uids, (size_t)cap * sizeof(int));
+                    char (*tmp)[17] = realloc(uids, (size_t)cap * sizeof(char[17]));
                     if (!tmp) { free(uids); response_free(&resp); return -1; }
                     uids = tmp;
                 }
-                uids[cnt++] = (int)uid;
+                snprintf(uids[cnt], 17, "%016lu", uid);
+                cnt++;
             }
             p = e;
         }
@@ -730,9 +731,9 @@ int imap_uid_search(ImapClient *c, const char *criteria,
 
 /* ── UID FETCH ───────────────────────────────────────────────────────── */
 
-static char *uid_fetch_part(ImapClient *c, int uid, const char *section) {
+static char *uid_fetch_part(ImapClient *c, const char *uid, const char *section) {
     char tag[16];
-    if (send_cmd(c, tag, "UID FETCH %d (UID %s)", uid, section) != 0)
+    if (send_cmd(c, tag, "UID FETCH %s (UID %s)", uid, section) != 0)
         return NULL;
 
     Response resp = {0};
@@ -749,15 +750,15 @@ static char *uid_fetch_part(ImapClient *c, int uid, const char *section) {
     response_free(&resp);
 
     if (!result)
-        logger_log(LOG_WARN, "UID FETCH %d %s: no literal in response", uid, section);
+        logger_log(LOG_WARN, "UID FETCH %s %s: no literal in response", uid, section);
     return result;
 }
 
-char *imap_uid_fetch_headers(ImapClient *c, int uid) {
+char *imap_uid_fetch_headers(ImapClient *c, const char *uid) {
     return uid_fetch_part(c, uid, "BODY.PEEK[HEADER]");
 }
 
-char *imap_uid_fetch_body(ImapClient *c, int uid) {
+char *imap_uid_fetch_body(ImapClient *c, const char *uid) {
     return uid_fetch_part(c, uid, "BODY.PEEK[]");
 }
 
@@ -780,9 +781,9 @@ static int parse_imap_flags(const char *line) {
     return flags;
 }
 
-int imap_uid_fetch_flags(ImapClient *c, int uid) {
+int imap_uid_fetch_flags(ImapClient *c, const char *uid) {
     char tag[16];
-    if (send_cmd(c, tag, "UID FETCH %d (UID FLAGS)", uid) != 0) return -1;
+    if (send_cmd(c, tag, "UID FETCH %s (UID FLAGS)", uid) != 0) return -1;
 
     Response resp = {0};
     if (read_response(c, tag, &resp) != 0) {
@@ -803,9 +804,9 @@ int imap_uid_fetch_flags(ImapClient *c, int uid) {
 
 /* ── UID STORE (set/clear flag) ──────────────────────────────────────── */
 
-int imap_uid_set_flag(ImapClient *c, int uid, const char *flag_name, int add) {
+int imap_uid_set_flag(ImapClient *c, const char *uid, const char *flag_name, int add) {
     char tag[16];
-    if (send_cmd(c, tag, "UID STORE %d %sFLAGS (%s)",
+    if (send_cmd(c, tag, "UID STORE %s %sFLAGS (%s)",
                  uid, add ? "+" : "-", flag_name) != 0)
         return -1;
     Response resp = {0};

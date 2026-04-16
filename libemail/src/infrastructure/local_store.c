@@ -45,8 +45,14 @@ int local_store_init(const char *host_url, const char *username) {
 
 /* ── Reverse digit bucketing helpers ─────────────────────────────────── */
 
-static char digit1(int uid) { return (char)('0' + (uid % 10)); }
-static char digit2(int uid) { return (char)('0' + ((uid / 10) % 10)); }
+static char digit1(const char *uid) {
+    size_t len = strlen(uid);
+    return len > 0 ? uid[len - 1] : '0';
+}
+static char digit2(const char *uid) {
+    size_t len = strlen(uid);
+    return len > 1 ? uid[len - 2] : '0';
+}
 
 /* ── Shared file I/O ─────────────────────────────────────────────────── */
 
@@ -72,7 +78,7 @@ static int write_file(const char *path, const char *content, size_t len) {
 }
 
 /** @brief Ensures the parent directory of a bucketed path exists. */
-static int ensure_bucket_dir(const char *area, const char *folder, int uid) {
+static int ensure_bucket_dir(const char *area, const char *folder, const char *uid) {
     RAII_STRING char *dir = NULL;
     if (asprintf(&dir, "%s/%s/%s/%c/%c",
                  g_account_base, area, folder, digit1(uid), digit2(uid)) == -1)
@@ -82,26 +88,26 @@ static int ensure_bucket_dir(const char *area, const char *folder, int uid) {
 
 /* ── Message store ───────────────────────────────────────────────────── */
 
-static char *msg_path(const char *folder, int uid) {
+static char *msg_path(const char *folder, const char *uid) {
     if (!g_account_base[0]) return NULL;
     char *path = NULL;
-    if (asprintf(&path, "%s/store/%s/%c/%c/%d.eml",
+    if (asprintf(&path, "%s/store/%s/%c/%c/%s.eml",
                  g_account_base, folder, digit1(uid), digit2(uid), uid) == -1)
         return NULL;
     return path;
 }
 
-int local_msg_exists(const char *folder, int uid) {
+int local_msg_exists(const char *folder, const char *uid) {
     RAII_STRING char *path = msg_path(folder, uid);
     if (!path) return 0;
     RAII_FILE FILE *fp = fopen(path, "r");
     return fp != NULL;
 }
 
-int local_msg_save(const char *folder, int uid, const char *content, size_t len) {
+int local_msg_save(const char *folder, const char *uid, const char *content, size_t len) {
     if (!g_account_base[0]) return -1;
     if (ensure_bucket_dir("store", folder, uid) != 0) {
-        logger_log(LOG_ERROR, "Failed to create store bucket for %s/%d", folder, uid);
+        logger_log(LOG_ERROR, "Failed to create store bucket for %s/%s", folder, uid);
         return -1;
     }
     RAII_STRING char *path = msg_path(folder, uid);
@@ -110,11 +116,11 @@ int local_msg_save(const char *folder, int uid, const char *content, size_t len)
         logger_log(LOG_ERROR, "Failed to write store file: %s", path);
         return -1;
     }
-    logger_log(LOG_DEBUG, "Stored %s/%d at %s", folder, uid, path);
+    logger_log(LOG_DEBUG, "Stored %s/%s at %s", folder, uid, path);
     return 0;
 }
 
-char *local_msg_load(const char *folder, int uid) {
+char *local_msg_load(const char *folder, const char *uid) {
     RAII_STRING char *path = msg_path(folder, uid);
     if (!path) return NULL;
     return load_file(path);
@@ -122,53 +128,53 @@ char *local_msg_load(const char *folder, int uid) {
 
 /* ── Header store ────────────────────────────────────────────────────── */
 
-static char *hdr_path(const char *folder, int uid) {
+static char *hdr_path(const char *folder, const char *uid) {
     if (!g_account_base[0]) return NULL;
     char *path = NULL;
-    if (asprintf(&path, "%s/headers/%s/%c/%c/%d.hdr",
+    if (asprintf(&path, "%s/headers/%s/%c/%c/%s.hdr",
                  g_account_base, folder, digit1(uid), digit2(uid), uid) == -1)
         return NULL;
     return path;
 }
 
-int local_hdr_exists(const char *folder, int uid) {
+int local_hdr_exists(const char *folder, const char *uid) {
     RAII_STRING char *path = hdr_path(folder, uid);
     if (!path) return 0;
     RAII_FILE FILE *fp = fopen(path, "r");
     return fp != NULL;
 }
 
-int local_hdr_save(const char *folder, int uid, const char *content, size_t len) {
+int local_hdr_save(const char *folder, const char *uid, const char *content, size_t len) {
     if (!g_account_base[0]) return -1;
     if (ensure_bucket_dir("headers", folder, uid) != 0) {
-        logger_log(LOG_ERROR, "Failed to create header bucket for %s/%d", folder, uid);
+        logger_log(LOG_ERROR, "Failed to create header bucket for %s/%s", folder, uid);
         return -1;
     }
     RAII_STRING char *path = hdr_path(folder, uid);
     if (!path) return -1;
     if (write_file(path, content, len) != 0) return -1;
-    logger_log(LOG_DEBUG, "Stored header %s/%d", folder, uid);
+    logger_log(LOG_DEBUG, "Stored header %s/%s", folder, uid);
     return 0;
 }
 
-char *local_hdr_load(const char *folder, int uid) {
+char *local_hdr_load(const char *folder, const char *uid) {
     RAII_STRING char *path = hdr_path(folder, uid);
     if (!path) return NULL;
     return load_file(path);
 }
 
-static int cmp_int_evict(const void *a, const void *b) {
-    return *(const int *)a - *(const int *)b;
+static int cmp_uid_evict(const void *a, const void *b) {
+    return memcmp(a, b, 16);
 }
 
 void local_hdr_evict_stale(const char *folder,
-                             const int *keep_uids, int keep_count) {
+                             const char (*keep_uids)[17], int keep_count) {
     if (!g_account_base[0]) return;
 
-    int *sorted = malloc((size_t)keep_count * sizeof(int));
+    char (*sorted)[17] = malloc((size_t)keep_count * sizeof(char[17]));
     if (!sorted) return;
-    memcpy(sorted, keep_uids, (size_t)keep_count * sizeof(int));
-    qsort(sorted, (size_t)keep_count, sizeof(int), cmp_int_evict);
+    memcpy(sorted, keep_uids, (size_t)keep_count * sizeof(char[17]));
+    qsort(sorted, (size_t)keep_count, sizeof(char[17]), cmp_uid_evict);
 
     /* Walk all 100 buckets (10 × 10) */
     for (int d1 = 0; d1 <= 9; d1++) {
@@ -186,17 +192,17 @@ void local_hdr_evict_stale(const char *folder,
                 const char *name = ent->d_name;
                 const char *dot  = strrchr(name, '.');
                 if (!dot || strcmp(dot, ".hdr") != 0) continue;
-                char *end;
-                long uid = strtol(name, &end, 10);
-                if (end != dot || uid <= 0) continue;
-                int key = (int)uid;
-                if (!bsearch(&key, sorted, (size_t)keep_count,
-                             sizeof(int), cmp_int_evict)) {
+                size_t stem_len = (size_t)(dot - name);
+                if (stem_len == 0 || stem_len > 16) continue;
+                char key[17] = {0};
+                memcpy(key, name, stem_len);
+                if (!bsearch(key, sorted, (size_t)keep_count,
+                             sizeof(char[17]), cmp_uid_evict)) {
                     RAII_STRING char *path = NULL;
                     if (asprintf(&path, "%s/%s", dir, name) != -1) {
                         remove(path);
                         logger_log(LOG_DEBUG,
-                                   "Evicted stale header: UID %ld in %s", uid, folder);
+                                   "Evicted stale header: UID %s in %s", key, folder);
                     }
                 }
             }
@@ -312,11 +318,11 @@ static void extract_email_parts(const char *from,
         *c = (char)tolower((unsigned char)*c);
 }
 
-int local_index_update(const char *folder, int uid, const char *raw_msg) {
+int local_index_update(const char *folder, const char *uid, const char *raw_msg) {
     if (!g_account_base[0] || !raw_msg) return -1;
 
     char ref[512];
-    snprintf(ref, sizeof(ref), "%s/%d", folder, uid);
+    snprintf(ref, sizeof(ref), "%s/%s", folder, uid);
 
     /* 1. From index: index/from/<domain>/<localpart> */
     RAII_STRING char *from_raw = mime_get_header(raw_msg, "From");
@@ -352,11 +358,11 @@ int local_index_update(const char *folder, int uid, const char *raw_msg) {
     return 0;
 }
 
-int local_msg_delete(const char *folder, int uid) {
+int local_msg_delete(const char *folder, const char *uid) {
     if (!g_account_base[0]) return -1;
 
     char ref[512];
-    snprintf(ref, sizeof(ref), "%s/%d", folder, uid);
+    snprintf(ref, sizeof(ref), "%s/%s", folder, uid);
 
     /* 1. Remove .eml file */
     RAII_STRING char *mpath = msg_path(folder, uid);
@@ -370,7 +376,7 @@ int local_msg_delete(const char *folder, int uid) {
     /* For from/: we'd need to know which file has this ref.
      * Since we don't track that, just load the message (if still cached)
      * or accept the stale entry.  A full re-index can clean up. */
-    logger_log(LOG_DEBUG, "Deleted %s/%d", folder, uid);
+    logger_log(LOG_DEBUG, "Deleted %s/%s", folder, uid);
     return 0;
 }
 
@@ -518,13 +524,14 @@ Manifest *manifest_load(const char *folder) {
         if (nl) *nl = '\0';
 
         /* Parse: uid\tfrom\tsubject\tdate */
-        char *end;
-        long uid = strtol(line, &end, 10);
-        if (end == line || *end != '\t' || uid <= 0) {
+        char *t1 = strchr(line, '\t');
+        if (!t1 || t1 == line) {
             line = nl ? nl + 1 : line + strlen(line);
             continue;
         }
-        char *from_start = end + 1;
+        *t1 = '\0';
+        char *uid_field = line;
+        char *from_start = t1 + 1;
         char *t2 = strchr(from_start, '\t');
         if (!t2) { line = nl ? nl + 1 : line + strlen(line); continue; }
         *t2 = '\0';
@@ -549,7 +556,7 @@ Manifest *manifest_load(const char *folder) {
             m->entries = tmp;
         }
         ManifestEntry *e = &m->entries[m->count++];
-        e->uid     = (int)uid;
+        snprintf(e->uid, sizeof(e->uid), "%s", uid_field);
         e->from    = strdup(from_start);
         e->subject = strdup(subj_start);
         e->date    = strdup(date_start);
@@ -589,7 +596,7 @@ int manifest_save(const char *folder, const Manifest *m) {
         RAII_STRING char *f = sanitise(e->from);
         RAII_STRING char *s = sanitise(e->subject);
         RAII_STRING char *d = sanitise(e->date);
-        fprintf(fp, "%d\t%s\t%s\t%s\t%d\n", e->uid, f ? f : "", s ? s : "", d ? d : "", e->flags);
+        fprintf(fp, "%s\t%s\t%s\t%s\t%d\n", e->uid, f ? f : "", s ? s : "", d ? d : "", e->flags);
     }
     logger_log(LOG_DEBUG, "Manifest saved: %s (%d entries)", folder, m->count);
     return 0;
@@ -606,14 +613,14 @@ void manifest_free(Manifest *m) {
     free(m);
 }
 
-ManifestEntry *manifest_find(const Manifest *m, int uid) {
+ManifestEntry *manifest_find(const Manifest *m, const char *uid) {
     if (!m) return NULL;
     for (int i = 0; i < m->count; i++)
-        if (m->entries[i].uid == uid) return &m->entries[i];
+        if (strcmp(m->entries[i].uid, uid) == 0) return &m->entries[i];
     return NULL;
 }
 
-void manifest_upsert(Manifest *m, int uid,
+void manifest_upsert(Manifest *m, const char *uid,
                      char *from, char *subject, char *date, int flags) {
     if (!m) return;
     ManifestEntry *existing = manifest_find(m, uid);
@@ -633,17 +640,18 @@ void manifest_upsert(Manifest *m, int uid,
         m->capacity = new_cap;
     }
     ManifestEntry *e = &m->entries[m->count++];
-    e->uid = uid; e->from = from; e->subject = subject; e->date = date;
+    snprintf(e->uid, sizeof(e->uid), "%s", uid);
+    e->from = from; e->subject = subject; e->date = date;
     e->flags = flags;
 }
 
-void manifest_retain(Manifest *m, const int *keep_uids, int keep_count) {
+void manifest_retain(Manifest *m, const char (*keep_uids)[17], int keep_count) {
     if (!m) return;
     int dst = 0;
     for (int i = 0; i < m->count; i++) {
         int found = 0;
         for (int j = 0; j < keep_count; j++) {
-            if (keep_uids[j] == m->entries[i].uid) { found = 1; break; }
+            if (strcmp(keep_uids[j], m->entries[i].uid) == 0) { found = 1; break; }
         }
         if (found) {
             if (dst != i) m->entries[dst] = m->entries[i];
@@ -735,7 +743,7 @@ static char *pending_flag_path(const char *folder) {
     return path;
 }
 
-int local_pending_flag_add(const char *folder, int uid,
+int local_pending_flag_add(const char *folder, const char *uid,
                             const char *flag_name, int add) {
     RAII_STRING char *path = pending_flag_path(folder);
     if (!path) return -1;
@@ -751,7 +759,7 @@ int local_pending_flag_add(const char *folder, int uid,
 
     RAII_FILE FILE *fp = fopen(path, "a");
     if (!fp) return -1;
-    fprintf(fp, "%d\t%s\t%d\n", uid, flag_name, add);
+    fprintf(fp, "%s\t%s\t%d\n", uid, flag_name, add);
     return 0;
 }
 
@@ -769,9 +777,9 @@ PendingFlag *local_pending_flag_load(const char *folder, int *count_out) {
 
     char line[256];
     while (fgets(line, sizeof(line), fp)) {
-        int uid, add_val;
-        char flag[64];
-        if (sscanf(line, "%d\t%63[^\t]\t%d", &uid, flag, &add_val) != 3)
+        int add_val;
+        char uid_str[17], flag[64];
+        if (sscanf(line, "%16[^\t]\t%63[^\t]\t%d", uid_str, flag, &add_val) != 3)
             continue;
         if (count == cap) {
             cap *= 2;
@@ -779,7 +787,7 @@ PendingFlag *local_pending_flag_load(const char *folder, int *count_out) {
             if (!tmp) break;
             arr = tmp;
         }
-        arr[count].uid = uid;
+        snprintf(arr[count].uid, sizeof(arr[count].uid), "%s", uid_str);
         arr[count].add = add_val;
         strncpy(arr[count].flag_name, flag, sizeof(arr[count].flag_name) - 1);
         arr[count].flag_name[sizeof(arr[count].flag_name) - 1] = '\0';

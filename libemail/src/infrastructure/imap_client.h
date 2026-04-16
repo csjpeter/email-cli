@@ -103,7 +103,7 @@ int imap_select(ImapClient *c, const char *folder);
  * @return 0 on success (including empty result), -1 on error.
  */
 int imap_uid_search(ImapClient *c, const char *criteria,
-                    int **uids_out, int *count_out);
+                    char (**uids_out)[17], int *count_out);
 
 /**
  * @brief Fetch just the RFC 2822 headers for a message (BODY.PEEK[HEADER]).
@@ -116,7 +116,7 @@ int imap_uid_search(ImapClient *c, const char *criteria,
  * @return Heap-allocated NUL-terminated string containing the raw headers,
  *         or NULL on error.  Caller must free().
  */
-char *imap_uid_fetch_headers(ImapClient *c, int uid);
+char *imap_uid_fetch_headers(ImapClient *c, const char *uid);
 
 /**
  * @brief Fetch the complete RFC 2822 message (BODY.PEEK[]).
@@ -129,7 +129,7 @@ char *imap_uid_fetch_headers(ImapClient *c, int uid);
  * @return Heap-allocated NUL-terminated string containing the full raw message,
  *         or NULL on error.  Caller must free().
  */
-char *imap_uid_fetch_body(ImapClient *c, int uid);
+char *imap_uid_fetch_body(ImapClient *c, const char *uid);
 
 /**
  * @brief Fetch the IMAP FLAGS for a single message (UID FETCH uid (UID FLAGS)).
@@ -137,7 +137,7 @@ char *imap_uid_fetch_body(ImapClient *c, int uid);
  * Returns a bitmask of MSG_FLAG_* from local_store.h, or -1 on error.
  * Does NOT affect \Seen.
  */
-int imap_uid_fetch_flags(ImapClient *c, int uid);
+int imap_uid_fetch_flags(ImapClient *c, const char *uid);
 
 /**
  * @brief Set or clear a single IMAP flag on a message (UID STORE).
@@ -146,7 +146,7 @@ int imap_uid_fetch_flags(ImapClient *c, int uid);
  * @param add        1 = add flag (+FLAGS), 0 = remove flag (-FLAGS).
  * @return 0 on success, -1 on error.
  */
-int imap_uid_set_flag(ImapClient *c, int uid, const char *flag_name, int add);
+int imap_uid_set_flag(ImapClient *c, const char *uid, const char *flag_name, int add);
 
 /**
  * @brief Append a message to an IMAP folder (IMAP APPEND command).

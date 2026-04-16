@@ -610,7 +610,7 @@ static FolderStatus *fetch_all_folder_statuses(const Config *cfg __attribute__((
  *  Opens a new IMAP connection each call.  For bulk fetching (sync), use
  *  the imap_client API directly with a shared connection. */
 static char *fetch_uid_content_in(const Config *cfg, const char *folder,
-                                  int uid, int headers_only) {
+                                  const char *uid, int headers_only) {
     RAII_IMAP ImapClient *imap = make_imap(cfg);
     if (!imap) return NULL;
     if (imap_select(imap, folder) != 0) return NULL;
@@ -622,7 +622,7 @@ static char *fetch_uid_content_in(const Config *cfg, const char *folder,
 
 /** Fetches headers for uid/folder, using the header cache. Caller must free. */
 static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
-                                       int uid) {
+                                       const char *uid) {
     if (local_hdr_exists(folder, uid))
         return local_hdr_load(folder, uid);
     char *hdrs = fetch_uid_content_in(cfg, folder, uid, 1);
@@ -636,7 +636,7 @@ static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
  * ImapClient instead of opening a new connection.  Falls back to the cache first.
  * Caller must free the returned string.
  */
-static char *fetch_uid_headers_via(ImapClient *imap, const char *folder, int uid) {
+static char *fetch_uid_headers_via(ImapClient *imap, const char *folder, const char *uid) {
     if (local_hdr_exists(folder, uid))
         return local_hdr_load(folder, uid);
     char *hdrs = imap_uid_fetch_headers(imap, uid);
@@ -780,7 +780,7 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
  * Returns 0 = back to list (Backspace/ESC/q), -1 = error.
  */
 static int show_uid_interactive(const Config *cfg, const char *folder,
-                                int uid, int page_size) {
+                                const char *uid, int page_size) {
     char *raw = NULL;
     if (local_msg_exists(folder, uid)) {
         raw = local_msg_load(folder, uid);
@@ -792,7 +792,7 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         }
     }
     if (!raw) {
-        fprintf(stderr, "Could not load UID %d.\n", uid);
+        fprintf(stderr, "Could not load UID %s.\n", uid);
         return -1;
     }
 
@@ -1008,7 +1008,7 @@ show_int_done:
 
 /* ── List helpers ────────────────────────────────────────────────────── */
 
-typedef struct { int uid; int flags; time_t epoch; } MsgEntry;
+typedef struct { char uid[17]; int flags; time_t epoch; } MsgEntry;
 
 /* Parse "YYYY-MM-DD HH:MM" (manifest date format) to time_t in local time.
  * Returns 0 on failure. */
@@ -1120,7 +1120,7 @@ static int cmp_uid_entry(const void *a, const void *b) {
     if (ga != gb) return ga - gb;         /* group order: unseen, flagged, rest */
     /* Within group: newer date first; fall back to UID if date unavailable */
     if (eb->epoch != ea->epoch) return (eb->epoch > ea->epoch) ? 1 : -1;
-    return eb->uid - ea->uid;
+    return strcmp(eb->uid, ea->uid);
 }
 
 /* ── Folder list helpers ─────────────────────────────────────────────── */
@@ -1485,7 +1485,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         entries = malloc((size_t)show_count * sizeof(MsgEntry));
         if (!entries) { manifest_free(manifest); return -1; }
         for (int i = 0; i < show_count; i++) {
-            entries[i].uid   = manifest->entries[i].uid;
+            memcpy(entries[i].uid, manifest->entries[i].uid, 17);
             entries[i].flags = manifest->entries[i].flags;
             entries[i].epoch = parse_manifest_date(manifest->entries[i].date);
         }
@@ -1507,7 +1507,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             return -1;
         }
 
-        int *unseen_uids = NULL;
+        char (*unseen_uids)[17] = NULL;
         int  unseen_uid_count = 0;
         if (imap_uid_search(list_imap, "UNSEEN", &unseen_uids, &unseen_uid_count) != 0) {
             manifest_free(manifest);
@@ -1515,15 +1515,17 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             return -1;
         }
 
-        int *flagged_uids = NULL, flagged_count = 0;
+        char (*flagged_uids)[17] = NULL;
+        int flagged_count = 0;
         imap_uid_search(list_imap, "FLAGGED", &flagged_uids, &flagged_count);
         /* ignore errors — treat as 0 flagged */
 
-        int *done_uids = NULL, done_count = 0;
+        char (*done_uids)[17] = NULL;
+        int done_count = 0;
         imap_uid_search(list_imap, "KEYWORD $Done", &done_uids, &done_count);
         /* ignore errors — treat as 0 done */
 
-        int *all_uids  = NULL;
+        char (*all_uids)[17] = NULL;
         int  all_count = 0;
         if (imap_uid_search(list_imap, "ALL", &all_uids, &all_count) != 0) {
             free(unseen_uids);
@@ -1535,11 +1537,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         }
         /* Evict headers for messages deleted from the server */
         if (all_count > 0)
-            local_hdr_evict_stale(folder, all_uids, all_count);
+            local_hdr_evict_stale(folder, (const char (*)[17])all_uids, all_count);
 
         /* Remove entries for UIDs deleted from the server */
         if (all_count > 0)
-            manifest_retain(manifest, all_uids, all_count);
+            manifest_retain(manifest, (const char (*)[17])all_uids, all_count);
 
         show_count = all_count;
 
@@ -1600,14 +1602,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (!entries) { free(unseen_uids); free(flagged_uids); free(done_uids); free(all_uids); manifest_free(manifest); return -1; }
 
         for (int i = 0; i < show_count; i++) {
-            entries[i].uid   = all_uids[i];
+            memcpy(entries[i].uid, all_uids[i], 17);
             entries[i].flags = 0;
             for (int j = 0; j < unseen_uid_count;  j++)
-                if (unseen_uids[j]  == all_uids[i]) { entries[i].flags |= MSG_FLAG_UNSEEN;  break; }
+                if (strcmp(unseen_uids[j],  all_uids[i]) == 0) { entries[i].flags |= MSG_FLAG_UNSEEN;  break; }
             for (int j = 0; j < flagged_count; j++)
-                if (flagged_uids[j] == all_uids[i]) { entries[i].flags |= MSG_FLAG_FLAGGED; break; }
+                if (strcmp(flagged_uids[j], all_uids[i]) == 0) { entries[i].flags |= MSG_FLAG_FLAGGED; break; }
             for (int j = 0; j < done_count;    j++)
-                if (done_uids[j]    == all_uids[i]) { entries[i].flags |= MSG_FLAG_DONE;    break; }
+                if (strcmp(done_uids[j],    all_uids[i]) == 0) { entries[i].flags |= MSG_FLAG_DONE;    break; }
             /* Try to get date from cached manifest (may be 0 if not yet fetched) */
             ManifestEntry *me = manifest_find(manifest, all_uids[i]);
             entries[i].epoch = me ? parse_manifest_date(me->date) : 0;
@@ -1797,7 +1799,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 (entries[i].flags & MSG_FLAG_ATTACH)  ? 'A' : '-',
                 '\0'
             };
-            printf("  %5d  %-16.16s  %s  ", entries[i].uid, date, sts);
+            printf("  %5s  %-16.16s  %s  ", entries[i].uid, date, sts);
             print_padded_col(subject, subj_w);
             printf("  ");
             print_padded_col(from,    from_w);
@@ -1858,7 +1860,7 @@ read_key_again: ;
                 if (ret == 1) goto list_done;  /* user quit from show */
                 if (ret == 2) {
                     /* 'r' pressed in reader → reply to this message */
-                    opts->action_uid = entries[cursor].uid;
+                    memcpy(opts->action_uid, entries[cursor].uid, 17);
                     list_result = 3;
                     goto list_done;
                 }
@@ -1879,7 +1881,7 @@ read_key_again: ;
                 goto list_done;
             }
             if (ch == 'r') {
-                opts->action_uid = entries[cursor].uid;
+                memcpy(opts->action_uid, entries[cursor].uid, 17);
                 list_result = 3;
                 goto list_done;
             }
@@ -1914,7 +1916,7 @@ read_key_again: ;
                 break;
             }
             if (ch == 'n' || ch == 'f' || ch == 'd') {
-                int uid  = entries[cursor].uid;
+                const char *uid = entries[cursor].uid;
                 int bit;
                 const char *flag_name;
                 if (ch == 'n') {
@@ -2530,15 +2532,15 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
 #undef ACC_FREE
 }
 
-int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
+int email_service_read(const Config *cfg, const char *uid, int pager, int page_size) {
     char *raw = NULL;
 
     if (local_msg_exists(cfg->folder, uid)) {
-        logger_log(LOG_DEBUG, "Cache hit for UID %d in %s", uid, cfg->folder);
+        logger_log(LOG_DEBUG, "Cache hit for UID %s in %s", uid, cfg->folder);
         raw = local_msg_load(cfg->folder, uid);
     } else if (cfg->sync_interval > 0) {
         /* cron/offline mode: serve only from local cache; do not connect */
-        fprintf(stderr, "Could not load message UID %d.\n", uid);
+        fprintf(stderr, "Could not load message UID %s.\n", uid);
         return -1;
     } else {
         raw = fetch_uid_content_in(cfg, cfg->folder, uid, 0);
@@ -2548,7 +2550,7 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
         }
     }
 
-    if (!raw) { fprintf(stderr, "Could not load message UID %d.\n", uid); return -1; }
+    if (!raw) { fprintf(stderr, "Could not load message UID %s.\n", uid); return -1; }
 
     char *from_raw = mime_get_header(raw, "From");
     char *from     = from_raw ? mime_decode_words(from_raw) : NULL;
@@ -2626,7 +2628,7 @@ int email_service_read(const Config *cfg, int uid, int pager, int page_size) {
 typedef struct {
     int    loop_i;     /* 1-based index of current UID in the loop */
     int    loop_total; /* total UIDs in this folder */
-    int    uid;
+    char   uid[17];
 } SyncProgressCtx;
 
 static void fmt_size(char *buf, size_t bufsz, size_t bytes) {
@@ -2641,7 +2643,7 @@ static void sync_progress_cb(size_t received, size_t total, void *ctx) {
     char recv_s[32], total_s[32];
     fmt_size(recv_s,  sizeof(recv_s),  received);
     fmt_size(total_s, sizeof(total_s), total);
-    printf("  [%d/%d] UID %d  %s / %s ...\r",
+    printf("  [%d/%d] UID %s  %s / %s ...\r",
            p->loop_i, p->loop_total, p->uid, recv_s, total_s);
     fflush(stdout);
 }
@@ -2712,7 +2714,7 @@ int email_service_sync(const Config *cfg) {
             continue;
         }
 
-        int *uids = NULL;
+        char (*uids)[17] = NULL;
         int  uid_count = 0;
         if (imap_uid_search(sync_imap, "ALL", &uids, &uid_count) != 0) {
             fprintf(stderr, "  WARN: SEARCH ALL failed for %s\n", folder);
@@ -2751,38 +2753,41 @@ int email_service_sync(const Config *cfg) {
         }
 
         /* Get UNSEEN set to mark entries */
-        int *unseen_uids = NULL;
+        char (*unseen_uids)[17] = NULL;
         int  unseen_count = 0;
         if (imap_uid_search(sync_imap, "UNSEEN", &unseen_uids, &unseen_count) != 0)
             unseen_count = 0;
 
-        int *flagged_uids = NULL, flagged_count = 0;
+        char (*flagged_uids)[17] = NULL;
+        int flagged_count = 0;
         imap_uid_search(sync_imap, "FLAGGED", &flagged_uids, &flagged_count);
 
-        int *done_uids = NULL, done_count = 0;
+        char (*done_uids)[17] = NULL;
+        int done_count = 0;
         imap_uid_search(sync_imap, "KEYWORD $Done", &done_uids, &done_count);
 
         /* Evict deleted messages from manifest */
-        manifest_retain(manifest, uids, uid_count);
+        manifest_retain(manifest, (const char (*)[17])uids, uid_count);
 
         int fetched = 0, skipped = 0;
         for (int i = 0; i < uid_count; i++) {
-            int uid = uids[i];
+            const char *uid = uids[i];
             int uid_flags = 0;
             for (int j = 0; j < unseen_count;  j++)
-                if (unseen_uids[j]  == uid) { uid_flags |= MSG_FLAG_UNSEEN;  break; }
+                if (strcmp(unseen_uids[j],  uid) == 0) { uid_flags |= MSG_FLAG_UNSEEN;  break; }
             for (int j = 0; j < flagged_count; j++)
-                if (flagged_uids[j] == uid) { uid_flags |= MSG_FLAG_FLAGGED; break; }
+                if (strcmp(flagged_uids[j], uid) == 0) { uid_flags |= MSG_FLAG_FLAGGED; break; }
             for (int j = 0; j < done_count;    j++)
-                if (done_uids[j]    == uid) { uid_flags |= MSG_FLAG_DONE;    break; }
+                if (strcmp(done_uids[j],    uid) == 0) { uid_flags |= MSG_FLAG_DONE;    break; }
 
             /* Show progress BEFORE the potentially slow network fetch */
-            printf("  [%d/%d] UID %d...\r", i + 1, uid_count, uid);
+            printf("  [%d/%d] UID %s...\r", i + 1, uid_count, uid);
             fflush(stdout);
 
             /* Fetch full body if not cached */
             if (!local_msg_exists(folder, uid)) {
-                SyncProgressCtx pctx = { i + 1, uid_count, uid };
+                SyncProgressCtx pctx = { i + 1, uid_count, {0} };
+                memcpy(pctx.uid, uid, 17);
                 imap_set_progress(sync_imap, sync_progress_cb, &pctx);
                 char *raw = imap_uid_fetch_body(sync_imap, uid);
                 imap_set_progress(sync_imap, NULL, NULL);
@@ -2799,7 +2804,7 @@ int email_service_sync(const Config *cfg) {
                     free(raw);
                     fetched++;
                 } else {
-                    fprintf(stderr, "  WARN: failed to fetch UID %d in %s\n", uid, folder);
+                    fprintf(stderr, "  WARN: failed to fetch UID %s in %s\n", uid, folder);
                     errors++;
                     continue;
                 }
@@ -2827,7 +2832,7 @@ int email_service_sync(const Config *cfg) {
                 me->flags = uid_flags;
             }
 
-            printf("  [%d/%d] UID %d   \r", i + 1, uid_count, uid);
+            printf("  [%d/%d] UID %s   \r", i + 1, uid_count, uid);
             fflush(stdout);
         }
         free(unseen_uids);
@@ -3038,7 +3043,7 @@ int email_service_cron_status(void) {
 /* ── Attachment service functions ───────────────────────────────────── */
 
 /* Load raw message for uid (cache or fetch). Returns heap string or NULL. */
-static char *load_raw_message(const Config *cfg, int uid) {
+static char *load_raw_message(const Config *cfg, const char *uid) {
     if (local_msg_exists(cfg->folder, uid)) {
         return local_msg_load(cfg->folder, uid);
     }
@@ -3050,14 +3055,14 @@ static char *load_raw_message(const Config *cfg, int uid) {
     return raw;
 }
 
-char *email_service_fetch_raw(const Config *cfg, int uid) {
+char *email_service_fetch_raw(const Config *cfg, const char *uid) {
     return load_raw_message(cfg, uid);
 }
 
-int email_service_list_attachments(const Config *cfg, int uid) {
+int email_service_list_attachments(const Config *cfg, const char *uid) {
     char *raw = load_raw_message(cfg, uid);
     if (!raw) {
-        fprintf(stderr, "Could not load message UID %d.\n", uid);
+        fprintf(stderr, "Could not load message UID %s.\n", uid);
         return -1;
     }
     int count = 0;
@@ -3082,18 +3087,18 @@ int email_service_list_attachments(const Config *cfg, int uid) {
     return 0;
 }
 
-int email_service_save_attachment(const Config *cfg, int uid,
+int email_service_save_attachment(const Config *cfg, const char *uid,
                                   const char *name, const char *outdir) {
     char *raw = load_raw_message(cfg, uid);
     if (!raw) {
-        fprintf(stderr, "Could not load message UID %d.\n", uid);
+        fprintf(stderr, "Could not load message UID %s.\n", uid);
         return -1;
     }
     int count = 0;
     MimeAttachment *atts = mime_list_attachments(raw, &count);
     free(raw);
     if (count == 0) {
-        fprintf(stderr, "Message UID %d has no attachments.\n", uid);
+        fprintf(stderr, "Message UID %s has no attachments.\n", uid);
         mime_free_attachments(atts, count);
         return -1;
     }
@@ -3105,7 +3110,7 @@ int email_service_save_attachment(const Config *cfg, int uid,
         if (strcmp(fn, name) == 0) { idx = i; break; }
     }
     if (idx < 0) {
-        fprintf(stderr, "Attachment '%s' not found in message UID %d.\n", name, uid);
+        fprintf(stderr, "Attachment '%s' not found in message UID %s.\n", name, uid);
         mime_free_attachments(atts, count);
         return -1;
     }

@@ -21,11 +21,11 @@ void test_local_msg_store(void) {
     setup_test_env("/tmp/email-cli-store-test");
 
     const char *folder = "INBOX";
-    const int   uid    = 137;
+    const char *uid    = "0000000000000137";
 
     /* Pre-clean */
     unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser/store/INBOX/7/3/137.eml");
+           "testuser/store/INBOX/7/3/0000000000000137.eml");
 
     /* 1. Not stored initially */
     ASSERT(local_msg_exists(folder, uid) == 0,
@@ -47,28 +47,28 @@ void test_local_msg_store(void) {
     }
 
     /* 4. Different UIDs are independent */
-    ASSERT(local_msg_exists(folder, 99) == 0,
+    ASSERT(local_msg_exists(folder, "0000000000000099") == 0,
            "local_msg_exists: UID 99 should not exist");
 
     /* 5. Reverse digit bucketing: UID 42 → 2/4/ */
     const char *c2 = "Subject: UID 42\r\n\r\nBody";
-    local_msg_save(folder, 42, c2, strlen(c2));
-    ASSERT(local_msg_exists(folder, 42) == 1,
+    local_msg_save(folder, "0000000000000042", c2, strlen(c2));
+    ASSERT(local_msg_exists(folder, "0000000000000042") == 1,
            "local_msg_exists: UID 42 after save (bucket 2/4)");
 
     /* 6. UID 5 → 5/0/ (single digit pads to 0) */
     const char *c3 = "Subject: UID 5\r\n\r\nBody";
-    local_msg_save(folder, 5, c3, strlen(c3));
-    ASSERT(local_msg_exists(folder, 5) == 1,
+    local_msg_save(folder, "0000000000000005", c3, strlen(c3));
+    ASSERT(local_msg_exists(folder, "0000000000000005") == 1,
            "local_msg_exists: UID 5 after save (bucket 5/0)");
 
     /* Cleanup */
     unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser/store/INBOX/7/3/137.eml");
+           "testuser/store/INBOX/7/3/0000000000000137.eml");
     unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser/store/INBOX/2/4/42.eml");
+           "testuser/store/INBOX/2/4/0000000000000042.eml");
     unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser/store/INBOX/5/0/5.eml");
+           "testuser/store/INBOX/5/0/0000000000000005.eml");
 
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
@@ -82,17 +82,17 @@ void test_local_hdr_evict(void) {
 
     const char *folder = "INBOX";
 
-    local_hdr_save(folder, 10, "header-10", 9);
-    local_hdr_save(folder, 20, "header-20", 9);
+    local_hdr_save(folder, "0000000000000010", "header-10", 9);
+    local_hdr_save(folder, "0000000000000020", "header-20", 9);
 
-    ASSERT(local_hdr_exists(folder, 10) == 1, "hdr_evict: UID 10 before");
-    ASSERT(local_hdr_exists(folder, 20) == 1, "hdr_evict: UID 20 before");
+    ASSERT(local_hdr_exists(folder, "0000000000000010") == 1, "hdr_evict: UID 10 before");
+    ASSERT(local_hdr_exists(folder, "0000000000000020") == 1, "hdr_evict: UID 20 before");
 
-    int keep[] = {20};
-    local_hdr_evict_stale(folder, keep, 1);
+    char keep[][17] = {"0000000000000020"};
+    local_hdr_evict_stale(folder, (const char (*)[17])keep, 1);
 
-    ASSERT(local_hdr_exists(folder, 10) == 0, "hdr_evict: UID 10 evicted");
-    ASSERT(local_hdr_exists(folder, 20) == 1, "hdr_evict: UID 20 kept");
+    ASSERT(local_hdr_exists(folder, "0000000000000010") == 0, "hdr_evict: UID 10 evicted");
+    ASSERT(local_hdr_exists(folder, "0000000000000020") == 1, "hdr_evict: UID 20 kept");
 
     /* Cleanup */
     local_hdr_evict_stale(folder, NULL, 0);
@@ -112,7 +112,7 @@ void test_local_index(void) {
         "Date: Tue, 15 Mar 2026 10:30:00 +0100\r\n"
         "Subject: Test\r\n\r\nBody";
 
-    int rc = local_index_update("INBOX", 42, msg);
+    int rc = local_index_update("INBOX", "0000000000000042", msg);
     ASSERT(rc == 0, "local_index_update: should return 0");
 
     /* Verify from index exists */
@@ -126,8 +126,8 @@ void test_local_index(void) {
             char line[256];
             ASSERT(fgets(line, sizeof(line), fp) != NULL,
                    "from index should have a line");
-            ASSERT(strstr(line, "INBOX/42") != NULL,
-                   "from index should contain INBOX/42");
+            ASSERT(strstr(line, "INBOX/0000000000000042") != NULL,
+                   "from index should contain INBOX/0000000000000042");
         }
     }
 
@@ -142,13 +142,13 @@ void test_local_index(void) {
             char line[256];
             ASSERT(fgets(line, sizeof(line), fp) != NULL,
                    "date index should have a line");
-            ASSERT(strstr(line, "INBOX/42") != NULL,
-                   "date index should contain INBOX/42");
+            ASSERT(strstr(line, "INBOX/0000000000000042") != NULL,
+                   "date index should contain INBOX/0000000000000042");
         }
     }
 
     /* Duplicate should not be added */
-    local_index_update("INBOX", 42, msg);
+    local_index_update("INBOX", "0000000000000042", msg);
     {
         RAII_FILE FILE *fp = fopen(from_path, "r");
         int count = 0;
@@ -182,10 +182,10 @@ void test_manifest(void) {
     /* 2. Create manifest, add entries, save */
     m = calloc(1, sizeof(Manifest));
     ASSERT(m != NULL, "manifest: calloc");
-    manifest_upsert(m, 42,   strdup("Alice <alice@example.com>"),
+    manifest_upsert(m, "0000000000000042", strdup("Alice <alice@example.com>"),
                               strdup("Hello World"),
                               strdup("2024-03-15 10:00"), MSG_FLAG_UNSEEN);
-    manifest_upsert(m, 137,  strdup("Bob <bob@test.org>"),
+    manifest_upsert(m, "0000000000000137", strdup("Bob <bob@test.org>"),
                               strdup("Re: Meeting"),
                               strdup("2024-03-16 14:30"), 0);
     ASSERT(m->count == 2, "manifest: 2 entries after upsert");
@@ -199,7 +199,7 @@ void test_manifest(void) {
     ASSERT(m != NULL, "manifest_load: not NULL after save");
     ASSERT(m->count == 2, "manifest_load: 2 entries");
 
-    ManifestEntry *e42 = manifest_find(m, 42);
+    ManifestEntry *e42 = manifest_find(m, "0000000000000042");
     ASSERT(e42 != NULL, "manifest_find: UID 42 found");
     ASSERT(strcmp(e42->from, "Alice <alice@example.com>") == 0,
            "manifest: UID 42 from correct");
@@ -208,34 +208,34 @@ void test_manifest(void) {
     ASSERT(strcmp(e42->date, "2024-03-15 10:00") == 0,
            "manifest: UID 42 date correct");
 
-    ManifestEntry *e137 = manifest_find(m, 137);
+    ManifestEntry *e137 = manifest_find(m, "0000000000000137");
     ASSERT(e137 != NULL, "manifest_find: UID 137 found");
     ASSERT(strcmp(e137->subject, "Re: Meeting") == 0,
            "manifest: UID 137 subject correct");
 
     /* 4. Upsert updates existing entry */
-    manifest_upsert(m, 42, strdup("Alice Updated"),
+    manifest_upsert(m, "0000000000000042", strdup("Alice Updated"),
                            strdup("Updated Subject"),
                            strdup("2024-03-15 11:00"), 0 /* no flags */);
     ASSERT(m->count == 2, "manifest: still 2 after upsert-update");
-    e42 = manifest_find(m, 42);
+    e42 = manifest_find(m, "0000000000000042");
     ASSERT(strcmp(e42->subject, "Updated Subject") == 0,
            "manifest: upsert updated subject");
 
     /* 5. manifest_find returns NULL for missing UID */
-    ASSERT(manifest_find(m, 999) == NULL,
+    ASSERT(manifest_find(m, "0000000000000999") == NULL,
            "manifest_find: NULL for missing UID");
 
     /* 6. manifest_retain keeps only specified UIDs */
-    int keep[] = {137};
-    manifest_retain(m, keep, 1);
+    char keep[][17] = {"0000000000000137"};
+    manifest_retain(m, (const char (*)[17])keep, 1);
     ASSERT(m->count == 1, "manifest_retain: 1 entry after retain");
-    ASSERT(manifest_find(m, 137) != NULL, "manifest_retain: UID 137 kept");
-    ASSERT(manifest_find(m, 42) == NULL, "manifest_retain: UID 42 removed");
+    ASSERT(manifest_find(m, "0000000000000137") != NULL, "manifest_retain: UID 137 kept");
+    ASSERT(manifest_find(m, "0000000000000042") == NULL, "manifest_retain: UID 42 removed");
 
     /* 7. Nested folder manifest */
     Manifest *m2 = calloc(1, sizeof(Manifest));
-    manifest_upsert(m2, 1, strdup("Test"), strdup("Nested"), strdup("2024-01-01 00:00"), 0 /* no flags */);
+    manifest_upsert(m2, "0000000000000001", strdup("Test"), strdup("Nested"), strdup("2024-01-01 00:00"), 0 /* no flags */);
     ASSERT(manifest_save("munka/ai", m2) == 0, "manifest_save: nested folder");
     manifest_free(m2);
     m2 = manifest_load("munka/ai");

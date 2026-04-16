@@ -27,7 +27,7 @@ typedef struct {
     int         limit;
     int         offset;
     int         pager;
-    int         action_uid;   /**< Output: UID for reply action (ret==3) */
+    char        action_uid[17]; /**< Output: UID for reply action (ret==3) */
 } EmailListOpts;
 
 /**
@@ -123,7 +123,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout);
  * @param page_size  Lines per page when pager=1.
  * @return 0 on success, -1 on failure.
  */
-int email_service_read(const Config *cfg, int uid, int pager, int page_size);
+int email_service_read(const Config *cfg, const char *uid, int pager, int page_size);
 
 /**
  * @brief Downloads all messages in all folders to the local cache.
@@ -189,7 +189,7 @@ int email_service_cron_status(void);
  * @param uid  IMAP UID of the message.
  * @return Heap-allocated raw message, or NULL on failure.
  */
-char *email_service_fetch_raw(const Config *cfg, int uid);
+char *email_service_fetch_raw(const Config *cfg, const char *uid);
 
 /**
  * @brief Saves a sent message to the Sent folder on the IMAP server.
@@ -215,7 +215,7 @@ int email_service_save_sent(const Config *cfg, const char *msg, size_t msg_len);
  * @param uid  IMAP UID of the message.
  * @return 0 on success, -1 on failure.
  */
-int email_service_list_attachments(const Config *cfg, int uid);
+int email_service_list_attachments(const Config *cfg, const char *uid);
 
 /**
  * @brief Saves one named attachment from a message to a directory.
@@ -230,7 +230,7 @@ int email_service_list_attachments(const Config *cfg, int uid);
  *                (falling back to ~).
  * @return 0 on success, -1 on failure.
  */
-int email_service_save_attachment(const Config *cfg, int uid,
+int email_service_save_attachment(const Config *cfg, const char *uid,
                                   const char *name, const char *outdir);
 
 #endif /* EMAIL_SERVICE_H */

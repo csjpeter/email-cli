@@ -1443,15 +1443,42 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 return 0;
             }
             RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
-            printf("\033[H\033[2J");
-            printf("No cached data for %s.\n\n", folder);
-            printf("Run 'email-cli sync' to download messages.\n\n");
-            printf("\033[2m  Backspace=folders  ESC=quit\033[0m\n");
-            fflush(stdout);
+            {
+                int tcols = terminal_cols(); int trows = terminal_rows();
+                if (tcols <= 0) tcols = 80;
+                if (trows <= 0) trows = 24;
+                int avail = tcols - 35; if (avail < 40) avail = 40;
+                int subj_w = avail * 3 / 5, from_w = avail - subj_w;
+                printf("\033[H\033[2J");
+                char cl[512];
+                snprintf(cl, sizeof(cl),
+                         "  0 of 0 message(s) in %s (0 unread) [%s].  \u26a0 No cached data \u2014 run 'email-sync' or 's=sync'",
+                         folder, cfg->user ? cfg->user : "?");
+                printf("\033[7m%s", cl);
+                int used = visible_line_cols(cl, cl + strlen(cl));
+                for (int p = used; p < tcols; p++) putchar(' ');
+                printf("\033[0m\n\n");
+                printf("  %5s  %-16s  %-4s  %-*s  %s\n",
+                       "UID", "Date", "Sts", subj_w, "Subject", "From");
+                printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
+                print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
+                printf("\n  \033[2m(empty)\033[0m\n");
+                fflush(stdout);
+                char sb[256];
+                snprintf(sb, sizeof(sb),
+                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                         "  Backspace=folders  ESC=quit"
+                         "  s=sync  R=refresh  [0/0]");
+                print_statusbar(trows, tcols, sb);
+            }
             for (;;) {
                 TermKey key = terminal_read_key();
                 if (key == TERM_KEY_BACK) return 1;
                 if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
+                int ch = terminal_last_printable();
+                if (ch == 's') { sync_start_background(); }
+                if (ch == 'R') return 4; /* refresh: re-list */
             }
         }
         show_count = manifest->count;
@@ -1526,18 +1553,45 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 printf("No messages in %s.\n", folder);
                 return 0;
             }
-            /* Interactive mode: show empty-folder screen and wait for input.
-             * Returning immediately would drop the user back to the OS — instead
-             * let them navigate away with Backspace (→ folder list) or ESC/^C. */
             RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
-            printf("\033[H\033[2J");
-            printf("No messages in %s.\n\n", folder);
-            printf("\033[2m  Backspace=folders  ESC=quit\033[0m\n");
-            fflush(stdout);
+            {
+                int tcols = terminal_cols(); int trows = terminal_rows();
+                if (tcols <= 0) tcols = 80;
+                if (trows <= 0) trows = 24;
+                int avail = tcols - 35; if (avail < 40) avail = 40;
+                int subj_w = avail * 3 / 5, from_w = avail - subj_w;
+                printf("\033[H\033[2J");
+                char cl[512];
+                snprintf(cl, sizeof(cl),
+                         "  0 of 0 message(s) in %s (0 unread) [%s].",
+                         folder, cfg->user ? cfg->user : "?");
+                printf("\033[7m%s", cl);
+                int used = visible_line_cols(cl, cl + strlen(cl));
+                for (int p = used; p < tcols; p++) putchar(' ');
+                printf("\033[0m\n\n");
+                printf("  %5s  %-16s  %-4s  %-*s  %s\n",
+                       "UID", "Date", "Sts", subj_w, "Subject", "From");
+                printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
+                print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
+                printf("\n  \033[2m(empty)\033[0m\n");
+                fflush(stdout);
+                char sb[256];
+                snprintf(sb, sizeof(sb),
+                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                         "  Backspace=folders  ESC=quit"
+                         "  c=compose  r=reply  n=new  f=flag  d=done"
+                         "  s=sync  R=refresh  [0/0]");
+                print_statusbar(trows, tcols, sb);
+            }
             for (;;) {
                 TermKey key = terminal_read_key();
-                if (key == TERM_KEY_BACK)  return 1; /* go to folder list */
+                if (key == TERM_KEY_BACK)  return 1;
                 if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
+                int ch = terminal_last_printable();
+                if (ch == 'c') return 2; /* compose */
+                if (ch == 's') { sync_start_background(); }
+                if (ch == 'R') return 4; /* refresh */
             }
         }
 
@@ -1575,14 +1629,44 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             return 0;
         }
         RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
-        printf("\033[H\033[2J");
-        printf("No messages in %s.\n\n", folder);
-        printf("\033[2m  Backspace=folders  ESC=quit\033[0m\n");
-        fflush(stdout);
+        {
+            int tcols = terminal_cols(); int trows = terminal_rows();
+            if (tcols <= 0) tcols = 80;
+            if (trows <= 0) trows = 24;
+            int avail = tcols - 35; if (avail < 40) avail = 40;
+            int subj_w = avail * 3 / 5, from_w = avail - subj_w;
+            printf("\033[H\033[2J");
+            char cl[512];
+            snprintf(cl, sizeof(cl),
+                     "  0 of 0 message(s) in %s (0 unread) [%s].",
+                     folder, cfg->user ? cfg->user : "?");
+            printf("\033[7m%s", cl);
+            int used = visible_line_cols(cl, cl + strlen(cl));
+            for (int p = used; p < tcols; p++) putchar(' ');
+            printf("\033[0m\n\n");
+            printf("  %5s  %-16s  %-4s  %-*s  %s\n",
+                   "UID", "Date", "Sts", subj_w, "Subject", "From");
+            printf("  \u2550\u2550\u2550\u2550\u2550  ");
+            print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
+            print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
+            printf("\n  \033[2m(empty)\033[0m\n");
+            fflush(stdout);
+            char sb[256];
+            snprintf(sb, sizeof(sb),
+                     "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                     "  Backspace=folders  ESC=quit"
+                     "  c=compose  r=reply  n=new  f=flag  d=done"
+                     "  s=sync  R=refresh  [0/0]");
+            print_statusbar(trows, tcols, sb);
+        }
         for (;;) {
             TermKey key = terminal_read_key();
             if (key == TERM_KEY_BACK)  return 1;
             if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
+            int ch = terminal_last_printable();
+            if (ch == 'c') return 2; /* compose */
+            if (ch == 's') { sync_start_background(); }
+            if (ch == 'R') return 4; /* refresh */
         }
     }
 
@@ -2052,7 +2136,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
         printf("\033[H\033[2J");
         {
-            char cl[512];
+            char cl[1024];
             if (!tree_mode && current_prefix[0])
                 snprintf(cl, sizeof(cl), "  Folders \u2014 %s  \u203a %s/  (%d)",
                          cfg->user ? cfg->user : "?",

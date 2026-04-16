@@ -486,3 +486,205 @@ On success:
 If the refresh token expires or is revoked, `gmail_connect()` detects the
 `invalid_grant` error and prompts for reauthorization using the same device
 flow.
+
+---
+
+## 12. TUI — Account List (Gmail Accounts)
+
+Gmail accounts appear alongside IMAP accounts in the unified account list.
+The **Type** column distinguishes them:
+
+```
+  Accounts  (2)
+
+  Email                    Type    Status
+  ═══════════════════════  ══════  ═══════════
+  user@example.com         IMAP    3 unread
+  user@gmail.com           Gmail   8 unread
+```
+
+- **Type column**: displays `IMAP` or `Gmail` — replaces any server hostname
+  info (Gmail accounts have no IMAP host/port to display).
+- **No SMTP columns**: Gmail send uses the REST API, not SMTP.
+- **Status**: aggregate unread count, identical to IMAP accounts.
+- **Navigation**: Enter on a Gmail account opens the **Label List** (§4);
+  Enter on an IMAP account opens the folder browser (existing behaviour).
+
+---
+
+## 13. TUI — Label Picker (`t` key)
+
+When `t` is pressed on a message in the Gmail message list, an overlay popup
+appears:
+
+```
+  ┌─ Labels ─────────────┐
+  │ [x] INBOX            │
+  │ [ ] Starred          │
+  │ [x] Work             │
+  │ [ ] Personal         │
+  │ [ ] Project-X        │
+  │                      │
+  │ Enter=toggle  q=done │
+  └──────────────────────┘
+```
+
+### Behaviour
+
+- **Checkbox list** overlaid on the message list, centred horizontally.
+- Shows toggleable labels: system labels (INBOX, STARRED, UNREAD) and all
+  user labels.  **Excluded** from the picker: TRASH, SPAM, DRAFTS, SENT —
+  these are managed exclusively by compound API calls.
+- `[x]` = message currently has this label; `[ ]` = does not.
+- **Enter** = toggle the selected label immediately via `messages.modify()`.
+  The checkbox updates in-place; the API call fires asynchronously.
+- **↑ / ↓** = navigate the picker list.
+- **q / ESC** = close the picker and return to the message list.
+- If the toggle results in the message having **no labels at all**, it
+  migrates to `_nolabel.idx` (Archive).
+
+### Width and Scrolling
+
+- Popup width: max(label name lengths) + checkbox + padding, capped at 40
+  columns.
+- If the label count exceeds the available popup height, the list scrolls
+  vertically.
+
+---
+
+## 14. TUI — Status Bar (Gmail)
+
+The status bar (bottom line of the terminal) adapts its content for Gmail
+accounts:
+
+| View | Status bar text |
+|------|----------------|
+| Label list | `↑↓=navigate  Enter=open  Backspace=accounts  q=quit` |
+| Message list (INBOX) | `r=remove  d=trash  a=archive  f=star  t=labels  c=compose  q=back` |
+| Message list (other label) | `r=remove  d=trash  f=star  t=labels  c=compose  q=back` |
+| Message reader | `r=remove  d=trash  f=star  n=unread  t=labels  q=back` |
+| Label picker | `Enter=toggle  ↑↓=navigate  q=done` |
+
+**Notes:**
+- The `a` (archive) key hint appears **only** in the INBOX view — archiving
+  is defined as removing the INBOX label.
+- The `n` (unread toggle) key hint appears in the **reader** view — in the
+  list it's less useful because opening a message auto-clears UNREAD.
+- IMAP accounts continue to show the existing IMAP-specific status bar text.
+
+---
+
+## 15. TUI — Message Reader (Gmail)
+
+The message reader for Gmail adds a **Labels** line to the header block:
+
+```
+  From:    Boss <boss@example.com>
+  Date:    2026-04-16 09:30
+  To:      user@gmail.com
+  Subject: Quarterly review
+  Labels:  INBOX, ★ Starred, Work
+  ────────────────────────────────────
+
+  Hi, please find the quarterly review attached...
+```
+
+### Details
+
+- **Labels line**: shown only for Gmail accounts.  IMAP messages do not
+  display this line.
+- **System label display**: `★` prefix for STARRED; other system labels by
+  name (INBOX, SENT, DRAFTS).
+- **UNREAD not shown**: the user is currently reading the message, so
+  displaying UNREAD would be misleading (it gets removed on open).
+- **TRASH / SPAM**: shown if the message is in Trash or Spam view (the user
+  navigated there intentionally).
+- **Key bindings in reader**: `r` (remove label), `d` (trash), `f` (star
+  toggle), `n` (unread toggle), `t` (label picker) — all function
+  identically to the message list.
+
+---
+
+## 16. Compose / Reply / Forward (Gmail)
+
+### Compose (`c` key)
+
+1. Opens the existing compose editor (same InputLine-based flow as IMAP).
+2. User fills in **To**, **Subject**, **Body**.
+3. On send: the composed RFC 2822 message is base64url-encoded and sent via
+   `POST /gmail/v1/users/me/messages/send` with `{raw: "<base64url>"}`.
+4. Gmail server auto-adds `SENT` label — no client-side label management
+   needed.
+
+### Reply (`R` key) / Forward (`F` key)
+
+Same compose flow with pre-populated headers (In-Reply-To, References, quoted
+body).  The `messages.send()` call includes `threadId` from the original
+message to maintain Gmail's threading model.
+
+### Draft Save
+
+If the user abandons composition (ESC / ^C):
+- **Option A** (simple, Phase 1): message is discarded with confirmation
+  prompt.
+- **Option B** (future): `POST /gmail/v1/users/me/drafts` with the partial
+  message → saved to Drafts label.
+
+### Dispatch in `email_service.c`
+
+```c
+if (mail_client_uses_labels(client)) {
+    // Gmail: send via REST API
+    gmail_send_message(client, raw_rfc2822, len);
+} else {
+    // IMAP: send via SMTP (existing libwrite path)
+    smtp_send(smtp_cfg, raw_rfc2822, len);
+}
+```
+
+No SMTP configuration is stored or needed for Gmail accounts.
+
+---
+
+## 17. Error Handling
+
+### OAuth2 Errors
+
+| Error | Handling |
+|-------|----------|
+| `invalid_grant` (expired/revoked refresh token) | Auto-trigger device flow reauthorization; display the device code prompt |
+| `invalid_client` | Display: `"OAuth2 client credentials are invalid. Check GMAIL_CLIENT_ID/SECRET in config.ini."` |
+| Network error during device flow poll | Retry silently up to `expires_in` timeout; then display: `"Authorization timed out."` |
+| User cancels (^C during device flow) | Return to account setup; no partial config saved |
+
+### API Request Errors
+
+| HTTP Status | Handling |
+|-------------|---------|
+| 401 Unauthorized | Refresh access token and retry once; if still 401 → trigger reauthorization |
+| 403 Forbidden | Display: `"Gmail API access denied. Verify OAuth2 scope and account permissions."` |
+| 404 Not Found (message) | Skip message silently during sync (permanently deleted server-side) |
+| 429 Too Many Requests | Exponential backoff: 1s → 2s → 4s → 8s → 16s → 30s cap; retry up to 6 times |
+| 5xx Server Error | Retry 3 times with exponential backoff; then display: `"Gmail API temporarily unavailable."` |
+
+### Sync Error Recovery
+
+If incremental sync fails with `historyId` not found (HTTP 404 on the
+`/history` endpoint):
+
+1. Log warning: `"History expired — performing full resync"`
+2. Delete all local `.idx` files for this account
+3. Perform full sync from scratch (§8)
+4. Save new `historyId`
+
+This is expected to happen only when the client hasn't synced for an extended
+period (>30 days) or when Google's internal history is pruned.
+
+### Network Connectivity
+
+All Gmail API calls go through a single `gmail_request()` helper that handles:
+- Connection timeouts: 10 seconds (libcurl `CURLOPT_CONNECTTIMEOUT`)
+- Transfer timeouts: 60 seconds (libcurl `CURLOPT_TIMEOUT`)
+- On timeout: display `"Network error — check internet connection"` in the
+  status bar; operation is not retried automatically (user can press `s` to
+  retry sync).

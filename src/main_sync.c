@@ -68,10 +68,19 @@ static void help_cron(void) {
     );
 }
 
+#ifndef EMAIL_CLI_VERSION
+#define EMAIL_CLI_VERSION "unknown"
+#endif
+
 int main(int argc, char *argv[]) {
     setlocale(LC_ALL, "");
 
     const char *cmd = argc > 1 ? argv[1] : NULL;
+
+    if (cmd && (strcmp(cmd, "--version") == 0 || strcmp(cmd, "-V") == 0)) {
+        printf("email-sync %s\n", EMAIL_CLI_VERSION);
+        return EXIT_SUCCESS;
+    }
 
     /* Handle --help / -h */
     if (cmd && (strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0)) {

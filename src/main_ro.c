@@ -142,8 +142,17 @@ static void unknown_option(const char *cmd, const char *opt) {
 
 /* ── Entry point ─────────────────────────────────────────────────────── */
 
+#ifndef EMAIL_CLI_VERSION
+#define EMAIL_CLI_VERSION "unknown"
+#endif
+
 int main(int argc, char *argv[]) {
     setlocale(LC_ALL, "");
+
+    if (argc >= 2 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)) {
+        printf("email-cli-ro %s\n", EMAIL_CLI_VERSION);
+        return EXIT_SUCCESS;
+    }
 
     /* 1. Determine cache directory for logs */
     const char *cache_base = platform_cache_dir();

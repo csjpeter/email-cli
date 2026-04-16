@@ -352,6 +352,10 @@ static int cmd_reply(Config *cfg, int uid, const char *folder) {
 
 /* ── Entry point ─────────────────────────────────────────────────────── */
 
+#ifndef EMAIL_CLI_VERSION
+#define EMAIL_CLI_VERSION "unknown"
+#endif
+
 int main(int argc, char *argv[]) {
     /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
@@ -359,6 +363,10 @@ int main(int argc, char *argv[]) {
 
     /* Handle --help / -h before anything else */
     for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-V") == 0) {
+            printf("email-tui %s\n", EMAIL_CLI_VERSION);
+            return EXIT_SUCCESS;
+        }
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             help();
             return EXIT_SUCCESS;

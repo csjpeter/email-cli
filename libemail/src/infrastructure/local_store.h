@@ -182,4 +182,10 @@ int ui_pref_get_int(const char *key, int default_val);
 /** @brief Writes an integer UI preference. */
 int ui_pref_set_int(const char *key, int value);
 
+/** @brief Reads a string UI preference.  Returns heap-allocated string or NULL. Caller must free(). */
+char *ui_pref_get_str(const char *key);
+
+/** @brief Writes a string UI preference. */
+int ui_pref_set_str(const char *key, const char *value);
+
 #endif /* LOCAL_STORE_H */

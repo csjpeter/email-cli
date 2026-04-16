@@ -431,6 +431,56 @@ int ui_pref_set_int(const char *key, int value) {
     return 0;
 }
 
+char *ui_pref_get_str(const char *key) {
+    RAII_STRING char *path = ui_pref_path();
+    if (!path) return NULL;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+    char line[1024];
+    size_t klen = strlen(key);
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, key, klen) == 0 && line[klen] == '=') {
+            char *val = line + klen + 1;
+            size_t vlen = strlen(val);
+            while (vlen > 0 && (val[vlen-1] == '\n' || val[vlen-1] == '\r'))
+                val[--vlen] = '\0';
+            return strdup(val);
+        }
+    }
+    return NULL;
+}
+
+int ui_pref_set_str(const char *key, const char *value) {
+    const char *data_base = platform_data_dir();
+    if (!data_base) return -1;
+    RAII_STRING char *dir = NULL;
+    if (asprintf(&dir, "%s/email-cli", data_base) == -1) return -1;
+    if (fs_mkdir_p(dir, 0700) != 0) return -1;
+    RAII_STRING char *path = ui_pref_path();
+    if (!path) return -1;
+
+    char *existing = load_file(path);
+
+    RAII_FILE FILE *fp = fopen(path, "w");
+    if (!fp) { free(existing); return -1; }
+
+    size_t klen = strlen(key);
+    if (existing) {
+        char *line = existing;
+        while (*line) {
+            char *nl = strchr(line, '\n');
+            size_t llen = nl ? (size_t)(nl - line + 1) : strlen(line);
+            if (!(strncmp(line, key, klen) == 0 && line[klen] == '='))
+                fwrite(line, 1, llen, fp);
+            line += llen;
+        }
+        free(existing);
+    }
+    fprintf(fp, "%s=%s\n", key, value);
+    logger_log(LOG_DEBUG, "UI pref %s=%s saved", key, value);
+    return 0;
+}
+
 /* ── Folder manifest ─────────────────────────────────────────────────── */
 
 static char *manifest_path(const char *folder) {

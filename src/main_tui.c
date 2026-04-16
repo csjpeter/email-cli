@@ -423,52 +423,103 @@ int main(int argc, char *argv[]) {
 
     int page_size = detect_page_size();
 
-    /* 5. Interactive TUI — three-level navigation:
-     *   Accounts screen  (top)
-     *     └─ Folder browser  (Backspace from message list)
+    /* 5. Interactive TUI — navigation hierarchy:
+     *   Accounts screen  (top, skipped on warm start if last_account is set)
+     *     └─ Folder browser  (Enter on account; also Backspace from message list)
      *           └─ Message list  (Enter on folder)
      *   Backspace at folder-root → back to Accounts
      *   ESC anywhere → quit
      */
     int result = 0;
     int account_cursor = 0;  /* persists across re-entries to accounts screen */
+
+    /* On warm start, skip accounts screen and jump straight to the last-used
+     * account's folder browser. */
+    Config *pending_cfg = NULL;
+    {
+        char *last = ui_pref_get_str("last_account");
+        if (last) {
+            int acount = 0;
+            AccountEntry *alist = config_list_accounts(&acount);
+            if (alist) {
+                for (int i = 0; i < acount; i++) {
+                    if (alist[i].cfg && alist[i].cfg->user &&
+                        strcmp(alist[i].cfg->user, last) == 0) {
+                        pending_cfg = alist[i].cfg;
+                        alist[i].cfg = NULL;  /* take ownership */
+                        account_cursor = i;
+                        break;
+                    }
+                }
+                config_free_account_list(alist, acount);
+            }
+            free(last);
+        }
+    }
+
     for (;;) {  /* outer: accounts screen */
         Config *sel_cfg = NULL;
-        int acc = email_service_account_interactive(&sel_cfg, &account_cursor);
-        if (acc == 0) break;  /* ESC/quit */
-        if (acc == 3) {
-            /* 'n' → add new account via wizard */
-            Config *new_cfg = setup_wizard_run();
-            if (new_cfg) {
-                if (config_save_account(new_cfg) != 0)
-                    fprintf(stderr, "Warning: Failed to save new account.\n");
-                config_free(new_cfg);
+
+        if (pending_cfg) {
+            /* warm start: bypass accounts screen */
+            sel_cfg = pending_cfg;
+            pending_cfg = NULL;
+        } else {
+            int acc = email_service_account_interactive(&sel_cfg, &account_cursor);
+            if (acc == 0) break;  /* ESC/quit */
+            if (acc == 3) {
+                /* 'n' → add new account via wizard */
+                Config *new_cfg = setup_wizard_run();
+                if (new_cfg) {
+                    if (config_save_account(new_cfg) != 0)
+                        fprintf(stderr, "Warning: Failed to save new account.\n");
+                    config_free(new_cfg);
+                }
+                continue;  /* re-display accounts screen */
             }
-            continue;  /* re-display accounts screen */
-        }
-        if (!sel_cfg) continue;
-        if (acc == 4) {
-            /* 'i' → edit IMAP settings for selected account */
-            if (setup_wizard_imap(sel_cfg) == 0)
-                config_save_account(sel_cfg);
-            config_free(sel_cfg);
-            continue;  /* re-display accounts screen with updated info */
-        }
-        if (acc == 2) {
-            /* 'e' → edit SMTP settings for selected account */
-            if (setup_wizard_smtp(sel_cfg) == 0)
-                config_save_account(sel_cfg);
-            config_free(sel_cfg);
-            continue;  /* re-display accounts screen with updated info */
+            if (!sel_cfg) continue;
+            if (acc == 4) {
+                /* 'i' → edit IMAP settings for selected account */
+                if (setup_wizard_imap(sel_cfg) == 0)
+                    config_save_account(sel_cfg);
+                config_free(sel_cfg);
+                continue;  /* re-display accounts screen with updated info */
+            }
+            if (acc == 2) {
+                /* 'e' → edit SMTP settings for selected account */
+                if (setup_wizard_smtp(sel_cfg) == 0)
+                    config_save_account(sel_cfg);
+                config_free(sel_cfg);
+                continue;  /* re-display accounts screen with updated info */
+            }
+            /* acc == 1: Enter → open account */
         }
 
-        /* acc == 1: Enter → open account, enter folder/message loop */
         logger_log(LOG_INFO, "Switching to account: user=%s host=%s",
                    sel_cfg->user ? sel_cfg->user : "(null)",
                    sel_cfg->host ? sel_cfg->host : "(null)");
         local_store_init(sel_cfg->host, sel_cfg->user);
-        char *tui_folder = strdup(sel_cfg->folder ? sel_cfg->folder : "INBOX");
-        if (!tui_folder) { config_free(sel_cfg); result = -1; break; }
+
+        /* Remember this as the last-used account for next startup */
+        if (sel_cfg->user)
+            ui_pref_set_str("last_account", sel_cfg->user);
+
+        /* Open folder browser first — user picks which folder to enter */
+        int go_up = 0;
+        char *tui_folder = email_service_list_folders_interactive(
+                               sel_cfg,
+                               sel_cfg->folder ? sel_cfg->folder : "INBOX",
+                               &go_up);
+        if (go_up) {
+            /* Backspace at folder root → back to accounts screen */
+            config_free(sel_cfg);
+            continue;
+        }
+        if (!tui_folder) {
+            /* ESC from folder browser → quit */
+            config_free(sel_cfg);
+            break;
+        }
 
         int back_to_accounts = 0;
         for (;;) {  /* inner: message list + folder browser */
@@ -476,7 +527,6 @@ int main(int argc, char *argv[]) {
             int ret = email_service_list(sel_cfg, &opts);
             if (ret == 1) {
                 /* Backspace from message list → folder browser */
-                int go_up = 0;
                 char *sel = email_service_list_folders_interactive(
                                 sel_cfg, tui_folder, &go_up);
                 free(tui_folder);

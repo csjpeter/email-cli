@@ -178,7 +178,7 @@ void local_hdr_evict_stale(const char *folder,
                          g_account_base, folder, d1, d2) == -1)
                 continue;
 
-            DIR *d = opendir(dir);
+            RAII_DIR DIR *d = opendir(dir);
             if (!d) continue;
 
             struct dirent *ent;
@@ -200,7 +200,6 @@ void local_hdr_evict_stale(const char *folder,
                     }
                 }
             }
-            closedir(d);
         }
     }
     free(sorted);
@@ -238,10 +237,9 @@ static int index_append(const char *dir_path, const char *file_name,
 
     if (index_has_ref(path, ref)) return 0; /* already indexed */
 
-    FILE *fp = fopen(path, "a");
+    RAII_FILE FILE *fp = fopen(path, "a");
     if (!fp) return -1;
     fprintf(fp, "%s\n", ref);
-    fclose(fp);
     return 0;
 }
 

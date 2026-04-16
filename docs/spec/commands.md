@@ -19,7 +19,7 @@ email-cli --help            → general help
 email-cli list --help       → same as: email-cli help list
 email-cli show --help       → same as: email-cli help show
 email-cli folders --help    → same as: email-cli help folders
-email-cli sync --help       → same as: email-cli help sync
+email-cli send --help       → same as: email-cli help send
 ```
 
 `--help` is processed before any other dispatch logic.
@@ -45,7 +45,7 @@ Prints usage text to **stdout** and exits with code **0**.
 
 If `<command>` is given and unknown, prints an error to **stderr** and exits **1**.
 
-Supported topics: `list`, `show`, `folders`, `sync`.
+Supported topics: `list`, `show`, `folders`, `attachments`, `save-attachment`, `send`, `config`.
 
 ---
 
@@ -76,7 +76,7 @@ Lists messages in the configured (or overridden) IMAP folder.
 5. Apply `--offset` (1-based; convert to 0-based cursor position) and `--limit`.
 6. For each message in the visible window: fetch headers from cache or server
    (see [local-store.md](local-store.md)), parse `From`, `Subject`, `Date`; render table row.
-7. When `--all` and the full UID set was fetched, call `hcache_evict_stale` to
+7. When `--all` and the full UID set was fetched, call `local_hdr_evict_stale` to
    remove cached headers for UIDs no longer present on the server.
 8. Paginate / interact according to [pagination.md](pagination.md).
 
@@ -141,8 +141,7 @@ Displays the full content of one message identified by its IMAP UID.
 2. **Local store hit**: load from disk.
 3. **Miss**:
    a. Check whether the message currently has `\Seen` (via `UID FETCH uid (FLAGS)`).
-   b. Fetch full message via IMAP URL (`/<folder>/;UID=<uid>`); libcurl issues
-      `UID FETCH uid BODY[]` which sets `\Seen` on the server.
+   b. Fetch full message via `UID FETCH uid BODY[]` which sets `\Seen` on the server.
    c. If the message was **not** `\Seen` before step (b): immediately issue
       `UID STORE uid -FLAGS (\Seen)` to restore the unread state.
    d. Save fetched content to the local message store.
@@ -198,42 +197,8 @@ Lists all IMAP folders available on the server.
 
 ---
 
-## `sync`
-
-```
-email-cli [--batch] sync
-```
-
-Downloads all messages in every IMAP folder to the local store.
-
-### Behaviour
-
-1. Fetch the folder list via IMAP `LIST "" "*"`.
-2. Sort folders lexicographically.
-3. For each folder:
-   a. Issue `UID SEARCH ALL` to obtain all UIDs.
-   b. For each UID not already in the local store: fetch full message
-      via `BODY.PEEK[]`, save to store, update from/date indexes.
-4. Print progress per folder to stdout.
-
-### Output
-
-```
-Syncing INBOX ...
-  [42/52] UID 1234 fetched
-  52 fetched, 0 already stored
-Syncing munka/ai ...
-  0 fetched, 18 already stored
-
-Sync complete: 52 fetched, 18 already stored
-```
-
-### Exit codes
-
-| Code | Condition |
-|------|-----------|
-| 0 | All folders synced without errors |
-| −1 | Folder list fetch failed or at least one UID fetch failed |
+> **Note:** The `sync` command and cron management have moved to the separate
+> `email-sync` binary. See [email-sync.md](email-sync.md) for the specification.
 
 ---
 

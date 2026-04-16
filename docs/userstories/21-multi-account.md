@@ -22,6 +22,7 @@
 | 10 | **Backspace** on the Accounts screen itself is ignored (does not quit). Only **ESC** / **q** / Ctrl-C exit the program from the top level. |
 | 11 | When returning to the Accounts screen (after navigating into an account and back), the cursor is positioned on the account that was previously open, not on the first one. |
 | 12 | The **Unread** and **Flagged** counts are read from local manifests (no network required) and reflect the totals across all folders for each account. |
+| 13 | Pressing **i** opens the IMAP wizard for the selected account; the updated config is saved if the wizard completes successfully. |
 
 ---
 
@@ -77,7 +78,7 @@ Accounts screen  (ESC/q → quit; Backspace → ignored)
 * `cursor_inout` is an in/out parameter: on entry the cursor is placed at this
   index; on any return the current cursor index is written back.  `main_tui.c`
   keeps an `account_cursor` variable across calls so position is restored.
-* Unread/Flagged counts are computed by `get_account_totals()`: calls
+* Unread/Flagged counts are computed by the static `get_account_totals()`: calls
   `local_store_init` + `local_folder_list_load` + `manifest_count_folder` for
   each account.  No network connection is required.
 * `main_tui.c` owns the outer `for(;;)` loop; `sel_cfg` is freed at the end of

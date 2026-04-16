@@ -32,8 +32,8 @@ Tests are designed to run under three diagnostic harnesses without modification:
 
 ## Consequences
 
-- Zero additional dependencies beyond GCC, libcurl, and lcov/valgrind (already needed).
+- Zero additional dependencies beyond GCC, libssl (OpenSSL), and lcov/valgrind (already needed).
 - No mocking framework — infrastructure dependencies are tested via real implementations
-  (config_store writes real files to /tmp; curl_adapter creates real CURL handles).
+  (config_store writes real files to /tmp; imap_client uses real OpenSSL connections).
 - Functional tests use a separate mock IMAP server written in C (`tests/functional/`).
 - Integration tests use a real Dockerized Dovecot server (`tests/integration/`).

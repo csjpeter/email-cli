@@ -30,3 +30,11 @@ const char *platform_data_dir(void) {
     if (h) { snprintf(g_data, sizeof(g_data), "%s", h); return g_data; }
     return NULL;
 }
+
+int platform_executable_path(char *buf, size_t size) {
+    if (!buf || size == 0) return -1;
+    /* MinGW-w64: GetModuleFileNameA is available via windows.h */
+    extern unsigned long __stdcall GetModuleFileNameA(void *, char *, unsigned long);
+    unsigned long n = GetModuleFileNameA(NULL, buf, (unsigned long)size);
+    return (n > 0 && n < (unsigned long)size) ? 0 : -1;
+}

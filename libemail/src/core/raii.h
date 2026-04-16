@@ -27,6 +27,13 @@ static inline void fclose_ptr(void *ptr) {
     }
 }
 
+static inline void pclose_ptr(FILE **p) {
+    if (p && *p) {
+        pclose(*p);
+        *p = NULL;
+    }
+}
+
 static inline void closedir_ptr(DIR **p) {
     if (p && *p) {
         closedir(*p);
@@ -36,6 +43,7 @@ static inline void closedir_ptr(DIR **p) {
 
 #define RAII_STRING __attribute__((cleanup(free_ptr)))
 #define RAII_FILE __attribute__((cleanup(fclose_ptr)))
+#define RAII_PFILE __attribute__((cleanup(pclose_ptr)))
 #define RAII_DIR __attribute__((cleanup(closedir_ptr)))
 
 /* To avoid circular dependencies with Config, we use a generic cleanup for it 

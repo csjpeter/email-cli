@@ -164,7 +164,7 @@ path.  Called from `main.c` after configuration is loaded.
 
 ## File format
 
-Both `.hdr` and `.eml` files store raw bytes as returned by libcurl,
+Both `.hdr` and `.eml` files store raw bytes as returned by the IMAP client,
 NUL-terminated.  No additional framing or metadata.  Index files are
 UTF-8 plain text with Unix line endings.
 

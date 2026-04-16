@@ -4,7 +4,7 @@
 
 ## Context
 
-Manual `free()` / `fclose()` / `curl_easy_cleanup()` at every return point leads
+Manual `free()` / `fclose()` / `closedir()` at every return point leads
 to leaks when error paths are added or refactored. `goto cleanup` patterns work
 but clutter the happy-path logic.
 
@@ -12,26 +12,26 @@ but clutter the happy-path logic.
 
 All resource-owning variables use GCC/Clang's `__attribute__((cleanup(fn)))` to
 bind a cleanup function that fires automatically when the variable goes out of scope.
-This is implemented in `src/core/raii.h` as four macros:
+This is implemented in `libemail/src/core/raii.h` as macros:
 
 | Macro | Type | Cleanup called |
 |-------|------|----------------|
 | `RAII_STRING` | `char *` | `free()` |
-| `RAII_CURL` | `CURL *` | `curl_easy_cleanup()` |
 | `RAII_FILE` | `FILE *` | `fclose()` |
-| `RAII_SLIST` | `struct curl_slist *` | `curl_slist_free_all()` |
+| `RAII_DIR` | `DIR *` | `closedir()` |
+| `RAII_HTML_NODE` | `HtmlNode *` | `html_node_free()` |
 
 ### Usage example
 
 ```c
-int fetch(const Config *cfg) {
-    RAII_CURL  CURL *curl = curl_adapter_init(cfg->user, cfg->pass, 1);
-    RAII_STRING char *url  = NULL;
+Config *load_config(const char *path) {
+    RAII_FILE  FILE *fp = fopen(path, "r");
+    RAII_STRING char *buf = NULL;
 
-    if (!curl) return -1;                // curl cleaned up automatically
-    if (asprintf(&url, "%s/%s", ...) == -1) return -1;  // url too
+    if (!fp) return NULL;                // fp closed automatically
+    if (asprintf(&buf, "%s/...", ...) == -1) return NULL;  // buf freed too
 
-    return curl_adapter_fetch(curl, url, NULL, write_to_stdout);
+    return parse_config(fp);
 }   // both freed here, no matter which return path was taken
 ```
 

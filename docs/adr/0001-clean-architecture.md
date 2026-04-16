@@ -25,10 +25,10 @@ Each layer may only depend on layers below it. No circular dependencies.
 
 | Layer | Path | Responsibility |
 |-------|------|----------------|
-| Core | `src/core/` | Zero-dependency utilities: logger, fs_util, raii.h |
-| Infrastructure | `src/infrastructure/` | External system adapters: config_store, curl_adapter, setup_wizard |
-| Domain | `src/domain/` | Business logic: email_service — coordinates fetch, does not know how config is stored |
-| Application | `src/main.c` | CLI entry point, wires layers together |
+| Core | `libemail/src/core/` | Zero-dependency utilities: logger, fs_util, config, mime_util, html_parser, html_render, imap_util, input_line, path_complete, raii.h |
+| Infrastructure | `libemail/src/infrastructure/` | External system adapters: config_store, imap_client, local_store, setup_wizard |
+| Domain | `libemail/src/domain/` | Business logic: email_service — coordinates fetch, does not know how config is stored |
+| Application | `src/main.c` + `main_ro.c`, `main_sync.c`, `main_tui.c` | CLI entry points, wire layers together |
 
 ### Dependency Inversion
 

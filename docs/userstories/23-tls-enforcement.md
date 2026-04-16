@@ -55,8 +55,7 @@ On insecure connection (test environments only, `SSL_NO_VERIFY=1` must be set):
 
 * Validation is performed in `config_load_from_store()` or immediately before the
   first network call, before any credentials are transmitted.
-* The `curl_adapter` layer logs the TLS version from `CURLINFO_TLS_SESSION` after
-  a successful connection.
+* The `imap_client` layer logs the TLS version after a successful connection.
 * The `SSL_NO_VERIFY=1` bypass is intentionally limited to development/test use;
   it must not suppress the WARN log entry.
 * Mock servers in `tests/functional/` and `tests/pty/` already use TLS (certs

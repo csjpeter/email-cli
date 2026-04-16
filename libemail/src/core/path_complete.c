@@ -1,5 +1,6 @@
 #include "path_complete.h"
 #include "platform/terminal.h"
+#include "raii.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -124,11 +125,11 @@ static void path_tab_fn(InputLine *il) {
         g_comp.dir[dlen] = '\0';
         prefix = slash + 1;
     } else {
-        strcpy(g_comp.dir, "./");
+        snprintf(g_comp.dir, sizeof(g_comp.dir), "./");
         prefix = head;
     }
 
-    DIR *d = opendir(g_comp.dir);
+    RAII_DIR DIR *d = opendir(g_comp.dir);
     if (!d) return;
 
     int cap = 0;
@@ -142,14 +143,13 @@ static void path_tab_fn(InputLine *il) {
             int nc = cap ? cap * 2 : 16;
             char (*tmp)[256] = realloc(g_comp.names,
                                        (size_t)nc * sizeof(*g_comp.names));
-            if (!tmp) { closedir(d); g_comp_free(); return; }
+            if (!tmp) { g_comp_free(); return; }
             g_comp.names = tmp;
             cap = nc;
         }
         snprintf(g_comp.names[g_comp.count], 256, "%s", ent->d_name);
         g_comp.count++;
     }
-    closedir(d);
 
     if (g_comp.count == 0) return;
 

@@ -1,5 +1,6 @@
 #include "mime_util.h"
 #include "html_render.h"
+#include "raii.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -787,15 +788,13 @@ void mime_free_attachments(MimeAttachment *list, int count) {
 
 int mime_save_attachment(const MimeAttachment *att, const char *dest_path) {
     if (!att || !dest_path || !att->data) return -1;
-    FILE *f = fopen(dest_path, "wb");
+    RAII_FILE FILE *f = fopen(dest_path, "wb");
     if (!f) return -1;
     /* Write the full decoded buffer; for base64 the NUL terminator is not
      * part of the content — use att->size if accurate, else strlen fallback. */
     size_t n = att->size > 0 ? att->size : strlen((char *)att->data);
     size_t written = fwrite(att->data, 1, n, f);
-    int err = (written != n) ? -1 : 0;
-    fclose(f);
-    return err;
+    return (written != n) ? -1 : 0;
 }
 
 char *mime_extract_imap_literal(const char *response) {

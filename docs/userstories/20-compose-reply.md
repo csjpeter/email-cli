@@ -43,6 +43,11 @@ email-tui reply <uid>
 4. If `To:` is empty → abort with message `Aborted (To: is empty.)`.
 5. Otherwise the message is built (MIME) and sent via SMTP.
 6. On success: `Message sent.` is printed; on failure: SMTP error to stderr.
+7. After a successful send, a copy of the message is appended to the IMAP Sent
+   folder (defaults to `Sent`; override with `EMAIL_SENT_FOLDER` in config).
+   `Saving to Sent folder...` is printed to stdout before the IMAP APPEND.
+   If the IMAP APPEND fails a warning is written to stderr but the overall
+   exit code remains `0` (the send itself succeeded).
 
 ### Reply
 1. The original message is loaded from local cache or fetched from the server.

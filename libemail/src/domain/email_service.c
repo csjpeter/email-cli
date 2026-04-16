@@ -2237,21 +2237,50 @@ static void get_account_totals(const Config *cfg, int *unseen_out, int *flagged_
 }
 
 /** Print one account row; cursor=1 draws the selection arrow. */
+/**
+ * Format a URL for display, appending the default port if none is present.
+ * defport is used when the URL has no ":port" after the host.
+ */
+static void fmt_url_with_port(const char *url, int defport, char *out, size_t size) {
+    if (!url || !url[0]) { out[0] = '\0'; return; }
+    const char *proto_end = strstr(url, "://");
+    const char *host = proto_end ? proto_end + 3 : url;
+    if (strchr(host, ':')) {
+        /* Port already present in URL */
+        snprintf(out, size, "%s", url);
+    } else {
+        snprintf(out, size, "%s:%d", url, defport);
+    }
+}
+
 static void print_account_row(const Config *cfg, int cursor,
                                int unseen, int flagged,
                                int imap_w, int smtp_w) {
     const char *user = cfg->user ? cfg->user : "(unknown)";
-    const char *imap = cfg->host ? cfg->host : "";
+
+    /* IMAP: always show port (default 993 for imaps://) */
+    char imap_buf[256];
+    fmt_url_with_port(cfg->host, 993, imap_buf, sizeof(imap_buf));
+    const char *imap = imap_buf;
 
     /* Build SMTP display string (no ANSI — safe to truncate with %.*s) */
     char smtp_buf[256];
     int smtp_configured = cfg->smtp_host && cfg->smtp_host[0];
     if (smtp_configured) {
-        if (cfg->smtp_port)
-            snprintf(smtp_buf, sizeof(smtp_buf), "%s:%d",
-                     cfg->smtp_host, cfg->smtp_port);
-        else
-            snprintf(smtp_buf, sizeof(smtp_buf), "%s", cfg->smtp_host);
+        if (cfg->smtp_port) {
+            /* Explicit port in config: append if not already in host URL */
+            const char *proto_end = strstr(cfg->smtp_host, "://");
+            const char *smtp_host_part = proto_end ? proto_end + 3 : cfg->smtp_host;
+            if (strchr(smtp_host_part, ':'))
+                snprintf(smtp_buf, sizeof(smtp_buf), "%s", cfg->smtp_host);
+            else
+                snprintf(smtp_buf, sizeof(smtp_buf), "%s:%d",
+                         cfg->smtp_host, cfg->smtp_port);
+        } else {
+            /* No explicit port: use protocol default */
+            int defport = (strncmp(cfg->smtp_host, "smtps://", 8) == 0) ? 465 : 587;
+            fmt_url_with_port(cfg->smtp_host, defport, smtp_buf, sizeof(smtp_buf));
+        }
     } else {
         snprintf(smtp_buf, sizeof(smtp_buf), "\u2014");  /* em dash: not configured */
     }

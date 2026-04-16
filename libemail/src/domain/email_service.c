@@ -2796,7 +2796,7 @@ int email_service_cron_setup(const Config *cfg) {
     if (strstr(existing, "email-sync") ||
         (strstr(existing, "email-cli") && strstr(existing, " sync"))) {
         printf("Cron job already installed. "
-               "Run 'email-cli cron remove' first to change the interval.\n");
+               "Run 'email-sync cron remove' first to change the interval.\n");
         return 0;
     }
 

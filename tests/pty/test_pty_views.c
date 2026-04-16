@@ -1105,7 +1105,7 @@ static void test_wizard_complete(void) {
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "wizard complete: opens");
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_str(s, "imap://localhost:9993\n");
+    pty_send_str(s, "imaps://localhost:9993\n");   /* explicit correct protocol */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
     pty_send_str(s, "testuser\n");
     ASSERT_WAIT_FOR(s, "assword", WAIT_MS);
@@ -1116,6 +1116,57 @@ static void test_wizard_complete(void) {
     pty_send_str(s, "\n");  /* skip SMTP config */
     ASSERT_WAIT_FOR(s, "Configuration saved", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    setenv("HOME", g_test_home, 1);
+}
+
+/* Wizard: plain hostname (no protocol) → auto-completes to imaps:// */
+static void test_wizard_host_autocomplete(void) {
+    char wiz_home[300];
+    snprintf(wiz_home, sizeof(wiz_home), "%s/wizard_autocomplete", g_test_home);
+    mkdir(wiz_home, 0700);
+    setenv("HOME", wiz_home, 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "wizard autocomplete: opens");
+    ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
+    pty_send_str(s, "localhost:9993\n");            /* no protocol → auto imaps:// */
+    ASSERT_WAIT_FOR(s, "imaps://", WAIT_MS);        /* confirmation line printed */
+    ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
+    pty_send_str(s, "testuser\n");
+    ASSERT_WAIT_FOR(s, "assword", WAIT_MS);
+    pty_send_str(s, "testpass\n");
+    ASSERT_WAIT_FOR(s, "older", WAIT_MS);
+    pty_send_str(s, "\n");   /* accept default INBOX */
+    ASSERT_WAIT_FOR(s, "SMTP Host", WAIT_MS);
+    pty_send_str(s, "\n");   /* skip SMTP */
+    ASSERT_WAIT_FOR(s, "Configuration saved", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    setenv("HOME", g_test_home, 1);
+}
+
+/* Wizard: explicit wrong protocol → error + re-prompt → correct → completes */
+static void test_wizard_bad_protocol_rejected(void) {
+    char wiz_home[300];
+    snprintf(wiz_home, sizeof(wiz_home), "%s/wizard_badproto", g_test_home);
+    mkdir(wiz_home, 0700);
+    setenv("HOME", wiz_home, 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "wizard bad proto: opens");
+    ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
+    pty_send_str(s, "imap://localhost:9993\n");     /* wrong protocol */
+    ASSERT_WAIT_FOR(s, "unsupported protocol", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);       /* re-prompted */
+    pty_send_str(s, "imaps://localhost:9993\n");    /* now correct */
+    ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);                /* abort to keep test short */
+    ASSERT_WAIT_FOR(s, "borted", WAIT_MS);
     pty_close(s);
 
     setenv("HOME", g_test_home, 1);
@@ -2201,6 +2252,8 @@ int main(int argc, char *argv[]) {
     printf("\n--- Setup wizard ---\n");
     RUN_TEST(test_wizard_abort);
     RUN_TEST(test_wizard_complete);
+    RUN_TEST(test_wizard_host_autocomplete);
+    RUN_TEST(test_wizard_bad_protocol_rejected);
 
     /* ── Non-TTY fallback ────────────────────────────────────────────── */
     printf("\n--- Non-TTY fallback ---\n");

@@ -35,6 +35,55 @@ static char* get_input(const char *prompt, int hide, FILE *stream) {
 }
 
 /**
+ * Normalise a user-supplied IMAP host string.
+ *
+ * Rules:
+ *  - No protocol (no "://"):  prepend "imaps://" automatically.
+ *  - "imaps://…":             accepted as-is.
+ *  - Anything else with "://": wrong / unsupported protocol → return NULL.
+ *
+ * Returns a newly-allocated string the caller must free(), or NULL on error.
+ */
+static char *normalize_imap_host(const char *input) {
+    if (!input || !input[0]) return NULL;
+    if (strstr(input, "://") == NULL) {
+        /* Plain hostname (or host:port) — add imaps:// */
+        size_t n = strlen(input);
+        char *out = malloc(n + 9);
+        if (!out) return NULL;
+        memcpy(out, "imaps://", 8);
+        memcpy(out + 8, input, n + 1);
+        return out;
+    }
+    if (strncmp(input, "imaps://", 8) == 0)
+        return strdup(input);
+    return NULL;  /* explicit but unsupported protocol */
+}
+
+/**
+ * Normalise a user-supplied SMTP host string.
+ *
+ * Rules:
+ *  - No protocol (no "://"):  prepend "smtps://" automatically.
+ *  - "smtps://…":             accepted as-is.
+ *  - Anything else with "://": wrong / unsupported protocol → return NULL.
+ */
+static char *normalize_smtp_host(const char *input) {
+    if (!input || !input[0]) return NULL;
+    if (strstr(input, "://") == NULL) {
+        size_t n = strlen(input);
+        char *out = malloc(n + 9);
+        if (!out) return NULL;
+        memcpy(out, "smtps://", 8);
+        memcpy(out + 8, input, n + 1);
+        return out;
+    }
+    if (strncmp(input, "smtps://", 8) == 0)
+        return strdup(input);
+    return NULL;
+}
+
+/**
  * @brief Internal wizard implementation that can take any input stream.
  */
 Config* setup_wizard_run_internal(FILE *stream) {
@@ -48,15 +97,19 @@ Config* setup_wizard_run_internal(FILE *stream) {
     if (!cfg) return NULL;
 
     for (;;) {
-        char *host = get_input("IMAP Host (e.g. imaps://imap.example.com)", 0, stream);
-        if (!host) { config_free(cfg); return NULL; }
-        if (strncmp(host, "imaps://", 8) != 0) {
+        char *input = get_input("IMAP Host (e.g. imap.example.com)", 0, stream);
+        if (!input) { config_free(cfg); return NULL; }
+        char *host = normalize_imap_host(input);
+        if (!host) {
             fprintf(stderr,
-                    "Error: IMAP host must start with 'imaps://' (got '%s').\n",
-                    host);
-            free(host);
+                    "Error: '%s' uses an unsupported protocol"
+                    " (only imaps:// is supported).\n", input);
+            free(input);
             continue;
         }
+        if (strstr(input, "://") == NULL && stream == stdin && is_tty)
+            printf("  → using imaps://%s\n", input);
+        free(input);
         cfg->host = host;
         break;
     }
@@ -77,8 +130,25 @@ Config* setup_wizard_run_internal(FILE *stream) {
     if (stream == stdin && is_tty)
         printf("\n--- SMTP (outgoing mail) — press Enter to skip ---\n");
 
-    char *smtp_host = get_input("SMTP Host (e.g. smtp://smtp.example.com) [Enter=skip]", 0, stream);
-    if (smtp_host && smtp_host[0] != '\0') {
+    char *smtp_host = NULL;
+    for (;;) {
+        char *input = get_input("SMTP Host [Enter=skip] (e.g. smtp.example.com)", 0, stream);
+        if (!input || !input[0]) { free(input); break; }
+        char *h = normalize_smtp_host(input);
+        if (!h) {
+            fprintf(stderr,
+                    "Error: '%s' uses an unsupported protocol"
+                    " (only smtps:// is supported).\n", input);
+            free(input);
+            continue;
+        }
+        if (strstr(input, "://") == NULL && stream == stdin && is_tty)
+            printf("  → using smtps://%s\n", input);
+        free(input);
+        smtp_host = h;
+        break;
+    }
+    if (smtp_host) {
         cfg->smtp_host = smtp_host;
 
         char *port_str = get_input("SMTP Port [587]", 0, stream);
@@ -99,8 +169,6 @@ Config* setup_wizard_run_internal(FILE *stream) {
             cfg->smtp_pass = sp;
         else
             free(sp);
-    } else {
-        free(smtp_host);
     }
 
     if (stream == stdin && is_tty)
@@ -135,27 +203,41 @@ int setup_wizard_smtp(Config *cfg) {
     char derived[512];
     derive_smtp_url(cfg, derived, sizeof(derived));
 
-    char host_prompt[1024];
-    if (cfg->smtp_host)
-        snprintf(host_prompt, sizeof(host_prompt),
-                 "SMTP Host [current: %s]", cfg->smtp_host);
-    else if (derived[0])
-        snprintf(host_prompt, sizeof(host_prompt),
-                 "SMTP Host [Enter = %s]", derived);
-    else
-        snprintf(host_prompt, sizeof(host_prompt),
-                 "SMTP Host (e.g. smtps://smtp.example.com)");
+    for (;;) {
+        char host_prompt[1024];
+        if (cfg->smtp_host)
+            snprintf(host_prompt, sizeof(host_prompt),
+                     "SMTP Host [current: %s]", cfg->smtp_host);
+        else if (derived[0])
+            snprintf(host_prompt, sizeof(host_prompt),
+                     "SMTP Host [Enter = %s] (e.g. smtp.example.com)", derived);
+        else
+            snprintf(host_prompt, sizeof(host_prompt),
+                     "SMTP Host (e.g. smtp.example.com)");
 
-    char *host = get_input(host_prompt, 0, stdin);
-    if (!host) return -1;   /* EOF / Ctrl-D → abort */
-    if (host[0]) {
+        char *input = get_input(host_prompt, 0, stdin);
+        if (!input) return -1;   /* EOF / Ctrl-D → abort */
+        if (!input[0]) {
+            /* Empty → keep current or use derived default */
+            free(input);
+            if (!cfg->smtp_host && derived[0])
+                cfg->smtp_host = strdup(derived);
+            break;
+        }
+        char *host = normalize_smtp_host(input);
+        if (!host) {
+            fprintf(stderr,
+                    "Error: '%s' uses an unsupported protocol"
+                    " (only smtps:// is supported).\n", input);
+            free(input);
+            continue;
+        }
+        if (strstr(input, "://") == NULL)
+            printf("  → using smtps://%s\n", input);
+        free(input);
         free(cfg->smtp_host);
         cfg->smtp_host = host;
-    } else {
-        free(host);
-        if (!cfg->smtp_host && derived[0])
-            cfg->smtp_host = strdup(derived);
-        /* else keep whatever was there */
+        break;
     }
 
     /* ── SMTP Port ────────────────────────────────────────────────── */
@@ -216,24 +298,28 @@ int setup_wizard_imap(Config *cfg) {
         char host_prompt[1024];
         if (cfg->host)
             snprintf(host_prompt, sizeof(host_prompt),
-                     "IMAP Host [current: %s]", cfg->host);
+                     "IMAP Host [current: %s] (e.g. imap.example.com)", cfg->host);
         else
             snprintf(host_prompt, sizeof(host_prompt),
-                     "IMAP Host (e.g. imaps://imap.example.com)");
+                     "IMAP Host (e.g. imap.example.com)");
 
-        char *host = get_input(host_prompt, 0, stdin);
-        if (!host) return -1;   /* EOF / Ctrl-D → abort */
-        if (host[0] == '\0') {
-            free(host);
+        char *input = get_input(host_prompt, 0, stdin);
+        if (!input) return -1;   /* EOF / Ctrl-D → abort */
+        if (!input[0]) {
+            free(input);
             break;  /* keep current */
         }
-        if (strncmp(host, "imaps://", 8) != 0) {
+        char *host = normalize_imap_host(input);
+        if (!host) {
             fprintf(stderr,
-                    "Error: IMAP host must start with 'imaps://' (got '%s').\n",
-                    host);
-            free(host);
+                    "Error: '%s' uses an unsupported protocol"
+                    " (only imaps:// is supported).\n", input);
+            free(input);
             continue;  /* re-prompt */
         }
+        if (strstr(input, "://") == NULL)
+            printf("  → using imaps://%s\n", input);
+        free(input);
         free(cfg->host);
         cfg->host = host;
         break;

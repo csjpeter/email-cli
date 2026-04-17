@@ -206,6 +206,21 @@ int mail_client_trash(MailClient *c, const char *uid) {
     return imap_uid_set_flag(c->imap, uid, "\\Deleted", 1);
 }
 
+/* ── Label modify (Gmail only) ────────────────────────────────────── */
+
+int mail_client_modify_label(MailClient *c, const char *uid,
+                             const char *label_id, int add) {
+    if (!c->is_gmail) return 0; /* no-op for IMAP */
+
+    if (add) {
+        const char *add_arr[] = {label_id};
+        return gmail_modify_labels(c->gmail, uid, add_arr, 1, NULL, 0);
+    } else {
+        const char *rm_arr[] = {label_id};
+        return gmail_modify_labels(c->gmail, uid, NULL, 0, rm_arr, 1);
+    }
+}
+
 /* ── Append / Send ────────────────────────────────────────────────── */
 
 int mail_client_append(MailClient *c, const char *folder,

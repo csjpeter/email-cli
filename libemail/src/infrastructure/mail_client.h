@@ -122,6 +122,16 @@ int mail_client_append(MailClient *c, const char *folder,
                        const char *msg, size_t msg_len);
 
 /**
+ * @brief Add or remove a label on a Gmail message (no-op for IMAP).
+ *
+ * @param label_id  Gmail label ID (e.g. "INBOX", "STARRED", "Work").
+ * @param add       1 = add label, 0 = remove label.
+ * @return 0 on success, -1 on error. Always returns 0 for IMAP (no-op).
+ */
+int mail_client_modify_label(MailClient *c, const char *uid,
+                             const char *label_id, int add);
+
+/**
  * @brief Install a progress callback for large downloads.
  */
 void mail_client_set_progress(MailClient *c, ImapProgressFn fn, void *ctx);

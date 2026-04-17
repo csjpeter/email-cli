@@ -2018,8 +2018,9 @@ read_key_again: ;
                 /* Archive: remove INBOX label from current message */
                 const char *uid = entries[cursor].uid;
                 if (list_mc) {
-                    /* Mark as read (\\Seen → remove UNREAD via dispatch) */
+                    /* Mark as read and remove INBOX label via Gmail API */
                     mail_client_set_flag(list_mc, uid, "\\Seen", 1);
+                    mail_client_modify_label(list_mc, uid, "INBOX", 0);
                 }
                 /* Update local index: remove from INBOX .idx */
                 label_idx_remove("INBOX", uid);
@@ -2582,32 +2583,19 @@ static void show_label_picker(MailClient *mc,
             break;
         if (key == TERM_KEY_NEXT_LINE && pcursor < pick_count - 1) pcursor++;
         if (key == TERM_KEY_PREV_LINE && pcursor > 0) pcursor--;
-        if (key == TERM_KEY_ENTER) {
+        if (key == TERM_KEY_ENTER || terminal_last_printable() == ' ') {
             /* Toggle the label */
             pick_on[pcursor] = !pick_on[pcursor];
             const char *lid = pick_ids[pcursor];
-            if (pick_on[pcursor]) {
-                label_idx_add(lid, uid);
-                if (mc) {
-                    /* For STARRED we use the flag path */
-                    if (strcmp(lid, "STARRED") == 0)
-                        mail_client_set_flag(mc, uid, "\\Flagged", 1);
-                }
-            } else {
-                label_idx_remove(lid, uid);
-                if (mc) {
-                    if (strcmp(lid, "STARRED") == 0)
-                        mail_client_set_flag(mc, uid, "\\Flagged", 0);
-                }
+            int adding = pick_on[pcursor];
+            if (adding) label_idx_add(lid, uid);
+            else        label_idx_remove(lid, uid);
+            if (mc) {
+                if (strcmp(lid, "STARRED") == 0)
+                    mail_client_set_flag(mc, uid, "\\Flagged", adding);
+                else
+                    mail_client_modify_label(mc, uid, lid, adding);
             }
-        }
-        int ch = terminal_last_printable();
-        if (ch == ' ') {
-            /* Space also toggles */
-            pick_on[pcursor] = !pick_on[pcursor];
-            const char *lid = pick_ids[pcursor];
-            if (pick_on[pcursor]) label_idx_add(lid, uid);
-            else                  label_idx_remove(lid, uid);
         }
     }
 

@@ -801,3 +801,205 @@ void local_pending_flag_clear(const char *folder) {
     RAII_STRING char *path = pending_flag_path(folder);
     if (path) remove(path);
 }
+
+/* ── Gmail label index files (.idx) ──────────────────────────────────── */
+
+#define IDX_RECORD_SIZE 17  /* 16 char UID + '\n' */
+
+/** @brief Returns heap-allocated path to labels/<label>.idx. */
+static char *label_idx_path(const char *label) {
+    if (!g_account_base[0] || !label) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/labels/%s.idx", g_account_base, label) == -1)
+        return NULL;
+    return path;
+}
+
+/** @brief Ensures the labels/ directory (and any parent for nested labels) exists. */
+static int ensure_label_dir(const char *label) {
+    RAII_STRING char *path = label_idx_path(label);
+    if (!path) return -1;
+    /* Find last slash and mkdir_p up to it */
+    char *last_slash = strrchr(path, '/');
+    if (!last_slash) return -1;
+    *last_slash = '\0';
+    int rc = fs_mkdir_p(path, 0700);
+    return rc;
+}
+
+int label_idx_contains(const char *label, const char *uid) {
+    RAII_STRING char *path = label_idx_path(label);
+    if (!path) return 0;
+
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return 0;
+
+    /* Get file size → record count */
+    if (fseek(fp, 0, SEEK_END) != 0) return 0;
+    long size = ftell(fp);
+    if (size < IDX_RECORD_SIZE) return 0;
+    int n = (int)(size / IDX_RECORD_SIZE);
+
+    /* Binary search on fixed-width records */
+    int lo = 0, hi = n - 1;
+    char rec[17];
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (fseek(fp, (long)mid * IDX_RECORD_SIZE, SEEK_SET) != 0) return 0;
+        if (fread(rec, 1, 16, fp) != 16) return 0;
+        rec[16] = '\0';
+        int cmp = memcmp(rec, uid, 16);
+        if (cmp == 0) return 1;
+        if (cmp < 0) lo = mid + 1;
+        else          hi = mid - 1;
+    }
+    return 0;
+}
+
+int label_idx_count(const char *label) {
+    RAII_STRING char *path = label_idx_path(label);
+    if (!path) return 0;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return 0;
+    if (fseek(fp, 0, SEEK_END) != 0) return 0;
+    long size = ftell(fp);
+    return (size >= IDX_RECORD_SIZE) ? (int)(size / IDX_RECORD_SIZE) : 0;
+}
+
+int label_idx_load(const char *label, char (**uids_out)[17], int *count_out) {
+    *uids_out  = NULL;
+    *count_out = 0;
+
+    RAII_STRING char *path = label_idx_path(label);
+    if (!path) return -1;
+
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return 0;  /* Empty / nonexistent label → 0 entries, not error */
+
+    if (fseek(fp, 0, SEEK_END) != 0) return -1;
+    long size = ftell(fp);
+    if (size < IDX_RECORD_SIZE) return 0;
+    rewind(fp);
+
+    int n = (int)(size / IDX_RECORD_SIZE);
+    char (*arr)[17] = malloc((size_t)n * sizeof(char[17]));
+    if (!arr) return -1;
+
+    int count = 0;
+    for (int i = 0; i < n; i++) {
+        if (fread(arr[count], 1, 16, fp) != 16) break;
+        arr[count][16] = '\0';
+        fgetc(fp);  /* skip '\n' */
+        count++;
+    }
+
+    *uids_out  = arr;
+    *count_out = count;
+    return 0;
+}
+
+int label_idx_write(const char *label, const char (*uids)[17], int count) {
+    if (ensure_label_dir(label) != 0) return -1;
+
+    RAII_STRING char *path = label_idx_path(label);
+    if (!path) return -1;
+
+    RAII_FILE FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+
+    for (int i = 0; i < count; i++)
+        fprintf(fp, "%.16s\n", uids[i]);
+
+    logger_log(LOG_DEBUG, "label_idx_write: %s → %d entries", label, count);
+    return 0;
+}
+
+int label_idx_add(const char *label, const char *uid) {
+    if (!uid || strlen(uid) < 1) return -1;
+
+    /* Load existing entries */
+    char (*existing)[17] = NULL;
+    int ecount = 0;
+    label_idx_load(label, &existing, &ecount);
+
+    /* Check if already present (binary search) */
+    int lo = 0, hi = ecount - 1, insert_pos = ecount;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        int cmp = memcmp(existing[mid], uid, 16);
+        if (cmp == 0) { free(existing); return 0; }  /* Already present */
+        if (cmp < 0) lo = mid + 1;
+        else { insert_pos = mid; hi = mid - 1; }
+    }
+    if (lo < ecount && insert_pos == ecount) insert_pos = lo;
+
+    /* Build new array with uid inserted at insert_pos */
+    int newcount = ecount + 1;
+    char (*arr)[17] = malloc((size_t)newcount * sizeof(char[17]));
+    if (!arr) { free(existing); return -1; }
+
+    if (insert_pos > 0 && existing)
+        memcpy(arr, existing, (size_t)insert_pos * sizeof(char[17]));
+    snprintf(arr[insert_pos], 17, "%.16s", uid);
+    if (insert_pos < ecount && existing)
+        memcpy(arr + insert_pos + 1, existing + insert_pos,
+               (size_t)(ecount - insert_pos) * sizeof(char[17]));
+    free(existing);
+
+    int rc = label_idx_write(label, (const char (*)[17])arr, newcount);
+    free(arr);
+    return rc;
+}
+
+int label_idx_remove(const char *label, const char *uid) {
+    if (!uid) return -1;
+
+    char (*existing)[17] = NULL;
+    int ecount = 0;
+    label_idx_load(label, &existing, &ecount);
+    if (!existing || ecount == 0) { free(existing); return 0; }
+
+    /* Find uid with binary search */
+    int lo = 0, hi = ecount - 1, found = -1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        int cmp = memcmp(existing[mid], uid, 16);
+        if (cmp == 0) { found = mid; break; }
+        if (cmp < 0) lo = mid + 1;
+        else          hi = mid - 1;
+    }
+
+    if (found < 0) { free(existing); return 0; }  /* Not present */
+
+    /* Shift down */
+    if (found < ecount - 1)
+        memmove(existing + found, existing + found + 1,
+                (size_t)(ecount - found - 1) * sizeof(char[17]));
+
+    int rc = label_idx_write(label, (const char (*)[17])existing, ecount - 1);
+    free(existing);
+    return rc;
+}
+
+/* ── Gmail history ID ─────────────────────────────────────────────── */
+
+int local_gmail_history_save(const char *history_id) {
+    if (!g_account_base[0] || !history_id) return -1;
+    if (fs_mkdir_p(g_account_base, 0700) != 0) return -1;
+    RAII_STRING char *path = NULL;
+    if (asprintf(&path, "%s/gmail_history_id", g_account_base) == -1) return -1;
+    return write_file(path, history_id, strlen(history_id));
+}
+
+char *local_gmail_history_load(void) {
+    if (!g_account_base[0]) return NULL;
+    RAII_STRING char *path = NULL;
+    if (asprintf(&path, "%s/gmail_history_id", g_account_base) == -1) return NULL;
+    char *data = load_file(path);
+    if (!data) return NULL;
+    /* Trim trailing whitespace */
+    size_t len = strlen(data);
+    while (len > 0 && (data[len-1] == '\n' || data[len-1] == '\r' || data[len-1] == ' '))
+        data[--len] = '\0';
+    return data;
+}

@@ -175,6 +175,61 @@ PendingFlag *local_pending_flag_load(const char *folder, int *count_out);
 /** @brief Removes the pending flag queue file for a folder. */
 void local_pending_flag_clear(const char *folder);
 
+/* ── Gmail label index files (.idx) ──────────────────────────────────── */
+
+/**
+ * Label index files store sorted 16-char UIDs (one per line, 17 bytes each).
+ * Path: accounts/<email>/labels/<label>.idx
+ *
+ * Binary search: O(log N) via fixed 17-byte records.
+ * A message with multiple labels appears in multiple .idx files.
+ */
+
+/** @brief Checks whether a UID is in a label's index (O(log N) binary search). */
+int label_idx_contains(const char *label, const char *uid);
+
+/** @brief Inserts a UID into a label's sorted index. No-op if already present. */
+int label_idx_add(const char *label, const char *uid);
+
+/** @brief Removes a UID from a label's index. No-op if not present. */
+int label_idx_remove(const char *label, const char *uid);
+
+/** @brief Returns the count of UIDs in a label's index. */
+int label_idx_count(const char *label);
+
+/**
+ * @brief Load all UIDs from a label index.
+ *
+ * @param label      Label name (e.g. "INBOX", "Work", "_nolabel").
+ * @param uids_out   Set to heap-allocated array of char[17]. Caller must free().
+ * @param count_out  Set to number of UIDs.
+ * @return 0 on success, -1 on error.
+ */
+int label_idx_load(const char *label, char (**uids_out)[17], int *count_out);
+
+/**
+ * @brief Write a complete sorted label index from an array of UIDs.
+ *
+ * Overwrites the existing .idx file.  The input array must already be sorted.
+ *
+ * @param label  Label name.
+ * @param uids   Sorted array of 16-char UID strings.
+ * @param count  Number of UIDs.
+ * @return 0 on success, -1 on error.
+ */
+int label_idx_write(const char *label, const char (*uids)[17], int count);
+
+/**
+ * @brief Saves the gmail_history_id for incremental sync.
+ * @return 0 on success, -1 on error.
+ */
+int local_gmail_history_save(const char *history_id);
+
+/**
+ * @brief Loads the gmail_history_id. Returns heap-allocated string or NULL.
+ */
+char *local_gmail_history_load(void);
+
 /* ── UI preferences ──────────────────────────────────────────────────── */
 
 /** @brief Reads an integer UI preference. */

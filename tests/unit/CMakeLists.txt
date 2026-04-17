@@ -41,6 +41,7 @@ set(TEST_SOURCES
     test_json_util.c
     test_gmail_auth.c
     test_gmail_client.c
+    test_label_idx.c
     ../../libemail/src/core/fs_util.c
     ../../libemail/src/core/logger.c
     ../../libemail/src/core/config.c

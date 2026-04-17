@@ -173,6 +173,24 @@ Config* setup_wizard_run_internal(FILE *stream) {
         break;
     }
 
+    /* IMAP port (default 993 for imaps://) */
+    char *port_str = get_input("IMAP Port [993]", 0, stream);
+    if (port_str && port_str[0] != '\0') {
+        int port = atoi(port_str);
+        if (port > 0 && port != 993) {
+            /* Append :port to the URL if not already present */
+            const char *scheme_end = strstr(cfg->host, "://");
+            if (scheme_end && !strchr(scheme_end + 3, ':')) {
+                char *new_host = NULL;
+                if (asprintf(&new_host, "%s:%d", cfg->host, port) != -1) {
+                    free(cfg->host);
+                    cfg->host = new_host;
+                }
+            }
+        }
+    }
+    free(port_str);
+
     cfg->user = get_input("Email Username", 0, stream);
     if (!cfg->user) { config_free(cfg); return NULL; }
 

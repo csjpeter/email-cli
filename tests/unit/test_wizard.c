@@ -17,7 +17,7 @@ static void config_cleanup(void *ptr) {
 void test_wizard(void) {
     // 1. Full valid input
     {
-        const char *input = "1\nimaps://imap.test.com\ntest@user.com\nsecretpass\nMYFOLDER\n";
+        const char *input = "1\nimaps://imap.test.com\n\ntest@user.com\nsecretpass\nMYFOLDER\n";
         RAII_FILE FILE *stream = fmemopen((void*)input, strlen(input), "r");
         ASSERT(stream != NULL, "fmemopen should succeed");
 
@@ -31,7 +31,7 @@ void test_wizard(void) {
 
     // 2. Empty folder defaults to INBOX
     {
-        const char *input2 = "1\nh\nu\np\n\n";
+        const char *input2 = "1\nh\n\nu\np\n\n";
         RAII_FILE FILE *stream = fmemopen((void*)input2, strlen(input2), "r");
         RAII_WITH_CLEANUP(config_cleanup) Config *cfg = setup_wizard_run_internal(stream);
         ASSERT(cfg != NULL, "setup_wizard should return config with empty folder");
@@ -40,7 +40,7 @@ void test_wizard(void) {
 
     // 3. EOF after host: user field missing → should return NULL
     {
-        const char *input3 = "1\nimaps://imap.test.com\n";
+        const char *input3 = "1\nimaps://imap.test.com\n\n";
         RAII_FILE FILE *stream = fmemopen((void*)input3, strlen(input3), "r");
         ASSERT(stream != NULL, "fmemopen should succeed for partial input");
         RAII_WITH_CLEANUP(config_cleanup) Config *cfg = setup_wizard_run_internal(stream);
@@ -49,7 +49,7 @@ void test_wizard(void) {
 
     // 4. EOF after host+user: password field missing → should return NULL
     {
-        const char *input4 = "1\nimaps://imap.test.com\ntest@user.com\n";
+        const char *input4 = "1\nimaps://imap.test.com\n\ntest@user.com\n";
         RAII_FILE FILE *stream = fmemopen((void*)input4, strlen(input4), "r");
         ASSERT(stream != NULL, "fmemopen should succeed for partial input");
         RAII_WITH_CLEANUP(config_cleanup) Config *cfg = setup_wizard_run_internal(stream);
@@ -58,7 +58,7 @@ void test_wizard(void) {
 
     // 5. Test setup_wizard_run() (stdin path) via pipe redirect
     {
-        const char *input5 = "1\nimaps://imap.stdin.com\nstdin@user.com\nstdinpass\nSTDIN\n";
+        const char *input5 = "1\nimaps://imap.stdin.com\n\nstdin@user.com\nstdinpass\nSTDIN\n";
         int pipefd[2];
         ASSERT(pipe(pipefd) == 0, "pipe() should succeed");
         ssize_t written = write(pipefd[1], input5, strlen(input5));

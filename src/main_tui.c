@@ -517,6 +517,27 @@ int main(int argc, char *argv[]) {
         snprintf(fc_key, sizeof(fc_key), "folder_cursor_%s",
                  sel_cfg->user ? sel_cfg->user : "default");
         char *saved_folder = ui_pref_get_str(fc_key);
+        /* Gmail OAuth credential check */
+        if (sel_cfg->gmail_mode &&
+            !sel_cfg->gmail_refresh_token &&
+            (!sel_cfg->gmail_client_id || !sel_cfg->gmail_client_id[0])) {
+            fprintf(stderr,
+                "\n  This Gmail account has no OAuth2 credentials configured.\n"
+                "  Add GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET to:\n"
+                "    ~/.config/email-cli/accounts/%s/config.ini\n"
+                "  See docs/dev/gmail-oauth2-setup.md for details.\n\n"
+                "  Press any key to return to accounts...\n",
+                sel_cfg->user ? sel_cfg->user : "(unknown)");
+            fflush(stderr);
+            {
+                TermRawState *_r = terminal_raw_enter();
+                char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
+                terminal_raw_exit(&_r);
+            }
+            config_free(sel_cfg);
+            continue;
+        }
+
         const char *init_folder = (saved_folder && saved_folder[0])
                                   ? saved_folder
                                   : (sel_cfg->folder ? sel_cfg->folder : "INBOX");
@@ -585,8 +606,20 @@ int main(int argc, char *argv[]) {
             } else if (ret == 4) {
                 /* background sync finished → re-list to show new messages */
                 continue;
+            } else if (ret < 0) {
+                /* Connection or command failed — show error, return to accounts */
+                fprintf(stderr, "\n  Connection failed. Press any key to return to accounts...\n");
+                fflush(stderr);
+                {
+                    TermRawState *_r = terminal_raw_enter();
+                    char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
+                    terminal_raw_exit(&_r);
+                }
+                back_to_accounts = 1;
+                break;
             } else {
-                result = (ret >= 0) ? 0 : -1;
+                /* ret == 0: normal quit (ESC/q) */
+                result = 0;
                 break;
             }
         }

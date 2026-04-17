@@ -32,6 +32,7 @@ add_library(libemail STATIC
     src/infrastructure/gmail_auth.c
     src/infrastructure/gmail_client.c
     src/infrastructure/gmail_sync.c
+    src/infrastructure/mail_client.c
     src/domain/email_service.c
     ${LIBEMAIL_PLATFORM_SOURCES}
 )

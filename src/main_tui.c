@@ -552,9 +552,28 @@ int main(int argc, char *argv[]) {
             ui_pref_set_str(fc_key, tui_folder);  /* persist selected folder */
 
         if (!tui_folder && !go_up) {
-            /* Connection error or empty folder list — show error,
-             * wait for keypress, then return to accounts */
-            fprintf(stderr, "\n  Connection failed. Press any key to return to accounts...\n");
+            /* Connection error or empty folder list — show actionable advice */
+            fprintf(stderr, "\n  Connection failed.\n\n");
+            if (sel_cfg->gmail_mode) {
+                fprintf(stderr,
+                    "  Possible causes:\n"
+                    "  - OAuth2 credentials missing or expired\n"
+                    "  - Network issue\n\n"
+                    "  To fix: check GMAIL_CLIENT_ID and GMAIL_REFRESH_TOKEN in\n"
+                    "    ~/.config/email-cli/accounts/%s/config.ini\n"
+                    "  Guide: docs/dev/gmail-oauth2-setup.md\n",
+                    sel_cfg->user ? sel_cfg->user : "(unknown)");
+            } else {
+                fprintf(stderr,
+                    "  Possible causes:\n"
+                    "  - Wrong password or username\n"
+                    "  - Server requires app-specific password (e.g. Gmail with 2FA)\n"
+                    "  - Server address or port is incorrect\n"
+                    "  - Network issue\n\n"
+                    "  To fix: press 'i' on accounts screen to edit IMAP settings,\n"
+                    "  or delete and re-add the account with 'd' then 'n'.\n");
+            }
+            fprintf(stderr, "\n  Press any key to return to accounts...\n");
             fflush(stderr);
             {
                 TermRawState *_r = terminal_raw_enter();
@@ -615,8 +634,10 @@ int main(int argc, char *argv[]) {
                 /* background sync finished → re-list to show new messages */
                 continue;
             } else if (ret < 0) {
-                /* Connection or command failed — show error, return to accounts */
-                fprintf(stderr, "\n  Connection failed. Press any key to return to accounts...\n");
+                /* Connection or command failed — show actionable advice */
+                fprintf(stderr, "\n  Operation failed. Check the error above.\n"
+                                "  Press 'i' on accounts screen to edit IMAP settings.\n\n"
+                                "  Press any key to return to accounts...\n");
                 fflush(stderr);
                 {
                     TermRawState *_r = terminal_raw_enter();

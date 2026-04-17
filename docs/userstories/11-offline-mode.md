@@ -5,7 +5,7 @@ As a user who has set up automatic background sync, I want the interactive TUI a
 list commands to work instantly from the local cache without connecting to the server.
 
 ## Trigger
-`sync_interval > 0` in config (set via `email-cli cron setup`).
+`sync_interval > 0` in config (set via `email-sync cron setup`).
 
 ## Behaviour
 - `email-cli list` and the interactive TUI serve message lists entirely from the
@@ -18,7 +18,7 @@ list commands to work instantly from the local cache without connecting to the s
   screen: "No data yet. Press Backspace/ESC."
 
 ## Manual sync
-The user can always run `email-cli sync` at any time to fetch new messages on demand.
+The user can always run `email-sync` at any time to fetch new messages on demand.
 
 ## Folder list
 The folder list is served from `folders.cache` (no server call) when in cron mode.

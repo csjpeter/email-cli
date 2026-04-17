@@ -6,7 +6,7 @@ my user crontab, without needing sudo or system access.
 
 ## Invocation
 ```
-email-cli cron setup
+email-sync cron setup
 ```
 
 ## Behaviour
@@ -27,7 +27,7 @@ Cron job installed: */5 * * * * /usr/local/bin/email-sync >> ~/.cache/email-cli/
 
 ## Example Output (already installed)
 ```
-Cron job already installed. Run 'email-cli cron remove' first to change the interval.
+Cron job already installed. Run 'email-sync cron remove' first to change the interval.
 ```
 
 ## Exit Codes

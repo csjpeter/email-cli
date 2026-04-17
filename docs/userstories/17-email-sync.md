@@ -33,12 +33,12 @@ Run 'email-cli' once to complete the setup wizard.
 and exits with code 1.
 
 ## Cron Integration
-`email-cli cron setup` installs `email-sync` (not `email-cli sync`) in the user's
+`email-sync cron setup` installs `email-sync` (not `email-cli sync`) in the user's
 crontab:
 ```
 */15 * * * * /path/to/email-sync >> ~/.cache/email-cli/sync.log 2>&1
 ```
-`email-cli cron remove` and `email-cli cron status` detect both `email-sync` and
+`email-sync cron remove` and `email-sync cron status` detect both `email-sync` and
 the legacy `email-cli sync` format.
 
 ## Differences from `email-cli sync`

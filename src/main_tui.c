@@ -61,7 +61,7 @@ static void help(void) {
         "  --help, -h   Show this help message\n"
         "\n"
         "For batch/scriptable operations use email-cli.\n"
-        "For background sync use email-sync or 'email-cli cron setup'.\n"
+        "For background sync use email-sync (incl. 'email-sync cron setup').\n"
     );
 }
 

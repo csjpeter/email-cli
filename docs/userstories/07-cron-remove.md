@@ -5,7 +5,7 @@ As a user, I want to remove the automatic background sync crontab entry.
 
 ## Invocation
 ```
-email-cli cron remove
+email-sync cron remove
 ```
 
 ## Behaviour

@@ -117,7 +117,8 @@ Config* setup_wizard_run_internal(FILE *stream) {
         if (stream == stdin && is_tty) {
             printf("\nOpening Gmail authorization...\n");
             if (gmail_auth_device_flow(cfg) != 0) {
-                fprintf(stderr, "Error: Gmail authorization failed.\n");
+                fprintf(stderr, "Press Enter to continue...");
+                getc(stdin);
                 config_free(cfg);
                 return NULL;
             }

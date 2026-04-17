@@ -6,7 +6,7 @@ scheduled in my crontab.
 
 ## Invocation
 ```
-email-cli cron status
+email-sync cron status
 ```
 
 ## Behaviour

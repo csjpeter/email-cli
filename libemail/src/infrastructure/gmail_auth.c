@@ -100,9 +100,22 @@ static char *http_post(const char *url, const char *postdata, long *http_code) {
 int gmail_auth_device_flow(Config *cfg) {
     const char *client_id = get_client_id(cfg);
     if (!client_id[0]) {
-        fprintf(stderr, "Error: No Gmail OAuth2 client_id configured.\n"
-                        "Set GMAIL_CLIENT_ID in config.ini or rebuild with "
-                        "-DGMAIL_DEFAULT_CLIENT_ID.\n");
+        fprintf(stderr,
+            "\n"
+            "  Gmail OAuth2 credentials are not configured yet.\n"
+            "\n"
+            "  To use Gmail, you need a Google Cloud OAuth2 client_id and\n"
+            "  client_secret. Add them to your account config file:\n"
+            "\n"
+            "    ~/.config/email-cli/accounts/<email>/config.ini\n"
+            "\n"
+            "  Add these two lines:\n"
+            "    GMAIL_CLIENT_ID=<your-client-id>.apps.googleusercontent.com\n"
+            "    GMAIL_CLIENT_SECRET=<your-client-secret>\n"
+            "\n"
+            "  See docs/dev/gmail-oauth2-setup.md for a step-by-step guide\n"
+            "  on creating credentials in the Google Cloud Console.\n"
+            "\n");
         return -1;
     }
 

@@ -6,6 +6,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifndef GMAIL_DEFAULT_CLIENT_ID
+#define GMAIL_DEFAULT_CLIENT_ID ""
+#endif
+
 static char* get_input(const char *prompt, int hide, FILE *stream) {
     int is_tty = isatty(fileno(stream));
 
@@ -115,6 +119,26 @@ Config* setup_wizard_run_internal(FILE *stream) {
         if (!cfg->user || !cfg->user[0]) { config_free(cfg); return NULL; }
 
         if (stream == stdin && is_tty) {
+            /* Check if OAuth2 credentials are available (compiled-in or config) */
+            const char *cid = cfg->gmail_client_id;
+            int has_builtin = (GMAIL_DEFAULT_CLIENT_ID[0] != '\0');
+            if (!has_builtin && (!cid || !cid[0])) {
+                printf("\n"
+                    "  Gmail requires OAuth2 credentials (client_id and client_secret)\n"
+                    "  from a Google Cloud project. See docs/dev/gmail-oauth2-setup.md\n"
+                    "  for a step-by-step guide on how to create them.\n\n");
+                cfg->gmail_client_id = get_input("GMAIL_CLIENT_ID", 0, stream);
+                if (!cfg->gmail_client_id || !cfg->gmail_client_id[0]) {
+                    config_free(cfg);
+                    return NULL;
+                }
+                cfg->gmail_client_secret = get_input("GMAIL_CLIENT_SECRET", 0, stream);
+                if (!cfg->gmail_client_secret || !cfg->gmail_client_secret[0]) {
+                    config_free(cfg);
+                    return NULL;
+                }
+            }
+
             printf("\nOpening Gmail authorization...\n");
             if (gmail_auth_device_flow(cfg) != 0) {
                 fprintf(stderr, "Press Enter to continue...");

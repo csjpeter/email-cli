@@ -32,6 +32,7 @@ void test_input_line(void);
 void test_path_complete(void);
 void run_json_util_tests(void);
 void test_gmail_auth(void);
+void test_gmail_client(void);
 
 int main() {
     printf("--- email-cli Unit Test Suite ---\n\n");
@@ -63,6 +64,7 @@ int main() {
     RUN_TEST(test_path_complete);
     run_json_util_tests();
     RUN_TEST(test_gmail_auth);
+    RUN_TEST(test_gmail_client);
 
     printf("\n--- Test Results ---\n");
     printf("Tests Run:    %d\n", g_tests_run);

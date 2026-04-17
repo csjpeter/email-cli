@@ -40,6 +40,7 @@ set(TEST_SOURCES
     test_path_complete.c
     test_json_util.c
     test_gmail_auth.c
+    test_gmail_client.c
     ../../libemail/src/core/fs_util.c
     ../../libemail/src/core/logger.c
     ../../libemail/src/core/config.c
@@ -51,6 +52,7 @@ set(TEST_SOURCES
     ../../libemail/src/core/path_complete.c
     ../../libemail/src/core/json_util.c
     ../../libemail/src/infrastructure/gmail_auth.c
+    ../../libemail/src/infrastructure/gmail_client.c
     ../../libemail/src/infrastructure/config_store.c
     ../../libemail/src/infrastructure/setup_wizard.c
     ../../libemail/src/infrastructure/imap_client.c

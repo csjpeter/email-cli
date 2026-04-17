@@ -19,6 +19,17 @@ else()
 endif()
 add_compile_definitions(EMAIL_CLI_VERSION="${EMAIL_CLI_VERSION}")
 
+# Gmail OAuth2 credentials (optional — loaded from gmail_credentials.cmake)
+if(EXISTS "${CMAKE_SOURCE_DIR}/gmail_credentials.cmake")
+    include("${CMAKE_SOURCE_DIR}/gmail_credentials.cmake")
+endif()
+if(GMAIL_DEFAULT_CLIENT_ID)
+    add_compile_definitions(GMAIL_DEFAULT_CLIENT_ID="${GMAIL_DEFAULT_CLIENT_ID}")
+endif()
+if(GMAIL_DEFAULT_CLIENT_SECRET)
+    add_compile_definitions(GMAIL_DEFAULT_CLIENT_SECRET="${GMAIL_DEFAULT_CLIENT_SECRET}")
+endif()
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Werror -pedantic -D_GNU_SOURCE")
 

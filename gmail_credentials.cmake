@@ -14,5 +14,5 @@
 # User accounts are protected by individual refresh tokens stored in
 # ~/.config/email-cli/accounts/<email>/config.ini (mode 0600).
 # See 'email-cli help gmail' for setup details.
-set(GMAIL_DEFAULT_CLIENT_ID "326922622254-hd0b765n60j4kfhfi0bviqj9g2qqebs2.apps.googleusercontent.com" CACHE STRING "Gmail OAuth2 client ID")
-set(GMAIL_DEFAULT_CLIENT_SECRET "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" CACHE STRING "Gmail OAuth2 client secret")
+set(GMAIL_DEFAULT_CLIENT_ID "326922622254-hdcevm96tkcltqfvaamtsiucd3h21fib.apps.googleusercontent.com" CACHE STRING "Gmail OAuth2 client ID")
+set(GMAIL_DEFAULT_CLIENT_SECRET "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" CACHE STRING "Gmail OAuth2 client secret")

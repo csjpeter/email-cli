@@ -163,6 +163,14 @@ libs/
   libptytest/             ← PTY-based terminal test library (self-contained)
 ```
 
+## Claude Code Usage Guidelines
+
+Cost-conscious workflow:
+- **Minimise subagent spawning.** Use direct Grep/Read/Edit tools for targeted changes. Reserve Agent for genuinely parallel, independent work on large files. Use `model: "haiku"` for simple subagents (search, audit).
+- **Keep context short.** `/compact` after completing each task. `/clear` when switching to unrelated tasks. Avoid reading entire large files — use offset/limit.
+- **Batch small tasks** into a single session turn instead of one-task-per-turn cycles.
+- **Prefer direct edits** over exploratory agents when the change location is known.
+
 ## Project Memory
 
 Current project status, architectural decisions, and user preferences are tracked in `.claude/memory/`. Read these files at the start of each session for context on what has been done and what comes next.

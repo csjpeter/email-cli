@@ -186,7 +186,7 @@ static const signed char b64url_table[256] = {
  * Decode a base64url string (no padding) into a binary buffer.
  * Returns heap-allocated NUL-terminated buffer; sets *out_len.
  */
-static char *base64url_decode(const char *input, size_t in_len, size_t *out_len) {
+char *gmail_base64url_decode(const char *input, size_t in_len, size_t *out_len) {
     size_t alloc = (in_len / 4 + 1) * 3 + 1;
     char *out = malloc(alloc);
     if (!out) return NULL;
@@ -224,7 +224,7 @@ static const char b64url_chars[] =
  * Encode binary data as base64url (no padding).
  * Returns heap-allocated NUL-terminated string.
  */
-static char *base64url_encode(const unsigned char *data, size_t len) {
+char *gmail_base64url_encode(const unsigned char *data, size_t len) {
     size_t alloc = ((len + 2) / 3) * 4 + 1;
     char *out = malloc(alloc);
     if (!out) return NULL;
@@ -436,7 +436,7 @@ char *gmail_fetch_message(GmailClient *c, const char *uid,
     }
 
     size_t decoded_len = 0;
-    char *decoded = base64url_decode(raw_b64, strlen(raw_b64), &decoded_len);
+    char *decoded = gmail_base64url_decode(raw_b64, strlen(raw_b64), &decoded_len);
     if (!decoded) return NULL;
 
     /* Extract labels if requested */
@@ -536,7 +536,7 @@ int gmail_send(GmailClient *c, const char *raw_msg, size_t len) {
         return -1;
 
     /* Base64url encode the raw RFC 2822 message */
-    char *encoded = base64url_encode((const unsigned char *)raw_msg, len);
+    char *encoded = gmail_base64url_encode((const unsigned char *)raw_msg, len);
     if (!encoded) return -1;
 
     /* Build JSON body: {"raw": "<base64url>"} */
@@ -557,6 +557,19 @@ int gmail_send(GmailClient *c, const char *raw_msg, size_t len) {
     }
     logger_log(LOG_INFO, "gmail_send: message sent successfully");
     return 0;
+}
+
+/* ── Profile (historyId) ──────────────────────────────────────────── */
+
+char *gmail_get_history_id(GmailClient *c) {
+    RAII_STRING char *url = NULL;
+    if (asprintf(&url, "%s/profile", GMAIL_API) == -1) return NULL;
+
+    long code = 0;
+    RAII_STRING char *resp = api_get_retry(c, url, &code);
+    if (!resp || code != 200) return NULL;
+
+    return json_get_string(resp, "historyId");
 }
 
 /* ── History (incremental sync) ───────────────────────────────────── */

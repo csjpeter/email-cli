@@ -147,23 +147,13 @@ int gmail_sync_full(GmailClient *gc) {
     }
     if (uid_count > 0) fprintf(stderr, "\n");
 
-    /* 3. Save historyId from the most recent message */
-    if (uid_count > 0) {
-        /* Fetch metadata of the first (most recent) message for its historyId */
-        /* The list is already in reverse chronological order from Gmail */
-        RAII_STRING char *url = NULL;
-        if (asprintf(&url, "https://gmail.googleapis.com/gmail/v1/users/me/messages/%s?format=metadata&metadataHeaders=Message-ID",
-                     all_uids[0]) != -1) {
-            /* We need the historyId but gmail_fetch_message with format=raw
-             * doesn't return it.  Use the profile endpoint instead. */
-        }
-        free(url);  /* Not using this approach */
-
-        /* Better: get profile which has historyId */
-        /* Actually, the simplest approach: fetch the first message's metadata
-         * to get historyId.  But our API doesn't expose that field.
-         * Alternative: use the Gmail profile endpoint. */
-        /* For now, use a messages.list call and extract from response. */
+    /* 3. Save historyId from the Gmail profile */
+    {
+        RAII_STRING char *hid = gmail_get_history_id(gc);
+        if (hid)
+            local_gmail_history_save(hid);
+        else
+            logger_log(LOG_WARN, "gmail_sync: could not retrieve historyId");
     }
 
     free(all_uids);

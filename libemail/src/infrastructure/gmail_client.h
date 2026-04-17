@@ -144,6 +144,20 @@ typedef void (*GmailProgressFn)(size_t current, size_t total, void *ctx);
 /** @brief Install a progress callback (called during list/sync operations). */
 void gmail_set_progress(GmailClient *c, GmailProgressFn fn, void *ctx);
 
+/**
+ * @brief Get the current historyId from the Gmail profile.
+ * @return Heap-allocated historyId string, or NULL on error. Caller must free().
+ */
+char *gmail_get_history_id(GmailClient *c);
+
+/* ── Base64url utilities (also used by sync/test code) ────────────── */
+
+/** @brief Decode base64url (no padding) to binary. Caller must free(). */
+char *gmail_base64url_decode(const char *input, size_t in_len, size_t *out_len);
+
+/** @brief Encode binary to base64url (no padding). Caller must free(). */
+char *gmail_base64url_encode(const unsigned char *data, size_t len);
+
 /* ── Inline RAII cleanup ──────────────────────────────────────────── */
 
 static inline void gmail_disconnect_ptr(GmailClient **p) {

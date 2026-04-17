@@ -12,6 +12,7 @@
 #include "fs_util.h"
 #include "smtp_adapter.h"
 #include "compose_service.h"
+#include "help_gmail.h"
 
 /* Default limit for batch output */
 #define BATCH_DEFAULT_LIMIT 100
@@ -34,6 +35,7 @@ static void help_general(void) {
         "  send                    Send a message non-interactively\n"
         "  config                  View or update configuration (incl. SMTP)\n"
         "  help [command]          Show this help, or detailed help for a command\n"
+        "  help gmail              Step-by-step Gmail OAuth2 setup guide\n"
         "\n"
         "Run 'email-cli help <command>' for more information.\n"
         "For the interactive TUI use email-tui.\n"
@@ -246,6 +248,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
                 if (strcmp(cmd, "send")            == 0) { help_send();            return EXIT_SUCCESS; }
                 if (strcmp(cmd, "config")          == 0) { help_config();          return EXIT_SUCCESS; }
+                if (strcmp(cmd, "gmail")           == 0) { help_gmail();           return EXIT_SUCCESS; }
             }
             /* email-cli --help  or  email-cli help --help */
             help_general();
@@ -268,6 +271,7 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
             if (strcmp(topic, "send")            == 0) { help_send();            return EXIT_SUCCESS; }
             if (strcmp(topic, "config")          == 0) { help_config();          return EXIT_SUCCESS; }
+            if (strcmp(topic, "gmail")           == 0) { help_gmail();           return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli help' for available commands.\n");
             return EXIT_FAILURE;

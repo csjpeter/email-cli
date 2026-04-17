@@ -18,6 +18,7 @@
 #include "config_store.h"
 #include "setup_wizard.h"
 #include "email_service.h"
+#include "help_gmail.h"
 #include "platform/terminal.h"
 #include "platform/path.h"
 #include "raii.h"
@@ -525,7 +526,7 @@ int main(int argc, char *argv[]) {
                 "\n  This Gmail account has no OAuth2 credentials configured.\n"
                 "  Add GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET to:\n"
                 "    ~/.config/email-cli/accounts/%s/config.ini\n"
-                "  See docs/dev/gmail-oauth2-setup.md for details.\n\n"
+                "  Run 'email-cli help gmail' for the setup guide.\n\n"
                 "  Press any key to return to accounts...\n",
                 sel_cfg->user ? sel_cfg->user : "(unknown)");
             fflush(stderr);
@@ -561,7 +562,7 @@ int main(int argc, char *argv[]) {
                     "  - Network issue\n\n"
                     "  To fix: check GMAIL_CLIENT_ID and GMAIL_REFRESH_TOKEN in\n"
                     "    ~/.config/email-cli/accounts/%s/config.ini\n"
-                    "  Guide: docs/dev/gmail-oauth2-setup.md\n",
+                    "  Run 'email-cli help gmail' for the setup guide.\n",
                     sel_cfg->user ? sel_cfg->user : "(unknown)");
             } else if (sel_cfg->host &&
                        (strstr(sel_cfg->host, "gmail.com") ||
@@ -572,7 +573,7 @@ int main(int argc, char *argv[]) {
                     "  To fix: delete this account ('d' on accounts screen) and\n"
                     "  re-add it ('n') as Gmail type (option 2), which uses the\n"
                     "  Gmail API with OAuth2 instead of IMAP.\n\n"
-                    "  See docs/dev/gmail-oauth2-setup.md for credentials setup.\n");
+                    "  Run 'email-cli help gmail' for the setup guide.\n");
             } else {
                 fprintf(stderr,
                     "  Possible causes:\n"

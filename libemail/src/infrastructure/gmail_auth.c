@@ -113,8 +113,7 @@ int gmail_auth_device_flow(Config *cfg) {
             "    GMAIL_CLIENT_ID=<your-client-id>.apps.googleusercontent.com\n"
             "    GMAIL_CLIENT_SECRET=<your-client-secret>\n"
             "\n"
-            "  See docs/dev/gmail-oauth2-setup.md for a step-by-step guide\n"
-            "  on creating credentials in the Google Cloud Console.\n"
+            "  Run 'email-cli help gmail' for the step-by-step setup guide.\n"
             "\n");
         return -1;
     }

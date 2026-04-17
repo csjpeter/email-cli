@@ -158,6 +158,19 @@ Config* setup_wizard_run_internal(FILE *stream) {
     for (;;) {
         char *input = get_input("IMAP Host (e.g. imap.example.com)", 0, stream);
         if (!input) { config_free(cfg); return NULL; }
+
+        /* Reject Gmail IMAP — Gmail must use the Gmail API (account type 2) */
+        if (strstr(input, "gmail.com") || strstr(input, "google.com") ||
+            strstr(input, "googlemail.com")) {
+            fprintf(stderr,
+                    "Error: Gmail is not supported via IMAP.\n"
+                    "  Please re-run the wizard and select account type [2] Gmail,\n"
+                    "  which uses the Gmail API with OAuth2.\n");
+            free(input);
+            config_free(cfg);
+            return NULL;
+        }
+
         char *host = normalize_imap_host(input);
         if (!host) {
             fprintf(stderr,

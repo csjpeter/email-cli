@@ -26,7 +26,8 @@ The project follows a strict layered CLEAN architecture with zero circular depen
 ```
 Application    →  src/main.c, main_ro.c, main_sync.c, main_tui.c
 Domain         →  libemail/src/domain/email_service.c
-Infrastructure →  libemail/src/infrastructure/{config_store,local_store,imap_client,setup_wizard}.c
+Infrastructure →  libemail/src/infrastructure/{config_store,local_store,imap_client,setup_wizard,
+                                                  gmail_auth,gmail_client,gmail_sync,mail_client}.c
 Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_parser,html_render,
                                      imap_util,input_line,path_complete}.c + raii.h
 Platform       →  libemail/src/platform/{terminal,path}.h
@@ -40,9 +41,11 @@ alongside `core/` and is depended upon by `domain/` and `infrastructure/`.
 No layer may contain `#ifdef` guards for platform selection — that is the
 build system's (CMake's) responsibility.
 
-**Data flow:** `main.c` initializes logger, paths, and local store → loads config (or runs `setup_wizard` on first run) → calls `email_service` → which uses `imap_client` (direct OpenSSL) to talk to the IMAP server → results go to stdout, messages stored in `~/.local/share/email-cli/accounts/`, diagnostics to `~/.cache/email-cli/logs/`.
+**Data flow:** `main.c` initializes logger, paths, and local store → loads config (or runs `setup_wizard` on first run) → calls `email_service` → which uses `mail_client` (dispatch layer) to talk to the IMAP server or Gmail REST API → results go to stdout, messages stored in `~/.local/share/email-cli/accounts/`, diagnostics to `~/.cache/email-cli/logs/`.
 
-**Config** is stored at `~/.config/email-cli/config.ini` with mode 0600 (IMAP host, user, password, folder).
+**Gmail support:** Gmail accounts use the native Gmail REST API (OAuth2 + libcurl), not IMAP. The setup wizard offers account type selection ([1] IMAP / [2] Gmail). Gmail uses label-based navigation instead of folders. See `docs/spec/gmail-api.md` for the full specification.
+
+**Config** is stored at `~/.config/email-cli/config.ini` with mode 0600 (IMAP host, user, password, folder). Gmail accounts add `GMAIL_MODE=1`, `GMAIL_REFRESH_TOKEN`, and optional `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET` fields.
 
 **Local store** uses account-based directories with reverse digit bucketing and text indexes. See `docs/spec/local-store.md` for the full specification.
 
@@ -56,7 +59,7 @@ No external test libraries are used. Tests use `ASSERT(condition, message)` and 
 
 ## Language & Standard
 
-C11 (`-std=c11`). Linked against libssl (OpenSSL) for IMAP, and libcurl for SMTP (in libwrite). All public functions should have Doxygen-style comments.
+C11 (`-std=c11`). Linked against libssl (OpenSSL) for IMAP, and libcurl for SMTP (libwrite) and Gmail REST API (libemail). All public functions should have Doxygen-style comments.
 
 ## GNU/Linux CLI Conventions
 

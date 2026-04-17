@@ -1,4 +1,5 @@
 #include "setup_wizard.h"
+#include "gmail_auth.h"
 #include "platform/terminal.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,11 +91,44 @@ Config* setup_wizard_run_internal(FILE *stream) {
     int is_tty = isatty(fileno(stream));
     if (stream == stdin && is_tty) {
         printf("\n--- email-cli Configuration Wizard ---\n");
-        printf("Please enter your email server details.\n\n");
+        printf("Please enter your email account details.\n\n");
     }
 
     Config *cfg = calloc(1, sizeof(Config));
     if (!cfg) return NULL;
+
+    /* ── Account type selection ──────────────────────────────────────── */
+    if (stream == stdin && is_tty)
+        printf("Account type:\n  [1] IMAP (standard e-mail server)\n"
+               "  [2] Gmail (Google account — uses Gmail API, not IMAP)\n");
+
+    char *type_str = get_input("Choice [1]", 0, stream);
+    int account_type = 1;
+    if (type_str && type_str[0] == '2') account_type = 2;
+    free(type_str);
+
+    /* ── Gmail flow ──────────────────────────────────────────────────── */
+    if (account_type == 2) {
+        cfg->gmail_mode = 1;
+
+        cfg->user = get_input("Email address", 0, stream);
+        if (!cfg->user || !cfg->user[0]) { config_free(cfg); return NULL; }
+
+        if (stream == stdin && is_tty) {
+            printf("\nOpening Gmail authorization...\n");
+            if (gmail_auth_device_flow(cfg) != 0) {
+                fprintf(stderr, "Error: Gmail authorization failed.\n");
+                config_free(cfg);
+                return NULL;
+            }
+            printf("Configuration collected.\n");
+        }
+        return cfg;
+    }
+
+    /* ── IMAP flow (existing) ────────────────────────────────────────── */
+    if (stream == stdin && is_tty)
+        printf("\n");
 
     for (;;) {
         char *input = get_input("IMAP Host (e.g. imap.example.com)", 0, stream);

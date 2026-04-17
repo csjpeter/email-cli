@@ -2094,6 +2094,71 @@ static void test_wizard_gmail_type_selection(void) {
     setenv("HOME", g_test_home, 1);
 }
 
+static void write_gmail_account(const char *name) {
+    char dir1[512], dir2[512], path[600];
+    snprintf(dir1, sizeof(dir1), "%s/.config/email-cli/accounts", g_test_home);
+    snprintf(dir2, sizeof(dir2), "%s/.config/email-cli/accounts/%s", g_test_home, name);
+    mkdir(dir1, 0700);
+    mkdir(dir2, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", dir2);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp,
+        "EMAIL_USER=%s\n"
+        "GMAIL_MODE=1\n"
+        "SSL_NO_VERIFY=1\n", name);
+    fclose(fp);
+    chmod(path, 0600);
+
+    /* Create local store with a dummy label .idx so label list is non-empty.
+     * Use a flat layout: accounts/<name>/labels/INBOX.idx */
+    {
+        char d[1024];
+        snprintf(d, sizeof(d), "%s/.local", g_test_home); mkdir(d, 0700);
+        snprintf(d, sizeof(d), "%s/.local/share", g_test_home); mkdir(d, 0700);
+        snprintf(d, sizeof(d), "%s/.local/share/email-cli", g_test_home); mkdir(d, 0700);
+        snprintf(d, sizeof(d), "%s/.local/share/email-cli/accounts", g_test_home); mkdir(d, 0700);
+        snprintf(d, sizeof(d), "%s/.local/share/email-cli/accounts/%s", g_test_home, name); mkdir(d, 0700);
+        snprintf(d, sizeof(d), "%s/.local/share/email-cli/accounts/%s/labels", g_test_home, name); mkdir(d, 0700);
+        char idx[1100];
+        snprintf(idx, sizeof(idx), "%s/INBOX.idx", d);
+        fp = fopen(idx, "w");
+        if (fp) { fprintf(fp, "18c9b46d67a60001\n"); fclose(fp); }
+    }
+}
+
+static void test_gmail_labels_backspace(void) {
+    /* Gmail account: Enter opens Labels view; Backspace → accounts */
+    write_gmail_account("gmailtest@gmail.com");
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "gmail labels backspace: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Gmail account should show "Gmail" in Type column */
+    ASSERT_SCREEN_CONTAINS(s, "Gmail");
+    /* Navigate to Gmail account and press Enter */
+    pty_send_key(s, PTY_KEY_DOWN);  /* cursor to Gmail account */
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
+    /* Backspace → back to accounts */
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    /* Cleanup */
+    char path[500];
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/gmailtest@gmail.com/config.ini",
+             g_test_home);
+    unlink(path);
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/gmailtest@gmail.com", g_test_home);
+    rmdir(path);
+}
+
 static void test_account_list_type_column(void) {
     /* Account list shows Type column with "IMAP" for standard accounts */
     restart_mock();
@@ -2481,6 +2546,7 @@ int main(int argc, char *argv[]) {
     restart_mock();
     RUN_TEST(test_wizard_gmail_type_selection);
     RUN_TEST(test_account_list_type_column);
+    RUN_TEST(test_gmail_labels_backspace);
 
     printf("\n--- email-tui: accounts management (US-21) ---\n");
     restart_mock();

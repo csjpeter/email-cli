@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+#include <unistd.h>
 
 /* ── Account base path (set by local_store_init) ─────────────────────── */
 
@@ -1040,6 +1041,47 @@ int label_idx_remove(const char *label, const char *uid) {
 }
 
 /* ── Gmail history ID ─────────────────────────────────────────────── */
+
+/* ── Trash label backup (for untrash restore) ────────────────────── */
+
+static char *trash_labels_path(const char *uid) {
+    if (!g_account_base[0] || !uid) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/trash_labels/%s.lbl", g_account_base, uid) == -1)
+        return NULL;
+    return path;
+}
+
+int local_trash_labels_save(const char *uid, const char *labels) {
+    if (!uid || !labels) return -1;
+    /* Ensure directory exists */
+    char dir[8300];
+    snprintf(dir, sizeof(dir), "%s/trash_labels", g_account_base);
+    fs_mkdir_p(dir, 0700);
+
+    RAII_STRING char *path = trash_labels_path(uid);
+    if (!path) return -1;
+    RAII_FILE FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+    fprintf(fp, "%s\n", labels);
+    return 0;
+}
+
+char *local_trash_labels_load(const char *uid) {
+    RAII_STRING char *path = trash_labels_path(uid);
+    if (!path) return NULL;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+    char buf[4096];
+    if (!fgets(buf, (int)sizeof(buf), fp)) return NULL;
+    buf[strcspn(buf, "\r\n")] = '\0';
+    return strdup(buf);
+}
+
+void local_trash_labels_remove(const char *uid) {
+    RAII_STRING char *path = trash_labels_path(uid);
+    if (path) unlink(path);
+}
 
 int local_gmail_history_save(const char *history_id) {
     if (!g_account_base[0] || !history_id) return -1;

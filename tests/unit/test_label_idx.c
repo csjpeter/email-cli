@@ -190,6 +190,234 @@ static void test_label_idx_list(void) {
            "label_idx_list: all labels found");
 }
 
+/* ── local_hdr_get_labels tests (#26) ─────────────────────────────── */
+
+static void test_hdr_get_labels_normal(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://hdr-labels-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    /* Save a Gmail-style .hdr: from\tsubject\tdate\tlabels\tflags */
+    const char *hdr = "Alice\tHello\t2026-04-17 10:00\tINBOX,STARRED,Work\t3";
+    local_hdr_save("", "18c9b46d67a60001", hdr, strlen(hdr));
+
+    char *labels = local_hdr_get_labels("", "18c9b46d67a60001");
+    ASSERT(labels != NULL, "hdr_get_labels: not NULL");
+    ASSERT(strcmp(labels, "INBOX,STARRED,Work") == 0, "hdr_get_labels: correct value");
+    free(labels);
+}
+
+static void test_hdr_get_labels_missing(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://hdr-labels-miss-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    char *labels = local_hdr_get_labels("", "0000000000000099");
+    ASSERT(labels == NULL, "hdr_get_labels missing: NULL");
+}
+
+static void test_hdr_get_labels_empty(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://hdr-labels-empty-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    /* Empty labels field */
+    const char *hdr = "Bob\tSubj\t2026-04-17\t\t0";
+    local_hdr_save("", "18c9b46d67a60002", hdr, strlen(hdr));
+
+    char *labels = local_hdr_get_labels("", "18c9b46d67a60002");
+    ASSERT(labels != NULL, "hdr_get_labels empty: not NULL");
+    ASSERT(labels[0] == '\0', "hdr_get_labels empty: empty string");
+    free(labels);
+}
+
+static void test_hdr_get_labels_single(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://hdr-labels-single-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *hdr = "Carol\tTest\t2026-04-17\tINBOX\t1";
+    local_hdr_save("", "18c9b46d67a60003", hdr, strlen(hdr));
+
+    char *labels = local_hdr_get_labels("", "18c9b46d67a60003");
+    ASSERT(labels != NULL && strcmp(labels, "INBOX") == 0,
+           "hdr_get_labels single: INBOX");
+    free(labels);
+}
+
+static void test_hdr_get_labels_many(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://hdr-labels-many-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *hdr = "Dave\tMulti\t2026-04-17\tINBOX,UNREAD,STARRED,Work,Personal\t3";
+    local_hdr_save("", "18c9b46d67a60004", hdr, strlen(hdr));
+
+    char *labels = local_hdr_get_labels("", "18c9b46d67a60004");
+    ASSERT(labels != NULL, "hdr_get_labels many: not NULL");
+    ASSERT(strstr(labels, "INBOX") != NULL, "hdr_get_labels many: has INBOX");
+    ASSERT(strstr(labels, "Work") != NULL, "hdr_get_labels many: has Work");
+    ASSERT(strstr(labels, "Personal") != NULL, "hdr_get_labels many: has Personal");
+    free(labels);
+}
+
+/* ── Archive / Trash label operations (#30) ──────────────────────── */
+
+static void test_archive_removes_inbox(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://archive-test-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *uid = "18c9b46d67a6a001";
+    label_idx_add("INBOX", uid);
+    label_idx_add("Work", uid);
+    ASSERT(label_idx_contains("INBOX", uid) == 1, "archive pre: in INBOX");
+
+    /* Simulate archive: remove INBOX */
+    label_idx_remove("INBOX", uid);
+    ASSERT(label_idx_contains("INBOX", uid) == 0, "archive: removed from INBOX");
+    ASSERT(label_idx_contains("Work", uid) == 1, "archive: Work preserved");
+}
+
+static void test_archive_nolabel_when_no_labels(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://archive-nolabel-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *uid = "18c9b46d67a6a002";
+    label_idx_add("INBOX", uid);
+
+    /* Archive: remove INBOX, no other labels → should go to _nolabel */
+    label_idx_remove("INBOX", uid);
+    /* Check: not in INBOX or any other label → add to _nolabel */
+    label_idx_add("_nolabel", uid);
+    ASSERT(label_idx_contains("_nolabel", uid) == 1, "archive nolabel: in _nolabel");
+}
+
+static void test_trash_removes_all_labels(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://trash-test-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *uid = "18c9b46d67a6a003";
+    label_idx_add("INBOX", uid);
+    label_idx_add("Work", uid);
+    label_idx_add("STARRED", uid);
+
+    /* Simulate trash: remove from all, add to _trash */
+    char **all_labels = NULL;
+    int all_count = 0;
+    label_idx_list(&all_labels, &all_count);
+    for (int i = 0; i < all_count; i++) {
+        label_idx_remove(all_labels[i], uid);
+        free(all_labels[i]);
+    }
+    free(all_labels);
+    label_idx_add("_trash", uid);
+
+    ASSERT(label_idx_contains("INBOX", uid) == 0, "trash: removed from INBOX");
+    ASSERT(label_idx_contains("Work", uid) == 0, "trash: removed from Work");
+    ASSERT(label_idx_contains("STARRED", uid) == 0, "trash: removed from STARRED");
+    ASSERT(label_idx_contains("_trash", uid) == 1, "trash: in _trash");
+}
+
+/* ── Label picker toggle logic (#31) ─────────────────────────────── */
+
+static void test_label_toggle_add_remove(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://label-toggle-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *uid = "18c9b46d67a6b001";
+
+    /* Toggle ON: add label */
+    label_idx_add("Work", uid);
+    ASSERT(label_idx_contains("Work", uid) == 1, "toggle on: added");
+
+    /* Toggle OFF: remove label */
+    label_idx_remove("Work", uid);
+    ASSERT(label_idx_contains("Work", uid) == 0, "toggle off: removed");
+
+    /* Double add is no-op */
+    label_idx_add("Work", uid);
+    label_idx_add("Work", uid);
+    ASSERT(label_idx_count("Work") == 1, "toggle: double add → count=1");
+
+    /* Double remove is no-op */
+    label_idx_remove("Work", uid);
+    label_idx_remove("Work", uid);
+    ASSERT(label_idx_count("Work") == 0, "toggle: double remove → count=0");
+}
+
+/* ── Trash label backup/restore (#25) ────────────────────────────── */
+
+static void test_trash_labels_save_load(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://trash-lbl-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *uid = "18c9b46d67a6c001";
+    ASSERT(local_trash_labels_load(uid) == NULL, "trash labels: initially NULL");
+
+    ASSERT(local_trash_labels_save(uid, "INBOX,Work,STARRED") == 0,
+           "trash labels: save ok");
+    char *loaded = local_trash_labels_load(uid);
+    ASSERT(loaded != NULL, "trash labels: load not NULL");
+    ASSERT(strcmp(loaded, "INBOX,Work,STARRED") == 0, "trash labels: content matches");
+    free(loaded);
+
+    /* Remove */
+    local_trash_labels_remove(uid);
+    ASSERT(local_trash_labels_load(uid) == NULL, "trash labels: removed");
+}
+
+static void test_trash_restore_flow(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://trash-flow-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *uid = "18c9b46d67a6c002";
+
+    /* Pre-trash state: message in INBOX + Work */
+    label_idx_add("INBOX", uid);
+    label_idx_add("Work", uid);
+
+    /* Save labels before trash */
+    local_trash_labels_save(uid, "INBOX,Work,UNREAD");
+
+    /* Trash: remove all labels, add _trash */
+    label_idx_remove("INBOX", uid);
+    label_idx_remove("Work", uid);
+    label_idx_add("_trash", uid);
+
+    ASSERT(label_idx_contains("INBOX", uid) == 0, "trash flow: not in INBOX");
+    ASSERT(label_idx_contains("_trash", uid) == 1, "trash flow: in _trash");
+
+    /* Untrash: restore saved labels (skip UNREAD) */
+    label_idx_remove("_trash", uid);
+    char *saved = local_trash_labels_load(uid);
+    ASSERT(saved != NULL, "trash flow: saved labels exist");
+    /* Parse and restore */
+    char *tok = saved, *sep;
+    while (tok && *tok) {
+        sep = strchr(tok, ',');
+        size_t tl = sep ? (size_t)(sep - tok) : strlen(tok);
+        char lb[64];
+        if (tl >= sizeof(lb)) tl = sizeof(lb) - 1;
+        memcpy(lb, tok, tl); lb[tl] = '\0';
+        if (strcmp(lb, "UNREAD") != 0)
+            label_idx_add(lb, uid);
+        tok = sep ? sep + 1 : NULL;
+    }
+    free(saved);
+    local_trash_labels_remove(uid);
+
+    ASSERT(label_idx_contains("INBOX", uid) == 1, "untrash: back in INBOX");
+    ASSERT(label_idx_contains("Work", uid) == 1, "untrash: back in Work");
+    ASSERT(label_idx_contains("_trash", uid) == 0, "untrash: not in _trash");
+    ASSERT(local_trash_labels_load(uid) == NULL, "untrash: backup removed");
+}
+
 /* ── Registration ─────────────────────────────────────────────────── */
 
 void test_label_idx(void) {
@@ -201,4 +429,15 @@ void test_label_idx(void) {
     RUN_TEST(test_label_idx_hex_uids);
     RUN_TEST(test_gmail_history_id);
     RUN_TEST(test_label_idx_list);
+    RUN_TEST(test_hdr_get_labels_normal);
+    RUN_TEST(test_hdr_get_labels_missing);
+    RUN_TEST(test_hdr_get_labels_empty);
+    RUN_TEST(test_hdr_get_labels_single);
+    RUN_TEST(test_hdr_get_labels_many);
+    RUN_TEST(test_archive_removes_inbox);
+    RUN_TEST(test_archive_nolabel_when_no_labels);
+    RUN_TEST(test_trash_removes_all_labels);
+    RUN_TEST(test_label_toggle_add_remove);
+    RUN_TEST(test_trash_labels_save_load);
+    RUN_TEST(test_trash_restore_flow);
 }

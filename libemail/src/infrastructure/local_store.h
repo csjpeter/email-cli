@@ -244,6 +244,27 @@ char *local_hdr_get_labels(const char *folder, const char *uid);
 int label_idx_list(char ***labels_out, int *count_out);
 
 /**
+ * @brief Save pre-trash labels for a message (for untrash restore).
+ *
+ * Before trashing, the comma-separated label string is saved so that
+ * untrash can restore the original labels.
+ *
+ * @param uid     16-char UID string.
+ * @param labels  Comma-separated label string (from .hdr).
+ * @return 0 on success, -1 on error.
+ */
+int local_trash_labels_save(const char *uid, const char *labels);
+
+/**
+ * @brief Load pre-trash labels for untrash restore.
+ * @return Heap-allocated comma-separated label string, or NULL. Caller frees.
+ */
+char *local_trash_labels_load(const char *uid);
+
+/** @brief Remove pre-trash labels file after successful untrash. */
+void local_trash_labels_remove(const char *uid);
+
+/**
  * @brief Saves the gmail_history_id for incremental sync.
  * @return 0 on success, -1 on error.
  */

@@ -1466,9 +1466,15 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
                 printf("\033[0m\n\n");
-                printf("  %5s  %-16s  %-4s  %-*s  %s\n",
-                       "UID", "Date", "Sts", subj_w, "Subject", "From");
-                printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                if (cfg->gmail_mode) {
+                    printf("  %-14s  %-16s  %-4s  %-*s  %s\n",
+                           "Labels", "Date", "Sts", subj_w, "Subject", "From");
+                    printf("  "); print_dbar(14); printf("  ");
+                } else {
+                    printf("  %5s  %-16s  %-4s  %-*s  %s\n",
+                           "UID", "Date", "Sts", subj_w, "Subject", "From");
+                    printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                }
                 print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
                 printf("\n  \033[2m(empty)\033[0m\n");
@@ -1476,8 +1482,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 char sb[256];
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                         "  Backspace=folders  ESC=quit"
-                         "  s=sync  R=refresh  [0/0]");
+                         "  Backspace=%s  ESC=quit"
+                         "  s=sync  R=refresh  [0/0]",
+                         cfg->gmail_mode ? "labels" : "folders");
                 print_statusbar(trows, tcols, sb);
             }
             for (;;) {
@@ -1579,19 +1586,33 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
                 printf("\033[0m\n\n");
-                printf("  %5s  %-16s  %-4s  %-*s  %s\n",
-                       "UID", "Date", "Sts", subj_w, "Subject", "From");
-                printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                if (cfg->gmail_mode) {
+                    printf("  %-14s  %-16s  %-4s  %-*s  %s\n",
+                           "Labels", "Date", "Sts", subj_w, "Subject", "From");
+                    printf("  "); print_dbar(14); printf("  ");
+                } else {
+                    printf("  %5s  %-16s  %-4s  %-*s  %s\n",
+                           "UID", "Date", "Sts", subj_w, "Subject", "From");
+                    printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                }
                 print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
                 printf("\n  \033[2m(empty)\033[0m\n");
                 fflush(stdout);
                 char sb[256];
-                snprintf(sb, sizeof(sb),
-                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                         "  Backspace=folders  ESC=quit"
-                         "  c=compose  r=reply  n=new  f=flag  d=done"
-                         "  s=sync  R=refresh  [0/0]");
+                if (cfg->gmail_mode) {
+                    snprintf(sb, sizeof(sb),
+                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                             "  Backspace=labels  ESC=quit"
+                             "  c=compose  r=reply  n=unread  f=star"
+                             "  s=sync  R=refresh  [0/0]");
+                } else {
+                    snprintf(sb, sizeof(sb),
+                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                             "  Backspace=folders  ESC=quit"
+                             "  c=compose  r=reply  n=new  f=flag  d=done"
+                             "  s=sync  R=refresh  [0/0]");
+                }
                 print_statusbar(trows, tcols, sb);
             }
             for (;;) {
@@ -1654,19 +1675,33 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
             printf("\033[0m\n\n");
-            printf("  %5s  %-16s  %-4s  %-*s  %s\n",
-                   "UID", "Date", "Sts", subj_w, "Subject", "From");
-            printf("  \u2550\u2550\u2550\u2550\u2550  ");
+            if (cfg->gmail_mode) {
+                printf("  %-14s  %-16s  %-4s  %-*s  %s\n",
+                       "Labels", "Date", "Sts", subj_w, "Subject", "From");
+                printf("  "); print_dbar(14); printf("  ");
+            } else {
+                printf("  %5s  %-16s  %-4s  %-*s  %s\n",
+                       "UID", "Date", "Sts", subj_w, "Subject", "From");
+                printf("  \u2550\u2550\u2550\u2550\u2550  ");
+            }
             print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
             print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
             printf("\n  \033[2m(empty)\033[0m\n");
             fflush(stdout);
             char sb[256];
-            snprintf(sb, sizeof(sb),
-                     "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                     "  Backspace=folders  ESC=quit"
-                     "  c=compose  r=reply  n=new  f=flag  d=done"
-                     "  s=sync  R=refresh  [0/0]");
+            if (cfg->gmail_mode) {
+                snprintf(sb, sizeof(sb),
+                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                         "  Backspace=labels  ESC=quit"
+                         "  c=compose  r=reply  n=unread  f=star"
+                         "  s=sync  R=refresh  [0/0]");
+            } else {
+                snprintf(sb, sizeof(sb),
+                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                         "  Backspace=folders  ESC=quit"
+                         "  c=compose  r=reply  n=new  f=flag  d=done"
+                         "  s=sync  R=refresh  [0/0]");
+            }
             print_statusbar(trows, tcols, sb);
         }
         for (;;) {
@@ -1729,6 +1764,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 suffix = "  \u2709 New mail may have arrived!  R=refresh";
             else if (sync)
                 suffix = "  \u21bb syncing...";
+            else if (is_gmail && strcmp(folder, "_trash") == 0)
+                suffix = "  \u26a0 auto-delete: 30 days";
             else
                 suffix = "";
             snprintf(cl, sizeof(cl),
@@ -1984,6 +2021,7 @@ read_key_again: ;
                         { "f",                 "Toggle Starred label"            },
                         { "a",                 "Archive (remove INBOX label)"    },
                         { "D",                 "Move to Trash"                   },
+                        { "u",                 "Untrash (restore labels)"        },
                         { "t",                 "Toggle labels (picker)"          },
                         { "s",                 "Start background sync"           },
                         { "R",                 "Refresh after sync"              },
@@ -2052,6 +2090,12 @@ read_key_again: ;
             if (ch == 'D' && is_gmail) {
                 /* Trash: Gmail compound trash operation */
                 const char *uid = entries[cursor].uid;
+                /* Save current labels for potential untrash */
+                char *pre_trash = local_hdr_get_labels("", uid);
+                if (pre_trash) {
+                    local_trash_labels_save(uid, pre_trash);
+                    free(pre_trash);
+                }
                 if (list_mc) mail_client_trash(list_mc, uid);
                 /* Remove from all local label indexes */
                 {
@@ -2065,6 +2109,41 @@ read_key_again: ;
                     free(all_labels);
                 }
                 label_idx_add("_trash", uid);
+                break;
+            }
+            if (ch == 'u' && is_gmail) {
+                /* Untrash: restore from Trash + restore saved labels */
+                const char *uid = entries[cursor].uid;
+                if (list_mc) {
+                    /* Gmail API: untrash removes TRASH label */
+                    mail_client_modify_label(list_mc, uid, "TRASH", 0);
+                }
+                label_idx_remove("_trash", uid);
+                /* Restore saved labels */
+                char *saved = local_trash_labels_load(uid);
+                if (saved) {
+                    char *tok = saved, *sep;
+                    while (tok && *tok) {
+                        sep = strchr(tok, ',');
+                        size_t tl = sep ? (size_t)(sep - tok) : strlen(tok);
+                        char lb[64];
+                        if (tl >= sizeof(lb)) tl = sizeof(lb) - 1;
+                        memcpy(lb, tok, tl); lb[tl] = '\0';
+                        if (lb[0] && strcmp(lb, "UNREAD") != 0 &&
+                            strcmp(lb, "IMPORTANT") != 0 &&
+                            strncmp(lb, "CATEGORY_", 9) != 0) {
+                            label_idx_add(lb, uid);
+                            if (list_mc)
+                                mail_client_modify_label(list_mc, uid, lb, 1);
+                        }
+                        tok = sep ? sep + 1 : NULL;
+                    }
+                    free(saved);
+                    local_trash_labels_remove(uid);
+                } else {
+                    /* No saved labels — put in Archive (_nolabel) */
+                    label_idx_add("_nolabel", uid);
+                }
                 break;
             }
             if (ch == 't' && is_gmail) {
@@ -2618,7 +2697,7 @@ static const struct { const char *id; const char *name; } gmail_system_labels[] 
 static const struct { const char *id; const char *name; } gmail_special_labels[] = {
     { "_nolabel", "Archive" },
     { "_spam",    "Spam"    },
-    { "_trash",   "Trash"   },
+    { "_trash",   "Trash (auto-delete: 30 days)" },
 };
 #define GMAIL_SPECIAL_COUNT ((int)(sizeof(gmail_special_labels)/sizeof(gmail_special_labels[0])))
 

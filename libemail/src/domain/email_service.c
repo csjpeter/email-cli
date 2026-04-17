@@ -3,6 +3,7 @@
 #include "input_line.h"
 #include "path_complete.h"
 #include "imap_client.h"
+#include "mail_client.h"
 #include "local_store.h"
 #include "mime_util.h"
 #include "html_render.h"
@@ -583,10 +584,10 @@ static void print_body_page(const char *body, int from_vrow, int vrow_budget,
     }
 }
 
-/* ── IMAP helpers ────────────────────────────────────────────────────── */
+/* ── Mail client helpers ─────────────────────────────────────────────── */
 
-static ImapClient *make_imap(const Config *cfg) {
-    return imap_connect(cfg->host, cfg->user, cfg->pass, !cfg->ssl_no_verify);
+static MailClient *make_mail(const Config *cfg) {
+    return mail_client_connect((Config *)cfg);
 }
 
 /* ── Folder status ───────────────────────────────────────────────────── */
@@ -607,15 +608,15 @@ static FolderStatus *fetch_all_folder_statuses(const Config *cfg __attribute__((
 }
 
 /** Fetches headers or full message for a UID in <folder>.  Caller must free.
- *  Opens a new IMAP connection each call.  For bulk fetching (sync), use
- *  the imap_client API directly with a shared connection. */
+ *  Opens a new mail client connection each call.  For bulk fetching (sync), use
+ *  a shared connection. */
 static char *fetch_uid_content_in(const Config *cfg, const char *folder,
                                   const char *uid, int headers_only) {
-    RAII_IMAP ImapClient *imap = make_imap(cfg);
-    if (!imap) return NULL;
-    if (imap_select(imap, folder) != 0) return NULL;
-    return headers_only ? imap_uid_fetch_headers(imap, uid)
-                        : imap_uid_fetch_body(imap, uid);
+    RAII_MAIL MailClient *mc = make_mail(cfg);
+    if (!mc) return NULL;
+    if (mail_client_select(mc, folder) != 0) return NULL;
+    return headers_only ? mail_client_fetch_headers(mc, uid)
+                        : mail_client_fetch_body(mc, uid);
 }
 
 /* ── Cached header fetch ─────────────────────────────────────────────── */
@@ -633,13 +634,13 @@ static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
 
 /**
  * Like fetch_uid_headers_cached but uses an already-connected and folder-selected
- * ImapClient instead of opening a new connection.  Falls back to the cache first.
+ * MailClient instead of opening a new connection.  Falls back to the cache first.
  * Caller must free the returned string.
  */
-static char *fetch_uid_headers_via(ImapClient *imap, const char *folder, const char *uid) {
+static char *fetch_uid_headers_via(MailClient *mc, const char *folder, const char *uid) {
     if (local_hdr_exists(folder, uid))
         return local_hdr_load(folder, uid);
-    char *hdrs = imap_uid_fetch_headers(imap, uid);
+    char *hdrs = mail_client_fetch_headers(mc, uid);
     if (hdrs)
         local_hdr_save(folder, uid, hdrs, strlen(hdrs));
     return hdrs;
@@ -1430,9 +1431,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     int unseen_count = 0;
     MsgEntry *entries = NULL;
 
-    /* Shared IMAP connection — populated in online mode, NULL in cron mode.
+    /* Shared mail client — populated in online mode, NULL in cron mode.
      * Kept alive for the full rendering loop so header fetches reuse it. */
-    RAII_IMAP ImapClient *list_imap = NULL;
+    RAII_MAIL MailClient *list_mc = NULL;
 
     if (cfg->sync_interval > 0) {
         /* ── Cron / cache-only mode: serve entirely from manifest ──────── */
@@ -1494,14 +1495,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     } else {
         /* ── Online mode: contact the server ───────────────────────────── */
 
-        /* Fetch UNSEEN and ALL UID sets via a shared IMAP connection. */
-        list_imap = make_imap(cfg);
-        if (!list_imap) {
+        /* Fetch UNSEEN and ALL UID sets via a shared mail client connection. */
+        list_mc = make_mail(cfg);
+        if (!list_mc) {
             manifest_free(manifest);
             fprintf(stderr, "Failed to connect.\n");
             return -1;
         }
-        if (imap_select(list_imap, folder) != 0) {
+        if (mail_client_select(list_mc, folder) != 0) {
             manifest_free(manifest);
             fprintf(stderr, "Failed to select folder %s.\n", folder);
             return -1;
@@ -1509,7 +1510,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
         char (*unseen_uids)[17] = NULL;
         int  unseen_uid_count = 0;
-        if (imap_uid_search(list_imap, "UNSEEN", &unseen_uids, &unseen_uid_count) != 0) {
+        if (mail_client_search(list_mc, MAIL_SEARCH_UNREAD, &unseen_uids, &unseen_uid_count) != 0) {
             manifest_free(manifest);
             fprintf(stderr, "Failed to search mailbox.\n");
             return -1;
@@ -1517,17 +1518,17 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
         char (*flagged_uids)[17] = NULL;
         int flagged_count = 0;
-        imap_uid_search(list_imap, "FLAGGED", &flagged_uids, &flagged_count);
+        mail_client_search(list_mc, MAIL_SEARCH_FLAGGED, &flagged_uids, &flagged_count);
         /* ignore errors — treat as 0 flagged */
 
         char (*done_uids)[17] = NULL;
         int done_count = 0;
-        imap_uid_search(list_imap, "KEYWORD $Done", &done_uids, &done_count);
+        mail_client_search(list_mc, MAIL_SEARCH_DONE, &done_uids, &done_count);
         /* ignore errors — treat as 0 done */
 
         char (*all_uids)[17] = NULL;
         int  all_count = 0;
-        if (imap_uid_search(list_imap, "ALL", &all_uids, &all_count) != 0) {
+        if (mail_client_search(list_mc, MAIL_SEARCH_ALL, &all_uids, &all_count) != 0) {
             free(unseen_uids);
             free(flagged_uids);
             free(done_uids);
@@ -1757,8 +1758,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                         }
                     }
                 }
-                char *hdrs     = list_imap
-                                 ? fetch_uid_headers_via(list_imap, folder, entries[i].uid)
+                char *hdrs     = list_mc
+                                 ? fetch_uid_headers_via(list_mc, folder, entries[i].uid)
                                  : fetch_uid_headers_cached(cfg, folder, entries[i].uid);
                 char *fr_raw   = hdrs ? mime_get_header(hdrs, "From")    : NULL;
                 char *fr       = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
@@ -1929,9 +1930,9 @@ read_key_again: ;
                 int currently = entries[cursor].flags & bit;
                 /* Determine the IMAP add/remove direction */
                 int add_flag = (ch == 'n') ? (currently ? 1 : 0) : (!currently ? 1 : 0);
-                if (list_imap) {
+                if (list_mc) {
                     /* Online: push immediately */
-                    imap_uid_set_flag(list_imap, uid, flag_name, add_flag);
+                    mail_client_set_flag(list_mc, uid, flag_name, add_flag);
                 }
                 /* Always queue for sync (covers offline/cron mode and STORE failures) */
                 local_pending_flag_add(folder, uid, flag_name, add_flag);
@@ -1968,13 +1969,13 @@ list_done:
 /** Fetch the folder list into a heap-allocated array; caller owns entries and array. */
 static char **fetch_folder_list_from_server(const Config *cfg,
                                              int *count_out, char *sep_out) {
-    RAII_IMAP ImapClient *imap = make_imap(cfg);
-    if (!imap) return NULL;
+    RAII_MAIL MailClient *mc = make_mail(cfg);
+    if (!mc) return NULL;
 
     char **folders = NULL;
     int count = 0;
     char sep = '.';
-    if (imap_list(imap, &folders, &count, &sep) != 0) return NULL;
+    if (mail_client_list(mc, &folders, &count, &sep) != 0) return NULL;
 
     *count_out = count;
     if (sep_out) *sep_out = sep;
@@ -2693,10 +2694,10 @@ int email_service_sync(const Config *cfg) {
 
     int total_fetched = 0, total_skipped = 0, errors = 0;
 
-    /* One shared IMAP connection for all folder operations */
-    RAII_IMAP ImapClient *sync_imap = make_imap(cfg);
-    if (!sync_imap) {
-        fprintf(stderr, "sync: could not connect to IMAP server.\n");
+    /* One shared mail client connection for all folder operations */
+    RAII_MAIL MailClient *sync_mc = make_mail(cfg);
+    if (!sync_mc) {
+        fprintf(stderr, "sync: could not connect to mail server.\n");
         for (int i = 0; i < folder_count; i++) free(folders[i]);
         free(folders);
         if (pid_path[0]) unlink(pid_path);
@@ -2708,7 +2709,7 @@ int email_service_sync(const Config *cfg) {
         printf("Syncing %s ...\n", folder);
         fflush(stdout);
 
-        if (imap_select(sync_imap, folder) != 0) {
+        if (mail_client_select(sync_mc, folder) != 0) {
             fprintf(stderr, "  WARN: SELECT failed for %s\n", folder);
             errors++;
             continue;
@@ -2716,7 +2717,7 @@ int email_service_sync(const Config *cfg) {
 
         char (*uids)[17] = NULL;
         int  uid_count = 0;
-        if (imap_uid_search(sync_imap, "ALL", &uids, &uid_count) != 0) {
+        if (mail_client_search(sync_mc, MAIL_SEARCH_ALL, &uids, &uid_count) != 0) {
             fprintf(stderr, "  WARN: SEARCH ALL failed for %s\n", folder);
             errors++;
             continue;
@@ -2745,8 +2746,8 @@ int email_service_sync(const Config *cfg) {
             PendingFlag *pending = local_pending_flag_load(folder, &pcount);
             if (pending && pcount > 0) {
                 for (int pi = 0; pi < pcount; pi++)
-                    imap_uid_set_flag(sync_imap, pending[pi].uid,
-                                      pending[pi].flag_name, pending[pi].add);
+                    mail_client_set_flag(sync_mc, pending[pi].uid,
+                                        pending[pi].flag_name, pending[pi].add);
                 local_pending_flag_clear(folder);
             }
             free(pending);
@@ -2755,16 +2756,16 @@ int email_service_sync(const Config *cfg) {
         /* Get UNSEEN set to mark entries */
         char (*unseen_uids)[17] = NULL;
         int  unseen_count = 0;
-        if (imap_uid_search(sync_imap, "UNSEEN", &unseen_uids, &unseen_count) != 0)
+        if (mail_client_search(sync_mc, MAIL_SEARCH_UNREAD, &unseen_uids, &unseen_count) != 0)
             unseen_count = 0;
 
         char (*flagged_uids)[17] = NULL;
         int flagged_count = 0;
-        imap_uid_search(sync_imap, "FLAGGED", &flagged_uids, &flagged_count);
+        mail_client_search(sync_mc, MAIL_SEARCH_FLAGGED, &flagged_uids, &flagged_count);
 
         char (*done_uids)[17] = NULL;
         int done_count = 0;
-        imap_uid_search(sync_imap, "KEYWORD $Done", &done_uids, &done_count);
+        mail_client_search(sync_mc, MAIL_SEARCH_DONE, &done_uids, &done_count);
 
         /* Evict deleted messages from manifest */
         manifest_retain(manifest, (const char (*)[17])uids, uid_count);
@@ -2788,9 +2789,9 @@ int email_service_sync(const Config *cfg) {
             if (!local_msg_exists(folder, uid)) {
                 SyncProgressCtx pctx = { i + 1, uid_count, {0} };
                 memcpy(pctx.uid, uid, 17);
-                imap_set_progress(sync_imap, sync_progress_cb, &pctx);
-                char *raw = imap_uid_fetch_body(sync_imap, uid);
-                imap_set_progress(sync_imap, NULL, NULL);
+                mail_client_set_progress(sync_mc, sync_progress_cb, &pctx);
+                char *raw = mail_client_fetch_body(sync_mc, uid);
+                mail_client_set_progress(sync_mc, NULL, NULL);
                 if (raw) {
                     /* Cache the header section extracted from the full body so
                      * the subsequent manifest update needs no extra IMAP round-trip. */
@@ -2815,7 +2816,7 @@ int email_service_sync(const Config *cfg) {
             /* Update manifest entry (headers from local cache — now always warm) */
             ManifestEntry *me = manifest_find(manifest, uid);
             if (!me) {
-                char *hdrs   = fetch_uid_headers_via(sync_imap, folder, uid);
+                char *hdrs   = fetch_uid_headers_via(sync_mc, folder, uid);
                 char *fr_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
                 char *fr     = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
                 free(fr_raw);
@@ -3137,13 +3138,13 @@ int email_service_save_attachment(const Config *cfg, const char *uid,
 }
 
 int email_service_save_sent(const Config *cfg, const char *msg, size_t msg_len) {
-    RAII_IMAP ImapClient *imap = make_imap(cfg);
-    if (!imap) {
+    RAII_MAIL MailClient *mc = make_mail(cfg);
+    if (!mc) {
         fprintf(stderr, "Warning: could not connect to save message to Sent folder.\n");
         return -1;
     }
     const char *sent_folder = cfg->sent_folder ? cfg->sent_folder : "Sent";
-    int rc = imap_append(imap, sent_folder, msg, msg_len);
+    int rc = mail_client_append(mc, sent_folder, msg, msg_len);
     if (rc != 0)
         fprintf(stderr, "Warning: could not save message to '%s' folder.\n", sent_folder);
     return rc;

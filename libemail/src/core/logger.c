@@ -86,7 +86,7 @@ void logger_log(LogLevel level, const char *format, ...) {
     strftime(time_str, 26, "%Y-%m-%d %H:%M:%S", tm_info);
 
     va_list args;
-    
+
     // Log to file
     fprintf(g_log_fp, "[%s] [%s] ", time_str, level_to_str(level));
     va_start(args, format);

@@ -3,6 +3,8 @@ include_directories(
     ../../libemail/src/core
     ../../libemail/src/infrastructure
     ../../libemail/src/domain
+    ../../libemail/src/platform
+    ../../libwrite/src
     ../common
 )
 
@@ -43,6 +45,11 @@ set(TEST_SOURCES
     test_gmail_client.c
     test_label_idx.c
     test_mail_client.c
+    test_gmail_sync.c
+    test_compose_service.c
+    test_smtp_adapter.c
+    ../../libwrite/src/compose_service.c
+    ../../libwrite/src/smtp_adapter.c
     ../../libemail/src/core/fs_util.c
     ../../libemail/src/core/logger.c
     ../../libemail/src/core/config.c

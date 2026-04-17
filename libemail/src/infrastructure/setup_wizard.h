@@ -14,12 +14,12 @@
  * @brief Runs an interactive CLI wizard to collect email settings.
  * @return Pointer to a newly allocated Config struct or NULL if aborted.
  */
-Config* setup_wizard_run(void);
+Config *setup_wizard_run(void);
 
 /**
  * @brief Internal wizard implementation that can take any input stream (for testing).
  */
-Config* setup_wizard_run_internal(FILE *stream);
+Config *setup_wizard_run_internal(FILE *stream);
 
 /**
  * @brief Interactively configure (or reconfigure) just the SMTP fields of an
@@ -50,4 +50,4 @@ int setup_wizard_smtp(Config *cfg);
  */
 int setup_wizard_imap(Config *cfg);
 
-#endif // SETUP_WIZARD_H
+#endif /* SETUP_WIZARD_H */

@@ -15,6 +15,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./manage.sh imap-down  # Stop integration container (volume preserved)
 ./manage.sh imap-clean # Remove integration container and volume
 ./manage.sh deps       # Install system dependencies (Ubuntu 24.04 / Rocky 9)
+./manage.sh run        # Release build + launch email-cli
+./manage.sh clean-logs # Purge application log files
+./manage.sh help       # Show available commands
 ```
 
 There is no Makefile — `manage.sh` calls CMake directly. There is no mechanism to run a single test in isolation; all unit tests run together via `build/tests/unit/test-runner`.
@@ -29,10 +32,10 @@ Domain         →  libemail/src/domain/email_service.c
 Infrastructure →  libemail/src/infrastructure/{config_store,local_store,imap_client,setup_wizard,
                                                   gmail_auth,gmail_client,gmail_sync,mail_client}.c
 Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_parser,html_render,
-                                     imap_util,input_line,path_complete}.c + raii.h
-Platform       →  libemail/src/platform/{terminal,path}.h
-                    libemail/src/platform/posix/{terminal,path}.c    (Linux/macOS/Android)
-                    libemail/src/platform/windows/{terminal,path}.c  (MinGW-w64)
+                                     imap_util,input_line,path_complete,json_util}.c + raii.h
+Platform       →  libemail/src/platform/{terminal,path,process}.h + html_medium.h
+                    libemail/src/platform/posix/{terminal,path,process,html_medium}.c    (Linux/macOS/Android)
+                    libemail/src/platform/windows/{terminal,path,process,html_medium}.c  (MinGW-w64)
 Write library  →  libwrite/src/{smtp_adapter,compose_service}.c
 ```
 
@@ -98,6 +101,8 @@ Known portability gaps that need shims before non-Linux builds work:
 | `__attribute__((cleanup(...)))` (RAII) | ✅ GCC / Apple Clang | ✅ Clang NDK | ✅ MinGW-w64 (GCC) |
 | Home dir (`$HOME`) | ✅ | ⚠️ use app data dir | ❌ use `%USERPROFILE%` |
 | Cache/config paths (`~/.cache`, `~/.config`) | ✅ | ❌ use app-specific dirs | ❌ use `%APPDATA%` |
+| `fork`/`waitpid` (process.h) | ✅ | ✅ | ❌ needs `CreateProcess` |
+| `open_memstream` (html_medium.h) | ✅ | ✅ | ❌ needs shim or tmpfile |
 
 **Compiler policy: GCC (or Clang) on every platform — MSVC is out of scope.**
 
@@ -133,6 +138,14 @@ src/platform/
   path.h              ← home_dir(), cache_dir(), config_dir()
   posix/path.c        ← $HOME / XDG
   windows/path.c      ← %USERPROFILE% / %APPDATA%
+
+  process.h           ← run_pager(), spawn child process
+  posix/process.c     ← fork + exec + waitpid
+  windows/process.c   ← CreateProcess
+
+  html_medium.h       ← HTML rendering backend (image handling)
+  posix/html_medium.c ← open_memstream-based
+  windows/html_medium.c ← tmpfile-based
 ```
 
 CMakeLists.txt pattern:
@@ -140,10 +153,14 @@ CMakeLists.txt pattern:
 ```cmake
 if(WIN32)
     target_sources(email-cli PRIVATE src/platform/windows/terminal.c
-                                     src/platform/windows/path.c)
+                                     src/platform/windows/path.c
+                                     src/platform/windows/process.c
+                                     src/platform/windows/html_medium.c)
 else()
     target_sources(email-cli PRIVATE src/platform/posix/terminal.c
-                                     src/platform/posix/path.c)
+                                     src/platform/posix/path.c
+                                     src/platform/posix/process.c
+                                     src/platform/posix/html_medium.c)
 endif()
 ```
 

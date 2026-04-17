@@ -48,4 +48,4 @@ int logger_clean_logs(const char *log_dir);
  */
 void logger_set_stderr(int enable);
 
-#endif // LOGGER_H
+#endif /* LOGGER_H */

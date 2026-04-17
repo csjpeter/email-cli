@@ -1,0 +1,113 @@
+# US-29 — Gmail Message Operations
+
+**As a** Gmail user viewing messages in a label,
+**I want to** use Gmail-native operations (remove label, trash, archive, star, unread toggle),
+**so that** my actions map to real Gmail semantics rather than IMAP flag emulation.
+
+---
+
+## Acceptance criteria
+
+| # | Criterion |
+|---|-----------|
+| 1 | The Gmail message list shows columns: Date, Labels, Subject, From (no UID column). |
+| 2 | The Labels column shows all labels on the message, with `★` for STARRED. |
+| 3 | Unread messages are rendered in bold or reverse video. |
+| 4 | Pressing **r** removes the currently-filtered label from the message via `messages.modify(removeLabelIds)`; the message disappears from the current view. |
+| 5 | Pressing **d** trashes the message via `messages.trash()`; all labels are removed and TRASH is added. |
+| 6 | Pressing **a** archives the message (removes INBOX label); this key hint appears **only** in the INBOX view. |
+| 7 | Pressing **f** toggles the STARRED label on the message. |
+| 8 | Pressing **n** toggles the UNREAD label on the message. |
+| 9 | The message reader shows a **Labels** line (e.g. `Labels:  INBOX, ★ Starred, Work`); this line is absent for IMAP messages. |
+| 10 | The UNREAD label is **not** shown in the reader Labels line (the user is currently reading it). |
+| 11 | `messages.untrash()` removes TRASH but does **not** restore original labels. The client locally remembers pre-trash labels for undo support. |
+| 12 | Server-side label modifications update the local `.idx` files immediately. |
+
+---
+
+## Message list layout (Gmail)
+
+```
+  Labels — user@gmail.com > INBOX  (3 unread)
+
+  Date              Labels         Subject              From
+  ════════════════  ═════════════  ═══════════════════  ════════════
+▶ 2026-04-16       ★ Work         Quarterly review     Boss
+  2026-04-15                      Hello there          Alice
+  2026-04-14       Personal       Invoice              Bank
+```
+
+---
+
+## Message reader layout (Gmail)
+
+```
+  From:    Boss <boss@example.com>
+  Date:    2026-04-16 09:30
+  To:      user@gmail.com
+  Subject: Quarterly review
+  Labels:  INBOX, ★ Starred, Work
+  ────────────────────────────────────
+
+  Hi, please find the quarterly review attached...
+```
+
+---
+
+## Key bindings (Gmail message list)
+
+| Key | Operation | API call | Effect |
+|-----|-----------|----------|--------|
+| `r` | Remove label | `messages.modify(removeLabelIds)` | Removes current label; message survives with other labels |
+| `d` | Trash | `messages.trash()` | All labels removed, TRASH added; auto-deleted after 30 days |
+| `a` | Archive | `messages.modify(remove: INBOX)` | INBOX removed (only in INBOX view) |
+| `f` | Star toggle | `messages.modify(STARRED)` | Add or remove STARRED label |
+| `n` | Unread toggle | `messages.modify(UNREAD)` | Add or remove UNREAD label |
+
+## Key bindings (Gmail message reader)
+
+| Key | Operation |
+|-----|-----------|
+| `r` | Remove label (same as list) |
+| `d` | Trash (same as list) |
+| `f` | Star toggle |
+| `n` | Unread toggle |
+| `t` | Label picker |
+
+---
+
+## Remove label (`r`) vs Trash (`d`)
+
+This is the core distinction of Gmail-native behaviour:
+
+- **`r` (remove label)** = the label comes off, the message stays alive with its
+  other labels.  If no other labels remain, the message moves to Archive.
+- **`d` (trash)** = a compound operation that strips **all** labels and adds TRASH.
+  Message is permanently deleted by Google after 30 days.
+
+---
+
+## Status bar (Gmail)
+
+| View | Status bar text |
+|------|----------------|
+| Message list (INBOX) | `r=remove  d=trash  a=archive  f=star  t=labels  c=compose  q=back` |
+| Message list (other) | `r=remove  d=trash  f=star  t=labels  c=compose  q=back` |
+| Message reader | `r=remove  d=trash  f=star  n=unread  t=labels  q=back` |
+
+---
+
+## Implementation notes
+
+* `email_service.c` dispatches Gmail-specific key bindings when
+  `mail_client_uses_labels()` returns true.
+* `gmail_client.c` provides `gmail_modify_message()`, `gmail_trash_message()`,
+  and `gmail_untrash_message()`.
+* Label changes update local `.idx` files via `local_store` functions.
+
+---
+
+## Related
+
+* Spec: `docs/spec/gmail-api.md` sections 5, 9, 14, 15
+* GML milestones: GML-18, GML-19, GML-20, GML-21

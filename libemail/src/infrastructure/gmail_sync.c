@@ -17,7 +17,7 @@
  *
  * Returns heap-allocated string. Caller must free().
  */
-static char *build_hdr(const char *raw_msg, char **labels, int label_count) {
+char *gmail_sync_build_hdr(const char *raw_msg, char **labels, int label_count) {
     RAII_STRING char *from_raw = mime_get_header(raw_msg, "From");
     RAII_STRING char *subj_raw = mime_get_header(raw_msg, "Subject");
     RAII_STRING char *date_raw = mime_get_header(raw_msg, "Date");
@@ -69,7 +69,7 @@ static char *build_hdr(const char *raw_msg, char **labels, int label_count) {
 
 /* ── Filtered labels (excluded from display / indexing) ───────────── */
 
-static int is_filtered_label(const char *label_id) {
+int gmail_sync_is_filtered_label(const char *label_id) {
     if (!label_id) return 1;
     if (strncmp(label_id, "CATEGORY_", 9) == 0) return 1;
     if (strcmp(label_id, "IMPORTANT") == 0) return 1;
@@ -116,7 +116,7 @@ int gmail_sync_full(GmailClient *gc) {
         local_msg_save("", uid, raw, strlen(raw));
 
         /* Build and save .hdr */
-        char *hdr = build_hdr(raw, labels, label_count);
+        char *hdr = gmail_sync_build_hdr(raw, labels, label_count);
         if (hdr) {
             local_hdr_save("", uid, hdr, strlen(hdr));
             free(hdr);
@@ -126,7 +126,7 @@ int gmail_sync_full(GmailClient *gc) {
         /* Update label index files */
         int has_label = 0;
         for (int j = 0; j < label_count; j++) {
-            if (is_filtered_label(labels[j])) continue;
+            if (gmail_sync_is_filtered_label(labels[j])) continue;
 
             /* Map SPAM/TRASH to underscore-prefixed filenames */
             const char *idx_name = labels[j];
@@ -187,7 +187,7 @@ static void process_message_added(const char *obj, int index, void *ctx) {
     if (raw) {
         local_msg_save("", id, raw, strlen(raw));
 
-        char *hdr = build_hdr(raw, labels, label_count);
+        char *hdr = gmail_sync_build_hdr(raw, labels, label_count);
         if (hdr) {
             local_hdr_save("", id, hdr, strlen(hdr));
             free(hdr);
@@ -196,7 +196,7 @@ static void process_message_added(const char *obj, int index, void *ctx) {
 
         int has_label = 0;
         for (int j = 0; j < label_count; j++) {
-            if (is_filtered_label(labels[j])) continue;
+            if (gmail_sync_is_filtered_label(labels[j])) continue;
             const char *idx_name = labels[j];
             if (strcmp(labels[j], "SPAM") == 0) idx_name = "_spam";
             else if (strcmp(labels[j], "TRASH") == 0) idx_name = "_trash";
@@ -255,7 +255,7 @@ static void process_labels_added(const char *obj, int index, void *ctx) {
     json_get_string_array(obj, "labelIds", &add_labels, &add_count);
 
     for (int i = 0; i < add_count; i++) {
-        if (is_filtered_label(add_labels[i])) continue;
+        if (gmail_sync_is_filtered_label(add_labels[i])) continue;
         const char *idx_name = add_labels[i];
         if (strcmp(add_labels[i], "SPAM") == 0) idx_name = "_spam";
         else if (strcmp(add_labels[i], "TRASH") == 0) idx_name = "_trash";
@@ -282,7 +282,7 @@ static void process_labels_removed(const char *obj, int index, void *ctx) {
     json_get_string_array(obj, "labelIds", &rm_labels, &rm_count);
 
     for (int i = 0; i < rm_count; i++) {
-        if (is_filtered_label(rm_labels[i])) continue;
+        if (gmail_sync_is_filtered_label(rm_labels[i])) continue;
         const char *idx_name = rm_labels[i];
         if (strcmp(rm_labels[i], "SPAM") == 0) idx_name = "_spam";
         else if (strcmp(rm_labels[i], "TRASH") == 0) idx_name = "_trash";
@@ -301,7 +301,7 @@ static void process_labels_removed(const char *obj, int index, void *ctx) {
 
     int has_real_label = 0;
     for (int i = 0; i < cur_count; i++) {
-        if (!is_filtered_label(cur_labels[i])) has_real_label = 1;
+        if (!gmail_sync_is_filtered_label(cur_labels[i])) has_real_label = 1;
         free(cur_labels[i]);
     }
     free(cur_labels);

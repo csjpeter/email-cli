@@ -1,12 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <locale.h>
 #include "config_store.h"
 #include "setup_wizard.h"
 #include "email_service.h"
-#include "platform/terminal.h"
 #include "platform/path.h"
 #include "raii.h"
 #include "logger.h"
@@ -15,29 +13,17 @@
 #include "smtp_adapter.h"
 #include "compose_service.h"
 
-/* Number of non-data lines printed around the message table */
-#define LIST_HEADER_LINES 6
-/* Default limit when stdout is not a terminal or --batch is given */
+/* Default limit for batch output */
 #define BATCH_DEFAULT_LIMIT 100
-
-static int detect_page_size(int batch) {
-    if (batch || !terminal_is_tty(STDOUT_FILENO))
-        return BATCH_DEFAULT_LIMIT;
-    int rows = terminal_rows();
-    if (rows > LIST_HEADER_LINES + 2)
-        return rows - LIST_HEADER_LINES;
-    return 20; /* safe fallback */
-}
 
 /* ── Help pages ──────────────────────────────────────────────────────── */
 
 static void help_general(void) {
     printf(
-        "Usage: email-cli [--batch] <command> [options]\n"
+        "Usage: email-cli <command> [options]\n"
         "\n"
-        "Global options:\n"
-        "  --batch           Disable interactive pager; use fixed page size (%d).\n"
-        "                    Implied when stdout is redirected to a pipe or file.\n"
+        "Batch-mode email CLI with read and write operations.\n"
+        "For the interactive TUI, use email-tui.\n"
         "\n"
         "Commands:\n"
         "  list                    List messages in the configured mailbox\n"
@@ -50,8 +36,8 @@ static void help_general(void) {
         "  help [command]          Show this help, or detailed help for a command\n"
         "\n"
         "Run 'email-cli help <command>' for more information.\n"
-        "For background sync and cron management use email-sync.\n",
-        BATCH_DEFAULT_LIMIT
+        "For the interactive TUI use email-tui.\n"
+        "For background sync and cron management use email-sync.\n"
     );
 }
 
@@ -60,25 +46,21 @@ static void help_list(void) {
         "Usage: email-cli list [options]\n"
         "\n"
         "Lists messages in the configured mailbox folder.\n"
+        "Shows unread (UNSEEN) messages by default; use --all for everything.\n"
         "\n"
         "Options:\n"
-        "  --all              All messages are always shown; this flag has no\n"
-        "                     effect and is kept for backwards compatibility.\n"
+        "  --all              Show all messages (not just unread).\n"
         "                     Unread messages are marked with 'N' and listed first.\n"
         "  --folder <name>    Use <name> instead of the configured folder.\n"
-        "  --limit <n>        Show at most <n> messages per page.\n"
-        "                     Defaults to terminal height when output is a\n"
-        "                     terminal, or %d when piped / --batch is used.\n"
+        "  --limit <n>        Show at most <n> messages (default: %d).\n"
         "  --offset <n>       Start listing from the <n>-th message (1-based).\n"
-        "  --batch            Disable terminal detection; use limit=%d.\n"
         "\n"
         "Examples:\n"
         "  email-cli list\n"
         "  email-cli list --all\n"
         "  email-cli list --all --offset 21\n"
-        "  email-cli list --folder INBOX.Sent --limit 50\n"
-        "  email-cli list --all --batch\n",
-        BATCH_DEFAULT_LIMIT, BATCH_DEFAULT_LIMIT
+        "  email-cli list --folder INBOX.Sent --limit 50\n",
+        BATCH_DEFAULT_LIMIT
     );
 }
 
@@ -93,9 +75,6 @@ static void help_show(void) {
         "The message is fetched from the server on first access and stored\n"
         "locally at ~/.local/share/email-cli/messages/<folder>/<uid>.eml.\n"
         "Subsequent reads are served from the local store.\n"
-        "\n"
-        "Long messages are paginated automatically when output is a terminal.\n"
-        "Use --batch or pipe to a file to disable the interactive pager.\n"
     );
 }
 
@@ -235,11 +214,10 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* 2. Global flags: scan all args for --batch and --account */
-    int batch = 0;
+    /* 2. Global flags: scan all args for --account */
     const char *account_arg = NULL;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--batch") == 0) { batch = 1; continue; }
+        if (strcmp(argv[i], "--batch") == 0) continue; /* accepted as no-op */
         if (strcmp(argv[i], "--account") == 0 && i + 1 < argc) {
             account_arg = argv[++i]; continue;
         }
@@ -275,10 +253,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* Page size / pager capability (used by list and show) */
-    int pager     = !batch && terminal_is_tty(STDOUT_FILENO);
-    int page_size = detect_page_size(batch);
-
     if (cmd && strcmp(cmd, "help") == 0) {
         /* First arg after the command is the topic */
         const char *topic = NULL;
@@ -302,8 +276,8 @@ int main(int argc, char *argv[]) {
         return EXIT_SUCCESS;
     }
 
-    /* No command in batch/non-tty mode: show help and exit. */
-    if (!cmd && !pager) {
+    /* No command: show help and exit. */
+    if (!cmd) {
         help_general();
         return EXIT_SUCCESS;
     }
@@ -339,34 +313,15 @@ int main(int argc, char *argv[]) {
     if (local_store_init(cfg->host, cfg->user) != 0)
         logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
 
-    /* 6. Dispatch */
+    /* 6. Dispatch — batch mode only (no interactive TUI) */
     int result = -1;
 
-    if (!cmd) {
-        /* Interactive TUI: start with unread messages in the configured folder. */
-        char *tui_folder = strdup(cfg->folder ? cfg->folder : "INBOX");
-        if (!tui_folder) {
-            result = -1;
-        } else {
-            for (;;) {
-                EmailListOpts opts = {0, tui_folder, page_size, 0, 1, {0}};
-                int ret = email_service_list(cfg, &opts);
-                if (ret != 1) { result = (ret >= 0) ? 0 : -1; break; }
-                /* User pressed Backspace → show folder browser */
-                char *sel = email_service_list_folders_interactive(cfg, tui_folder, NULL);
-                free(tui_folder);
-                tui_folder = sel;
-                if (!tui_folder) { result = 0; break; }
-            }
-            free(tui_folder);
-        }
-
-    } else if (strcmp(cmd, "list") == 0) {
-        EmailListOpts opts = {0, NULL, 0, 0, pager, {0}};
-        int ok = 1, explicit_limit = -1;
+    if (strcmp(cmd, "list") == 0) {
+        EmailListOpts opts = {0, NULL, BATCH_DEFAULT_LIMIT, 0, 0, {0}};
+        int ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) {
-                continue; /* already handled globally */
+                continue; /* accepted as no-op */
             } else if (strcmp(argv[i], "--all") == 0) {
                 opts.all = 1;
             } else if (strcmp(argv[i], "--folder") == 0) {
@@ -387,7 +342,7 @@ int main(int argc, char *argv[]) {
                         fprintf(stderr, "Error: --limit must be a positive integer.\n");
                         ok = 0;
                     } else {
-                        explicit_limit = (int)v;
+                        opts.limit = (int)v;
                     }
                 }
             } else if (strcmp(argv[i], "--offset") == 0) {
@@ -409,10 +364,7 @@ int main(int argc, char *argv[]) {
                 ok = 0;
             }
         }
-        if (ok) {
-            opts.limit = (explicit_limit >= 0) ? explicit_limit : page_size;
-            result = email_service_list(cfg, &opts);
-        }
+        if (ok) result = email_service_list(cfg, &opts);
 
     } else if (strcmp(cmd, "show") == 0) {
         /* UID is the first non --batch arg after "show" */
@@ -431,7 +383,7 @@ int main(int argc, char *argv[]) {
                         "Error: UID must be a positive integer (got '%s').\n",
                         uid_str);
             else
-                result = email_service_read(cfg, uid, pager, page_size);
+                result = email_service_read(cfg, uid, 0, BATCH_DEFAULT_LIMIT);
         }
 
     } else if (strcmp(cmd, "folders") == 0) {

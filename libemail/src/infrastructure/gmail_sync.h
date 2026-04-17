@@ -48,4 +48,26 @@ int gmail_sync_full(GmailClient *gc);
  */
 int gmail_sync_incremental(GmailClient *gc);
 
+/**
+ * @brief Check whether a Gmail label should be filtered out from display/indexing.
+ *
+ * Filters out CATEGORY_* labels and IMPORTANT (opaque Google ML classification).
+ *
+ * @param label_id  Gmail label ID string.
+ * @return 1 if the label should be filtered (excluded), 0 otherwise.
+ */
+int gmail_sync_is_filtered_label(const char *label_id);
+
+/**
+ * @brief Build a .hdr cache string from raw RFC 2822 message and label list.
+ *
+ * Format: from\tsubject\tdate\tlabel1,label2,...\tflags
+ *
+ * @param raw_msg      Raw RFC 2822 message content.
+ * @param labels       Array of Gmail label ID strings.
+ * @param label_count  Number of labels in the array.
+ * @return Heap-allocated string (caller must free), or NULL on error.
+ */
+char *gmail_sync_build_hdr(const char *raw_msg, char **labels, int label_count);
+
 #endif /* GMAIL_SYNC_H */

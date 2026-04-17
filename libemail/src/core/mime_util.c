@@ -801,20 +801,20 @@ char *mime_extract_imap_literal(const char *response) {
     if (!response) return NULL;
     const char *brace = strchr(response, '{');
     if (!brace) return NULL;
-    
+
     char *end = NULL;
     long size = strtol(brace + 1, &end, 10);
     if (!end || *end != '}' || size <= 0) return NULL;
-    
+
     const char *content = end + 1;
     if (*content == '\r') content++;
     if (*content == '\n') content++;
-    
+
     // Safety check
     size_t avail = strlen(content);
     if (avail < (size_t)size) {
         return strndup(content, avail);
     }
-    
+
     return strndup(content, (size_t)size);
 }

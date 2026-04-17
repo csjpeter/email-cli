@@ -35,6 +35,9 @@ void test_gmail_auth(void);
 void test_gmail_client(void);
 void test_label_idx(void);
 void test_mail_client(void);
+void test_gmail_sync(void);
+void test_compose_service(void);
+void test_smtp_adapter(void);
 
 int main() {
     printf("--- email-cli Unit Test Suite ---\n\n");
@@ -69,6 +72,9 @@ int main() {
     RUN_TEST(test_gmail_client);
     RUN_TEST(test_label_idx);
     RUN_TEST(test_mail_client);
+    RUN_TEST(test_gmail_sync);
+    RUN_TEST(test_compose_service);
+    RUN_TEST(test_smtp_adapter);
 
     printf("\n--- Test Results ---\n");
     printf("Tests Run:    %d\n", g_tests_run);

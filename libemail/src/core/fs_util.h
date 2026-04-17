@@ -28,6 +28,6 @@ int fs_ensure_permissions(const char *path, mode_t mode);
  * @brief Gets the user's home directory.
  * @return String (must NOT be freed), or NULL.
  */
-const char* fs_get_home_dir(void);
+const char *fs_get_home_dir(void);
 
-#endif // FS_UTIL_H
+#endif /* FS_UTIL_H */

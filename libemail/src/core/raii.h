@@ -46,7 +46,7 @@ static inline void closedir_ptr(DIR **p) {
 #define RAII_PFILE __attribute__((cleanup(pclose_ptr)))
 #define RAII_DIR __attribute__((cleanup(closedir_ptr)))
 
-/* To avoid circular dependencies with Config, we use a generic cleanup for it 
+/* To avoid circular dependencies with Config, we use a generic cleanup for it
  * but it must be defined in each file that uses it or we use a macro. */
 #define RAII_WITH_CLEANUP(func) __attribute__((cleanup(func)))
 
@@ -55,4 +55,4 @@ static inline void html_node_free_ptr(HtmlNode **p) {
 }
 #define RAII_HTML_NODE __attribute__((cleanup(html_node_free_ptr)))
 
-#endif // RAII_H
+#endif /* RAII_H */

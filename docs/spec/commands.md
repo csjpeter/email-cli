@@ -197,8 +197,204 @@ Lists all IMAP folders available on the server.
 
 ---
 
+## `attachments`
+
+```
+email-cli attachments <uid>
+```
+
+Lists all MIME attachments in the message identified by its UID.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<uid>` | Positive integer IMAP UID (as shown in `list` output) |
+
+### Behaviour
+
+1. Fetch or load the message from the local store (same resolution as `show`).
+2. Parse the MIME structure to enumerate attachment parts
+   (content-disposition `attachment` or non-text content types).
+3. Print one line per attachment: filename and decoded size.
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Attachments listed (even if none found) |
+| −1 | Fetch or parse failed |
+
+---
+
+## `save-attachment`
+
+```
+email-cli save-attachment <uid> <filename> [dir]
+```
+
+Saves a single attachment from a message to disk.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<uid>` | Positive integer IMAP UID |
+| `<filename>` | Exact attachment filename (as shown by `attachments`) |
+| `[dir]` | Destination directory (default: `~/Downloads` if it exists, otherwise `~`) |
+
+### Behaviour
+
+1. Fetch or load the message from the local store.
+2. Locate the MIME part whose filename matches `<filename>` exactly.
+3. Decode the attachment body (base64 or quoted-printable).
+4. Write to `<dir>/<filename>`.  If the file already exists, it is overwritten.
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Attachment saved successfully |
+| −1 | Message not found, no matching attachment, or write failed |
+
+---
+
+## `send`
+
+```
+email-cli send --to <addr> --subject <text> --body <text>
+```
+
+Sends a message non-interactively (scriptable / batch mode).
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--to <addr>` | Recipient email address (required) |
+| `--subject <text>` | Subject line (required) |
+| `--body <text>` | Message body text (required) |
+
+All three options are mandatory.
+
+### Behaviour
+
+1. Validate that all three required options are present.
+2. Determine the sender address: `cfg.smtp_user` if set, otherwise `cfg.user`.
+3. Build a complete RFC 2822 message via `compose_build_message()` (adds Date,
+   Message-ID, MIME-Version, Content-Type headers; converts LF to CRLF).
+4. Send via `smtp_send()` using the account's SMTP configuration.
+5. On success, save the sent message to the local Sent folder via
+   `email_service_save_sent()`.
+
+### Prerequisites
+
+SMTP settings must be configured before using this command.  Run
+`email-cli config smtp` to set up outgoing mail.
+
+### Gmail accounts
+
+For Gmail accounts (`GMAIL_MODE=1`), the send dispatch uses the Gmail REST
+API (`gmail_send_message()`) instead of SMTP.  No SMTP configuration is
+needed.
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Message sent (and optionally saved to Sent folder) |
+| −1 | Missing options, build failure, or SMTP/API error |
+
+---
+
+## `config`
+
+```
+email-cli [--account <email>] config <subcommand>
+```
+
+View or update configuration settings.
+
+### Global options
+
+| Option | Description |
+|--------|-------------|
+| `--account <email>` | Select a specific account by email address.  Required when multiple accounts are configured. |
+
+### Subcommands
+
+#### `config show`
+
+Prints the current configuration to stdout.  Passwords are masked as `****`.
+
+Output format:
+
+```
+email-cli configuration (user@example.com):
+
+  IMAP:
+    Host:     imaps://imap.example.com
+    User:     user@example.com
+    Password: ****
+    Folder:   INBOX
+
+  SMTP:
+    Host:     smtps://smtp.example.com
+    Port:     587
+    User:     user@example.com
+    Password: ****
+```
+
+If SMTP is not configured:
+
+```
+  SMTP:
+    (not configured — will be derived from IMAP host)
+```
+
+#### `config imap`
+
+Runs the interactive IMAP setup wizard for the selected account.  On
+success, the updated configuration is saved to
+`~/.config/email-cli/accounts/<email>/config.ini`.
+
+#### `config smtp`
+
+Runs the interactive SMTP setup wizard for the selected account.  On
+success, the SMTP fields are appended/updated in the account's config file.
+
+### Multi-account dispatch
+
+When multiple accounts are configured and `--account` is omitted, the
+command lists the available accounts on stderr and exits with code 1:
+
+```
+Multiple accounts configured. Re-run with --account <email>:
+  alice@example.com
+  bob@work.example
+```
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Subcommand completed successfully |
+| 1 | Unknown subcommand, missing account, or wizard aborted |
+
+---
+
 > **Note:** The `sync` command and cron management have moved to the separate
 > `email-sync` binary. See [email-sync.md](email-sync.md) for the specification.
+
+---
+
+## Binary-specific defaults
+
+| Binary | `list` default | Interactive pager | Write operations |
+|--------|---------------|-------------------|-----------------|
+| `email-cli` | UNSEEN only | No (batch) | send, config imap/smtp |
+| `email-cli-ro` | UNSEEN only | No (batch) | None |
+| `email-tui` | UNSEEN only | Yes (TUI) | All (compose, reply, send, flag) |
 
 ---
 

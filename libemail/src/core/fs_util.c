@@ -24,7 +24,7 @@ int fs_mkdir_p(const char *path, mode_t mode) {
     len = strlen(tmp);
     if (len > 0 && tmp[len - 1] == '/')
         tmp[len - 1] = 0;
-    
+
     for (p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = 0;
@@ -37,7 +37,7 @@ int fs_mkdir_p(const char *path, mode_t mode) {
             *p = '/';
         }
     }
-    
+
     if (strlen(tmp) > 0) {
         if (mkdir(tmp, mode) != 0 && errno != EEXIST) {
             return -1;
@@ -45,7 +45,7 @@ int fs_mkdir_p(const char *path, mode_t mode) {
         // Explicitly set mode in case of umask
         return chmod(tmp, mode);
     }
-    
+
     return 0;
 }
 

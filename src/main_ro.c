@@ -53,9 +53,10 @@ static void help_list(void) {
         "Usage: email-cli-ro list [options]\n"
         "\n"
         "Lists messages in the configured mailbox folder.\n"
-        "All messages are shown; unread ones are marked with 'N' and listed first.\n"
+        "Shows unread (UNSEEN) messages by default; use --all for everything.\n"
         "\n"
         "Options:\n"
+        "  --all              Show all messages (not just unread).\n"
         "  --folder <name>    Use <name> instead of the configured folder.\n"
         "  --limit <n>        Show at most <n> messages (default: %d).\n"
         "  --offset <n>       Start listing from the <n>-th message (1-based).\n"
@@ -241,11 +242,13 @@ int main(int argc, char *argv[]) {
     int result = -1;
 
     if (strcmp(cmd, "list") == 0) {
-        EmailListOpts opts = {1, NULL, BATCH_DEFAULT_LIMIT, 0, 0, {0}};
+        EmailListOpts opts = {0, NULL, BATCH_DEFAULT_LIMIT, 0, 0, {0}};
         int ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) {
                 /* accepted as no-op: email-cli-ro is always batch mode */
+            } else if (strcmp(argv[i], "--all") == 0) {
+                opts.all = 1;
             } else if (strcmp(argv[i], "--folder") == 0) {
                 if (i + 1 >= argc) {
                     fprintf(stderr, "Error: --folder requires a folder name.\n");

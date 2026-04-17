@@ -31,12 +31,12 @@ and replying to messages.
 
 ## Binaries
 
-| Binary | Write ops | Intended use |
-|--------|-----------|--------------|
-| `email-cli` | Send only | Interactive TUI and batch scripting; supports send but no compose UI |
-| `email-tui` | Yes | Full-featured interactive TUI; compose, reply, send, flag |
-| `email-cli-ro` | No | Truly read-only; no sync, no flag changes |
-| `email-sync` | No | Standalone background sync daemon / cron helper |
+| Binary | Mode | Write ops | Intended use |
+|--------|------|-----------|--------------|
+| `email-cli` | Batch | Yes | CLI scripting: list, show, send, config |
+| `email-cli-ro` | Batch | No | Read-only CLI; safe for AI agents |
+| `email-tui` | Interactive | Yes | Full-featured TUI: compose, reply, send, flag |
+| `email-sync` | Batch | Sync only | Background sync daemon / cron helper |
 
 All four binaries share the same configuration file and local message cache.
 
@@ -44,11 +44,15 @@ All four binaries share the same configuration file and local message cache.
 
 ## Security
 
-- **Read-only commands:** `email-cli` and `email-cli-ro` issue only `FETCH` (with
-  `BODY.PEEK`, which never sets `\Seen`) and `SEARCH` IMAP commands. They never send,
-  move, delete, or modify messages or flags on the server — not even the `\Seen` flag.
-- **Write operations:** `email-tui` can set IMAP keyword flags (`n`/`f`/`d` keys) and
-  send outgoing mail via SMTP. Write operations are confined to this binary.
+- **Truly read-only:** `email-cli-ro` issues only `FETCH` (with `BODY.PEEK`, which never
+  sets `\Seen`) and `SEARCH` IMAP commands. It never sends, moves, deletes, or modifies
+  messages or flags on the server — not even the `\Seen` flag.
+- **Batch write:** `email-cli` is batch-only (no interactive TUI). It adds batch send
+  (`email-cli send`) and configuration management. It links `libwrite` for SMTP.
+- **Full interactive write:** `email-tui` is the interactive TUI with compose, reply,
+  send, and flag operations. All write operations are available.
+- **Sync only:** `email-sync` synchronizes the server with the local store. Only this
+  binary can sync; the other three do not.
 - **Credentials at rest:** The configuration file is written with `0600` permissions,
   readable only by the owning user. Passwords are stored in plaintext — keep the file
   private.
@@ -72,11 +76,11 @@ All four binaries share the same configuration file and local message cache.
 ./manage.sh build   # Build → bin/email-cli  bin/email-tui  bin/email-cli-ro  bin/email-sync
 ```
 
-Run the interactive client:
+Run:
 
 ```bash
-bin/email-tui       # full-featured TUI (compose, reply, send)
-bin/email-cli       # read + flag TUI (batch send, no compose)
+bin/email-tui       # full-featured interactive TUI
+bin/email-cli list  # batch CLI (list, show, send, config)
 ```
 
 ---
@@ -133,12 +137,12 @@ SMTP credentials are appended to `~/.config/email-cli/config.ini` (mode `0600`).
 
 ---
 
-## Interactive Mode
+## Interactive Mode (email-tui)
 
-When run without arguments in a terminal, `email-tui` and `email-cli` open a full-screen
-interactive TUI. Navigation uses keyboard shortcuts — no mouse required.
+The interactive TUI is provided exclusively by `email-tui`. The other binaries
+(`email-cli`, `email-cli-ro`, `email-sync`) are batch-only.
 
-### Accounts Screen (email-tui only)
+### Accounts Screen
 
 `email-tui` opens at the accounts screen, which shows the configured IMAP account.
 
@@ -156,12 +160,9 @@ Email Account
 | `e` | Open the SMTP setup wizard |
 | `ESC` / Ctrl-C | Quit |
 
-`email-cli` skips the accounts screen and opens the message list directly.
-
 ### Message List View
 
-The default view on launch for `email-cli`, or reached via Enter on the accounts screen
-in `email-tui`.
+Reached via Enter on the accounts screen.
 
 ```
 1-20 of 42 unread message(s) in INBOX.
@@ -186,7 +187,7 @@ in `email-tui`.
 | `Backspace` | Go to folder browser |
 | `ESC` / Ctrl-C | Quit |
 
-#### Flag keys (email-cli and email-tui)
+#### Flag keys
 
 | Key | Action |
 |-----|--------|
@@ -194,7 +195,7 @@ in `email-tui`.
 | `f` | Toggle `\Flagged` keyword flag |
 | `d` | Mark as done (sets `done` IMAP keyword) |
 
-#### Compose / reply keys (email-tui only)
+#### Compose / reply keys
 
 | Key | Action |
 |-----|--------|
@@ -268,44 +269,42 @@ Just confirming the meeting is on for 10:00.
 
 Messages are cached locally after the first fetch.
 
-### Navigation Hierarchy (email-tui)
+### Navigation Hierarchy
 
 ```
 Accounts screen  (Enter=open, e=SMTP settings, ESC=quit)
-  └─ Message list  (Backspace=folders, s=sync, R=refresh, c=compose, r=reply, ESC=quit)
-       └─ Folder browser  (Backspace=back/up, ESC=quit)
+  └─ Folder browser  (Backspace=back/up, ESC=quit)
+       └─ Message list  (Backspace=folders, s=sync, R=refresh, c=compose, r=reply, ESC=quit)
+            └─ Message reader  (Backspace=list, ESC=quit)
 ```
 
 ---
 
-## CLI Batch Mode
+## CLI Batch Mode (email-cli / email-cli-ro)
 
-Pass `--batch` or pipe output to a file/command to disable the interactive TUI. All
-commands print plain text suitable for scripting.
+`email-cli` and `email-cli-ro` are batch-only tools — all output is plain text suitable
+for scripting and piping. There is no interactive pager or TUI.
 
 ### list
 
 ```
-email-cli list [--all] [--folder <name>] [--limit <n>] [--offset <n>] [--batch]
+email-cli list [--all] [--folder <name>] [--limit <n>] [--offset <n>]
 ```
 
 | Option | Description |
 |--------|-------------|
-| _(none)_ | Show all messages; unread ones marked `N`, listed first |
-| `--all` | Same as no option (all messages are always shown) |
+| _(none)_ | Show unread (UNSEEN) messages only |
+| `--all` | Show all messages; unread ones marked `N`, listed first |
 | `--folder <name>` | Use a different folder instead of the configured default |
-| `--limit <n>` | Number of messages per page (default: terminal height) |
+| `--limit <n>` | Maximum number of messages to show (default: 100) |
 | `--offset <n>` | Start from the nth message, 1-based (for paging scripts) |
-| `--batch` | Disable interactive pager; use fixed limit of 100 |
-
-Examples:
 
 ```bash
 email-cli list
 email-cli list --all
 email-cli list --all --offset 21
 email-cli list --folder INBOX.Sent --limit 50
-email-cli list --all --batch | grep "Invoice"
+email-cli list --all | grep "Invoice"
 ```
 
 ### show
@@ -314,12 +313,11 @@ email-cli list --all --batch | grep "Invoice"
 email-cli show <uid>
 ```
 
-Displays the full content of the message with the given UID. The UID is shown in the
-`list` output.
+Displays the full content of the message with the given UID.
 
 ```bash
 email-cli show 1234
-email-cli --batch show 1234 | less
+email-cli show 1234 | less
 ```
 
 ### folders
@@ -331,28 +329,52 @@ email-cli folders [--tree]
 Lists all IMAP folders available on the server.
 
 ```bash
-email-cli folders          # flat list
-email-cli folders --tree   # folder hierarchy as a tree
+email-cli folders
+email-cli folders --tree
 ```
 
-Example tree output:
+### attachments
 
 ```
-└── INBOX
-    ├── Sent
-    ├── Drafts
-    └── Archive
-        └── 2025
+email-cli attachments <uid>
 ```
 
-### config smtp
+Lists all MIME attachments in a message (filename and size).
+
+### save-attachment
 
 ```
-email-cli config smtp
+email-cli save-attachment <uid> <filename> [dir]
 ```
 
-Interactive wizard to set or update SMTP credentials. Equivalent to pressing `e` on the
-accounts screen in `email-tui`.
+Saves a single attachment to disk. Default directory: `~/Downloads` or `~`.
+
+```bash
+email-cli save-attachment 42 report.pdf
+email-cli save-attachment 42 report.pdf /tmp
+```
+
+### send
+
+```
+email-cli send --to <addr> --subject <text> --body <text>
+```
+
+Sends a message non-interactively. SMTP must be configured first.
+
+```bash
+email-cli send --to friend@example.com --subject "Hello" --body "Hi there!"
+```
+
+### config
+
+```
+email-cli config show          # Print current config (passwords masked)
+email-cli config imap          # IMAP setup wizard
+email-cli config smtp          # SMTP setup wizard
+```
+
+Use `--account <email>` when multiple accounts are configured.
 
 ### help
 
@@ -365,5 +387,8 @@ email-cli help
 email-cli help list
 email-cli help show
 email-cli help folders
+email-cli help attachments
+email-cli help save-attachment
+email-cli help send
 email-cli help config
 ```

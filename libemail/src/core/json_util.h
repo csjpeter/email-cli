@@ -8,6 +8,13 @@
  * Recursive descent parser that handles the JSON subset used by the Gmail
  * REST API: string/number values, arrays of strings, iteration over object
  * arrays.  Not a general-purpose JSON library — intentionally minimal.
+ *
+ * @note Unicode limitation: \\uXXXX escapes are decoded only for the ASCII
+ *       range (U+0000–U+007F).  Non-ASCII codepoints (U+0080+), including
+ *       BMP and surrogate pairs, are replaced with '?'.  This is acceptable
+ *       because Gmail API returns UTF-8 text directly in JSON string values
+ *       rather than \\uXXXX-encoding it; the escape form appears only for
+ *       control characters and ASCII punctuation in practice.
  */
 
 /**

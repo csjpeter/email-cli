@@ -66,7 +66,7 @@ int config_delete_account(const char *name);
  * If file does not exist, returns NULL (caller should trigger wizard).
  * @return Pointer to Config struct or NULL.
  */
-Config* config_load_from_store(void);
+Config *config_load_from_store(void);
 
 /**
  * @brief Saves configuration to the platform config directory with 0600 permissions.

@@ -551,15 +551,11 @@ int main(int argc, char *argv[]) {
         if (tui_folder)
             ui_pref_set_str(fc_key, tui_folder);  /* persist selected folder */
 
-        if (go_up) {
-            /* Backspace at folder root → back to accounts screen */
+        if (go_up || !tui_folder) {
+            /* Backspace at folder root, ESC, or connection error
+             * → back to accounts screen */
             config_free(sel_cfg);
             continue;
-        }
-        if (!tui_folder) {
-            /* ESC from folder browser → quit */
-            config_free(sel_cfg);
-            break;
         }
 
         int back_to_accounts = 0;

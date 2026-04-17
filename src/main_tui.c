@@ -28,6 +28,7 @@
 #include "compose_service.h"
 #include "mime_util.h"
 #include "html_render.h"
+#include "mail_client.h"
 
 /* Number of non-data lines printed around the message table */
 #define LIST_HEADER_LINES 6
@@ -75,6 +76,7 @@ static void help(void) {
  * Never blocks the compose attempt: always returns 0.
  */
 static void ensure_smtp_configured(Config *cfg) {
+    if (cfg->gmail_mode) return; /* Gmail uses REST API, not SMTP */
     if (cfg->smtp_host) return; /* Already explicitly configured */
 
     printf("\n"
@@ -233,21 +235,27 @@ static int cmd_compose_interactive(Config *cfg,
         } else {
             printf("  Sending...\n");
             fflush(stdout);
-            rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
-            if (rc == 0) {
-                printf("  Message sent.\n");
-                /* Save a copy to the Sent folder synchronously.
-                 * imap_connect uses SO_RCVTIMEO/SO_SNDTIMEO (15 s) so this
-                 * never blocks longer than the server timeout. */
-                printf("  Saving to Sent folder...\n");
-                fflush(stdout);
-                if (email_service_save_sent(cfg, msg, msg_len) != 0)
-                    fprintf(stderr, "  (Could not save to Sent folder — "
-                            "check EMAIL_SENT_FOLDER in config.)\n");
-                else
-                    printf("  Saved.\n");
-                fflush(stdout);
+            if (cfg->gmail_mode) {
+                /* Gmail: send via REST API; SENT label auto-added */
+                RAII_MAIL MailClient *mc = mail_client_connect((Config *)cfg);
+                rc = mc ? mail_client_append(mc, NULL, msg, msg_len) : -1;
+                if (rc == 0)
+                    printf("  Message sent.\n");
+            } else {
+                /* IMAP: send via SMTP, then save to Sent folder */
+                rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
+                if (rc == 0) {
+                    printf("  Message sent.\n");
+                    printf("  Saving to Sent folder...\n");
+                    fflush(stdout);
+                    if (email_service_save_sent(cfg, msg, msg_len) != 0)
+                        fprintf(stderr, "  (Could not save to Sent folder — "
+                                "check EMAIL_SENT_FOLDER in config.)\n");
+                    else
+                        printf("  Saved.\n");
+                }
             }
+            fflush(stdout);
             free(msg);
         }
         free(body);

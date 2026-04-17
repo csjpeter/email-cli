@@ -563,6 +563,14 @@ int main(int argc, char *argv[]) {
                     "    ~/.config/email-cli/accounts/%s/config.ini\n"
                     "  Guide: docs/dev/gmail-oauth2-setup.md\n",
                     sel_cfg->user ? sel_cfg->user : "(unknown)");
+            } else if (sel_cfg->host && strstr(sel_cfg->host, "gmail.com")) {
+                fprintf(stderr,
+                    "  This account uses imap.gmail.com but is configured as IMAP.\n"
+                    "  Google no longer supports plain IMAP password login.\n\n"
+                    "  To fix: delete this account ('d' on accounts screen) and\n"
+                    "  re-add it ('n') as Gmail type (option 2), which uses the\n"
+                    "  Gmail API with OAuth2 instead of IMAP.\n\n"
+                    "  See docs/dev/gmail-oauth2-setup.md for credentials setup.\n");
             } else {
                 fprintf(stderr,
                     "  Possible causes:\n"

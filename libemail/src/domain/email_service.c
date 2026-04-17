@@ -198,6 +198,9 @@ static char *word_wrap(const char *text, int width) {
 
 /* Forward declaration — defined after visible_line_cols (below). */
 static void print_statusbar(int trows, int width, const char *text);
+static void show_label_picker(MailClient *mc,
+                               const char *uid);
+static int is_system_or_special_label(const char *name);
 
 /**
  * Pager prompt for the standalone `show` command.
@@ -690,11 +693,13 @@ static void print_clean(const char *s, const char *fallback, int max_cols) {
 }
 
 static void print_show_headers(const char *from, const char *subject,
-                                const char *date) {
+                                const char *date, const char *labels) {
     /* label = 9 chars ("From:    "), remaining = SHOW_WIDTH - 9 = 71 */
     printf("From:    "); print_clean(from,    "(none)", SHOW_WIDTH - 9); putchar('\n');
     printf("Subject: "); print_clean(subject, "(none)", SHOW_WIDTH - 9); putchar('\n');
     printf("Date:    "); print_clean(date,    "(none)", SHOW_WIDTH - 9); putchar('\n');
+    if (labels && labels[0])
+        printf("Labels:  %s\n", labels);
     printf(SHOW_SEPARATOR);
 }
 
@@ -806,6 +811,8 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
     char *date_raw = mime_get_header(raw, "Date");
     char *date     = date_raw ? mime_format_date(date_raw) : NULL;
     free(date_raw);
+    /* Gmail: load labels from .hdr cache for display in reader header */
+    char *show_labels = cfg->gmail_mode ? local_hdr_get_labels("", uid) : NULL;
     int term_cols = terminal_cols();
     int term_rows = terminal_rows();
     if (term_rows <= 0) term_rows = page_size;
@@ -845,7 +852,7 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
     int result = 0;
     for (int cur_line = 0;;) {
         printf("\033[0m\033[H\033[2J");     /* reset attrs + clear screen */
-        print_show_headers(from, subject, date);
+        print_show_headers(from, subject, date, show_labels);
         print_body_page(body_text, cur_line, rows_avail, term_cols);
         printf("\033[0m");                  /* close any open ANSI from body */
         fflush(stdout);
@@ -1003,7 +1010,7 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
 show_int_done:
 #undef SHOW_HDR_LINES_INT
     mime_free_attachments(atts, att_count);
-    free(body); free(body_wrapped); free(from); free(subject); free(date); free(raw);
+    free(body); free(body_wrapped); free(from); free(subject); free(date); free(show_labels); free(raw);
     return result;
 }
 
@@ -1699,10 +1706,13 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (wend > show_count)           wend = show_count;
 
         /* Compute adaptive column widths.
-         * Fixed overhead per data row: "  UID  "(7) + "  DATE  "(18) + "  Sts   "(8) = 35
+         * IMAP:  "  UID  "(7) + "  DATE  "(18) + "  Sts  "(8) = 35
+         * Gmail: "  Labels "(lbl_w+2) + "  DATE  "(18) + "  Sts  "(8)
          * subj_w gets ~60% of remaining space, from_w ~40%. */
         int tcols    = terminal_cols();
-        int overhead = 35;
+        int is_gmail = cfg->gmail_mode;
+        int lbl_w    = is_gmail ? 14 : 0;
+        int overhead = is_gmail ? (lbl_w + 2 + 18 + 8) : 35;
         int avail    = tcols - overhead;
         if (avail < 40) avail = 40;
         int subj_w = avail * 3 / 5;
@@ -1730,9 +1740,15 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             for (int p = used; p < tcols; p++) putchar(' ');
             printf("\033[0m\n\n");
         }
-        printf("  %5s  %-16s  %-4s  %-*s  %s\n",
-               "UID", "Date", "Sts", subj_w, "Subject", "From");
-        printf("  \u2550\u2550\u2550\u2550\u2550  ");
+        if (is_gmail) {
+            printf("  %-*s  %-16s  %-4s  %-*s  %s\n",
+                   lbl_w, "Labels", "Date", "Sts", subj_w, "Subject", "From");
+            printf("  "); print_dbar(lbl_w); printf("  ");
+        } else {
+            printf("  %5s  %-16s  %-4s  %-*s  %s\n",
+                   "UID", "Date", "Sts", subj_w, "Subject", "From");
+            printf("  \u2550\u2550\u2550\u2550\u2550  ");
+        }
         print_dbar(16); printf("  ");
         printf("\u2550\u2550\u2550\u2550  ");
         print_dbar(subj_w); printf("  ");
@@ -1800,7 +1816,58 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 (entries[i].flags & MSG_FLAG_ATTACH)  ? 'A' : '-',
                 '\0'
             };
-            printf("  %5s  %-16.16s  %s  ", entries[i].uid, date, sts);
+            if (is_gmail) {
+                /* Load labels from .hdr cache for display */
+                char *lbl_raw = local_hdr_get_labels("", entries[i].uid);
+                /* Build short label display: ★ for STARRED, skip system labels */
+                char lbl_disp[64] = "";
+                if (lbl_raw) {
+                    int dpos = 0;
+                    char *tok = lbl_raw, *sep;
+                    while (tok && *tok) {
+                        sep = strchr(tok, ',');
+                        size_t tlen = sep ? (size_t)(sep - tok) : strlen(tok);
+                        char lbl[64];
+                        if (tlen >= sizeof(lbl)) tlen = sizeof(lbl) - 1;
+                        memcpy(lbl, tok, tlen);
+                        lbl[tlen] = '\0';
+                        /* Starred → ★ symbol */
+                        if (strcmp(lbl, "STARRED") == 0) {
+                            if (dpos > 0 && dpos < (int)sizeof(lbl_disp) - 1)
+                                lbl_disp[dpos++] = ' ';
+                            const char *star = "\xe2\x98\x85";
+                            int slen = 3;
+                            if (dpos + slen < (int)sizeof(lbl_disp)) {
+                                memcpy(lbl_disp + dpos, star, (size_t)slen);
+                                dpos += slen;
+                            }
+                        } else if (strcmp(lbl, "UNREAD") != 0 &&
+                                   strcmp(lbl, "INBOX") != 0 &&
+                                   strcmp(lbl, "SENT") != 0 &&
+                                   strcmp(lbl, "IMPORTANT") != 0 &&
+                                   strncmp(lbl, "CATEGORY_", 9) != 0) {
+                            /* Show user labels */
+                            if (dpos > 0 && dpos < (int)sizeof(lbl_disp) - 1)
+                                lbl_disp[dpos++] = ' ';
+                            int copy = (int)tlen;
+                            if (dpos + copy >= (int)sizeof(lbl_disp))
+                                copy = (int)sizeof(lbl_disp) - dpos - 1;
+                            if (copy > 0) {
+                                memcpy(lbl_disp + dpos, lbl, (size_t)copy);
+                                dpos += copy;
+                            }
+                        }
+                        lbl_disp[dpos] = '\0';
+                        tok = sep ? sep + 1 : NULL;
+                    }
+                    free(lbl_raw);
+                }
+                printf("  ");
+                print_padded_col(lbl_disp, lbl_w);
+                printf("  %-16.16s  %s  ", date, sts);
+            } else {
+                printf("  %5s  %-16.16s  %s  ", entries[i].uid, date, sts);
+            }
             print_padded_col(subject, subj_w);
             printf("  ");
             print_padded_col(from,    from_w);
@@ -1825,12 +1892,21 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int trows = terminal_rows();
             if (trows <= 0) trows = limit + 6;
             char sb[256];
-            snprintf(sb, sizeof(sb),
-                     "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                     "  Backspace=folders  ESC=quit"
-                     "  c=compose  r=reply  n=new  f=flag  d=done"
-                     "  s=sync  R=refresh  [%d/%d]",
-                     cursor + 1, show_count);
+            if (is_gmail) {
+                snprintf(sb, sizeof(sb),
+                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                         "  Backspace=labels  ESC=quit"
+                         "  c=compose  r=reply  n=unread  f=star  a=archive  D=trash"
+                         "  s=sync  R=refresh  [%d/%d]",
+                         cursor + 1, show_count);
+            } else {
+                snprintf(sb, sizeof(sb),
+                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                         "  Backspace=folders  ESC=quit"
+                         "  c=compose  r=reply  n=new  f=flag  d=done"
+                         "  s=sync  R=refresh  [%d/%d]",
+                         cursor + 1, show_count);
+            }
             print_statusbar(trows, tcols, sb);
         }
 
@@ -1897,23 +1973,101 @@ read_key_again: ;
                 goto list_done;
             }
             if (ch == 'h' || ch == '?') {
-                static const char *help[][2] = {
-                    { "\u2191 / \u2193",   "Move cursor up / down"               },
-                    { "PgUp / PgDn",        "Move cursor one page up / down"      },
-                    { "Enter",             "Open selected message"               },
-                    { "r",                 "Reply to selected message"           },
-                    { "c",                 "Compose new message"                 },
-                    { "n",                 "Toggle New (unread) flag"            },
-                    { "f",                 "Toggle Flagged (starred) flag"       },
-                    { "d",                 "Toggle Done flag"                    },
-                    { "s",                 "Start background sync"               },
-                    { "R",                 "Refresh after sync"                  },
-                    { "Backspace",         "Open folder browser"                 },
-                    { "ESC / q",           "Quit"                                },
-                    { "h / ?",             "Show this help"                      },
-                };
-                show_help_popup("Message list shortcuts",
-                                help, (int)(sizeof(help)/sizeof(help[0])));
+                if (is_gmail) {
+                    static const char *ghelp[][2] = {
+                        { "\u2191 / \u2193",   "Move cursor up / down"           },
+                        { "PgUp / PgDn",        "Page up / down"                  },
+                        { "Enter",             "Open selected message"           },
+                        { "r",                 "Reply to selected message"       },
+                        { "c",                 "Compose new message"             },
+                        { "n",                 "Toggle Unread label"             },
+                        { "f",                 "Toggle Starred label"            },
+                        { "a",                 "Archive (remove INBOX label)"    },
+                        { "D",                 "Move to Trash"                   },
+                        { "t",                 "Toggle labels (picker)"          },
+                        { "s",                 "Start background sync"           },
+                        { "R",                 "Refresh after sync"              },
+                        { "Backspace",         "Open label browser"              },
+                        { "ESC / q",           "Quit"                            },
+                        { "h / ?",             "Show this help"                  },
+                    };
+                    show_help_popup("Message list shortcuts (Gmail)",
+                                    ghelp, (int)(sizeof(ghelp)/sizeof(ghelp[0])));
+                } else {
+                    static const char *help[][2] = {
+                        { "\u2191 / \u2193",   "Move cursor up / down"           },
+                        { "PgUp / PgDn",        "Page up / down"                  },
+                        { "Enter",             "Open selected message"           },
+                        { "r",                 "Reply to selected message"       },
+                        { "c",                 "Compose new message"             },
+                        { "n",                 "Toggle New (unread) flag"        },
+                        { "f",                 "Toggle Flagged (starred) flag"   },
+                        { "d",                 "Toggle Done flag"                },
+                        { "s",                 "Start background sync"           },
+                        { "R",                 "Refresh after sync"              },
+                        { "Backspace",         "Open folder browser"             },
+                        { "ESC / q",           "Quit"                            },
+                        { "h / ?",             "Show this help"                  },
+                    };
+                    show_help_popup("Message list shortcuts",
+                                    help, (int)(sizeof(help)/sizeof(help[0])));
+                }
+                break;
+            }
+            if (ch == 'a' && is_gmail) {
+                /* Archive: remove INBOX label from current message */
+                const char *uid = entries[cursor].uid;
+                if (list_mc) {
+                    /* Mark as read (\\Seen → remove UNREAD via dispatch) */
+                    mail_client_set_flag(list_mc, uid, "\\Seen", 1);
+                }
+                /* Update local index: remove from INBOX .idx */
+                label_idx_remove("INBOX", uid);
+                /* If no other labels remain, add to _nolabel */
+                {
+                    char *lbl = local_hdr_get_labels("", uid);
+                    int has_real = 0;
+                    if (lbl) {
+                        char *tok = lbl, *s;
+                        while (tok && *tok) {
+                            s = strchr(tok, ',');
+                            size_t tl = s ? (size_t)(s - tok) : strlen(tok);
+                            char lb[64];
+                            if (tl >= sizeof(lb)) tl = sizeof(lb) - 1;
+                            memcpy(lb, tok, tl); lb[tl] = '\0';
+                            if (strcmp(lb, "INBOX") != 0 &&
+                                strcmp(lb, "UNREAD") != 0 &&
+                                strcmp(lb, "IMPORTANT") != 0 &&
+                                strncmp(lb, "CATEGORY_", 9) != 0)
+                                has_real = 1;
+                            tok = s ? s + 1 : NULL;
+                        }
+                        free(lbl);
+                    }
+                    if (!has_real) label_idx_add("_nolabel", uid);
+                }
+                break;
+            }
+            if (ch == 'D' && is_gmail) {
+                /* Trash: Gmail compound trash operation */
+                const char *uid = entries[cursor].uid;
+                if (list_mc) mail_client_trash(list_mc, uid);
+                /* Remove from all local label indexes */
+                {
+                    char **all_labels = NULL;
+                    int all_count = 0;
+                    label_idx_list(&all_labels, &all_count);
+                    for (int j = 0; j < all_count; j++) {
+                        label_idx_remove(all_labels[j], uid);
+                        free(all_labels[j]);
+                    }
+                    free(all_labels);
+                }
+                label_idx_add("_trash", uid);
+                break;
+            }
+            if (ch == 't' && is_gmail) {
+                show_label_picker(list_mc, entries[cursor].uid);
                 break;
             }
             if (ch == 'n' || ch == 'f' || ch == 'd') {
@@ -2301,6 +2455,413 @@ folders_int_done:
     return selected;
 }
 
+/* ── Gmail Label Picker Popup ────────────────────────────────────────── */
+
+/**
+ * Show a popup overlay with checkboxes for each label.
+ * The user can toggle labels on/off with Enter/Space, navigate with arrows.
+ * Applies changes via mail_client_set_flag and updates local .idx.
+ * Returns when the user presses ESC/Backspace/q.
+ */
+static void show_label_picker(MailClient *mc,
+                               const char *uid) {
+    /* Collect available labels from local .idx files */
+    char **all_labels = NULL;
+    int all_count = 0;
+    label_idx_list(&all_labels, &all_count);
+
+    /* Build display: only user labels + key system labels (INBOX, STARRED, etc.)
+     * Skip UNREAD (use 'n' key), _nolabel, _spam, _trash (system-managed) */
+    char **pick_ids   = NULL;
+    char **pick_names = NULL;
+    int  *pick_on     = NULL;
+    int  pick_count = 0, pick_cap = 0;
+
+    /* Add system labels first */
+    static const char *sys_pick[] = {"INBOX", "STARRED", "SENT", "DRAFTS"};
+    for (int s = 0; s < (int)(sizeof(sys_pick)/sizeof(sys_pick[0])); s++) {
+        if (pick_count == pick_cap) {
+            int nc = pick_cap ? pick_cap * 2 : 16;
+            pick_ids   = realloc(pick_ids,   (size_t)nc * sizeof(char *));
+            pick_names = realloc(pick_names, (size_t)nc * sizeof(char *));
+            pick_on    = realloc(pick_on,    (size_t)nc * sizeof(int));
+            pick_cap   = nc;
+        }
+        pick_ids[pick_count]   = strdup(sys_pick[s]);
+        pick_names[pick_count] = strdup(sys_pick[s]);
+        pick_on[pick_count]    = label_idx_contains(sys_pick[s], uid);
+        pick_count++;
+    }
+    /* Add user labels */
+    for (int i = 0; i < all_count; i++) {
+        if (is_system_or_special_label(all_labels[i])) {
+            free(all_labels[i]);
+            continue;
+        }
+        if (strcmp(all_labels[i], "UNREAD") == 0) { free(all_labels[i]); continue; }
+        if (pick_count == pick_cap) {
+            int nc = pick_cap ? pick_cap * 2 : 16;
+            pick_ids   = realloc(pick_ids,   (size_t)nc * sizeof(char *));
+            pick_names = realloc(pick_names, (size_t)nc * sizeof(char *));
+            pick_on    = realloc(pick_on,    (size_t)nc * sizeof(int));
+            pick_cap   = nc;
+        }
+        pick_ids[pick_count]   = all_labels[i]; /* transfer ownership */
+        pick_names[pick_count] = strdup(all_labels[i]);
+        pick_on[pick_count]    = label_idx_contains(all_labels[i], uid);
+        pick_count++;
+    }
+    free(all_labels);
+
+    if (pick_count == 0) {
+        free(pick_ids); free(pick_names); free(pick_on);
+        return;
+    }
+
+    int pcursor = 0;
+    int tcols = terminal_cols();
+    int trows = terminal_rows();
+    if (tcols <= 0) tcols = 80;
+    if (trows <= 0) trows = 24;
+
+    int inner_w = 30;
+    int box_w = inner_w + 4;
+    int box_h = pick_count + 4;
+    int col0 = (tcols - box_w) / 2;
+    int row0 = (trows - box_h) / 2;
+    if (col0 < 1) col0 = 1;
+    if (row0 < 1) row0 = 1;
+
+    for (;;) {
+        /* Draw popup */
+        fprintf(stderr, "\033[%d;%dH\033[7m\u250c", row0, col0);
+        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
+        fprintf(stderr, "\u2510\033[0m");
+
+        const char *title = "Toggle Labels";
+        int tlen = (int)strlen(title);
+        fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 1, col0);
+        int pl = (box_w - 4 - tlen) / 2;
+        int pr = (box_w - 4 - tlen) - pl;
+        for (int i = 0; i < pl; i++) fputc(' ', stderr);
+        fprintf(stderr, "%s", title);
+        for (int i = 0; i < pr; i++) fputc(' ', stderr);
+        fprintf(stderr, " \u2502\033[0m");
+
+        fprintf(stderr, "\033[%d;%dH\033[7m\u251c", row0 + 2, col0);
+        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
+        fprintf(stderr, "\u2524\033[0m");
+
+        for (int i = 0; i < pick_count; i++) {
+            int sel = (i == pcursor);
+            fprintf(stderr, "\033[%d;%dH", row0 + 3 + i, col0);
+            if (sel) fprintf(stderr, "\033[7m\033[1m");
+            else     fprintf(stderr, "\033[7m");
+            fprintf(stderr, "\u2502 [%c] %-*.*s \u2502",
+                    pick_on[i] ? 'x' : ' ',
+                    inner_w - 5, inner_w - 5,
+                    pick_names[i]);
+            fprintf(stderr, "\033[0m");
+        }
+
+        fprintf(stderr, "\033[%d;%dH\033[7m\u2514", row0 + 3 + pick_count, col0);
+        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
+        fprintf(stderr, "\u2518\033[0m");
+
+        const char *foot = " \u2191\u2193=move  Enter=toggle  ESC=done ";
+        int flen = (int)strlen(foot);
+        if (flen < box_w) {
+            int fc = col0 + (box_w - flen) / 2;
+            fprintf(stderr, "\033[%d;%dH\033[2m%s\033[0m",
+                    row0 + 4 + pick_count, fc, foot);
+        }
+        fflush(stderr);
+
+        TermKey key = terminal_read_key();
+        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC || key == TERM_KEY_BACK)
+            break;
+        if (key == TERM_KEY_NEXT_LINE && pcursor < pick_count - 1) pcursor++;
+        if (key == TERM_KEY_PREV_LINE && pcursor > 0) pcursor--;
+        if (key == TERM_KEY_ENTER) {
+            /* Toggle the label */
+            pick_on[pcursor] = !pick_on[pcursor];
+            const char *lid = pick_ids[pcursor];
+            if (pick_on[pcursor]) {
+                label_idx_add(lid, uid);
+                if (mc) {
+                    /* For STARRED we use the flag path */
+                    if (strcmp(lid, "STARRED") == 0)
+                        mail_client_set_flag(mc, uid, "\\Flagged", 1);
+                }
+            } else {
+                label_idx_remove(lid, uid);
+                if (mc) {
+                    if (strcmp(lid, "STARRED") == 0)
+                        mail_client_set_flag(mc, uid, "\\Flagged", 0);
+                }
+            }
+        }
+        int ch = terminal_last_printable();
+        if (ch == ' ') {
+            /* Space also toggles */
+            pick_on[pcursor] = !pick_on[pcursor];
+            const char *lid = pick_ids[pcursor];
+            if (pick_on[pcursor]) label_idx_add(lid, uid);
+            else                  label_idx_remove(lid, uid);
+        }
+    }
+
+    for (int i = 0; i < pick_count; i++) { free(pick_ids[i]); free(pick_names[i]); }
+    free(pick_ids); free(pick_names); free(pick_on);
+}
+
+/* ── Gmail Label List (interactive) ──────────────────────────────────── */
+
+/* System labels in display order.  id = .idx filename, name = display name. */
+static const struct { const char *id; const char *name; } gmail_system_labels[] = {
+    { "INBOX",    "Inbox"   },
+    { "STARRED",  "Starred" },
+    { "UNREAD",   "Unread"  },
+    { "SENT",     "Sent"    },
+    { "DRAFTS",   "Drafts"  },
+};
+#define GMAIL_SYS_COUNT ((int)(sizeof(gmail_system_labels)/sizeof(gmail_system_labels[0])))
+
+static const struct { const char *id; const char *name; } gmail_special_labels[] = {
+    { "_nolabel", "Archive" },
+    { "_spam",    "Spam"    },
+    { "_trash",   "Trash"   },
+};
+#define GMAIL_SPECIAL_COUNT ((int)(sizeof(gmail_special_labels)/sizeof(gmail_special_labels[0])))
+
+/* Build a flat label display list.  Returns count.
+ * Each entry has id (for .idx lookup / selection) and display name.
+ * section_sep[i] = 1 means a separator line should appear before row i. */
+static int build_label_display(
+    char ***ids_out, char ***names_out, int **sep_out,
+    char **user_labels, int user_count)
+{
+    /* total = system + user + special */
+    int total = GMAIL_SYS_COUNT + user_count + GMAIL_SPECIAL_COUNT;
+    char **ids   = calloc((size_t)total, sizeof(char *));
+    char **names = calloc((size_t)total, sizeof(char *));
+    int  *seps   = calloc((size_t)total, sizeof(int));
+    if (!ids || !names || !seps) { free(ids); free(names); free(seps); return 0; }
+
+    int n = 0;
+    /* Section 1: system labels */
+    for (int i = 0; i < GMAIL_SYS_COUNT; i++) {
+        ids[n]   = strdup(gmail_system_labels[i].id);
+        names[n] = strdup(gmail_system_labels[i].name);
+        n++;
+    }
+    /* Section 2: user labels (separator before first) */
+    if (user_count > 0) seps[n] = 1;
+    for (int i = 0; i < user_count; i++) {
+        ids[n]   = strdup(user_labels[i]);
+        names[n] = strdup(user_labels[i]);
+        n++;
+    }
+    /* Section 3: special labels (separator before first) */
+    seps[n] = 1;
+    for (int i = 0; i < GMAIL_SPECIAL_COUNT; i++) {
+        ids[n]   = strdup(gmail_special_labels[i].id);
+        names[n] = strdup(gmail_special_labels[i].name);
+        n++;
+    }
+
+    *ids_out   = ids;
+    *names_out = names;
+    *sep_out   = seps;
+    return n;
+}
+
+static void free_label_display(char **ids, char **names, int *seps, int count) {
+    for (int i = 0; i < count; i++) { free(ids[i]); free(names[i]); }
+    free(ids); free(names); free(seps);
+}
+
+/* Check if a label name is a system or special label (skip for user list). */
+static int is_system_or_special_label(const char *name) {
+    for (int i = 0; i < GMAIL_SYS_COUNT; i++)
+        if (strcmp(name, gmail_system_labels[i].id) == 0) return 1;
+    for (int i = 0; i < GMAIL_SPECIAL_COUNT; i++)
+        if (strcmp(name, gmail_special_labels[i].id) == 0) return 1;
+    /* Also filter out IMPORTANT and CATEGORY_* which gmail_sync already filters */
+    if (strcmp(name, "IMPORTANT") == 0) return 1;
+    if (strncmp(name, "CATEGORY_", 9) == 0) return 1;
+    if (strcmp(name, "TRASH") == 0 || strcmp(name, "SPAM") == 0) return 1;
+    return 0;
+}
+
+char *email_service_list_labels_interactive(const Config *cfg,
+                                            const char *current_label,
+                                            int *go_up) {
+    local_store_init(cfg->host, cfg->user);
+    if (go_up) *go_up = 0;
+
+    /* Collect user-defined labels from locally synced .idx files.
+     * We scan the labels/ directory for .idx files that are not system/special. */
+    char **user_labels = NULL;
+    int user_count = 0;
+    {
+        char **all_labels = NULL;
+        int all_count = 0;
+        label_idx_list(&all_labels, &all_count);
+        /* Filter to user labels only */
+        user_labels = calloc(all_count > 0 ? (size_t)all_count : 1, sizeof(char *));
+        for (int i = 0; i < all_count; i++) {
+            if (!is_system_or_special_label(all_labels[i]))
+                user_labels[user_count++] = strdup(all_labels[i]);
+            free(all_labels[i]);
+        }
+        free(all_labels);
+    }
+
+    /* Sort user labels alphabetically */
+    if (user_count > 1)
+        qsort(user_labels, (size_t)user_count, sizeof(char *), cmp_str);
+
+    char **lbl_ids = NULL, **lbl_names = NULL;
+    int *lbl_seps = NULL;
+    int lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps,
+                                        user_labels, user_count);
+    for (int i = 0; i < user_count; i++) free(user_labels[i]);
+    free(user_labels);
+
+    if (lbl_count == 0) {
+        free_label_display(lbl_ids, lbl_names, lbl_seps, 0);
+        return NULL;
+    }
+
+    int cursor = 0, wstart = 0;
+    char *selected = NULL;
+
+    /* Pre-position cursor on current_label */
+    if (current_label && *current_label) {
+        for (int i = 0; i < lbl_count; i++) {
+            if (strcmp(lbl_ids[i], current_label) == 0) {
+                cursor = i; break;
+            }
+        }
+    }
+
+    RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
+
+    for (;;) {
+        int trows = terminal_rows();
+        int tcols = terminal_cols();
+        if (trows <= 0) trows = 24;
+        if (tcols <= 0) tcols = 80;
+        int limit = (trows > 4) ? trows - 3 : 10;
+
+        if (cursor >= lbl_count) cursor = lbl_count - 1;
+        if (cursor < 0) cursor = 0;
+        if (cursor < wstart) wstart = cursor;
+        if (cursor >= wstart + limit) wstart = cursor - limit + 1;
+        int wend = wstart + limit;
+        if (wend > lbl_count) wend = lbl_count;
+
+        /* Name column width: "  " + 6(count) + "  " + name_w = name_w + 10 */
+        int name_w = tcols - 12;
+        if (name_w < 20) name_w = 20;
+
+        printf("\033[H\033[2J");
+        {
+            char cl[512];
+            snprintf(cl, sizeof(cl), "  Labels \u2014 %s  (%d)",
+                     cfg->user ? cfg->user : "?", lbl_count);
+            printf("\033[7m%s", cl);
+            int used = visible_line_cols(cl, cl + strlen(cl));
+            for (int p = used; p < tcols; p++) putchar(' ');
+            printf("\033[0m\n\n");
+        }
+
+        printf("  %6s  %-*s\n", "Count", name_w, "Label");
+        printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
+        print_dbar(name_w);
+        printf("\n");
+
+        for (int i = wstart; i < wend; i++) {
+            /* Section separator */
+            if (lbl_seps[i]) {
+                printf("  \033[2m");
+                for (int s = 0; s < tcols - 2; s++) fputs("\u2504", stdout);
+                printf("\033[0m\n");
+            }
+
+            int cnt = label_idx_count(lbl_ids[i]);
+            char cnt_buf[16];
+            fmt_thou(cnt_buf, sizeof(cnt_buf), cnt);
+
+            int sel = (i == cursor);
+            if (sel) printf("\033[7m");
+            printf("  %6s  ", cnt_buf);
+            print_padded_col(lbl_names[i], name_w);
+            if (sel) printf("\033[K\033[0m");
+            printf("\n");
+        }
+        fflush(stdout);
+
+        {
+            char sb[256];
+            snprintf(sb, sizeof(sb),
+                     "  \u2191\u2193=select  Enter=open  Backspace=accounts  ESC=quit"
+                     "  h=help  [%d/%d]",
+                     cursor + 1, lbl_count);
+            print_statusbar(trows, tcols, sb);
+        }
+
+        TermKey key = terminal_read_key();
+        fprintf(stderr, "\r\033[K"); fflush(stderr);
+
+        switch (key) {
+        case TERM_KEY_BACK:
+            if (go_up) *go_up = 1;
+            goto labels_done;
+        case TERM_KEY_QUIT:
+        case TERM_KEY_ESC:
+            goto labels_done;
+        case TERM_KEY_NEXT_LINE:
+            if (cursor < lbl_count - 1) cursor++;
+            break;
+        case TERM_KEY_PREV_LINE:
+            if (cursor > 0) cursor--;
+            break;
+        case TERM_KEY_NEXT_PAGE:
+            cursor += limit;
+            if (cursor >= lbl_count) cursor = lbl_count - 1;
+            break;
+        case TERM_KEY_PREV_PAGE:
+            cursor -= limit;
+            if (cursor < 0) cursor = 0;
+            break;
+        case TERM_KEY_ENTER:
+            selected = strdup(lbl_ids[cursor]);
+            goto labels_done;
+        default: {
+            int ch = terminal_last_printable();
+            if (ch == 'h' || ch == '?') {
+                static const char *help[][2] = {
+                    { "\u2191 / \u2193",   "Move cursor up / down"      },
+                    { "PgUp / PgDn",       "Page up / down"             },
+                    { "Enter",             "Open selected label"        },
+                    { "Backspace",         "Back to accounts"           },
+                    { "ESC / q",           "Quit"                       },
+                    { "h / ?",             "Show this help"             },
+                };
+                show_help_popup("Label browser shortcuts",
+                                help, (int)(sizeof(help)/sizeof(help[0])));
+            }
+            break;
+        }
+        }
+    }
+labels_done:
+    free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_count);
+    return selected;
+}
+
 /**
  * Sum unread and flagged counts across all locally-cached folders for one
  * account.  Temporarily switches g_account_base via local_store_init; the
@@ -2344,32 +2905,40 @@ static void print_account_row(const Config *cfg, int cursor,
                                int unseen, int flagged,
                                int imap_w, int smtp_w) {
     const char *user = cfg->user ? cfg->user : "(unknown)";
+    const char *type = cfg->gmail_mode ? "Gmail" : "IMAP";
 
-    /* IMAP: always show port (default 993 for imaps://) */
-    char imap_buf[256];
-    fmt_url_with_port(cfg->host, 993, imap_buf, sizeof(imap_buf));
-    const char *imap = imap_buf;
+    /* Server: Gmail shows "Gmail API", IMAP shows host:port */
+    char server_buf[256];
+    if (cfg->gmail_mode) {
+        snprintf(server_buf, sizeof(server_buf), "Gmail API");
+    } else {
+        fmt_url_with_port(cfg->host, 993, server_buf, sizeof(server_buf));
+    }
 
     /* Build SMTP display string (no ANSI — safe to truncate with %.*s) */
     char smtp_buf[256];
-    int smtp_configured = cfg->smtp_host && cfg->smtp_host[0];
-    if (smtp_configured) {
-        if (cfg->smtp_port) {
-            /* Explicit port in config: append if not already in host URL */
-            const char *proto_end = strstr(cfg->smtp_host, "://");
-            const char *smtp_host_part = proto_end ? proto_end + 3 : cfg->smtp_host;
-            if (strchr(smtp_host_part, ':'))
-                snprintf(smtp_buf, sizeof(smtp_buf), "%s", cfg->smtp_host);
-            else
-                snprintf(smtp_buf, sizeof(smtp_buf), "%s:%d",
-                         cfg->smtp_host, cfg->smtp_port);
-        } else {
-            /* No explicit port: use protocol default */
-            int defport = (strncmp(cfg->smtp_host, "smtps://", 8) == 0) ? 465 : 587;
-            fmt_url_with_port(cfg->smtp_host, defport, smtp_buf, sizeof(smtp_buf));
-        }
+    int smtp_configured;
+    if (cfg->gmail_mode) {
+        snprintf(smtp_buf, sizeof(smtp_buf), "Gmail API");
+        smtp_configured = 1;
     } else {
-        snprintf(smtp_buf, sizeof(smtp_buf), "\u2014");  /* em dash: not configured */
+        smtp_configured = cfg->smtp_host && cfg->smtp_host[0];
+        if (smtp_configured) {
+            if (cfg->smtp_port) {
+                const char *proto_end = strstr(cfg->smtp_host, "://");
+                const char *smtp_host_part = proto_end ? proto_end + 3 : cfg->smtp_host;
+                if (strchr(smtp_host_part, ':'))
+                    snprintf(smtp_buf, sizeof(smtp_buf), "%s", cfg->smtp_host);
+                else
+                    snprintf(smtp_buf, sizeof(smtp_buf), "%s:%d",
+                             cfg->smtp_host, cfg->smtp_port);
+            } else {
+                int defport = (strncmp(cfg->smtp_host, "smtps://", 8) == 0) ? 465 : 587;
+                fmt_url_with_port(cfg->smtp_host, defport, smtp_buf, sizeof(smtp_buf));
+            }
+        } else {
+            snprintf(smtp_buf, sizeof(smtp_buf), "\u2014");
+        }
     }
 
     char u[16], f[16];
@@ -2377,15 +2946,14 @@ static void print_account_row(const Config *cfg, int cursor,
     fmt_thou(f, sizeof(f), flagged);
 
     if (cursor) {
-        printf("  \033[1m\u2192 %6s  %7s  %-32.32s  %-*.*s  %.*s\033[0m\n",
-               u, f, user, imap_w, imap_w, imap, smtp_w, smtp_buf);
+        printf("  \033[1m\u2192 %6s  %7s  %-32.32s  %-5s  %-*.*s  %.*s\033[0m\n",
+               u, f, user, type, imap_w, imap_w, server_buf, smtp_w, smtp_buf);
     } else if (!smtp_configured) {
-        /* dim the em dash to indicate SMTP is not yet set up */
-        printf("    %6s  %7s  %-32.32s  %-*.*s  \033[2m%.*s\033[0m\n",
-               u, f, user, imap_w, imap_w, imap, smtp_w, smtp_buf);
+        printf("    %6s  %7s  %-32.32s  %-5s  %-*.*s  \033[2m%.*s\033[0m\n",
+               u, f, user, type, imap_w, imap_w, server_buf, smtp_w, smtp_buf);
     } else {
-        printf("    %6s  %7s  %-32.32s  %-*.*s  %.*s\n",
-               u, f, user, imap_w, imap_w, imap, smtp_w, smtp_buf);
+        printf("    %6s  %7s  %-32.32s  %-5s  %-*.*s  %.*s\n",
+               u, f, user, type, imap_w, imap_w, server_buf, smtp_w, smtp_buf);
     }
 }
 
@@ -2415,9 +2983,9 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
 
         /* Column widths:
          * Fixed overhead: 4(indent) + 6(unread) + 2 + 7(flagged) + 2
-         *                 + 32(account) + 2 + 2(sep) = 57
-         * Remaining split evenly between IMAP and SMTP columns. */
-        int avail = tcols - 59;
+         *                 + 32(account) + 2 + 5(type) + 2 + 2(sep) = 64
+         * Remaining split evenly between Server and SMTP columns. */
+        int avail = tcols - 64;
         if (avail < 0) avail = 0;
         int imap_w = avail / 2;
         int smtp_w = avail - imap_w;
@@ -2437,11 +3005,11 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
         if (count == 0) {
             printf("  No accounts configured.\n");
         } else {
-            printf("    %6s  %7s  %-32s  %-*s  %s\n",
-                   "Unread", "Flagged", "Account", imap_w, "IMAP", "SMTP");
+            printf("    %6s  %7s  %-32s  %-5s  %-*s  %s\n",
+                   "Unread", "Flagged", "Account", "Type", imap_w, "Server", "Send via");
             printf("    \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
             print_dbar(32);
-            printf("  ");
+            printf("  \u2550\u2550\u2550\u2550\u2550  ");
             print_dbar(imap_w);
             printf("  ");
             print_dbar(smtp_w);
@@ -2562,8 +3130,9 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
     char *date_raw = mime_get_header(raw, "Date");
     char *date     = date_raw ? mime_format_date(date_raw) : NULL;
     free(date_raw);
+    char *ro_labels = cfg->gmail_mode ? local_hdr_get_labels("", uid) : NULL;
 
-    print_show_headers(from, subject, date);
+    print_show_headers(from, subject, date, ro_labels);
 
     int term_cols_show = pager ? terminal_cols() : SHOW_WIDTH;
     int wrap_cols = term_cols_show > SHOW_WIDTH ? SHOW_WIDTH : term_cols_show;
@@ -2600,7 +3169,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
         for (int cur_line = 0, show_displayed = 0; ; ) {
             if (show_displayed) {
                 printf("\033[0m\033[H\033[2J");   /* reset attrs + clear screen */
-                print_show_headers(from, subject, date);
+                print_show_headers(from, subject, date, ro_labels);
             }
             show_displayed = 1;
             print_body_page(body_text, cur_line, rows_avail, term_cols_show);
@@ -2620,7 +3189,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
     }
 #undef SHOW_HDR_LINES
 
-    free(body); free(from); free(subject); free(date); free(raw);
+    free(body); free(from); free(subject); free(date); free(ro_labels); free(raw);
     return 0;
 }
 

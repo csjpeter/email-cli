@@ -521,10 +521,11 @@ int main(int argc, char *argv[]) {
                                   ? saved_folder
                                   : (sel_cfg->folder ? sel_cfg->folder : "INBOX");
 
-        /* Open folder browser first — user picks which folder to enter */
+        /* Open folder/label browser — user picks which folder/label to enter */
         int go_up = 0;
-        char *tui_folder = email_service_list_folders_interactive(
-                               sel_cfg, init_folder, &go_up);
+        char *tui_folder = sel_cfg->gmail_mode
+            ? email_service_list_labels_interactive(sel_cfg, init_folder, &go_up)
+            : email_service_list_folders_interactive(sel_cfg, init_folder, &go_up);
         free(saved_folder);
         if (tui_folder)
             ui_pref_set_str(fc_key, tui_folder);  /* persist selected folder */
@@ -545,9 +546,10 @@ int main(int argc, char *argv[]) {
             EmailListOpts opts = {0, tui_folder, page_size, 0, 1, {0}};
             int ret = email_service_list(sel_cfg, &opts);
             if (ret == 1) {
-                /* Backspace from message list → folder browser */
-                char *sel = email_service_list_folders_interactive(
-                                sel_cfg, tui_folder, &go_up);
+                /* Backspace from message list → folder/label browser */
+                char *sel = sel_cfg->gmail_mode
+                    ? email_service_list_labels_interactive(sel_cfg, tui_folder, &go_up)
+                    : email_service_list_folders_interactive(sel_cfg, tui_folder, &go_up);
                 free(tui_folder);
                 tui_folder = sel;
                 if (tui_folder)

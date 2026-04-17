@@ -914,6 +914,64 @@ int label_idx_write(const char *label, const char (*uids)[17], int count) {
     return 0;
 }
 
+char *local_hdr_get_labels(const char *folder, const char *uid) {
+    char *hdr = local_hdr_load(folder, uid);
+    if (!hdr) return NULL;
+
+    /* Parse 4th tab-separated field: from\tsubject\tdate\tLABELS\tflags */
+    const char *p = hdr;
+    for (int t = 0; t < 3; t++) {
+        p = strchr(p, '\t');
+        if (!p) { free(hdr); return NULL; }
+        p++;
+    }
+    /* p now points to the start of the labels field */
+    const char *end = strchr(p, '\t');
+    size_t len = end ? (size_t)(end - p) : strlen(p);
+    char *result = strndup(p, len);
+    free(hdr);
+    return result;
+}
+
+int label_idx_list(char ***labels_out, int *count_out) {
+    *labels_out = NULL;
+    *count_out  = 0;
+
+    char dir_path[8300];
+    snprintf(dir_path, sizeof(dir_path), "%s/labels", g_account_base);
+
+    RAII_DIR DIR *dp = opendir(dir_path);
+    if (!dp) return 0;  /* No labels directory → 0 labels */
+
+    char **list = NULL;
+    int count = 0, cap = 0;
+
+    struct dirent *ent;
+    while ((ent = readdir(dp)) != NULL) {
+        const char *name = ent->d_name;
+        size_t nlen = strlen(name);
+        if (nlen <= 4) continue;
+        if (strcmp(name + nlen - 4, ".idx") != 0) continue;
+
+        /* Extract label name (strip .idx) */
+        char *label = strndup(name, nlen - 4);
+        if (!label) continue;
+
+        if (count == cap) {
+            int newcap = cap ? cap * 2 : 16;
+            char **tmp = realloc(list, (size_t)newcap * sizeof(char *));
+            if (!tmp) { free(label); break; }
+            list = tmp;
+            cap = newcap;
+        }
+        list[count++] = label;
+    }
+
+    *labels_out = list;
+    *count_out  = count;
+    return 0;
+}
+
 int label_idx_add(const char *label, const char *uid) {
     if (!uid || strlen(uid) < 1) return -1;
 

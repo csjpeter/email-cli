@@ -159,6 +159,37 @@ static void test_gmail_history_id(void) {
     free(hid);
 }
 
+static void test_label_idx_list(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://labelidx-list-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    /* Create a few label indexes */
+    label_idx_add("INBOX",   "0000000000000001");
+    label_idx_add("SENT",    "0000000000000002");
+    label_idx_add("Work",    "0000000000000003");
+    label_idx_add("_nolabel","0000000000000004");
+
+    char **labels = NULL;
+    int count = 0;
+    int rc = label_idx_list(&labels, &count);
+    ASSERT(rc == 0, "label_idx_list: rc=0");
+    ASSERT(count == 4, "label_idx_list: 4 labels");
+
+    /* Check that all expected labels are present (order not guaranteed by readdir) */
+    int found_inbox = 0, found_sent = 0, found_work = 0, found_nolabel = 0;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(labels[i], "INBOX") == 0) found_inbox = 1;
+        if (strcmp(labels[i], "SENT") == 0) found_sent = 1;
+        if (strcmp(labels[i], "Work") == 0) found_work = 1;
+        if (strcmp(labels[i], "_nolabel") == 0) found_nolabel = 1;
+        free(labels[i]);
+    }
+    free(labels);
+    ASSERT(found_inbox && found_sent && found_work && found_nolabel,
+           "label_idx_list: all labels found");
+}
+
 /* ── Registration ─────────────────────────────────────────────────── */
 
 void test_label_idx(void) {
@@ -169,4 +200,5 @@ void test_label_idx(void) {
     RUN_TEST(test_label_idx_write_bulk);
     RUN_TEST(test_label_idx_hex_uids);
     RUN_TEST(test_gmail_history_id);
+    RUN_TEST(test_label_idx_list);
 }

@@ -86,6 +86,27 @@ char *email_service_list_folders_interactive(const Config *cfg,
                                              int *go_up);
 
 /**
+ * @brief Interactive label browser for Gmail accounts (TUI).
+ *
+ * Displays labels in three sections:
+ *   1. System labels (INBOX, Starred, Unread, Sent, Drafts)
+ *   2. User-defined labels (alphabetical)
+ *   3. Special (Archive, Spam, Trash)
+ *
+ * Each label shows a message count from the local .idx files.
+ * Navigation: arrows, Enter to select, Backspace to go up.
+ *
+ * @param cfg            Connection configuration (must have gmail_mode=1).
+ * @param current_label  Label active before opening; used for pre-positioning.
+ * @param go_up          Output: set to 1 when Backspace pressed (go to accounts).
+ * @return Heap-allocated selected label ID string, or NULL on ESC/quit.
+ *         Caller must free().
+ */
+char *email_service_list_labels_interactive(const Config *cfg,
+                                            const char *current_label,
+                                            int *go_up);
+
+/**
  * @brief Interactive accounts list screen (TUI).
  *
  * Shows all configured accounts in a navigable cursor list.

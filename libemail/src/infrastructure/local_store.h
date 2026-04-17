@@ -220,6 +220,30 @@ int label_idx_load(const char *label, char (**uids_out)[17], int *count_out);
 int label_idx_write(const char *label, const char (*uids)[17], int count);
 
 /**
+ * @brief Extract the labels field from a Gmail .hdr file.
+ *
+ * The .hdr format is: from\tsubject\tdate\tlabels\tflags
+ * Returns a heap-allocated copy of the labels field (4th tab-separated field),
+ * or NULL if the header is not in Gmail format.  Caller must free().
+ *
+ * @param folder  Folder/label name (empty string for Gmail flat store).
+ * @param uid     16-char UID string.
+ * @return Comma-separated labels string, or NULL.
+ */
+char *local_hdr_get_labels(const char *folder, const char *uid);
+
+/**
+ * @brief List all label names that have .idx files in the labels/ directory.
+ *
+ * Scans accounts/<email>/labels/ and returns label names (without .idx extension).
+ *
+ * @param labels_out  Set to heap-allocated array of strings. Caller frees each + array.
+ * @param count_out   Set to number of labels.
+ * @return 0 on success, -1 on error.
+ */
+int label_idx_list(char ***labels_out, int *count_out);
+
+/**
  * @brief Saves the gmail_history_id for incremental sync.
  * @return 0 on success, -1 on error.
  */

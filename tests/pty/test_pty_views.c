@@ -1109,7 +1109,7 @@ static void test_wizard_abort(void) {
 
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "wizard abort: opens");
-    ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_key(s, PTY_KEY_CTRL_D);  /* EOF on stdin → getline returns -1 → wizard aborts */
     ASSERT_WAIT_FOR(s, "borted", WAIT_MS);
     pty_close(s);
@@ -1127,6 +1127,8 @@ static void test_wizard_complete(void) {
     restart_mock();
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "wizard complete: opens");
+    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
     pty_send_str(s, "imaps://localhost:9993\n");   /* explicit correct protocol */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
@@ -1154,6 +1156,8 @@ static void test_wizard_host_autocomplete(void) {
 
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "wizard autocomplete: opens");
+    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
     pty_send_str(s, "localhost:9993\n");            /* no protocol → auto imaps:// */
     ASSERT_WAIT_FOR(s, "imaps://", WAIT_MS);        /* confirmation line printed */
@@ -1182,6 +1186,8 @@ static void test_wizard_bad_protocol_rejected(void) {
 
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "wizard bad proto: opens");
+    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
     pty_send_str(s, "imap://localhost:9993\n");     /* wrong protocol */
     ASSERT_WAIT_FOR(s, "unsupported protocol", WAIT_MS);
@@ -2063,6 +2069,45 @@ static void test_tui_list_sync_and_refresh(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  GMAIL WIZARD — Account type selection (US-27)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_wizard_gmail_type_selection(void) {
+    /* Gmail flow: choose type 2 → "Email address" prompt appears */
+    char wiz_home[300];
+    snprintf(wiz_home, sizeof(wiz_home), "%s/wizard_gmail", g_test_home);
+    mkdir(wiz_home, 0700);
+    setenv("HOME", wiz_home, 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "wizard gmail: opens");
+    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "IMAP");
+    ASSERT_SCREEN_CONTAINS(s, "Gmail");
+    pty_send_str(s, "2\n");  /* Gmail */
+    ASSERT_WAIT_FOR(s, "Email address", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);  /* abort — no OAuth server available */
+    ASSERT_WAIT_FOR(s, "borted", WAIT_MS);
+    pty_close(s);
+
+    setenv("HOME", g_test_home, 1);
+}
+
+static void test_account_list_type_column(void) {
+    /* Account list shows Type column with "IMAP" for standard accounts */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "account type column: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Type");
+    ASSERT_SCREEN_CONTAINS(s, "IMAP");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  TUI ACCOUNTS: ADD / DELETE / EDIT IMAP (US-21 AC4/5/13)
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -2074,6 +2119,8 @@ static void test_tui_accounts_new_key(void) {
     ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "n");
+    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
     pty_send_key(s, PTY_KEY_CTRL_D);  /* EOF aborts wizard */
     ASSERT_WAIT_FOR(s, "borted", WAIT_MS);
@@ -2429,6 +2476,11 @@ int main(int argc, char *argv[]) {
     printf("\n--- email-tui: sync and refresh (US-19) ---\n");
     restart_mock();
     RUN_TEST(test_tui_list_sync_and_refresh);
+
+    printf("\n--- Gmail wizard & account type column (US-27) ---\n");
+    restart_mock();
+    RUN_TEST(test_wizard_gmail_type_selection);
+    RUN_TEST(test_account_list_type_column);
 
     printf("\n--- email-tui: accounts management (US-21) ---\n");
     restart_mock();

@@ -81,7 +81,47 @@ void test_wizard(void) {
         ASSERT(strcmp(cfg->folder, "STDIN") == 0, "Folder should match stdin input");
     }
 
-    // 6. Gmail type: EOF after email → NULL (no device flow in test)
+    // 6. Custom IMAP port → appended to URL
+    {
+        const char *input6p = "1\nimap.custom.com\n10993\nuser@custom.com\npass\nINBOX\n";
+        RAII_FILE FILE *stream = fmemopen((void*)input6p, strlen(input6p), "r");
+        RAII_WITH_CLEANUP(config_cleanup) Config *cfg = setup_wizard_run_internal(stream);
+        ASSERT(cfg != NULL, "Port wizard: returns config");
+        ASSERT(strcmp(cfg->host, "imaps://imap.custom.com:10993") == 0,
+               "Port wizard: custom port appended to URL");
+    }
+
+    // 7. Default IMAP port (empty) → no port in URL
+    {
+        const char *input7 = "1\nimap.default.com\n\nuser@default.com\npass\nINBOX\n";
+        RAII_FILE FILE *stream = fmemopen((void*)input7, strlen(input7), "r");
+        RAII_WITH_CLEANUP(config_cleanup) Config *cfg = setup_wizard_run_internal(stream);
+        ASSERT(cfg != NULL, "Port wizard default: returns config");
+        ASSERT(strcmp(cfg->host, "imaps://imap.default.com") == 0,
+               "Port wizard default: no port suffix");
+    }
+
+    // 8. Explicit 993 → no port in URL (same as default)
+    {
+        const char *input8 = "1\nimap.explicit.com\n993\nuser@explicit.com\npass\nINBOX\n";
+        RAII_FILE FILE *stream = fmemopen((void*)input8, strlen(input8), "r");
+        RAII_WITH_CLEANUP(config_cleanup) Config *cfg = setup_wizard_run_internal(stream);
+        ASSERT(cfg != NULL, "Port wizard 993: returns config");
+        ASSERT(strcmp(cfg->host, "imaps://imap.explicit.com") == 0,
+               "Port wizard 993: no port suffix (993 is default)");
+    }
+
+    // 9. Host already has port → port prompt ignored
+    {
+        const char *input9 = "1\nimap.ported.com:995\n1234\nuser@ported.com\npass\nINBOX\n";
+        RAII_FILE FILE *stream = fmemopen((void*)input9, strlen(input9), "r");
+        RAII_WITH_CLEANUP(config_cleanup) Config *cfg = setup_wizard_run_internal(stream);
+        ASSERT(cfg != NULL, "Port wizard existing: returns config");
+        ASSERT(strcmp(cfg->host, "imaps://imap.ported.com:995") == 0,
+               "Port wizard existing: original port preserved");
+    }
+
+    // 10. Gmail type: EOF after email → NULL (no device flow in test)
     {
         const char *input6 = "2\ngmail@example.com\n";
         RAII_FILE FILE *stream = fmemopen((void*)input6, strlen(input6), "r");

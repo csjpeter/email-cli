@@ -551,9 +551,21 @@ int main(int argc, char *argv[]) {
         if (tui_folder)
             ui_pref_set_str(fc_key, tui_folder);  /* persist selected folder */
 
-        if (go_up || !tui_folder) {
-            /* Backspace at folder root, ESC, or connection error
-             * → back to accounts screen */
+        if (!tui_folder && !go_up) {
+            /* Connection error or empty folder list — show error,
+             * wait for keypress, then return to accounts */
+            fprintf(stderr, "\n  Connection failed. Press any key to return to accounts...\n");
+            fflush(stderr);
+            {
+                TermRawState *_r = terminal_raw_enter();
+                char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
+                terminal_raw_exit(&_r);
+            }
+            config_free(sel_cfg);
+            continue;
+        }
+        if (go_up) {
+            /* Backspace at folder root → back to accounts screen */
             config_free(sel_cfg);
             continue;
         }

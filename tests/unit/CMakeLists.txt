@@ -39,6 +39,7 @@ set(TEST_SOURCES
     test_input_line.c
     test_path_complete.c
     test_json_util.c
+    test_gmail_auth.c
     ../../libemail/src/core/fs_util.c
     ../../libemail/src/core/logger.c
     ../../libemail/src/core/config.c
@@ -49,6 +50,7 @@ set(TEST_SOURCES
     ../../libemail/src/core/input_line.c
     ../../libemail/src/core/path_complete.c
     ../../libemail/src/core/json_util.c
+    ../../libemail/src/infrastructure/gmail_auth.c
     ../../libemail/src/infrastructure/config_store.c
     ../../libemail/src/infrastructure/setup_wizard.c
     ../../libemail/src/infrastructure/imap_client.c
@@ -58,7 +60,8 @@ set(TEST_SOURCES
 )
 
 add_executable(test-runner ${TEST_SOURCES})
-target_link_libraries(test-runner OpenSSL::SSL OpenSSL::Crypto)
+find_package(CURL REQUIRED)
+target_link_libraries(test-runner OpenSSL::SSL OpenSSL::Crypto CURL::libcurl)
 add_dependencies(test-runner test-tls-certs)
 
 add_test(NAME UnitTests COMMAND test-runner)

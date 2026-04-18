@@ -44,13 +44,21 @@ echo "  -> $VIDEO_RAW"
 echo ""
 echo "=== Step 2: Generate narration audio ==="
 
-# Strip timestamp markers and section headers, keep only spoken text
+# Strip file header, timestamp markers, section headers — keep only spoken text
 NARRATION_CLEAN="$SCRIPT_DIR/narration_clean.txt"
 grep -v '^\[' "$NARRATION_FILE" \
     | grep -v '^=\+' \
     | grep -v '^email-cli —' \
+    | grep -v '^Cél hossz' \
+    | grep -v '^Total target length' \
     | sed '/^$/d' \
     > "$NARRATION_CLEAN"
+
+if [[ ! -s "$NARRATION_CLEAN" ]]; then
+    echo "ERROR: narration_clean.txt is empty after stripping"
+    exit 1
+fi
+echo "  Narration: $(wc -l < "$NARRATION_CLEAN") lines"
 
 if [[ -n "${ELEVENLABS_API_KEY:-}" ]]; then
     echo "  Using ElevenLabs TTS..."
@@ -89,16 +97,27 @@ else
 fi
 
 rm -f "$NARRATION_CLEAN"
-echo "  -> $AUDIO_FILE"
+
+if [[ ! -s "$AUDIO_FILE" ]]; then
+    echo "ERROR: narration.mp3 is empty — TTS generation failed"
+    exit 1
+fi
+AUDIO_DURATION=$(ffprobe -v error -show_entries format=duration \
+    -of default=noprint_wrappers=1:nokey=1 "$AUDIO_FILE" 2>/dev/null || echo "unknown")
+echo "  -> $AUDIO_FILE  (duration: ${AUDIO_DURATION}s)"
 
 # ── Step 3: Merge video + audio ──────────────────────────────────────────────
 echo ""
 echo "=== Step 3: Merge video + audio with ffmpeg ==="
+# Use audio length as the authoritative duration.
+# tpad freezes the last video frame if the video ends before the audio.
 ffmpeg -y \
     -i "$VIDEO_RAW" \
     -i "$AUDIO_FILE" \
-    -c:v copy \
-    -c:a aac \
+    -filter_complex "[0:v]tpad=stop_mode=clone:stop_duration=9999[v]" \
+    -map "[v]" -map 1:a:0 \
+    -c:v libx264 -preset fast -crf 22 \
+    -c:a aac -b:a 128k \
     -shortest \
     "$OUTPUT_FILE"
 echo "  -> $OUTPUT_FILE"

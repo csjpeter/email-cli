@@ -53,6 +53,19 @@ static char *get_settings_path(void) {
     return path;
 }
 
+static void write_settings(const char *path) {
+    const char *config_base = platform_config_dir();
+    if (!config_base) return;
+    char dir[4096];
+    snprintf(dir, sizeof(dir), "%s/%s", config_base, CONFIG_APP_DIR);
+    if (fs_mkdir_p(dir, 0700) != 0) return;
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp, "credential_obfuscation=%d\n", g_credential_obfuscation);
+    fclose(fp);
+    fs_ensure_permissions(path, 0600);
+}
+
 static void load_settings_once(void) {
     if (g_obfuscation_loaded) return;
     g_obfuscation_loaded = 1;
@@ -60,8 +73,12 @@ static void load_settings_once(void) {
     RAII_STRING char *path = get_settings_path();
     if (!path) return;
 
-    RAII_FILE FILE *fp = fopen(path, "r");
-    if (!fp) return;
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        /* First run — create settings.ini with defaults */
+        write_settings(path);
+        return;
+    }
 
     char line[256];
     while (fgets(line, sizeof(line), fp)) {
@@ -72,6 +89,7 @@ static void load_settings_once(void) {
         if (strcmp(key, "credential_obfuscation") == 0)
             g_credential_obfuscation = atoi(val);
     }
+    fclose(fp);
 }
 
 int app_settings_get_obfuscation(void) {
@@ -82,21 +100,9 @@ int app_settings_get_obfuscation(void) {
 int app_settings_set_obfuscation(int enabled) {
     load_settings_once();
     g_credential_obfuscation = enabled ? 1 : 0;
-
-    const char *config_base = platform_config_dir();
-    if (!config_base) return -1;
-
-    char dir[4096];
-    snprintf(dir, sizeof(dir), "%s/%s", config_base, CONFIG_APP_DIR);
-    if (fs_mkdir_p(dir, 0700) != 0) return -1;
-
     RAII_STRING char *path = get_settings_path();
     if (!path) return -1;
-
-    RAII_FILE FILE *fp = fopen(path, "w");
-    if (!fp) return -1;
-    fprintf(fp, "credential_obfuscation=%d\n", g_credential_obfuscation);
-    fs_ensure_permissions(path, 0600);
+    write_settings(path);
     return 0;
 }
 

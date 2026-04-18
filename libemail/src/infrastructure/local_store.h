@@ -278,6 +278,19 @@ int local_gmail_history_save(const char *history_id);
  */
 char *local_gmail_history_load(void);
 
+/**
+ * @brief Saves Gmail label ID→display-name mapping to local cache.
+ * Format: one line per label: "<id>\t<name>\n"
+ * @return 0 on success, -1 on error.
+ */
+int local_gmail_label_names_save(char **ids, char **names, int count);
+
+/**
+ * @brief Look up a Gmail label display name by ID from local cache.
+ * Returns heap-allocated display name, or NULL if not found. Caller must free().
+ */
+char *local_gmail_label_name_lookup(const char *id);
+
 /* ── UI preferences ──────────────────────────────────────────────────── */
 
 /** @brief Reads an integer UI preference. */

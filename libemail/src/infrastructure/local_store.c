@@ -1095,6 +1095,36 @@ void local_trash_labels_remove(const char *uid) {
     if (path) unlink(path);
 }
 
+int local_gmail_label_names_save(char **ids, char **names, int count) {
+    if (!g_account_base[0]) return -1;
+    if (fs_mkdir_p(g_account_base, 0700) != 0) return -1;
+    RAII_STRING char *path = NULL;
+    if (asprintf(&path, "%s/gmail_label_names", g_account_base) == -1) return -1;
+    RAII_FILE FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+    for (int i = 0; i < count; i++)
+        fprintf(fp, "%s\t%s\n", ids[i], names[i]);
+    return 0;
+}
+
+char *local_gmail_label_name_lookup(const char *id) {
+    if (!g_account_base[0] || !id) return NULL;
+    RAII_STRING char *path = NULL;
+    if (asprintf(&path, "%s/gmail_label_names", g_account_base) == -1) return NULL;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+    char buf[1024];
+    while (fgets(buf, (int)sizeof(buf), fp)) {
+        buf[strcspn(buf, "\r\n")] = '\0';
+        char *tab = strchr(buf, '\t');
+        if (!tab) continue;
+        *tab = '\0';
+        if (strcmp(buf, id) == 0)
+            return strdup(tab + 1);
+    }
+    return NULL;
+}
+
 int local_gmail_history_save(const char *history_id) {
     if (!g_account_base[0] || !history_id) return -1;
     if (fs_mkdir_p(g_account_base, 0700) != 0) return -1;

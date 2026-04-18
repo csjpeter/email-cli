@@ -2776,7 +2776,8 @@ static int build_label_display(
     if (user_count > 0) seps[n] = 1;
     for (int i = 0; i < user_count; i++) {
         ids[n]   = strdup(user_labels[i]);
-        names[n] = strdup(user_labels[i]);
+        char *disp = local_gmail_label_name_lookup(user_labels[i]);
+        names[n] = disp ? disp : strdup(user_labels[i]);
         n++;
     }
     /* Section 3: special labels (separator before first) */

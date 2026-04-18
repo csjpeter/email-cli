@@ -180,6 +180,18 @@ int gmail_sync_full(GmailClient *gc) {
             logger_log(LOG_WARN, "gmail_sync: could not retrieve historyId");
     }
 
+    /* 4. Save label ID→name mapping for friendly display */
+    {
+        char **lbl_names = NULL, **lbl_ids = NULL;
+        int lbl_count = 0;
+        if (gmail_list_labels(gc, &lbl_names, &lbl_ids, &lbl_count) == 0) {
+            local_gmail_label_names_save(lbl_ids, lbl_names, lbl_count);
+            for (int i = 0; i < lbl_count; i++) { free(lbl_names[i]); free(lbl_ids[i]); }
+            free(lbl_names);
+            free(lbl_ids);
+        }
+    }
+
     free(all_uids);
     logger_log(LOG_INFO, "gmail_sync: full sync completed (%d messages)", uid_count);
     return 0;
@@ -377,6 +389,18 @@ int gmail_sync_incremental(GmailClient *gc) {
         local_gmail_history_save(new_history_id);
 
     free(resp);
+
+    /* Refresh label name mapping if any label events occurred */
+    if (hc.label_changes > 0) {
+        char **lbl_names = NULL, **lbl_ids = NULL;
+        int lbl_count = 0;
+        if (gmail_list_labels(gc, &lbl_names, &lbl_ids, &lbl_count) == 0) {
+            local_gmail_label_names_save(lbl_ids, lbl_names, lbl_count);
+            for (int i = 0; i < lbl_count; i++) { free(lbl_names[i]); free(lbl_ids[i]); }
+            free(lbl_names);
+            free(lbl_ids);
+        }
+    }
 
     logger_log(LOG_INFO, "gmail_sync: incremental done — added=%d deleted=%d labels=%d",
                hc.added, hc.deleted, hc.label_changes);

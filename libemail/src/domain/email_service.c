@@ -1067,13 +1067,49 @@ static pid_t bg_sync_pid = -1;
 
 static void bg_sync_sigchld(int sig) {
     (void)sig;
-    if (bg_sync_pid > 0) {
-        int status;
-        if (waitpid(bg_sync_pid, &status, WNOHANG) == bg_sync_pid) {
+    int status;
+    pid_t p;
+    /* Reap all children; only bg_sync_pid triggers bg_sync_done. */
+    while ((p = waitpid(-1, &status, WNOHANG)) > 0) {
+        if (p == bg_sync_pid) {
             bg_sync_pid = -1;
             bg_sync_done = 1;
         }
     }
+}
+
+/**
+ * Fork a minimal child to push a single flag change to the mail server.
+ * The parent returns immediately; the child connects, sets the flag, and exits.
+ * The pending queue already records the change so failures are retried on sync.
+ */
+static void flag_push_background(const Config *cfg, const char *uid,
+                                  const char *flag_name, int add_flag) {
+    /* Ensure SIGCHLD is handled so the child is reaped without polling. */
+    struct sigaction sa = {0};
+    sa.sa_handler = bg_sync_sigchld;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGCHLD, &sa, NULL);
+
+    pid_t pid = fork();
+    if (pid < 0) return; /* fork failed; pending queue retries on next sync */
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            if (devnull > STDERR_FILENO) close(devnull);
+        }
+        MailClient *mc = make_mail(cfg);
+        if (mc) {
+            mail_client_set_flag(mc, uid, flag_name, add_flag);
+            mail_client_free(mc);
+        }
+        _exit(0);
+    }
+    /* Parent continues; child reaped by bg_sync_sigchld. */
 }
 
 /**
@@ -2150,7 +2186,7 @@ read_key_again: ;
                             label_idx_add("STARRED", uid);
                     }
                     local_hdr_update_flags("", uid, entries[cursor].flags);
-                    sync_start_background();
+                    flag_push_background(cfg, uid, flag_name, add_flag);
                 } else if (list_mc) {
                     /* IMAP online mode: connection already open, push immediately */
                     mail_client_set_flag(list_mc, uid, flag_name, add_flag);

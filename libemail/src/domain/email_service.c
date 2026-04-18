@@ -2670,9 +2670,9 @@ static void show_label_picker(MailClient *mc,
 
 /* System labels in display order.  id = .idx filename, name = display name. */
 static const struct { const char *id; const char *name; } gmail_system_labels[] = {
-    { "INBOX",    "Inbox"   },
-    { "STARRED",  "Starred" },
     { "UNREAD",   "Unread"  },
+    { "STARRED",  "Starred" },
+    { "INBOX",    "Inbox"   },
     { "SENT",     "Sent"    },
     { "DRAFTS",   "Drafts"  },
 };

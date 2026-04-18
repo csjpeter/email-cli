@@ -2128,22 +2128,15 @@ read_key_again: ;
                 /* Determine the IMAP add/remove direction */
                 int add_flag = (ch == 'n') ? (currently ? 1 : 0) : (!currently ? 1 : 0);
 
-                /* Gmail: lazy-connect for server-side update */
-                if (is_gmail && !list_mc)
-                    list_mc = make_mail(cfg);
-
-                if (list_mc) {
-                    /* Online: push immediately */
-                    mail_client_set_flag(list_mc, uid, flag_name, add_flag);
-                }
-                /* Always queue for sync (covers offline/cron mode and STORE failures) */
+                /* Local update first — instant UI response regardless of network */
                 local_pending_flag_add(folder, uid, flag_name, add_flag);
                 entries[cursor].flags ^= bit;
                 ManifestEntry *me = manifest_find(manifest, uid);
                 if (me) me->flags = entries[cursor].flags;
                 manifest_save(folder, manifest);
 
-                /* Gmail: update local label indexes and .hdr flags */
+                /* Gmail: update local label indexes and .hdr flags, then kick
+                 * background sync to flush the pending flag to the server. */
                 if (is_gmail) {
                     if (ch == 'n') {
                         if (currently)
@@ -2157,6 +2150,10 @@ read_key_again: ;
                             label_idx_add("STARRED", uid);
                     }
                     local_hdr_update_flags("", uid, entries[cursor].flags);
+                    sync_start_background();
+                } else if (list_mc) {
+                    /* IMAP online mode: connection already open, push immediately */
+                    mail_client_set_flag(list_mc, uid, flag_name, add_flag);
                 }
             }
             break;

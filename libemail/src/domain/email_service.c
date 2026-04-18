@@ -1742,16 +1742,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (wend > show_count)           wend = show_count;
 
         /* Compute adaptive column widths.
-         * IMAP:  "  DATE  "(18) + "  Sts  "(8) = 28  (UID shown only in reader)
-         * Gmail: "  Labels "(lbl_w+2) + "  DATE  "(18) + "  Sts  "(8)
+         * Fixed: "  " indent(2) + date(16) + "  "(2) + sts(4) + "  "(2) + "  "(2 before from) = 28
          * subj_w gets ~60% of remaining space, from_w ~40%. */
         int tcols    = terminal_cols();
         int is_gmail = cfg->gmail_mode;
-        int lbl_w    = is_gmail ? 14 : 0;
-        /* Fixed chars: "  " indent(2) + lbl_w + "  "(2) + date(16) + "  "(2) + sts(4) + "  "(2) + "  "(2 before from)
-         * Gmail:  2 + 14 + 2 + 16 + 2 + 4 + 2 + 2 = 44
-         * IMAP:   2      + 16 + 2 + 4 + 2 + 2     = 28 */
-        int overhead = is_gmail ? (2 + lbl_w + 2 + 16 + 2 + 4 + 2 + 2) : 28;
+        int overhead = 28;
         int avail    = tcols - overhead;
         if (avail < 40) avail = 40;
         int subj_w = avail * 3 / 5;
@@ -1781,15 +1776,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             for (int p = used; p < tcols; p++) putchar(' ');
             printf("\033[0m\n\n");
         }
-        if (is_gmail) {
-            printf("  %-*s  %-16s  %-4s  %-*s  %s\n",
-                   lbl_w, "Labels", "Date", "Sts", subj_w, "Subject", "From");
-            printf("  "); print_dbar(lbl_w); printf("  ");
-        } else {
-            printf("  %-16s  %-4s  %-*s  %s\n",
-                   "Date", "Sts", subj_w, "Subject", "From");
-            printf("  ");
-        }
+        printf("  %-16s  %-4s  %-*s  %s\n",
+               "Date", "Sts", subj_w, "Subject", "From");
+        printf("  ");
         print_dbar(16); printf("  ");
         printf("\u2550\u2550\u2550\u2550  ");
         print_dbar(subj_w); printf("  ");
@@ -1857,58 +1846,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 (entries[i].flags & MSG_FLAG_ATTACH)  ? 'A' : '-',
                 '\0'
             };
-            if (is_gmail) {
-                /* Load labels from .hdr cache for display */
-                char *lbl_raw = local_hdr_get_labels("", entries[i].uid);
-                /* Build short label display: ★ for STARRED, skip system labels */
-                char lbl_disp[64] = "";
-                if (lbl_raw) {
-                    int dpos = 0;
-                    char *tok = lbl_raw, *sep;
-                    while (tok && *tok) {
-                        sep = strchr(tok, ',');
-                        size_t tlen = sep ? (size_t)(sep - tok) : strlen(tok);
-                        char lbl[64];
-                        if (tlen >= sizeof(lbl)) tlen = sizeof(lbl) - 1;
-                        memcpy(lbl, tok, tlen);
-                        lbl[tlen] = '\0';
-                        /* Starred → ★ symbol */
-                        if (strcmp(lbl, "STARRED") == 0) {
-                            if (dpos > 0 && dpos < (int)sizeof(lbl_disp) - 1)
-                                lbl_disp[dpos++] = ' ';
-                            const char *star = "\xe2\x98\x85";
-                            int slen = 3;
-                            if (dpos + slen < (int)sizeof(lbl_disp)) {
-                                memcpy(lbl_disp + dpos, star, (size_t)slen);
-                                dpos += slen;
-                            }
-                        } else if (strcmp(lbl, "UNREAD") != 0 &&
-                                   strcmp(lbl, "INBOX") != 0 &&
-                                   strcmp(lbl, "SENT") != 0 &&
-                                   strcmp(lbl, "IMPORTANT") != 0 &&
-                                   strncmp(lbl, "CATEGORY_", 9) != 0) {
-                            /* Show user labels */
-                            if (dpos > 0 && dpos < (int)sizeof(lbl_disp) - 1)
-                                lbl_disp[dpos++] = ' ';
-                            int copy = (int)tlen;
-                            if (dpos + copy >= (int)sizeof(lbl_disp))
-                                copy = (int)sizeof(lbl_disp) - dpos - 1;
-                            if (copy > 0) {
-                                memcpy(lbl_disp + dpos, lbl, (size_t)copy);
-                                dpos += copy;
-                            }
-                        }
-                        lbl_disp[dpos] = '\0';
-                        tok = sep ? sep + 1 : NULL;
-                    }
-                    free(lbl_raw);
-                }
-                printf("  ");
-                print_padded_col(lbl_disp, lbl_w);
-                printf("  %-16.16s  %s  ", date, sts);
-            } else {
-                printf("  %-16.16s  %s  ", date, sts);
-            }
+            printf("  %-16.16s  %s  ", date, sts);
             print_padded_col(subject, subj_w);
             printf("  ");
             print_padded_col(from,    from_w);

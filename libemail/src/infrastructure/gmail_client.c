@@ -591,7 +591,7 @@ char *gmail_get_history(GmailClient *c, const char *history_id) {
         return NULL;
     }
     if (code != 200) {
-        logger_log(LOG_ERROR, "gmail_get_history: HTTP %ld", code);
+        logger_log(LOG_WARN, "gmail_get_history: HTTP %ld (will retry with full sync)", code);
         free(resp);
         return NULL;
     }

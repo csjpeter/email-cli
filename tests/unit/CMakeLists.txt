@@ -76,5 +76,9 @@ add_executable(test-runner ${TEST_SOURCES})
 find_package(CURL REQUIRED)
 target_link_libraries(test-runner OpenSSL::SSL OpenSSL::Crypto CURL::libcurl)
 add_dependencies(test-runner test-tls-certs)
+target_compile_definitions(test-runner PRIVATE
+    TEST_CERT_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.crt"
+    TEST_KEY_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.key"
+)
 
 add_test(NAME UnitTests COMMAND test-runner)

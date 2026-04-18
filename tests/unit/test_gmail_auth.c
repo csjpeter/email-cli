@@ -9,14 +9,11 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-/* ── gmail_auth_device_flow — error paths (no network needed) ─────── */
-
-static void test_device_flow_no_client_id(void) {
-    Config cfg = {0};
-    /* No client_id configured and default is empty → should fail */
-    int rc = gmail_auth_device_flow(&cfg);
-    ASSERT(rc == -1, "device_flow: fails with no client_id");
-}
+/* ── gmail_auth_device_flow ──────────────────────────────────────── */
+/* gmail_auth_device_flow() opens a TCP listener and launches a browser,
+ * so it MUST NOT be called from unit tests.  The localhost listener +
+ * code extraction logic is tested separately via test_auth_code_extraction
+ * and test_auth_code_denied below. */
 
 /* ── gmail_auth_refresh — error paths (no network needed) ─────────── */
 
@@ -174,7 +171,6 @@ static void test_wizard_rejects_gmail_imap(void) {
 /* ── Registration ─────────────────────────────────────────────────── */
 
 void test_gmail_auth(void) {
-    RUN_TEST(test_device_flow_no_client_id);
     RUN_TEST(test_refresh_no_token);
     RUN_TEST(test_refresh_empty_token);
     RUN_TEST(test_auth_code_extraction);

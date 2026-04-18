@@ -418,6 +418,178 @@ static void test_trash_restore_flow(void) {
     ASSERT(local_trash_labels_load(uid) == NULL, "untrash: backup removed");
 }
 
+/* ── local_hdr_update_flags (#37) ─────────────────────────────────── */
+
+static void test_hdr_update_flags_basic(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://hdr-updflags-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    /* Save a .hdr with flags=3 (UNSEEN|FLAGGED) */
+    const char *hdr = "Alice\tHello\t2026-04-18\tINBOX,UNREAD,STARRED\t3";
+    local_hdr_save("", "18c9b46d67a6f001", hdr, strlen(hdr));
+
+    /* Update flags to 0 (mark as read + unstar) */
+    ASSERT(local_hdr_update_flags("", "18c9b46d67a6f001", 0) == 0,
+           "hdr_update_flags: rc=0");
+
+    char *loaded = local_hdr_load("", "18c9b46d67a6f001");
+    ASSERT(loaded != NULL, "hdr_update_flags: load ok");
+
+    /* Verify the last tab field is now "0" */
+    char *last_tab = strrchr(loaded, '\t');
+    ASSERT(last_tab != NULL, "hdr_update_flags: has tab");
+    ASSERT(atoi(last_tab + 1) == 0, "hdr_update_flags: flags=0");
+
+    /* Verify the rest is unchanged */
+    ASSERT(strstr(loaded, "Alice") != NULL, "hdr_update_flags: from preserved");
+    ASSERT(strstr(loaded, "Hello") != NULL, "hdr_update_flags: subject preserved");
+    free(loaded);
+}
+
+static void test_hdr_update_flags_toggle_unseen(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://hdr-toggle-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *uid = "18c9b46d67a6f002";
+    const char *hdr = "Bob\tTest\t2026-04-18\tINBOX,UNREAD\t1";
+    local_hdr_save("", uid, hdr, strlen(hdr));
+
+    /* Mark as read: flags 1→0 */
+    local_hdr_update_flags("", uid, 0);
+    char *h1 = local_hdr_load("", uid);
+    char *t1 = strrchr(h1, '\t');
+    ASSERT(atoi(t1 + 1) == 0, "toggle unseen: now read (flags=0)");
+    free(h1);
+
+    /* Mark as unread again: flags 0→1 */
+    local_hdr_update_flags("", uid, 1);
+    char *h2 = local_hdr_load("", uid);
+    char *t2 = strrchr(h2, '\t');
+    ASSERT(atoi(t2 + 1) == 1, "toggle unseen: back to unread (flags=1)");
+    free(h2);
+}
+
+static void test_hdr_update_flags_nonexistent(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://hdr-noexist-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    ASSERT(local_hdr_update_flags("", "0000000000000000", 5) == -1,
+           "hdr_update_flags nonexistent: returns -1");
+}
+
+/* ── Gmail flag toggle end-to-end (#37) ──────────────────────────── */
+
+static void test_gmail_flag_toggle_unread(void) {
+    /* Simulates what email_service does when user presses 'n' on Gmail */
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://gmail-ftoggle-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *uid = "18c9b46d67a6e001";
+
+    /* Initial state: message is in INBOX + UNREAD, flags=1 (UNSEEN) */
+    const char *hdr = "Alice\tHello\t2026-04-18\tINBOX,UNREAD\t1";
+    local_hdr_save("", uid, hdr, strlen(hdr));
+    label_idx_add("INBOX", uid);
+    label_idx_add("UNREAD", uid);
+
+    ASSERT(label_idx_count("UNREAD") == 1, "toggle pre: UNREAD count=1");
+
+    /* === User presses 'n' → mark as read === */
+    /* 1. Update label index */
+    label_idx_remove("UNREAD", uid);
+    /* 2. Update .hdr flags (remove UNSEEN bit) */
+    local_hdr_update_flags("", uid, 0);
+
+    /* Verify: UNREAD count decreased */
+    ASSERT(label_idx_count("UNREAD") == 0, "toggle read: UNREAD count=0");
+    ASSERT(label_idx_contains("UNREAD", uid) == 0, "toggle read: not in UNREAD");
+    /* Still in INBOX */
+    ASSERT(label_idx_contains("INBOX", uid) == 1, "toggle read: still in INBOX");
+    /* .hdr flags updated */
+    char *h = local_hdr_load("", uid);
+    char *lt = strrchr(h, '\t');
+    ASSERT(atoi(lt + 1) == 0, "toggle read: .hdr flags=0");
+    free(h);
+
+    /* === User presses 'n' again → mark as unread === */
+    label_idx_add("UNREAD", uid);
+    local_hdr_update_flags("", uid, 1);
+
+    ASSERT(label_idx_count("UNREAD") == 1, "toggle unread: UNREAD count=1");
+    ASSERT(label_idx_contains("UNREAD", uid) == 1, "toggle unread: in UNREAD");
+    h = local_hdr_load("", uid);
+    lt = strrchr(h, '\t');
+    ASSERT(atoi(lt + 1) == 1, "toggle unread: .hdr flags=1");
+    free(h);
+}
+
+static void test_gmail_flag_toggle_starred(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://gmail-fstar-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    const char *uid = "18c9b46d67a6e002";
+
+    /* Initial: not starred, flags=0 */
+    const char *hdr = "Bob\tTest\t2026-04-18\tINBOX\t0";
+    local_hdr_save("", uid, hdr, strlen(hdr));
+    label_idx_add("INBOX", uid);
+
+    ASSERT(label_idx_count("STARRED") == 0, "star pre: STARRED count=0");
+
+    /* User presses 'f' → add star */
+    label_idx_add("STARRED", uid);
+    local_hdr_update_flags("", uid, 2);  /* MSG_FLAG_FLAGGED = 2 */
+
+    ASSERT(label_idx_count("STARRED") == 1, "star on: STARRED count=1");
+    ASSERT(label_idx_contains("STARRED", uid) == 1, "star on: in STARRED");
+
+    /* User presses 'f' again → remove star */
+    label_idx_remove("STARRED", uid);
+    local_hdr_update_flags("", uid, 0);
+
+    ASSERT(label_idx_count("STARRED") == 0, "star off: STARRED count=0");
+    ASSERT(label_idx_contains("STARRED", uid) == 0, "star off: not in STARRED");
+}
+
+static void test_gmail_flag_toggle_multiple_msgs(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://gmail-fmulti-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    /* 3 unread messages */
+    for (int i = 1; i <= 3; i++) {
+        char uid[17];
+        snprintf(uid, sizeof(uid), "18c9b46d67a6d%03d", i);
+        char hdr[128];
+        snprintf(hdr, sizeof(hdr), "User%d\tMsg%d\t2026-04-18\tINBOX,UNREAD\t1", i, i);
+        local_hdr_save("", uid, hdr, strlen(hdr));
+        label_idx_add("INBOX", uid);
+        label_idx_add("UNREAD", uid);
+    }
+
+    ASSERT(label_idx_count("UNREAD") == 3, "multi pre: UNREAD=3");
+
+    /* Mark first message as read */
+    label_idx_remove("UNREAD", "18c9b46d67a6d001");
+    local_hdr_update_flags("", "18c9b46d67a6d001", 0);
+    ASSERT(label_idx_count("UNREAD") == 2, "multi: UNREAD=2 after one read");
+
+    /* Mark second as read */
+    label_idx_remove("UNREAD", "18c9b46d67a6d002");
+    local_hdr_update_flags("", "18c9b46d67a6d002", 0);
+    ASSERT(label_idx_count("UNREAD") == 1, "multi: UNREAD=1 after two read");
+
+    /* Mark first as unread again */
+    label_idx_add("UNREAD", "18c9b46d67a6d001");
+    local_hdr_update_flags("", "18c9b46d67a6d001", 1);
+    ASSERT(label_idx_count("UNREAD") == 2, "multi: UNREAD=2 after re-unread");
+}
+
 /* ── Registration ─────────────────────────────────────────────────── */
 
 void test_label_idx(void) {
@@ -440,4 +612,10 @@ void test_label_idx(void) {
     RUN_TEST(test_label_toggle_add_remove);
     RUN_TEST(test_trash_labels_save_load);
     RUN_TEST(test_trash_restore_flow);
+    RUN_TEST(test_hdr_update_flags_basic);
+    RUN_TEST(test_hdr_update_flags_toggle_unseen);
+    RUN_TEST(test_hdr_update_flags_nonexistent);
+    RUN_TEST(test_gmail_flag_toggle_unread);
+    RUN_TEST(test_gmail_flag_toggle_starred);
+    RUN_TEST(test_gmail_flag_toggle_multiple_msgs);
 }

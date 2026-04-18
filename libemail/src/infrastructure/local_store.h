@@ -62,6 +62,9 @@ int   local_hdr_save(const char *folder, const char *uid, const char *content, s
 /** @brief Reads a locally stored header. Caller must free. */
 char *local_hdr_load(const char *folder, const char *uid);
 
+/** @brief Updates the flags integer (5th tab field) in a stored .hdr file. */
+int   local_hdr_update_flags(const char *folder, const char *uid, int new_flags);
+
 /** @brief Removes header files whose UID is not in @p keep_uids. */
 void  local_hdr_evict_stale(const char *folder,
                               const char (*keep_uids)[17], int keep_count);

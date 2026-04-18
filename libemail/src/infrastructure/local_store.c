@@ -165,6 +165,28 @@ char *local_hdr_load(const char *folder, const char *uid) {
     return load_file(path);
 }
 
+int local_hdr_update_flags(const char *folder, const char *uid, int new_flags) {
+    char *hdr = local_hdr_load(folder, uid);
+    if (!hdr) return -1;
+
+    /* Find the last tab → flags field starts after it */
+    char *last_tab = strrchr(hdr, '\t');
+    if (!last_tab) { free(hdr); return -1; }
+
+    /* Rebuild: keep everything up to and including last tab, replace flags */
+    *last_tab = '\0';
+    char *updated = NULL;
+    if (asprintf(&updated, "%s\t%d", hdr, new_flags) == -1) {
+        free(hdr);
+        return -1;
+    }
+    free(hdr);
+
+    int rc = local_hdr_save(folder, uid, updated, strlen(updated));
+    free(updated);
+    return rc;
+}
+
 static int cmp_uid_evict(const void *a, const void *b) {
     return memcmp(a, b, 16);
 }

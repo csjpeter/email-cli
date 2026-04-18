@@ -47,14 +47,14 @@ static SSL_CTX *create_server_ctx(void) {
         ERR_print_errors_fp(stderr);
         return NULL;
     }
-    if (SSL_CTX_use_certificate_file(ctx, "tests/certs/test.crt", SSL_FILETYPE_PEM) <= 0) {
-        fprintf(stderr, "Failed to load test cert: tests/certs/test.crt\n");
+    if (SSL_CTX_use_certificate_file(ctx, TEST_CERT_PATH, SSL_FILETYPE_PEM) <= 0) {
+        fprintf(stderr, "Failed to load test cert: %s\n", TEST_CERT_PATH);
         ERR_print_errors_fp(stderr);
         SSL_CTX_free(ctx);
         return NULL;
     }
-    if (SSL_CTX_use_PrivateKey_file(ctx, "tests/certs/test.key", SSL_FILETYPE_PEM) <= 0) {
-        fprintf(stderr, "Failed to load test key: tests/certs/test.key\n");
+    if (SSL_CTX_use_PrivateKey_file(ctx, TEST_KEY_PATH, SSL_FILETYPE_PEM) <= 0) {
+        fprintf(stderr, "Failed to load test key: %s\n", TEST_KEY_PATH);
         ERR_print_errors_fp(stderr);
         SSL_CTX_free(ctx);
         return NULL;

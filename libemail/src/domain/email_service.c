@@ -2127,6 +2127,11 @@ read_key_again: ;
                 int currently = entries[cursor].flags & bit;
                 /* Determine the IMAP add/remove direction */
                 int add_flag = (ch == 'n') ? (currently ? 1 : 0) : (!currently ? 1 : 0);
+
+                /* Gmail: lazy-connect for server-side update */
+                if (is_gmail && !list_mc)
+                    list_mc = make_mail(cfg);
+
                 if (list_mc) {
                     /* Online: push immediately */
                     mail_client_set_flag(list_mc, uid, flag_name, add_flag);
@@ -2137,6 +2142,22 @@ read_key_again: ;
                 ManifestEntry *me = manifest_find(manifest, uid);
                 if (me) me->flags = entries[cursor].flags;
                 manifest_save(folder, manifest);
+
+                /* Gmail: update local label indexes and .hdr flags */
+                if (is_gmail) {
+                    if (ch == 'n') {
+                        if (currently)
+                            label_idx_remove("UNREAD", uid);
+                        else
+                            label_idx_add("UNREAD", uid);
+                    } else if (ch == 'f') {
+                        if (currently)
+                            label_idx_remove("STARRED", uid);
+                        else
+                            label_idx_add("STARRED", uid);
+                    }
+                    local_hdr_update_flags("", uid, entries[cursor].flags);
+                }
             }
             break;
         }

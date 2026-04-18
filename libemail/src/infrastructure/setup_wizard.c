@@ -139,6 +139,11 @@ Config* setup_wizard_run_internal(FILE *stream) {
                 }
             }
 
+            if (!is_tty) {
+                /* Non-interactive: skip OAuth (tests, piped input) */
+                return cfg;
+            }
+
             printf("\nOpening Gmail authorization...\n");
             if (gmail_auth_device_flow(cfg) != 0) {
                 fprintf(stderr, "Press Enter to continue...");

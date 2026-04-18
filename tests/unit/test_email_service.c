@@ -744,7 +744,7 @@ void test_email_service(void) {
         /* Call with new signature: explicit folder parameter */
         int sf_ret = show_uid_interactive(&sf_cfg, "test_subfolder", "0000000000007777", 25);
 
-        /* Restore stdin, stdout, stderr */
+        /* Restore stdin, stdout, stderr — ALWAYS, even if ASSERT would fail */
         fflush(stdout); fflush(stderr);
         dup2(saved_stdin,  STDIN_FILENO);  close(saved_stdin);
         dup2(saved_stdout, STDOUT_FILENO); close(saved_stdout);

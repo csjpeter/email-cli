@@ -1,0 +1,70 @@
+email-cli — YouTube demo narration script (English)
+=====================================================
+Total target length: ~3 minutes
+
+[0:00 – 0:10]  INTRO
+Managing email from the terminal just got a lot easier.
+email-cli is a lightweight, open-source email client suite written in C —
+fast, scriptable, and safe enough to hand to an AI agent.
+
+[0:10 – 0:25]  FOUR BINARIES
+The suite ships four binaries.
+email-tui gives you a full interactive interface in your terminal.
+email-cli is the read-write batch tool for scripting.
+email-cli-ro is strictly read-only — perfect for automation pipelines that
+must never accidentally modify your mailbox.
+And email-sync keeps your local cache in sync in the background.
+
+[0:25 – 0:45]  CLI DEMO: listing and reading
+Let's start with the basics.
+email-cli list shows your unread messages instantly from the local cache.
+Add --all to include everything, and pipe it through grep to find exactly
+what you're looking for.
+email-cli show followed by a message UID prints the full message to stdout —
+ready to feed into any script or AI tool.
+
+[0:45 – 1:05]  CLI DEMO: send and folders
+Sending is just as simple.
+One line, no interaction required.
+email-cli folders --tree draws your full folder hierarchy.
+The same command works for Gmail labels too — no special cases.
+
+[1:05 – 1:25]  GMAIL LABELS
+Speaking of Gmail — email-cli uses the native Gmail REST API with OAuth2,
+not IMAP.
+You get full label management: list labels, add them, remove them, archive,
+trash, and restore — all from the command line.
+
+[1:25 – 1:50]  TUI DEMO
+Now let's take a look at the interactive TUI.
+The accounts screen shows all your configured accounts at a glance —
+unread counts, starred counts, IMAP or Gmail.
+Navigate with arrow keys, press Enter to open an account,
+and you're inside your inbox in seconds.
+Reading a message is just another Enter press.
+
+[1:50 – 2:10]  READ-ONLY + AI AGENTS
+email-cli-ro deserves a special mention.
+It issues only read commands to the server — never sends, never moves,
+never marks anything as read.
+This makes it safe to expose to AI agents and automation scripts that need
+to see your mail without being able to change it.
+
+[2:10 – 2:30]  SECURITY AND MEMORY SAFETY
+Security matters.
+Config files are written with 0600 permissions.
+Gmail accounts use OAuth2 — no password stored.
+The entire codebase is tested with AddressSanitizer and Valgrind on every
+CI run to catch memory leaks and buffer overflows before they ship.
+
+[2:30 – 2:50]  INSTALLATION
+Getting started takes two commands.
+Run manage.sh deps to install system dependencies,
+then manage.sh build to compile all four binaries.
+The setup wizard runs automatically on first launch.
+
+[2:50 – 3:00]  OUTRO
+email-cli — terminal email, done right.
+Find the source, docs, and issue tracker at github.com/csjpeter/email-cli.
+Star the repo if you find it useful, and feel free to open issues or
+contribute.

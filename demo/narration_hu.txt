@@ -1,0 +1,73 @@
+email-cli — YouTube demó narráció (magyar)
+==========================================
+Cél hossz: ~3 perc
+
+[0:00 – 0:10]  INTRO
+A terminálból való levelezés most sokkal egyszerűbb lett.
+Az email-cli egy könnyűsúlyú, nyílt forráskódú, C-ben írt email kliens csomag —
+gyors, szkriptelhető, és elég biztonságos ahhoz, hogy AI ügynökre bízzuk.
+
+[0:10 – 0:25]  NÉGY BINÁRIS
+A csomag négy programot tartalmaz.
+Az email-tui teljes interaktív felületet ad a terminálban.
+Az email-cli az írható-olvasható batch eszköz szkriptekhez.
+Az email-cli-ro kizárólag olvasható — tökéletes olyan automatizált
+folyamatokhoz, amelyek soha nem módosíthatják a postaládát.
+Az email-sync pedig a háttérben tartja naprakészen a helyi gyorsítótárat.
+
+[0:25 – 0:45]  CLI DEMÓ: listázás és olvasás
+Kezdjük az alapokkal.
+Az email-cli list azonnal megjeleníti az olvasatlan üzeneteket a helyi
+gyorsítótárból.
+Az --all kapcsolóval minden üzenetet lát, a grep-pel pedig pontosan
+megtalálja, amit keres.
+Az email-cli show parancs egy üzenet UID-jével kinyomtatja az üzenet
+teljes tartalmát a standard kimenetre — készen áll bármilyen szkript vagy
+AI eszköz számára.
+
+[0:45 – 1:05]  CLI DEMÓ: küldés és mappák
+A küldés ugyanilyen egyszerű.
+Egyetlen sor, semmi interakció.
+Az email-cli folders --tree kirajzolja a teljes mappastruktúrát.
+Ugyanez a parancs Gmail címkékkel is működik — semmi kivétel.
+
+[1:05 – 1:25]  GMAIL CÍMKÉK
+A Gmail kapcsán — az email-cli az OAuth2-vel védett natív Gmail REST API-t
+használja, nem IMAP-ot.
+Teljes körű címkekezelés: listázás, hozzáadás, eltávolítás, archiválás,
+kukázás és visszaállítás — mind a parancssorból.
+
+[1:25 – 1:50]  TUI DEMÓ
+Nézzük meg az interaktív TUI-t.
+A fiókok képernyője egy pillantásra mutatja az összes beállított fiókot —
+olvasatlan és jelölt üzenetek száma, IMAP vagy Gmail.
+Navigáljon nyílbillentyűkkel, nyomjon Enter-t egy fiók megnyitásához,
+és másodperceken belül bent van a beérkező üzenetekben.
+Egy üzenet olvasásához ismét csak Enter kell.
+
+[1:50 – 2:10]  READ-ONLY + AI ÜGYNÖKÖK
+Az email-cli-ro külön figyelmet érdemel.
+Csak olvasó parancsokat küld a szervernek — sosem küld, sosem mozgat,
+sosem jelöl olvasottként semmit.
+Ez biztonságossá teszi AI ügynökök és automatizálási szkriptek számára,
+amelyeknek látniuk kell a leveleket, de nem szabad megváltoztatniuk őket.
+
+[2:10 – 2:30]  BIZTONSÁG ÉS MEMÓRIABIZTONSÁG
+A biztonság számít.
+A konfigurációs fájlok 0600-as jogosultságokkal íródnak.
+A Gmail fiókok OAuth2-t használnak — nem tárolódik jelszó.
+A teljes kódbázist AddressSanitizer és Valgrind futtatja minden CI menetben,
+hogy a memóriaszivárgások és puffertúlcsordulások szállítás előtt kiderüljenek.
+
+[2:30 – 2:50]  TELEPÍTÉS
+A kezdés két parancsból áll.
+Futtassa a manage.sh deps parancsot a rendszerfüggőségek telepítéséhez,
+majd a manage.sh build parancsot mind a négy bináris lefordításához.
+Az első indításkor a beállító varázsló automatikusan elindul.
+
+[2:50 – 3:00]  OUTRO
+email-cli — terminál levelezés, ahogy kell.
+A forráskódot, dokumentációt és hibakövetőt a github.com/csjpeter/email-cli
+oldalon találja.
+Ha hasznosnak találja, csillagozza meg a repót, és nyugodtan nyisson
+issue-kat vagy járuljon hozzá.

@@ -838,11 +838,11 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
     int att_count = 0;
     MimeAttachment *atts = mime_list_attachments(raw, &att_count);
 
-/* Bottom two rows: row (trows-1) = info line, row trows = shortcut hints.
- * Reserve one extra row compared to the previous single-line footer. */
-#define SHOW_HDR_LINES_INT 6
-    int rows_avail  = (page_size > SHOW_HDR_LINES_INT)
-                      ? page_size - SHOW_HDR_LINES_INT : 1;
+/* Header: From+Subject+Date+separator = 4 rows; +1 if Labels line present.
+ * Footer: info line (trows-1) + statusbar (trows) = 2 rows. */
+#define SHOW_HDR_LINES_INT 6  /* kept for #undef below */
+    int hdr_rows    = (show_labels && show_labels[0]) ? 5 : 4;
+    int rows_avail  = (term_rows > hdr_rows + 2) ? term_rows - hdr_rows - 2 : 1;
     int body_vrows  = count_visual_rows(body_text, term_cols);
     int total_pages = (body_vrows + rows_avail - 1) / rows_avail;
     if (total_pages < 1) total_pages = 1;

@@ -108,6 +108,20 @@ elif [[ "$OS" == "Linux" ]]; then
             ok "vhs installed"
         fi
 
+        # ttyd — required by vhs for terminal rendering
+        if command -v ttyd &>/dev/null; then
+            skip "ttyd already installed ($(ttyd --version 2>/dev/null || echo 'ok'))"
+        else
+            info "Installing ttyd (prebuilt binary from GitHub)..."
+            ARCH="$(uname -m)"
+            TTYD_VERSION="$(curl -fsSL https://api.github.com/repos/tsl0922/ttyd/releases/latest \
+                | grep '"tag_name"' | cut -d'"' -f4)"
+            TTYD_URL="https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${ARCH}"
+            $SUDO curl -fsSL "$TTYD_URL" -o /usr/local/bin/ttyd
+            $SUDO chmod +x /usr/local/bin/ttyd
+            ok "ttyd ${TTYD_VERSION} installed"
+        fi
+
     elif [[ "$DISTRO_ID" == "fedora" || "$DISTRO_ID" == "rhel" || "$DISTRO_ID" == "rocky" || "$DISTRO_ID" == "almalinux" ]]; then
         echo "--- Fedora/RHEL ---"
 
@@ -208,6 +222,7 @@ check_tool() {
 }
 
 check_tool ffmpeg  "ffmpeg"
+check_tool ttyd    "ttyd"
 check_tool vhs     "vhs"
 
 if command -v edge-tts &>/dev/null; then

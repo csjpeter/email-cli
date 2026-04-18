@@ -1,0 +1,36 @@
+## INTRO
+Az email-tui egy interaktív terminál felhasználói felület billentyűzettel vezérelhető navigációval.
+Indítás után megjelenik a fiókválasztó képernyő.
+
+## ACCOUNTS_SCREEN
+A fióklista mutatja az összes konfigurált fiókot típussal és kiszolgáló URL-lel.
+Navigálás nyílbillentyűkkel, megnyitás Enter-rel.
+
+## OPEN_ACCOUNT
+Az Enter megnyitja a fiókot és megjelenik a mappaböngésző.
+A mappák hierarchikusan jelennek meg, a beérkező levelek mappája alapból kiemelve.
+
+## MESSAGE_LIST
+Az Enter megnyitja az INBOX-ot és megjelenik az üzenetlista.
+Minden sor tartalmazza az üzenet állapotát, dátumát, feladóját és tárgyát.
+
+## OPEN_MESSAGE
+Az Enter megnyitja a kijelölt üzenetet.
+
+## READ_MESSAGE
+Az üzenet teljes tartalma megjelenik: fejlécek, majd a törzsszöveg.
+HTML tartalom automatikusan szöveggé konvertálódik.
+Görgethető, és a csatolmányok listája az üzenet végén látható.
+
+## BACK_TO_LIST
+A Backspace visszalép az üzenetlistához.
+Az éppen olvasott üzenet megjelölt állapota frissül.
+
+## COMPOSE_SCREEN
+A c billentyű megnyitja az üzenetszerkesztőt.
+Megadható a címzett, a tárgy és a törzs.
+Küldés Enter-rel, megszakítás Escape-pel.
+
+## OUTRO
+email-tui — terminál email kliens interaktív módban.
+github.com/csjpeter/email-cli.

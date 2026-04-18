@@ -1,0 +1,47 @@
+## INTRO
+email-cli-ro az email-cli kizárólag olvasható változata AI ügynökök és automatizált szkriptek számára.
+Minden olvasási parancs elérhető, de az írási műveletek tiltottak és visszautasítottak.
+Ez a tervezési döntés megakadályozza, hogy egy kompromittált AI ügynök véletlenül vagy rosszindulatúan módosítsa a leveleket.
+
+## LIST
+A list parancs olvasatlan üzeneteket jelenít meg — ez olvasási művelet, engedélyezett.
+
+## SHOW_BEFORE
+Az üzenet UID-je, feladója és tárgya a listában látható.
+
+## SHOW_RESULT
+A show parancs az üzenet teljes tartalmát adja vissza — szintén olvasási művelet, engedélyezett.
+
+## FOLDERS
+A folders --tree a teljes mappastruktúrát mutatja — olvasás, engedélyezett.
+
+## ATTACHMENTS_BEFORE
+Az üzenetben csatolmányok szerepelnek.
+
+## ATTACHMENTS_RESULT
+Az attachments parancs listázza a csatolmányokat — olvasás, engedélyezett.
+
+## SAVE_BEFORE
+A fájl még nem létezik a lemezen.
+
+## SAVE_ACTION
+A save-attachment csatolmányt ment a helyi fájlrendszerbe — ez olvasási kategória, engedélyezett.
+
+## SAVE_AFTER
+A csatolmány sikeresen letöltődött.
+
+## WRITE_ATTEMPT_INTRO
+Most megpróbálunk írási műveleteket végrehajtani.
+Egy AI ügynök sosem végezhet ilyen műveleteket véletlenül, mert az email-cli-ro minden írási kísérletét visszautasítja.
+
+## MARK_READ_REJECTED
+A mark-read jelzőt állítana a szerveren — ez írási művelet.
+Az email-cli-ro visszautasítja és hibakóddal lép ki.
+
+## SEND_REJECTED
+A send SMTP-n küldene üzenetet — szintén írási művelet.
+Az email-cli-ro ezt is visszautasítja.
+
+## OUTRO
+email-cli-ro — biztonságos olvasási felület AI ügynökök számára.
+github.com/csjpeter/email-cli.

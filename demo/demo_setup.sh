@@ -97,8 +97,8 @@ export DEMO_SMTP_PORT="$SMTP_PORT"
 # ── Add bin/ to PATH ─────────────────────────────────────────────────────────
 export PATH="$BIN_DIR:$PATH"
 export PS1='\[\033[01;32m\]demo@email-cli\[\033[00m\]:\[\033[01;34m\]~\[\033[00m\]\$ '
-stty cols 80 2>/dev/null || true
-export COLUMNS=80
+stty cols 100 2>/dev/null || true
+export COLUMNS=100
 
 echo "[demo] Environment ready. Account: $DEMO_ACCOUNT"
 echo "[demo] IMAP mock PID: $DEMO_IMAP_PID  SMTP mock PID: $DEMO_SMTP_PID"

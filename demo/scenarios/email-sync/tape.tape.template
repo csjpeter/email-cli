@@ -1,0 +1,63 @@
+# VHS tape template for the email-sync scenario
+# Demonstrates the sync daemon, local cache benefits, and cron usage.
+# Sleep placeholders (e.g. __INTRO__) are replaced by gen_tape.sh with real durations.
+
+Set Shell "bash"
+Set FontSize 24
+Set Width 1920
+Set Height 1080
+Set Theme "Dracula"
+Set Padding 24
+Set TypingSpeed 60ms
+
+# ── Boot (hidden) ─────────────────────────────────────────────────────────────
+Hide
+Type "source demo/demo_setup.sh"
+Enter
+Sleep 3s
+Show
+
+# ── INTRO ─────────────────────────────────────────────────────────────────────
+Type "# email-sync — helyi levéltár szinkronizálása"
+Enter
+Sleep __INTRO__
+
+# ── BEFORE_SYNC ───────────────────────────────────────────────────────────────
+Type "ls ~/.local/share/email-cli/ 2>/dev/null || echo '(helyi tár még üres)'"
+Enter
+Sleep __BEFORE_SYNC__
+
+# ── RUN_SYNC ──────────────────────────────────────────────────────────────────
+Type "email-sync"
+Enter
+Sleep __RUN_SYNC__
+
+# ── SYNC_OUTPUT ───────────────────────────────────────────────────────────────
+Sleep __SYNC_OUTPUT__
+
+# ── AFTER_SYNC ────────────────────────────────────────────────────────────────
+Type "ls -la ~/.local/share/email-cli/accounts/"
+Enter
+Sleep __AFTER_SYNC__
+
+# ── CACHE_FILES ───────────────────────────────────────────────────────────────
+Type "find ~/.local/share/email-cli -name '*.tsv' | head -5"
+Enter
+Sleep __CACHE_FILES__
+
+# ── FAST_LIST ─────────────────────────────────────────────────────────────────
+Type "email-cli list"
+Enter
+Sleep __FAST_LIST__
+
+# ── CRON_USAGE ────────────────────────────────────────────────────────────────
+Type "echo '# Cron: minden 5 percben szinkronizál'"
+Enter
+Type "echo '*/5 * * * * /usr/local/bin/email-sync >> ~/.cache/email-cli/sync-cron.log 2>&1'"
+Enter
+Sleep __CRON_USAGE__
+
+# ── OUTRO ─────────────────────────────────────────────────────────────────────
+Type "# github.com/csjpeter/email-cli"
+Enter
+Sleep __OUTRO__

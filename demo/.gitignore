@@ -2,3 +2,5 @@
 *.mp3
 narration_clean.txt
 make_demo.log
+scenarios/*/output/
+scenarios/*/tmp/

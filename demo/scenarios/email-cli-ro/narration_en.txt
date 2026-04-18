@@ -1,0 +1,47 @@
+## INTRO
+email-cli-ro is the read-only variant of email-cli, designed for AI agents and automated scripts.
+All read operations are available, but write operations are blocked and rejected at the binary level.
+This design decision prevents a compromised or misbehaving AI agent from accidentally or maliciously modifying your mail.
+
+## LIST
+The list command shows unread messages — this is a read operation, permitted.
+
+## SHOW_BEFORE
+Each message's UID, sender, and subject are visible in the list.
+
+## SHOW_RESULT
+The show command returns the full message content — also a read operation, permitted.
+
+## FOLDERS
+folders --tree displays the complete folder structure — read operation, permitted.
+
+## ATTACHMENTS_BEFORE
+This message contains attachments.
+
+## ATTACHMENTS_RESULT
+The attachments command lists attachment names and sizes — read operation, permitted.
+
+## SAVE_BEFORE
+The file does not exist on disk yet.
+
+## SAVE_ACTION
+save-attachment saves an attachment to the local filesystem — this falls under read access, permitted.
+
+## SAVE_AFTER
+The attachment was downloaded successfully.
+
+## WRITE_ATTEMPT_INTRO
+Now we attempt write operations.
+An AI agent can never perform these accidentally, because email-cli-ro rejects every write attempt at the binary level.
+
+## MARK_READ_REJECTED
+mark-read would set a flag on the server — that is a write operation.
+email-cli-ro refuses and exits with an error code.
+
+## SEND_REJECTED
+send would deliver a message over SMTP — also a write operation.
+email-cli-ro refuses this too.
+
+## OUTRO
+email-cli-ro — a safe, read-only mail interface for AI agents.
+github.com/csjpeter/email-cli.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# demo/pipeline.sh — end-to-end YouTube demo video builder
+# demo/pipeline.sh — Per-scenario YouTube demo video builder.
 #
 # Dependencies:
 #   vhs        https://github.com/charmbracelet/vhs   (brew/apt install vhs)
@@ -7,114 +7,118 @@
 #   ffmpeg     sudo apt install ffmpeg
 #
 # Optional env vars:
+#   SCENARIO           scenario name (default: email-cli)
 #   NARRATION_LANG     "en" or "hu" (default: hu)
-#   EDGE_VOICE         edge-tts voice name (default: hu-HU-NoemiNeural)
-#   ELEVENLABS_API_KEY if set, uses ElevenLabs instead of edge-tts
-#   OPENAI_API_KEY     if set and no ElevenLabs key, uses OpenAI TTS
+#   EDGE_VOICE         edge-tts voice name (overrides language default)
+#   TAPE_BUFFER        extra seconds added to each Sleep (default: 0.5)
 #
 # Usage:
-#   ./demo/pipeline.sh                        # Hungarian, edge-tts (free)
-#   NARRATION_LANG=en ./demo/pipeline.sh      # English, edge-tts (free)
-#   ELEVENLABS_API_KEY=sk-... ./demo/pipeline.sh
+#   ./demo/pipeline.sh
+#   SCENARIO=email-cli-ro ./demo/pipeline.sh
+#   NARRATION_LANG=en SCENARIO=email-tui ./demo/pipeline.sh
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SCENARIO="${SCENARIO:-email-cli}"
 LANG_CHOICE="${NARRATION_LANG:-hu}"
-EDGE_VOICE="${EDGE_VOICE:-hu-HU-NoemiNeural}"
+TAPE_BUFFER="${TAPE_BUFFER:-0.5}"
 
-TAPE_FILE="$SCRIPT_DIR/demo.tape"
-NARRATION_FILE="$SCRIPT_DIR/narration_${LANG_CHOICE}.txt"
-VIDEO_RAW="$SCRIPT_DIR/demo.mp4"
-AUDIO_FILE="$SCRIPT_DIR/narration.mp3"
-OUTPUT_FILE="$SCRIPT_DIR/email-cli-demo.mp4"
-
-# ── Step 1: Record terminal session ─────────────────────────────────────────
-echo "=== Step 1: Record terminal session with VHS ==="
-if ! command -v vhs &>/dev/null; then
-    echo "ERROR: vhs not found."
-    echo "  Ubuntu: snap install vhs  OR  go install github.com/charmbracelet/vhs@latest"
-    echo "  macOS:  brew install vhs"
+SCENARIO_DIR="$SCRIPT_DIR/scenarios/$SCENARIO"
+if [[ ! -d "$SCENARIO_DIR" ]]; then
+    echo "ERROR: scenario directory not found: $SCENARIO_DIR" >&2
     exit 1
 fi
-vhs "$TAPE_FILE"
-echo "  -> $VIDEO_RAW"
 
-# ── Step 2: Generate narration audio ────────────────────────────────────────
-echo ""
-echo "=== Step 2: Generate narration audio ==="
+TEMPLATE_FILE="$SCENARIO_DIR/tape.tape.template"
+NARRATION_FILE="$SCENARIO_DIR/narration_${LANG_CHOICE}.txt"
+OUTPUT_DIR="$SCENARIO_DIR/output"
+TMP_DIR="$SCENARIO_DIR/tmp"
 
-# Strip file header, timestamp markers, section headers — keep only spoken text
-NARRATION_CLEAN="$SCRIPT_DIR/narration_clean.txt"
-grep -v '^\[' "$NARRATION_FILE" \
-    | grep -v '^=\+' \
-    | grep -v '^email-cli —' \
-    | grep -v '^Cél hossz' \
-    | grep -v '^Total target length' \
-    | sed '/^$/d' \
-    > "$NARRATION_CLEAN"
-
-if [[ ! -s "$NARRATION_CLEAN" ]]; then
-    echo "ERROR: narration_clean.txt is empty after stripping"
+if [[ ! -f "$TEMPLATE_FILE" ]]; then
+    echo "ERROR: tape template not found: $TEMPLATE_FILE" >&2
     exit 1
 fi
-echo "  Narration: $(wc -l < "$NARRATION_CLEAN") lines"
+if [[ ! -f "$NARRATION_FILE" ]]; then
+    echo "ERROR: narration file not found: $NARRATION_FILE" >&2
+    exit 1
+fi
 
-if [[ -n "${ELEVENLABS_API_KEY:-}" ]]; then
-    echo "  Using ElevenLabs TTS..."
-    VOICE_ID="${VOICE_ID:-21m00Tcm4TlvDq8ikWAM}"
-    NARRATION_TEXT=$(tr '\n' ' ' < "$NARRATION_CLEAN")
-    curl -s -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
-        -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
-        -H "Content-Type: application/json" \
-        -d "{\"text\": $(echo "$NARRATION_TEXT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
-             \"model_id\": \"eleven_multilingual_v2\",
-             \"voice_settings\": {\"stability\": 0.5, \"similarity_boost\": 0.75}}" \
-        --output "$AUDIO_FILE"
+mkdir -p "$OUTPUT_DIR" "$TMP_DIR"
 
-elif [[ -n "${OPENAI_API_KEY:-}" ]]; then
-    echo "  Using OpenAI TTS..."
-    NARRATION_TEXT=$(tr '\n' ' ' < "$NARRATION_CLEAN")
-    curl -s -X POST "https://api.openai.com/v1/audio/speech" \
-        -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-        -H "Content-Type: application/json" \
-        -d "{\"model\": \"tts-1\",
-             \"input\": $(echo "$NARRATION_TEXT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
-             \"voice\": \"alloy\"}" \
-        --output "$AUDIO_FILE"
-
-else
-    echo "  Using edge-tts (free, Microsoft neural voices)..."
-    if ! command -v edge-tts &>/dev/null; then
-        echo "  Installing edge-tts..."
-        pip install --quiet edge-tts
-    fi
-    # English voice fallback
-    if [[ "$LANG_CHOICE" == "en" && "$EDGE_VOICE" == "hu-HU-NoemiNeural" ]]; then
+# Default voice selection
+if [[ -z "${EDGE_VOICE:-}" ]]; then
+    if [[ "$LANG_CHOICE" == "en" ]]; then
         EDGE_VOICE="en-US-AriaNeural"
+    else
+        EDGE_VOICE="hu-HU-NoemiNeural"
     fi
-    edge-tts --voice "$EDGE_VOICE" --file "$NARRATION_CLEAN" --write-media "$AUDIO_FILE"
 fi
 
-rm -f "$NARRATION_CLEAN"
+TAPE_FILE="$TMP_DIR/generated.tape"
+AUDIO_DIR="$TMP_DIR/audio"
+NARRATION_MP3="$TMP_DIR/narration.mp3"
+VIDEO_RAW="$TMP_DIR/raw.mp4"
+OUTPUT_FILE="$OUTPUT_DIR/email-cli-${SCENARIO}-demo.mp4"
 
-if [[ ! -s "$AUDIO_FILE" ]]; then
-    echo "ERROR: narration.mp3 is empty — TTS generation failed"
+echo ""
+echo "=== Scenario: $SCENARIO  lang: $LANG_CHOICE  voice: $EDGE_VOICE ==="
+echo ""
+
+# ── Step 1: Generate per-section MP3s ────────────────────────────────────────
+echo "=== Step 1: Generate per-section audio (edge-tts) ==="
+bash "$SCRIPT_DIR/gen_audio.sh" "$NARRATION_FILE" "$EDGE_VOICE" "$AUDIO_DIR"
+echo "  -> $AUDIO_DIR"
+echo ""
+
+# ── Step 2: Generate tape from template ──────────────────────────────────────
+echo "=== Step 2: Generate VHS tape from template ==="
+bash "$SCRIPT_DIR/gen_tape.sh" \
+    "$TEMPLATE_FILE" \
+    "$AUDIO_DIR/durations.sh" \
+    "$TAPE_FILE" \
+    "$TAPE_BUFFER"
+echo "  -> $TAPE_FILE"
+echo ""
+
+# ── Step 3: Record terminal session ──────────────────────────────────────────
+echo "=== Step 3: Record terminal session with VHS ==="
+if ! command -v vhs &>/dev/null; then
+    echo "ERROR: vhs not found." >&2
+    echo "  Ubuntu: snap install vhs  OR  go install github.com/charmbracelet/vhs@latest" >&2
+    echo "  macOS:  brew install vhs" >&2
     exit 1
 fi
-AUDIO_DURATION=$(ffprobe -v error -show_entries format=duration \
-    -of default=noprint_wrappers=1:nokey=1 "$AUDIO_FILE" 2>/dev/null || echo "unknown")
-echo "  -> $AUDIO_FILE  (duration: ${AUDIO_DURATION}s)"
-
-# ── Step 3: Merge video + audio ──────────────────────────────────────────────
+# VHS requires a relative Output path (absolute paths are rejected by the parser).
+# Run vhs from TMP_DIR so "Output raw.mp4" resolves to $VIDEO_RAW.
+{
+    echo "Output raw.mp4"
+    cat "$TAPE_FILE"
+} > "$TMP_DIR/with_output.tape"
+(cd "$TMP_DIR" && vhs with_output.tape)
+echo "  -> $VIDEO_RAW"
 echo ""
-echo "=== Step 3: Merge video + audio with ffmpeg ==="
-# Use audio duration as the authoritative output length.
-# tpad clones the last video frame if the video ends before the audio.
+
+# ── Step 4: Concatenate per-section MP3s → narration.mp3 ─────────────────────
+echo "=== Step 4: Concatenate audio sections ==="
+if [[ ! -f "$AUDIO_DIR/concat.txt" ]]; then
+    echo "ERROR: concat.txt not found in $AUDIO_DIR" >&2
+    exit 1
+fi
+ffmpeg -y -f concat -safe 0 -i "$AUDIO_DIR/concat.txt" -c copy "$NARRATION_MP3"
+AUDIO_DURATION=$(ffprobe -v error -show_entries format=duration \
+    -of default=noprint_wrappers=1:nokey=1 "$NARRATION_MP3" 2>/dev/null)
+echo "  -> $NARRATION_MP3  (duration: ${AUDIO_DURATION}s)"
+echo ""
+
+# ── Step 5: Merge video + audio ───────────────────────────────────────────────
+echo "=== Step 5: Merge video + audio with ffmpeg ==="
+# tpad clones the last video frame if video ends before audio.
 # volume=2.5 boosts narration to a comfortable listening level (~8 dB).
 ffmpeg -y \
     -i "$VIDEO_RAW" \
-    -i "$AUDIO_FILE" \
+    -i "$NARRATION_MP3" \
     -filter_complex \
       "[0:v]tpad=stop_mode=clone:stop_duration=9999[v]; \
        [1:a]volume=2.5[a]" \
@@ -124,7 +128,7 @@ ffmpeg -y \
     -t "$AUDIO_DURATION" \
     "$OUTPUT_FILE"
 echo "  -> $OUTPUT_FILE"
-
 echo ""
+
 echo "=== Done! ==="
 echo "Upload to YouTube: $OUTPUT_FILE"

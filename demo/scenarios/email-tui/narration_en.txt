@@ -1,0 +1,36 @@
+## INTRO
+email-tui is an interactive terminal user interface with keyboard-driven navigation.
+After launch the account selection screen appears.
+
+## ACCOUNTS_SCREEN
+The account list shows all configured accounts with their type and server URL.
+Navigate with the arrow keys and open an account with Enter.
+
+## OPEN_ACCOUNT
+Pressing Enter opens the account and shows the folder browser.
+Folders are displayed hierarchically with the inbox highlighted by default.
+
+## MESSAGE_LIST
+Enter opens the INBOX and the message list appears.
+Each row shows the message status, date, sender, and subject.
+
+## OPEN_MESSAGE
+Enter opens the selected message.
+
+## READ_MESSAGE
+The full message is displayed: headers followed by the body text.
+HTML content is automatically converted to plain text.
+The view is scrollable, and any attachments are listed at the bottom.
+
+## BACK_TO_LIST
+Backspace returns to the message list.
+The read status of the message just viewed is updated.
+
+## COMPOSE_SCREEN
+The c key opens the message composer.
+Fill in the recipient, subject, and body.
+Press Enter to send or Escape to cancel.
+
+## OUTRO
+email-tui — terminal email client in interactive mode.
+github.com/csjpeter/email-cli.

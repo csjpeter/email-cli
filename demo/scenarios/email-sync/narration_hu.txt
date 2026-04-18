@@ -1,0 +1,30 @@
+## INTRO
+Az email-sync háttér szinkronizáló démon.
+Letölti a szerver új üzeneteit és frissíti a helyi levéltárat.
+Nem foglal tárhelyet folyamatos kapcsolattal, nem szükséges mindig futnia.
+
+## BEFORE_SYNC
+Az első futtatás előtt a helyi tár üres.
+
+## RUN_SYNC
+Az email-sync csatlakozik az IMAP szerverhez és lekéri az indexet.
+
+## SYNC_OUTPUT
+Az összesítő sor mutatja hány üzenetet kért le és tárolódott el.
+
+## AFTER_SYNC
+A helyi levéltárban minden fióknak saját könyvtára van.
+
+## CACHE_FILES
+A manifest fájlok TSV formátumban tárolják az üzenet indexet: UID, dátum, feladó, tárgy, jelzők.
+
+## FAST_LIST
+Szinkronizálás után az email-cli list azonnal válaszol — szerver kapcsolat nélkül, a helyi indexből.
+
+## CRON_USAGE
+Cronba téve az email-sync 5 percenként frissíti a tárat.
+Így az email-cli-ro és az AI ügynökök mindig friss adatból olvasnak anélkül, hogy közvetlen IMAP hozzáférésük lenne.
+
+## OUTRO
+email-sync — egyszerű, deterministikus, biztonságos szinkronizálás.
+github.com/csjpeter/email-cli.

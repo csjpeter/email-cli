@@ -1,0 +1,88 @@
+# VHS tape template for the email-cli-ro scenario
+# Demonstrates read-only operations and rejection of write commands.
+# Sleep placeholders (e.g. __INTRO__) are replaced by gen_tape.sh with real durations.
+
+Set Shell "bash"
+Set FontSize 24
+Set Width 1920
+Set Height 1080
+Set Theme "Dracula"
+Set Padding 24
+Set TypingSpeed 60ms
+
+# ── Boot (hidden) ─────────────────────────────────────────────────────────────
+Hide
+Type "source demo/demo_setup.sh"
+Enter
+Sleep 3s
+Show
+
+# ── INTRO ─────────────────────────────────────────────────────────────────────
+Type "email-cli-ro --help"
+Enter
+Sleep __INTRO__
+
+# ── LIST ─────────────────────────────────────────────────────────────────────
+Type "email-cli-ro list"
+Enter
+Sleep __LIST__
+
+# ── SHOW_BEFORE ───────────────────────────────────────────────────────────────
+Type "email-cli-ro list"
+Enter
+Sleep __SHOW_BEFORE__
+
+# ── SHOW_RESULT ───────────────────────────────────────────────────────────────
+Type "email-cli-ro show 1"
+Enter
+Sleep __SHOW_RESULT__
+
+# ── FOLDERS ───────────────────────────────────────────────────────────────────
+Type "email-cli-ro folders --tree"
+Enter
+Sleep __FOLDERS__
+
+# ── ATTACHMENTS_BEFORE ───────────────────────────────────────────────────────
+Type "email-cli-ro show 1"
+Enter
+Sleep __ATTACHMENTS_BEFORE__
+
+# ── ATTACHMENTS_RESULT ───────────────────────────────────────────────────────
+Type "email-cli-ro attachments 1"
+Enter
+Sleep __ATTACHMENTS_RESULT__
+
+# ── SAVE_BEFORE ───────────────────────────────────────────────────────────────
+Type "ls /tmp/notes.txt 2>/dev/null || echo '(not downloaded yet)'"
+Enter
+Sleep __SAVE_BEFORE__
+
+# ── SAVE_ACTION ───────────────────────────────────────────────────────────────
+Type "email-cli-ro save-attachment 1 notes.txt /tmp"
+Enter
+Sleep __SAVE_ACTION__
+
+# ── SAVE_AFTER ────────────────────────────────────────────────────────────────
+Type "ls -lh /tmp/notes.txt"
+Enter
+Sleep __SAVE_AFTER__
+
+# ── WRITE_ATTEMPT_INTRO ───────────────────────────────────────────────────────
+Type "# Now attempting write operations..."
+Enter
+Sleep __WRITE_ATTEMPT_INTRO__
+
+# ── MARK_READ_REJECTED ───────────────────────────────────────────────────────
+Type "email-cli-ro mark-read 1"
+Enter
+Sleep __MARK_READ_REJECTED__
+
+# ── SEND_REJECTED ────────────────────────────────────────────────────────────
+Type `email-cli-ro send --to colleague@example.com --subject "Re: Kickoff" --body "See you Tuesday!"`
+Enter
+Sleep __SEND_REJECTED__
+
+# ── OUTRO ─────────────────────────────────────────────────────────────────────
+Type "# github.com/csjpeter/email-cli"
+Enter
+Sleep __OUTRO__

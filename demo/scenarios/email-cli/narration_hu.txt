@@ -1,0 +1,103 @@
+## INTRO
+email-cli C-ben írt terminál email kliens.
+Külső futásidejű függősége kettő: OpenSSL és libcurl — mindkettő disztribúció által ellenőrzött rendszerkönyvtár.
+Nincs csomagkezelő, nincs futásidejű keretrendszer, nincs supply-chain kockázat.
+A csomag négy binárisból áll különböző jogosultságszinttel: interaktív TUI, írható parancssori eszköz, kizárólag olvasható változat AI ügynökök számára, és háttér szinkronizáló démon.
+Mindenük közös konfigurációt és helyi levéltárat használ.
+
+## SHOW_ACCOUNTS
+A show-accounts listázza a konfigurált fiókokat típussal és URL-lel.
+Minden fiók önálló konfigurációs könyvtárban tárolódik.
+
+## LIST
+A list parancs az olvasatlan üzeneteket mutatja a helyi gyorsítótárból.
+Szerver kapcsolat csak szinkronizáláskor szükséges.
+
+## SHOW_BEFORE
+A listában az üzenet UID-je, feladója és tárgya látható.
+
+## SHOW_RESULT
+A show parancs az üzenet teljes tartalmát standard kimenetre írja: fejlécek, törzs, HTML nélkül.
+Szkriptek és AI eszközök közvetlenül feldolgozhatják.
+
+## LIST_ALL
+Az --all kapcsoló az összes üzenetet mutatja, nem csak az olvasatlanokat.
+
+## GREP_RESULT
+A kimenet pipe-olható grep-be vagy bármilyen Unix eszközbe.
+
+## FOLDERS
+A folders --tree kirajzolja a mappastruktúrát.
+IMAP fióknál valódi mappákat, Gmail fióknál labeleket listáz.
+
+## LIST_DEFAULT
+Alapból az INBOX tartalma látható.
+
+## LIST_FOLDER
+A --folder kapcsolóval bármelyik mappa közvetlenül elérhető.
+
+## ATTACHMENTS_BEFORE
+Az üzenet csatolmányokat tartalmaz.
+
+## ATTACHMENTS_RESULT
+Az attachments parancs listázza minden csatolmány nevét és méretét.
+
+## SAVE_BEFORE
+A fájl még nem létezik a lemezen.
+
+## SAVE_ACTION
+A save-attachment UID, fájlnév és célkönyvtár alapján tölti le a csatolmányt.
+
+## SAVE_AFTER
+A mentés után a fájl megjelenik a megadott helyen.
+
+## SEND_BEFORE
+A küldés előtt megtekintjük a Sent mappa aktuális tartalmát.
+
+## SEND_ACTION
+A send parancs SMTP-n kézbesíti az üzenetet és automatikusan elmenti a Sent mappába is.
+
+## SEND_AFTER
+A küldés után az üzenet megjelenik a Sent mappában.
+
+## MARK_READ_BEFORE
+Az üzenet jelenleg olvasatlan, megjelenik a listában.
+
+## MARK_READ_ACTION
+A mark-read Seen jelzőt állít a szerveren.
+
+## MARK_READ_AFTER
+Az olvasottnak jelölés után az üzenet eltűnik az olvasatlan listából.
+
+## MARK_UNREAD_ACTION
+A mark-unread visszaveszi a Seen jelzőt.
+
+## MARK_UNREAD_AFTER
+Az üzenet ismét megjelenik az olvasatlan listában.
+
+## MARK_STARRED_BEFORE
+Az üzenet jelenleg nem jelölt csillaggal.
+
+## MARK_STARRED_ACTION
+A mark-starred Flagged jelzőt állít a szerveren.
+
+## MARK_STARRED_AFTER
+A csillagozás után az üzenet a jelölt üzenetek között jelenik meg.
+
+## REMOVE_STARRED_ACTION
+A remove-starred eltávolítja a Flagged jelzőt.
+
+## REMOVE_STARRED_AFTER
+Az üzenet visszatér a jelöletlen állapotba.
+
+## CONFIG_SHOW
+A config show az aktuális konfigurációt mutatja.
+Jelszavak és tokenek csillaggal maszkolt formában látszanak.
+
+## SYNC
+Az email-sync lekéri az új üzeneteket a szerverről és frissíti a helyi levéltárat.
+Cronból futtatva a többi eszköz mindig friss adatból dolgozik szerver kapcsolat nélkül.
+
+## OUTRO
+email-cli — C, POSIX, OpenSSL, libcurl.
+Forráskód, dokumentáció és hibajelentés: github.com/csjpeter/email-cli.

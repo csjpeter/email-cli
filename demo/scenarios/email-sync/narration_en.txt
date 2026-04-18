@@ -1,0 +1,31 @@
+## INTRO
+email-sync is a background synchronisation daemon.
+It downloads new messages from the server and updates the local mail store.
+It does not hold a persistent connection, so it does not need to run continuously.
+
+## BEFORE_SYNC
+Before the first run, the local mail store is empty.
+
+## RUN_SYNC
+email-sync connects to the IMAP server and fetches the message index.
+
+## SYNC_OUTPUT
+The summary line shows how many messages were fetched and stored.
+
+## AFTER_SYNC
+In the local mail store, each account has its own directory.
+
+## CACHE_FILES
+The manifest files store the message index in TSV format: UID, date, sender, subject, flags.
+
+## FAST_LIST
+After syncing, email-cli list responds instantly — from the local index, with no server connection.
+
+## CRON_USAGE
+Scheduled via cron, email-sync refreshes the store every five minutes.
+Unlike traditional IMAP clients that maintain persistent connections, email-sync polls on schedule.
+The trade-off: no push notifications, but the local store is accessible to read-only tools that never touch the network — including AI agents.
+
+## OUTRO
+email-sync — simple, deterministic, safe synchronisation.
+github.com/csjpeter/email-cli.

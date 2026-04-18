@@ -1,0 +1,103 @@
+## INTRO
+email-cli is a terminal email client written in C.
+It has exactly two runtime dependencies: OpenSSL and libcurl — both distribution-managed system libraries.
+No package manager, no runtime framework, no supply-chain risk.
+The package ships four binaries with distinct privilege levels: an interactive TUI, a read-write CLI tool, a read-only variant for AI agents, and a background sync daemon.
+All four share the same configuration and local mail store.
+
+## SHOW_ACCOUNTS
+show-accounts lists configured accounts with their type and server URL.
+Each account is stored in its own configuration directory.
+
+## LIST
+The list command shows unread messages from the local cache.
+A server connection is only needed during synchronisation.
+
+## SHOW_BEFORE
+The list shows each message's UID, sender, and subject.
+
+## SHOW_RESULT
+The show command writes the full message to standard output: headers, body, no HTML.
+Scripts and AI tools can process it directly.
+
+## LIST_ALL
+The --all flag shows every message, not just unread ones.
+
+## GREP_RESULT
+The output can be piped into grep or any other Unix tool.
+
+## FOLDERS
+folders --tree draws the complete folder tree.
+For IMAP accounts it shows real folders; for Gmail accounts it shows labels.
+
+## LIST_DEFAULT
+By default the INBOX contents are displayed.
+
+## LIST_FOLDER
+The --folder flag gives direct access to any folder.
+
+## ATTACHMENTS_BEFORE
+This message contains attachments.
+
+## ATTACHMENTS_RESULT
+The attachments command lists the name and size of each attachment.
+
+## SAVE_BEFORE
+The file does not exist on disk yet.
+
+## SAVE_ACTION
+save-attachment downloads the attachment by UID, filename, and target directory.
+
+## SAVE_AFTER
+After saving, the file appears at the specified location.
+
+## SEND_BEFORE
+Before sending, we inspect the current contents of the Sent folder.
+
+## SEND_ACTION
+The send command delivers the message over SMTP and automatically saves a copy to the Sent folder.
+
+## SEND_AFTER
+After sending, the message appears in the Sent folder.
+
+## MARK_READ_BEFORE
+The message is currently unread and visible in the list.
+
+## MARK_READ_ACTION
+mark-read sets the Seen flag on the server.
+
+## MARK_READ_AFTER
+After marking as read, the message disappears from the unread list.
+
+## MARK_UNREAD_ACTION
+mark-unread removes the Seen flag.
+
+## MARK_UNREAD_AFTER
+The message reappears in the unread list.
+
+## MARK_STARRED_BEFORE
+The message is not currently starred.
+
+## MARK_STARRED_ACTION
+mark-starred sets the Flagged flag on the server.
+
+## MARK_STARRED_AFTER
+After starring, the message appears among flagged messages.
+
+## REMOVE_STARRED_ACTION
+remove-starred removes the Flagged flag.
+
+## REMOVE_STARRED_AFTER
+The message returns to the unflagged state.
+
+## CONFIG_SHOW
+config show displays the current configuration.
+Passwords and tokens are shown masked with asterisks.
+
+## SYNC
+email-sync fetches new messages from the server and updates the local mail store.
+When run from cron, all other tools always work from fresh data without a server connection.
+
+## OUTRO
+email-cli — C, POSIX, OpenSSL, libcurl.
+Source code, documentation, and bug reports: github.com/csjpeter/email-cli.

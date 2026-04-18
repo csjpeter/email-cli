@@ -1,0 +1,54 @@
+# VHS tape template for the email-tui scenario
+# Demonstrates the interactive TUI with simulated keypresses.
+# Sleep placeholders (e.g. __INTRO__) are replaced by gen_tape.sh with real durations.
+
+Set Shell "bash"
+Set FontSize 24
+Set Width 1920
+Set Height 1080
+Set Theme "Dracula"
+Set Padding 24
+Set TypingSpeed 60ms
+
+# ── Boot (hidden) ─────────────────────────────────────────────────────────────
+Hide
+Type "source demo/demo_setup.sh"
+Enter
+Sleep 3s
+Show
+
+# ── INTRO — launch TUI, accounts screen appears ───────────────────────────────
+Type "email-tui"
+Enter
+Sleep __INTRO__
+
+# ── ACCOUNTS_SCREEN — accounts screen narration ───────────────────────────────
+Sleep __ACCOUNTS_SCREEN__
+
+# ── OPEN_ACCOUNT — open first account, folder browser appears ─────────────────
+Key Enter
+Sleep __OPEN_ACCOUNT__
+
+# ── MESSAGE_LIST — open INBOX, message list appears ───────────────────────────
+Key Enter
+Sleep __MESSAGE_LIST__
+
+# ── OPEN_MESSAGE — open first message ────────────────────────────────────────
+Key Enter
+Sleep __OPEN_MESSAGE__
+
+# ── READ_MESSAGE — reading the message ───────────────────────────────────────
+Sleep __READ_MESSAGE__
+
+# ── BACK_TO_LIST — go back to message list ───────────────────────────────────
+Key Backspace
+Sleep __BACK_TO_LIST__
+
+# ── COMPOSE_SCREEN — open compose screen ─────────────────────────────────────
+Key "c"
+Sleep __COMPOSE_SCREEN__
+
+# ── OUTRO — cancel and quit ───────────────────────────────────────────────────
+Key Escape
+Key Escape
+Sleep __OUTRO__

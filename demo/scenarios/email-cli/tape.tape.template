@@ -1,0 +1,150 @@
+# VHS tape template for the email-cli scenario
+# Sleep placeholders (e.g. __INTRO__) are replaced by gen_tape.sh with real durations.
+# Run from the project root: vhs <generated.tape>
+
+Set Shell "bash"
+Set FontSize 24
+Set Width 1920
+Set Height 1080
+Set Theme "Dracula"
+Set Padding 24
+Set TypingSpeed 60ms
+
+# ── Boot (hidden) ─────────────────────────────────────────────────────────────
+Hide
+Type "source demo/demo_setup.sh"
+Enter
+Sleep 3s
+Show
+
+# ── INTRO — help screen ───────────────────────────────────────────────────────
+Type "email-cli --help"
+Enter
+Sleep __INTRO__
+
+# ── SHOW_ACCOUNTS ─────────────────────────────────────────────────────────────
+Type "email-cli show-accounts"
+Enter
+Sleep __SHOW_ACCOUNTS__
+
+# ── LIST — olvasatlan üzenetek ────────────────────────────────────────────────
+Type "email-cli list"
+Enter
+Sleep __LIST__
+
+# ── SHOW — üzenet megjelenítése ───────────────────────────────────────────────
+Type "email-cli list"
+Enter
+Sleep __SHOW_BEFORE__
+Type "email-cli show 1"
+Enter
+Sleep __SHOW_RESULT__
+
+# ── LIST --all + GREP ─────────────────────────────────────────────────────────
+Type "email-cli list --all"
+Enter
+Sleep __LIST_ALL__
+Type "email-cli list --all | grep -i kickoff"
+Enter
+Sleep __GREP_RESULT__
+
+# ── FOLDERS --tree ────────────────────────────────────────────────────────────
+Type "email-cli folders --tree"
+Enter
+Sleep __FOLDERS__
+
+# ── LIST --folder ─────────────────────────────────────────────────────────────
+Type "email-cli list"
+Enter
+Sleep __LIST_DEFAULT__
+Type "email-cli list --folder INBOX.Sent"
+Enter
+Sleep __LIST_FOLDER__
+
+# ── ATTACHMENTS ───────────────────────────────────────────────────────────────
+Type "email-cli show 1"
+Enter
+Sleep __ATTACHMENTS_BEFORE__
+Type "email-cli attachments 1"
+Enter
+Sleep __ATTACHMENTS_RESULT__
+
+# ── SAVE-ATTACHMENT ───────────────────────────────────────────────────────────
+Type "ls /tmp/notes.txt 2>/dev/null || echo '(not downloaded yet)'"
+Enter
+Sleep __SAVE_BEFORE__
+Type "email-cli save-attachment 1 notes.txt /tmp"
+Enter
+Sleep __SAVE_ACTION__
+Type "ls -lh /tmp/notes.txt"
+Enter
+Sleep __SAVE_AFTER__
+
+# ── SEND ──────────────────────────────────────────────────────────────────────
+Type "email-cli list --folder INBOX.Sent"
+Enter
+Sleep __SEND_BEFORE__
+Hide
+Type "bash demo/restart_smtp.sh"
+Enter
+Sleep 1.5s
+Show
+Type `email-cli send --to colleague@example.com --subject "Re: Kickoff" --body "See you Tuesday!"`
+Enter
+Sleep __SEND_ACTION__
+Type "email-cli list --folder INBOX.Sent"
+Enter
+Sleep __SEND_AFTER__
+
+# ── MARK-READ ─────────────────────────────────────────────────────────────────
+Type "email-cli list"
+Enter
+Sleep __MARK_READ_BEFORE__
+Type "email-cli mark-read 1"
+Enter
+Sleep __MARK_READ_ACTION__
+Type "email-cli list"
+Enter
+Sleep __MARK_READ_AFTER__
+
+# ── MARK-UNREAD ───────────────────────────────────────────────────────────────
+Type "email-cli mark-unread 1"
+Enter
+Sleep __MARK_UNREAD_ACTION__
+Type "email-cli list"
+Enter
+Sleep __MARK_UNREAD_AFTER__
+
+# ── MARK-STARRED ─────────────────────────────────────────────────────────────
+Type "email-cli list --all"
+Enter
+Sleep __MARK_STARRED_BEFORE__
+Type "email-cli mark-starred 1"
+Enter
+Sleep __MARK_STARRED_ACTION__
+Type "email-cli list --all"
+Enter
+Sleep __MARK_STARRED_AFTER__
+
+# ── REMOVE-STARRED ───────────────────────────────────────────────────────────
+Type "email-cli remove-starred 1"
+Enter
+Sleep __REMOVE_STARRED_ACTION__
+Type "email-cli list --all"
+Enter
+Sleep __REMOVE_STARRED_AFTER__
+
+# ── CONFIG SHOW ───────────────────────────────────────────────────────────────
+Type "email-cli config show"
+Enter
+Sleep __CONFIG_SHOW__
+
+# ── SYNC ──────────────────────────────────────────────────────────────────────
+Type "email-sync"
+Enter
+Sleep __SYNC__
+
+# ── OUTRO ─────────────────────────────────────────────────────────────────────
+Type "# github.com/csjpeter/email-cli"
+Enter
+Sleep __OUTRO__

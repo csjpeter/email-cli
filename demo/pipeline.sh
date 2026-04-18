@@ -109,19 +109,19 @@ echo "  -> $AUDIO_FILE  (duration: ${AUDIO_DURATION}s)"
 # ── Step 3: Merge video + audio ──────────────────────────────────────────────
 echo ""
 echo "=== Step 3: Merge video + audio with ffmpeg ==="
-# Use audio length as the authoritative duration.
-# tpad freezes the last video frame if the video ends before the audio.
-# loudnorm normalises to -14 LUFS (YouTube recommended level).
+# Use audio duration as the authoritative output length.
+# tpad clones the last video frame if the video ends before the audio.
+# volume=2.5 boosts narration to a comfortable listening level (~8 dB).
 ffmpeg -y \
     -i "$VIDEO_RAW" \
     -i "$AUDIO_FILE" \
     -filter_complex \
       "[0:v]tpad=stop_mode=clone:stop_duration=9999[v]; \
-       [1:a]loudnorm=I=-14:TP=-1.5:LRA=11[a]" \
+       [1:a]volume=2.5[a]" \
     -map "[v]" -map "[a]" \
     -c:v libx264 -preset fast -crf 22 \
     -c:a aac -b:a 128k \
-    -shortest \
+    -t "$AUDIO_DURATION" \
     "$OUTPUT_FILE"
 echo "  -> $OUTPUT_FILE"
 

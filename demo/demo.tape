@@ -34,7 +34,7 @@ Sleep 36s
 # SHOW-ACCOUNTS — konfigurált fiókok listája
 # Narration: ~15 words, ~7s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch show-accounts"
+Type "email-cli show-accounts"
 Enter
 Sleep 8s
 
@@ -42,7 +42,7 @@ Sleep 8s
 # LIST — olvasatlan üzenetek
 # Narration: ~18 words, ~8s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch list"
+Type "email-cli list"
 Enter
 Sleep 9s
 
@@ -51,10 +51,10 @@ Sleep 9s
 # Before (list): narration ~10 words, ~5s
 # After  (show): narration ~20 words, ~9s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch list"
+Type "email-cli list"
 Enter
 Sleep 5s
-Type "email-cli --batch show 1"
+Type "email-cli show 1"
 Enter
 Sleep 10s
 
@@ -63,10 +63,10 @@ Sleep 10s
 # Before (list --all): narration ~10 words, ~5s
 # After  (grep):       narration ~14 words, ~6s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch list --all"
+Type "email-cli list --all"
 Enter
 Sleep 5s
-Type "email-cli --batch list --all | grep -i kickoff"
+Type "email-cli list --all | grep -i kickoff"
 Enter
 Sleep 7s
 
@@ -74,7 +74,7 @@ Sleep 7s
 # FOLDERS --tree — mappastruktúra
 # Narration: ~18 words, ~8s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch folders --tree"
+Type "email-cli folders --tree"
 Enter
 Sleep 9s
 
@@ -83,10 +83,10 @@ Sleep 9s
 # Before (INBOX): narration ~9 words, ~4s
 # After (Sent):   narration ~14 words, ~6s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch list"
+Type "email-cli list"
 Enter
 Sleep 5s
-Type "email-cli --batch list --folder INBOX.Sent"
+Type "email-cli list --folder INBOX.Sent"
 Enter
 Sleep 7s
 
@@ -95,10 +95,10 @@ Sleep 7s
 # Before (show): narration ~10 words, ~5s
 # After (list):  narration ~14 words, ~6s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch show 1"
+Type "email-cli show 1"
 Enter
 Sleep 5s
-Type "email-cli --batch attachments 1"
+Type "email-cli attachments 1"
 Enter
 Sleep 7s
 
@@ -112,7 +112,7 @@ Sleep 7s
 Type "ls /tmp/notes.txt 2>/dev/null || echo '(not downloaded yet)'"
 Enter
 Sleep 4s
-Type "email-cli --batch save-attachment 1 notes.txt /tmp"
+Type "email-cli save-attachment 1 notes.txt /tmp"
 Enter
 Sleep 4s
 Type "ls -lh /tmp/notes.txt"
@@ -126,7 +126,7 @@ Sleep 7s
 # After:  megerősítés + Sent mappa frissülve
 # Narration: ~40 words, ~18s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch list --folder INBOX.Sent"
+Type "email-cli list --folder INBOX.Sent"
 Enter
 Sleep 5s
 Hide
@@ -134,10 +134,10 @@ Type "bash demo/restart_smtp.sh"
 Enter
 Sleep 1.5s
 Show
-Type `email-cli --batch send --to bob@acme.example --subject "Re: Kickoff" --body "See you Tuesday!"`
+Type `email-cli send --to colleague@example.com --subject "Re: Kickoff" --body "See you Tuesday!"`
 Enter
 Sleep 6s
-Type "email-cli --batch list --folder INBOX.Sent"
+Type "email-cli list --folder INBOX.Sent"
 Enter
 Sleep 8s
 
@@ -148,13 +148,13 @@ Sleep 8s
 # After:  0 olvasatlan
 # Narration: ~33 words, ~15s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch list"
+Type "email-cli list"
 Enter
 Sleep 6s
-Type "email-cli --batch mark-read 1"
+Type "email-cli mark-read 1"
 Enter
 Sleep 3s
-Type "email-cli --batch list"
+Type "email-cli list"
 Enter
 Sleep 7s
 
@@ -165,10 +165,10 @@ Sleep 7s
 # After:  1 olvasatlan
 # Narration: ~20 words, ~9s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch mark-unread 1"
+Type "email-cli mark-unread 1"
 Enter
 Sleep 3s
-Type "email-cli --batch list"
+Type "email-cli list"
 Enter
 Sleep 7s
 
@@ -179,13 +179,13 @@ Sleep 7s
 # After:  csillagos üzenet látható
 # Narration: ~33 words, ~15s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch list --all"
+Type "email-cli list --all"
 Enter
 Sleep 6s
-Type "email-cli --batch mark-starred 1"
+Type "email-cli mark-starred 1"
 Enter
 Sleep 3s
-Type "email-cli --batch list --all"
+Type "email-cli list --all"
 Enter
 Sleep 7s
 
@@ -196,10 +196,10 @@ Sleep 7s
 # After:  nincs csillag
 # Narration: ~20 words, ~9s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch remove-starred 1"
+Type "email-cli remove-starred 1"
 Enter
 Sleep 3s
-Type "email-cli --batch list --all"
+Type "email-cli list --all"
 Enter
 Sleep 7s
 
@@ -207,7 +207,7 @@ Sleep 7s
 # CONFIG SHOW — konfiguráció jelszó nélkül
 # Narration: ~18 words, ~8s
 # ════════════════════════════════════════════════════════════════════
-Type "email-cli --batch config show"
+Type "email-cli config show"
 Enter
 Sleep 9s
 

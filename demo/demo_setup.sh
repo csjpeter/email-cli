@@ -18,7 +18,7 @@ MOCK_IMAP_BIN="$BUILD_DIR/tests/functional/mock_imap_server"
 MOCK_SMTP_BIN="$BUILD_DIR/tests/functional/mock_smtp_server"
 
 DEMO_HOME="/tmp/email-cli-demo-home"
-DEMO_ACCOUNT="alice@acme.example"
+DEMO_ACCOUNT="demo@example.com"
 IMAP_PORT=9993
 SMTP_PORT=9465
 

@@ -96,8 +96,7 @@ int gmail_sync_full(GmailClient *gc) {
 
         /* Skip if already cached */
         if (local_msg_exists("", uid)) {
-            if (i % 100 == 0)
-                logger_log(LOG_DEBUG, "gmail_sync: [%d/%d] %s (cached)", i + 1, uid_count, uid);
+            fprintf(stderr, "  [%d/%d] (cached)\r", i + 1, uid_count);
             continue;
         }
 
@@ -142,8 +141,7 @@ int gmail_sync_full(GmailClient *gc) {
         for (int j = 0; j < label_count; j++) free(labels[j]);
         free(labels);
 
-        if ((i + 1) % 50 == 0 || i + 1 == uid_count)
-            fprintf(stderr, "  [%d/%d] messages synced\r", i + 1, uid_count);
+        fprintf(stderr, "  [%d/%d] messages synced\r", i + 1, uid_count);
     }
     if (uid_count > 0) fprintf(stderr, "\n");
 

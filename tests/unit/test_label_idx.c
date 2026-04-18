@@ -590,6 +590,117 @@ static void test_gmail_flag_toggle_multiple_msgs(void) {
     ASSERT(label_idx_count("UNREAD") == 2, "multi: UNREAD=2 after re-unread");
 }
 
+/* ── Short UID regression (GML-short-id) ─────────────────────────── */
+
+/*
+ * Regression test: Gmail message IDs can be shorter than 16 characters
+ * (e.g. 13, 14, 15 hex chars).  The old label_idx_write used "%.16s\n"
+ * which produced variable-length records; the fixed-size fread then read
+ * the newline into the UID, embedding "\n" in the string and breaking
+ * URL construction.
+ *
+ * The fix: label_idx_write always writes exactly 16 NUL-padded bytes +
+ * '\n' = 17 bytes per record; label_idx_load uses fgets which handles
+ * both old (variable) and new (fixed) formats transparently.
+ */
+static void test_label_idx_short_ids(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://labelidx-short-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    /* IDs from real-world Gmail error report (13–15 chars) */
+    ASSERT(label_idx_add("INBOX", "d99192cdf1df3")   == 0, "add 13-char id");
+    ASSERT(label_idx_add("INBOX", "db185943f7560a")  == 0, "add 14-char id");
+    ASSERT(label_idx_add("INBOX", "e169e066dd2f3ee") == 0, "add 15-char id");
+    ASSERT(label_idx_add("INBOX", "18c9b46d67a61234")== 0, "add 16-char id");
+
+    ASSERT(label_idx_count("INBOX") == 4, "short ids: count=4");
+
+    /* contains() must find each ID — no embedded newlines in stored keys */
+    ASSERT(label_idx_contains("INBOX", "d99192cdf1df3")   == 1, "contains 13-char");
+    ASSERT(label_idx_contains("INBOX", "db185943f7560a")  == 1, "contains 14-char");
+    ASSERT(label_idx_contains("INBOX", "e169e066dd2f3ee") == 1, "contains 15-char");
+    ASSERT(label_idx_contains("INBOX", "18c9b46d67a61234")== 1, "contains 16-char");
+
+    /* Load and verify no embedded newlines or CR in any stored UID */
+    char (*uids)[17] = NULL;
+    int count = 0;
+    ASSERT(label_idx_load("INBOX", &uids, &count) == 0, "load short ids ok");
+    ASSERT(count == 4, "load count=4");
+    int clean = 1;
+    for (int i = 0; i < count; i++) {
+        if (strchr(uids[i], '\n') || strchr(uids[i], '\r'))
+            clean = 0;
+    }
+    ASSERT(clean, "no embedded newlines in loaded short IDs");
+    free(uids);
+
+    /* Remove and re-add cycle must work for short IDs */
+    ASSERT(label_idx_remove("INBOX", "db185943f7560a") == 0, "remove 14-char ok");
+    ASSERT(label_idx_contains("INBOX", "db185943f7560a") == 0, "14-char gone");
+    ASSERT(label_idx_count("INBOX") == 3, "count=3 after remove");
+
+    ASSERT(label_idx_add("INBOX", "db185943f7560a") == 0, "re-add 14-char ok");
+    ASSERT(label_idx_contains("INBOX", "db185943f7560a") == 1, "14-char back");
+    ASSERT(label_idx_count("INBOX") == 4, "count=4 after re-add");
+}
+
+/*
+ * Verify that a label index file written in the OLD variable-length format
+ * (where short IDs produced records shorter than 17 bytes) is read back
+ * correctly by the new fgets-based loader.
+ */
+static void test_label_idx_old_format_compat(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://labelidx-compat-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    /* Seed two 16-char IDs in new format first (establishes the labels/ dir) */
+    label_idx_add("MIGR", "aaaa000000000001");
+    label_idx_add("MIGR", "aaaa000000000002");
+
+    /* Overwrite with an old-format file: variable-length lines (no NUL padding).
+     * We do this by locating the .idx file via the account base.
+     * label_idx_write path: <data>/email-cli/accounts/imap.<host>/labels/MIGR.idx */
+    const char *home = getenv("HOME");
+    ASSERT(home != NULL, "compat: HOME env set");
+    char idxpath[2048];
+    snprintf(idxpath, sizeof(idxpath),
+             "%s/.local/share/email-cli/accounts/"
+             "imap.labelidx-compat-%d.example.com/labels/MIGR.idx",
+             home, getpid());
+
+    /* Write old-format file manually: variable-length lines (no NUL padding),
+     * in sorted order (old code also kept files sorted via label_idx_add). */
+    FILE *fp = fopen(idxpath, "w");
+    ASSERT(fp != NULL, "compat: open idx for write");
+    /* 16-char ID: 16 bytes + '\n' = 17 bytes (same as new format for full IDs) */
+    fputs("18c9b46d67a61234\n", fp);
+    /* 13-char ID: 13 bytes + '\n' = 14 bytes (old broken record) */
+    fputs("d99192cdf1df3\n", fp);
+    /* 15-char ID: 15 bytes + '\n' = 16 bytes (old broken record) */
+    fputs("e169e066dd2f3ee\n", fp);
+    fclose(fp);
+
+    /* Load must produce 3 clean UIDs */
+    char (*uids)[17] = NULL;
+    int count = 0;
+    ASSERT(label_idx_load("MIGR", &uids, &count) == 0, "compat: load ok");
+    ASSERT(count == 3, "compat: count=3");
+    int clean = 1;
+    for (int i = 0; i < count; i++) {
+        if (strchr(uids[i], '\n') || strchr(uids[i], '\r'))
+            clean = 0;
+    }
+    ASSERT(clean, "compat: no embedded newlines after migration");
+    free(uids);
+
+    /* contains() must work after migration */
+    ASSERT(label_idx_contains("MIGR", "e169e066dd2f3ee") == 1, "compat: 15-char found");
+    ASSERT(label_idx_contains("MIGR", "d99192cdf1df3")   == 1, "compat: 13-char found");
+    ASSERT(label_idx_contains("MIGR", "18c9b46d67a61234")== 1, "compat: 16-char found");
+}
+
 /* ── Registration ─────────────────────────────────────────────────── */
 
 void test_label_idx(void) {
@@ -618,4 +729,6 @@ void test_label_idx(void) {
     RUN_TEST(test_gmail_flag_toggle_unread);
     RUN_TEST(test_gmail_flag_toggle_starred);
     RUN_TEST(test_gmail_flag_toggle_multiple_msgs);
+    RUN_TEST(test_label_idx_short_ids);
+    RUN_TEST(test_label_idx_old_format_compat);
 }

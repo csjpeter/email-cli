@@ -236,10 +236,29 @@ AccountEntry *config_list_accounts(int *count_out) {
 
     if (count == 0) { free(list); return NULL; }
 
-    /* Sort alphabetically by name for consistent ordering. */
+    /* Sort by domain (part after '@') first, then by username within domain.
+     * This keeps accounts from the same service together regardless of username
+     * length, making multi-account setups easier to scan. */
     for (int i = 0; i < count - 1; i++) {
         for (int j = i + 1; j < count; j++) {
-            if (strcmp(list[i].name, list[j].name) > 0) {
+            const char *na = list[i].name ? list[i].name : "";
+            const char *nb = list[j].name ? list[j].name : "";
+            const char *at_a = strchr(na, '@');
+            const char *at_b = strchr(nb, '@');
+            const char *dom_a = at_a ? at_a + 1 : na;
+            const char *dom_b = at_b ? at_b + 1 : nb;
+            int dc = strcmp(dom_a, dom_b);
+            int swap;
+            if (dc != 0) {
+                swap = dc > 0;
+            } else {
+                /* Same domain: sort by user part */
+                size_t ul_a = at_a ? (size_t)(at_a - na) : strlen(na);
+                size_t ul_b = at_b ? (size_t)(at_b - nb) : strlen(nb);
+                int uc = strncmp(na, nb, ul_a < ul_b ? ul_a : ul_b);
+                swap = (uc != 0) ? (uc > 0) : (ul_a > ul_b);
+            }
+            if (swap) {
                 AccountEntry tmp = list[i];
                 list[i] = list[j];
                 list[j] = tmp;

@@ -137,7 +137,7 @@ static void test_auth_code_denied(void) {
     ASSERT(conn >= 0, "denied: accept succeeded");
 
     char req[4096] = {0};
-    read(conn, req, sizeof(req) - 1);
+    ssize_t n2 = read(conn, req, sizeof(req) - 1); (void)n2;
 
     ASSERT(strstr(req, "code=") == NULL,
            "denied: no code in request");

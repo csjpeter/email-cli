@@ -852,42 +852,32 @@ static int ensure_label_dir(const char *label) {
 }
 
 int label_idx_contains(const char *label, const char *uid) {
-    RAII_STRING char *path = label_idx_path(label);
-    if (!path) return 0;
+    char (*arr)[17] = NULL;
+    int n = 0;
+    if (label_idx_load(label, &arr, &n) != 0 || n == 0) {
+        free(arr);
+        return 0;
+    }
 
-    RAII_FILE FILE *fp = fopen(path, "r");
-    if (!fp) return 0;
-
-    /* Get file size → record count */
-    if (fseek(fp, 0, SEEK_END) != 0) return 0;
-    long size = ftell(fp);
-    if (size < IDX_RECORD_SIZE) return 0;
-    int n = (int)(size / IDX_RECORD_SIZE);
-
-    /* Binary search on fixed-width records */
-    int lo = 0, hi = n - 1;
-    char rec[17];
+    /* In-memory binary search (file is kept sorted) */
+    int lo = 0, hi = n - 1, found = 0;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
-        if (fseek(fp, (long)mid * IDX_RECORD_SIZE, SEEK_SET) != 0) return 0;
-        if (fread(rec, 1, 16, fp) != 16) return 0;
-        rec[16] = '\0';
-        int cmp = memcmp(rec, uid, 16);
-        if (cmp == 0) return 1;
+        int cmp = strcmp(arr[mid], uid);
+        if (cmp == 0) { found = 1; break; }
         if (cmp < 0) lo = mid + 1;
         else          hi = mid - 1;
     }
-    return 0;
+    free(arr);
+    return found;
 }
 
 int label_idx_count(const char *label) {
-    RAII_STRING char *path = label_idx_path(label);
-    if (!path) return 0;
-    RAII_FILE FILE *fp = fopen(path, "r");
-    if (!fp) return 0;
-    if (fseek(fp, 0, SEEK_END) != 0) return 0;
-    long size = ftell(fp);
-    return (size >= IDX_RECORD_SIZE) ? (int)(size / IDX_RECORD_SIZE) : 0;
+    char (*arr)[17] = NULL;
+    int n = 0;
+    label_idx_load(label, &arr, &n);
+    free(arr);
+    return n;
 }
 
 int label_idx_load(const char *label, char (**uids_out)[17], int *count_out) {
@@ -900,20 +890,30 @@ int label_idx_load(const char *label, char (**uids_out)[17], int *count_out) {
     RAII_FILE FILE *fp = fopen(path, "r");
     if (!fp) return 0;  /* Empty / nonexistent label → 0 entries, not error */
 
-    if (fseek(fp, 0, SEEK_END) != 0) return -1;
-    long size = ftell(fp);
-    if (size < IDX_RECORD_SIZE) return 0;
-    rewind(fp);
-
-    int n = (int)(size / IDX_RECORD_SIZE);
-    char (*arr)[17] = malloc((size_t)n * sizeof(char[17]));
+    /* Use fgets-based reading to handle both old variable-length format
+     * (where short Gmail IDs < 16 chars were stored without NUL padding)
+     * and new fixed-width format (16 NUL-padded bytes + '\n'). */
+    int cap = 256;
+    char (*arr)[17] = malloc((size_t)cap * sizeof(char[17]));
     if (!arr) return -1;
 
     int count = 0;
-    for (int i = 0; i < n; i++) {
-        if (fread(arr[count], 1, 16, fp) != 16) break;
-        arr[count][16] = '\0';
-        fgetc(fp);  /* skip '\n' */
+    char line[64];
+    while (fgets(line, sizeof(line), fp)) {
+        /* fgets stops at '\n'; strip trailing whitespace/newline */
+        size_t len = strlen(line);
+        while (len > 0 && ((unsigned char)line[len-1] <= ' '))
+            line[--len] = '\0';
+        if (len == 0 || len > 16) continue;
+
+        if (count >= cap) {
+            cap *= 2;
+            char (*tmp)[17] = realloc(arr, (size_t)cap * sizeof(char[17]));
+            if (!tmp) { free(arr); return -1; }
+            arr = tmp;
+        }
+        memset(arr[count], 0, sizeof(arr[count]));
+        memcpy(arr[count], line, len);
         count++;
     }
 
@@ -931,8 +931,18 @@ int label_idx_write(const char *label, const char (*uids)[17], int count) {
     RAII_FILE FILE *fp = fopen(path, "w");
     if (!fp) return -1;
 
-    for (int i = 0; i < count; i++)
-        fprintf(fp, "%.16s\n", uids[i]);
+    /* Write fixed-width records: exactly 16 NUL-padded bytes + '\n' = 17 bytes.
+     * Short Gmail IDs (< 16 chars) are padded with NUL so the record size is
+     * always 17 bytes, preventing embedded newlines on read-back. */
+    for (int i = 0; i < count; i++) {
+        char padded[17];
+        size_t uid_len = strlen(uids[i]);
+        if (uid_len > 16) uid_len = 16;
+        memset(padded, 0, 16);
+        memcpy(padded, uids[i], uid_len);
+        padded[16] = '\n';
+        if (fwrite(padded, 1, 17, fp) != 17) return -1;
+    }
 
     logger_log(LOG_DEBUG, "label_idx_write: %s → %d entries", label, count);
     return 0;
@@ -1008,7 +1018,7 @@ int label_idx_add(const char *label, const char *uid) {
     int lo = 0, hi = ecount - 1, insert_pos = ecount;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
-        int cmp = memcmp(existing[mid], uid, 16);
+        int cmp = strcmp(existing[mid], uid);
         if (cmp == 0) { free(existing); return 0; }  /* Already present */
         if (cmp < 0) lo = mid + 1;
         else { insert_pos = mid; hi = mid - 1; }
@@ -1045,7 +1055,7 @@ int label_idx_remove(const char *label, const char *uid) {
     int lo = 0, hi = ecount - 1, found = -1;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
-        int cmp = memcmp(existing[mid], uid, 16);
+        int cmp = strcmp(existing[mid], uid);
         if (cmp == 0) { found = mid; break; }
         if (cmp < 0) lo = mid + 1;
         else          hi = mid - 1;

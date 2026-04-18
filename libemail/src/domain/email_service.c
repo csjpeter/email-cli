@@ -1932,8 +1932,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=labels  ESC=quit"
-                         "  c=compose  r=reply  n=unread  f=star  a=archive  D=trash"
-                         "  s=sync  R=refresh  [%d/%d]",
+                         "  c=compose  r=reply  n=unread  f=star  a=archive"
+                         "  d=rm-label  D=trash  s=sync  R=refresh  [%d/%d]",
                          cursor + 1, show_count);
             } else {
                 snprintf(sb, sizeof(sb),
@@ -2019,6 +2019,7 @@ read_key_again: ;
                         { "n",                 "Toggle Unread label"             },
                         { "f",                 "Toggle Starred label"            },
                         { "a",                 "Archive (remove INBOX label)"    },
+                        { "d",                 "Remove current label"            },
                         { "D",                 "Move to Trash"                   },
                         { "u",                 "Untrash (restore labels)"        },
                         { "t",                 "Toggle labels (picker)"          },
@@ -2147,6 +2148,38 @@ read_key_again: ;
             }
             if (ch == 't' && is_gmail) {
                 show_label_picker(list_mc, entries[cursor].uid);
+                break;
+            }
+            if (ch == 'd' && is_gmail) {
+                /* Remove current label (folder) from this message.
+                 * Restricted to non-meta labels (no underscore prefix). */
+                if (folder[0] != '_') {
+                    const char *uid = entries[cursor].uid;
+                    if (list_mc)
+                        mail_client_modify_label(list_mc, uid, folder, 0);
+                    label_idx_remove(folder, uid);
+                    /* If no other real labels remain, put in archive */
+                    char *lbl = local_hdr_get_labels("", uid);
+                    int has_real = 0;
+                    if (lbl) {
+                        char *tok = lbl, *s;
+                        while (tok && *tok) {
+                            s = strchr(tok, ',');
+                            size_t tl = s ? (size_t)(s - tok) : strlen(tok);
+                            char lb[64];
+                            if (tl >= sizeof(lb)) tl = sizeof(lb) - 1;
+                            memcpy(lb, tok, tl); lb[tl] = '\0';
+                            if (strcmp(lb, folder) != 0 &&
+                                strcmp(lb, "UNREAD") != 0 &&
+                                strcmp(lb, "IMPORTANT") != 0 &&
+                                strncmp(lb, "CATEGORY_", 9) != 0)
+                                has_real = 1;
+                            tok = s ? s + 1 : NULL;
+                        }
+                        free(lbl);
+                    }
+                    if (!has_real) label_idx_add("_nolabel", uid);
+                }
                 break;
             }
             if (ch == 'n' || ch == 'f' || ch == 'd') {
@@ -3030,8 +3063,15 @@ labels_done:
  */
 static void get_account_totals(const Config *cfg, int *unseen_out, int *flagged_out) {
     *unseen_out = 0; *flagged_out = 0;
-    if (!cfg || !cfg->host) return;
+    if (!cfg) return;
     local_store_init(cfg->host, cfg->user);
+    if (cfg->gmail_mode) {
+        /* Gmail: count from local label index files */
+        *unseen_out  = label_idx_count("UNREAD");
+        *flagged_out = label_idx_count("STARRED");
+        return;
+    }
+    if (!cfg->host) return;
     int fcount = 0;
     char **flist = local_folder_list_load(&fcount, NULL);
     if (!flist) return;

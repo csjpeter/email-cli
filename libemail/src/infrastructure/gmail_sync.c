@@ -9,6 +9,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* ── Progress callbacks ───────────────────────────────────────────── */
+
+/* Called by gmail_list_messages after each page: cur = messages collected so far */
+static void list_progress_cb(size_t cur, size_t total, void *ctx) {
+    (void)total; (void)ctx;
+    fprintf(stderr, "\r\033[K  Listing messages... %zu found", cur);
+    fflush(stderr);
+}
+
 /* ── Gmail .hdr file format ───────────────────────────────────────── */
 
 /**
@@ -81,13 +90,20 @@ int gmail_sync_is_filtered_label(const char *label_id) {
 int gmail_sync_full(GmailClient *gc) {
     logger_log(LOG_INFO, "gmail_sync: starting full sync");
 
-    /* 1. List all message IDs */
+    /* 1. List all message IDs (paginated — show running count while fetching) */
+    fprintf(stderr, "  Listing messages...");
+    fflush(stderr);
+    gmail_set_progress(gc, list_progress_cb, NULL);
+
     char (*all_uids)[17] = NULL;
     int uid_count = 0;
     if (gmail_list_messages(gc, NULL, NULL, &all_uids, &uid_count) != 0) {
+        gmail_set_progress(gc, NULL, NULL);
         logger_log(LOG_ERROR, "gmail_sync: failed to list messages");
         return -1;
     }
+    gmail_set_progress(gc, NULL, NULL);
+    fprintf(stderr, "\r\033[K  %d messages found\n", uid_count);
     logger_log(LOG_INFO, "gmail_sync: %d messages to sync", uid_count);
 
     /* 2. For each message: fetch, store .eml, build .hdr, collect labels */

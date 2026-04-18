@@ -17,7 +17,8 @@ static char g_account_base[8192];
 
 int local_store_init(const char *host_url, const char *username) {
     const char *data_base = platform_data_dir();
-    if (!data_base || !host_url) return -1;
+    if (!data_base) return -1;
+    if (!host_url && (!username || !username[0])) return -1;
 
     /* The email address (username) uniquely identifies an account.
      * Use it directly as the directory key so two accounts on the same

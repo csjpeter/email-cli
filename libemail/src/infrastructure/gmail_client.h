@@ -47,6 +47,25 @@ int gmail_list_labels(GmailClient *c, char ***names_out,
                       char ***ids_out, int *count_out);
 
 /**
+ * @brief Create a new user-defined label.
+ * @param c       Connected GmailClient.
+ * @param name    Display name for the new label.
+ * @param id_out  Optional: receives heap-allocated new label ID. Caller frees.
+ * @return 0 on success, -1 on error.
+ */
+int gmail_create_label(GmailClient *c, const char *name, char **id_out);
+
+/**
+ * @brief Permanently delete a user-defined label.
+ * System labels (INBOX, UNREAD, STARRED, SENT, DRAFTS, TRASH, SPAM) cannot
+ * be deleted via this API — the server will return an error.
+ * @param c        Connected GmailClient.
+ * @param label_id Gmail label ID (e.g. "Label_12345").
+ * @return 0 on success, -1 on error.
+ */
+int gmail_delete_label(GmailClient *c, const char *label_id);
+
+/**
  * @brief List message IDs matching a label (or all messages).
  *
  * Paginates automatically; returns all matching UIDs.

@@ -33,6 +33,18 @@ static void help_general(void) {
         "  attachments <uid>       List attachments in a message\n"
         "  save-attachment <uid>   Save a named attachment to disk\n"
         "  send                    Send a message non-interactively\n"
+        "  mark-read <uid>         Mark a message as read\n"
+        "  mark-unread <uid>       Mark a message as unread\n"
+        "  mark-starred <uid>      Star (flag) a message\n"
+        "  remove-starred <uid>    Remove star from a message\n"
+        "  add-label <uid> <lbl>   Add a Gmail label to a message\n"
+        "  remove-label <uid> <lbl> Remove a Gmail label from a message\n"
+        "  list-labels             List all labels (Gmail) or folders (IMAP)\n"
+        "  create-label <name>     Create a new label (Gmail) or folder (IMAP)\n"
+        "  delete-label <id>       Delete a label (Gmail) or folder (IMAP)\n"
+        "  show-accounts           List all configured accounts\n"
+        "  add-account             Add a new account (runs setup wizard)\n"
+        "  remove-account <email>  Remove an account (local data preserved)\n"
         "  config                  View or update configuration (incl. SMTP)\n"
         "  help [command]          Show this help, or detailed help for a command\n"
         "  help gmail              Step-by-step Gmail OAuth2 setup guide\n"
@@ -169,6 +181,134 @@ static void help_save_attachment(void) {
     );
 }
 
+static void help_mark_read(void) {
+    printf(
+        "Usage: email-cli mark-read <uid> [--folder <name>]\n"
+        "       email-cli mark-unread <uid> [--folder <name>]\n"
+        "\n"
+        "Mark a message as read (removes the UNSEEN flag) or unread (adds it).\n"
+        "\n"
+        "  <uid>            Numeric IMAP UID shown by 'email-cli list'\n"
+        "  --folder <name>  Folder/label containing the message (default: configured folder)\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli mark-read 42\n"
+        "  email-cli mark-unread 42 --folder INBOX\n"
+    );
+}
+
+static void help_mark_starred(void) {
+    printf(
+        "Usage: email-cli mark-starred <uid> [--folder <name>]\n"
+        "       email-cli remove-starred <uid> [--folder <name>]\n"
+        "\n"
+        "Star (flag) or un-star a message.\n"
+        "\n"
+        "  <uid>            Numeric IMAP UID shown by 'email-cli list'\n"
+        "  --folder <name>  Folder/label containing the message\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli mark-starred 42\n"
+        "  email-cli remove-starred 42\n"
+    );
+}
+
+static void help_add_label(void) {
+    printf(
+        "Usage: email-cli add-label <uid> <label>\n"
+        "       email-cli remove-label <uid> <label>\n"
+        "\n"
+        "Add or remove a Gmail label on a message (Gmail only).\n"
+        "\n"
+        "  <uid>    Numeric message ID shown by 'email-cli list'\n"
+        "  <label>  Gmail label ID (e.g. 'Label_12345' or 'STARRED')\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli add-label 1abc23 Work\n"
+        "  email-cli remove-label 1abc23 Work\n"
+    );
+}
+
+static void help_list_labels(void) {
+    printf(
+        "Usage: email-cli list-labels\n"
+        "\n"
+        "List all available labels (Gmail) or folders (IMAP).\n"
+        "For Gmail, shows both the display name and the label ID.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli list-labels\n"
+    );
+}
+
+static void help_create_label(void) {
+    printf(
+        "Usage: email-cli create-label <name>\n"
+        "\n"
+        "Create a new Gmail label or IMAP folder.\n"
+        "\n"
+        "  <name>  Display name for the new label/folder\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli create-label Work\n"
+        "  email-cli create-label \"My Projects\"\n"
+    );
+}
+
+static void help_delete_label(void) {
+    printf(
+        "Usage: email-cli delete-label <label-id>\n"
+        "\n"
+        "Delete a Gmail label or IMAP folder.\n"
+        "For Gmail, <label-id> is the label ID (from list-labels).\n"
+        "For IMAP, <label-id> is the folder name.\n"
+        "System labels (INBOX, TRASH, etc.) cannot be deleted.\n"
+        "\n"
+        "  <label-id>  Label ID (Gmail) or folder name (IMAP)\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli delete-label Label_12345\n"
+        "  email-cli delete-label MyFolder\n"
+    );
+}
+
+static void help_show_accounts(void) {
+    printf(
+        "Usage: email-cli show-accounts\n"
+        "\n"
+        "List all configured accounts with their type and server.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli show-accounts\n"
+    );
+}
+
+static void help_add_account(void) {
+    printf(
+        "Usage: email-cli add-account\n"
+        "\n"
+        "Run the interactive setup wizard to add a new account.\n"
+        "Supports both IMAP and Gmail (OAuth2) accounts.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli add-account\n"
+    );
+}
+
+static void help_remove_account(void) {
+    printf(
+        "Usage: email-cli remove-account <email>\n"
+        "\n"
+        "Remove a configured account by email address.\n"
+        "Local messages are NOT deleted — they are preserved on disk.\n"
+        "\n"
+        "  <email>  Account email address shown by 'email-cli show-accounts'\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli remove-account user@example.com\n"
+    );
+}
+
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
 static int parse_uid(const char *s, char uid_out[17]) {
@@ -249,6 +389,18 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "send")            == 0) { help_send();            return EXIT_SUCCESS; }
                 if (strcmp(cmd, "config")          == 0) { help_config();          return EXIT_SUCCESS; }
                 if (strcmp(cmd, "gmail")           == 0) { help_gmail();           return EXIT_SUCCESS; }
+                if (strcmp(cmd, "mark-read")       == 0 ||
+                    strcmp(cmd, "mark-unread")     == 0) { help_mark_read();       return EXIT_SUCCESS; }
+                if (strcmp(cmd, "mark-starred")    == 0 ||
+                    strcmp(cmd, "remove-starred")  == 0) { help_mark_starred();    return EXIT_SUCCESS; }
+                if (strcmp(cmd, "add-label")       == 0 ||
+                    strcmp(cmd, "remove-label")    == 0) { help_add_label();       return EXIT_SUCCESS; }
+                if (strcmp(cmd, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
+                if (strcmp(cmd, "create-label")    == 0) { help_create_label();    return EXIT_SUCCESS; }
+                if (strcmp(cmd, "delete-label")    == 0) { help_delete_label();    return EXIT_SUCCESS; }
+                if (strcmp(cmd, "show-accounts")   == 0) { help_show_accounts();   return EXIT_SUCCESS; }
+                if (strcmp(cmd, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
+                if (strcmp(cmd, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
             }
             /* email-cli --help  or  email-cli help --help */
             help_general();
@@ -272,6 +424,18 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "send")            == 0) { help_send();            return EXIT_SUCCESS; }
             if (strcmp(topic, "config")          == 0) { help_config();          return EXIT_SUCCESS; }
             if (strcmp(topic, "gmail")           == 0) { help_gmail();           return EXIT_SUCCESS; }
+            if (strcmp(topic, "mark-read")       == 0 ||
+                strcmp(topic, "mark-unread")     == 0) { help_mark_read();       return EXIT_SUCCESS; }
+            if (strcmp(topic, "mark-starred")    == 0 ||
+                strcmp(topic, "remove-starred")  == 0) { help_mark_starred();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "add-label")       == 0 ||
+                strcmp(topic, "remove-label")    == 0) { help_add_label();       return EXIT_SUCCESS; }
+            if (strcmp(topic, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
+            if (strcmp(topic, "create-label")    == 0) { help_create_label();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "delete-label")    == 0) { help_delete_label();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "show-accounts")   == 0) { help_show_accounts();   return EXIT_SUCCESS; }
+            if (strcmp(topic, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
+            if (strcmp(topic, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli help' for available commands.\n");
             return EXIT_FAILURE;
@@ -293,28 +457,36 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Warning: Logging system failed to initialize.\n");
     logger_log(LOG_INFO, "--- email-cli starting (cmd: %s) ---", cmd);
 
+    /* Determine if this command needs a loaded account config */
+    int cmd_needs_cfg = !(cmd && (strcmp(cmd, "add-account")    == 0 ||
+                                  strcmp(cmd, "show-accounts")  == 0 ||
+                                  strcmp(cmd, "remove-account") == 0));
+
     /* 4. Load configuration */
-    Config *cfg = config_load_from_store();
-    if (!cfg) {
-        logger_log(LOG_INFO, "No configuration found. Starting setup wizard.");
-        cfg = setup_wizard_run();
-        if (cfg) {
-            if (config_save_to_store(cfg) != 0) {
-                logger_log(LOG_ERROR, "Failed to save configuration.");
-                fprintf(stderr, "Error: Failed to save configuration to disk.\n");
+    Config *cfg = NULL;
+    if (cmd_needs_cfg) {
+        cfg = config_load_from_store();
+        if (!cfg) {
+            logger_log(LOG_INFO, "No configuration found. Starting setup wizard.");
+            cfg = setup_wizard_run();
+            if (cfg) {
+                if (config_save_to_store(cfg) != 0) {
+                    logger_log(LOG_ERROR, "Failed to save configuration.");
+                    fprintf(stderr, "Error: Failed to save configuration to disk.\n");
+                } else {
+                    printf("Configuration saved. Run 'email-cli sync' to download your mail.\n");
+                }
             } else {
-                printf("Configuration saved. Run 'email-cli sync' to download your mail.\n");
+                logger_log(LOG_ERROR, "Configuration aborted by user.");
+                fprintf(stderr, "Configuration aborted. Exiting.\n");
+                logger_close();
+                return EXIT_FAILURE;
             }
-        } else {
-            logger_log(LOG_ERROR, "Configuration aborted by user.");
-            fprintf(stderr, "Configuration aborted. Exiting.\n");
-            logger_close();
-            return EXIT_FAILURE;
         }
     }
 
     /* 5. Initialize local store */
-    if (local_store_init(cfg->host, cfg->user) != 0)
+    if (cfg && local_store_init(cfg->host, cfg->user) != 0)
         logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
 
     /* 6. Dispatch — batch mode only (no interactive TUI) */
@@ -593,6 +765,195 @@ int main(int argc, char *argv[]) {
                     }
                     free(msg);
                 }
+            }
+        }
+
+    } else if (strcmp(cmd, "mark-read") == 0 || strcmp(cmd, "mark-unread") == 0) {
+        const char *uid_str = NULL;
+        const char *folder  = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--folder") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --folder requires a folder name.\n"); ok = 0;
+                } else folder = argv[++i];
+            } else if (!uid_str) {
+                uid_str = argv[i];
+            } else {
+                unknown_option(cmd, argv[i]); ok = 0;
+            }
+        }
+        if (ok) {
+            if (!uid_str) {
+                fprintf(stderr, "Error: '%s' requires a UID argument.\n", cmd);
+                help_mark_read();
+            } else {
+                char uid[17];
+                if (parse_uid(uid_str, uid) != 0)
+                    fprintf(stderr, "Error: UID must be a positive integer (got '%s').\n", uid_str);
+                else {
+                    int flag_add = (strcmp(cmd, "mark-unread") == 0) ? 1 : 0;
+                    result = email_service_set_flag(cfg, uid, folder, MSG_FLAG_UNSEEN, flag_add);
+                }
+            }
+        }
+
+    } else if (strcmp(cmd, "mark-starred") == 0 || strcmp(cmd, "remove-starred") == 0) {
+        const char *uid_str = NULL;
+        const char *folder  = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--folder") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --folder requires a folder name.\n"); ok = 0;
+                } else folder = argv[++i];
+            } else if (!uid_str) {
+                uid_str = argv[i];
+            } else {
+                unknown_option(cmd, argv[i]); ok = 0;
+            }
+        }
+        if (ok) {
+            if (!uid_str) {
+                fprintf(stderr, "Error: '%s' requires a UID argument.\n", cmd);
+                help_mark_starred();
+            } else {
+                char uid[17];
+                if (parse_uid(uid_str, uid) != 0)
+                    fprintf(stderr, "Error: UID must be a positive integer (got '%s').\n", uid_str);
+                else {
+                    int flag_add = (strcmp(cmd, "mark-starred") == 0) ? 1 : 0;
+                    result = email_service_set_flag(cfg, uid, folder, MSG_FLAG_FLAGGED, flag_add);
+                }
+            }
+        }
+
+    } else if (strcmp(cmd, "add-label") == 0 || strcmp(cmd, "remove-label") == 0) {
+        const char *uid_str = NULL;
+        const char *label   = NULL;
+        int argn = 0;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (argn == 0)      { uid_str = argv[i]; argn++; }
+            else if (argn == 1) { label   = argv[i]; argn++; }
+        }
+        if (!uid_str || !label) {
+            fprintf(stderr, "Error: '%s' requires a UID and a label.\n", cmd);
+            help_add_label();
+        } else {
+            char uid[17];
+            if (parse_uid(uid_str, uid) != 0)
+                fprintf(stderr, "Error: UID must be a positive integer (got '%s').\n", uid_str);
+            else {
+                int add = (strcmp(cmd, "add-label") == 0) ? 1 : 0;
+                result = email_service_set_label(cfg, uid, label, add);
+            }
+        }
+
+    } else if (strcmp(cmd, "list-labels") == 0) {
+        result = email_service_list_labels(cfg);
+
+    } else if (strcmp(cmd, "create-label") == 0) {
+        const char *name = NULL;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            name = argv[i]; break;
+        }
+        if (!name) {
+            fprintf(stderr, "Error: 'create-label' requires a label name.\n");
+            help_create_label();
+        } else {
+            result = email_service_create_label(cfg, name);
+        }
+
+    } else if (strcmp(cmd, "delete-label") == 0) {
+        const char *label_id = NULL;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            label_id = argv[i]; break;
+        }
+        if (!label_id) {
+            fprintf(stderr, "Error: 'delete-label' requires a label ID.\n");
+            help_delete_label();
+        } else {
+            result = email_service_delete_label(cfg, label_id);
+        }
+
+    } else if (strcmp(cmd, "show-accounts") == 0) {
+        int count = 0;
+        AccountEntry *accs = config_list_accounts(&count);
+        if (count == 0) {
+            printf("No accounts configured.\n");
+            result = 0;
+        } else {
+            printf("%-40s  %-8s  %s\n", "Account", "Type", "Server");
+            printf("%-40s  %-8s  %s\n",
+                   "----------------------------------------",
+                   "--------",
+                   "----------------------------");
+            for (int i = 0; i < count; i++) {
+                const char *type   = (accs[i].cfg && accs[i].cfg->gmail_mode) ? "Gmail" : "IMAP";
+                const char *server = accs[i].cfg ? (accs[i].cfg->host ? accs[i].cfg->host : "-") : "-";
+                printf("%-40s  %-8s  %s\n",
+                       accs[i].name ? accs[i].name : "?",
+                       type, server);
+            }
+            config_free_account_list(accs, count);
+            result = 0;
+        }
+
+    } else if (strcmp(cmd, "add-account") == 0) {
+        Config *new_cfg = setup_wizard_run();
+        if (new_cfg) {
+            if (config_save_account(new_cfg) == 0) {
+                printf("Account '%s' added.\n", new_cfg->user ? new_cfg->user : "?");
+                result = 0;
+            } else {
+                fprintf(stderr, "Error: Failed to save account.\n");
+            }
+            config_free(new_cfg);
+        } else {
+            fprintf(stderr, "Account setup cancelled.\n");
+            result = -1;
+        }
+
+    } else if (strcmp(cmd, "remove-account") == 0) {
+        const char *account_name = NULL;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            account_name = argv[i]; break;
+        }
+        if (!account_name) {
+            fprintf(stderr, "Error: 'remove-account' requires an account email.\n");
+            help_remove_account();
+        } else {
+            /* Verify account exists */
+            int acc_count = 0;
+            AccountEntry *accs = config_list_accounts(&acc_count);
+            int found = 0;
+            for (int i = 0; i < acc_count && !found; i++)
+                if (accs[i].name && strcmp(accs[i].name, account_name) == 0) found = 1;
+            config_free_account_list(accs, acc_count);
+
+            if (!found) {
+                fprintf(stderr, "Error: Account '%s' not found.\n", account_name);
+            } else {
+                config_delete_account(account_name);
+
+                const char *data_base = platform_data_dir();
+                printf("Account '%s' removed.\n", account_name);
+                printf("\n");
+                printf("Local messages have been PRESERVED and are NOT deleted.\n");
+                if (data_base) {
+                    printf("Local data directory: %s/email-cli/accounts/%s/\n",
+                           data_base, account_name);
+                    printf("To delete local messages manually:\n");
+                    printf("  rm -rf %s/email-cli/accounts/%s/\n",
+                           data_base, account_name);
+                }
+                result = 0;
             }
         }
 

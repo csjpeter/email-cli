@@ -2890,7 +2890,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
         {
             char sb[256];
             snprintf(sb, sizeof(sb),
-                     "  \u2191\u2193=select  Enter=open  Backspace=accounts  ESC=quit"
+                     "  \u2191\u2193=select  Enter=open  c=create  d=delete  Backspace=accounts  ESC=quit"
                      "  h=help  [%d/%d]",
                      cursor + 1, lbl_count);
             print_statusbar(trows, tcols, sb);
@@ -2930,12 +2930,89 @@ char *email_service_list_labels_interactive(const Config *cfg,
                     { "\u2191 / \u2193",   "Move cursor up / down"      },
                     { "PgUp / PgDn",       "Page up / down"             },
                     { "Enter",             "Open selected label"        },
+                    { "c",                 "Create new label"           },
+                    { "d",                 "Delete selected label"      },
                     { "Backspace",         "Back to accounts"           },
                     { "ESC / q",           "Quit"                       },
                     { "h / ?",             "Show this help"             },
                 };
                 show_help_popup("Label browser shortcuts",
                                 help, (int)(sizeof(help)/sizeof(help[0])));
+            }
+            if (ch == 'c') {
+                /* Create new label */
+                char new_name[256] = "";
+                InputLine il;
+                input_line_init(&il, new_name, sizeof(new_name), "");
+                int confirmed = input_line_run(&il, trows - 2, "New label name: ");
+                if (confirmed && new_name[0]) {
+                    if (email_service_create_label(cfg, new_name) == 0) {
+                        /* Reload label list on next iteration */
+                        free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_count);
+                        /* Rebuild user labels */
+                        char **ul2 = NULL;
+                        int uc2 = 0;
+                        {
+                            char **al2 = NULL;
+                            int ac2 = 0;
+                            label_idx_list(&al2, &ac2);
+                            ul2 = calloc(ac2 > 0 ? (size_t)ac2 : 1, sizeof(char *));
+                            for (int i = 0; i < ac2; i++) {
+                                if (!is_system_or_special_label(al2[i]))
+                                    ul2[uc2++] = strdup(al2[i]);
+                                free(al2[i]);
+                            }
+                            free(al2);
+                        }
+                        if (uc2 > 1)
+                            qsort(ul2, (size_t)uc2, sizeof(char *), cmp_str);
+                        lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps,
+                                                        ul2, uc2);
+                        for (int i = 0; i < uc2; i++) free(ul2[i]);
+                        free(ul2);
+                        if (lbl_count == 0) {
+                            free_label_display(lbl_ids, lbl_names, lbl_seps, 0);
+                            goto labels_done;
+                        }
+                    }
+                }
+            }
+            if (ch == 'd' && lbl_count > 0) {
+                /* Delete selected label — use the label name as ID (best effort).
+                 * TODO: use label ID instead of name for Gmail (ID != name for
+                 *       user-defined labels). For IMAP this is correct (name == ID). */
+                const char *del_id = lbl_names[cursor];
+                if (del_id) {
+                    email_service_delete_label(cfg, del_id);
+                    /* Rebuild display after deletion */
+                    free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_count);
+                    char **ul3 = NULL;
+                    int uc3 = 0;
+                    {
+                        char **al3 = NULL;
+                        int ac3 = 0;
+                        label_idx_list(&al3, &ac3);
+                        ul3 = calloc(ac3 > 0 ? (size_t)ac3 : 1, sizeof(char *));
+                        for (int i = 0; i < ac3; i++) {
+                            if (!is_system_or_special_label(al3[i]))
+                                ul3[uc3++] = strdup(al3[i]);
+                            free(al3[i]);
+                        }
+                        free(al3);
+                    }
+                    if (uc3 > 1)
+                        qsort(ul3, (size_t)uc3, sizeof(char *), cmp_str);
+                    lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps,
+                                                    ul3, uc3);
+                    for (int i = 0; i < uc3; i++) free(ul3[i]);
+                    free(ul3);
+                    if (cursor >= lbl_count) cursor = lbl_count - 1;
+                    if (cursor < 0) cursor = 0;
+                    if (lbl_count == 0) {
+                        free_label_display(lbl_ids, lbl_names, lbl_seps, 0);
+                        goto labels_done;
+                    }
+                }
             }
             break;
         }
@@ -3107,7 +3184,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
 
         char sb[256];
         snprintf(sb, sizeof(sb),
-                 "  \u2191\u2193=select  Enter=open  n=add  d=delete  i=IMAP  e=SMTP  ESC=quit");
+                 "  \u2191\u2193=select  Enter=open  n=add  d=delete*  i=IMAP  e=SMTP  ESC=quit  (*keeps local data)");
         print_statusbar(trows, tcols, sb);
 
         TermKey key = terminal_read_key();
@@ -3174,9 +3251,27 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
         }
         if (ch == 'd' && count > 0) {
             const char *name = accounts[cursor].name;
+
+            /* Compute local data directory (NOT deleted) */
+            const char *data_base = platform_data_dir();
+            char data_path[2048] = "";
+            if (data_base && name && name[0])
+                snprintf(data_path, sizeof(data_path),
+                         "%s/email-cli/accounts/%s", data_base, name);
+
             config_delete_account(name);
             ACC_FREE();
             if (cursor > 0) cursor--;
+
+            /* Show preservation notice */
+            if (data_path[0]) {
+                int trows2 = terminal_rows();
+                int tcols2 = terminal_cols();
+                char notice[2200];
+                snprintf(notice, sizeof(notice),
+                         "Account removed. Local messages preserved: %s", data_path);
+                print_infoline(trows2, tcols2, notice);
+            }
             continue;  /* re-render */
         }
 
@@ -3802,6 +3897,183 @@ int email_service_save_attachment(const Config *cfg, const char *uid,
 
     mime_free_attachments(atts, count);
     free(dir_heap);
+    return rc;
+}
+
+/* ── Flag / label service functions ─────────────────────────────────── */
+
+int email_service_set_flag(const Config *cfg, const char *uid,
+                           const char *folder, int flag_bit, int add) {
+    const char *use_folder = folder ? folder : (cfg->folder ? cfg->folder : "INBOX");
+
+    /* Determine IMAP flag name and effective add direction */
+    const char *flag_name;
+    int imap_add;
+    if (flag_bit == MSG_FLAG_UNSEEN) {
+        flag_name = "\\Seen";
+        imap_add  = !add;  /* add UNSEEN = remove \Seen */
+    } else if (flag_bit == MSG_FLAG_FLAGGED) {
+        flag_name = "\\Flagged";
+        imap_add  = add;
+    } else if (flag_bit == MSG_FLAG_DONE) {
+        flag_name = "$Done";
+        imap_add  = add;
+    } else {
+        fprintf(stderr, "Error: Unknown flag bit %d.\n", flag_bit);
+        return -1;
+    }
+
+    /* Update local manifest */
+    Manifest *m = manifest_load(use_folder);
+    if (m) {
+        ManifestEntry *me = manifest_find(m, uid);
+        if (me) {
+            if (add)
+                me->flags |= flag_bit;
+            else
+                me->flags &= ~flag_bit;
+        }
+        manifest_save(use_folder, m);
+        manifest_free(m);
+    }
+
+    /* Update Gmail label indexes if in Gmail mode */
+    if (cfg->gmail_mode) {
+        if (flag_bit == MSG_FLAG_UNSEEN) {
+            if (add)
+                label_idx_add("UNREAD", uid);
+            else
+                label_idx_remove("UNREAD", uid);
+        } else if (flag_bit == MSG_FLAG_FLAGGED) {
+            if (add)
+                label_idx_add("STARRED", uid);
+            else
+                label_idx_remove("STARRED", uid);
+        }
+
+        /* Reload current flags from manifest to update .hdr */
+        Manifest *m2 = manifest_load(use_folder);
+        if (m2) {
+            ManifestEntry *me2 = manifest_find(m2, uid);
+            if (me2)
+                local_hdr_update_flags("", uid, me2->flags);
+            manifest_free(m2);
+        }
+    }
+
+    /* Enqueue to pending flag queue */
+    local_pending_flag_add(use_folder, uid, flag_name, imap_add);
+
+    /* Synchronous server push */
+    MailClient *mc = make_mail(cfg);
+    if (mc) {
+        if (mail_client_select(mc, use_folder) == 0)
+            mail_client_set_flag(mc, uid, flag_name, imap_add);
+        mail_client_free(mc);
+    } else {
+        fprintf(stderr, "Warning: Could not connect. Change queued for next sync.\n");
+    }
+
+    return 0;
+}
+
+int email_service_set_label(const Config *cfg, const char *uid,
+                            const char *label, int add) {
+    if (!cfg->gmail_mode) {
+        fprintf(stderr, "Error: label operations require Gmail mode.\n");
+        return -1;
+    }
+
+    MailClient *mc = make_mail(cfg);
+    if (!mc) {
+        fprintf(stderr, "Error: Could not connect to server.\n");
+        return -1;
+    }
+    int rc = mail_client_modify_label(mc, uid, label, add);
+    mail_client_free(mc);
+
+    if (add)
+        label_idx_add(label, uid);
+    else
+        label_idx_remove(label, uid);
+
+    return rc;
+}
+
+int email_service_list_labels(const Config *cfg) {
+    MailClient *mc = make_mail(cfg);
+    if (!mc) {
+        fprintf(stderr, "Error: Could not connect.\n");
+        return -1;
+    }
+
+    char **names = NULL, **ids = NULL;
+    int count = 0;
+    int rc = mail_client_list_with_ids(mc, &names, &ids, &count);
+    mail_client_free(mc);
+
+    if (rc != 0 || count == 0) {
+        if (rc == 0) printf("No labels/folders found.\n");
+        /* free any partial results */
+        for (int i = 0; i < count; i++) {
+            if (names) free(names[i]);
+            if (ids)   free(ids[i]);
+        }
+        free(names);
+        free(ids);
+        return rc;
+    }
+
+    if (cfg->gmail_mode) {
+        printf("%-30s  %s\n", "Label", "ID");
+        printf("%-30s  %s\n", "------------------------------",
+               "------------------------------");
+        for (int i = 0; i < count; i++) {
+            printf("%-30s  %s\n",
+                   names[i] ? names[i] : "",
+                   ids[i]   ? ids[i]   : "");
+        }
+    } else {
+        for (int i = 0; i < count; i++)
+            printf("%s\n", names[i] ? names[i] : "");
+    }
+
+    for (int i = 0; i < count; i++) {
+        free(names[i]);
+        free(ids[i]);
+    }
+    free(names);
+    free(ids);
+    return 0;
+}
+
+int email_service_create_label(const Config *cfg, const char *name) {
+    MailClient *mc = make_mail(cfg);
+    if (!mc) {
+        fprintf(stderr, "Error: Could not connect.\n");
+        return -1;
+    }
+    char *new_id = NULL;
+    int rc = mail_client_create_label(mc, name, &new_id);
+    mail_client_free(mc);
+
+    if (rc == 0)
+        printf("Label '%s' created (ID: %s).\n", name, new_id ? new_id : name);
+    free(new_id);
+    return rc;
+}
+
+int email_service_delete_label(const Config *cfg, const char *label_id) {
+    MailClient *mc = make_mail(cfg);
+    if (!mc) {
+        fprintf(stderr, "Error: Could not connect.\n");
+        return -1;
+    }
+    int rc = mail_client_delete_label(mc, label_id);
+    mail_client_free(mc);
+
+    if (rc == 0)
+        printf("Label '%s' deleted.\n", label_id);
     return rc;
 }
 

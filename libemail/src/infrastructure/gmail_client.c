@@ -278,6 +278,107 @@ void gmail_set_progress(GmailClient *c, GmailProgressFn fn, void *ctx) {
     c->progress_ctx = ctx;
 }
 
+/* ── DELETE helper ────────────────────────────────────────────────── */
+
+/**
+ * Perform an authenticated DELETE request.
+ * Absorbs the response body (usually empty for 204 responses).
+ */
+static char *api_delete(GmailClient *c, const char *url, long *http_code) {
+    CURL *curl = curl_easy_init();
+    if (!curl) return NULL;
+
+    CurlBuf buf = {0};
+    char auth_hdr[2048];
+    snprintf(auth_hdr, sizeof(auth_hdr), "Authorization: Bearer %s", c->access_token);
+
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, auth_hdr);
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(headers);
+
+    if (res != CURLE_OK) {
+        logger_log(LOG_ERROR, "gmail: DELETE %s failed: %s", url, curl_easy_strerror(res));
+        free(buf.data);
+        curl_easy_cleanup(curl);
+        return NULL;
+    }
+
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
+    curl_easy_cleanup(curl);
+    /* Return an empty string (not NULL) so caller can distinguish curl error from HTTP error */
+    if (!buf.data) {
+        char *empty = malloc(1);
+        if (empty) *empty = '\0';
+        return empty;
+    }
+    return buf.data;
+}
+
+static char *api_delete_retry(GmailClient *c, const char *url, long *http_code) {
+    char *resp = api_delete(c, url, http_code);
+    if (resp && *http_code == 401) {
+        free(resp);
+        char *new_token = gmail_auth_refresh(c->cfg);
+        if (!new_token) return NULL;
+        free(c->access_token);
+        c->access_token = new_token;
+        resp = api_delete(c, url, http_code);
+    }
+    return resp;
+}
+
+/* ── Create / delete label ────────────────────────────────────────── */
+
+int gmail_create_label(GmailClient *c, const char *name, char **id_out) {
+    if (id_out) *id_out = NULL;
+
+    RAII_STRING char *url = NULL;
+    if (asprintf(&url, "%s/labels", GMAIL_API) == -1) return -1;
+
+    char body[1024];
+    snprintf(body, sizeof(body), "{\"name\":\"%s\"}", name);
+
+    long code = 0;
+    RAII_STRING char *resp = api_post_retry(c, url, body, &code);
+    if (!resp || code != 200) {
+        logger_log(LOG_ERROR, "gmail_create_label: HTTP %ld", code);
+        return -1;
+    }
+
+    if (id_out) {
+        *id_out = json_get_string(resp, "id");
+    }
+    return 0;
+}
+
+int gmail_delete_label(GmailClient *c, const char *label_id) {
+    RAII_STRING char *url = NULL;
+    if (asprintf(&url, "%s/labels/%s", GMAIL_API, label_id) == -1) return -1;
+
+    long code = 0;
+    RAII_STRING char *resp = api_delete_retry(c, url, &code);
+    if (!resp) {
+        logger_log(LOG_ERROR, "gmail_delete_label: curl error for label %s", label_id);
+        return -1;
+    }
+    if (code != 204 && code != 200) {
+        logger_log(LOG_ERROR, "gmail_delete_label: HTTP %ld for label %s", code, label_id);
+        return -1;
+    }
+    return 0;
+}
+
 /* ── List labels ──────────────────────────────────────────────────── */
 
 struct label_ctx {

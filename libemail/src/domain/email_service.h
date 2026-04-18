@@ -227,6 +227,60 @@ char *email_service_fetch_raw(const Config *cfg, const char *uid);
 int email_service_save_sent(const Config *cfg, const char *msg, size_t msg_len);
 
 /**
+ * @brief Set or clear a flag on a message (batch mode — synchronous push).
+ *
+ * Updates local manifest, Gmail label indexes (gmail_mode), pending queue,
+ * then synchronously connects and pushes to server.
+ * If server connection fails the pending queue ensures retry on next sync.
+ *
+ * @param cfg        Account configuration.
+ * @param uid        16-char padded UID string.
+ * @param folder     Folder/label the message is in (NULL = cfg->folder).
+ * @param flag_bit   MSG_FLAG_UNSEEN, MSG_FLAG_FLAGGED, or MSG_FLAG_DONE.
+ * @param add        1 = set the flag, 0 = clear it.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_set_flag(const Config *cfg, const char *uid,
+                           const char *folder, int flag_bit, int add);
+
+/**
+ * @brief Add or remove a label/folder on a message (Gmail) or copy/move (IMAP).
+ *
+ * For Gmail: calls mail_client_modify_label.
+ * For IMAP: not supported (returns -1 with message).
+ *
+ * @param cfg    Account configuration.
+ * @param uid    16-char padded UID string.
+ * @param label  Label ID (Gmail) or folder name (IMAP).
+ * @param add    1 = add label, 0 = remove label.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_set_label(const Config *cfg, const char *uid,
+                            const char *label, int add);
+
+/**
+ * @brief Print all available labels/folders to stdout.
+ * Gmail: lists all labels with their IDs.
+ * IMAP: lists all folders.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_list_labels(const Config *cfg);
+
+/**
+ * @brief Create a new label (Gmail) or folder (IMAP).
+ * @param name  Display name for the new label/folder.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_create_label(const Config *cfg, const char *name);
+
+/**
+ * @brief Delete a label (Gmail) or folder (IMAP).
+ * @param label_id  Label ID (Gmail) or folder name (IMAP).
+ * @return 0 on success, -1 on error.
+ */
+int email_service_delete_label(const Config *cfg, const char *label_id);
+
+/**
  * @brief Lists all attachments in a message identified by IMAP UID.
  *
  * Loads the message from local cache or fetches it from the server.

@@ -656,6 +656,38 @@ int imap_list(ImapClient *c, char ***folders_out, int *count_out, char *sep_out)
     return 0;
 }
 
+/* ── CREATE / DELETE folder ──────────────────────────────────────────── */
+
+int imap_create_folder(ImapClient *c, const char *name) {
+    char *utf7 = imap_utf7_encode(name);
+    const char *utf7_name = utf7 ? utf7 : name;
+
+    char tag[16];
+    int rc = send_cmd(c, tag, "CREATE \"%s\"", utf7_name);
+    free(utf7);
+    if (rc != 0) return -1;
+
+    Response resp = {0};
+    rc = read_response(c, tag, &resp);
+    response_free(&resp);
+    return rc;
+}
+
+int imap_delete_folder(ImapClient *c, const char *name) {
+    char *utf7 = imap_utf7_encode(name);
+    const char *utf7_name = utf7 ? utf7 : name;
+
+    char tag[16];
+    int rc = send_cmd(c, tag, "DELETE \"%s\"", utf7_name);
+    free(utf7);
+    if (rc != 0) return -1;
+
+    Response resp = {0};
+    rc = read_response(c, tag, &resp);
+    response_free(&resp);
+    return rc;
+}
+
 /* ── SELECT ──────────────────────────────────────────────────────────── */
 
 int imap_select(ImapClient *c, const char *folder) {

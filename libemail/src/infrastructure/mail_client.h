@@ -122,6 +122,32 @@ int mail_client_append(MailClient *c, const char *folder,
                        const char *msg, size_t msg_len);
 
 /**
+ * @brief List folders (IMAP) or labels (Gmail), returning both display names and IDs.
+ * For IMAP, names and IDs are the same string.
+ * @param names_out  Heap-alloc'd array of display names. Caller frees each + array.
+ * @param ids_out    Heap-alloc'd array of IDs (parallel). Caller frees each + array.
+ * @param count_out  Number of entries.
+ * @return 0 on success, -1 on error.
+ */
+int mail_client_list_with_ids(MailClient *c, char ***names_out,
+                              char ***ids_out, int *count_out);
+
+/**
+ * @brief Create a label (Gmail) or folder (IMAP).
+ * @param name   Display name / folder path.
+ * @param id_out Optional: receives new label ID (Gmail only). Caller frees.
+ * @return 0 on success, -1 on error.
+ */
+int mail_client_create_label(MailClient *c, const char *name, char **id_out);
+
+/**
+ * @brief Delete a label (Gmail) or folder (IMAP).
+ * @param label_id  Label ID for Gmail; folder name for IMAP.
+ * @return 0 on success, -1 on error.
+ */
+int mail_client_delete_label(MailClient *c, const char *label_id);
+
+/**
  * @brief Add or remove a label on a Gmail message (no-op for IMAP).
  *
  * @param label_id  Gmail label ID (e.g. "INBOX", "STARRED", "Work").

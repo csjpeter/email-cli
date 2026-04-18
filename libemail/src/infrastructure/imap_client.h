@@ -77,6 +77,22 @@ void imap_disconnect(ImapClient *c);
 int imap_list(ImapClient *c, char ***folders_out, int *count_out, char *sep_out);
 
 /**
+ * @brief Create a new IMAP folder.
+ * @param c     Connected client.
+ * @param name  UTF-8 folder name (will be encoded to Modified UTF-7).
+ * @return 0 on success, -1 on error.
+ */
+int imap_create_folder(ImapClient *c, const char *name);
+
+/**
+ * @brief Delete an existing IMAP folder.
+ * @param c     Connected client.
+ * @param name  UTF-8 folder name.
+ * @return 0 on success, -1 on error.
+ */
+int imap_delete_folder(ImapClient *c, const char *name);
+
+/**
  * @brief SELECT a folder.
  *
  * Must be called before imap_uid_search(), imap_uid_fetch_headers(), or

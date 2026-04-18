@@ -206,6 +206,71 @@ int mail_client_trash(MailClient *c, const char *uid) {
     return imap_uid_set_flag(c->imap, uid, "\\Deleted", 1);
 }
 
+/* ── List with IDs ────────────────────────────────────────────────── */
+
+int mail_client_list_with_ids(MailClient *c, char ***names_out,
+                              char ***ids_out, int *count_out) {
+    *names_out = NULL;
+    *ids_out   = NULL;
+    *count_out = 0;
+
+    if (c->is_gmail) {
+        return gmail_list_labels(c->gmail, names_out, ids_out, count_out);
+    }
+
+    /* IMAP: list folders, then duplicate names as IDs */
+    int rc = imap_list(c->imap, names_out, count_out, NULL);
+    if (rc != 0 || *count_out == 0) return rc;
+
+    char **ids = calloc((size_t)*count_out, sizeof(char *));
+    if (!ids) {
+        for (int i = 0; i < *count_out; i++) free((*names_out)[i]);
+        free(*names_out);
+        *names_out = NULL;
+        *count_out = 0;
+        return -1;
+    }
+    for (int i = 0; i < *count_out; i++) {
+        ids[i] = strdup((*names_out)[i]);
+        if (!ids[i]) {
+            /* clean up on alloc failure */
+            for (int j = 0; j < i; j++) free(ids[j]);
+            free(ids);
+            for (int j = 0; j < *count_out; j++) free((*names_out)[j]);
+            free(*names_out);
+            *names_out = NULL;
+            *count_out = 0;
+            return -1;
+        }
+    }
+    *ids_out = ids;
+    return 0;
+}
+
+/* ── Create / delete label or folder ─────────────────────────────── */
+
+int mail_client_create_label(MailClient *c, const char *name, char **id_out) {
+    if (id_out) *id_out = NULL;
+
+    if (c->is_gmail) {
+        return gmail_create_label(c->gmail, name, id_out);
+    }
+
+    /* IMAP: create folder */
+    int rc = imap_create_folder(c->imap, name);
+    if (rc == 0 && id_out) {
+        *id_out = strdup(name);
+    }
+    return rc;
+}
+
+int mail_client_delete_label(MailClient *c, const char *label_id) {
+    if (c->is_gmail) {
+        return gmail_delete_label(c->gmail, label_id);
+    }
+    return imap_delete_folder(c->imap, label_id);
+}
+
 /* ── Label modify (Gmail only) ────────────────────────────────────── */
 
 int mail_client_modify_label(MailClient *c, const char *uid,

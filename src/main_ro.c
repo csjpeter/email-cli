@@ -23,6 +23,7 @@
 #include "logger.h"
 #include "local_store.h"
 #include "fs_util.h"
+#include "config.h"
 
 #define BATCH_DEFAULT_LIMIT 100
 
@@ -42,9 +43,12 @@ static void help_general(void) {
         "  attachments <uid>          List attachments in a message\n"
         "  save-attachment <uid> <filename> [dir]\n"
         "                             Save an attachment to disk\n"
+        "  list-labels                List all labels (Gmail) or folders (IMAP)\n"
+        "  show-accounts              List all configured accounts\n"
         "  help [command]             Show this help, or detailed help for a command\n"
         "\n"
         "Run 'email-cli-ro help <command>' for more information.\n"
+        "For write operations (send, mark-read, add-label, etc.) use 'email-cli'.\n"
     );
 }
 
@@ -127,6 +131,29 @@ static void help_save_attachment(void) {
     );
 }
 
+static void help_list_labels(void) {
+    printf(
+        "Usage: email-cli-ro list-labels\n"
+        "\n"
+        "List all available labels (Gmail) or folders (IMAP).\n"
+        "For Gmail, shows both the display name and the label ID.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli-ro list-labels\n"
+    );
+}
+
+static void help_show_accounts(void) {
+    printf(
+        "Usage: email-cli-ro show-accounts\n"
+        "\n"
+        "List all configured accounts with their type and server.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli-ro show-accounts\n"
+    );
+}
+
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
 static int parse_uid(const char *s, char uid_out[17]) {
@@ -189,6 +216,8 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
                 if (strcmp(cmd, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
+                if (strcmp(cmd, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
+                if (strcmp(cmd, "show-accounts")   == 0) { help_show_accounts();   return EXIT_SUCCESS; }
             }
             help_general();
             return EXIT_SUCCESS;
@@ -204,6 +233,8 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
             if (strcmp(topic, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
             if (strcmp(topic, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
+            if (strcmp(topic, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
+            if (strcmp(topic, "show-accounts")   == 0) { help_show_accounts();   return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli-ro help' for available commands.\n");
             return EXIT_FAILURE;
@@ -364,9 +395,54 @@ int main(int argc, char *argv[]) {
                 result = email_service_save_attachment(cfg, uid, filename, outdir);
         }
 
+    } else if (strcmp(cmd, "list-labels") == 0) {
+        result = email_service_list_labels(cfg);
+
+    } else if (strcmp(cmd, "show-accounts") == 0) {
+        int count = 0;
+        AccountEntry *accs = config_list_accounts(&count);
+        if (count == 0) {
+            printf("No accounts configured.\n");
+            result = 0;
+        } else {
+            printf("%-40s  %-8s  %s\n", "Account", "Type", "Server");
+            printf("%-40s  %-8s  %s\n",
+                   "----------------------------------------",
+                   "--------",
+                   "----------------------------");
+            for (int i = 0; i < count; i++) {
+                const char *type   = (accs[i].cfg && accs[i].cfg->gmail_mode) ? "Gmail" : "IMAP";
+                const char *server = accs[i].cfg ? (accs[i].cfg->host ? accs[i].cfg->host : "-") : "-";
+                printf("%-40s  %-8s  %s\n",
+                       accs[i].name ? accs[i].name : "?",
+                       type, server);
+            }
+            config_free_account_list(accs, count);
+            result = 0;
+        }
+
     } else {
-        fprintf(stderr, "Unknown command '%s'.\n", cmd);
-        fprintf(stderr, "Run 'email-cli-ro help' for available commands.\n");
+        /* Check if the command is a write-only command blocked in ro mode */
+        static const char *ro_blocked[] = {
+            "mark-read", "mark-unread", "mark-starred", "remove-starred",
+            "add-label", "remove-label", "create-label", "delete-label",
+            "add-account", "remove-account", NULL
+        };
+        int blocked = 0;
+        for (int i = 0; ro_blocked[i]; i++) {
+            if (strcmp(cmd, ro_blocked[i]) == 0) {
+                fprintf(stderr, "Error: '%s' is not available in read-only mode (email-cli-ro).\n", cmd);
+                fprintf(stderr, "Use 'email-cli' for write operations.\n");
+                config_free(cfg);
+                logger_log(LOG_INFO, "--- email-cli-ro session finished ---");
+                logger_close();
+                return EXIT_FAILURE;
+            }
+        }
+        if (!blocked) {
+            fprintf(stderr, "Unknown command '%s'.\n", cmd);
+            fprintf(stderr, "Run 'email-cli-ro help' for available commands.\n");
+        }
     }
 
     /* 7. Cleanup */

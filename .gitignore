@@ -3,4 +3,5 @@ bin/
 .env
 *~
 *.log
+*.gcov
 .claude/

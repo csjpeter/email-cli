@@ -136,8 +136,9 @@ case "$1" in
         (cd "$BUILD_DIR" && ./tests/unit/test-runner)
         ./tests/functional/run_functional.sh
         echo "Generating coverage report..."
-        lcov --capture --directory . --output-file "$BUILD_DIR/coverage.info"
-        genhtml "$BUILD_DIR/coverage.info" --output-directory "$BUILD_DIR/coverage_report"
+        (cd "$BUILD_DIR" && \
+         lcov --capture --directory . --output-file coverage.info && \
+         genhtml coverage.info --output-directory coverage_report)
         echo "Coverage report available at $BUILD_DIR/coverage_report/index.html"
         ;;
     integration)

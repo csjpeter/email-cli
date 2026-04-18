@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <locale.h>
 
 void test_platform(void) {
@@ -91,6 +92,27 @@ void test_platform(void) {
         int n = terminal_read_password("test", pwbuf, sizeof(pwbuf));
         ASSERT(n == -1 || n >= 0,
                "terminal_read_password non-tty: must not crash");
+    }
+
+    /* Non-tty stdin with CRLF input: covers the \\r stripping step
+     * (terminal.c line 214: if (slen > 0 && line[slen-1] == '\\r')). */
+    if (!terminal_is_tty(STDIN_FILENO)) {
+        int pfd[2];
+        if (pipe(pfd) == 0) {
+            const char *crlf_input = "secret\r\n";
+            write(pfd[1], crlf_input, 8);
+            close(pfd[1]);
+            int saved = dup(STDIN_FILENO);
+            dup2(pfd[0], STDIN_FILENO);
+            close(pfd[0]);
+            clearerr(stdin); /* clear EOF from any previous non-tty read */
+            char pwbuf2[64];
+            int n2 = terminal_read_password("Password", pwbuf2, sizeof(pwbuf2));
+            dup2(saved, STDIN_FILENO);
+            close(saved);
+            ASSERT(n2 == 6 && strcmp(pwbuf2, "secret") == 0,
+                   "terminal_read_password: CRLF input strips \\r");
+        }
     }
 
     /* ── platform_home_dir ──────────────────────────────────────────── */

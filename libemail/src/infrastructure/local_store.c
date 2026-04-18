@@ -275,27 +275,6 @@ static int index_append(const char *dir_path, const char *file_name,
 
 /** @brief Removes a reference from an index file. */
 __attribute__((unused))
-static void index_remove_ref(const char *path, const char *ref) {
-    char *content = load_file(path);
-    if (!content) return;
-
-    RAII_FILE FILE *fp = fopen(path, "w");
-    if (!fp) { free(content); return; }
-
-    size_t ref_len = strlen(ref);
-    char *p = content;
-    while (*p) {
-        char *nl = strchr(p, '\n');
-        size_t llen = nl ? (size_t)(nl - p + 1) : strlen(p);
-        /* Skip the matching line */
-        if (!(strncmp(p, ref, ref_len) == 0 &&
-              (p[ref_len] == '\n' || p[ref_len] == '\0')))
-            fwrite(p, 1, llen, fp);
-        p += llen;
-    }
-    free(content);
-}
-
 /** @brief Extracts email address parts from a From header value. */
 static void extract_email_parts(const char *from,
                                 char *domain, size_t dlen,

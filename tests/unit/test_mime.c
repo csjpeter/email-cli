@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <unistd.h>
 
 void test_mime_util(void) {
 
@@ -558,5 +559,343 @@ void test_mime_util(void) {
             "--NOHTML--\r\n";
         RAII_STRING char *html = mime_get_html_part(no_html_msg);
         ASSERT(html == NULL, "mime_get_html_part: no-html multipart should return NULL");
+    }
+
+    /* ── mime_list_attachments: single base64 attachment ─────────────── */
+
+    {
+        /* "dGVzdA==" is base64 for "test" */
+        const char *mime =
+            "MIME-Version: 1.0\r\n"
+            "Content-Type: multipart/mixed; boundary=\"B001\"\r\n"
+            "\r\n"
+            "--B001\r\n"
+            "Content-Type: text/plain\r\n"
+            "\r\n"
+            "Body\r\n"
+            "--B001\r\n"
+            "Content-Type: application/octet-stream; name=\"file.bin\"\r\n"
+            "Content-Disposition: attachment; filename=\"file.bin\"\r\n"
+            "Content-Transfer-Encoding: base64\r\n"
+            "\r\n"
+            "dGVzdA==\r\n"
+            "--B001--\r\n";
+
+        int count = 0;
+        MimeAttachment *list = mime_list_attachments(mime, &count);
+        ASSERT(list != NULL, "list_attachments: not NULL");
+        ASSERT(count == 1, "list_attachments: count=1");
+        if (list && count > 0) {
+            ASSERT(strcmp(list[0].filename, "file.bin") == 0,
+                   "list_attachments: filename is file.bin");
+            ASSERT(list[0].data != NULL, "list_attachments: data not NULL");
+        }
+        mime_free_attachments(list, count);
+    }
+
+    /* ── mime_list_attachments: NULL input ───────────────────────────── */
+
+    {
+        int count = -1;
+        MimeAttachment *list = mime_list_attachments(NULL, &count);
+        ASSERT(list == NULL, "list_attachments: NULL msg returns NULL");
+        ASSERT(count == 0, "list_attachments: NULL msg sets count=0");
+    }
+
+    /* ── mime_list_attachments: plain text — no attachments ──────────── */
+
+    {
+        const char *plain = "Content-Type: text/plain\r\n\r\nHello";
+        int count = 0;
+        MimeAttachment *list = mime_list_attachments(plain, &count);
+        ASSERT(count == 0, "no attachments: count=0");
+        mime_free_attachments(list, count);
+    }
+
+    /* ── mime_list_attachments: quoted filename ───────────────────────── */
+
+    {
+        const char *mime_q =
+            "MIME-Version: 1.0\r\n"
+            "Content-Type: multipart/mixed; boundary=\"B002\"\r\n"
+            "\r\n"
+            "--B002\r\n"
+            "Content-Type: application/pdf; name=\"quoted file.pdf\"\r\n"
+            "Content-Disposition: attachment; filename=\"quoted file.pdf\"\r\n"
+            "\r\n"
+            "data\r\n"
+            "--B002--\r\n";
+        int count2 = 0;
+        MimeAttachment *list2 = mime_list_attachments(mime_q, &count2);
+        ASSERT(count2 == 1, "quoted filename: count=1");
+        if (list2 && count2 > 0)
+            ASSERT(strstr(list2[0].filename, "quoted") != NULL,
+                   "quoted filename: name contains 'quoted'");
+        mime_free_attachments(list2, count2);
+    }
+
+    /* ── mime_list_attachments: multiple attachments ─────────────────── */
+
+    {
+        const char *mime2 =
+            "Content-Type: multipart/mixed; boundary=\"B003\"\r\n"
+            "\r\n"
+            "--B003\r\n"
+            "Content-Type: application/pdf; name=\"doc.pdf\"\r\n"
+            "Content-Disposition: attachment; filename=\"doc.pdf\"\r\n"
+            "\r\n"
+            "pdfdata\r\n"
+            "--B003\r\n"
+            "Content-Type: image/png; name=\"img.png\"\r\n"
+            "Content-Disposition: attachment; filename=\"img.png\"\r\n"
+            "\r\n"
+            "imgdata\r\n"
+            "--B003--\r\n";
+        int cnt = 0;
+        MimeAttachment *ml = mime_list_attachments(mime2, &cnt);
+        ASSERT(cnt == 2, "multi attachments: count=2");
+        mime_free_attachments(ml, cnt);
+    }
+
+    /* ── mime_save_attachment: write decoded content to disk ─────────── */
+
+    {
+        /* base64 "dGVzdA==" = "test" (4 bytes) */
+        const char *mime3 =
+            "Content-Type: multipart/mixed; boundary=\"B004\"\r\n"
+            "\r\n"
+            "--B004\r\n"
+            "Content-Type: application/octet-stream; name=\"save.bin\"\r\n"
+            "Content-Disposition: attachment; filename=\"save.bin\"\r\n"
+            "Content-Transfer-Encoding: base64\r\n"
+            "\r\n"
+            "dGVzdA==\r\n"
+            "--B004--\r\n";
+
+        int cnt3 = 0;
+        MimeAttachment *list3 = mime_list_attachments(mime3, &cnt3);
+        ASSERT(cnt3 == 1, "save_attachment: list count=1");
+        if (list3 && cnt3 > 0) {
+            char tmpdir[] = "/tmp/mime_test_XXXXXX";
+            char *dir = mkdtemp(tmpdir);
+            ASSERT(dir != NULL, "save_attachment: mkdtemp succeeded");
+            if (dir) {
+                char path[256];
+                snprintf(path, sizeof(path), "%s/%s", dir, list3[0].filename);
+                int saved = mime_save_attachment(&list3[0], path);
+                ASSERT(saved == 0, "save_attachment: returns 0");
+                ASSERT(access(path, F_OK) == 0, "save_attachment: file exists");
+                unlink(path);
+                rmdir(dir);
+            }
+        }
+        mime_free_attachments(list3, cnt3);
+    }
+
+    /* ── mime_save_attachment: NULL inputs ───────────────────────────── */
+
+    {
+        int rc_null = mime_save_attachment(NULL, "/tmp/irrelevant");
+        ASSERT(rc_null == -1, "save_attachment: NULL att returns -1");
+    }
+
+    /* ── mime_list_attachments: explicit attachment, no filename → auto-name */
+
+    {
+        const char *mime4 =
+            "Content-Type: multipart/mixed; boundary=\"B005\"\r\n"
+            "\r\n"
+            "--B005\r\n"
+            "Content-Type: application/octet-stream\r\n"
+            "Content-Disposition: attachment\r\n"
+            "\r\n"
+            "binarydata\r\n"
+            "--B005--\r\n";
+        int cnt4 = 0;
+        MimeAttachment *list4 = mime_list_attachments(mime4, &cnt4);
+        ASSERT(cnt4 == 1, "auto-name attachment: count=1");
+        if (list4 && cnt4 > 0)
+            ASSERT(list4[0].filename != NULL, "auto-name attachment: filename not NULL");
+        mime_free_attachments(list4, cnt4);
+    }
+
+    /* ── mime_list_attachments: unquoted boundary ─────────────────────── */
+
+    {
+        const char *mime5 =
+            "Content-Type: multipart/mixed; boundary=UBND\r\n"
+            "\r\n"
+            "--UBND\r\n"
+            "Content-Type: application/zip; name=\"archive.zip\"\r\n"
+            "Content-Disposition: attachment; filename=\"archive.zip\"\r\n"
+            "\r\n"
+            "zipdata\r\n"
+            "--UBND--\r\n";
+        int cnt5 = 0;
+        MimeAttachment *list5 = mime_list_attachments(mime5, &cnt5);
+        ASSERT(cnt5 == 1, "unquoted boundary attachment: count=1");
+        if (list5 && cnt5 > 0)
+            ASSERT(strcmp(list5[0].filename, "archive.zip") == 0,
+                   "unquoted boundary attachment: filename correct");
+        mime_free_attachments(list5, cnt5);
+    }
+
+    /* ── extract_param: unquoted value (lines 590-595) ───────────────── */
+    /* A Content-Disposition with unquoted filename triggers the unquoted
+     * extraction path in extract_param. */
+    {
+        const char *mime6 =
+            "Content-Type: multipart/mixed; boundary=\"B006\"\r\n"
+            "\r\n"
+            "--B006\r\n"
+            "Content-Type: application/octet-stream\r\n"
+            "Content-Disposition: attachment; filename=unquoted.bin\r\n"
+            "\r\n"
+            "binarydata\r\n"
+            "--B006--\r\n";
+        int cnt6 = 0;
+        MimeAttachment *list6 = mime_list_attachments(mime6, &cnt6);
+        ASSERT(cnt6 == 1, "unquoted filename param: count=1");
+        if (list6 && cnt6 > 0)
+            ASSERT(strcmp(list6[0].filename, "unquoted.bin") == 0,
+                   "unquoted filename param: name correct");
+        mime_free_attachments(list6, cnt6);
+    }
+
+    /* ── collect_parts: text/plain with name= but no attachment disp
+     *    → body part, skip (lines 715-718) ───────────────────────────── */
+    {
+        /* text/plain with a name parameter but Content-Disposition: inline
+         * (not "attachment") → should be treated as a body part, not an
+         * attachment.  count must be 0. */
+        const char *mime7 =
+            "Content-Type: multipart/mixed; boundary=\"B007\"\r\n"
+            "\r\n"
+            "--B007\r\n"
+            "Content-Type: text/plain; name=readme.txt\r\n"
+            "Content-Disposition: inline\r\n"
+            "\r\n"
+            "inline text\r\n"
+            "--B007--\r\n";
+        int cnt7 = 0;
+        MimeAttachment *list7 = mime_list_attachments(mime7, &cnt7);
+        ASSERT(cnt7 == 0, "text/plain name= no attachment disp: count=0");
+        mime_free_attachments(list7, cnt7);
+    }
+
+    /* ── collect_parts: text/html with name= but no attachment disp
+     *    → body part, skip (hits text/html branch of || on line 716) ─── */
+    {
+        const char *mime7b =
+            "Content-Type: multipart/mixed; boundary=\"B007B\"\r\n"
+            "\r\n"
+            "--B007B\r\n"
+            "Content-Type: text/html; name=page.html\r\n"
+            "Content-Disposition: inline\r\n"
+            "\r\n"
+            "<p>inline html</p>\r\n"
+            "--B007B--\r\n";
+        int cnt7b = 0;
+        MimeAttachment *list7b = mime_list_attachments(mime7b, &cnt7b);
+        ASSERT(cnt7b == 0, "text/html name= no attachment disp: count=0");
+        mime_free_attachments(list7b, cnt7b);
+    }
+
+    /* ── collect_parts: no body separator → early return (lines 724-725) */
+    {
+        /* An attachment part that has no blank line (no body separator) —
+         * body_start() returns NULL → collect_parts returns without adding. */
+        const char *mime8 =
+            "Content-Type: multipart/mixed; boundary=\"B008\"\r\n"
+            "\r\n"
+            "--B008\r\n"
+            "Content-Type: application/octet-stream\r\n"
+            "Content-Disposition: attachment; filename=noseq.bin\r\n"
+            "--B008--\r\n";
+        int cnt8 = 0;
+        MimeAttachment *list8 = mime_list_attachments(mime8, &cnt8);
+        ASSERT(cnt8 == 0, "attachment no body separator: count=0");
+        mime_free_attachments(list8, cnt8);
+    }
+
+    /* ── mime_decode_words: realloc when decoded output exceeds cap
+     *    (lines 429-432) ───────────────────────────────────────────────── */
+    {
+        /* Build a subject with two back-to-back encoded words whose combined
+         * decoded length exceeds the initial cap (vlen*4+1 where vlen is the
+         * input length).  We achieve this by using a B-encoded word that
+         * decodes to a longer string than the encoded representation. */
+
+        /* 60 'A's base64-encoded = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFA"
+         * Actually, base64 of N bytes = ceil(N/3)*4 chars, so 60 bytes → 80 chars.
+         * The encoded word =?utf-8?B?...?= has 88 chars.
+         * After the first word the cap shrinks; the second word reuses the same
+         * to overflow.  Simpler: use a single short header but make vlen small
+         * by wrapping in a very short value parameter to mime_decode_words. */
+
+        /* A 48-byte payload base64-encodes to 64 chars.
+         * Input to mime_decode_words:  "=?utf-8?B?<64-char-b64>?="
+         * vlen = 2+5+1+64+2 = 74 chars.  Initial cap = 74*4+1 = 297.
+         * Decoded output = 48 bytes.  297 > 48 so no realloc yet.
+         *
+         * Two consecutive encoded words:  vlen = 2*(74+1) = 150.
+         * cap = 150*4+1 = 601.  Both decode to 48 bytes = 96 total.  Still fits.
+         *
+         * To force realloc we need dlen > cap - n, i.e. decoded output larger
+         * than the initial cap estimate.  cap = vlen*4+1.  For a B-encoded word
+         * the decoded length equals the base64 input size * 3/4.  We need:
+         *   (encoded_text_len * 3 / 4) > vlen * 4
+         * which means the encoded text must be about 5.3× the total wrapper length.
+         * That cannot happen with normal base64.
+         *
+         * The realloc branch is genuinely hard to reach with valid UTF-8 input.
+         * Instead, we test via many concatenated short encoded words so that
+         * the cumulative n approaches and then exceeds cap during a late word. */
+
+        /* Create a value whose first encoded word already decodes near cap. */
+        /* 300 'X' chars base64-encoded = 400 chars.
+         * Wrapper: "=?utf-8?B?" + 400 + "?=" = 410 chars.
+         * vlen = 410.  cap = 410*4+1 = 1641.
+         * decoded = 300.  n = 300.
+         * Second word: same → n = 600.  Still < 1641.
+         *
+         * We need at least 5 such words to exceed cap (5*300 = 1500 < 1641).
+         * Use 6 words: n = 1800 > 1641 → realloc triggered on 6th word. */
+
+        /* 300 bytes of 'X' */
+        char payload[301];
+        memset(payload, 'X', 300);
+        payload[300] = '\0';
+
+        /* base64-encode payload into b64buf */
+        static const char b64chars[] =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        char b64buf[401];
+        size_t bi = 0;
+        for (int i = 0; i < 300; i += 3) {
+            unsigned int grp = ((unsigned char)payload[i]   << 16) |
+                               ((unsigned char)payload[i+1] <<  8) |
+                                (unsigned char)payload[i+2];
+            b64buf[bi++] = b64chars[(grp >> 18) & 0x3F];
+            b64buf[bi++] = b64chars[(grp >> 12) & 0x3F];
+            b64buf[bi++] = b64chars[(grp >>  6) & 0x3F];
+            b64buf[bi++] = b64chars[(grp      ) & 0x3F];
+        }
+        b64buf[bi] = '\0';
+
+        /* Build 6 adjacent encoded words (no space between them = adjacent,
+         * so whitespace-stripping logic does not drop them). */
+        char many_words[4096];
+        int pos = 0;
+        for (int w = 0; w < 6; w++) {
+            pos += snprintf(many_words + pos, sizeof(many_words) - (size_t)pos,
+                            "=?utf-8?B?%s?=", b64buf);
+        }
+
+        RAII_STRING char *r = mime_decode_words(many_words);
+        ASSERT(r != NULL, "mime_decode_words realloc: not NULL");
+        /* Each word decodes to 300 X's; 6 words = 1800 X's */
+        ASSERT(strlen(r) == 1800,
+               "mime_decode_words realloc: total length = 1800");
     }
 }

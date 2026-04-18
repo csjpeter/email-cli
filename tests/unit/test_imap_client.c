@@ -9,6 +9,9 @@
 #include <arpa/inet.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#ifdef __GNUC__
+extern void __gcov_dump(void);
+#endif
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
@@ -81,6 +84,9 @@ static void run_mock_server(int listen_fd,
     close(listen_fd);
     if (cfd < 0) {
         SSL_CTX_free(ctx);
+#ifdef __GNUC__
+        __gcov_dump();
+#endif
         _exit(1);
     }
 
@@ -95,6 +101,9 @@ static void run_mock_server(int listen_fd,
         ERR_print_errors_fp(stderr);
         SSL_free(ssl);
         close(cfd);
+#ifdef __GNUC__
+        __gcov_dump();
+#endif
         _exit(1);
     }
 
@@ -170,6 +179,9 @@ static void run_mock_server(int listen_fd,
     SSL_shutdown(ssl);
     SSL_free(ssl);
     close(cfd);
+#ifdef __GNUC__
+    __gcov_dump();
+#endif
     _exit(0);
 }
 
@@ -310,6 +322,255 @@ void test_imap_append_literal_plus(void) {
     waitpid(pid, &status, 0);
 }
 
+/* ── Extended mock server: SELECT, SEARCH, FETCH, STORE, LIST, etc. ──── */
+
+/*
+ * Stateful mock server that handles a fixed command sequence:
+ * LOGIN → SELECT → SEARCH → FETCH(body) → FETCH(hdrs) → FETCH(flags)
+ * → STORE → LIST → CREATE → DELETE → LOGOUT.
+ * Each command is matched by keyword; the tag is extracted from the request.
+ */
+static void run_mock_server_full(int listen_fd, SSL_CTX *ctx) {
+    int cfd = accept(listen_fd, NULL, NULL);
+    close(listen_fd);
+    if (cfd < 0) { SSL_CTX_free(ctx);
+#ifdef __GNUC__
+        __gcov_dump();
+#endif
+        _exit(1);
+    }
+
+    struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+    setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    SSL *ssl = SSL_new(ctx);
+    SSL_CTX_free(ctx);
+    SSL_set_fd(ssl, cfd);
+    if (SSL_accept(ssl) <= 0) {
+        ERR_print_errors_fp(stderr);
+        SSL_free(ssl); close(cfd);
+#ifdef __GNUC__
+        __gcov_dump();
+#endif
+        _exit(1);
+    }
+
+    /* Greeting */
+    const char *greet = "* OK Mock ready\r\n";
+    SSL_write(ssl, greet, (int)strlen(greet));
+
+    /* Message body used for FETCH responses */
+    const char *msg_body = "From: a@b.com\r\nSubject: Test\r\n\r\nHello.\r\n";
+    int msg_len = (int)strlen(msg_body);
+    const char *hdrs = "From: a@b.com\r\nSubject: Test\r\n\r\n";
+    int hdr_len = (int)strlen(hdrs);
+
+    char buf[4096];
+    while (1) {
+        int n = SSL_read(ssl, buf, (int)(sizeof(buf) - 1));
+        if (n <= 0) break;
+        buf[n] = '\0';
+
+        char tag[32] = "*";
+        sscanf(buf, "%31s", tag);
+
+        char resp[1024];
+        if (strstr(buf, "LOGIN")) {
+            snprintf(resp, sizeof(resp),
+                     "%s OK [CAPABILITY IMAP4rev1 LITERAL+] Logged in\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "SELECT")) {
+            snprintf(resp, sizeof(resp),
+                     "* 3 EXISTS\r\n* 0 RECENT\r\n%s OK [READ-WRITE] SELECT completed\r\n",
+                     tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "UID SEARCH")) {
+            snprintf(resp, sizeof(resp),
+                     "* SEARCH 1 2 3\r\n%s OK SEARCH completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "BODY.PEEK[]")) {
+            /* FETCH body literal */
+            snprintf(resp, sizeof(resp),
+                     "* 1 FETCH (UID 1 BODY[] {%d}\r\n", msg_len);
+            SSL_write(ssl, resp, (int)strlen(resp));
+            SSL_write(ssl, msg_body, msg_len);
+            snprintf(resp, sizeof(resp), ")\r\n%s OK FETCH completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "BODY.PEEK[HEADER]")) {
+            /* FETCH headers literal */
+            snprintf(resp, sizeof(resp),
+                     "* 1 FETCH (UID 1 BODY[HEADER] {%d}\r\n", hdr_len);
+            SSL_write(ssl, resp, (int)strlen(resp));
+            SSL_write(ssl, hdrs, hdr_len);
+            snprintf(resp, sizeof(resp), ")\r\n%s OK FETCH completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "UID FETCH") && strstr(buf, "FLAGS")) {
+            snprintf(resp, sizeof(resp),
+                     "* 1 FETCH (UID 1 FLAGS (\\Seen))\r\n%s OK FETCH completed\r\n",
+                     tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "UID STORE")) {
+            snprintf(resp, sizeof(resp),
+                     "* 1 FETCH (FLAGS (\\Seen \\Flagged))\r\n%s OK STORE completed\r\n",
+                     tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "LIST")) {
+            snprintf(resp, sizeof(resp),
+                     "* LIST (\\HasNoChildren) \".\" \"INBOX\"\r\n"
+                     "* LIST (\\HasNoChildren) \".\" \"INBOX.Sent\"\r\n"
+                     "%s OK LIST completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "CREATE")) {
+            snprintf(resp, sizeof(resp), "%s OK CREATE completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "DELETE")) {
+            snprintf(resp, sizeof(resp), "%s OK DELETE completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "APPEND")) {
+            /* Handle literal APPEND as before */
+            char *lbrace = strrchr(buf, '{');
+            long lsize = 0;
+            int  sync  = 1;
+            if (lbrace) {
+                char *end = NULL;
+                lsize = strtol(lbrace + 1, &end, 10);
+                if (end && *end == '+') sync = 0;
+            }
+            if (lsize <= 0) {
+                snprintf(resp, sizeof(resp), "%s BAD Missing size\r\n", tag);
+                SSL_write(ssl, resp, (int)strlen(resp));
+            } else {
+                if (sync) SSL_write(ssl, "+ OK\r\n", 6);
+                char *ptr = lbrace ? strchr(lbrace, '}') : NULL;
+                long already = 0;
+                if (ptr) {
+                    ptr++;
+                    if (*ptr == '+') ptr++;
+                    if (*ptr == '\r') ptr++;
+                    if (*ptr == '\n') ptr++;
+                    already = (long)(buf + n - ptr);
+                    if (already > lsize) already = lsize;
+                }
+                long remaining = lsize - already;
+                char tmp[512];
+                while (remaining > 0) {
+                    int r2 = SSL_read(ssl, tmp,
+                                     remaining > (long)sizeof(tmp) ?
+                                     (int)sizeof(tmp) : (int)remaining);
+                    if (r2 <= 0) break;
+                    remaining -= r2;
+                }
+                snprintf(resp, sizeof(resp),
+                         "%s OK [APPENDUID 1 99] APPEND completed\r\n", tag);
+                SSL_write(ssl, resp, (int)strlen(resp));
+            }
+        } else if (strstr(buf, "LOGOUT")) {
+            SSL_write(ssl, "* BYE Logging out\r\n", 19);
+            snprintf(resp, sizeof(resp), "%s OK LOGOUT completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+            break;
+        } else {
+            snprintf(resp, sizeof(resp), "%s BAD Unknown\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        }
+    }
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    close(cfd);
+#ifdef __GNUC__
+    __gcov_dump();
+#endif
+    _exit(0);
+}
+
+/*
+ * Test that imap_select, imap_uid_search, imap_uid_fetch_body,
+ * imap_uid_fetch_headers, imap_uid_fetch_flags, imap_uid_set_flag,
+ * imap_list, imap_create_folder, imap_delete_folder, and
+ * imap_set_progress all work against the extended mock server.
+ */
+void test_imap_full_operations(void) {
+    int port = 0;
+    int lfd  = make_listener(&port);
+    ASSERT(lfd >= 0, "make_listener for full ops test");
+
+    SSL_CTX *ctx = create_server_ctx();
+    ASSERT(ctx != NULL, "create_server_ctx for full ops test");
+
+    pid_t pid = fork();
+    ASSERT(pid >= 0, "fork for full ops test");
+    if (pid == 0) {
+        run_mock_server_full(lfd, ctx);
+        /* _exit called inside */
+    }
+    close(lfd);
+    SSL_CTX_free(ctx);
+
+    char url[64];
+    snprintf(url, sizeof(url), "imaps://127.0.0.1:%d", port);
+    ImapClient *c = imap_connect(url, "user", "pass", 0);
+    ASSERT(c != NULL, "imap_full_ops: imap_connect must succeed");
+
+    /* imap_set_progress: NULL guard + set callback to NULL */
+    imap_set_progress(NULL, NULL, NULL);   /* NULL client — no crash */
+    imap_set_progress(c, NULL, NULL);      /* clear callback */
+
+    /* imap_select */
+    int rc = imap_select(c, "INBOX");
+    ASSERT(rc == 0, "imap_full_ops: imap_select returns 0");
+
+    /* imap_uid_search */
+    char (*uids)[17] = NULL;
+    int count = 0;
+    rc = imap_uid_search(c, "ALL", &uids, &count);
+    ASSERT(rc == 0, "imap_full_ops: imap_uid_search returns 0");
+    ASSERT(count == 3, "imap_full_ops: imap_uid_search found 3 UIDs");
+    free(uids);
+
+    /* imap_uid_fetch_body */
+    char *body = imap_uid_fetch_body(c, "0000000000000001");
+    ASSERT(body != NULL, "imap_full_ops: imap_uid_fetch_body returns non-NULL");
+    free(body);
+
+    /* imap_uid_fetch_headers */
+    char *hdr = imap_uid_fetch_headers(c, "0000000000000001");
+    ASSERT(hdr != NULL, "imap_full_ops: imap_uid_fetch_headers returns non-NULL");
+    free(hdr);
+
+    /* imap_uid_fetch_flags */
+    int flags = imap_uid_fetch_flags(c, "0000000000000001");
+    /* Server returns "FLAGS (\Seen)" → Seen set means NOT unseen */
+    ASSERT(flags >= 0, "imap_full_ops: imap_uid_fetch_flags returns >= 0");
+
+    /* imap_uid_set_flag */
+    rc = imap_uid_set_flag(c, "0000000000000001", "\\Flagged", 1);
+    ASSERT(rc == 0, "imap_full_ops: imap_uid_set_flag returns 0");
+
+    /* imap_list */
+    char **folders = NULL;
+    int fc = 0;
+    char sep = '.';
+    rc = imap_list(c, &folders, &fc, &sep);
+    ASSERT(rc == 0, "imap_full_ops: imap_list returns 0");
+    ASSERT(fc == 2, "imap_full_ops: imap_list found 2 folders");
+    for (int i = 0; i < fc; i++) free(folders[i]);
+    free(folders);
+    ASSERT(sep == '.', "imap_full_ops: separator is '.'");
+
+    /* imap_create_folder */
+    rc = imap_create_folder(c, "TestFolder");
+    ASSERT(rc == 0, "imap_full_ops: imap_create_folder returns 0");
+
+    /* imap_delete_folder */
+    rc = imap_delete_folder(c, "TestFolder");
+    ASSERT(rc == 0, "imap_full_ops: imap_delete_folder returns 0");
+
+    imap_disconnect(c);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+}
+
 /* ── Test suite entry point ──────────────────────────────────────────────── */
 
 void test_imap_client(void) {
@@ -324,4 +585,5 @@ void test_imap_client(void) {
     test_imap_connect_login_ok();
     test_imap_connect_login_rejected();
     test_imap_append_literal_plus();
+    test_imap_full_operations();
 }

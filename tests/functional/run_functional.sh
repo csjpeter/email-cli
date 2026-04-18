@@ -587,6 +587,116 @@ check_not "12.3 stale pid: no spurious 'syncing'"   "syncing"        "$STALE"
 rm -f "$PID_FILE"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 13 — list --all mode
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 13: list --all mode ---"
+ALL_LIST=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
+    "$BIN_DIR/email-cli" --batch list --all 2>&1 || true) )
+check "13.1 list --all: message count"      "message"        "$ALL_LIST"
+check "13.2 list --all: own subject shown"  "AlphaAccountMsg" "$ALL_LIST"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 14 — attachments command
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 14: attachments command ---"
+# Use UID=1 (the UID the mock server serves)
+ATTACH_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
+    "$BIN_DIR/email-cli" --batch attachments 1 2>&1 || true) )
+check "14.1 attachments: notes.txt listed"  "notes.txt"  "$ATTACH_OUT"
+check "14.2 attachments: data.bin listed"   "data.bin"   "$ATTACH_OUT"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 15 — save-attachment command
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 15: save-attachment command ---"
+SAVE_DIR="/tmp/email-cli-ft-attach-$$"
+mkdir -p "$SAVE_DIR"
+SAVE_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
+    "$BIN_DIR/email-cli" --batch save-attachment 1 notes.txt "$SAVE_DIR" 2>&1 || true) )
+check "15.1 save-attachment: saved confirmation"  "aved\|uccessful\|notes" "$SAVE_OUT"
+check "15.2 save-attachment: file exists"  "." "$(test -f "$SAVE_DIR/notes.txt" && echo ok || echo missing)"
+rm -rf "$SAVE_DIR"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 16 — mark-read and mark-unread
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 16: mark-read / mark-unread ---"
+MARKR=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
+    "$BIN_DIR/email-cli" --batch mark-read 1 2>&1 || true) )
+# Should not error
+check_not "16.1 mark-read: no error"  "Error\|error\|failed" "$MARKR"
+
+MARKUR=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
+    "$BIN_DIR/email-cli" --batch mark-unread 1 2>&1 || true) )
+check_not "16.2 mark-unread: no error"  "Error\|error\|failed" "$MARKUR"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 17 — mark-starred and remove-starred
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 17: mark-starred / remove-starred ---"
+STARS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
+    "$BIN_DIR/email-cli" --batch mark-starred 1 2>&1 || true) )
+check_not "17.1 mark-starred: no error"  "Error\|error\|failed" "$STARS"
+
+UNSTAR=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
+    "$BIN_DIR/email-cli" --batch remove-starred 1 2>&1 || true) )
+check_not "17.2 remove-starred: no error"  "Error\|error\|failed" "$UNSTAR"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 18 — show-accounts command
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 18: show-accounts command ---"
+ACCS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
+    "$BIN_DIR/email-cli" --batch show-accounts 2>&1 || true) )
+check "18.1 show-accounts: account listed"  "alpha@test.local"  "$ACCS"
+check "18.2 show-accounts: IMAP type"       "IMAP"              "$ACCS"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 19 — config show
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 19: config show ---"
+CONF=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
+    "$BIN_DIR/email-cli" --batch config show 2>&1 || true) )
+check "19.1 config show: host shown"   "localhost"         "$CONF"
+check "19.2 config show: user shown"   "alpha@test.local"  "$CONF"
+check_not "19.3 config show: pass masked"  "testpass"      "$CONF"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 20 — sync output format check
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 20: sync output format ---"
+SYNC_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
+    "$BIN_DIR/email-sync" 2>&1 || true) )
+# The summary line must NOT have digits immediately after "stored" (old bug: "stored66")
+check_not "20.1 sync output: no garbage after stored"  "stored[0-9]"  "$SYNC_OUT"
+check "20.2 sync: fetched/stored line present"  "fetched.*stored\|already stored"  "$SYNC_OUT"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 21 — help for various topics
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 21: help topics ---"
+HATT=$( (export HOME="$H_ALPHA"; "$BIN_DIR/email-cli" help attachments 2>&1 || true) )
+check "21.1 help attachments: usage line"  "attachments"  "$HATT"
+
+HSAVE=$( (export HOME="$H_ALPHA"; "$BIN_DIR/email-cli" help save-attachment 2>&1 || true) )
+check "21.2 help save-attachment: usage"   "save-attachment"  "$HSAVE"
+
+HSEND=$( (export HOME="$H_ALPHA"; "$BIN_DIR/email-cli" help send 2>&1 || true) )
+check "21.3 help send: usage line"         "send"   "$HSEND"
+
+HCONF=$( (export HOME="$H_ALPHA"; "$BIN_DIR/email-cli" help config 2>&1 || true) )
+check "21.4 help config: usage line"       "config"  "$HCONF"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

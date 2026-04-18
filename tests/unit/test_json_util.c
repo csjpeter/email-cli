@@ -243,6 +243,112 @@ static void test_json_foreach_single(void) {
     ASSERT(strcmp(ctx.ids[0], "only") == 0, "foreach single[0]=only");
 }
 
+/* ── Additional branch coverage tests ──────────────────────────────── */
+
+/* Lines 56-61: string inside array during skip_value (array branch).
+ * The key is NOT "v", so the array value must be skipped; the array
+ * contains strings with escape sequences, exercising the string-skip
+ * path inside the array branch of skip_value. */
+static void test_json_skip_array_with_strings(void) {
+    /* "v" has an array of strings with escapes; we look up "other" → skip "v" */
+    const char *j = "{\"v\": [\"a\\nb\", \"c\\td\"], \"other\": \"found\"}";
+    char *v = json_get_string(j, "other");
+    ASSERT(v != NULL, "skip_array_with_strings: found other key");
+    ASSERT(strcmp(v, "found") == 0, "skip_array_with_strings: value matches");
+    free(v);
+}
+
+/* Lines 128, 130, 132-133: unescape \/, \r, \b, \f */
+static void test_json_unescape_slash(void) {
+    const char *j = "{\"msg\": \"a\\/b\"}";
+    char *v = json_get_string(j, "msg");
+    ASSERT(v != NULL, "unescape slash: found");
+    ASSERT(strcmp(v, "a/b") == 0, "unescape slash: value");
+    free(v);
+}
+
+static void test_json_unescape_carriage_return(void) {
+    const char *j = "{\"msg\": \"a\\rb\"}";
+    char *v = json_get_string(j, "msg");
+    ASSERT(v != NULL, "unescape \\r: found");
+    ASSERT(v[0] == 'a' && v[1] == '\r' && v[2] == 'b' && v[3] == '\0',
+           "unescape \\r: value contains carriage return");
+    free(v);
+}
+
+static void test_json_unescape_backspace(void) {
+    const char *j = "{\"msg\": \"a\\bb\"}";
+    char *v = json_get_string(j, "msg");
+    ASSERT(v != NULL, "unescape \\b: found");
+    ASSERT(v[0] == 'a' && v[1] == '\b' && v[2] == 'b' && v[3] == '\0',
+           "unescape \\b: value contains backspace");
+    free(v);
+}
+
+static void test_json_unescape_form_feed(void) {
+    const char *j = "{\"msg\": \"a\\fb\"}";
+    char *v = json_get_string(j, "msg");
+    ASSERT(v != NULL, "unescape \\f: found");
+    ASSERT(v[0] == 'a' && v[1] == '\f' && v[2] == 'b' && v[3] == '\0',
+           "unescape \\f: value contains form feed");
+    free(v);
+}
+
+/* Lines 142, 146-148: \uXXXX with non-ASCII code point → '?' placeholder */
+static void test_json_unescape_unicode_non_ascii(void) {
+    /* \u00E9 = 0xE9 = 233, which is >= 0x80 → '?' placeholder */
+    const char *j = "{\"msg\": \"a\\u00E9b\"}";
+    char *v = json_get_string(j, "msg");
+    ASSERT(v != NULL, "unescape unicode non-ASCII: found");
+    ASSERT(v[0] == 'a' && v[1] == '?' && v[2] == 'b' && v[3] == '\0',
+           "unescape unicode non-ASCII: '?' placeholder");
+    free(v);
+}
+
+/* Lines 146-148: unescape default case — unknown escape char passes through */
+static void test_json_unescape_unknown_escape(void) {
+    /* \z is not a recognised escape sequence; the default branch emits 'z' */
+    const char *j = "{\"msg\": \"a\\zb\"}";
+    char *v = json_get_string(j, "msg");
+    ASSERT(v != NULL, "unescape unknown escape: found");
+    ASSERT(v[0] == 'a' && v[1] == 'z' && v[2] == 'b' && v[3] == '\0',
+           "unescape unknown escape: passes through raw char");
+    free(v);
+}
+
+/* Line 207: json_get_int returns -1 when value is not a number */
+static void test_json_get_int_non_number_value(void) {
+    const char *j = "{\"x\": true}";
+    int v = 0;
+    ASSERT(json_get_int(j, "x", &v) == -1,
+           "json_get_int non-number: returns -1 for boolean value");
+}
+
+/* Lines 244-248: json_get_string_array realloc when count >= cap.
+ * cap starts at 8 in the source; use 20 strings to trigger realloc. */
+static void test_json_string_array_realloc(void) {
+    /* Build a JSON array with 20 strings */
+    char j[1024];
+    int pos = 0;
+    pos += snprintf(j + pos, sizeof(j) - (size_t)pos, "{\"items\": [");
+    for (int i = 0; i < 20; i++) {
+        pos += snprintf(j + pos, sizeof(j) - (size_t)pos,
+                        "%s\"item%d\"", i ? "," : "", i);
+    }
+    pos += snprintf(j + pos, sizeof(j) - (size_t)pos, "]}");
+
+    char **arr = NULL; int count = 0;
+    ASSERT(json_get_string_array(j, "items", &arr, &count) == 0,
+           "str_array realloc: ok");
+    ASSERT(count == 20, "str_array realloc: count=20");
+    if (arr) {
+        ASSERT(strcmp(arr[0], "item0") == 0, "str_array realloc: arr[0]=item0");
+        ASSERT(strcmp(arr[19], "item19") == 0, "str_array realloc: arr[19]=item19");
+        for (int i = 0; i < count; i++) free(arr[i]);
+        free(arr);
+    }
+}
+
 /* ── Registration ───────────────────────────────────────────────────── */
 
 void run_json_util_tests(void) {
@@ -281,4 +387,15 @@ void run_json_util_tests(void) {
     RUN_TEST(test_json_foreach_not_found);
     RUN_TEST(test_json_foreach_nested_objects);
     RUN_TEST(test_json_foreach_single);
+
+    /* additional branch coverage */
+    RUN_TEST(test_json_skip_array_with_strings);
+    RUN_TEST(test_json_unescape_slash);
+    RUN_TEST(test_json_unescape_carriage_return);
+    RUN_TEST(test_json_unescape_backspace);
+    RUN_TEST(test_json_unescape_form_feed);
+    RUN_TEST(test_json_unescape_unicode_non_ascii);
+    RUN_TEST(test_json_unescape_unknown_escape);
+    RUN_TEST(test_json_get_int_non_number_value);
+    RUN_TEST(test_json_string_array_realloc);
 }

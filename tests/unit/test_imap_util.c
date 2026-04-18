@@ -133,4 +133,131 @@ void test_imap_util(void) {
         ASSERT(strcmp(r, "\xED\xA0\x80" "A") == 0,
                "Unpaired high surrogate pass-through mismatch");
     }
+
+    /* ── imap_utf7_encode tests ──────────────────────────────────────────── */
+
+    /* NULL input → NULL */
+    {
+        char *r = imap_utf7_encode(NULL);
+        ASSERT(r == NULL, "imap_utf7_encode: NULL input returns NULL");
+    }
+
+    /* Empty string → empty string */
+    {
+        RAII_STRING char *r = imap_utf7_encode("");
+        ASSERT(r != NULL, "imap_utf7_encode: empty string must not return NULL");
+        ASSERT(strcmp(r, "") == 0, "imap_utf7_encode: empty string round-trip");
+    }
+
+    /* Pure ASCII passthrough (no encoding needed) */
+    {
+        RAII_STRING char *r = imap_utf7_encode("INBOX");
+        ASSERT(r != NULL, "imap_utf7_encode: ASCII must not return NULL");
+        ASSERT(strcmp(r, "INBOX") == 0, "imap_utf7_encode: ASCII passthrough");
+    }
+
+    /* Literal '&' → "&-" */
+    {
+        RAII_STRING char *r = imap_utf7_encode("foo&bar");
+        ASSERT(r != NULL, "imap_utf7_encode: '&' must not return NULL");
+        ASSERT(strcmp(r, "foo&-bar") == 0, "imap_utf7_encode: literal & escaping");
+    }
+
+    /* Roundtrip: encode then decode → original UTF-8 string */
+    /* é (U+00E9, 2-byte UTF-8) */
+    {
+        RAII_STRING char *encoded = imap_utf7_encode("\xC3\xA9");
+        ASSERT(encoded != NULL, "imap_utf7_encode: é must not return NULL");
+        RAII_STRING char *decoded = imap_utf7_decode(encoded);
+        ASSERT(decoded != NULL, "imap_utf7_encode/decode: é roundtrip must not be NULL");
+        ASSERT(strcmp(decoded, "\xC3\xA9") == 0, "imap_utf7_encode/decode: é roundtrip");
+    }
+
+    /* CJK U+4E2D (中, 3-byte UTF-8) roundtrip */
+    {
+        RAII_STRING char *encoded = imap_utf7_encode("\xE4\xB8\xAD");
+        ASSERT(encoded != NULL, "imap_utf7_encode: CJK must not return NULL");
+        RAII_STRING char *decoded = imap_utf7_decode(encoded);
+        ASSERT(decoded != NULL, "imap_utf7_encode/decode: CJK roundtrip must not be NULL");
+        ASSERT(strcmp(decoded, "\xE4\xB8\xAD") == 0, "imap_utf7_encode/decode: CJK roundtrip");
+    }
+
+    /* Supplementary plane U+10000 (4-byte UTF-8) roundtrip (surrogate pair) */
+    {
+        RAII_STRING char *encoded = imap_utf7_encode("\xF0\x90\x80\x80");
+        ASSERT(encoded != NULL, "imap_utf7_encode: U+10000 must not return NULL");
+        RAII_STRING char *decoded = imap_utf7_decode(encoded);
+        ASSERT(decoded != NULL, "imap_utf7_encode/decode: U+10000 roundtrip must not be NULL");
+        ASSERT(strcmp(decoded, "\xF0\x90\x80\x80") == 0,
+               "imap_utf7_encode/decode: U+10000 surrogate-pair roundtrip");
+    }
+
+    /* Mixed ASCII and non-ASCII (folder path with accented chars) */
+    {
+        /* "INBOX.étest" — é is U+00E9 */
+        RAII_STRING char *encoded = imap_utf7_encode("INBOX.\xC3\xA9test");
+        ASSERT(encoded != NULL, "imap_utf7_encode: mixed path must not return NULL");
+        RAII_STRING char *decoded = imap_utf7_decode(encoded);
+        ASSERT(decoded != NULL, "imap_utf7_encode/decode: mixed path must not be NULL");
+        ASSERT(strcmp(decoded, "INBOX.\xC3\xA9test") == 0,
+               "imap_utf7_encode/decode: mixed path roundtrip");
+    }
+
+    /* Multiple non-ASCII chars in a single run */
+    {
+        /* "éü" — two accented chars back to back, one encoded run */
+        RAII_STRING char *encoded = imap_utf7_encode("\xC3\xA9\xC3\xBC");
+        ASSERT(encoded != NULL, "imap_utf7_encode: two-char run must not return NULL");
+        RAII_STRING char *decoded = imap_utf7_decode(encoded);
+        ASSERT(decoded != NULL, "imap_utf7_encode/decode: two-char run roundtrip must not be NULL");
+        ASSERT(strcmp(decoded, "\xC3\xA9\xC3\xBC") == 0,
+               "imap_utf7_encode/decode: two-char run roundtrip");
+    }
+
+    /* Non-ASCII immediately followed by '&' (edge: run flush then '&' escape) */
+    {
+        /* "é&" */
+        RAII_STRING char *encoded = imap_utf7_encode("\xC3\xA9&");
+        ASSERT(encoded != NULL, "imap_utf7_encode: non-ASCII+'&' must not return NULL");
+        RAII_STRING char *decoded = imap_utf7_decode(encoded);
+        ASSERT(decoded != NULL,
+               "imap_utf7_encode/decode: non-ASCII+'&' roundtrip must not be NULL");
+        ASSERT(strcmp(decoded, "\xC3\xA9&") == 0,
+               "imap_utf7_encode/decode: non-ASCII+'&' roundtrip");
+    }
+
+    /* Invalid UTF-8 continuation byte at start (0x80) → replaced with U+FFFD */
+    {
+        /* 0x80 is a bare continuation byte — decoder maps it to U+FFFD */
+        RAII_STRING char *encoded = imap_utf7_encode("\x80");
+        ASSERT(encoded != NULL, "imap_utf7_encode: invalid UTF-8 must not return NULL");
+        /* encoded should be a non-ASCII run; decode it back and compare with U+FFFD */
+        RAII_STRING char *decoded = imap_utf7_decode(encoded);
+        ASSERT(decoded != NULL,
+               "imap_utf7_encode/decode: invalid UTF-8 decoded must not be NULL");
+        /* U+FFFD in UTF-8 is EF BF BD */
+        ASSERT(strcmp(decoded, "\xEF\xBF\xBD") == 0,
+               "imap_utf7_encode: invalid UTF-8 byte encodes as U+FFFD");
+    }
+
+    /* Known encode value: é → "&AOk-" (same as decode test, verify direction) */
+    {
+        RAII_STRING char *r = imap_utf7_encode("\xC3\xA9");
+        ASSERT(r != NULL, "imap_utf7_encode: é known value must not be NULL");
+        ASSERT(strcmp(r, "&AOk-") == 0, "imap_utf7_encode: é encodes to &AOk-");
+    }
+
+    /* Known encode value: ASCII 'A' is passed through (not encoded) */
+    {
+        RAII_STRING char *r = imap_utf7_encode("A");
+        ASSERT(r != NULL, "imap_utf7_encode: 'A' must not be NULL");
+        ASSERT(strcmp(r, "A") == 0, "imap_utf7_encode: printable ASCII 'A' passthrough");
+    }
+
+    /* Printable ASCII boundaries: space (0x20) and tilde (0x7E) pass through */
+    {
+        RAII_STRING char *r = imap_utf7_encode(" ~");
+        ASSERT(r != NULL, "imap_utf7_encode: space+tilde must not be NULL");
+        ASSERT(strcmp(r, " ~") == 0, "imap_utf7_encode: space+tilde passthrough");
+    }
 }

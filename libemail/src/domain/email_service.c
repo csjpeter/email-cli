@@ -3646,7 +3646,7 @@ int email_service_sync(const Config *cfg) {
         manifest_free(manifest);
         free(uids);
 
-        printf("  %d fetched, %d already stored%s\n",
+        printf("\r\033[K  %d fetched, %d already stored%s\n",
                fetched, skipped, errors ? " (some errors)" : "");
         total_fetched += fetched;
         total_skipped += skipped;

@@ -304,6 +304,73 @@ static void test_hidden_files_included_with_dot_prefix(void) {
     path_complete_reset();
 }
 
+static void test_render_below_no_completions_is_noop(void) {
+    /* render_below is a no-op when count == 0 (no completions) */
+    char buf[256] = "";
+    InputLine il;
+    input_line_init(&il, buf, sizeof(buf), "");
+    path_complete_attach(&il);
+    path_complete_reset();  /* ensure empty state */
+    /* Should not crash even though count == 0 */
+    il.render_below(&il);
+    ASSERT(1, "render_below with no completions does not crash");
+}
+
+static void test_render_below_after_match(void) {
+    /* Trigger completion so count > 0, then call render_below directly.
+     * The render writes ANSI escapes to stdout — that's fine in tests. */
+    char td[256]; td_make("render_after_match", td, sizeof(td));
+    make_file(td, "alpha.txt");
+    make_file(td, "beta.txt");
+
+    char prefix[512]; snprintf(prefix, sizeof(prefix), "%s/", td);
+    char buf[512]; InputLine il;
+    il_setup(&il, buf, sizeof(buf), prefix);
+    il.trow = 1;  /* give a non-zero row so ANSI escape is well-formed */
+
+    il.tab_fn(&il);  /* populates g_comp with 2 matches */
+    il.render_below(&il);  /* exercises the rendering path with count > 0 */
+    ASSERT(1, "render_below with matches does not crash");
+    path_complete_reset();
+}
+
+static void test_render_below_many_matches_scrolls(void) {
+    /* Create enough matches that view_start is advanced (scrolling path). */
+    char td[256]; td_make("render_scroll", td, sizeof(td));
+    /* Create 30 files to overflow a narrow terminal */
+    for (int i = 0; i < 30; i++) {
+        char name[64]; snprintf(name, sizeof(name), "file%02d.txt", i);
+        make_file(td, name);
+    }
+
+    char prefix[512]; snprintf(prefix, sizeof(prefix), "%s/", td);
+    char buf[512]; InputLine il;
+    il_setup(&il, buf, sizeof(buf), prefix);
+    il.trow = 1;
+
+    il.tab_fn(&il);   /* populates g_comp with 30 matches, idx=0 */
+    /* Advance idx towards the end to force view scrolling */
+    for (int i = 0; i < 25; i++) {
+        il.tab_fn(&il);
+    }
+    il.render_below(&il);  /* exercises view_start advancement */
+    ASSERT(1, "render_below with many matches (scroll) does not crash");
+    path_complete_reset();
+}
+
+static void test_no_slash_in_prefix_uses_cwd(void) {
+    /* When the prefix has no '/', g_comp.dir becomes "./" and opendir runs
+     * on the current directory.  Any single character that matches nothing is fine. */
+    char buf[256]; InputLine il;
+    /* Use a prefix that is very unlikely to match any real file */
+    il_setup(&il, buf, sizeof(buf), "ZZZQQQNONEXISTENT");
+    il.tab_fn(&il);
+    /* buf unchanged since no match */
+    ASSERT(strcmp(il.buf, "ZZZQQQNONEXISTENT") == 0,
+           "no-slash prefix with no match leaves buf unchanged");
+    path_complete_reset();
+}
+
 /* ── Entry point ─────────────────────────────────────────────────────── */
 
 void test_path_complete(void) {
@@ -322,6 +389,10 @@ void test_path_complete(void) {
     RUN_TEST(test_results_are_sorted_alphabetically);
     RUN_TEST(test_hidden_files_excluded_with_empty_prefix);
     RUN_TEST(test_hidden_files_included_with_dot_prefix);
+    RUN_TEST(test_render_below_no_completions_is_noop);
+    RUN_TEST(test_render_below_after_match);
+    RUN_TEST(test_render_below_many_matches_scrolls);
+    RUN_TEST(test_no_slash_in_prefix_uses_cwd);
 
     fixture_teardown();
 }

@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdio.h>
 
 /* ── Helper to set up a clean test environment ────────────────────────── */
 
@@ -283,6 +284,255 @@ void test_ui_prefs(void) {
            "ui_pref_get_int: unknown key should return default");
 
     unlink("/tmp/email-cli-ui-pref-test-home/.local/share/email-cli/ui.ini");
+
+    /* ui_pref_get_str / ui_pref_set_str */
+    ASSERT(ui_pref_get_str("str_key") == NULL,
+           "ui_pref_get_str: missing file returns NULL");
+
+    ASSERT(ui_pref_set_str("str_key", "hello") == 0,
+           "ui_pref_set_str: returns 0 on first write");
+    {
+        char *v = ui_pref_get_str("str_key");
+        ASSERT(v != NULL, "ui_pref_get_str: returns non-NULL after set");
+        ASSERT(strcmp(v, "hello") == 0, "ui_pref_get_str: value matches");
+        free(v);
+    }
+
+    ASSERT(ui_pref_set_str("str_key", "world") == 0,
+           "ui_pref_set_str: overwrite returns 0");
+    {
+        char *v = ui_pref_get_str("str_key");
+        ASSERT(v != NULL, "ui_pref_get_str: overwrite non-NULL");
+        ASSERT(strcmp(v, "world") == 0, "ui_pref_get_str: overwrite value matches");
+        free(v);
+    }
+
+    ASSERT(ui_pref_set_str("another_key", "value2") == 0,
+           "ui_pref_set_str: second key returns 0");
+    {
+        char *v1 = ui_pref_get_str("str_key");
+        char *v2 = ui_pref_get_str("another_key");
+        ASSERT(v1 && strcmp(v1, "world") == 0,  "ui_pref_get_str: first key intact");
+        ASSERT(v2 && strcmp(v2, "value2") == 0, "ui_pref_get_str: second key correct");
+        free(v1); free(v2);
+    }
+
+    ASSERT(ui_pref_get_str("no_such_str_key") == NULL,
+           "ui_pref_get_str: unknown key returns NULL");
+
+    unlink("/tmp/email-cli-ui-pref-test-home/.local/share/email-cli/ui.ini");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+/* ── msg delete tests ────────────────────────────────────────────────── */
+
+void test_local_msg_delete(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-delete-test");
+
+    const char *folder = "INBOX";
+    const char *uid    = "0000000000001000";
+
+    /* Save then delete */
+    int rc = local_msg_save(folder, uid, "test body", 9);
+    ASSERT(rc == 0, "delete: save succeeded");
+    ASSERT(local_msg_exists(folder, uid) == 1, "delete: exists before delete");
+
+    int del = local_msg_delete(folder, uid);
+    ASSERT(del == 0, "delete: returns 0");
+    ASSERT(local_msg_exists(folder, uid) == 0, "delete: does not exist after delete");
+
+    /* Deleting a non-existent message should not crash */
+    int del2 = local_msg_delete(folder, "0000000000001001");
+    ASSERT(del2 == 0, "delete: non-existent msg returns 0");
+
+    /* Delete also removes .hdr if it exists */
+    const char *uid2 = "0000000000001002";
+    local_hdr_save(folder, uid2, "from\tsubject\tdate\t\t0", 20);
+    ASSERT(local_hdr_exists(folder, uid2) == 1, "delete: hdr exists before delete");
+    local_msg_delete(folder, uid2);
+    ASSERT(local_hdr_exists(folder, uid2) == 0, "delete: hdr removed by delete");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+/* ── index email extraction tests ────────────────────────────────────── */
+
+void test_local_index_email_extraction(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-email-extract-test");
+
+    /* "Name <user@domain>" format */
+    {
+        const char *msg =
+            "From: Alice <alice@example.com>\r\n"
+            "Date: Mon, 01 Jan 2024 10:00:00 +0000\r\n"
+            "Subject: Test\r\n\r\nBody";
+        int rc = local_index_update("INBOX", "0000000000000201", msg);
+        ASSERT(rc == 0, "email_extraction: Name<email> index_update returns 0");
+
+        const char *from_path =
+            "/tmp/email-cli-email-extract-test/.local/share/email-cli/accounts/"
+            "testuser/index/from/example.com/alice";
+        RAII_FILE FILE *fp = fopen(from_path, "r");
+        ASSERT(fp != NULL, "email_extraction: Name<email> from index created");
+        if (fp) {
+            char line[256];
+            ASSERT(fgets(line, sizeof(line), fp) != NULL,
+                   "email_extraction: from index has a line");
+            ASSERT(strstr(line, "INBOX/0000000000000201") != NULL,
+                   "email_extraction: from index contains correct ref");
+        }
+    }
+
+    /* "<user@domain>" format without display name */
+    {
+        const char *msg2 =
+            "From: <bob@test.org>\r\n"
+            "Date: Tue, 02 Jan 2024 11:00:00 +0000\r\n"
+            "Subject: Test2\r\n\r\nBody";
+        int rc = local_index_update("INBOX", "0000000000000202", msg2);
+        ASSERT(rc == 0, "email_extraction: <email> index_update returns 0");
+
+        const char *from_path2 =
+            "/tmp/email-cli-email-extract-test/.local/share/email-cli/accounts/"
+            "testuser/index/from/test.org/bob";
+        RAII_FILE FILE *fp2 = fopen(from_path2, "r");
+        ASSERT(fp2 != NULL, "email_extraction: <email> from index created");
+    }
+
+    /* Plain "user@domain" format */
+    {
+        const char *msg3 =
+            "From: carol@sample.net\r\n"
+            "Date: Wed, 03 Jan 2024 12:00:00 +0000\r\n"
+            "Subject: Test3\r\n\r\nBody";
+        int rc = local_index_update("INBOX", "0000000000000203", msg3);
+        ASSERT(rc == 0, "email_extraction: plain email index_update returns 0");
+
+        const char *from_path3 =
+            "/tmp/email-cli-email-extract-test/.local/share/email-cli/accounts/"
+            "testuser/index/from/sample.net/carol";
+        RAII_FILE FILE *fp3 = fopen(from_path3, "r");
+        ASSERT(fp3 != NULL, "email_extraction: plain email from index created");
+    }
+
+    /* From header with no @ sign: no from index entry created (graceful skip) */
+    {
+        const char *msg4 =
+            "From: noemail\r\n"
+            "Date: Thu, 04 Jan 2024 13:00:00 +0000\r\n"
+            "Subject: Test4\r\n\r\nBody";
+        int rc = local_index_update("INBOX", "0000000000000204", msg4);
+        ASSERT(rc == 0, "email_extraction: no-@ returns 0 (graceful)");
+    }
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+/* ── trash labels tests ──────────────────────────────────────────────── */
+
+void test_local_trash_labels(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-trash-labels-test");
+
+    const char *uid = "0000000000002000";
+    const char *labels = "INBOX,Work,Important";
+
+    /* Save and load */
+    int rc = local_trash_labels_save(uid, labels);
+    ASSERT(rc == 0, "trash_labels: save returns 0");
+
+    RAII_STRING char *loaded = local_trash_labels_load(uid);
+    ASSERT(loaded != NULL, "trash_labels: load returns non-NULL");
+    ASSERT(strcmp(loaded, labels) == 0, "trash_labels: loaded value matches saved");
+
+    /* Remove */
+    local_trash_labels_remove(uid);
+    RAII_STRING char *after_remove = local_trash_labels_load(uid);
+    ASSERT(after_remove == NULL, "trash_labels: NULL after remove");
+
+    /* Load non-existent returns NULL */
+    RAII_STRING char *missing = local_trash_labels_load("0000000000009999");
+    ASSERT(missing == NULL, "trash_labels: missing uid returns NULL");
+
+    /* Remove non-existent should not crash */
+    local_trash_labels_remove("0000000000009998");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+/* ── gmail history id tests ──────────────────────────────────────────── */
+
+void test_local_gmail_history(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-gmail-history-test");
+
+    /* Pre-clean any leftover history file from previous runs */
+    unlink("/tmp/email-cli-gmail-history-test/.local/share/email-cli/accounts/"
+           "testuser/gmail_history_id");
+
+    /* Load when missing returns NULL */
+    RAII_STRING char *none = local_gmail_history_load();
+    ASSERT(none == NULL, "gmail_history: missing returns NULL");
+
+    /* Save and load */
+    int rc = local_gmail_history_save("12345678");
+    ASSERT(rc == 0, "gmail_history: save returns 0");
+
+    RAII_STRING char *loaded = local_gmail_history_load();
+    ASSERT(loaded != NULL, "gmail_history: load returns non-NULL");
+    ASSERT(strcmp(loaded, "12345678") == 0, "gmail_history: loaded value matches");
+
+    /* Overwrite with new value */
+    int rc2 = local_gmail_history_save("99999999");
+    ASSERT(rc2 == 0, "gmail_history: overwrite returns 0");
+
+    RAII_STRING char *loaded2 = local_gmail_history_load();
+    ASSERT(loaded2 != NULL, "gmail_history: overwrite load returns non-NULL");
+    ASSERT(strcmp(loaded2, "99999999") == 0, "gmail_history: overwrite value correct");
+
+    /* Null history id returns -1 */
+    int rc3 = local_gmail_history_save(NULL);
+    ASSERT(rc3 == -1, "gmail_history: NULL id returns -1");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+/* ── local_hdr_get_labels tests ──────────────────────────────────────── */
+
+void test_local_hdr_get_labels(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-hdr-labels-test");
+
+    const char *folder = "";  /* Gmail flat store uses empty folder */
+    const char *uid    = "0000000000003000";
+
+    /* Gmail .hdr format: from\tsubject\tdate\tlabels\tflags */
+    const char *hdr_content = "Alice <alice@example.com>\tHello\t2024-01-01 10:00\tINBOX,Work\t1";
+    int rc = local_hdr_save(folder, uid, hdr_content, strlen(hdr_content));
+    ASSERT(rc == 0, "hdr_labels: save returns 0");
+
+    RAII_STRING char *labels = local_hdr_get_labels(folder, uid);
+    ASSERT(labels != NULL, "hdr_labels: get_labels returns non-NULL");
+    ASSERT(strcmp(labels, "INBOX,Work") == 0, "hdr_labels: labels value correct");
+
+    /* Non-Gmail .hdr (no labels field) → NULL */
+    const char *uid2 = "0000000000003001";
+    const char *hdr2 = "Bob\tSubject\tDate";  /* only 3 fields, no 4th tab */
+    local_hdr_save(folder, uid2, hdr2, strlen(hdr2));
+    RAII_STRING char *labels2 = local_hdr_get_labels(folder, uid2);
+    ASSERT(labels2 == NULL, "hdr_labels: non-Gmail hdr returns NULL");
+
+    /* Non-existent uid → NULL */
+    RAII_STRING char *labels3 = local_hdr_get_labels(folder, "0000000000009997");
+    ASSERT(labels3 == NULL, "hdr_labels: missing uid returns NULL");
 
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");

@@ -1455,7 +1455,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int tcols = terminal_cols(); int trows = terminal_rows();
                 if (tcols <= 0) tcols = 80;
                 if (trows <= 0) trows = 24;
-                int avail = tcols - 35; if (avail < 40) avail = 40;
+                int avail = tcols - (cfg->gmail_mode ? 35 : 28); if (avail < 40) avail = 40;
                 int subj_w = avail * 3 / 5, from_w = avail - subj_w;
                 printf("\033[H\033[2J");
                 char cl[512];
@@ -1471,9 +1471,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                            "Labels", "Date", "Sts", subj_w, "Subject", "From");
                     printf("  "); print_dbar(14); printf("  ");
                 } else {
-                    printf("  %5s  %-16s  %-4s  %-*s  %s\n",
-                           "UID", "Date", "Sts", subj_w, "Subject", "From");
-                    printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                    printf("  %-16s  %-4s  %-*s  %s\n",
+                           "Date", "Sts", subj_w, "Subject", "From");
                 }
                 print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
@@ -1575,7 +1574,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int tcols = terminal_cols(); int trows = terminal_rows();
                 if (tcols <= 0) tcols = 80;
                 if (trows <= 0) trows = 24;
-                int avail = tcols - 35; if (avail < 40) avail = 40;
+                int avail = tcols - (cfg->gmail_mode ? 35 : 28); if (avail < 40) avail = 40;
                 int subj_w = avail * 3 / 5, from_w = avail - subj_w;
                 printf("\033[H\033[2J");
                 char cl[512];
@@ -1591,9 +1590,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                            "Labels", "Date", "Sts", subj_w, "Subject", "From");
                     printf("  "); print_dbar(14); printf("  ");
                 } else {
-                    printf("  %5s  %-16s  %-4s  %-*s  %s\n",
-                           "UID", "Date", "Sts", subj_w, "Subject", "From");
-                    printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                    printf("  %-16s  %-4s  %-*s  %s\n",
+                           "Date", "Sts", subj_w, "Subject", "From");
                 }
                 print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
@@ -1664,7 +1662,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int tcols = terminal_cols(); int trows = terminal_rows();
             if (tcols <= 0) tcols = 80;
             if (trows <= 0) trows = 24;
-            int avail = tcols - 35; if (avail < 40) avail = 40;
+            int avail = tcols - (cfg->gmail_mode ? 35 : 28); if (avail < 40) avail = 40;
             int subj_w = avail * 3 / 5, from_w = avail - subj_w;
             printf("\033[H\033[2J");
             char cl[512];
@@ -1680,9 +1678,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                        "Labels", "Date", "Sts", subj_w, "Subject", "From");
                 printf("  "); print_dbar(14); printf("  ");
             } else {
-                printf("  %5s  %-16s  %-4s  %-*s  %s\n",
-                       "UID", "Date", "Sts", subj_w, "Subject", "From");
-                printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                printf("  %-16s  %-4s  %-*s  %s\n",
+                       "Date", "Sts", subj_w, "Subject", "From");
             }
             print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
             print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
@@ -1741,13 +1738,13 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (wend > show_count)           wend = show_count;
 
         /* Compute adaptive column widths.
-         * IMAP:  "  UID  "(7) + "  DATE  "(18) + "  Sts  "(8) = 35
+         * IMAP:  "  DATE  "(18) + "  Sts  "(8) = 28  (UID shown only in reader)
          * Gmail: "  Labels "(lbl_w+2) + "  DATE  "(18) + "  Sts  "(8)
          * subj_w gets ~60% of remaining space, from_w ~40%. */
         int tcols    = terminal_cols();
         int is_gmail = cfg->gmail_mode;
         int lbl_w    = is_gmail ? 14 : 0;
-        int overhead = is_gmail ? (lbl_w + 2 + 18 + 8) : 35;
+        int overhead = is_gmail ? (lbl_w + 2 + 18 + 8) : 28;
         int avail    = tcols - overhead;
         if (avail < 40) avail = 40;
         int subj_w = avail * 3 / 5;
@@ -1782,9 +1779,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                    lbl_w, "Labels", "Date", "Sts", subj_w, "Subject", "From");
             printf("  "); print_dbar(lbl_w); printf("  ");
         } else {
-            printf("  %5s  %-16s  %-4s  %-*s  %s\n",
-                   "UID", "Date", "Sts", subj_w, "Subject", "From");
-            printf("  \u2550\u2550\u2550\u2550\u2550  ");
+            printf("  %-16s  %-4s  %-*s  %s\n",
+                   "Date", "Sts", subj_w, "Subject", "From");
         }
         print_dbar(16); printf("  ");
         printf("\u2550\u2550\u2550\u2550  ");
@@ -1903,7 +1899,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 print_padded_col(lbl_disp, lbl_w);
                 printf("  %-16.16s  %s  ", date, sts);
             } else {
-                printf("  %5s  %-16.16s  %s  ", entries[i].uid, date, sts);
+                printf("  %-16.16s  %s  ", date, sts);
             }
             print_padded_col(subject, subj_w);
             printf("  ");

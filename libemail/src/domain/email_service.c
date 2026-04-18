@@ -908,10 +908,14 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         case TERM_KEY_PREV_LINE:
             if (cur_line > 0) cur_line--;
             break;
+        case TERM_KEY_HOME:
+            cur_line = 0;
+            break;
+        case TERM_KEY_END:
+            cur_line = body_vrows > rows_avail ? body_vrows - rows_avail : 0;
+            break;
         case TERM_KEY_LEFT:
         case TERM_KEY_RIGHT:
-        case TERM_KEY_HOME:
-        case TERM_KEY_END:
         case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
         case TERM_KEY_SHIFT_TAB:
@@ -927,6 +931,7 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
                 static const char *help[][2] = {
                     { "PgDn / \u2193",   "Scroll down one page / one line"  },
                     { "PgUp / \u2191",   "Scroll up one page / one line"    },
+                    { "Home / End",      "Jump to top / bottom of message"  },
                     { "r",              "Reply to this message"             },
                     { "a",              "Save an attachment"                },
                     { "A",              "Save all attachments"              },
@@ -1980,10 +1985,14 @@ read_key_again: ;
                 /* ret == 0: Backspace → back to list; ret == -1: error → stay */
             }
             break;
+        case TERM_KEY_HOME:
+            cursor = 0;
+            break;
+        case TERM_KEY_END:
+            cursor = show_count > 0 ? show_count - 1 : 0;
+            break;
         case TERM_KEY_LEFT:
         case TERM_KEY_RIGHT:
-        case TERM_KEY_HOME:
-        case TERM_KEY_END:
         case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
         case TERM_KEY_SHIFT_TAB:
@@ -2244,6 +2253,7 @@ read_key_again: ;
         }
     }
 list_done:
+
     /* tui_raw / folder_canonical cleaned up automatically via RAII macros */
     manifest_free(manifest);
     free(entries);
@@ -2546,10 +2556,14 @@ char *email_service_list_folders_interactive(const Config *cfg,
             cursor -= limit;
             if (cursor < 0) cursor = 0;
             break;
+        case TERM_KEY_HOME:
+            cursor = 0; wstart = 0;
+            break;
+        case TERM_KEY_END:
+            cursor = display_count > 0 ? display_count - 1 : 0;
+            break;
         case TERM_KEY_LEFT:
         case TERM_KEY_RIGHT:
-        case TERM_KEY_HOME:
-        case TERM_KEY_END:
         case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
         case TERM_KEY_SHIFT_TAB:
@@ -2940,6 +2954,12 @@ char *email_service_list_labels_interactive(const Config *cfg,
         case TERM_KEY_QUIT:
         case TERM_KEY_ESC:
             goto labels_done;
+        case TERM_KEY_HOME:
+            cursor = 0; wstart = 0;
+            break;
+        case TERM_KEY_END:
+            cursor = lbl_count > 0 ? lbl_count - 1 : 0;
+            break;
         case TERM_KEY_NEXT_LINE:
             if (cursor < lbl_count - 1) cursor++;
             break;
@@ -3242,6 +3262,14 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
         }
         if (key == TERM_KEY_BACK) {
             /* Backspace has no meaning at the top-level accounts screen; ignore. */
+            ACC_FREE(); continue;
+        }
+        if (key == TERM_KEY_HOME) {
+            cursor = 0;
+            ACC_FREE(); continue;
+        }
+        if (key == TERM_KEY_END) {
+            cursor = count > 0 ? count - 1 : 0;
             ACC_FREE(); continue;
         }
         if (key == TERM_KEY_NEXT_LINE || key == TERM_KEY_NEXT_PAGE) {

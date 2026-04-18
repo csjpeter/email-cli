@@ -91,12 +91,15 @@ int gmail_sync_full(GmailClient *gc) {
     logger_log(LOG_INFO, "gmail_sync: %d messages to sync", uid_count);
 
     /* 2. For each message: fetch, store .eml, build .hdr, collect labels */
+    int fetched = 0, skipped = 0;
     for (int i = 0; i < uid_count; i++) {
         const char *uid = all_uids[i];
 
         /* Skip if already cached */
         if (local_msg_exists("", uid)) {
-            fprintf(stderr, "  [%d/%d] (cached)\r", i + 1, uid_count);
+            fprintf(stderr, "\r\033[K  [%d/%d] (cached)", i + 1, uid_count);
+            fflush(stderr);
+            skipped++;
             continue;
         }
 
@@ -141,9 +144,13 @@ int gmail_sync_full(GmailClient *gc) {
         for (int j = 0; j < label_count; j++) free(labels[j]);
         free(labels);
 
-        fprintf(stderr, "  [%d/%d] messages synced\r", i + 1, uid_count);
+        fprintf(stderr, "\r\033[K  [%d/%d] fetched", i + 1, uid_count);
+        fflush(stderr);
+        fetched++;
     }
-    if (uid_count > 0) fprintf(stderr, "\n");
+    if (uid_count > 0)
+        fprintf(stderr, "\r\033[K  %d fetched, %d already cached\n",
+                fetched, skipped);
 
     /* 3. Save historyId from the Gmail profile */
     {

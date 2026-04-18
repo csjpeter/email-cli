@@ -322,14 +322,16 @@ static void write_config_to_fp(FILE *fp, const Config *cfg) {
     if (cfg->gmail_client_secret) fprintf(fp, "GMAIL_CLIENT_SECRET=%s\n", cfg->gmail_client_secret);
 }
 
-/** Load a config from a specific file path. Decrypts enc: credentials transparently. */
-static Config *load_config_from_path(const char *path) {
+/** Load a config from a specific file path. Decrypts enc: credentials transparently.
+ *  Sets *out_needs_resave to 1 if any credential was plaintext and obfuscation is ON. */
+static Config *load_config_from_path(const char *path, int *out_needs_resave) {
     RAII_FILE FILE *fp = fopen(path, "r");
     if (!fp) return NULL;
 
     Config *cfg = calloc(1, sizeof(Config));
     if (!cfg) return NULL;
 
+    int plaintext_cred_found = 0; /* set if any credential lacks enc: prefix */
     char line[1024]; /* wider than before — enc: values can be long */
     while (fgets(line, sizeof(line), fp)) {
         char *eq = strchr(line, '=');
@@ -344,7 +346,10 @@ static Config *load_config_from_path(const char *path) {
 
         if      (strcmp(key, "EMAIL_HOST")          == 0) cfg->host               = strdup(val);
         else if (strcmp(key, "EMAIL_USER")          == 0) cfg->user               = strdup(val);
-        else if (strcmp(key, "EMAIL_PASS")          == 0) cfg->pass               = strdup(val);
+        else if (strcmp(key, "EMAIL_PASS")          == 0) {
+            cfg->pass = strdup(val);
+            if (val[0] && strncmp(val, "enc:", 4) != 0) plaintext_cred_found = 1;
+        }
         else if (strcmp(key, "EMAIL_FOLDER")        == 0) cfg->folder             = strdup(val);
         else if (strcmp(key, "EMAIL_SENT_FOLDER")   == 0) cfg->sent_folder        = strdup(val);
         else if (strcmp(key, "SSL_NO_VERIFY")       == 0) cfg->ssl_no_verify      = atoi(val);
@@ -352,9 +357,15 @@ static Config *load_config_from_path(const char *path) {
         else if (strcmp(key, "SMTP_HOST")           == 0) cfg->smtp_host          = strdup(val);
         else if (strcmp(key, "SMTP_PORT")           == 0) cfg->smtp_port          = atoi(val);
         else if (strcmp(key, "SMTP_USER")           == 0) cfg->smtp_user          = strdup(val);
-        else if (strcmp(key, "SMTP_PASS")           == 0) cfg->smtp_pass          = strdup(val);
+        else if (strcmp(key, "SMTP_PASS")           == 0) {
+            cfg->smtp_pass = strdup(val);
+            if (val[0] && strncmp(val, "enc:", 4) != 0) plaintext_cred_found = 1;
+        }
         else if (strcmp(key, "GMAIL_MODE")          == 0) cfg->gmail_mode         = atoi(val);
-        else if (strcmp(key, "GMAIL_REFRESH_TOKEN") == 0) cfg->gmail_refresh_token = strdup(val);
+        else if (strcmp(key, "GMAIL_REFRESH_TOKEN") == 0) {
+            cfg->gmail_refresh_token = strdup(val);
+            if (val[0] && strncmp(val, "enc:", 4) != 0) plaintext_cred_found = 1;
+        }
         else if (strcmp(key, "GMAIL_CLIENT_ID")     == 0) cfg->gmail_client_id    = strdup(val);
         else if (strcmp(key, "GMAIL_CLIENT_SECRET") == 0) cfg->gmail_client_secret = strdup(val);
     }
@@ -439,6 +450,8 @@ static Config *load_config_from_path(const char *path) {
                        "SSL_NO_VERIFY=1: SMTP without TLS to %s "
                        "(test/dev mode only)", cfg->smtp_host);
     }
+    if (out_needs_resave)
+        *out_needs_resave = plaintext_cred_found && g_credential_obfuscation;
     return cfg;
 }
 
@@ -528,8 +541,17 @@ AccountEntry *config_list_accounts(int *count_out) {
         snprintf(path, sizeof(path), "%s/%s/config.ini",
                  accounts_dir, ent->d_name);
 
-        Config *cfg = load_config_from_path(path);
+        int needs_resave = 0;
+        Config *cfg = load_config_from_path(path, &needs_resave);
         if (!cfg) continue;
+        if (needs_resave) {
+            logger_log(LOG_INFO, "Re-encrypting plaintext credentials for %s", ent->d_name);
+            RAII_FILE FILE *wfp = fopen(path, "w");
+            if (wfp) {
+                write_config_to_fp(wfp, cfg);
+                fs_ensure_permissions(path, 0600);
+            }
+        }
 
         if (count >= cap) {
             cap *= 2;

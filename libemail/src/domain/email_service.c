@@ -1456,7 +1456,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int tcols = terminal_cols(); int trows = terminal_rows();
                 if (tcols <= 0) tcols = 80;
                 if (trows <= 0) trows = 24;
-                int avail = tcols - (cfg->gmail_mode ? 35 : 28); if (avail < 40) avail = 40;
+                int avail = tcols - 28; if (avail < 40) avail = 40;
                 int subj_w = avail * 3 / 5, from_w = avail - subj_w;
                 printf("\033[H\033[2J");
                 char cl[512];
@@ -1467,15 +1467,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
                 printf("\033[0m\n\n");
-                if (cfg->gmail_mode) {
-                    printf("  %-14s  %-16s  %-4s  %-*s  %s\n",
-                           "Labels", "Date", "Sts", subj_w, "Subject", "From");
-                    printf("  "); print_dbar(14); printf("  ");
-                } else {
-                    printf("  %-16s  %-4s  %-*s  %s\n",
-                           "Date", "Sts", subj_w, "Subject", "From");
-                    printf("  ");
-                }
+                printf("  %-16s  %-4s  %-*s  %s\n",
+                       "Date", "Sts", subj_w, "Subject", "From");
+                printf("  ");
                 print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
                 printf("\n  \033[2m(empty)\033[0m\n");
@@ -1576,7 +1570,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int tcols = terminal_cols(); int trows = terminal_rows();
                 if (tcols <= 0) tcols = 80;
                 if (trows <= 0) trows = 24;
-                int avail = tcols - (cfg->gmail_mode ? 35 : 28); if (avail < 40) avail = 40;
+                int avail = tcols - 28; if (avail < 40) avail = 40;
                 int subj_w = avail * 3 / 5, from_w = avail - subj_w;
                 printf("\033[H\033[2J");
                 char cl[512];
@@ -1587,15 +1581,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
                 printf("\033[0m\n\n");
-                if (cfg->gmail_mode) {
-                    printf("  %-14s  %-16s  %-4s  %-*s  %s\n",
-                           "Labels", "Date", "Sts", subj_w, "Subject", "From");
-                    printf("  "); print_dbar(14); printf("  ");
-                } else {
-                    printf("  %-16s  %-4s  %-*s  %s\n",
-                           "Date", "Sts", subj_w, "Subject", "From");
-                    printf("  ");
-                }
+                printf("  %-16s  %-4s  %-*s  %s\n",
+                       "Date", "Sts", subj_w, "Subject", "From");
+                printf("  ");
                 print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
                 printf("\n  \033[2m(empty)\033[0m\n");
@@ -1665,7 +1653,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int tcols = terminal_cols(); int trows = terminal_rows();
             if (tcols <= 0) tcols = 80;
             if (trows <= 0) trows = 24;
-            int avail = tcols - (cfg->gmail_mode ? 35 : 28); if (avail < 40) avail = 40;
+            int avail = tcols - 28; if (avail < 40) avail = 40;
             int subj_w = avail * 3 / 5, from_w = avail - subj_w;
             printf("\033[H\033[2J");
             char cl[512];
@@ -1676,15 +1664,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
             printf("\033[0m\n\n");
-            if (cfg->gmail_mode) {
-                printf("  %-14s  %-16s  %-4s  %-*s  %s\n",
-                       "Labels", "Date", "Sts", subj_w, "Subject", "From");
-                printf("  "); print_dbar(14); printf("  ");
-            } else {
-                printf("  %-16s  %-4s  %-*s  %s\n",
-                       "Date", "Sts", subj_w, "Subject", "From");
-                printf("  ");
-            }
+            printf("  %-16s  %-4s  %-*s  %s\n",
+                   "Date", "Sts", subj_w, "Subject", "From");
+            printf("  ");
             print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
             print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
             printf("\n  \033[2m(empty)\033[0m\n");

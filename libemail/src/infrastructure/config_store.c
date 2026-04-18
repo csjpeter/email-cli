@@ -445,6 +445,7 @@ static Config *load_config_from_path(const char *path) {
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
 Config* config_load_from_store(void) {
+    load_settings_once(); /* ensure settings.ini exists */
     int count = 0;
     AccountEntry *list = config_list_accounts(&count);
     if (!list || count == 0) {
@@ -505,6 +506,7 @@ int config_delete_account(const char *name) {
 }
 
 AccountEntry *config_list_accounts(int *count_out) {
+    load_settings_once(); /* ensure settings.ini exists */
     *count_out = 0;
 
     RAII_STRING char *accounts_dir = get_accounts_dir();

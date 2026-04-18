@@ -117,7 +117,9 @@ static Config *load_config_from_path(const char *path) {
             config_free(cfg);
             return NULL;
         }
-    } else {
+    } else if (cfg->host) {
+        /* ssl_no_verify mode — log warnings for non-TLS connections.
+         * Skip entirely for Gmail (host is NULL). */
         if (strncmp(cfg->host, "imaps://", 8) != 0)
             logger_log(LOG_WARN,
                        "SSL_NO_VERIFY=1: connecting without TLS to %s "

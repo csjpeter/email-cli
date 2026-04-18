@@ -5,15 +5,18 @@ Total target length: ~3 minutes
 [0:00 – 0:10]  INTRO
 Managing email from the terminal just got a lot easier.
 email-cli is a lightweight, open-source email client suite written in C —
-fast, scriptable, and safe enough to hand to an AI agent.
+three distinct user experiences, plus a background sync service.
 
-[0:10 – 0:25]  FOUR BINARIES
-The suite ships four binaries.
-email-tui gives you a full interactive interface in your terminal.
-email-cli is the read-write batch tool for scripting.
-email-cli-ro is strictly read-only — perfect for automation pipelines that
-must never accidentally modify your mailbox.
-And email-sync keeps your local cache in sync in the background.
+[0:10 – 0:30]  FOUR BINARIES
+First: email-tui — a full text user interface right in your terminal,
+for browsing, reading, composing, and sending mail interactively.
+Second: email-cli — the read-write batch tool for shell scripts and
+automation: list, send, flag, manage folders, all from one command.
+Third: email-cli-ro — a strictly read-only variant designed specifically
+for AI agents. It never sends, deletes, or modifies anything on the server,
+so you can let an AI process your inbox without granting it write access.
+Fourth: email-sync — run it from cron to keep the local message store
+up to date, so every other tool always works from fresh data.
 
 [0:25 – 0:45]  CLI DEMO: listing and reading
 Let's start with the basics.

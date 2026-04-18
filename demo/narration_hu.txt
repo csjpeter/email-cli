@@ -5,15 +5,19 @@ Cél hossz: ~3 perc
 [0:00 – 0:10]  INTRO
 A terminálból való levelezés most sokkal egyszerűbb lett.
 Az email-cli egy könnyűsúlyú, nyílt forráskódú, C-ben írt email kliens csomag —
-gyors, szkriptelhető, és elég biztonságos ahhoz, hogy AI ügynökre bízzuk.
+három különböző használati élménnyel és egy háttérszolgáltatással.
 
-[0:10 – 0:25]  NÉGY BINÁRIS
-A csomag négy programot tartalmaz.
-Az email-tui teljes interaktív felületet ad a terminálban.
-Az email-cli az írható-olvasható batch eszköz szkriptekhez.
-Az email-cli-ro kizárólag olvasható — tökéletes olyan automatizált
-folyamatokhoz, amelyek soha nem módosíthatják a postaládát.
-Az email-sync pedig a háttérben tartja naprakészen a helyi gyorsítótárat.
+[0:10 – 0:30]  NÉGY BINÁRIS
+Első: az email-tui — teljes szöveg alapú felhasználói felület a terminálban,
+navigáláshoz, olvasáshoz, íráshoz és küldéshez.
+Második: az email-cli — parancssoros batch eszköz, amellyel shell szkriptekből
+automatizálhatja a levelezést: listázás, küldés, jelölés, mappakezelés.
+Harmadik: az email-cli-ro — kizárólag olvasható változat, amelyet kifejezetten
+AI ügynökök számára terveztek. Soha nem küld, nem töröl, nem módosít semmit
+a szerveren — biztonságosan feldolgoztathatja vele a leveleit anélkül,
+hogy írási jogot kellene adnia.
+Negyedik: az email-sync — cronból futtatva rendszeresen frissíti a helyi
+levéltárat, így a többi eszköz mindig naprakész adatból dolgozik.
 
 [0:25 – 0:45]  CLI DEMÓ: listázás és olvasás
 Kezdjük az alapokkal.

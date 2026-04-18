@@ -1,82 +1,92 @@
-email-cli — YouTube demo narration script (English)
-=====================================================
-Total target length: ~3 minutes
+email-cli — YouTube demo narration (English)
+=============================================
+Each section is synchronised to the matching section in demo.tape.
+Estimated pace: ~2.8 words/second (edge-tts, en-US-AriaNeural)
 
-[0:00 – 0:10]  INTRO
-Managing email from the terminal just got a lot easier.
-email-cli is a lightweight, open-source email client suite written in C —
-three distinct user experiences, plus a background sync service.
+[INTRO — help screen visible, ~36s]
+email-cli is a terminal email client written in C.
+It has exactly two external runtime dependencies: OpenSSL and libcurl.
+Both are decades-old, system-level libraries
+shipped and verified by your Linux distribution.
+No package manager, no runtime framework, no supply-chain risk.
+The suite consists of four independent binaries with distinct privilege levels:
+an interactive TUI, a read-write batch CLI,
+a strictly read-only variant designed for AI agents,
+and a background sync daemon.
+All four share the same configuration and local message store.
 
-[0:10 – 0:30]  FOUR BINARIES
-First: email-tui — a full text user interface right in your terminal,
-for browsing, reading, composing, and sending mail interactively.
-Second: email-cli — the read-write batch tool for shell scripts and
-automation: list, send, flag, manage folders, all from one command.
-Third: email-cli-ro — a strictly read-only variant designed specifically
-for AI agents. It never sends, deletes, or modifies anything on the server,
-so you can let an AI process your inbox without granting it write access.
-Fourth: email-sync — run it from cron to keep the local message store
-up to date, so every other tool always works from fresh data.
+[SHOW-ACCOUNTS — ~8s]
+show-accounts lists every configured account.
+Each account has its own configuration directory.
 
-[0:25 – 0:45]  CLI DEMO: listing and reading
-Let's start with the basics.
-email-cli list shows your unread messages instantly from the local cache.
-Add --all to include everything, and pipe it through grep to find exactly
-what you're looking for.
-email-cli show followed by a message UID prints the full message to stdout —
-ready to feed into any script or AI tool.
+[LIST — ~9s]
+The list command shows unread messages from the local cache.
+A server connection is only needed during sync.
 
-[0:45 – 1:05]  CLI DEMO: send and folders
-Sending is just as simple.
-One line, no interaction required.
-email-cli folders --tree draws your full folder hierarchy.
-The same command works for Gmail labels too — no special cases.
+[SHOW — before ~5s, after ~10s]
+The listing shows each message's UID and subject.
+The show command prints the full message content by UID —
+headers, body, no HTML —
+directly to stdout, ready for any script or AI tool to process.
 
-[1:05 – 1:25]  GMAIL LABELS
-Speaking of Gmail — email-cli uses the native Gmail REST API with OAuth2,
-not IMAP.
-You get full label management: list labels, add them, remove them, archive,
-trash, and restore — all from the command line.
+[LIST --all + GREP — before ~5s, after ~7s]
+By default, list shows only unread messages.
+The --all flag includes everything,
+and the output can be piped directly into grep or any other tool.
 
-[1:25 – 1:50]  TUI DEMO
-Now let's take a look at the interactive TUI.
-The accounts screen shows all your configured accounts at a glance —
-unread counts, starred counts, IMAP or Gmail.
-Navigate with arrow keys, press Enter to open an account,
-and you're inside your inbox in seconds.
-Reading a message is just another Enter press.
+[FOLDERS — ~9s]
+folders --tree draws the full folder hierarchy.
+For IMAP accounts it shows mailbox folders;
+for Gmail accounts it shows labels.
 
-[1:50 – 2:10]  READ-ONLY + AI AGENTS
-email-cli-ro deserves a special mention.
-It issues only read commands to the server — never sends, never moves,
-never marks anything as read.
-This makes it safe to expose to AI agents and automation scripts that need
-to see your mail without being able to change it.
+[LIST --folder — before ~5s, after ~7s]
+list defaults to the INBOX folder.
+The --folder flag opens any other folder directly.
 
-[2:10 – 2:35]  MINIMAL DEPENDENCIES
-email-cli has exactly two external dependencies: OpenSSL and libcurl.
-Both are decades-old, extensively audited system libraries maintained
-and verified by your Linux distribution — not random packages from a
-registry.
-No npm. No pip. No cargo. No supply chain risk.
-After the xz-utils backdoor and countless package-manager-based attacks,
-this matters: you shouldn't have to trust an unknown maintainer's code
-with access to your inbox.
+[ATTACHMENTS — before ~5s, after ~7s]
+Messages can contain attachments.
+The attachments command lists each attachment's filename and size.
 
-[2:35 – 2:55]  SECURITY AND MEMORY SAFETY
-Config files are written with 0600 permissions, readable only by you.
-Gmail accounts use OAuth2 — no password is ever stored.
-The entire codebase is tested with AddressSanitizer and Valgrind on every
-CI run to catch memory leaks and buffer overflows before they ship.
+[SAVE-ATTACHMENT — before ~4s, action ~4s, after ~7s]
+The file does not exist on disk yet.
+save-attachment downloads a single attachment by UID and filename
+and writes it to the specified directory.
+After saving, the file is present on disk.
 
-[2:30 – 2:50]  INSTALLATION
-Getting started takes two commands.
-Run manage.sh deps to install system dependencies,
-then manage.sh build to compile all four binaries.
-The setup wizard runs automatically on first launch.
+[SEND — before ~5s, action ~6s, after ~8s]
+Before sending, the Sent folder shows its current contents.
+The send command delivers the message over SMTP
+and automatically saves a copy to the Sent folder.
+After sending, the new message appears in Sent.
 
-[2:50 – 3:00]  OUTRO
-email-cli — terminal email, done right.
-Find the source, docs, and issue tracker at github.com/csjpeter/email-cli.
-Star the repo if you find it useful, and feel free to open issues or
-contribute.
+[MARK-READ — before ~6s, action ~3s, after ~7s]
+The message is currently unread and appears in the list.
+mark-read sets the Seen flag on the server.
+After marking, the message is gone from the unread list.
+
+[MARK-UNREAD — action ~3s, after ~7s]
+mark-unread clears the Seen flag.
+The message reappears in the unread list.
+
+[MARK-STARRED — before ~6s, action ~3s, after ~7s]
+The message currently has no star.
+mark-starred sets the Flagged flag on the server.
+After starring, the message appears among flagged messages.
+
+[REMOVE-STARRED — action ~3s, after ~7s]
+remove-starred clears the flag.
+The message returns to its unflagged state.
+
+[CONFIG SHOW — ~9s]
+config show prints the current account configuration.
+Passwords and tokens are shown masked with asterisks.
+
+[SYNC — ~11s]
+email-sync fetches new messages from the server
+and updates the local message store.
+Run from cron, it keeps the store current
+so every other tool can list instantly without a live server connection.
+
+[OUTRO — ~12s]
+email-cli — C, POSIX, OpenSSL, libcurl.
+Source code, documentation, and issue tracker: github.com/csjpeter/email-cli.

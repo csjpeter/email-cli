@@ -1,60 +1,134 @@
 # VHS demo script for email-cli
 # Requires: vhs (https://github.com/charmbracelet/vhs)
 # Run from the project root: vhs demo/demo.tape
+#
+# Terminal is fixed at 80 columns (stty cols 80 in demo_setup.sh).
+# FontSize + Width chosen so 80-char lines fill the viewport comfortably.
 
 Output demo/demo.mp4
 
 Set Shell "bash"
-Set FontSize 15
-Set Width 1600
-Set Height 900
+Set FontSize 20
+Set Width 1200
+Set Height 700
 Set Theme "Dracula"
 Set Padding 24
 Set TypingSpeed 60ms
 
-# ── Boot: start mock servers, set up demo HOME (hidden) ──────────────────────
+# ── Boot (hidden) ─────────────────────────────────────────────────────────────
 Hide
 Type "source demo/demo_setup.sh"
 Enter
 Sleep 3s
 Show
 
-# ── Help overview (~15s) ─────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════
+# INTRO — help screen visible while narration covers project overview
+# Narration: ~70 words, ~32s speech
+# ════════════════════════════════════════════════════════════════════
 Type "email-cli --help"
 Enter
-Sleep 6s
+Sleep 36s
 
-# ── Show accounts (~10s) ─────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════
+# SHOW-ACCOUNTS — konfigurált fiókok listája
+# Narration: ~15 words, ~7s
+# ════════════════════════════════════════════════════════════════════
 Type "email-cli --batch show-accounts"
-Enter
-Sleep 5s
-
-# ── List unread messages — before state (~20s) ────────────────────────────────
-Type "email-cli --batch list"
-Enter
-Sleep 7s
-
-# ── Show full message (~20s) ──────────────────────────────────────────────────
-Type "email-cli --batch show 1"
 Enter
 Sleep 8s
 
-# ── List all + grep (~15s) ───────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════
+# LIST — olvasatlan üzenetek
+# Narration: ~18 words, ~8s
+# ════════════════════════════════════════════════════════════════════
+Type "email-cli --batch list"
+Enter
+Sleep 9s
+
+# ════════════════════════════════════════════════════════════════════
+# SHOW — teljes üzenet megjelenítése
+# Before (list): narration ~10 words, ~5s
+# After  (show): narration ~20 words, ~9s
+# ════════════════════════════════════════════════════════════════════
+Type "email-cli --batch list"
+Enter
+Sleep 5s
+Type "email-cli --batch show 1"
+Enter
+Sleep 10s
+
+# ════════════════════════════════════════════════════════════════════
+# LIST --all + GREP — szűrés pipe-pal
+# Before (list --all): narration ~10 words, ~5s
+# After  (grep):       narration ~14 words, ~6s
+# ════════════════════════════════════════════════════════════════════
+Type "email-cli --batch list --all"
+Enter
+Sleep 5s
 Type "email-cli --batch list --all | grep -i kickoff"
 Enter
-Sleep 6s
+Sleep 7s
 
-# ── Folder tree (~15s) ───────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════
+# FOLDERS --tree — mappastruktúra
+# Narration: ~18 words, ~8s
+# ════════════════════════════════════════════════════════════════════
 Type "email-cli --batch folders --tree"
 Enter
-Sleep 6s
+Sleep 9s
 
-# ── List specific folder (~12s) ───────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════
+# LIST --folder — másik mappa megnyitása
+# Before (INBOX): narration ~9 words, ~4s
+# After (Sent):   narration ~14 words, ~6s
+# ════════════════════════════════════════════════════════════════════
+Type "email-cli --batch list"
+Enter
+Sleep 5s
+Type "email-cli --batch list --folder INBOX.Sent"
+Enter
+Sleep 7s
+
+# ════════════════════════════════════════════════════════════════════
+# ATTACHMENTS — csatolmányok listázása
+# Before (show): narration ~10 words, ~5s
+# After (list):  narration ~14 words, ~6s
+# ════════════════════════════════════════════════════════════════════
+Type "email-cli --batch show 1"
+Enter
+Sleep 5s
+Type "email-cli --batch attachments 1"
+Enter
+Sleep 7s
+
+# ════════════════════════════════════════════════════════════════════
+# SAVE-ATTACHMENT — csatolmány mentése
+# Before: fájl nem létezik
+# Action: mentés
+# After:  fájl létezik
+# Narration: ~30 words, ~14s
+# ════════════════════════════════════════════════════════════════════
+Type "ls /tmp/notes.txt 2>/dev/null || echo '(not downloaded yet)'"
+Enter
+Sleep 4s
+Type "email-cli --batch save-attachment 1 notes.txt /tmp"
+Enter
+Sleep 4s
+Type "ls -lh /tmp/notes.txt"
+Enter
+Sleep 7s
+
+# ════════════════════════════════════════════════════════════════════
+# SEND — üzenet küldése
+# Before: Sent mappa tartalma
+# Action: küldés
+# After:  megerősítés + Sent mappa frissülve
+# Narration: ~40 words, ~18s
+# ════════════════════════════════════════════════════════════════════
 Type "email-cli --batch list --folder INBOX.Sent"
 Enter
 Sleep 5s
-
-# ── Send a message — restart SMTP mock first (hidden) ────────────────────────
 Hide
 Type "bash demo/restart_smtp.sh"
 Enter
@@ -63,67 +137,94 @@ Show
 Type `email-cli --batch send --to bob@acme.example --subject "Re: Kickoff" --body "See you Tuesday!"`
 Enter
 Sleep 6s
-
-# ── Attachments (~15s) ───────────────────────────────────────────────────────
-Type "email-cli --batch attachments 1"
+Type "email-cli --batch list --folder INBOX.Sent"
 Enter
-Sleep 5s
+Sleep 8s
 
-# ── Save attachment (~12s) ───────────────────────────────────────────────────
-Type "email-cli --batch save-attachment 1 notes.txt /tmp"
-Enter
-Sleep 5s
-
-# ── mark-read: BEFORE → action → AFTER (~25s) ────────────────────────────────
-Type "# Before: message is unread"
-Enter
-Sleep 1s
+# ════════════════════════════════════════════════════════════════════
+# MARK-READ — olvasottnak jelölés
+# Before: 1 olvasatlan
+# Action: mark-read
+# After:  0 olvasatlan
+# Narration: ~33 words, ~15s
+# ════════════════════════════════════════════════════════════════════
 Type "email-cli --batch list"
 Enter
 Sleep 6s
 Type "email-cli --batch mark-read 1"
 Enter
 Sleep 3s
-Type "# After: no unread messages"
-Enter
-Sleep 1s
 Type "email-cli --batch list"
 Enter
-Sleep 6s
+Sleep 7s
 
-# ── mark-unread: restore for next demo (~15s) ────────────────────────────────
+# ════════════════════════════════════════════════════════════════════
+# MARK-UNREAD — olvasatlannak visszaállítás
+# Before: 0 olvasatlan (az előző After)
+# Action: mark-unread
+# After:  1 olvasatlan
+# Narration: ~20 words, ~9s
+# ════════════════════════════════════════════════════════════════════
 Type "email-cli --batch mark-unread 1"
 Enter
 Sleep 3s
-
-# ── mark-starred: BEFORE → action → AFTER (~25s) ─────────────────────────────
-Type "# Before: not starred"
+Type "email-cli --batch list"
 Enter
-Sleep 1s
+Sleep 7s
+
+# ════════════════════════════════════════════════════════════════════
+# MARK-STARRED — jelölés csillaggal
+# Before: nincs csillagos üzenet
+# Action: mark-starred
+# After:  csillagos üzenet látható
+# Narration: ~33 words, ~15s
+# ════════════════════════════════════════════════════════════════════
 Type "email-cli --batch list --all"
 Enter
 Sleep 6s
 Type "email-cli --batch mark-starred 1"
 Enter
 Sleep 3s
-Type "# After: message is starred"
-Enter
-Sleep 1s
 Type "email-cli --batch list --all"
-Enter
-Sleep 6s
-
-# ── Config show — passwords masked (~15s) ────────────────────────────────────
-Type "email-cli --batch config show"
 Enter
 Sleep 7s
 
-# ── Sync (~15s) ──────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════
+# REMOVE-STARRED — csillag eltávolítása
+# Before: csillagos (az előző After)
+# Action: remove-starred
+# After:  nincs csillag
+# Narration: ~20 words, ~9s
+# ════════════════════════════════════════════════════════════════════
+Type "email-cli --batch remove-starred 1"
+Enter
+Sleep 3s
+Type "email-cli --batch list --all"
+Enter
+Sleep 7s
+
+# ════════════════════════════════════════════════════════════════════
+# CONFIG SHOW — konfiguráció jelszó nélkül
+# Narration: ~18 words, ~8s
+# ════════════════════════════════════════════════════════════════════
+Type "email-cli --batch config show"
+Enter
+Sleep 9s
+
+# ════════════════════════════════════════════════════════════════════
+# SYNC — helyi tár frissítése
+# Action: email-sync
+# After:  fetched/stored összefoglaló IS a következmény
+# Narration: ~22 words, ~10s
+# ════════════════════════════════════════════════════════════════════
 Type "email-sync"
 Enter
-Sleep 8s
+Sleep 11s
 
-# ── Outro (~10s) ─────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════
+# OUTRO
+# Narration: ~22 words, ~10s
+# ════════════════════════════════════════════════════════════════════
 Type "# github.com/csjpeter/email-cli"
 Enter
-Sleep 8s
+Sleep 12s

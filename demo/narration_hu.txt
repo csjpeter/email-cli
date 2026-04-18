@@ -1,85 +1,89 @@
 email-cli — YouTube demó narráció (magyar)
 ==========================================
-Cél hossz: ~3 perc
+Minden szekció a tape azonos nevű szakaszához van szinkronizálva.
+Becsült tempó: ~2,2 szó/másodperc (edge-tts, hu-HU-NoemiNeural)
 
-[0:00 – 0:10]  INTRO
-A terminálból való levelezés most sokkal egyszerűbb lett.
-Az email-cli egy könnyűsúlyú, nyílt forráskódú, C-ben írt email kliens csomag —
-három különböző használati élménnyel és egy háttérszolgáltatással.
+[INTRO — help képernyő látható, ~36s]
+email-cli egy C-ben írt terminál email kliens.
+Külső futásidejű függősége kettő: OpenSSL és libcurl.
+Mindkettő évtizedes, operációs rendszer szintű könyvtár,
+amelyet a Linux disztribúciók maguk ellenőriznek és szállítanak.
+Nincs csomagkezelő, nincs futásidejű keretrendszer, nincs supply-chain kockázat.
+A csomag négy önálló binárisból áll, eltérő jogosultságszinttel:
+interaktív TUI, írható-olvasható parancssori eszköz,
+kizárólag olvasható változat AI ügynökök számára,
+és egy háttér szinkronizáló démon.
+Mind a négy közös konfigurációt és közös helyi levéltárat használ.
 
-[0:10 – 0:30]  NÉGY BINÁRIS
-Első: az email-tui — teljes szöveg alapú felhasználói felület a terminálban,
-navigáláshoz, olvasáshoz, íráshoz és küldéshez.
-Második: az email-cli — parancssoros batch eszköz, amellyel shell szkriptekből
-automatizálhatja a levelezést: listázás, küldés, jelölés, mappakezelés.
-Harmadik: az email-cli-ro — kizárólag olvasható változat, amelyet kifejezetten
-AI ügynökök számára terveztek. Soha nem küld, nem töröl, nem módosít semmit
-a szerveren — biztonságosan feldolgoztathatja vele a leveleit anélkül,
-hogy írási jogot kellene adnia.
-Negyedik: az email-sync — cronból futtatva rendszeresen frissíti a helyi
-levéltárat, így a többi eszköz mindig naprakész adatból dolgozik.
+[SHOW-ACCOUNTS — ~8s]
+A show-accounts parancs listázza a konfigurált fiókokat.
+Minden fiók saját könyvtárban tárolt konfigurációval rendelkezik.
 
-[0:25 – 0:45]  CLI DEMÓ: listázás és olvasás
-Kezdjük az alapokkal.
-Az email-cli list azonnal megjeleníti az olvasatlan üzeneteket a helyi
-gyorsítótárból.
-Az --all kapcsolóval minden üzenetet lát, a grep-pel pedig pontosan
-megtalálja, amit keres.
-Az email-cli show parancs egy üzenet UID-jével kinyomtatja az üzenet
-teljes tartalmát a standard kimenetre — készen áll bármilyen szkript vagy
-AI eszköz számára.
+[LIST — ~9s]
+A list parancs az olvasatlan üzeneteket jeleníti meg a helyi gyorsítótárból.
+A szerver kapcsolat csak szinkronizáláskor szükséges.
 
-[0:45 – 1:05]  CLI DEMÓ: küldés és mappák
-A küldés ugyanilyen egyszerű.
-Egyetlen sor, semmi interakció.
-Az email-cli folders --tree kirajzolja a teljes mappastruktúrát.
-Ugyanez a parancs Gmail címkékkel is működik — semmi kivétel.
+[SHOW — before ~5s, after ~10s]
+Az aktuális listában látható az üzenet UID-je és tárgya.
+A show parancs UID alapján nyomtatja ki az üzenet teljes tartalmát —
+fejléceket, törzset, HTML nélkül — standard kimenetre,
+bármilyen szkript vagy AI eszköz számára közvetlenül feldolgozható formában.
 
-[1:05 – 1:25]  GMAIL CÍMKÉK
-A Gmail kapcsán — az email-cli az OAuth2-vel védett natív Gmail REST API-t
-használja, nem IMAP-ot.
-Teljes körű címkekezelés: listázás, hozzáadás, eltávolítás, archiválás,
-kukázás és visszaállítás — mind a parancssorból.
+[LIST --all + GREP — before ~5s, after ~7s]
+A list parancs alapból csak az olvasatlanokat mutatja.
+Az --all kapcsolóval minden üzenet látható,
+a kimenet pedig közvetlenül pipe-olható grep-be vagy bármilyen más eszközbe.
 
-[1:25 – 1:50]  TUI DEMÓ
-Nézzük meg az interaktív TUI-t.
-A fiókok képernyője egy pillantásra mutatja az összes beállított fiókot —
-olvasatlan és jelölt üzenetek száma, IMAP vagy Gmail.
-Navigáljon nyílbillentyűkkel, nyomjon Enter-t egy fiók megnyitásához,
-és másodperceken belül bent van a beérkező üzenetekben.
-Egy üzenet olvasásához ismét csak Enter kell.
+[FOLDERS — ~9s]
+A folders --tree parancs kirajzolja a teljes mappastruktúrát.
+IMAP fióknál valódi mappákat, Gmail fióknál a labeleket listázza.
 
-[1:50 – 2:10]  READ-ONLY + AI ÜGYNÖKÖK
-Az email-cli-ro külön figyelmet érdemel.
-Csak olvasó parancsokat küld a szervernek — sosem küld, sosem mozgat,
-sosem jelöl olvasottként semmit.
-Ez biztonságossá teszi AI ügynökök és automatizálási szkriptek számára,
-amelyeknek látniuk kell a leveleket, de nem szabad megváltoztatniuk őket.
+[LIST --folder — before ~5s, after ~7s]
+A list alapból az INBOX mappát mutatja.
+A --folder kapcsolóval bármelyik másik mappa közvetlenül lekérdezhető.
 
-[2:10 – 2:35]  MINIMÁLIS FÜGGŐSÉGEK
-Az email-cli külső függősége összesen kettő: OpenSSL és libcurl.
-Mindkettő évtizedes, széles körben auditált rendszerkönyvtár,
-amelyet a Linux disztribúciók maguk ellenőriznek és tartanak karban.
-Nincs npm, nincs pip, nincs cargo — nincs supply chain kockázat.
-Az xz-utils backdoor és a számtalan csomagkezelő alapú támadás után
-ez nem elhanyagolható szempont: ismeretlen szerző által karbantartott
-csomagoknak nem adunk hozzáférést a levelezésünkhöz.
+[ATTACHMENTS — before ~5s, after ~7s]
+Az üzenet tartalmában csatolmányok is lehetnek.
+Az attachments parancs listázza a csatolmányok nevét és méretét.
 
-[2:35 – 2:55]  BIZTONSÁG ÉS MEMÓRIABIZTONSÁG
-A konfiguráció 0600-as jogosultságokkal íródik, csak a tulajdonos olvashatja.
-A Gmail fiókok OAuth2-t használnak — jelszó nem kerül tárolásra.
-A teljes kódbázist AddressSanitizer és Valgrind futtatja minden CI menetben,
-hogy a memóriaszivárgások és puffertúlcsordulások szállítás előtt kiderüljenek.
+[SAVE-ATTACHMENT — before ~4s, action ~4s, after ~7s]
+A fájl egyelőre nem létezik a lemezen.
+A save-attachment parancs UID, fájlnév és célkönyvtár alapján menti ki a csatolmányt.
+A mentés után a fájl megjelenik a megadott helyen.
 
-[2:30 – 2:50]  TELEPÍTÉS
-A kezdés két parancsból áll.
-Futtassa a manage.sh deps parancsot a rendszerfüggőségek telepítéséhez,
-majd a manage.sh build parancsot mind a négy bináris lefordításához.
-Az első indításkor a beállító varázsló automatikusan elindul.
+[SEND — before ~5s, action ~6s, after ~8s]
+A küldés előtt a Sent mappa aktuális állapotát látjuk.
+A send parancs SMTP-n keresztül küldi el az üzenetet,
+és automatikusan elmenti a Sent mappába is.
+Az elküldés után az üzenet megjelenik a Sent mappában.
 
-[2:50 – 3:00]  OUTRO
-email-cli — terminál levelezés, ahogy kell.
-A forráskódot, dokumentációt és hibakövetőt a github.com/csjpeter/email-cli
-oldalon találja.
-Ha hasznosnak találja, csillagozza meg a repót, és nyugodtan nyisson
-issue-kat vagy járuljon hozzá.
+[MARK-READ — before ~6s, action ~3s, after ~7s]
+Az üzenet jelenleg olvasatlan, megjelenik a listában.
+A mark-read parancs Seen-nek jelöli a szerveren.
+Az olvasottnak jelölés után az üzenet eltűnik az olvasatlan listából.
+
+[MARK-UNREAD — action ~3s, after ~7s]
+A mark-unread visszaveszi a Seen jelölést.
+Az üzenet ismét megjelenik az olvasatlan listában.
+
+[MARK-STARRED — before ~6s, action ~3s, after ~7s]
+Az üzenet jelenleg nem csillagos.
+A mark-starred parancs Flagged-nek jelöli a szerveren.
+A csillagozás után az üzenet megjelenik a jelölt üzenetek között.
+
+[REMOVE-STARRED — action ~3s, after ~7s]
+A remove-starred eltávolítja a csillagot.
+Az üzenet visszakerül a jelöletlen állapotba.
+
+[CONFIG SHOW — ~9s]
+A config show kiírja az aktuális konfigurációt.
+A jelszavak és tokenek csillagokkal maszkolt formában jelennek meg.
+
+[SYNC — ~11s]
+Az email-sync lekéri a szerver új üzeneteit és frissíti a helyi levéltárat.
+Cronból futtatva a helyi tár mindig naprakész,
+így a többi eszköz szerver kapcsolat nélkül is azonnal tud listázni.
+
+[OUTRO — ~12s]
+email-cli — C, POSIX, OpenSSL, libcurl.
+Forráskód, dokumentáció és hibajelentés: github.com/csjpeter/email-cli.

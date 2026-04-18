@@ -331,7 +331,8 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
     Config *cfg = calloc(1, sizeof(Config));
     if (!cfg) return NULL;
 
-    int plaintext_cred_found = 0; /* set if any credential lacks enc: prefix */
+    int plaintext_cred_found  = 0; /* set if any credential lacks enc: prefix */
+    int encrypted_cred_found  = 0; /* set if any credential has  enc: prefix */
     char line[1024]; /* wider than before — enc: values can be long */
     while (fgets(line, sizeof(line), fp)) {
         char *eq = strchr(line, '=');
@@ -348,7 +349,8 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
         else if (strcmp(key, "EMAIL_USER")          == 0) cfg->user               = strdup(val);
         else if (strcmp(key, "EMAIL_PASS")          == 0) {
             cfg->pass = strdup(val);
-            if (val[0] && strncmp(val, "enc:", 4) != 0) plaintext_cred_found = 1;
+            if (val[0]) { if (strncmp(val, "enc:", 4) == 0) encrypted_cred_found = 1;
+                          else                               plaintext_cred_found  = 1; }
         }
         else if (strcmp(key, "EMAIL_FOLDER")        == 0) cfg->folder             = strdup(val);
         else if (strcmp(key, "EMAIL_SENT_FOLDER")   == 0) cfg->sent_folder        = strdup(val);
@@ -359,12 +361,14 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
         else if (strcmp(key, "SMTP_USER")           == 0) cfg->smtp_user          = strdup(val);
         else if (strcmp(key, "SMTP_PASS")           == 0) {
             cfg->smtp_pass = strdup(val);
-            if (val[0] && strncmp(val, "enc:", 4) != 0) plaintext_cred_found = 1;
+            if (val[0]) { if (strncmp(val, "enc:", 4) == 0) encrypted_cred_found = 1;
+                          else                               plaintext_cred_found  = 1; }
         }
         else if (strcmp(key, "GMAIL_MODE")          == 0) cfg->gmail_mode         = atoi(val);
         else if (strcmp(key, "GMAIL_REFRESH_TOKEN") == 0) {
             cfg->gmail_refresh_token = strdup(val);
-            if (val[0] && strncmp(val, "enc:", 4) != 0) plaintext_cred_found = 1;
+            if (val[0]) { if (strncmp(val, "enc:", 4) == 0) encrypted_cred_found = 1;
+                          else                               plaintext_cred_found  = 1; }
         }
         else if (strcmp(key, "GMAIL_CLIENT_ID")     == 0) cfg->gmail_client_id    = strdup(val);
         else if (strcmp(key, "GMAIL_CLIENT_SECRET") == 0) cfg->gmail_client_secret = strdup(val);
@@ -451,7 +455,8 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
                        "(test/dev mode only)", cfg->smtp_host);
     }
     if (out_needs_resave)
-        *out_needs_resave = plaintext_cred_found && g_credential_obfuscation;
+        *out_needs_resave = (plaintext_cred_found &&  g_credential_obfuscation)  /* plaintext → encrypt */
+                         || (encrypted_cred_found && !g_credential_obfuscation); /* enc: → plaintext  */
     return cfg;
 }
 

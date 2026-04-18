@@ -709,6 +709,8 @@ check "21.4 help config: usage line"       "config"  "$HCONF"
 #   US-07  Two accounts with the same password produce different enc: values
 #   US-08  migrate-credentials is idempotent (double-run safe)
 #   US-09  Absent settings.ini defaults to obfuscation ON
+#   US-10  Auto-encrypt on load (no migrate needed): plain→enc on first access
+#   US-11  Auto-decrypt on load (no migrate needed): enc→plain on first access
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 22: credential obfuscation ---"
@@ -844,6 +846,38 @@ else
     echo "  [PASS] 22-US07: different accounts → different enc: values (even with same password)"
     PASSED=$((PASSED + 1))
 fi
+
+# ── US-10: Auto-encrypt on load (no migrate needed) ──────────────────────
+# Start from a plaintext config with obfuscation ON (default)
+make_cred_home
+check_not "22-US10: before any access — no enc: prefix" \
+    "enc:" "$(cat "$CRED_CFG")"
+# A plain list command triggers load → auto-encrypt
+run_list "$H_CRED" "" INBOX > /dev/null
+check "22-US10: after first access — enc: prefix auto-applied" \
+    "enc:" "$(cat "$CRED_CFG")"
+# Authentication still works after auto-encrypt
+OUT_10=$(run_list "$H_CRED" "" INBOX)
+check "22-US10: after auto-encrypt — list still works" \
+    "AlphaAccountMsg" "$OUT_10"
+
+# ── US-11: Auto-decrypt on load (no migrate needed) ──────────────────────
+# Start from an encrypted config, then disable obfuscation
+make_cred_home
+run_cred migrate-credentials > /dev/null  # encrypt first
+check "22-US11 setup: config is encrypted" \
+    "enc:" "$(cat "$CRED_CFG")"
+echo "credential_obfuscation=false" > "$CRED_SETTINGS"
+# A plain list command triggers load → auto-decrypt
+run_list "$H_CRED" "" INBOX > /dev/null
+check_not "22-US11: after first access — enc: prefix auto-removed" \
+    "enc:" "$(cat "$CRED_CFG")"
+check "22-US11: plaintext password restored in config" \
+    "EMAIL_PASS=testpass" "$(cat "$CRED_CFG")"
+# Authentication still works after auto-decrypt
+OUT_11=$(run_list "$H_CRED" "" INBOX)
+check "22-US11: after auto-decrypt — list still works" \
+    "AlphaAccountMsg" "$OUT_11"
 
 # Cleanup isolated homes
 rm -rf "$H_CRED" "$H_DUAL"

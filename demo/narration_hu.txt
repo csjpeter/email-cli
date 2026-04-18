@@ -56,10 +56,18 @@ sosem jelöl olvasottként semmit.
 Ez biztonságossá teszi AI ügynökök és automatizálási szkriptek számára,
 amelyeknek látniuk kell a leveleket, de nem szabad megváltoztatniuk őket.
 
-[2:10 – 2:30]  BIZTONSÁG ÉS MEMÓRIABIZTONSÁG
-A biztonság számít.
-A konfigurációs fájlok 0600-as jogosultságokkal íródnak.
-A Gmail fiókok OAuth2-t használnak — nem tárolódik jelszó.
+[2:10 – 2:35]  MINIMÁLIS FÜGGŐSÉGEK
+Az email-cli külső függősége összesen kettő: OpenSSL és libcurl.
+Mindkettő évtizedes, széles körben auditált rendszerkönyvtár,
+amelyet a Linux disztribúciók maguk ellenőriznek és tartanak karban.
+Nincs npm, nincs pip, nincs cargo — nincs supply chain kockázat.
+Az xz-utils backdoor és a számtalan csomagkezelő alapú támadás után
+ez nem elhanyagolható szempont: ismeretlen szerző által karbantartott
+csomagoknak nem adunk hozzáférést a levelezésünkhöz.
+
+[2:35 – 2:55]  BIZTONSÁG ÉS MEMÓRIABIZTONSÁG
+A konfiguráció 0600-as jogosultságokkal íródik, csak a tulajdonos olvashatja.
+A Gmail fiókok OAuth2-t használnak — jelszó nem kerül tárolásra.
 A teljes kódbázist AddressSanitizer és Valgrind futtatja minden CI menetben,
 hogy a memóriaszivárgások és puffertúlcsordulások szállítás előtt kiderüljenek.
 

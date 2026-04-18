@@ -92,14 +92,17 @@ int gmail_sync_full(GmailClient *gc) {
 
     /* 2. For each message: fetch, store .eml, build .hdr, collect labels */
     int fetched = 0, skipped = 0;
+#define PROGRESS_INTERVAL 1000   /* print a visible line every N cached msgs */
     for (int i = 0; i < uid_count; i++) {
         const char *uid = all_uids[i];
 
         /* Skip if already cached */
         if (local_msg_exists("", uid)) {
-            fprintf(stderr, "\r\033[K  [%d/%d] (cached)", i + 1, uid_count);
-            fflush(stderr);
             skipped++;
+            /* Print a progress line every PROGRESS_INTERVAL cached messages so
+             * the user can see activity during long all-cached syncs. */
+            if (skipped % PROGRESS_INTERVAL == 0)
+                fprintf(stderr, "  [%d/%d] (cached)\n", i + 1, uid_count);
             continue;
         }
 
@@ -144,9 +147,8 @@ int gmail_sync_full(GmailClient *gc) {
         for (int j = 0; j < label_count; j++) free(labels[j]);
         free(labels);
 
-        fprintf(stderr, "\r\033[K  [%d/%d] fetched", i + 1, uid_count);
-        fflush(stderr);
         fetched++;
+        fprintf(stderr, "  [%d/%d] fetched\n", i + 1, uid_count);
     }
     if (uid_count > 0)
         fprintf(stderr, "\r\033[K  %d fetched, %d already cached\n",

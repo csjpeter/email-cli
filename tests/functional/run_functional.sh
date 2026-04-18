@@ -697,6 +697,158 @@ HCONF=$( (export HOME="$H_ALPHA"; "$BIN_DIR/email-cli" help config 2>&1 || true)
 check "21.4 help config: usage line"       "config"  "$HCONF"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 22 — Credential obfuscation
+#
+# User Stories:
+#   US-01  Default: fresh account config is saved with "enc:" prefix
+#   US-02  Encrypted config loads and authenticates successfully
+#   US-03  Plaintext config (legacy / obfuscation disabled) loads correctly
+#   US-04  migrate-credentials converts plaintext → encrypted
+#   US-05  Disable obfuscation + migrate converts encrypted → plaintext
+#   US-06  Re-enable obfuscation + migrate converts plaintext → encrypted again
+#   US-07  Two accounts with the same password produce different enc: values
+#   US-08  migrate-credentials is idempotent (double-run safe)
+#   US-09  Absent settings.ini defaults to obfuscation ON
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 22: credential obfuscation ---"
+
+# Isolated home for obfuscation tests (no mock server needed for format checks)
+H_CRED="$PROJECT_ROOT/build/tests/functional/cred_home"
+CRED_EMAIL="cred@test.local"
+CRED_CFG="$H_CRED/.config/email-cli/accounts/$CRED_EMAIL/config.ini"
+CRED_SETTINGS="$H_CRED/.config/email-cli/settings.ini"
+
+# Helper: write a plaintext account config
+make_cred_home() {
+    rm -rf "$H_CRED"
+    mkdir -p "$H_CRED/.config/email-cli/accounts/$CRED_EMAIL"
+    cat > "$CRED_CFG" <<CFG
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=$CRED_EMAIL
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG
+}
+
+# Helper: run email-cli with isolated HOME (no server contact needed for migration)
+run_cred() {
+    (export HOME="$H_CRED"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/email-cli" "$@" 2>&1 || true)
+}
+
+# ── US-09: No settings.ini → obfuscation defaults to ON ──────────────────
+make_cred_home
+# run migrate-credentials without a settings.ini
+OUT_09=$(run_cred migrate-credentials)
+check "22-US09: migrate without settings.ini reports encrypting" \
+    "encrypt" "$OUT_09"
+check "22-US09: config file has enc: prefix after default migrate" \
+    "enc:" "$(cat "$CRED_CFG")"
+
+# ── US-01: Default save produces enc: prefix ─────────────────────────────
+# After migrate with default settings, the password field must have enc:
+check "22-US01: EMAIL_PASS stored with enc: prefix" \
+    "^EMAIL_PASS=enc:" "$(grep EMAIL_PASS "$CRED_CFG")"
+
+# ── US-08: migrate-credentials is idempotent ─────────────────────────────
+PASS_AFTER_FIRST=$(grep EMAIL_PASS "$CRED_CFG")
+run_cred migrate-credentials > /dev/null
+PASS_AFTER_SECOND=$(grep EMAIL_PASS "$CRED_CFG")
+# The enc: prefix must still be present; the value may differ (new IV each time)
+check "22-US08: idempotent — enc: still present after second migrate" \
+    "^EMAIL_PASS=enc:" "$(grep EMAIL_PASS "$CRED_CFG")"
+
+# ── US-02: Encrypted config loads and authenticates ──────────────────────
+# Use the encrypted config to list emails via the mock IMAP server
+OUT_02=$(run_list "$H_CRED" "" INBOX)
+check "22-US02: encrypted config: list succeeds (AlphaAccountMsg)" \
+    "AlphaAccountMsg" "$OUT_02"
+
+# ── US-03: Plaintext config loads transparently ──────────────────────────
+make_cred_home   # reset to plaintext
+OUT_03=$(run_list "$H_CRED" "" INBOX)
+check "22-US03: plaintext config: list succeeds (AlphaAccountMsg)" \
+    "AlphaAccountMsg" "$OUT_03"
+
+# ── US-04: migrate-credentials converts plaintext → encrypted ────────────
+make_cred_home
+# Confirm it is plaintext before migration
+check_not "22-US04: before migrate — no enc: prefix" \
+    "enc:" "$(cat "$CRED_CFG")"
+run_cred migrate-credentials > /dev/null
+check "22-US04: after migrate — enc: prefix present" \
+    "enc:" "$(cat "$CRED_CFG")"
+# And it must still authenticate
+OUT_04=$(run_list "$H_CRED" "" INBOX)
+check "22-US04: after migrate — list still works" \
+    "AlphaAccountMsg" "$OUT_04"
+
+# ── US-05: Disable obfuscation + migrate converts encrypted → plaintext ──
+# Start from an encrypted config
+make_cred_home
+run_cred migrate-credentials > /dev/null
+check "22-US05 setup: config is encrypted" \
+    "enc:" "$(cat "$CRED_CFG")"
+# Disable obfuscation
+echo "credential_obfuscation=0" > "$CRED_SETTINGS"
+OUT_05=$(run_cred migrate-credentials)
+check "22-US05: migrate after disable reports removing encryption" \
+    "plaintext" "$OUT_05"
+check_not "22-US05: config no longer has enc: prefix" \
+    "enc:" "$(cat "$CRED_CFG")"
+check "22-US05: plaintext config still has the password value" \
+    "EMAIL_PASS=testpass" "$(cat "$CRED_CFG")"
+# Verify authentication still works
+OUT_05b=$(run_list "$H_CRED" "" INBOX)
+check "22-US05: after decrypt migrate — list still works" \
+    "AlphaAccountMsg" "$OUT_05b"
+
+# ── US-06: Re-enable obfuscation + migrate converts plaintext → encrypted ─
+echo "credential_obfuscation=1" > "$CRED_SETTINGS"
+run_cred migrate-credentials > /dev/null
+check "22-US06: after re-enable — enc: prefix present again" \
+    "enc:" "$(cat "$CRED_CFG")"
+OUT_06=$(run_list "$H_CRED" "" INBOX)
+check "22-US06: after re-encrypt — list still works" \
+    "AlphaAccountMsg" "$OUT_06"
+
+# ── US-07: Two accounts with the same password have different enc: values ─
+H_DUAL="$PROJECT_ROOT/build/tests/functional/dual_home"
+DUAL_A="dual-a@test.local"
+DUAL_B="dual-b@test.local"
+rm -rf "$H_DUAL"
+for ACCT in "$DUAL_A" "$DUAL_B"; do
+    mkdir -p "$H_DUAL/.config/email-cli/accounts/$ACCT"
+    cat > "$H_DUAL/.config/email-cli/accounts/$ACCT/config.ini" <<CFG
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=$ACCT
+EMAIL_PASS=samepassword
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG
+done
+(export HOME="$H_DUAL"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+ "$BIN_DIR/email-cli" migrate-credentials 2>&1 || true) > /dev/null
+ENC_A=$(grep EMAIL_PASS "$H_DUAL/.config/email-cli/accounts/$DUAL_A/config.ini")
+ENC_B=$(grep EMAIL_PASS "$H_DUAL/.config/email-cli/accounts/$DUAL_B/config.ini")
+check "22-US07: both accounts have enc: prefix" \
+    "enc:" "$ENC_A"
+check "22-US07: both accounts have enc: prefix (B)" \
+    "enc:" "$ENC_B"
+if [ "$ENC_A" = "$ENC_B" ]; then
+    echo "  [FAIL] 22-US07: two accounts with same password produced identical enc: values"
+    FAILED=$((FAILED + 1))
+else
+    echo "  [PASS] 22-US07: different accounts → different enc: values (even with same password)"
+    PASSED=$((PASSED + 1))
+fi
+
+# Cleanup isolated homes
+rm -rf "$H_CRED" "$H_DUAL"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

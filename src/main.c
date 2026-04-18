@@ -46,6 +46,7 @@ static void help_general(void) {
         "  add-account             Add a new account (runs setup wizard)\n"
         "  remove-account <email>  Remove an account (local data preserved)\n"
         "  config                  View or update configuration (incl. SMTP)\n"
+        "  migrate-credentials     Re-encrypt (or decrypt) all stored passwords\n"
         "  help [command]          Show this help, or detailed help for a command\n"
         "  help gmail              Step-by-step Gmail OAuth2 setup guide\n"
         "\n"
@@ -955,6 +956,19 @@ int main(int argc, char *argv[]) {
                 }
                 result = 0;
             }
+        }
+
+    } else if (strcmp(cmd, "migrate-credentials") == 0) {
+        int obfus = app_settings_get_obfuscation();
+        printf("Migrating credentials (%s)...\n",
+               obfus ? "encrypting stored passwords" : "removing encryption");
+        int rc = config_migrate_credentials();
+        if (rc == 0) {
+            printf("Done. All account credentials are now %s.\n",
+                   obfus ? "obfuscated (enc: prefix)" : "stored as plaintext");
+            result = 0;
+        } else {
+            fprintf(stderr, "Error: one or more accounts could not be migrated.\n");
         }
 
     } else {

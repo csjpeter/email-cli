@@ -4,6 +4,7 @@ if(WIN32)
         src/platform/windows/path.c
         src/platform/windows/html_medium.c
         src/platform/windows/process.c
+        src/platform/windows/credential_key.c
     )
 else()
     set(LIBEMAIL_PLATFORM_SOURCES
@@ -11,6 +12,7 @@ else()
         src/platform/posix/path.c
         src/platform/posix/html_medium.c
         src/platform/posix/process.c
+        src/platform/posix/credential_key.c
     )
 endif()
 

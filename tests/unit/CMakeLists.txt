@@ -15,12 +15,14 @@ if(WIN32)
         ../../libemail/src/platform/windows/terminal.c
         ../../libemail/src/platform/windows/path.c
         ../../libemail/src/platform/windows/process.c
+        ../../libemail/src/platform/windows/credential_key.c
     )
 else()
     set(TEST_PLATFORM_SOURCES
         ../../libemail/src/platform/posix/terminal.c
         ../../libemail/src/platform/posix/path.c
         ../../libemail/src/platform/posix/process.c
+        ../../libemail/src/platform/posix/credential_key.c
     )
 endif()
 

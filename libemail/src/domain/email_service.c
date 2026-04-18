@@ -1531,8 +1531,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int flags = fields[4] ? atoi(fields[4]) : 0;
                 entries[i].flags = flags;
                 entries[i].epoch = parse_manifest_date(date);
-                /* Populate manifest so the renderer can find from/subject/date */
-                manifest_upsert(manifest, idx_uids[i], (char *)from, (char *)subj, (char *)date, flags);
+                /* Populate manifest so the renderer can find from/subject/date.
+                 * manifest_upsert takes ownership of the strings, so strdup
+                 * them — the originals point into the hdr buffer freed below. */
+                manifest_upsert(manifest, idx_uids[i], strdup(from), strdup(subj), strdup(date), flags);
                 free(hdr);
             }
             if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;

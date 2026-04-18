@@ -61,7 +61,7 @@ static void write_settings(const char *path) {
     if (fs_mkdir_p(dir, 0700) != 0) return;
     FILE *fp = fopen(path, "w");
     if (!fp) return;
-    fprintf(fp, "credential_obfuscation=%d\n", g_credential_obfuscation);
+    fprintf(fp, "credential_obfuscation=%s\n", g_credential_obfuscation ? "true" : "false");
     fclose(fp);
     fs_ensure_permissions(path, 0600);
 }
@@ -87,7 +87,7 @@ static void load_settings_once(void) {
         if (!key || !val) continue;
         key = trim(key); val = trim(val);
         if (strcmp(key, "credential_obfuscation") == 0)
-            g_credential_obfuscation = atoi(val);
+            g_credential_obfuscation = (strcmp(val, "true") == 0 || strcmp(val, "1") == 0) ? 1 : 0;
     }
     fclose(fp);
 }

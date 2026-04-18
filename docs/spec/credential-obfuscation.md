@@ -41,7 +41,7 @@ To store credentials as plain text, edit (or create)
 `~/.config/email-cli/settings.ini` and add:
 
 ```ini
-credential_obfuscation=0
+credential_obfuscation=false
 ```
 
 Then run:
@@ -56,7 +56,7 @@ happens transparently on load).
 
 ## Re-enabling Obfuscation
 
-Set `credential_obfuscation=1` (or remove the line; 1 is the default) and run:
+Set `credential_obfuscation=true` (or remove the line; 1 is the default) and run:
 
 ```
 email-cli migrate-credentials
@@ -66,8 +66,8 @@ email-cli migrate-credentials
 
 | Goal | settings.ini | Command |
 |------|-------------|---------|
-| Encrypt existing plaintext configs | `credential_obfuscation=1` (default) | `email-cli migrate-credentials` |
-| Decrypt to plaintext | `credential_obfuscation=0` | `email-cli migrate-credentials` |
+| Encrypt existing plaintext configs | `credential_obfuscation=true` (default) | `email-cli migrate-credentials` |
+| Decrypt to plaintext | `credential_obfuscation=false` | `email-cli migrate-credentials` |
 | Check current setting | — | `cat ~/.config/email-cli/settings.ini` |
 
 ## migrate-credentials

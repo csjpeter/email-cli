@@ -792,7 +792,7 @@ run_cred migrate-credentials > /dev/null
 check "22-US05 setup: config is encrypted" \
     "enc:" "$(cat "$CRED_CFG")"
 # Disable obfuscation
-echo "credential_obfuscation=0" > "$CRED_SETTINGS"
+echo "credential_obfuscation=false" > "$CRED_SETTINGS"
 OUT_05=$(run_cred migrate-credentials)
 check "22-US05: migrate after disable reports removing encryption" \
     "plaintext" "$OUT_05"
@@ -806,7 +806,7 @@ check "22-US05: after decrypt migrate — list still works" \
     "AlphaAccountMsg" "$OUT_05b"
 
 # ── US-06: Re-enable obfuscation + migrate converts plaintext → encrypted ─
-echo "credential_obfuscation=1" > "$CRED_SETTINGS"
+echo "credential_obfuscation=true" > "$CRED_SETTINGS"
 run_cred migrate-credentials > /dev/null
 check "22-US06: after re-enable — enc: prefix present again" \
     "enc:" "$(cat "$CRED_CFG")"

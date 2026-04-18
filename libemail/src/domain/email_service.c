@@ -1513,32 +1513,31 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
         for (int i = 0; i < idx_count; i++) {
             memcpy(entries[i].uid, idx_uids[i], 17);
-            /* Read flags from .hdr file (tab-separated: from\tsubj\tdate\tlabels\tflags) */
             entries[i].flags = 0;
             entries[i].epoch = 0;
+            /* .hdr format: from\tsubject\tdate\tlabels\tflags */
             char *hdr = local_hdr_load("", idx_uids[i]);
             if (hdr) {
-                /* Parse flags field (5th tab-separated field) */
-                char *p = hdr;
-                int tab = 0;
-                while (*p && tab < 4) { if (*p == '\t') tab++; p++; }
-                if (tab == 4) entries[i].flags = atoi(p);
-                /* Parse date field (3rd tab-separated field) for sorting */
-                p = hdr; tab = 0;
-                while (*p && tab < 2) { if (*p == '\t') tab++; p++; }
-                if (tab == 2) {
-                    char *dt_end = strchr(p, '\t');
-                    if (dt_end) *dt_end = '\0';
-                    entries[i].epoch = parse_manifest_date(p);
-                    if (dt_end) *dt_end = '\t';
+                /* Split tab-separated fields */
+                char *fields[5] = {0};
+                fields[0] = hdr;
+                int f = 1;
+                for (char *p = hdr; *p && f < 5; p++) {
+                    if (*p == '\t') { *p = '\0'; fields[f++] = p + 1; }
                 }
+                const char *from = fields[0] ? fields[0] : "";
+                const char *subj = fields[1] ? fields[1] : "";
+                const char *date = fields[2] ? fields[2] : "";
+                int flags = fields[4] ? atoi(fields[4]) : 0;
+                entries[i].flags = flags;
+                entries[i].epoch = parse_manifest_date(date);
+                /* Populate manifest so the renderer can find from/subject/date */
+                manifest_upsert(manifest, idx_uids[i], (char *)from, (char *)subj, (char *)date, flags);
                 free(hdr);
             }
             if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
         }
         free(idx_uids);
-        manifest_free(manifest);
-        manifest = NULL;
     } else {
         /* ── IMAP online mode: contact the server ──────────────────────── */
 

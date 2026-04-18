@@ -4,6 +4,7 @@
 #include "path_complete.h"
 #include "imap_client.h"
 #include "mail_client.h"
+#include "gmail_sync.h"
 #include "local_store.h"
 #include "mime_util.h"
 #include "html_render.h"
@@ -1473,6 +1474,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 } else {
                     printf("  %-16s  %-4s  %-*s  %s\n",
                            "Date", "Sts", subj_w, "Subject", "From");
+                    printf("  ");
                 }
                 print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
@@ -1592,6 +1594,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 } else {
                     printf("  %-16s  %-4s  %-*s  %s\n",
                            "Date", "Sts", subj_w, "Subject", "From");
+                    printf("  ");
                 }
                 print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
@@ -1680,6 +1683,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             } else {
                 printf("  %-16s  %-4s  %-*s  %s\n",
                        "Date", "Sts", subj_w, "Subject", "From");
+                printf("  ");
             }
             print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
             print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
@@ -1744,7 +1748,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         int tcols    = terminal_cols();
         int is_gmail = cfg->gmail_mode;
         int lbl_w    = is_gmail ? 14 : 0;
-        int overhead = is_gmail ? (lbl_w + 2 + 18 + 8) : 28;
+        /* Fixed chars: "  " indent(2) + lbl_w + "  "(2) + date(16) + "  "(2) + sts(4) + "  "(2) + "  "(2 before from)
+         * Gmail:  2 + 14 + 2 + 16 + 2 + 4 + 2 + 2 = 44
+         * IMAP:   2      + 16 + 2 + 4 + 2 + 2     = 28 */
+        int overhead = is_gmail ? (2 + lbl_w + 2 + 16 + 2 + 4 + 2 + 2) : 28;
         int avail    = tcols - overhead;
         if (avail < 40) avail = 40;
         int subj_w = avail * 3 / 5;
@@ -1781,6 +1788,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         } else {
             printf("  %-16s  %-4s  %-*s  %s\n",
                    "Date", "Sts", subj_w, "Subject", "From");
+            printf("  ");
         }
         print_dbar(16); printf("  ");
         printf("\u2550\u2550\u2550\u2550  ");
@@ -3309,6 +3317,21 @@ int email_service_sync(const Config *cfg) {
         if (pf) fprintf(pf, "%d\n", (int)platform_getpid());
     }
 
+    /* ── Gmail: delegate to gmail_sync (flat store + label indexes) ────── */
+    if (cfg->gmail_mode) {
+        GmailClient *gc = gmail_connect((Config *)cfg);
+        if (!gc) {
+            fprintf(stderr, "sync: could not connect to Gmail API.\n");
+            if (pid_path[0]) unlink(pid_path);
+            return -1;
+        }
+        int rc = gmail_sync(gc);
+        gmail_disconnect(gc);
+        if (pid_path[0]) unlink(pid_path);
+        return rc;
+    }
+
+    /* ── IMAP: sync all folders individually ─────────────────────────── */
     int folder_count = 0;
     char sep = '.';
     /* Always fetch from server during sync to get the latest folder list */

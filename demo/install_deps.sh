@@ -108,6 +108,37 @@ elif [[ "$OS" == "Linux" ]]; then
             ok "vhs installed"
         fi
 
+        # Chromium --no-sandbox wrapper (needed in VM/container environments)
+        # VHS uses go-rod which downloads Chromium on first run.
+        # Trigger the download, then wrap the binary to inject --no-sandbox.
+        _apply_no_sandbox_wrapper() {
+            local chrome
+            chrome="$(find "$HOME/.cache/rod/browser" -name "chrome" \
+                      -not -name "chrome-real" 2>/dev/null | head -1)"
+            if [[ -z "$chrome" ]]; then return; fi
+            if [[ -f "${chrome}-real" ]]; then
+                skip "Chromium --no-sandbox wrapper already applied"
+                return
+            fi
+            mv "$chrome" "${chrome}-real"
+            cat > "$chrome" <<'WRAPPER'
+#!/usr/bin/env bash
+exec "$(dirname "$0")/chrome-real" --no-sandbox "$@"
+WRAPPER
+            chmod +x "$chrome"
+            ok "Chromium --no-sandbox wrapper applied"
+        }
+        if find "$HOME/.cache/rod/browser" -name "chrome" \
+               -not -name "chrome-real" 2>/dev/null | grep -q .; then
+            _apply_no_sandbox_wrapper
+        else
+            info "Triggering VHS Chromium download (first run)..."
+            printf 'Output /dev/null\nSleep 0.1s\n' > /tmp/vhs-preflight.tape
+            vhs /tmp/vhs-preflight.tape >/dev/null 2>&1 || true
+            rm -f /tmp/vhs-preflight.tape
+            _apply_no_sandbox_wrapper
+        fi
+
         # ttyd — required by vhs for terminal rendering
         if command -v ttyd &>/dev/null; then
             skip "ttyd already installed ($(ttyd --version 2>/dev/null || echo 'ok'))"

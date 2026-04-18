@@ -1501,8 +1501,46 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         }
         for (int i = 0; i < show_count; i++)
             if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
+    } else if (cfg->gmail_mode) {
+        /* ── Gmail offline mode: load from local .idx + .hdr cache ─────── */
+        char (*idx_uids)[17] = NULL;
+        int idx_count = 0;
+        label_idx_load(folder, &idx_uids, &idx_count);
+
+        show_count = idx_count;
+        entries = malloc((size_t)(show_count > 0 ? show_count : 1) * sizeof(MsgEntry));
+        if (!entries) { free(idx_uids); manifest_free(manifest); return -1; }
+
+        for (int i = 0; i < idx_count; i++) {
+            memcpy(entries[i].uid, idx_uids[i], 17);
+            /* Read flags from .hdr file (tab-separated: from\tsubj\tdate\tlabels\tflags) */
+            entries[i].flags = 0;
+            entries[i].epoch = 0;
+            char *hdr = local_hdr_load("", idx_uids[i]);
+            if (hdr) {
+                /* Parse flags field (5th tab-separated field) */
+                char *p = hdr;
+                int tab = 0;
+                while (*p && tab < 4) { if (*p == '\t') tab++; p++; }
+                if (tab == 4) entries[i].flags = atoi(p);
+                /* Parse date field (3rd tab-separated field) for sorting */
+                p = hdr; tab = 0;
+                while (*p && tab < 2) { if (*p == '\t') tab++; p++; }
+                if (tab == 2) {
+                    char *dt_end = strchr(p, '\t');
+                    if (dt_end) *dt_end = '\0';
+                    entries[i].epoch = parse_manifest_date(p);
+                    if (dt_end) *dt_end = '\t';
+                }
+                free(hdr);
+            }
+            if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
+        }
+        free(idx_uids);
+        manifest_free(manifest);
+        manifest = NULL;
     } else {
-        /* ── Online mode: contact the server ───────────────────────────── */
+        /* ── IMAP online mode: contact the server ──────────────────────── */
 
         /* Fetch UNSEEN and ALL UID sets via a shared mail client connection. */
         list_mc = make_mail(cfg);

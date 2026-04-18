@@ -92,8 +92,8 @@ Az üzenet visszatér a jelöletlen állapotba.
 
 ## CONFIG_SHOW
 A config show az aktuális konfigurációt mutatja.
-A jelszavak és tokenek titkosítva tárolódnak: az enc: előtag jelzi, hogy az érték gépazonosítóból levezetett kulccsal van titkosítva.
-Így más gépre másolt konfigfájl nem fejthető vissza, és az AI ügynökök vagy rövid fizikai hozzáférés sem tárja fel a hitelesítő adatokat.
+A jelszavak és tokenek titkosítva tárolódnak: az enc: előtag jelzi a védett értékeket.
+A titkosítás a rendszeren található, ritkán változó adatokat használja kulcsként — így más gépre másolt konfigfájl nem fejthető vissza, és az AI ügynökök vagy rövid fizikai hozzáférés sem tárja fel a hitelesítő adatokat.
 
 ## SYNC
 Az email-sync lekéri az új üzeneteket a szerverről és frissíti a helyi levéltárat.

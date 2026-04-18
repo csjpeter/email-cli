@@ -92,8 +92,8 @@ The message returns to the unflagged state.
 
 ## CONFIG_SHOW
 config show displays the current configuration.
-Passwords and tokens are stored encrypted: the enc: prefix indicates a value protected by a key derived from stable system-specific data.
-A config file copied to another machine cannot be decrypted there, and AI agents or brief physical access will not expose your credentials.
+Passwords and tokens are stored encrypted: the enc: prefix marks a protected value.
+The encryption uses rarely-changing data already present on the system — so a config file copied to another machine cannot be decrypted there, and AI agents or brief physical access will not expose your credentials.
 
 ## SYNC
 email-sync fetches new messages from the server and updates the local mail store.

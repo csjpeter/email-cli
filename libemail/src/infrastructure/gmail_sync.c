@@ -119,8 +119,11 @@ int gmail_sync_full(GmailClient *gc) {
     for (int i = 0; i < uid_count; i++) {
         const char *uid = all_uids[i];
 
-        /* Skip if already cached */
-        if (local_msg_exists("", uid)) {
+        /* Skip only when BOTH .eml and .hdr are present.
+         * If .eml exists but .hdr is missing (e.g. sync interrupted or
+         * upgraded from an older version that did not write .hdr files),
+         * re-fetch so the .hdr is created. */
+        if (local_msg_exists("", uid) && local_hdr_exists("", uid)) {
             skipped++;
             if (i % PROGRESS_STEP == 0 || i == uid_count - 1) {
                 fprintf(stderr, "\r\033[K  [%d/%d] (cached)", i + 1, uid_count);

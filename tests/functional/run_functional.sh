@@ -979,6 +979,23 @@ OUT_23_09=$(
 check "23-US09: account + help list → shows list help" \
     "Usage:" "$OUT_23_09"
 
+# ── US-10: show-accounts works without specifying an account ─────────────
+OUT_23_10_ro=$(
+    export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" show-accounts 2>&1 || true)
+check "23-US10: email-cli-ro show-accounts lists alpha" \
+    "$ALPHA" "$OUT_23_10_ro"
+check "23-US10: email-cli-ro show-accounts lists beta" \
+    "$BETA" "$OUT_23_10_ro"
+
+OUT_23_10_rw=$(
+    export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" show-accounts 2>&1 || true)
+check "23-US10: email-cli show-accounts lists alpha" \
+    "$ALPHA" "$OUT_23_10_rw"
+check "23-US10: email-cli show-accounts lists beta" \
+    "$BETA" "$OUT_23_10_rw"
+
 # ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════

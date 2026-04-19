@@ -58,20 +58,31 @@ static void help_general(void) {
 
 static void help_list(void) {
     printf(
-        "Usage: email-cli-ro list [options]\n"
+        "Usage: email-cli-ro [<account>] list [options]\n"
         "\n"
-        "Lists messages in the configured mailbox folder.\n"
+        "Lists messages in the configured mailbox.\n"
         "Shows unread (UNSEEN) messages by default; use --all for everything.\n"
         "\n"
         "Options:\n"
-        "  --all              Show all messages (not just unread).\n"
-        "  --folder <name>    Use <name> instead of the configured folder.\n"
-        "  --limit <n>        Show at most <n> messages (default: %d).\n"
-        "  --offset <n>       Start listing from the <n>-th message (1-based).\n"
+        "  --all                    Show all messages (not just unread).\n"
+        "  --folder <name>          IMAP: use <name> instead of the configured folder.\n"
+        "  --label  <id-or-name>    Gmail: filter by label (alias for --folder).\n"
+        "  --limit <n>              Show at most <n> messages (default: %d).\n"
+        "  --offset <n>             Start listing from the <n>-th message (1-based).\n"
         "\n"
-        "Examples:\n"
+        "Gmail notes:\n"
+        "  Use 'email-cli-ro list-labels' to see available labels and their IDs.\n"
+        "  Predefined labels: INBOX, SENT, DRAFT, SPAM, TRASH, STARRED, IMPORTANT.\n"
+        "\n"
+        "Examples (IMAP):\n"
         "  email-cli-ro list\n"
-        "  email-cli-ro list --folder INBOX.Sent --limit 50\n",
+        "  email-cli-ro list --folder INBOX.Sent --limit 50\n"
+        "\n"
+        "Examples (Gmail):\n"
+        "  email-cli-ro list\n"
+        "  email-cli-ro list --label INBOX\n"
+        "  email-cli-ro list --label SENT\n"
+        "  email-cli-ro user@gmail.com list --label Label_42\n",
         BATCH_DEFAULT_LIMIT
     );
 }
@@ -344,9 +355,10 @@ int main(int argc, char *argv[]) {
                 /* accepted as no-op: email-cli-ro is always batch mode */
             } else if (strcmp(argv[i], "--all") == 0) {
                 opts.all = 1;
-            } else if (strcmp(argv[i], "--folder") == 0) {
+            } else if (strcmp(argv[i], "--folder") == 0 ||
+                       strcmp(argv[i], "--label")  == 0) {
                 if (i + 1 >= argc) {
-                    fprintf(stderr, "Error: --folder requires a folder name.\n");
+                    fprintf(stderr, "Error: %s requires a name.\n", argv[i]);
                     ok = 0;
                 } else {
                     opts.folder = argv[++i];

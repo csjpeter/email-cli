@@ -1465,6 +1465,15 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     RAII_STRING char *folder_canonical = resolve_folder_name_dup(raw_folder);
     const char *folder = folder_canonical ? folder_canonical : raw_folder;
 
+    /* Gmail: if the folder value looks like a display name rather than a label ID,
+     * try to resolve it to the underlying ID via the local label name cache. */
+    RAII_STRING char *gmail_resolved_id = NULL;
+    if (cfg->gmail_mode && folder) {
+        gmail_resolved_id = local_gmail_label_id_lookup(folder);
+        if (gmail_resolved_id)
+            folder = gmail_resolved_id;
+    }
+
     int list_result = 0;
 
     logger_log(LOG_INFO, "Listing %s @ %s/%s", cfg->user, cfg->host, folder);

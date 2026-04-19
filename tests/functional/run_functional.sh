@@ -997,6 +997,41 @@ check "23-US10: email-cli show-accounts lists beta" \
     "$BETA" "$OUT_23_10_rw"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 24 — --label alias and label name resolution
+#
+# User Stories:
+#   US-01  --label is accepted as alias for --folder (IMAP mode)
+#   US-02  email-cli-ro accepts --label alias (IMAP mode)
+#   US-03  --label with unknown name falls back to using value as-is
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 24: --label alias ---"
+
+# ── US-01: --label works as alias for --folder (IMAP) ─────────────────────
+OUT_24_01_folder=$(run_list "$H_ALPHA" "" INBOX)
+OUT_24_01_label=$(
+    export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --batch --label INBOX 2>&1 || true)
+check "24-US01: --label INBOX returns same as --folder INBOX" \
+    "AlphaAccountMsg" "$OUT_24_01_label"
+
+# ── US-02: email-cli-ro accepts --label alias ─────────────────────────────
+OUT_24_02=$(
+    export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list --batch --label INBOX 2>&1 || true)
+check "24-US02: email-cli-ro --label INBOX works" \
+    "AlphaAccountMsg" "$OUT_24_02"
+
+# ── US-03: --label with a name not in cache falls back gracefully ──────────
+# (IMAP: an unknown label/folder returns empty or error, not a crash)
+OUT_24_03=$(
+    export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --batch --label "NonExistentFolder" 2>&1 || true)
+# Should not crash — either empty list or server error message
+check_not "24-US03: unknown label does not crash (no segfault output)" \
+    "Segmentation fault" "$OUT_24_03"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

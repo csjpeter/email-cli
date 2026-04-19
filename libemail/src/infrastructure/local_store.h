@@ -291,6 +291,12 @@ int local_gmail_label_names_save(char **ids, char **names, int count);
  */
 char *local_gmail_label_name_lookup(const char *id);
 
+/**
+ * @brief Look up a Gmail label ID by display name from local cache (reverse lookup).
+ * Returns heap-allocated label ID, or NULL if not found. Caller must free().
+ */
+char *local_gmail_label_id_lookup(const char *name);
+
 /* ── UI preferences ──────────────────────────────────────────────────── */
 
 /** @brief Reads an integer UI preference. */

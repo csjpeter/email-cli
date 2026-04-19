@@ -1853,6 +1853,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     if (cursor >= show_count) cursor = 0;
     int wstart = cursor;   /* top of the visible window */
 
+    /* Track entries that have been locally label-removed ('d' key) but not
+     * yet purged from the entries array.  TUI renders them with red
+     * strikethrough so the user sees immediate feedback.  Only allocated in
+     * TUI (pager) mode; always NULL in CLI/RO mode. */
+    int *pending_remove = opts->pager
+                          ? calloc((size_t)show_count, sizeof(int))
+                          : NULL;
+
     /* Keep the terminal in raw mode for the entire interactive TUI.
      * Without this, each terminal_read_key() call would need to briefly enter
      * and exit raw mode per keystroke, which causes escape sequence echo and
@@ -2020,15 +2028,25 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             const char *subject = (me && me->subject && me->subject[0]) ? me->subject : "(no subject)";
             const char *date    = (me && me->date)                       ? me->date    : "";
 
-            int sel = opts->pager && (i == cursor);
-            if (sel) printf("\033[7m");
+            int sel     = opts->pager && (i == cursor);
+            int pending = (pending_remove != NULL) && pending_remove[i];
 
-            /* Status column: coloured in all TUI rows (email-tui only).
+            /* Pending-remove rows (TUI only): red + strikethrough.
+             * Use plain ASCII sts to avoid \033[0m reset conflicts with
+             * embedded colour escapes.  Selected-row reverse-video is
+             * suppressed for pending rows; the cursor is still tracked. */
+            if (opts->pager && pending) {
+                printf("\033[31m\033[9m");   /* red foreground + strikethrough */
+            } else if (sel) {
+                printf("\033[7m");
+            }
+
+            /* Status column: coloured in TUI (except pending-remove rows).
              * In sel (reverse-video) rows: temporarily exit reverse-video
              * for the coloured character, then re-enter (\033[7m) so the
              * rest of the row stays highlighted. Plain CLI/RO stays ASCII. */
             char sts[64];
-            if (opts->pager) {
+            if (opts->pager && !pending) {
                 /* Non-sel: plain colour reset after char.
                  * Sel: \033[0m exits rev-video → colour → \033[7m re-enters. */
                 const char *n_s = (entries[i].flags & MSG_FLAG_UNSEEN)
@@ -2056,7 +2074,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             printf("  ");
             print_padded_col(from,    from_w);
 
-            if (sel) printf("\033[K\033[0m");
+            if (opts->pager && (sel || pending)) printf("\033[K\033[0m");
             printf("\n");
             fflush(stdout); /* show row immediately as it arrives */
         }
@@ -2339,6 +2357,8 @@ read_key_again: ;
                         free(lbl);
                     }
                     if (!has_real) label_idx_add("_nolabel", uid);
+                    /* Mark row for immediate visual feedback (red strikethrough) */
+                    if (pending_remove) pending_remove[cursor] = 1;
                 }
                 break;
             }
@@ -2407,7 +2427,7 @@ read_key_again: ;
         }
     }
 list_done:
-
+    free(pending_remove);
     /* tui_raw / folder_canonical cleaned up automatically via RAII macros */
     manifest_free(manifest);
     free(entries);

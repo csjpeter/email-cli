@@ -130,11 +130,43 @@ static void rebuild_label_indexes(const char (*uids)[17], int uid_count) {
     int npairs = 0;
 
     for (int i = 0; i < uid_count; i++) {
-        char *lbl_str = local_hdr_get_labels("", uids[i]);
-        if (!lbl_str) continue;
+        /* Load full .hdr so we can both collect label pairs and sync the
+         * flags integer in one read (avoid a separate local_hdr_get_labels
+         * call followed by local_hdr_update_labels). */
+        char *hdr = local_hdr_load("", uids[i]);
+        if (!hdr) continue;
 
+        /* Locate labels field (4th tab-separated token).
+         * Track the tab pointer so we can NUL-terminate the prefix later. */
+        char *t3_tab = hdr;
+        for (int f = 0; f < 3; f++) {
+            t3_tab = strchr(t3_tab, '\t');
+            if (!t3_tab) break;
+            if (f < 2) t3_tab++;
+        }
+        if (!t3_tab || t3_tab == hdr) { free(hdr); continue; }
+        char *lbl_start = t3_tab + 1;   /* start of labels CSV field */
+
+        /* Locate optional flags field (5th token) and read old value */
+        char *t4 = strchr(lbl_start, '\t');
+        int old_flags = 0;
+        if (t4) {
+            old_flags = atoi(t4 + 1);
+            *t4 = '\0';   /* NUL-terminate labels field in-place */
+        } else {
+            char *nl = strchr(lbl_start, '\n');
+            if (nl) *nl = '\0';
+        }
+
+        /* Derive new flags from labels (preserving non-label bits) */
+        int new_flags = old_flags & ~(MSG_FLAG_UNSEEN | MSG_FLAG_FLAGGED);
         int has_real = 0;
-        char *tok = lbl_str;
+
+        /* Iterate labels via a copy (tokenising modifies the string) */
+        char *lbl_copy = strdup(lbl_start);
+        if (!lbl_copy) { free(hdr); continue; }
+
+        char *tok = lbl_copy;
         while (tok) {
             char *comma = strchr(tok, ',');
             if (comma) *comma = '\0';
@@ -147,7 +179,7 @@ static void rebuild_label_indexes(const char (*uids)[17], int uid_count) {
                 if (npairs >= (int)cap) {
                     cap = cap * 2 + 1;
                     LabelUidPair *tmp = realloc(pairs, cap * sizeof(LabelUidPair));
-                    if (!tmp) { free(pairs); free(lbl_str); return; }
+                    if (!tmp) { free(lbl_copy); free(hdr); free(pairs); return; }
                     pairs = tmp;
                 }
                 strncpy(pairs[npairs].label, idx_name, 63);
@@ -157,15 +189,19 @@ static void rebuild_label_indexes(const char (*uids)[17], int uid_count) {
                 npairs++;
 
                 if (!is_category_label(tok)) has_real = 1;
+                if (strcmp(tok, "UNREAD")  == 0) new_flags |= MSG_FLAG_UNSEEN;
+                if (strcmp(tok, "STARRED") == 0) new_flags |= MSG_FLAG_FLAGGED;
             }
             tok = comma ? comma + 1 : NULL;
         }
+        free(lbl_copy);
+
         /* Messages with no real (non-CATEGORY_) label → Archive */
         if (!has_real) {
             if (npairs >= (int)cap) {
                 cap = cap * 2 + 1;
                 LabelUidPair *tmp = realloc(pairs, cap * sizeof(LabelUidPair));
-                if (!tmp) { free(pairs); free(lbl_str); return; }
+                if (!tmp) { free(hdr); free(pairs); return; }
                 pairs = tmp;
             }
             strncpy(pairs[npairs].label, "_nolabel", 63);
@@ -173,7 +209,20 @@ static void rebuild_label_indexes(const char (*uids)[17], int uid_count) {
             pairs[npairs].uid[16] = '\0';
             npairs++;
         }
-        free(lbl_str);
+
+        /* Sync flags integer if it disagrees with the labels CSV.
+         * lbl_start still points into hdr at the labels field.
+         * NUL-terminate the prefix at t3_tab then reassemble. */
+        if (new_flags != old_flags) {
+            *t3_tab = '\0';
+            char *updated = NULL;
+            if (asprintf(&updated, "%s\t%s\t%d", hdr, lbl_start, new_flags) != -1) {
+                local_hdr_save("", uids[i], updated, strlen(updated));
+                free(updated);
+            }
+        }
+
+        free(hdr);
     }
 
     /* Phase 2: sort by (label, uid) */

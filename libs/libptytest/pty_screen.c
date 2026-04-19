@@ -136,10 +136,14 @@ static void apply_csi(PtyScreen *scr, const char *params, int param_len, char fi
 
     case 'm': /* SGR — select graphic rendition */
         for (int i = 0; i < argc; i++) {
-            if (args[i] == 0)      scr->cur_attr = PTY_ATTR_NONE;
-            else if (args[i] == 1) scr->cur_attr |= PTY_ATTR_BOLD;
-            else if (args[i] == 2) scr->cur_attr |= PTY_ATTR_DIM;
-            else if (args[i] == 7) scr->cur_attr |= PTY_ATTR_REVERSE;
+            if (args[i] == 0)       scr->cur_attr = PTY_ATTR_NONE;
+            else if (args[i] == 1)  scr->cur_attr |= PTY_ATTR_BOLD;
+            else if (args[i] == 2)  scr->cur_attr |= PTY_ATTR_DIM;
+            else if (args[i] == 7)  scr->cur_attr |= PTY_ATTR_REVERSE;
+            else if (args[i] == 9)  scr->cur_attr |= PTY_ATTR_STRIKE;
+            else if (args[i] == 22) scr->cur_attr &= ~(PTY_ATTR_BOLD | PTY_ATTR_DIM);
+            else if (args[i] == 27) scr->cur_attr &= ~PTY_ATTR_REVERSE;
+            else if (args[i] == 29) scr->cur_attr &= ~PTY_ATTR_STRIKE;
             /* Skip colour args: 30-37,38,39, 40-47,48,49, 90-97, 100-107 */
             else if (args[i] == 38 || args[i] == 48) {
                 /* 38;2;R;G;B or 38;5;N — skip remaining args */

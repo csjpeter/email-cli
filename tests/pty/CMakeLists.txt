@@ -69,6 +69,34 @@ if(NOT APPLE)
 endif()
 add_dependencies(test-pty-input-line input-line-harness)
 
+# ── Mock Gmail API server ─────────────────────────────────────────────
+add_executable(mock-gmail-server EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/tests/functional/mock_gmail_api_server.c
+)
+
+# ── Gmail TUI PTY tests ───────────────────────────────────────────────
+add_executable(test-pty-gmail-tui EXCLUDE_FROM_ALL
+    test_pty_gmail_tui.c
+)
+target_include_directories(test-pty-gmail-tui PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-gmail-tui ptytest)
+if(NOT APPLE)
+    target_link_libraries(test-pty-gmail-tui util)
+endif()
+add_dependencies(test-pty-gmail-tui email-tui email-sync mock-gmail-server)
+
+add_custom_target(run-pty-gmail-tui
+    COMMAND test-pty-gmail-tui
+        $<TARGET_FILE:email-tui>
+        $<TARGET_FILE:email-sync>
+        $<TARGET_FILE:mock-gmail-server>
+    DEPENDS test-pty-gmail-tui email-tui email-sync mock-gmail-server
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running Gmail TUI PTY tests"
+)
+
 # ── Mock SMTP server ──────────────────────────────────────────────────
 add_executable(mock-smtp-server EXCLUDE_FROM_ALL
     mock_smtp_server.c

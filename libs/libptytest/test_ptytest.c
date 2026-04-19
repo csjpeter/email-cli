@@ -95,6 +95,16 @@ static void test_screen_sgr_bold_dim(void) {
     pty_screen_free(scr);
 }
 
+static void test_screen_sgr_strikethrough(void) {
+    PtyScreen *scr = pty_screen_new(20, 5);
+    pty_screen_feed(scr, "\033[9mX\033[0mY", 10);
+
+    ASSERT(scr->cells[0].attr & PTY_ATTR_STRIKE, "X has STRIKE attr");
+    ASSERT((scr->cells[1].attr & PTY_ATTR_STRIKE) == 0, "Y has no STRIKE after reset");
+
+    pty_screen_free(scr);
+}
+
 static void test_screen_erase_line(void) {
     PtyScreen *scr = pty_screen_new(10, 3);
     pty_screen_feed(scr, "0123456789", 10);
@@ -200,6 +210,7 @@ int main(void) {
     RUN_TEST(test_screen_erase_display);
     RUN_TEST(test_screen_sgr_reverse);
     RUN_TEST(test_screen_sgr_bold_dim);
+    RUN_TEST(test_screen_sgr_strikethrough);
     RUN_TEST(test_screen_erase_line);
     RUN_TEST(test_screen_scroll);
     RUN_TEST(test_screen_24bit_color_skip);

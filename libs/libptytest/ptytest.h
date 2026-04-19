@@ -21,6 +21,7 @@
 #define PTY_ATTR_BOLD    (1 << 0)
 #define PTY_ATTR_DIM     (1 << 1)
 #define PTY_ATTR_REVERSE (1 << 2)
+#define PTY_ATTR_STRIKE  (1 << 3)
 
 /* ── Special keys ────────────────────────────────────────────────────── */
 

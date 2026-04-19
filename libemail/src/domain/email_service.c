@@ -600,16 +600,33 @@ static MailClient *make_mail(const Config *cfg) {
 
 typedef struct { int messages; int unseen; int flagged; } FolderStatus;
 
-/** Read total, unseen and flagged counts for each folder from their local manifests.
+/** Read total, unseen and flagged counts for each folder/label from local storage.
  *  Instant — no server connection needed.
+ *  IMAP: reads per-folder manifests.
+ *  Gmail: uses .idx file counts for totals; manifest (if present) for unseen/flagged.
  *  Returns heap-allocated array; caller must free(). */
-static FolderStatus *fetch_all_folder_statuses(const Config *cfg __attribute__((unused)),
+static FolderStatus *fetch_all_folder_statuses(const Config *cfg,
                                                 char **folders, int count) {
     FolderStatus *st = calloc((size_t)count, sizeof(FolderStatus));
     if (!st || count == 0) return st;
-    for (int i = 0; i < count; i++)
-        manifest_count_folder(folders[i], &st[i].messages,
-                              &st[i].unseen, &st[i].flagged);
+    for (int i = 0; i < count; i++) {
+        if (cfg->gmail_mode) {
+            /* Gmail: .idx gives the authoritative total count per label */
+            st[i].messages = label_idx_count(folders[i]);
+            /* Use manifest for unseen/flagged if available (populated by 'list --label') */
+            Manifest *m = manifest_load(folders[i]);
+            if (m) {
+                for (int j = 0; j < m->count; j++) {
+                    if (m->entries[j].flags & MSG_FLAG_UNSEEN)  st[i].unseen++;
+                    if (m->entries[j].flags & MSG_FLAG_FLAGGED) st[i].flagged++;
+                }
+                manifest_free(m);
+            }
+        } else {
+            manifest_count_folder(folders[i], &st[i].messages,
+                                  &st[i].unseen, &st[i].flagged);
+        }
+    }
     return st;
 }
 

@@ -171,7 +171,7 @@ static void test_help_general(void) {
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "list");
     ASSERT_SCREEN_CONTAINS(s, "show");
-    ASSERT_SCREEN_CONTAINS(s, "folders");
+    ASSERT_SCREEN_CONTAINS(s, "list-folders");
     ASSERT_SCREEN_CONTAINS(s, "sync");
     ASSERT_SCREEN_CONTAINS(s, "help");
     pty_close(s);
@@ -197,9 +197,9 @@ static void test_help_show(void) {
 }
 
 static void test_help_folders(void) {
-    const char *a[] = {"folders", "--help", NULL};
+    const char *a[] = {"list-folders", "--help", NULL};
     PtySession *s = cli_open_size(120, 50, a);
-    ASSERT(s != NULL, "help folders: opens");
+    ASSERT(s != NULL, "help list-folders: opens");
     ASSERT_WAIT_FOR(s, "Usage: email-cli", WAIT_MS);
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "--tree");
@@ -273,9 +273,9 @@ static void test_batch_show(void) {
 }
 
 static void test_batch_folders_flat(void) {
-    const char *a[] = {"folders", "--batch", NULL};
+    const char *a[] = {"list-folders", "--batch", NULL};
     PtySession *s = cli_run(a);
-    ASSERT(s != NULL, "batch folders: opens");
+    ASSERT(s != NULL, "batch list-folders: opens");
     ASSERT_WAIT_FOR(s, "INBOX", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "INBOX.Sent");
@@ -284,9 +284,9 @@ static void test_batch_folders_flat(void) {
 }
 
 static void test_batch_folders_tree(void) {
-    const char *a[] = {"folders", "--tree", "--batch", NULL};
+    const char *a[] = {"list-folders", "--tree", "--batch", NULL};
     PtySession *s = cli_run(a);
-    ASSERT(s != NULL, "batch folders --tree: opens");
+    ASSERT(s != NULL, "batch list-folders --tree: opens");
     ASSERT_WAIT_FOR(s, "INBOX", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Sent");
@@ -381,7 +381,7 @@ static void test_interactive_list_statusbar(void) {
     ASSERT(sb >= 0, "list sb: found row with 'step'");
     if (sb >= 0) {
         ASSERT(pty_row_contains(s, sb, "Enter=open"), "list sb: Enter=open");
-        ASSERT(pty_row_contains(s, sb, "Backspace=folders"), "list sb: Backspace");
+        ASSERT(pty_row_contains(s, sb, "Backspace=list-folders"), "list sb: Backspace");
         ASSERT(pty_row_contains(s, sb, "ESC=quit"), "list sb: ESC=quit");
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
     }
@@ -599,7 +599,7 @@ static void test_interactive_show_arrow_scroll(void) {
 static void test_interactive_folders_content(void) {
     restart_mock();
     PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "folders content: opens");
+    ASSERT(s != NULL, "list-folders content: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_BACK);
@@ -615,7 +615,7 @@ static void test_interactive_folders_content(void) {
 static void test_interactive_folders_statusbar(void) {
     restart_mock();
     PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "folders sb: opens");
+    ASSERT(s != NULL, "list-folders sb: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_BACK);
@@ -623,7 +623,7 @@ static void test_interactive_folders_statusbar(void) {
     pty_settle(s, SETTLE_MS);
 
     int sb = find_row(s, "Enter=open/select");
-    ASSERT(sb >= 0, "folders sb: found Enter=open/select");
+    ASSERT(sb >= 0, "list-folders sb: found Enter=open/select");
     if (sb >= 0)
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
     pty_send_key(s, PTY_KEY_ESC);
@@ -633,7 +633,7 @@ static void test_interactive_folders_statusbar(void) {
 static void test_interactive_folders_toggle(void) {
     restart_mock();
     PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "folders toggle: opens");
+    ASSERT(s != NULL, "list-folders toggle: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_BACK);
@@ -657,7 +657,7 @@ static void test_interactive_folders_toggle(void) {
 static void test_interactive_folders_select(void) {
     restart_mock();
     PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "folders select: opens");
+    ASSERT(s != NULL, "list-folders select: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_BACK);
@@ -672,13 +672,13 @@ static void test_interactive_folders_select(void) {
 static void test_interactive_folders_nav(void) {
     restart_mock();
     PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "folders nav: opens");
+    ASSERT(s != NULL, "list-folders nav: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* Navigate down and back up — folders remain visible */
+    /* Navigate down and back up — list-folders remain visible */
     pty_send_key(s, PTY_KEY_DOWN);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "INBOX");
@@ -699,7 +699,7 @@ static void test_interactive_folders_back_to_list(void) {
     /* Backspace from folder browser (root) returns to message list */
     restart_mock();
     PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "folders back→list: opens");
+    ASSERT(s != NULL, "list-folders back→list: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_BACK);
@@ -717,7 +717,7 @@ static void test_interactive_folders_flat_navigate_up(void) {
      * (sets current_prefix); Backspace navigates back up one level. */
     restart_mock();
     PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "folders flat nav up: opens");
+    ASSERT(s != NULL, "list-folders flat nav up: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_BACK);            /* open folder browser */
@@ -726,7 +726,7 @@ static void test_interactive_folders_flat_navigate_up(void) {
     pty_send_str(s, "t");                     /* toggle to flat view */
     ASSERT_WAIT_FOR(s, "t=tree", WAIT_MS);    /* flat mode: hint shows "t=tree" */
     pty_settle(s, SETTLE_MS);
-    /* Flat view at root shows only top-level folders (no '.' in name) */
+    /* Flat view at root shows only top-level list-folders (no '.' in name) */
     ASSERT_SCREEN_CONTAINS(s, "INBOX");
     pty_send_key(s, PTY_KEY_ENTER);           /* navigate into INBOX */
     ASSERT_WAIT_FOR(s, "Backspace=up", WAIT_MS);
@@ -744,7 +744,7 @@ static void test_interactive_folders_esc_quit(void) {
     /* ESC from folder browser quits the entire application */
     restart_mock();
     PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "folders ESC quit: opens");
+    ASSERT(s != NULL, "list-folders ESC quit: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_BACK);
@@ -781,7 +781,7 @@ static void test_interactive_empty_folder(void) {
     ASSERT_SCREEN_CONTAINS(s, "UID");
     ASSERT_SCREEN_CONTAINS(s, "Subject");
     ASSERT_SCREEN_CONTAINS(s, "(empty)");
-    ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
+    ASSERT_SCREEN_CONTAINS(s, "Backspace=list-folders");
 
     /* Backspace returns to folder browser */
     pty_send_key(s, PTY_KEY_BACK);
@@ -801,7 +801,7 @@ static void test_interactive_empty_folder_cron(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "(empty)");
     ASSERT_SCREEN_CONTAINS(s, "No cached data");
-    ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
+    ASSERT_SCREEN_CONTAINS(s, "Backspace=list-folders");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
     write_config();  /* restore normal config */
@@ -810,7 +810,7 @@ static void test_interactive_empty_folder_cron(void) {
 /* ══════════════════════════════════════════════════════════════════════
  *  ATTACHMENT SAVE TESTS
  *
- * The mock server message is multipart/mixed with two attachments:
+ * The mock server message is multipart/mixed with two list-attachments:
  *   notes.txt  (content: "Hello World")
  *   data.bin   (content: "test data")
  *
@@ -833,7 +833,7 @@ static PtySession *open_show_view(void) {
     return s;
 }
 
-/** Status bar shows  a=save  A=save-all(2) when attachments present. */
+/** Status bar shows  a=save  A=save-all(2) when list-attachments present. */
 static void test_show_attachment_statusbar(void) {
     PtySession *s = open_show_view();
     ASSERT(s != NULL, "att statusbar: opens");
@@ -845,7 +845,7 @@ static void test_show_attachment_statusbar(void) {
     pty_close(s);
 }
 
-/** Attachment picker is shown when 'a' is pressed (2 attachments). */
+/** Attachment picker is shown when 'a' is pressed (2 list-attachments). */
 static void test_show_attachment_picker(void) {
     PtySession *s = open_show_view();
     ASSERT(s != NULL, "att picker: opens");
@@ -915,7 +915,7 @@ static void test_show_save_all_cancel(void) {
     pty_close(s);
 }
 
-/** Pressing 'A' then Enter saves all attachments to the default dir. */
+/** Pressing 'A' then Enter saves all list-attachments to the default dir. */
 static void test_show_save_all_confirm(void) {
     PtySession *s = open_show_view();
     ASSERT(s != NULL, "save-all confirm: opens");
@@ -961,8 +961,8 @@ static void test_ro_help_general(void) {
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "list");
     ASSERT_SCREEN_CONTAINS(s, "show");
-    ASSERT_SCREEN_CONTAINS(s, "folders");
-    ASSERT_SCREEN_CONTAINS(s, "attachments");
+    ASSERT_SCREEN_CONTAINS(s, "list-folders");
+    ASSERT_SCREEN_CONTAINS(s, "list-attachments");
     ASSERT_SCREEN_CONTAINS(s, "save-attachment");
     ASSERT_SCREEN_CONTAINS(s, "help");
     pty_close(s);
@@ -979,10 +979,10 @@ static void test_ro_help_list(void) {
 }
 
 static void test_ro_help_attachments(void) {
-    const char *a[] = {"attachments", "--help", NULL};
+    const char *a[] = {"list-attachments", "--help", NULL};
     PtySession *s = cli_open_size(120, 50, a);
-    ASSERT(s != NULL, "ro help attachments: opens");
-    ASSERT_WAIT_FOR(s, "attachments <uid>", WAIT_MS);
+    ASSERT(s != NULL, "ro help list-attachments: opens");
+    ASSERT_WAIT_FOR(s, "list-attachments <uid>", WAIT_MS);
     pty_close(s);
 }
 
@@ -1032,9 +1032,9 @@ static void test_ro_sync_unknown(void) {
 
 static void test_ro_attachments(void) {
     restart_mock();
-    const char *a[] = {"attachments", "1", NULL};
+    const char *a[] = {"list-attachments", "1", NULL};
     PtySession *s = cli_run(a);
-    ASSERT(s != NULL, "ro attachments: opens");
+    ASSERT(s != NULL, "ro list-attachments: opens");
     ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "data.bin");
@@ -1849,7 +1849,7 @@ static void test_tui_folders_help_panel(void) {
     /* US-22 AC7: 'h' in folder browser shows help overlay */
     restart_mock();
     PtySession *s = tui_open_to_list();
-    ASSERT(s != NULL, "folders help: opens");
+    ASSERT(s != NULL, "list-folders help: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_BACK);
@@ -2391,7 +2391,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_show_pgdn);
     RUN_TEST(test_interactive_show_arrow_scroll);
 
-    printf("\n--- Interactive folders ---\n");
+    printf("\n--- Interactive list-folders ---\n");
     RUN_TEST(test_interactive_folders_content);
     RUN_TEST(test_interactive_folders_statusbar);
     RUN_TEST(test_interactive_folders_toggle);

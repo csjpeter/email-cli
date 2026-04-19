@@ -171,7 +171,7 @@ run_folders() {
      [ -n "$data_home" ] && export XDG_DATA_HOME="$data_home" || unset XDG_DATA_HOME
      unset XDG_CONFIG_HOME XDG_CACHE_HOME
      # shellcheck disable=SC2086
-     "$BIN_DIR/email-cli" folders $extra 2>&1 || true)
+     "$BIN_DIR/email-cli" list-folders $extra 2>&1 || true)
 }
 
 # ── Account fixtures ──────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ HELP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_H
          "$BIN_DIR/email-cli" 2>&1 || true) )
 check "1.1 help: list cmd mentioned"     "list"           "$HELP"
 check "1.1 help: show cmd mentioned"     "show"           "$HELP"
-check "1.1 help: folders cmd mentioned"  "folders"        "$HELP"
+check "1.1 help: folders cmd mentioned"  "list-folders"        "$HELP"
 
 HELP_LIST=$( (export HOME="$H_ALPHA"; "$BIN_DIR/email-cli" help list 2>&1 || true) )
 check "1.2 help list: usage line"        "email-cli list" "$HELP_LIST"
@@ -612,7 +612,7 @@ echo ""
 echo "--- Phase 14: attachments command ---"
 # Use UID=1 (the UID the mock server serves)
 ATTACH_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
-    "$BIN_DIR/email-cli" --batch attachments 1 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch list-attachments 1 2>&1 || true) )
 check "14.1 attachments: notes.txt listed"  "notes.txt"  "$ATTACH_OUT"
 check "14.2 attachments: data.bin listed"   "data.bin"   "$ATTACH_OUT"
 
@@ -693,8 +693,8 @@ check "20.2 sync: fetched/stored line present"  "fetched.*stored\|already stored
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 21: help topics ---"
-HATT=$( (export HOME="$H_ALPHA"; "$BIN_DIR/email-cli" help attachments 2>&1 || true) )
-check "21.1 help attachments: usage line"  "attachments"  "$HATT"
+HATT=$( (export HOME="$H_ALPHA"; "$BIN_DIR/email-cli" help list-attachments 2>&1 || true) )
+check "21.1 help attachments: usage line"  "list-attachments"  "$HATT"
 
 HSAVE=$( (export HOME="$H_ALPHA"; "$BIN_DIR/email-cli" help save-attachment 2>&1 || true) )
 check "21.2 help save-attachment: usage"   "save-attachment"  "$HSAVE"

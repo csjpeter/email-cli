@@ -1817,7 +1817,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         /* Compute adaptive column widths.
          * email-tui (opts->pager==1): date+sts+subject+from, overhead=28
          * email-cli/ro (opts->pager==0): uid+date+sts+subject+from, overhead=46
-         * Non-TTY (pipe/batch): subj_w=from_w=0 → print_padded_col prints full strings. */
+         * Non-TTY CLI: two-pass — pre-load all entries, use max Subject width. */
         int is_tty   = isatty(STDOUT_FILENO);
         int tcols    = is_tty ? terminal_cols() : 0;
         int is_gmail = cfg->gmail_mode;
@@ -1830,8 +1830,45 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             subj_w = avail * 3 / 5;
             from_w = avail - subj_w;
         } else {
-            subj_w = 0; /* unlimited — print_padded_col prints full string */
+            subj_w = 0;
             from_w = 0;
+        }
+
+        /* Non-TTY CLI mode: pre-load all entries to determine exact Subject column width.
+         * This two-pass approach ensures Subject is padded consistently so From starts
+         * at a predictable column — required for reliable batch/script processing. */
+        int manifest_dirty = 0;
+        if (!opts->pager && !is_tty) {
+            for (int i = wstart; i < wend; i++) {
+                if (manifest_find(manifest, entries[i].uid)) continue;
+                char *hdrs   = list_mc
+                               ? fetch_uid_headers_via(list_mc, folder, entries[i].uid)
+                               : fetch_uid_headers_cached(cfg, folder, entries[i].uid);
+                char *fr_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
+                char *fr     = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
+                free(fr_raw);
+                char *su_raw = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
+                char *su     = su_raw ? mime_decode_words(su_raw)      : strdup("");
+                free(su_raw);
+                char *dt_raw = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
+                char *dt     = dt_raw ? mime_format_date(dt_raw)       : strdup("");
+                free(dt_raw);
+                char *ct_raw = hdrs ? mime_get_header(hdrs, "Content-Type") : NULL;
+                if (ct_raw && strcasestr(ct_raw, "multipart/mixed"))
+                    entries[i].flags |= MSG_FLAG_ATTACH;
+                free(ct_raw);
+                free(hdrs);
+                manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].flags);
+                manifest_dirty = 1;
+            }
+            /* Compute max Subject display width across all visible entries */
+            for (int i = wstart; i < wend; i++) {
+                ManifestEntry *me = manifest_find(manifest, entries[i].uid);
+                const char *sub = (me && me->subject) ? me->subject : "";
+                int w = (int)visible_line_cols(sub, sub + strlen(sub));
+                if (w > subj_w) subj_w = w;
+            }
+            from_w = 0; /* From is the last column — no right-padding needed */
         }
 
         if (opts->pager) printf("\033[H\033[2J");
@@ -1877,7 +1914,6 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         print_dbar(from_w > 0 ? from_w : 40); printf("\n");
 
         /* Data rows: fetch-on-demand + immediate render per row */
-        int manifest_dirty = 0;
         int load_interrupted = 0;
         for (int i = wstart; i < wend; i++) {
             /* Fetch into manifest if missing; always sync unseen flag */

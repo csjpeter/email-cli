@@ -33,8 +33,8 @@ static void help_general(void) {
         "Commands:\n"
         "  list                    List messages in the configured mailbox\n"
         "  show <uid>              Display the full content of a message by its UID\n"
-        "  folders                 List available IMAP folders\n"
-        "  attachments <uid>       List attachments in a message\n"
+        "  list-folders                 List available IMAP folders\n"
+        "  list-attachments <uid>       List attachments in a message\n"
         "  save-attachment <uid>   Save a named attachment to disk\n"
         "  send                    Send a message non-interactively\n"
         "  mark-read <uid>         Mark a message as read\n"
@@ -110,7 +110,7 @@ static void help_show(void) {
 
 static void help_folders(void) {
     printf(
-        "Usage: email-cli folders [options]\n"
+        "Usage: email-cli list-folders [options]\n"
         "\n"
         "Lists all available IMAP folders on the server.\n"
         "\n"
@@ -118,8 +118,8 @@ static void help_folders(void) {
         "  --tree    Render the folder hierarchy as a tree.\n"
         "\n"
         "Examples:\n"
-        "  email-cli folders\n"
-        "  email-cli folders --tree\n"
+        "  email-cli list-folders\n"
+        "  email-cli list-folders --tree\n"
     );
 }
 
@@ -164,7 +164,7 @@ static void help_config(void) {
 
 static void help_attachments(void) {
     printf(
-        "Usage: email-cli attachments <uid>\n"
+        "Usage: email-cli list-attachments <uid>\n"
         "\n"
         "Lists all attachments in the message identified by <uid>.\n"
         "Prints one line per attachment: filename and decoded size.\n"
@@ -172,7 +172,7 @@ static void help_attachments(void) {
         "  <uid>   Numeric IMAP UID shown by 'email-cli list'\n"
         "\n"
         "Examples:\n"
-        "  email-cli attachments 42\n"
+        "  email-cli list-attachments 42\n"
     );
 }
 
@@ -183,7 +183,7 @@ static void help_save_attachment(void) {
         "Saves the named attachment from message <uid> to disk.\n"
         "\n"
         "  <uid>       Numeric IMAP UID shown by 'email-cli list'\n"
-        "  <filename>  Exact attachment filename shown by 'email-cli attachments'\n"
+        "  <filename>  Exact attachment filename shown by 'email-cli list-attachments'\n"
         "  [dir]       Destination directory (default: ~/Downloads or ~)\n"
         "\n"
         "Examples:\n"
@@ -419,8 +419,8 @@ int main(int argc, char *argv[]) {
                 /* e.g. email-cli list --help */
                 if (strcmp(cmd, "list")            == 0) { help_list();            return EXIT_SUCCESS; }
                 if (strcmp(cmd, "show")            == 0) { help_show();            return EXIT_SUCCESS; }
-                if (strcmp(cmd, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
-                if (strcmp(cmd, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
+                if (strcmp(cmd, "list-folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
+                if (strcmp(cmd, "list-attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
                 if (strcmp(cmd, "send")            == 0) { help_send();            return EXIT_SUCCESS; }
                 if (strcmp(cmd, "config")          == 0) { help_config();          return EXIT_SUCCESS; }
@@ -454,8 +454,8 @@ int main(int argc, char *argv[]) {
         if (topic) {
             if (strcmp(topic, "list")            == 0) { help_list();            return EXIT_SUCCESS; }
             if (strcmp(topic, "show")            == 0) { help_show();            return EXIT_SUCCESS; }
-            if (strcmp(topic, "folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
-            if (strcmp(topic, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
+            if (strcmp(topic, "list-folders")         == 0) { help_folders();         return EXIT_SUCCESS; }
+            if (strcmp(topic, "list-attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
             if (strcmp(topic, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
             if (strcmp(topic, "send")            == 0) { help_send();            return EXIT_SUCCESS; }
             if (strcmp(topic, "config")          == 0) { help_config();          return EXIT_SUCCESS; }
@@ -630,24 +630,24 @@ int main(int argc, char *argv[]) {
                 result = email_service_read(cfg, uid, 0, BATCH_DEFAULT_LIMIT);
         }
 
-    } else if (strcmp(cmd, "folders") == 0) {
+    } else if (strcmp(cmd, "list-folders") == 0) {
         int tree = 0, ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) continue;
             if (strcmp(argv[i], "--tree") == 0)
                 tree = 1;
-            else { unknown_option("folders", argv[i]); ok = 0; }
+            else { unknown_option("list-folders", argv[i]); ok = 0; }
         }
         if (ok) result = email_service_list_folders(cfg, tree);
 
-    } else if (strcmp(cmd, "attachments") == 0) {
+    } else if (strcmp(cmd, "list-attachments") == 0) {
         const char *uid_str = NULL;
         for (int i = cmd_idx + 1; i < argc; i++) {
             if (strcmp(argv[i], "--batch") == 0) continue;
             uid_str = argv[i]; break;
         }
         if (!uid_str) {
-            fprintf(stderr, "Error: 'attachments' requires a UID argument.\n");
+            fprintf(stderr, "Error: 'list-attachments' requires a UID argument.\n");
             help_attachments();
         } else {
             char uid[17];

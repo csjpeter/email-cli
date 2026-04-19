@@ -18,7 +18,7 @@ dispatching to the command handler.
 email-cli --help            → general help
 email-cli list --help       → same as: email-cli help list
 email-cli show --help       → same as: email-cli help show
-email-cli folders --help    → same as: email-cli help folders
+email-cli list-folders --help    → same as: email-cli help folders
 email-cli send --help       → same as: email-cli help send
 ```
 
@@ -45,7 +45,7 @@ Prints usage text to **stdout** and exits with code **0**.
 
 If `<command>` is given and unknown, prints an error to **stderr** and exits **1**.
 
-Supported topics: `list`, `show`, `folders`, `attachments`, `save-attachment`, `send`, `config`.
+Supported topics: `list`, `show`, `list-folders`, `list-attachments`, `save-attachment`, `send`, `config`.
 
 ---
 
@@ -182,7 +182,7 @@ issued (no-op).
 
 ---
 
-## `folders`
+## `list-folders`
 
 ```
 email-cli [--batch] folders [--tree]
@@ -213,10 +213,10 @@ Lists all IMAP folders available on the server.
 
 ---
 
-## `attachments`
+## `list-attachments`
 
 ```
-email-cli attachments <uid>
+email-cli list-attachments <uid>
 ```
 
 Lists all MIME attachments in the message identified by its UID.
@@ -256,7 +256,7 @@ Saves a single attachment from a message to disk.
 | Argument | Description |
 |----------|-------------|
 | `<uid>` | Positive integer IMAP UID |
-| `<filename>` | Exact attachment filename (as shown by `attachments`) |
+| `<filename>` | Exact attachment filename (as shown by `list-attachments`) |
 | `[dir]` | Destination directory (default: `~/Downloads` if it exists, otherwise `~`) |
 
 ### Behaviour

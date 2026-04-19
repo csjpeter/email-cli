@@ -353,7 +353,7 @@ Accounts screen  (Enter=open, n=new, d=delete, e=SMTP, ESC=quit)
 `email-cli` and `email-cli-ro` are batch-only tools — all output is plain text suitable
 for scripting and piping. There is no interactive pager or TUI.
 
-`email-cli-ro` supports only read commands (`list`, `show`, `folders`, `attachments`).
+`email-cli-ro` supports only read commands (`list`, `show`, `list-folders`, `list-attachments`).
 `email-cli` supports all commands including write operations and Gmail label management.
 
 ### list
@@ -395,20 +395,20 @@ email-cli show 18c9b46d67a6…
 ### folders
 
 ```
-email-cli folders [--tree]
+email-cli list-folders [--tree]
 ```
 
 Lists all IMAP folders (or Gmail labels) available on the server.
 
 ```bash
-email-cli folders
-email-cli folders --tree
+email-cli list-folders
+email-cli list-folders --tree
 ```
 
 ### attachments
 
 ```
-email-cli attachments <uid>
+email-cli list-attachments <uid>
 ```
 
 Lists all MIME attachments in a message (filename and size).

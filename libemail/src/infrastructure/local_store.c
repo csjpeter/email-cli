@@ -262,12 +262,25 @@ int local_hdr_update_labels(const char *folder, const char *uid,
         if (i) strcat(new_lbl, ",");
         strcat(new_lbl, labels[i]);
     }
+
+    /* Recompute flags integer from the updated label set.
+     * Label-derived bits: UNREAD→MSG_FLAG_UNSEEN(1), STARRED→MSG_FLAG_FLAGGED(2).
+     * Non-label bits (MSG_FLAG_DONE=4, MSG_FLAG_ATTACH=8) are preserved. */
+    int old_flags = (suffix && suffix[0]) ? atoi(suffix) : 0;
+    int new_flags = old_flags & ~(MSG_FLAG_UNSEEN | MSG_FLAG_FLAGGED);
+    for (int i = 0; i < cnt; i++) {
+        if (strcmp(labels[i], "UNREAD")  == 0) new_flags |= MSG_FLAG_UNSEEN;
+        if (strcmp(labels[i], "STARRED") == 0) new_flags |= MSG_FLAG_FLAGGED;
+    }
+    char flags_str[16];
+    snprintf(flags_str, sizeof(flags_str), "%d", new_flags);
+
     free(lbl_copy);
     free(labels);
 
     /* Reassemble: prefix already NUL-terminated at t3 */
     char *updated = NULL;
-    int rc = asprintf(&updated, "%s\t%s\t%s", prefix, new_lbl, suffix);
+    int rc = asprintf(&updated, "%s\t%s\t%s", prefix, new_lbl, flags_str);
     free(new_lbl);
     free(hdr);
     if (rc == -1) return -1;

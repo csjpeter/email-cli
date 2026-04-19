@@ -10,6 +10,9 @@ BUILD_DIR="./build"
 BIN_DIR="./bin"
 BIN_PATH="$BIN_DIR/$PROJECT_NAME"
 
+INSTALL_DIR="${HOME}/.local/bin"
+INSTALL_BINS="email-cli email-cli-ro email-sync email-tui"
+
 show_help() {
     echo "Usage: ./manage.sh [command]"
     echo ""
@@ -24,6 +27,8 @@ show_help() {
     echo "  integration    Run integration test against Dovecot IMAP container"
     echo "  imap-down      Stop integration test container (preserves emails volume)"
     echo "  imap-clean     Remove integration test container and volume"
+    echo "  install        Build (release) and install binaries to ~/.local/bin"
+    echo "  uninstall      Remove installed binaries from ~/.local/bin"
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
@@ -100,6 +105,32 @@ build_test_runner() {
     cmake --build "$BUILD_DIR" --target test-runner -- -j"$JOBS"
 }
 
+do_install() {
+    build_release
+    mkdir -p "$INSTALL_DIR"
+    for bin in $INSTALL_BINS; do
+        src="$BIN_DIR/$bin"
+        if [ -f "$src" ]; then
+            cp "$src" "$INSTALL_DIR/$bin"
+            echo "Installed $INSTALL_DIR/$bin"
+        else
+            echo "Warning: $src not found, skipping."
+        fi
+    done
+    echo "Install complete. Make sure $INSTALL_DIR is in your PATH."
+}
+
+do_uninstall() {
+    for bin in $INSTALL_BINS; do
+        dst="$INSTALL_DIR/$bin"
+        if [ -f "$dst" ]; then
+            rm "$dst"
+            echo "Removed $dst"
+        fi
+    done
+    echo "Uninstall complete."
+}
+
 case "$1" in
     deps)
         install_deps
@@ -150,6 +181,12 @@ case "$1" in
         ;;
     imap-clean)
         ./tests/integration/run_integration.sh --clean
+        ;;
+    install)
+        do_install
+        ;;
+    uninstall)
+        do_uninstall
         ;;
     clean-logs)
         if [ -f "$BIN_PATH" ]; then

@@ -139,4 +139,103 @@ decimal IMAP UIDs continue to work.
 and skips accounts where it is 0.  A message is printed for each skipped
 account in verbose/debug mode.
 
+---
+
+## Gmail .hdr consistency — labels CSV and flags integer
+
+### Background
+
+Each cached Gmail message is stored in a `.hdr` file with five
+tab-separated fields:
+
+```
+from\tsubject\tdate\tINBOX,UNREAD,CATEGORY_SOCIAL\t1
+                     ──────────────────────────────  ─
+                         labels CSV  (field 4)      flags int (field 5)
+```
+
+The **labels CSV** is the source of truth: `rebuild_label_indexes` reads
+it to reconstruct all `.idx` files.  The **flags integer** is a derived
+cache: the list view reads it to display `N` (unread) and `★` (starred)
+without parsing the CSV.
+
+Both fields must be updated atomically whenever a label changes, or the
+next full sync's `rebuild_label_indexes` step will silently undo the
+mutation.
+
+---
+
+### US-7 — mark-read reverts after sync
+
+> **As a Gmail user** who marks hundreds of messages as read,
+> **when** I run `email-sync` afterwards,
+> **I want** those messages to stay read,
+> **so that** my read-state changes are not silently discarded.
+
+**Problem:** `email_service_set_flag` (mark-read / mark-unread) updated
+the `.idx` and the flags integer, but not the labels CSV.
+`rebuild_label_indexes` (called on every full sync) read the stale
+labels CSV, found `UNREAD` still present, and re-inserted the UID into
+`UNREAD.idx` — making the message appear unread again.
+
+**Solution:** `email_service_set_flag` now also calls
+`local_hdr_update_labels` to add/remove `"UNREAD"` / `"STARRED"` from
+the labels CSV.  `local_hdr_update_labels` itself was also fixed to
+recompute the flags integer from the resulting label set, keeping both
+fields in sync in a single write.
+
+**Regression guard:** Phase 29 tests 29.1–29.2 (mark-read, mark-unread).
+
+---
+
+### US-8 — n/f key changes revert after sync
+
+> **As a Gmail user** in the TUI message list,
+> **when** I press `n` to toggle read/unread or `f` to toggle starred,
+> **I want** the change to survive the next sync,
+> **so that** interactive flag changes are not silently lost.
+
+**Problem:** The TUI `n`/`f` key handler called `label_idx_add/remove`
+and `local_hdr_update_flags` but not `local_hdr_update_labels`, leaving
+the labels CSV stale.
+
+**Solution:** The `n`/`f` handler now calls `local_hdr_update_labels`
+(which updates both CSV and flags integer) instead of the separate calls.
+
+**Regression guard:** Phase 29 tests 29.3–29.4 (mark-starred, remove-starred).
+
+---
+
+### US-9 — add-label / remove-label changes revert after sync
+
+> **As a Gmail user** who runs `email-cli add-label <uid> UNREAD` or
+> uses the label picker (`t` key) to toggle a label,
+> **I want** the change to survive the next sync,
+> **so that** label edits are not silently discarded.
+
+**Problem:** `email_service_set_label` (CLI `add-label`/`remove-label`)
+and the TUI label picker both updated `.idx` but not `.hdr` labels CSV.
+
+**Solution:** Both now call `local_hdr_update_labels` after updating `.idx`.
+
+**Regression guard:** Phase 29 tests 29.5–29.6 (add-label UNREAD, remove-label UNREAD).
+
+---
+
+### US-10 — archive / remove-label operations revert after sync
+
+> **As a Gmail user** who presses `a` (archive) or `d` (remove current
+> label) in the TUI,
+> **I want** the label change to survive the next sync,
+> **so that** archived messages don't reappear in INBOX.
+
+**Problem:** The `a` and `d` key handlers called `label_idx_remove` but
+not `local_hdr_update_labels`, leaving the labels CSV stale.
+
+**Solution:** Both handlers now call `local_hdr_update_labels` to remove
+the relevant label from the CSV (and recompute the flags integer).
+
+**Regression guard:** Covered indirectly by Phase 29 (same code path in
+`local_hdr_update_labels`).
+
 **Spec:** `docs/spec/email-sync.md` → `--rebuild-index` → Behaviour.

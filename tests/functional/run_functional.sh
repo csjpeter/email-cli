@@ -1508,7 +1508,77 @@ DEC28=$( (export HOME="$H28_IMAP"
 check_not "28.11 mark-read decimal UID (IMAP): no parse error"  "invalid UID\|positive integer" "$DEC28"
 rm -rf "$H28_IMAP"
 
-# Cleanup Phase 26+27+28
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 29 — .hdr labels CSV / flags-int consistency after local mutations
+#
+# Regression guard for the bug where label-mutating operations updated .idx
+# but not .hdr labels CSV, so rebuild_label_indexes (run on every full sync)
+# silently undid the changes.  Each test follows the pattern:
+#   1. mutate via CLI or key emulation
+#   2. run --rebuild-index (simulates the full-sync rebuild step)
+#   3. verify the .idx reflects the mutation (not the pre-mutation state)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 29: .hdr labels CSV / flags-int consistency ---"
+
+# Helpers reused from Phase 27/28
+# run_gmail_cli_a, run_rebuild_idx, LABELS_DIR_A, HEX_UID already defined
+
+idx_contains() { grep -qF "$1" "$2" 2>/dev/null && echo yes || echo no; }
+
+# 29.1 mark-read: UID removed from UNREAD.idx AND stays removed after rebuild
+MR29=$(run_gmail_cli_a mark-read "$HEX_UID")
+check_not "29.1a mark-read: no error"  "Error\|invalid UID" "$MR29"
+check "29.1b mark-read: UID removed from UNREAD.idx immediately" "no" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+run_rebuild_idx --rebuild-index --account "$GMAIL_ACCT_A" >/dev/null 2>&1
+check "29.1c mark-read: UID still absent from UNREAD.idx after rebuild" "no" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+
+# 29.2 mark-unread: UID re-added to UNREAD.idx AND persists after rebuild
+MU29=$(run_gmail_cli_a mark-unread "$HEX_UID")
+check_not "29.2a mark-unread: no error"  "Error\|invalid UID" "$MU29"
+check "29.2b mark-unread: UID back in UNREAD.idx immediately" "yes" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+run_rebuild_idx --rebuild-index --account "$GMAIL_ACCT_A" >/dev/null 2>&1
+check "29.2c mark-unread: UID still in UNREAD.idx after rebuild" "yes" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+
+# 29.3 mark-starred: UID added to STARRED.idx AND persists after rebuild
+MS29=$(run_gmail_cli_a mark-starred "$HEX_UID")
+check_not "29.3a mark-starred: no error"  "Error\|invalid UID" "$MS29"
+check "29.3b mark-starred: UID in STARRED.idx immediately" "yes" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
+run_rebuild_idx --rebuild-index --account "$GMAIL_ACCT_A" >/dev/null 2>&1
+check "29.3c mark-starred: UID still in STARRED.idx after rebuild" "yes" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
+
+# 29.4 remove-starred: UID removed from STARRED.idx AND stays removed after rebuild
+RS29=$(run_gmail_cli_a remove-starred "$HEX_UID")
+check_not "29.4a remove-starred: no error"  "Error\|invalid UID" "$RS29"
+check "29.4b remove-starred: UID absent from STARRED.idx immediately" "no" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
+run_rebuild_idx --rebuild-index --account "$GMAIL_ACCT_A" >/dev/null 2>&1
+check "29.4c remove-starred: UID still absent from STARRED.idx after rebuild" "no" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
+
+# 29.5 add-label UNREAD via CLI: persists after rebuild
+AL29=$(run_gmail_cli_a add-label "$HEX_UID" UNREAD 2>&1 || true)
+check "29.5b add-label UNREAD: UID in UNREAD.idx immediately" "yes" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+run_rebuild_idx --rebuild-index --account "$GMAIL_ACCT_A" >/dev/null 2>&1
+check "29.5c add-label UNREAD: UID still in UNREAD.idx after rebuild" "yes" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+
+# 29.6 remove-label UNREAD via CLI: persists after rebuild
+RL29=$(run_gmail_cli_a remove-label "$HEX_UID" UNREAD 2>&1 || true)
+check "29.6b remove-label UNREAD: UID absent from UNREAD.idx immediately" "no" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+run_rebuild_idx --rebuild-index --account "$GMAIL_ACCT_A" >/dev/null 2>&1
+check "29.6c remove-label UNREAD: UID still absent after rebuild" "no" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+
+# Cleanup Phase 26+27+28+29
 kill "$GMAIL_SERVER_A_PID" "$GMAIL_SERVER_B_PID" 2>/dev/null || true
 rm -rf "$H_GMAIL"
 

@@ -486,16 +486,23 @@ static void handle_connection(int fd) {
         return;
     }
 
-    /* /gmail/v1/users/me/messages/{id}?format=raw */
+    /* /gmail/v1/users/me/messages/{id}[/modify|/trash|/untrash]?... */
     /* Must check specific message before the list endpoint */
     const char *msgs_prefix = strstr(path, "/messages/");
     if (msgs_prefix) {
         /* Extract the message ID — it comes right after "/messages/" */
         const char *id_start = msgs_prefix + 10; /* skip "/messages/" */
-        /* ID ends at '?' or end of string */
+        /* ID ends at '/', '?' or end of string */
         const char *id_end = id_start;
-        while (*id_end && *id_end != '?' && *id_end != ' ') id_end++;
+        while (*id_end && *id_end != '/' && *id_end != '?' && *id_end != ' ')
+            id_end++;
         if (id_end > id_start) {
+            /* Check for sub-path (modify / trash / untrash) */
+            if (*id_end == '/') {
+                /* POST .../modify, .../trash, .../untrash → accept, return {} */
+                send_json(fd, "{}");
+                return;
+            }
             char id_buf[64] = {0};
             size_t id_len = (size_t)(id_end - id_start);
             if (id_len >= sizeof(id_buf)) id_len = sizeof(id_buf) - 1;

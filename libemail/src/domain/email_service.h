@@ -173,6 +173,20 @@ int email_service_sync(const Config *cfg);
 int email_service_sync_all(const char *only_account);
 
 /**
+ * @brief Rebuild label .idx files from cached .hdr files for Gmail accounts.
+ *
+ * Does NOT contact the Gmail API.  Reads every .hdr file in the local
+ * message store and reconstructs the label indexes from scratch.
+ *
+ * If @p only_account is non-NULL, only that account is processed.
+ * IMAP accounts are skipped (they do not use label indexes).
+ *
+ * @param only_account  Email address to process, or NULL for all accounts.
+ * @return 0 on success, -1 on error or account not found.
+ */
+int email_service_rebuild_indexes(const char *only_account);
+
+/**
  * @brief Installs a user crontab entry to run 'email-cli sync' periodically.
  *
  * Uses cfg->sync_interval (minutes) to set the cron frequency.

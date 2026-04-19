@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 
 /* ── Progress callbacks ───────────────────────────────────────────── */
 
@@ -90,6 +91,143 @@ int gmail_sync_is_filtered_label(const char *label_id) {
  * non-filtered labels are CATEGORY_* is also added to _nolabel (Archive). */
 static int is_category_label(const char *label_id) {
     return label_id && strncmp(label_id, "CATEGORY_", 9) == 0;
+}
+
+/* ── Label index rebuild ──────────────────────────────────────────── */
+
+typedef struct { char label[64]; char uid[17]; } LabelUidPair;
+
+static int cmp_lbl_uid_pair(const void *a, const void *b) {
+    const LabelUidPair *pa = a, *pb = b;
+    int c = strcmp(pa->label, pb->label);
+    return c ? c : strcmp(pa->uid, pb->uid);
+}
+
+/**
+ * Rebuild ALL label .idx files from the .hdr files for the given UIDs.
+ *
+ * Efficient O(N log N) approach:
+ *   1. Read each .hdr and collect (label, uid) pairs in memory.
+ *   2. Sort the flat pair array.
+ *   3. Write each label's .idx file in one grouped pass.
+ *
+ * This is called at the end of every full sync so that cached messages
+ * (whose .idx entries were never written) are correctly indexed.
+ */
+static void rebuild_label_indexes(const char (*uids)[17], int uid_count) {
+    if (uid_count <= 0) return;
+
+    fprintf(stderr, "  Rebuilding label indexes...");
+    fflush(stderr);
+
+    /* Phase 1: collect (label, uid) pairs from all .hdr files */
+    size_t cap = (size_t)uid_count * 5; /* ~5 labels per message */
+    LabelUidPair *pairs = malloc(cap * sizeof(LabelUidPair));
+    if (!pairs) {
+        fprintf(stderr, " [out of memory]\n");
+        return;
+    }
+    int npairs = 0;
+
+    for (int i = 0; i < uid_count; i++) {
+        char *lbl_str = local_hdr_get_labels("", uids[i]);
+        if (!lbl_str) continue;
+
+        int has_real = 0;
+        char *tok = lbl_str;
+        while (tok) {
+            char *comma = strchr(tok, ',');
+            if (comma) *comma = '\0';
+
+            if (tok[0] && !gmail_sync_is_filtered_label(tok)) {
+                const char *idx_name = tok;
+                if      (strcmp(tok, "SPAM")  == 0) idx_name = "_spam";
+                else if (strcmp(tok, "TRASH") == 0) idx_name = "_trash";
+
+                if (npairs >= (int)cap) {
+                    cap = cap * 2 + 1;
+                    LabelUidPair *tmp = realloc(pairs, cap * sizeof(LabelUidPair));
+                    if (!tmp) { free(pairs); free(lbl_str); return; }
+                    pairs = tmp;
+                }
+                strncpy(pairs[npairs].label, idx_name, 63);
+                pairs[npairs].label[63] = '\0';
+                strncpy(pairs[npairs].uid, uids[i], 16);
+                pairs[npairs].uid[16] = '\0';
+                npairs++;
+
+                if (!is_category_label(tok)) has_real = 1;
+            }
+            tok = comma ? comma + 1 : NULL;
+        }
+        /* Messages with no real (non-CATEGORY_) label → Archive */
+        if (!has_real) {
+            if (npairs >= (int)cap) {
+                cap = cap * 2 + 1;
+                LabelUidPair *tmp = realloc(pairs, cap * sizeof(LabelUidPair));
+                if (!tmp) { free(pairs); free(lbl_str); return; }
+                pairs = tmp;
+            }
+            strncpy(pairs[npairs].label, "_nolabel", 63);
+            strncpy(pairs[npairs].uid, uids[i], 16);
+            pairs[npairs].uid[16] = '\0';
+            npairs++;
+        }
+        free(lbl_str);
+    }
+
+    /* Phase 2: sort by (label, uid) */
+    qsort(pairs, (size_t)npairs, sizeof(LabelUidPair), cmp_lbl_uid_pair);
+
+    /* Phase 3: group by label and write each .idx file */
+    int labels_written = 0;
+    int i = 0;
+    while (i < npairs) {
+        const char *cur_label = pairs[i].label;
+        int j = i;
+        while (j < npairs && strcmp(pairs[j].label, cur_label) == 0) j++;
+        int run = j - i;
+
+        char (*uid_arr)[17] = malloc((size_t)run * sizeof(char[17]));
+        if (uid_arr) {
+            int unique = 0;
+            for (int k = i; k < j; k++) {
+                if (unique == 0 ||
+                    strcmp(uid_arr[unique - 1], pairs[k].uid) != 0) {
+                    memcpy(uid_arr[unique++], pairs[k].uid, 17);
+                }
+            }
+            label_idx_write(cur_label, (const char (*)[17])uid_arr, unique);
+            free(uid_arr);
+            labels_written++;
+        }
+        i = j;
+    }
+    free(pairs);
+
+    fprintf(stderr, "\r\033[K  Label indexes rebuilt (%d labels)\n",
+            labels_written);
+    logger_log(LOG_INFO,
+               "gmail_sync: rebuilt %d label indexes from %d messages",
+               labels_written, uid_count);
+}
+
+/**
+ * Rebuild all label .idx files from locally cached .hdr files.
+ * Does NOT contact the Gmail API.
+ * Use this to repair missing or incomplete indexes without re-downloading.
+ */
+int gmail_sync_rebuild_indexes(void) {
+    char (*uids)[17] = NULL;
+    int count = 0;
+    if (local_hdr_list_all_uids("", &uids, &count) != 0) {
+        fprintf(stderr, "Error: could not scan local message store.\n");
+        return -1;
+    }
+    fprintf(stderr, "  Found %d cached messages.\n", count);
+    rebuild_label_indexes((const char (*)[17])uids, count);
+    free(uids);
+    return 0;
 }
 
 /* ── Full Sync ────────────────────────────────────────────────────── */
@@ -183,7 +321,13 @@ int gmail_sync_full(GmailClient *gc) {
         fprintf(stderr, "\r\033[K  %d fetched, %d already cached\n",
                 fetched, skipped);
 
-    /* 3. Save historyId from the Gmail profile */
+    /* 3. Rebuild label indexes from .hdr files (covers cached messages too).
+     * Efficient O(N log N) bulk rebuild ensures indexes are complete even
+     * when messages were cached before this sync run. */
+    if (uid_count > 0)
+        rebuild_label_indexes((const char (*)[17])all_uids, uid_count);
+
+    /* 5. Save historyId from the Gmail profile */
     {
         RAII_STRING char *hid = gmail_get_history_id(gc);
         if (hid)
@@ -192,7 +336,7 @@ int gmail_sync_full(GmailClient *gc) {
             logger_log(LOG_WARN, "gmail_sync: could not retrieve historyId");
     }
 
-    /* 4. Save label ID→name mapping for friendly display */
+    /* 6. Save label ID→name mapping for friendly display */
     {
         char **lbl_names = NULL, **lbl_ids = NULL;
         int lbl_count = 0;

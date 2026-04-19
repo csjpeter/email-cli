@@ -49,6 +49,22 @@ int gmail_sync_full(GmailClient *gc);
 int gmail_sync_incremental(GmailClient *gc);
 
 /**
+ * @brief Rebuild all label .idx files from locally cached .hdr files.
+ *
+ * Does NOT contact the Gmail API.  Reads every .hdr file in the local
+ * message store and reconstructs the label index files from scratch.
+ *
+ * Use this to repair missing or incomplete indexes without re-downloading
+ * messages (e.g. after upgrading from a version that did not write .idx
+ * files, or to recover from a corrupted index).
+ *
+ * Local store must be initialised (local_store_init) before calling.
+ *
+ * @return 0 on success, -1 on error.
+ */
+int gmail_sync_rebuild_indexes(void);
+
+/**
  * @brief Check whether a Gmail label should be filtered out from display/indexing.
  *
  * Filters out CATEGORY_* labels and IMPORTANT (opaque Google ML classification).

@@ -69,6 +69,20 @@ int   local_hdr_update_flags(const char *folder, const char *uid, int new_flags)
 void  local_hdr_evict_stale(const char *folder,
                               const char (*keep_uids)[17], int keep_count);
 
+/**
+ * @brief List all UIDs that have a .hdr file for the given folder.
+ *
+ * Scans all 100 bucket directories under headers/<folder>/ and collects
+ * the UID (filename stem) for every .hdr file found.
+ *
+ * @param folder      IMAP folder name, or "" for Gmail.
+ * @param uids_out    Set to heap-allocated array of char[17] UID strings (caller frees).
+ * @param count_out   Set to the number of entries in *uids_out.
+ * @return 0 on success, -1 on allocation failure.
+ */
+int local_hdr_list_all_uids(const char *folder,
+                             char (**uids_out)[17], int *count_out);
+
 /* ── Index ───────────────────────────────────────────────────────────── */
 
 /**

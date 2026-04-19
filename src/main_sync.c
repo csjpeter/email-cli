@@ -23,10 +23,10 @@
 
 static void help(void) {
     printf(
-        "Usage: email-sync [--account <email>]\n"
+        "Usage: email-sync [--account <email>] [--rebuild-index]\n"
         "       email-sync cron <setup|remove|status>\n"
         "\n"
-        "Downloads all messages from all IMAP folders to the local store.\n"
+        "Downloads all messages from all accounts to the local store.\n"
         "Without --account, every configured account is synced in alphabetical\n"
         "order.  With --account, only the specified account is synced.\n"
         "Messages already stored locally are skipped.\n"
@@ -39,6 +39,8 @@ static void help(void) {
         "\n"
         "Options:\n"
         "  --account <email>   Sync only the account with this email address\n"
+        "  --rebuild-index     Rebuild label index files from cached .hdr files\n"
+        "                      (Gmail only; does not re-download messages)\n"
         "  --help, -h          Show this help message\n"
         "\n"
         "Exit Codes:\n"
@@ -153,6 +155,7 @@ int main(int argc, char *argv[]) {
 
     /* Parse remaining options (sync mode) */
     const char *account_filter = NULL;
+    int do_rebuild_index = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--account") == 0) {
             if (i + 1 >= argc) {
@@ -163,13 +166,24 @@ int main(int argc, char *argv[]) {
             account_filter = argv[++i];
             continue;
         }
+        if (strcmp(argv[i], "--rebuild-index") == 0) {
+            do_rebuild_index = 1;
+            continue;
+        }
         fprintf(stderr, "Unknown option '%s'.\nRun 'email-sync --help' for usage.\n",
                 argv[i]);
         logger_close();
         return EXIT_FAILURE;
     }
 
-    /* Run sync (handles account loading, local_store_init, and iteration) */
+    /* Run requested operation */
+    if (do_rebuild_index) {
+        int rc = email_service_rebuild_indexes(account_filter);
+        logger_close();
+        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    /* Normal sync */
     int result = email_service_sync_all(account_filter);
 
     logger_log(LOG_INFO, "--- email-sync finished (result: %d) ---", result);

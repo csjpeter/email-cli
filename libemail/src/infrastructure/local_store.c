@@ -235,6 +235,52 @@ void local_hdr_evict_stale(const char *folder,
     free(sorted);
 }
 
+int local_hdr_list_all_uids(const char *folder,
+                             char (**uids_out)[17], int *count_out) {
+    *uids_out  = NULL;
+    *count_out = 0;
+
+    int cap = 256;
+    char (*arr)[17] = malloc((size_t)cap * sizeof(char[17]));
+    if (!arr) return -1;
+    int count = 0;
+
+    /* Walk all 100 buckets (d1=0..9, d2=0..9) */
+    for (int d1 = 0; d1 <= 9; d1++) {
+        for (int d2 = 0; d2 <= 9; d2++) {
+            RAII_STRING char *dir = NULL;
+            if (asprintf(&dir, "%s/headers/%s/%d/%d",
+                         g_account_base, folder, d1, d2) == -1)
+                continue;
+            RAII_DIR DIR *dp = opendir(dir);
+            if (!dp) continue;
+
+            struct dirent *ent;
+            while ((ent = readdir(dp)) != NULL) {
+                const char *name = ent->d_name;
+                const char *dot  = strrchr(name, '.');
+                if (!dot || strcmp(dot, ".hdr") != 0) continue;
+                size_t stem_len = (size_t)(dot - name);
+                if (stem_len == 0 || stem_len > 16) continue;
+
+                if (count >= cap) {
+                    cap *= 2;
+                    char (*tmp)[17] = realloc(arr, (size_t)cap * sizeof(char[17]));
+                    if (!tmp) { free(arr); return -1; }
+                    arr = tmp;
+                }
+                memset(arr[count], 0, 17);
+                memcpy(arr[count], name, stem_len);
+                count++;
+            }
+        }
+    }
+
+    *uids_out  = arr;
+    *count_out = count;
+    return 0;
+}
+
 /* ── Index helpers ───────────────────────────────────────────────────── */
 
 /** @brief Checks if a reference line already exists in an index file. */

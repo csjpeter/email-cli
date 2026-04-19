@@ -1511,6 +1511,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             folder = gmail_resolved_id;
     }
 
+    /* Friendly display name for the folder/label (used in status bar).
+     * For Gmail user labels: look up display name from ID.
+     * For IMAP or system labels: use the ID as-is. */
+    RAII_STRING char *folder_display_alloc = NULL;
+    if (cfg->gmail_mode && folder)
+        folder_display_alloc = local_gmail_label_name_lookup(folder);
+    const char *folder_display = folder_display_alloc ? folder_display_alloc : folder;
+
     int list_result = 0;
 
     logger_log(LOG_INFO, "Listing %s @ %s/%s", cfg->user, cfg->host, folder);
@@ -1549,7 +1557,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 char cl[512];
                 snprintf(cl, sizeof(cl),
                          "  0 of 0 message(s) in %s (0 unread) [%s].  \u26a0 No cached data \u2014 run 'email-sync' or 's=sync'",
-                         folder, cfg->user ? cfg->user : "?");
+                         folder_display, cfg->user ? cfg->user : "?");
                 printf("\033[7m%s", cl);
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
@@ -1701,7 +1709,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             free(done_uids);
             free(all_uids);
             if (!opts->pager) {
-                printf("No messages in %s.\n", folder);
+                printf("No messages in %s.\n", folder_display);
                 return 0;
             }
             RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
@@ -1715,7 +1723,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 char cl[512];
                 snprintf(cl, sizeof(cl),
                          "  0 of 0 message(s) in %s (0 unread) [%s].",
-                         folder, cfg->user ? cfg->user : "?");
+                         folder_display, cfg->user ? cfg->user : "?");
                 printf("\033[7m%s", cl);
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
@@ -1784,7 +1792,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         manifest_free(manifest);
         free(entries);
         if (!opts->pager) {
-            printf("No messages in %s.\n", folder);
+            printf("No messages in %s.\n", folder_display);
             return 0;
         }
         RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
@@ -1798,7 +1806,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             char cl[512];
             snprintf(cl, sizeof(cl),
                      "  0 of 0 message(s) in %s (0 unread) [%s].",
-                     folder, cfg->user ? cfg->user : "?");
+                     folder_display, cfg->user ? cfg->user : "?");
             printf("\033[7m%s", cl);
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
@@ -1936,7 +1944,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 suffix = "";
             snprintf(cl, sizeof(cl),
                      "  %d-%d of %d message(s) in %s (%d unread) [%s].%s",
-                     wstart + 1, wend, show_count, folder, unseen_count,
+                     wstart + 1, wend, show_count, folder_display, unseen_count,
                      cfg->user ? cfg->user : "?", suffix);
             if (opts->pager) {
                 /* TUI mode: reverse-video status bar padded to full terminal width */

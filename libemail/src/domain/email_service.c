@@ -2212,8 +2212,10 @@ read_key_again: ;
                     mail_client_set_flag(list_mc, uid, "\\Seen", 1);
                     mail_client_modify_label(list_mc, uid, "INBOX", 0);
                 }
-                /* Update local index: remove from INBOX .idx */
+                /* Update local index and .hdr: remove INBOX */
                 label_idx_remove("INBOX", uid);
+                { const char *_inbox = "INBOX";
+                  local_hdr_update_labels("", uid, NULL, 0, &_inbox, 1); }
                 /* If no other labels remain, add to _nolabel */
                 {
                     char *lbl = local_hdr_get_labels("", uid);
@@ -2315,6 +2317,7 @@ read_key_again: ;
                     if (list_mc)
                         mail_client_modify_label(list_mc, uid, folder, 0);
                     label_idx_remove(folder, uid);
+                    local_hdr_update_labels("", uid, NULL, 0, &folder, 1);
                     /* If no other real labels remain, put in archive */
                     char *lbl = local_hdr_get_labels("", uid);
                     int has_real = 0;
@@ -2882,8 +2885,13 @@ static void show_label_picker(MailClient *mc,
             pick_on[pcursor] = !pick_on[pcursor];
             const char *lid = pick_ids[pcursor];
             int adding = pick_on[pcursor];
-            if (adding) label_idx_add(lid, uid);
-            else        label_idx_remove(lid, uid);
+            if (adding) {
+                label_idx_add(lid, uid);
+                local_hdr_update_labels("", uid, &lid, 1, NULL, 0);
+            } else {
+                label_idx_remove(lid, uid);
+                local_hdr_update_labels("", uid, NULL, 0, &lid, 1);
+            }
             if (mc) {
                 if (strcmp(lid, "STARRED") == 0)
                     mail_client_set_flag(mc, uid, "\\Flagged", adding);
@@ -4317,10 +4325,13 @@ int email_service_set_label(const Config *cfg, const char *uid,
     int rc = mail_client_modify_label(mc, uid, label, add);
     mail_client_free(mc);
 
-    if (add)
+    if (add) {
         label_idx_add(label, uid);
-    else
+        local_hdr_update_labels("", uid, &label, 1, NULL, 0);
+    } else {
         label_idx_remove(label, uid);
+        local_hdr_update_labels("", uid, NULL, 0, &label, 1);
+    }
 
     return rc;
 }

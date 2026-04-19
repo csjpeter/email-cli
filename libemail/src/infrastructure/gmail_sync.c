@@ -457,6 +457,10 @@ static void process_labels_added(const char *obj, int index, void *ctx) {
             label_idx_remove("_nolabel", id);
     }
 
+    /* Keep .hdr labels field in sync so rebuild_label_indexes stays accurate. */
+    local_hdr_update_labels("", id,
+                            (const char **)add_labels, add_count, NULL, 0);
+
     for (int i = 0; i < add_count; i++) free(add_labels[i]);
     free(add_labels);
     free(id);
@@ -503,6 +507,10 @@ static void process_labels_removed(const char *obj, int index, void *ctx) {
 
     if (!has_real_label)
         label_idx_add("_nolabel", id);
+
+    /* Keep .hdr labels field in sync so rebuild_label_indexes stays accurate. */
+    local_hdr_update_labels("", id,
+                            NULL, 0, (const char **)rm_labels, rm_count);
 
     free(id);
     hc->label_changes++;

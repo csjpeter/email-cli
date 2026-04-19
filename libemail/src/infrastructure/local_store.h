@@ -65,6 +65,26 @@ char *local_hdr_load(const char *folder, const char *uid);
 /** @brief Updates the flags integer (5th tab field) in a stored .hdr file. */
 int   local_hdr_update_flags(const char *folder, const char *uid, int new_flags);
 
+/**
+ * @brief Update the labels field of a Gmail .hdr file in place.
+ *
+ * Loads the .hdr, adds label IDs from add_ids[], removes those in rm_ids[],
+ * then writes the result back.  Either array may be NULL/0 for a one-sided
+ * update.  Called by incremental sync on labelsAdded/labelsRemoved events so
+ * that .hdr files stay current and rebuild_label_indexes() stays accurate.
+ *
+ * @param folder    Folder path (empty string for Gmail flat store).
+ * @param uid       16-char UID string.
+ * @param add_ids   Label IDs to add (NULL = none).
+ * @param add_count Number of entries in add_ids.
+ * @param rm_ids    Label IDs to remove (NULL = none).
+ * @param rm_count  Number of entries in rm_ids.
+ * @return 0 on success, -1 on error.
+ */
+int   local_hdr_update_labels(const char *folder, const char *uid,
+                               const char **add_ids, int add_count,
+                               const char **rm_ids,  int rm_count);
+
 /** @brief Removes header files whose UID is not in @p keep_uids. */
 void  local_hdr_evict_stale(const char *folder,
                               const char (*keep_uids)[17], int keep_count);

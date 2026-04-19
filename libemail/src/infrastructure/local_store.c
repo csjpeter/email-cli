@@ -187,6 +187,96 @@ int local_hdr_update_flags(const char *folder, const char *uid, int new_flags) {
     return rc;
 }
 
+int local_hdr_update_labels(const char *folder, const char *uid,
+                             const char **add_ids, int add_count,
+                             const char **rm_ids,  int rm_count) {
+    char *hdr = local_hdr_load(folder, uid);
+    if (!hdr) return -1;
+
+    /* .hdr format: from\tsubject\tdate\tlabels\tflags
+     * Locate the labels field (4th tab-separated token). */
+    char *t1 = strchr(hdr, '\t');
+    if (!t1) { free(hdr); return -1; }
+    char *t2 = strchr(t1 + 1, '\t');
+    if (!t2) { free(hdr); return -1; }
+    char *t3 = strchr(t2 + 1, '\t');
+    if (!t3) { free(hdr); return -1; }
+    char *t4 = strchr(t3 + 1, '\t');   /* may be NULL if flags field absent */
+
+    /* labels field: [t3+1 .. t4)  (or end of string if no t4) */
+    *t3 = '\0';                /* NUL-terminate prefix (from\tsubject\tdate) */
+    const char *prefix  = hdr;
+    const char *lbl_str = t3 + 1;
+    const char *suffix  = t4 ? t4 + 1 : "";  /* flags value */
+    if (t4) *t4 = '\0';
+
+    /* Build new label set: start from existing labels */
+    int cap = 64, cnt = 0;
+    char **labels = malloc((size_t)cap * sizeof(char *));
+    if (!labels) { free(hdr); return -1; }
+
+    char *lbl_copy = strdup(lbl_str);
+    if (!lbl_copy) { free(labels); free(hdr); return -1; }
+    char *saveptr = NULL;
+    for (char *tok = strtok_r(lbl_copy, ",", &saveptr);
+         tok; tok = strtok_r(NULL, ",", &saveptr)) {
+        if (!tok[0]) continue;
+        /* skip labels in rm_ids */
+        int rm = 0;
+        for (int i = 0; i < rm_count; i++)
+            if (rm_ids && rm_ids[i] && strcmp(tok, rm_ids[i]) == 0) { rm = 1; break; }
+        if (rm) continue;
+        if (cnt == cap) {
+            cap *= 2;
+            char **tmp = realloc(labels, (size_t)cap * sizeof(char *));
+            if (!tmp) { free(lbl_copy); free(labels); free(hdr); return -1; }
+            labels = tmp;
+        }
+        labels[cnt++] = tok;   /* points into lbl_copy */
+    }
+
+    /* append add_ids (skip duplicates) */
+    for (int i = 0; i < add_count; i++) {
+        if (!add_ids || !add_ids[i] || !add_ids[i][0]) continue;
+        int dup = 0;
+        for (int j = 0; j < cnt; j++)
+            if (strcmp(labels[j], add_ids[i]) == 0) { dup = 1; break; }
+        if (!dup) {
+            if (cnt == cap) {
+                cap *= 2;
+                char **tmp = realloc(labels, (size_t)cap * sizeof(char *));
+                if (!tmp) { free(lbl_copy); free(labels); free(hdr); return -1; }
+                labels = tmp;
+            }
+            labels[cnt++] = (char *)add_ids[i];  /* borrows caller's pointer */
+        }
+    }
+
+    /* Rebuild labels CSV */
+    size_t lbl_len = 0;
+    for (int i = 0; i < cnt; i++) lbl_len += strlen(labels[i]) + 1;
+    char *new_lbl = malloc(lbl_len + 1);
+    if (!new_lbl) { free(lbl_copy); free(labels); free(hdr); return -1; }
+    new_lbl[0] = '\0';
+    for (int i = 0; i < cnt; i++) {
+        if (i) strcat(new_lbl, ",");
+        strcat(new_lbl, labels[i]);
+    }
+    free(lbl_copy);
+    free(labels);
+
+    /* Reassemble: prefix already NUL-terminated at t3 */
+    char *updated = NULL;
+    int rc = asprintf(&updated, "%s\t%s\t%s", prefix, new_lbl, suffix);
+    free(new_lbl);
+    free(hdr);
+    if (rc == -1) return -1;
+
+    rc = local_hdr_save(folder, uid, updated, strlen(updated));
+    free(updated);
+    return rc;
+}
+
 static int cmp_uid_evict(const void *a, const void *b) {
     return memcmp(a, b, 16);
 }

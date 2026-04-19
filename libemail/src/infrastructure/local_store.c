@@ -905,6 +905,27 @@ int label_idx_count(const char *label) {
     return n;
 }
 
+int label_idx_intersect_count(const char *label_a,
+                               const char (*b_uids)[17], int b_count) {
+    if (!label_a || b_count <= 0 || !b_uids) return 0;
+    char (*a_uids)[17] = NULL;
+    int a_count = 0;
+    if (label_idx_load(label_a, &a_uids, &a_count) != 0 || a_count == 0) {
+        free(a_uids);
+        return 0;
+    }
+    /* Merge-join on two sorted arrays — O(N+M). */
+    int i = 0, j = 0, matches = 0;
+    while (i < a_count && j < b_count) {
+        int cmp = strcmp(a_uids[i], b_uids[j]);
+        if      (cmp == 0) { matches++; i++; j++; }
+        else if (cmp  < 0) { i++; }
+        else               { j++; }
+    }
+    free(a_uids);
+    return matches;
+}
+
 int label_idx_load(const char *label, char (**uids_out)[17], int *count_out) {
     *uids_out  = NULL;
     *count_out = 0;

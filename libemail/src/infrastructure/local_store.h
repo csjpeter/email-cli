@@ -215,6 +215,20 @@ int label_idx_remove(const char *label, const char *uid);
 int label_idx_count(const char *label);
 
 /**
+ * @brief Count UIDs present in both label_a's index and a pre-loaded sorted array.
+ *
+ * Performs an O(N+M) merge-join.  Load the second array once with
+ * label_idx_load() and reuse it across many calls.
+ *
+ * @param label_a   Label name — its .idx is loaded from disk.
+ * @param b_uids    Pre-loaded, sorted UID array for the second label.
+ * @param b_count   Number of entries in b_uids.
+ * @return Number of UIDs common to both indexes, or 0 on error / empty.
+ */
+int label_idx_intersect_count(const char *label_a,
+                               const char (*b_uids)[17], int b_count);
+
+/**
  * @brief Load all UIDs from a label index.
  *
  * @param label      Label name (e.g. "INBOX", "Work", "_nolabel").

@@ -603,34 +603,38 @@ typedef struct { int messages; int unseen; int flagged; } FolderStatus;
 /** Read total, unseen and flagged counts for each folder/label from local storage.
  *  Instant — no server connection needed.
  *  IMAP: reads per-folder manifests.
- *  Gmail: uses .idx file counts for totals; manifest (if present) for unseen/flagged.
+ *  Gmail: total from .idx; unseen = L∩UNREAD, flagged = L∩STARRED (both via
+ *         merge-join on sorted index files — accurate, no server contact needed).
  *  Returns heap-allocated array; caller must free(). */
 static FolderStatus *fetch_all_folder_statuses(const Config *cfg,
                                                 char **folders, int count) {
     FolderStatus *st = calloc((size_t)count, sizeof(FolderStatus));
     if (!st || count == 0) return st;
-    for (int i = 0; i < count; i++) {
-        if (cfg->gmail_mode) {
-            /* Gmail: .idx gives the authoritative total count per label.
-             * SPAM and TRASH are stored under their underscore-prefixed local
-             * names (_spam, _trash) to avoid collision with user labels. */
+    if (cfg->gmail_mode) {
+        /* Load UNREAD and STARRED indexes once; reuse across all labels. */
+        char (*unread_uids)[17]  = NULL; int unread_count  = 0;
+        char (*starred_uids)[17] = NULL; int starred_count = 0;
+        label_idx_load("UNREAD",  &unread_uids,  &unread_count);
+        label_idx_load("STARRED", &starred_uids, &starred_count);
+
+        for (int i = 0; i < count; i++) {
+            /* TRASH and SPAM use underscore-prefixed local index names. */
             const char *idx_name = folders[i];
             if (strcmp(folders[i], "TRASH") == 0) idx_name = "_trash";
             else if (strcmp(folders[i], "SPAM") == 0) idx_name = "_spam";
+
             st[i].messages = label_idx_count(idx_name);
-            /* Use manifest for unseen/flagged if available (populated by 'list --label') */
-            Manifest *m = manifest_load(folders[i]);
-            if (m) {
-                for (int j = 0; j < m->count; j++) {
-                    if (m->entries[j].flags & MSG_FLAG_UNSEEN)  st[i].unseen++;
-                    if (m->entries[j].flags & MSG_FLAG_FLAGGED) st[i].flagged++;
-                }
-                manifest_free(m);
-            }
-        } else {
+            st[i].unseen   = label_idx_intersect_count(idx_name,
+                                 (const char (*)[17])unread_uids,  unread_count);
+            st[i].flagged  = label_idx_intersect_count(idx_name,
+                                 (const char (*)[17])starred_uids, starred_count);
+        }
+        free(unread_uids);
+        free(starred_uids);
+    } else {
+        for (int i = 0; i < count; i++)
             manifest_count_folder(folders[i], &st[i].messages,
                                   &st[i].unseen, &st[i].flagged);
-        }
     }
     return st;
 }

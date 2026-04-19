@@ -1578,6 +1578,50 @@ run_rebuild_idx --rebuild-index --account "$GMAIL_ACCT_A" >/dev/null 2>&1
 check "29.6c remove-label UNREAD: UID still absent after rebuild" "no" \
     "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
 
+# ── Full email-sync regression tests ─────────────────────────────────────
+# The original reported bug: mark-read then email-sync → message appears
+# unread again.  This exercises the full sync path (rebuild_label_indexes
+# called from gmail_sync_full) rather than just --rebuild-index.
+# Force a full sync by deleting the historyId before each run.
+
+HIST_A="$H_GMAIL/data/email-cli/accounts/$GMAIL_ACCT_A/gmail_history_id"
+
+# 29.7 mark-read survives full email-sync (the original reported bug)
+run_gmail_cli_a mark-read "$HEX_UID" >/dev/null 2>&1
+check "29.7a mark-read: UID absent from UNREAD.idx before sync" "no" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+rm -f "$HIST_A"
+run_gmail_sync_a >/dev/null 2>&1
+check "29.7b mark-read: UID still absent from UNREAD.idx after full sync" "no" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+
+# 29.8 mark-unread survives full email-sync
+run_gmail_cli_a mark-unread "$HEX_UID" >/dev/null 2>&1
+check "29.8a mark-unread: UID in UNREAD.idx before sync" "yes" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+rm -f "$HIST_A"
+run_gmail_sync_a >/dev/null 2>&1
+check "29.8b mark-unread: UID still in UNREAD.idx after full sync" "yes" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
+
+# 29.9 mark-starred survives full email-sync
+run_gmail_cli_a mark-starred "$HEX_UID" >/dev/null 2>&1
+check "29.9a mark-starred: UID in STARRED.idx before sync" "yes" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
+rm -f "$HIST_A"
+run_gmail_sync_a >/dev/null 2>&1
+check "29.9b mark-starred: UID still in STARRED.idx after full sync" "yes" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
+
+# 29.10 remove-starred survives full email-sync
+run_gmail_cli_a remove-starred "$HEX_UID" >/dev/null 2>&1
+check "29.10a remove-starred: UID absent from STARRED.idx before sync" "no" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
+rm -f "$HIST_A"
+run_gmail_sync_a >/dev/null 2>&1
+check "29.10b remove-starred: UID still absent from STARRED.idx after full sync" "no" \
+    "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
+
 # Cleanup Phase 26+27+28+29
 kill "$GMAIL_SERVER_A_PID" "$GMAIL_SERVER_B_PID" 2>/dev/null || true
 rm -rf "$H_GMAIL"

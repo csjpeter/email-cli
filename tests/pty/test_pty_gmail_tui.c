@@ -344,6 +344,56 @@ static void test_d_key_cursor_row_has_reverse(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  TEST: second 'd' undoes the pending-remove (toggle)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Pressing 'd' twice on the same row must cancel the pending-remove:
+ *   - After first 'd': row has red strikethrough (PTY_ATTR_STRIKE set).
+ *   - After second 'd': strikethrough is gone; label is restored locally;
+ *     pressing 'R' (refresh) must keep the row visible.
+ */
+static void test_d_key_toggle_undo(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "d-undo: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "d-undo: pty_run");
+
+    ASSERT(navigate_to_inbox(s) == 0, "d-undo: navigate_to_inbox");
+
+    /* First 'd': mark for removal */
+    pty_send_str(s, "d");
+    pty_settle(s, SETTLE_MS);
+
+    int row1 = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row1 >= 0, "d-undo: " GMAIL_TOP_MSG " present after first d");
+    if (row1 >= 0)
+        ASSERT(pty_cell_attr(s, row1, 4) & PTY_ATTR_STRIKE,
+               "d-undo: STRIKE set after first d");
+
+    /* Second 'd': undo */
+    pty_send_str(s, "d");
+    pty_settle(s, SETTLE_MS);
+
+    int row2 = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row2 >= 0, "d-undo: " GMAIL_TOP_MSG " still present after second d");
+    if (row2 >= 0)
+        ASSERT(!(pty_cell_attr(s, row2, 4) & PTY_ATTR_STRIKE),
+               "d-undo: STRIKE cleared after second d");
+
+    /* Refresh — row must survive (label was restored) */
+    pty_send_str(s, "R");
+    pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_screen_contains(s, GMAIL_TOP_MSG),
+           "d-undo: " GMAIL_TOP_MSG " visible after refresh (undo preserved)");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  TEST: 'd' key → message absent after explicit refresh
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -468,6 +518,14 @@ int main(int argc, char *argv[]) {
     printf("--- Fresh sync (test 4) ---\n");
     if (reset_and_sync() != 0) {
         fprintf(stderr, "FATAL: reset_and_sync failed for test 4\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_d_key_toggle_undo);
+
+    printf("--- Fresh sync (test 5) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 5\n");
         stop_gmail_mock();
         goto done;
     }

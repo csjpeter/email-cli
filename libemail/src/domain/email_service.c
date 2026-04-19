@@ -2331,37 +2331,50 @@ read_key_again: ;
                 break;
             }
             if (ch == 'd' && is_gmail) {
-                /* Remove current label (folder) from this message.
+                /* Toggle: first 'd' removes the label (pending_remove);
+                 * second 'd' on the same row restores it (undo).
                  * Restricted to non-meta labels (no underscore prefix). */
                 if (folder[0] != '_') {
                     const char *uid = entries[cursor].uid;
-                    if (list_mc)
-                        mail_client_modify_label(list_mc, uid, folder, 0);
-                    label_idx_remove(folder, uid);
-                    local_hdr_update_labels("", uid, NULL, 0, &folder, 1);
-                    /* If no other real labels remain, put in archive */
-                    char *lbl = local_hdr_get_labels("", uid);
-                    int has_real = 0;
-                    if (lbl) {
-                        char *tok = lbl, *s;
-                        while (tok && *tok) {
-                            s = strchr(tok, ',');
-                            size_t tl = s ? (size_t)(s - tok) : strlen(tok);
-                            char lb[64];
-                            if (tl >= sizeof(lb)) tl = sizeof(lb) - 1;
-                            memcpy(lb, tok, tl); lb[tl] = '\0';
-                            if (strcmp(lb, folder) != 0 &&
-                                strcmp(lb, "UNREAD") != 0 &&
-                                strcmp(lb, "IMPORTANT") != 0 &&
-                                strncmp(lb, "CATEGORY_", 9) != 0)
-                                has_real = 1;
-                            tok = s ? s + 1 : NULL;
+                    if (pending_remove && pending_remove[cursor]) {
+                        /* Undo: restore the label that was removed */
+                        if (list_mc)
+                            mail_client_modify_label(list_mc, uid, folder, 1);
+                        label_idx_add(folder, uid);
+                        local_hdr_update_labels("", uid, &folder, 1, NULL, 0);
+                        /* Remove from archive fallback if it was added */
+                        label_idx_remove("_nolabel", uid);
+                        pending_remove[cursor] = 0;
+                    } else {
+                        /* Remove label from this message */
+                        if (list_mc)
+                            mail_client_modify_label(list_mc, uid, folder, 0);
+                        label_idx_remove(folder, uid);
+                        local_hdr_update_labels("", uid, NULL, 0, &folder, 1);
+                        /* If no other real labels remain, put in archive */
+                        char *lbl = local_hdr_get_labels("", uid);
+                        int has_real = 0;
+                        if (lbl) {
+                            char *tok = lbl, *s;
+                            while (tok && *tok) {
+                                s = strchr(tok, ',');
+                                size_t tl = s ? (size_t)(s - tok) : strlen(tok);
+                                char lb[64];
+                                if (tl >= sizeof(lb)) tl = sizeof(lb) - 1;
+                                memcpy(lb, tok, tl); lb[tl] = '\0';
+                                if (strcmp(lb, folder) != 0 &&
+                                    strcmp(lb, "UNREAD") != 0 &&
+                                    strcmp(lb, "IMPORTANT") != 0 &&
+                                    strncmp(lb, "CATEGORY_", 9) != 0)
+                                    has_real = 1;
+                                tok = s ? s + 1 : NULL;
+                            }
+                            free(lbl);
                         }
-                        free(lbl);
+                        if (!has_real) label_idx_add("_nolabel", uid);
+                        /* Mark row for immediate visual feedback (red strikethrough) */
+                        if (pending_remove) pending_remove[cursor] = 1;
                     }
-                    if (!has_real) label_idx_add("_nolabel", uid);
-                    /* Mark row for immediate visual feedback (red strikethrough) */
-                    if (pending_remove) pending_remove[cursor] = 1;
                 }
                 break;
             }

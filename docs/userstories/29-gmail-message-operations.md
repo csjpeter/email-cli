@@ -24,6 +24,7 @@
 | 12 | Server-side label modifications update the local `.idx` files immediately. |
 | 13 | After pressing **d** (or **r**), the row is shown with red foreground and strikethrough until the next refresh, giving immediate visual feedback. |
 | 14 | When the cursor is on a pending-remove row, the row is rendered with **both** inverse-video (cursor highlight) and red strikethrough, so the cursor position remains clearly visible. |
+| 15 | Pressing **d** a second time on the same pending-remove row cancels the operation: the label is restored locally and the strikethrough is cleared. A subsequent refresh keeps the message visible. |
 
 ---
 

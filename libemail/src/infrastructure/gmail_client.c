@@ -12,6 +12,16 @@
 
 #define GMAIL_API "https://gmail.googleapis.com/gmail/v1/users/me"
 
+/**
+ * Return the base URL for all Gmail API calls.
+ * If the environment variable GMAIL_API_BASE_URL is set and non-empty,
+ * it overrides the default (useful for pointing at a mock server in tests).
+ */
+static const char *gmail_api_base(void) {
+    const char *override = getenv("GMAIL_API_BASE_URL");
+    return (override && override[0]) ? override : GMAIL_API;
+}
+
 /* ── Client struct ────────────────────────────────────────────────── */
 
 struct GmailClient {
@@ -71,6 +81,12 @@ static char *api_get(GmailClient *c, const char *url, long *http_code) {
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
+    /* Disable SSL verification when talking to a plain HTTP test server */
+    if (strncmp(url, "http://", 7) == 0) {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+
     CURLcode res = curl_easy_perform(curl);
     curl_slist_free_all(headers);
 
@@ -110,6 +126,12 @@ static char *api_post_json(GmailClient *c, const char *url,
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+    /* Disable SSL verification when talking to a plain HTTP test server */
+    if (strncmp(url, "http://", 7) == 0) {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
 
     if (json_body) {
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body);
@@ -304,6 +326,12 @@ static char *api_delete(GmailClient *c, const char *url, long *http_code) {
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
+    /* Disable SSL verification when talking to a plain HTTP test server */
+    if (strncmp(url, "http://", 7) == 0) {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+
     CURLcode res = curl_easy_perform(curl);
     curl_slist_free_all(headers);
 
@@ -344,7 +372,7 @@ int gmail_create_label(GmailClient *c, const char *name, char **id_out) {
     if (id_out) *id_out = NULL;
 
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/labels", GMAIL_API) == -1) return -1;
+    if (asprintf(&url, "%s/labels", gmail_api_base()) == -1) return -1;
 
     char body[1024];
     snprintf(body, sizeof(body), "{\"name\":\"%s\"}", name);
@@ -364,7 +392,7 @@ int gmail_create_label(GmailClient *c, const char *name, char **id_out) {
 
 int gmail_delete_label(GmailClient *c, const char *label_id) {
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/labels/%s", GMAIL_API, label_id) == -1) return -1;
+    if (asprintf(&url, "%s/labels/%s", gmail_api_base(), label_id) == -1) return -1;
 
     long code = 0;
     RAII_STRING char *resp = api_delete_retry(c, url, &code);
@@ -416,7 +444,7 @@ int gmail_list_labels(GmailClient *c, char ***names_out,
     *count_out = 0;
 
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/labels", GMAIL_API) == -1) return -1;
+    if (asprintf(&url, "%s/labels", gmail_api_base()) == -1) return -1;
 
     long code = 0;
     RAII_STRING char *resp = api_get_retry(c, url, &code);
@@ -472,7 +500,7 @@ int gmail_list_messages(GmailClient *c, const char *label_id,
     for (;;) {
         /* Build URL with optional query parameters */
         char url_buf[2048];
-        int n = snprintf(url_buf, sizeof(url_buf), "%s/messages?maxResults=500", GMAIL_API);
+        int n = snprintf(url_buf, sizeof(url_buf), "%s/messages?maxResults=500", gmail_api_base());
         if (label_id)
             n += snprintf(url_buf + n, sizeof(url_buf) - (size_t)n, "&labelIds=%s", label_id);
         if (query)
@@ -515,7 +543,7 @@ char *gmail_fetch_message(GmailClient *c, const char *uid,
     if (label_count_out) *label_count_out = 0;
 
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/messages/%s?format=raw", GMAIL_API, uid) == -1)
+    if (asprintf(&url, "%s/messages/%s?format=raw", gmail_api_base(), uid) == -1)
         return NULL;
 
     long code = 0;
@@ -554,7 +582,7 @@ int gmail_modify_labels(GmailClient *c, const char *uid,
                         const char **add_labels, int add_count,
                         const char **remove_labels, int remove_count) {
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/messages/%s/modify", GMAIL_API, uid) == -1)
+    if (asprintf(&url, "%s/messages/%s/modify", gmail_api_base(), uid) == -1)
         return -1;
 
     /* Build JSON body */
@@ -603,7 +631,7 @@ int gmail_modify_labels(GmailClient *c, const char *uid,
 
 int gmail_trash(GmailClient *c, const char *uid) {
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/messages/%s/trash", GMAIL_API, uid) == -1)
+    if (asprintf(&url, "%s/messages/%s/trash", gmail_api_base(), uid) == -1)
         return -1;
 
     long code = 0;
@@ -617,7 +645,7 @@ int gmail_trash(GmailClient *c, const char *uid) {
 
 int gmail_untrash(GmailClient *c, const char *uid) {
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/messages/%s/untrash", GMAIL_API, uid) == -1)
+    if (asprintf(&url, "%s/messages/%s/untrash", gmail_api_base(), uid) == -1)
         return -1;
 
     long code = 0;
@@ -633,7 +661,7 @@ int gmail_untrash(GmailClient *c, const char *uid) {
 
 int gmail_send(GmailClient *c, const char *raw_msg, size_t len) {
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/messages/send", GMAIL_API) == -1)
+    if (asprintf(&url, "%s/messages/send", gmail_api_base()) == -1)
         return -1;
 
     /* Base64url encode the raw RFC 2822 message */
@@ -664,7 +692,7 @@ int gmail_send(GmailClient *c, const char *raw_msg, size_t len) {
 
 char *gmail_get_history_id(GmailClient *c) {
     RAII_STRING char *url = NULL;
-    if (asprintf(&url, "%s/profile", GMAIL_API) == -1) return NULL;
+    if (asprintf(&url, "%s/profile", gmail_api_base()) == -1) return NULL;
 
     long code = 0;
     RAII_STRING char *resp = api_get_retry(c, url, &code);
@@ -679,7 +707,7 @@ char *gmail_get_history(GmailClient *c, const char *history_id) {
     RAII_STRING char *url = NULL;
     if (asprintf(&url, "%s/history?startHistoryId=%s"
                  "&historyTypes=messageAdded,messageDeleted,labelAdded,labelRemoved",
-                 GMAIL_API, history_id) == -1)
+                 gmail_api_base(), history_id) == -1)
         return NULL;
 
     long code = 0;

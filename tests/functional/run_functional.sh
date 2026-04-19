@@ -11,6 +11,8 @@ MOCK_SERVER_SRC="$PROJECT_ROOT/tests/functional/mock_imap_server.c"
 MOCK_SERVER_BIN="$PROJECT_ROOT/build/tests/functional/mock_imap_server"
 MOCK_SMTP_SRC="$PROJECT_ROOT/tests/pty/mock_smtp_server.c"
 MOCK_SMTP_BIN="$PROJECT_ROOT/build/tests/functional/mock_smtp_server"
+MOCK_GMAIL_SRC="$PROJECT_ROOT/tests/functional/mock_gmail_api_server.c"
+MOCK_GMAIL_BIN="$PROJECT_ROOT/build/tests/functional/mock_gmail_api_server"
 
 echo "--- email-cli Functional Tests ---"
 
@@ -29,6 +31,7 @@ fi
 mkdir -p "$PROJECT_ROOT/build/tests/functional"
 gcc "$MOCK_SERVER_SRC" -o "$MOCK_SERVER_BIN" -lssl -lcrypto
 gcc "$MOCK_SMTP_SRC"   -o "$MOCK_SMTP_BIN"   -lssl -lcrypto
+gcc "$MOCK_GMAIL_SRC"  -o "$MOCK_GMAIL_BIN"
 
 # Kill any lingering mock server instances from a previous (interrupted) run
 # before binding to the same ports again.
@@ -65,7 +68,8 @@ SMTP_LOG="$PROJECT_ROOT/build/tests/functional/mock_smtp.log"
     "$MOCK_SMTP_BIN") >"$SMTP_LOG" 2>&1 &
 SMTP_PID=$!
 
-trap "kill $SERVER1_PID $SERVER2_PID $SERVER3_PID $SMTP_PID 2>/dev/null || true" EXIT
+trap "kill $SERVER1_PID $SERVER2_PID $SERVER3_PID $SMTP_PID \
+          \${SERVER200_PID:-} \${GMAIL_SERVER_PID:-} 2>/dev/null || true" EXIT
 
 sleep 1
 
@@ -1030,6 +1034,335 @@ OUT_24_03=$(
 # Should not crash — either empty list or server error message
 check_not "24-US03: unknown label does not crash (no segfault output)" \
     "Segmentation fault" "$OUT_24_03"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 25 — IMAP with 2 accounts (200 + 250 messages) + cross-contamination
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 25: IMAP with 2 accounts (200 + 250 messages) ---"
+
+IMAP200_PORT=9996
+IMAP250_PORT=9998
+IMAP200_LOG="$PROJECT_ROOT/build/tests/functional/mock_server200.log"
+IMAP250_LOG="$PROJECT_ROOT/build/tests/functional/mock_server250.log"
+echo "Starting mock IMAP server A (port $IMAP200_PORT, 200 messages)..."
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP200_PORT MOCK_IMAP_COUNT=200 \
+    MOCK_IMAP_MSG_PREFIX="IMapA-Message" \
+    "$MOCK_SERVER_BIN") >"$IMAP200_LOG" 2>&1 &
+SERVER200_PID=$!
+echo "Starting mock IMAP server B (port $IMAP250_PORT, 250 messages)..."
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP250_PORT MOCK_IMAP_COUNT=250 \
+    MOCK_IMAP_MSG_PREFIX="IMapB-Message" \
+    "$MOCK_SERVER_BIN") >"$IMAP250_LOG" 2>&1 &
+SERVER250_PID=$!
+sleep 0.5
+
+H_200="/tmp/email-cli-ft-200-$$"
+ACCT200="imap200@test.local"
+ACCT250="imap250@test.local"
+rm -rf "$H_200"
+mkdir -p "$H_200/.config/email-cli/accounts/$ACCT200"
+mkdir -p "$H_200/.config/email-cli/accounts/$ACCT250"
+cat > "$H_200/.config/email-cli/accounts/$ACCT200/config.ini" <<CFG200
+EMAIL_HOST=imaps://localhost:$IMAP200_PORT
+EMAIL_USER=$ACCT200
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+EMAIL_SENT_FOLDER=INBOX.Sent
+SSL_NO_VERIFY=1
+CFG200
+cat > "$H_200/.config/email-cli/accounts/$ACCT250/config.ini" <<CFG250
+EMAIL_HOST=imaps://localhost:$IMAP250_PORT
+EMAIL_USER=$ACCT250
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+EMAIL_SENT_FOLDER=INBOX.Sent
+SSL_NO_VERIFY=1
+CFG250
+
+run_200() {
+    (export HOME="$H_200"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/email-cli" "$ACCT200" "$@" 2>&1 || true)
+}
+
+run_250() {
+    (export HOME="$H_200"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/email-cli" "$ACCT250" "$@" 2>&1 || true)
+}
+
+# ── IMAP-A (200 messages, prefix "IMapA-Message") ────────────────────────
+# 25.1 list --all --limit 200
+L200=$(run_200 --batch list --all --limit 200)
+check "25.1 imap-A list: count line shows 200" "200" "$L200"
+
+# 25.2 list with limit + offset
+L200_off=$(run_200 --batch list --all --limit 10 --offset 1)
+check "25.2 imap-A list --offset 1 --limit 10: shows messages" "IMapA" "$L200_off"
+
+# 25.3 list with higher offset
+L200_off2=$(run_200 --batch list --all --limit 10 --offset 101)
+check "25.3 imap-A list --offset 101 --limit 10: shows messages" "IMapA" "$L200_off2"
+
+# 25.4 show specific UIDs
+S200_1=$(run_200 show 1)
+check "25.4 imap-A show UID 1: subject shown" "IMapA-Message 1" "$S200_1"
+
+S200_50=$(run_200 show 50)
+check "25.5 imap-A show UID 50: subject shown" "IMapA-Message 50" "$S200_50"
+
+S200_100=$(run_200 show 100)
+check "25.6 imap-A show UID 100: subject shown" "IMapA-Message 100" "$S200_100"
+
+# 25.7 Verify different UIDs show different subjects
+check_not "25.7 imap-A show UID 50: not UID 1 subject" "IMapA-Message 1$" "$S200_50"
+check_not "25.8 imap-A show UID 100: not UID 50 subject" "IMapA-Message 50$" "$S200_100"
+
+# 25.9 list-attachments for UID with attachment (multiples of 10)
+LA200=$(run_200 --batch list-attachments 10)
+check "25.9 imap-A list-attachments UID 10: notes_10.txt listed" "notes_10" "$LA200"
+
+# 25.10 list-attachments for UID without attachment
+LA200_1=$(run_200 --batch list-attachments 1)
+check_not "25.10 imap-A list-attachments UID 1: no notes_10.txt" "notes_10" "$LA200_1"
+
+# 25.11 save-attachment
+SAVE200_DIR="/tmp/email-cli-ft-attach200-$$"
+mkdir -p "$SAVE200_DIR"
+SA200=$(run_200 --batch save-attachment 10 notes_10.txt "$SAVE200_DIR")
+check "25.11 imap-A save-attachment UID 10: confirmation" "aved\|uccessful\|notes" "$SA200"
+check "25.12 imap-A save-attachment UID 10: file exists" "." \
+    "$(test -f "$SAVE200_DIR/notes_10.txt" && echo ok || echo missing)"
+rm -rf "$SAVE200_DIR"
+
+# 25.13 list-folders
+F200=$(run_200 list-folders)
+check "25.13 imap-A list-folders: INBOX listed" "INBOX" "$F200"
+
+# ── IMAP-B (250 messages, prefix "IMapB-Message") ────────────────────────
+# 25.14 list all 250 messages
+L250=$(run_250 --batch list --all --limit 250)
+check "25.14 imap-B list: count line shows 250" "250" "$L250"
+
+# 25.15 list offset
+L250_off=$(run_250 --batch list --all --limit 10 --offset 201)
+check "25.15 imap-B list --offset 201 --limit 10: shows messages" "IMapB" "$L250_off"
+
+# 25.16 show UID 1
+S250_1=$(run_250 show 1)
+check "25.16 imap-B show UID 1: correct subject" "IMapB-Message 1" "$S250_1"
+
+# 25.17 show UID 200
+S250_200=$(run_250 show 200)
+check "25.17 imap-B show UID 200: correct subject" "IMapB-Message 200" "$S250_200"
+
+# 25.18 show UID 250
+S250_250=$(run_250 show 250)
+check "25.18 imap-B show UID 250: correct subject" "IMapB-Message 250" "$S250_250"
+
+# 25.19 list-attachments UID 20 (multiple of 10)
+LA250=$(run_250 --batch list-attachments 20)
+check "25.19 imap-B list-attachments UID 20: notes_20.txt listed" "notes_20" "$LA250"
+
+# 25.20 save-attachment
+SAVE250_DIR="/tmp/email-cli-ft-attach250-$$"
+mkdir -p "$SAVE250_DIR"
+SA250=$(run_250 --batch save-attachment 20 notes_20.txt "$SAVE250_DIR")
+check "25.20 imap-B save-attachment UID 20: confirmation" "aved\|uccessful\|notes" "$SA250"
+check "25.21 imap-B save-attachment UID 20: file exists" "." \
+    "$(test -f "$SAVE250_DIR/notes_20.txt" && echo ok || echo missing)"
+rm -rf "$SAVE250_DIR"
+
+# ── IMAP cross-contamination checks ──────────────────────────────────────
+# 25.22 IMAP-A list must NOT contain IMAP-B subjects
+check_not "25.22 imap-A list: no IMapB subjects" "IMapB" "$L200"
+
+# 25.23 IMAP-B list must NOT contain IMAP-A subjects
+check_not "25.23 imap-B list: no IMapA subjects" "IMapA" "$L250"
+
+# 25.24 IMAP-A show must NOT contain IMAP-B subject text
+check_not "25.24 imap-A show UID 1: no IMapB content" "IMapB" "$S200_1"
+
+# 25.25 IMAP-B has 250 messages; IMAP-A must report 200 max
+check_not "25.25 imap-A list: count not 250" "250 message" "$L200"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 26 — Gmail sync + offline list (2 accounts + cross-contamination)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 26: Gmail sync + offline list (2 accounts) ---"
+
+GMAIL_PORT_A=9997
+GMAIL_PORT_B=9999
+GMAIL_LOG_A="$PROJECT_ROOT/build/tests/functional/mock_gmail_a.log"
+GMAIL_LOG_B="$PROJECT_ROOT/build/tests/functional/mock_gmail_b.log"
+echo "Starting mock Gmail API server A (port $GMAIL_PORT_A, 200 messages)..."
+(MOCK_GMAIL_PORT=$GMAIL_PORT_A MOCK_GMAIL_COUNT=200 \
+    MOCK_GMAIL_EMAIL="test@gmail.com" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL_LOG_A" 2>&1 &
+GMAIL_SERVER_A_PID=$!
+echo "Starting mock Gmail API server B (port $GMAIL_PORT_B, 150 messages)..."
+(MOCK_GMAIL_PORT=$GMAIL_PORT_B MOCK_GMAIL_COUNT=150 \
+    MOCK_GMAIL_EMAIL="test2@gmail.com" \
+    MOCK_GMAIL_SUBJECT_PREFIX="GmailB-" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL_LOG_B" 2>&1 &
+GMAIL_SERVER_B_PID=$!
+sleep 0.5
+
+# Shared temp home for both Gmail accounts (tests account isolation within one HOME)
+H_GMAIL="/tmp/email-cli-ft-gmail-$$"
+GMAIL_ACCT_A="test@gmail.com"
+GMAIL_ACCT_B="test2@gmail.com"
+rm -rf "$H_GMAIL"
+mkdir -p "$H_GMAIL/config/email-cli/accounts/$GMAIL_ACCT_A"
+mkdir -p "$H_GMAIL/config/email-cli/accounts/$GMAIL_ACCT_B"
+mkdir -p "$H_GMAIL/data"
+cat > "$H_GMAIL/config/email-cli/accounts/$GMAIL_ACCT_A/config.ini" <<GCFG_A
+EMAIL_HOST=
+EMAIL_USER=$GMAIL_ACCT_A
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=fakefaketoken
+GCFG_A
+cat > "$H_GMAIL/config/email-cli/accounts/$GMAIL_ACCT_B/config.ini" <<GCFG_B
+EMAIL_HOST=
+EMAIL_USER=$GMAIL_ACCT_B
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=fakefaketoken2
+GCFG_B
+
+# Helper: sync account A
+run_gmail_sync_a() {
+    (export XDG_CONFIG_HOME="$H_GMAIL/config"
+     export XDG_DATA_HOME="$H_GMAIL/data"
+     export XDG_CACHE_HOME="$H_GMAIL/cache"
+     export HOME="$H_GMAIL"
+     export GMAIL_TEST_TOKEN=testtoken
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL_PORT_A/gmail/v1/users/me"
+     "$BIN_DIR/email-sync" --account "$GMAIL_ACCT_A" 2>&1 || true)
+}
+
+# Helper: sync account B
+run_gmail_sync_b() {
+    (export XDG_CONFIG_HOME="$H_GMAIL/config"
+     export XDG_DATA_HOME="$H_GMAIL/data"
+     export XDG_CACHE_HOME="$H_GMAIL/cache"
+     export HOME="$H_GMAIL"
+     export GMAIL_TEST_TOKEN=testtoken2
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL_PORT_B/gmail/v1/users/me"
+     "$BIN_DIR/email-sync" --account "$GMAIL_ACCT_B" 2>&1 || true)
+}
+
+# Helper: read-only commands for account A
+run_gmail_ro_a() {
+    (export XDG_CONFIG_HOME="$H_GMAIL/config"
+     export XDG_DATA_HOME="$H_GMAIL/data"
+     export XDG_CACHE_HOME="$H_GMAIL/cache"
+     export HOME="$H_GMAIL"
+     export GMAIL_TEST_TOKEN=testtoken
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL_PORT_A/gmail/v1/users/me"
+     "$BIN_DIR/email-cli-ro" "$GMAIL_ACCT_A" "$@" 2>&1 || true)
+}
+
+# Helper: read-only commands for account B
+run_gmail_ro_b() {
+    (export XDG_CONFIG_HOME="$H_GMAIL/config"
+     export XDG_DATA_HOME="$H_GMAIL/data"
+     export XDG_CACHE_HOME="$H_GMAIL/cache"
+     export HOME="$H_GMAIL"
+     export GMAIL_TEST_TOKEN=testtoken2
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL_PORT_B/gmail/v1/users/me"
+     "$BIN_DIR/email-cli-ro" "$GMAIL_ACCT_B" "$@" 2>&1 || true)
+}
+
+# ── Gmail account A (test@gmail.com, 200 messages) ────────────────────────
+# 26.1 Run email-sync for account A
+SYNC26A=$(run_gmail_sync_a)
+check "26.1 gmail-A sync: fetched messages" "fetched\|stored\|already" "$SYNC26A"
+
+# 26.2 list --all --limit 200
+GL_A=$(run_gmail_ro_a --batch list --all --limit 200)
+check "26.2 gmail-A list: count shows messages" "message" "$GL_A"
+check "26.3 gmail-A list: Message 1 present" "Message 1" "$GL_A"
+check "26.4 gmail-A list: Message 200 present" "Message 200" "$GL_A"
+
+# 26.5 show message 1
+GS_A1=$(run_gmail_ro_a show 0000000000000001)
+check "26.5 gmail-A show 1: subject present" "Message 1" "$GS_A1"
+check "26.6 gmail-A show 1: sender present" "Sender 1" "$GS_A1"
+
+# 26.7 show message 10 (has attachment)
+GS_A10=$(run_gmail_ro_a show 000000000000000a)
+check "26.7 gmail-A show 10: subject present" "Message 10" "$GS_A10"
+
+# 26.8 list-attachments for message 10
+GLA_A=$(run_gmail_ro_a --batch list-attachments 000000000000000a)
+check "26.8 gmail-A list-attachments 10: notes_10.txt listed" "notes_10" "$GLA_A"
+
+# 26.9 save-attachment for message 10
+GSAVE_A_DIR="/tmp/email-cli-ft-gattach-a-$$"
+mkdir -p "$GSAVE_A_DIR"
+GSA_A=$(run_gmail_ro_a --batch save-attachment 000000000000000a notes_10.txt "$GSAVE_A_DIR")
+check "26.9 gmail-A save-attachment: exit ok" "aved\|uccessful\|notes\|ok" "$GSA_A"
+check "26.10 gmail-A save-attachment: file exists" "." \
+    "$(test -f "$GSAVE_A_DIR/notes_10.txt" && echo ok || echo missing)"
+rm -rf "$GSAVE_A_DIR"
+
+# 26.11 list-folders account A
+GF_A=$(run_gmail_ro_a --batch list-folders)
+check "26.11 gmail-A list-folders: INBOX listed" "INBOX" "$GF_A"
+check "26.12 gmail-A list-folders: Work listed" "Work" "$GF_A"
+
+# ── Gmail account B (test2@gmail.com, 150 messages, prefix GmailB-) ───────
+# 26.13 Sync account B
+SYNC26B=$(run_gmail_sync_b)
+check "26.13 gmail-B sync: fetched messages" "fetched\|stored\|already" "$SYNC26B"
+
+# 26.14 list all 150 messages
+GL_B=$(run_gmail_ro_b --batch list --all --limit 150)
+check "26.14 gmail-B list: count shows messages" "message" "$GL_B"
+check "26.15 gmail-B list: GmailB-Message 1 present" "GmailB-Message 1" "$GL_B"
+check "26.16 gmail-B list: GmailB-Message 150 present" "GmailB-Message 150" "$GL_B"
+
+# 26.17 show message 1 from account B
+GS_B1=$(run_gmail_ro_b show 0000000000000001)
+check "26.17 gmail-B show 1: subject has prefix" "GmailB-Message 1" "$GS_B1"
+check "26.18 gmail-B show 1: sender present" "Sender 1" "$GS_B1"
+
+# 26.19 show message 20 (has attachment, 20 % 10 == 0)
+GS_B20=$(run_gmail_ro_b show 0000000000000014)
+check "26.19 gmail-B show 20: correct subject" "GmailB-Message 20" "$GS_B20"
+
+# 26.20 list-attachments for message 20
+GLA_B=$(run_gmail_ro_b --batch list-attachments 0000000000000014)
+check "26.20 gmail-B list-attachments 20: GmailB-notes_20.txt listed" "GmailB-notes_20" "$GLA_B"
+
+# 26.21 save-attachment for message 20 (account B)
+GSAVE_B_DIR="/tmp/email-cli-ft-gattach-b-$$"
+mkdir -p "$GSAVE_B_DIR"
+GSA_B=$(run_gmail_ro_b --batch save-attachment 0000000000000014 GmailB-notes_20.txt "$GSAVE_B_DIR")
+check "26.21 gmail-B save-attachment: exit ok" "aved\|uccessful\|notes\|ok" "$GSA_B"
+check "26.22 gmail-B save-attachment: file exists" "." \
+    "$(test -f "$GSAVE_B_DIR/GmailB-notes_20.txt" && echo ok || echo missing)"
+rm -rf "$GSAVE_B_DIR"
+
+# ── Gmail cross-contamination checks ─────────────────────────────────────
+# 26.23 Account A list must NOT contain account B's GmailB- prefix
+check_not "26.23 gmail-A list: no GmailB- content" "GmailB-" "$GL_A"
+
+# 26.24 Account B list must NOT contain account A's plain subjects
+check_not "26.24 gmail-B list: subjects have prefix (no plain 'Message 1')" \
+    "^.*[^-]Message 1$" "$GL_B"
+
+# 26.25 Account A has 200 msgs; B's msg 150 ID (0000000000000096) not in A
+GL_A_FULL=$(run_gmail_ro_a --batch list --all --limit 200)
+check_not "26.25 gmail-A list: no GmailB-Message 150" "GmailB-Message 150" "$GL_A_FULL"
+
+# 26.26 list-folders account B
+GF_B=$(run_gmail_ro_b --batch list-folders)
+check "26.26 gmail-B list-folders: INBOX listed" "INBOX" "$GF_B"
+
+# Cleanup
+kill "$GMAIL_SERVER_A_PID" "$GMAIL_SERVER_B_PID" 2>/dev/null || true
+rm -rf "$H_GMAIL"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

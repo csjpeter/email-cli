@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <locale.h>
 #include "config_store.h"
 #include "email_service.h"
@@ -177,6 +178,19 @@ static void help_list_accounts(void) {
 
 static int parse_uid(const char *s, char uid_out[17]) {
     if (!s || !*s) return -1;
+    /* Accept 16-character hex strings directly (Gmail message IDs shown by list). */
+    if (strlen(s) == 16) {
+        int all_hex = 1;
+        for (int i = 0; i < 16; i++) {
+            if (!isxdigit((unsigned char)s[i])) { all_hex = 0; break; }
+        }
+        if (all_hex) {
+            memcpy(uid_out, s, 16);
+            uid_out[16] = '\0';
+            return 0;
+        }
+    }
+    /* Accept positive decimal integers (IMAP UIDs). */
     char *end;
     unsigned long v = strtoul(s, &end, 10);
     if (*end != '\0' || v == 0 || v > 4294967295UL) return -1;
@@ -253,6 +267,7 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) continue;
         if (strcmp(argv[i], "--account") == 0) { i++; continue; }
+        if (strcmp(argv[i], "--batch") == 0) continue; /* no-op: always batch */
         if (i == account_arg_idx) continue;
         cmd = argv[i]; cmd_idx = i; break;
     }

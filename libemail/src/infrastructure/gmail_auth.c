@@ -308,6 +308,11 @@ int gmail_auth_device_flow(Config *cfg) {
 /* ── Token Refresh ────────────────────────────────────────────────── */
 
 char *gmail_auth_refresh(const Config *cfg) {
+    /* Test hook: if GMAIL_TEST_TOKEN is set, skip real OAuth and return it directly */
+    const char *test_token = getenv("GMAIL_TEST_TOKEN");
+    if (test_token && test_token[0])
+        return strdup(test_token);
+
     if (!cfg->gmail_refresh_token || !cfg->gmail_refresh_token[0]) {
         logger_log(LOG_ERROR, "gmail_auth: no refresh_token available");
         return NULL;

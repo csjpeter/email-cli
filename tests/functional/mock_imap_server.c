@@ -15,14 +15,23 @@
  * Environment variables:
  *   MOCK_IMAP_PORT    - TCP port to listen on (default 9993)
  *   MOCK_IMAP_SUBJECT - Subject returned in FETCH responses (default "Test Message")
+ *   MOCK_IMAP_COUNT   - Number of messages to simulate (default 1, backward compat)
  *
  * Launching two instances with different ports and subjects allows testing
  * that account isolation works correctly (each account connects to its own
  * server and sees its own messages).
+ *
+ * When MOCK_IMAP_COUNT > 1:
+ *   - Messages are numbered 1..N
+ *   - Subject: "Message X", From: "Sender X <senderX@example.com>"
+ *   - UIDs 1..20 are UNSEEN; UIDs 21..N are \Seen
+ *   - Messages where X % 10 == 0 have a notes_X.txt attachment
  */
 
-static int         g_port    = 9993;
-static const char *g_subject = "Test Message";
+static int         g_port       = 9993;
+static const char *g_subject    = "Test Message";
+static int         g_count      = 1;
+static const char *g_msg_prefix = "Message"; /* MOCK_IMAP_MSG_PREFIX */
 
 /**
  * Read one CRLF-terminated line from ssl into buf (max len-1 chars + NUL).
@@ -41,6 +50,252 @@ static int readline_crlf_ssl(SSL *ssl, char *buf, int len) {
     }
     buf[n] = '\0';
     return n;
+}
+
+/* ── Base64 encode (standard alphabet) for attachment content ─────── */
+
+static const char b64_chars[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * Encode data as standard base64 with = padding.
+ * Returns heap-allocated NUL-terminated string.
+ */
+static char *base64_encode(const unsigned char *data, size_t len) {
+    size_t alloc = ((len + 2) / 3) * 4 + 1;
+    char *out = malloc(alloc);
+    if (!out) return NULL;
+
+    size_t o = 0;
+    for (size_t i = 0; i < len; i += 3) {
+        unsigned int n = ((unsigned int)data[i]) << 16;
+        if (i + 1 < len) n |= ((unsigned int)data[i + 1]) << 8;
+        if (i + 2 < len) n |= ((unsigned int)data[i + 2]);
+
+        out[o++] = b64_chars[(n >> 18) & 0x3F];
+        out[o++] = b64_chars[(n >> 12) & 0x3F];
+        out[o++] = (i + 1 < len) ? b64_chars[(n >> 6) & 0x3F] : '=';
+        out[o++] = (i + 2 < len) ? b64_chars[n & 0x3F] : '=';
+    }
+    out[o] = '\0';
+    return out;
+}
+
+/**
+ * Extract the UID number from a FETCH command line.
+ * Handles "UID FETCH X" and "FETCH X" patterns.
+ * Returns the UID, or 1 if not parseable.
+ */
+static int extract_uid(const char *buffer) {
+    const char *uid_fetch = strstr(buffer, "UID FETCH ");
+    if (uid_fetch) {
+        int uid = 0;
+        if (sscanf(uid_fetch + 10, "%d", &uid) == 1 && uid > 0)
+            return uid;
+    }
+    const char *fetch_p = strstr(buffer, " FETCH ");
+    if (fetch_p) {
+        int uid = 0;
+        if (sscanf(fetch_p + 7, "%d", &uid) == 1 && uid > 0)
+            return uid;
+    }
+    return 1;
+}
+
+/**
+ * Build the content for message UID X (multi-message mode).
+ * Returns heap-allocated string; caller must free.
+ */
+static char *build_message_content(int uid, int is_header, int is_flags_only,
+                                   const char **section_out) {
+    /* Compute a date: start 2020-01-01, add uid days.
+     * We use a fixed base and just format a plausible date string. */
+    /* Days per month (non-leap year) */
+    static const int days_in_month[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    static const char *month_names[] = {
+        "Jan","Feb","Mar","Apr","May","Jun",
+        "Jul","Aug","Sep","Oct","Nov","Dec"
+    };
+    static const char *day_names[] = {
+        "Wed","Thu","Fri","Sat","Sun","Mon","Tue"
+    };
+    /* 2020-01-01 is a Wednesday, day-of-week index 0 */
+    int base_year = 2020;
+    int day_of_year = uid; /* offset from Jan 1 2020 */
+    int year = base_year;
+    int month = 0;
+    int day = day_of_year;
+
+    while (1) {
+        int days_this_year = (year % 4 == 0) ? 366 : 365;
+        if (day <= days_this_year) break;
+        day -= days_this_year;
+        year++;
+    }
+    month = 0;
+    while (month < 11) {
+        int dim = days_in_month[month];
+        if (month == 1 && year % 4 == 0) dim = 29;
+        if (day <= dim) break;
+        day -= dim;
+        month++;
+    }
+    int dow = (uid + 2) % 7; /* approximate day of week */
+
+    char subject[128];
+    char from_name[128];
+    char from_addr[128];
+    char date_str[64];
+
+    snprintf(subject,   sizeof(subject),   "%s %d", g_msg_prefix, uid);
+    snprintf(from_name, sizeof(from_name), "Sender %d", uid);
+    snprintf(from_addr, sizeof(from_addr), "sender%d@example.com", uid);
+    snprintf(date_str, sizeof(date_str), "%s, %02d %s %04d 12:00:00 +0000",
+             day_names[dow], day, month_names[month], year);
+
+    if (is_flags_only) {
+        /* Caller handles FLAGS specially; should not reach here */
+        *section_out = "FLAGS";
+        return NULL;
+    }
+
+    if (is_header) {
+        *section_out = "BODY[HEADER]";
+        char *hdr = NULL;
+        if (asprintf(&hdr,
+                     "From: %s <%s>\r\n"
+                     "Subject: %s\r\n"
+                     "Date: %s\r\n"
+                     "\r\n",
+                     from_name, from_addr, subject, date_str) == -1)
+            return NULL;
+        return hdr;
+    }
+
+    *section_out = "BODY[]";
+
+    int has_attachment = (uid % 10 == 0);
+
+    if (!has_attachment) {
+        /* Simple plain-text message */
+        char *msg = NULL;
+        char body_text[128];
+        snprintf(body_text, sizeof(body_text), "Body of message %d", uid);
+        if (asprintf(&msg,
+                     "From: %s <%s>\r\n"
+                     "Subject: %s\r\n"
+                     "Date: %s\r\n"
+                     "MIME-Version: 1.0\r\n"
+                     "Content-Type: text/plain; charset=UTF-8\r\n"
+                     "\r\n"
+                     "%s\r\n",
+                     from_name, from_addr, subject, date_str, body_text) == -1)
+            return NULL;
+        return msg;
+    }
+
+    /* Multipart message with text/plain + attachment */
+    char boundary[32];
+    snprintf(boundary, sizeof(boundary), "B%04d", uid);
+
+    char attach_name[64];
+    snprintf(attach_name, sizeof(attach_name), "notes_%d.txt", uid);
+
+    char attach_content[128];
+    snprintf(attach_content, sizeof(attach_content), "Attachment for msg %d", uid);
+    char *attach_b64 = base64_encode(
+        (const unsigned char *)attach_content, strlen(attach_content));
+    if (!attach_b64) return NULL;
+
+    char body_text[128];
+    snprintf(body_text, sizeof(body_text), "Body of message %d", uid);
+
+    char *msg = NULL;
+    int rc = asprintf(&msg,
+        "From: %s <%s>\r\n"
+        "Subject: %s\r\n"
+        "Date: %s\r\n"
+        "MIME-Version: 1.0\r\n"
+        "Content-Type: multipart/mixed; boundary=\"%s\"\r\n"
+        "\r\n"
+        "--%s\r\n"
+        "Content-Type: text/plain; charset=UTF-8\r\n"
+        "\r\n"
+        "%s\r\n"
+        "--%s\r\n"
+        "Content-Type: text/plain; name=\"%s\"\r\n"
+        "Content-Disposition: attachment; filename=\"%s\"\r\n"
+        "Content-Transfer-Encoding: base64\r\n"
+        "\r\n"
+        "%s\r\n"
+        "--%s--\r\n",
+        from_name, from_addr, subject, date_str,
+        boundary,
+        boundary,
+        body_text,
+        boundary,
+        attach_name, attach_name,
+        attach_b64,
+        boundary);
+    free(attach_b64);
+    if (rc == -1) return NULL;
+    return msg;
+}
+
+/**
+ * Build message content for UID in single-message (legacy) mode.
+ * Uses g_subject and the original full multipart body.
+ */
+static char *build_legacy_content(int is_header, const char **section_out) {
+    char headers[512];
+    snprintf(headers, sizeof(headers),
+             "From: Test User <test@example.com>\r\n"
+             "Subject: %s\r\n"
+             "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+             "\r\n",
+             g_subject);
+
+    char *full_msg = NULL;
+    if (asprintf(&full_msg,
+                 "From: Test User <test@example.com>\r\n"
+                 "Subject: %s\r\n"
+                 "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+                 "MIME-Version: 1.0\r\n"
+                 "Content-Type: multipart/mixed; boundary=\"B001\"\r\n"
+                 "\r\n"
+                 "--B001\r\n"
+                 "Content-Type: text/html; charset=UTF-8\r\n"
+                 "\r\n"
+                 "<html>"
+                 "<head><style>body { color: red; font-size: 14px; }</style></head>"
+                 "<body><b>Hello from Mock Server!</b><br>"
+                 "Line 2<br>Line 3<br>Line 4<br>Line 5<br>"
+                 "Line 6<br>Line 7<br>Line 8<br>Line 9</body>"
+                 "</html>\r\n"
+                 "--B001\r\n"
+                 "Content-Type: text/plain; name=\"notes.txt\"\r\n"
+                 "Content-Disposition: attachment; filename=\"notes.txt\"\r\n"
+                 "Content-Transfer-Encoding: base64\r\n"
+                 "\r\n"
+                 "SGVsbG8gV29ybGQ=\r\n"
+                 "--B001\r\n"
+                 "Content-Type: application/octet-stream; name=\"data.bin\"\r\n"
+                 "Content-Disposition: attachment; filename=\"data.bin\"\r\n"
+                 "Content-Transfer-Encoding: base64\r\n"
+                 "\r\n"
+                 "dGVzdCBkYXRh\r\n"
+                 "--B001--\r\n",
+                 g_subject) == -1)
+        return NULL;
+
+    if (is_header) {
+        *section_out = "BODY[HEADER]";
+        char *hdr = strdup(headers);
+        free(full_msg);
+        return hdr;
+    }
+    *section_out = "BODY[]";
+    return full_msg;
 }
 
 static void handle_client(SSL *ssl) {
@@ -102,10 +357,25 @@ static void handle_client(SSL *ssl) {
                 }
             }
             int is_empty = (strstr(selected_folder, "Empty") != NULL);
-            const char *exists = is_empty
-                ? "* 0 EXISTS\r\n* 0 RECENT\r\n* OK [UIDVALIDITY 1] UIDs are valid\r\n"
-                : "* 1 EXISTS\r\n* 1 RECENT\r\n* OK [UIDVALIDITY 1] UIDs are valid\r\n";
-            SSL_write(ssl, exists, (int)strlen(exists));
+            if (is_empty) {
+                const char *exists =
+                    "* 0 EXISTS\r\n* 0 RECENT\r\n"
+                    "* OK [UIDVALIDITY 1] UIDs are valid\r\n";
+                SSL_write(ssl, exists, (int)strlen(exists));
+            } else if (g_count > 1) {
+                /* Multi-message mode */
+                char exists[128];
+                snprintf(exists, sizeof(exists),
+                         "* %d EXISTS\r\n* 0 RECENT\r\n"
+                         "* OK [UIDVALIDITY 1] UIDs are valid\r\n",
+                         g_count);
+                SSL_write(ssl, exists, (int)strlen(exists));
+            } else {
+                const char *exists =
+                    "* 1 EXISTS\r\n* 1 RECENT\r\n"
+                    "* OK [UIDVALIDITY 1] UIDs are valid\r\n";
+                SSL_write(ssl, exists, (int)strlen(exists));
+            }
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK [READ-WRITE] SELECT completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
@@ -121,16 +391,45 @@ static void handle_client(SSL *ssl) {
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "SEARCH")) {
             int is_empty = (strstr(selected_folder, "Empty") != NULL);
-            const char *search_resp = is_empty ? "* SEARCH\r\n" : "* SEARCH 1\r\n";
-            SSL_write(ssl, search_resp, (int)strlen(search_resp));
+            if (is_empty) {
+                const char *sr = "* SEARCH\r\n";
+                SSL_write(ssl, sr, (int)strlen(sr));
+            } else if (g_count > 1) {
+                /* Multi-message mode: build UID list */
+                int is_unseen = (strstr(buffer, "UNSEEN") != NULL);
+                int limit = is_unseen ? 20 : g_count;
+                /* Allocate buffer: each UID up to 6 digits + space */
+                char *sr_buf = malloc((size_t)limit * 8 + 16);
+                if (!sr_buf) break;
+                int off = sprintf(sr_buf, "* SEARCH");
+                for (int i = 1; i <= limit; i++) {
+                    off += sprintf(sr_buf + off, " %d", i);
+                }
+                off += sprintf(sr_buf + off, "\r\n");
+                SSL_write(ssl, sr_buf, off);
+                free(sr_buf);
+            } else {
+                const char *sr = "* SEARCH 1\r\n";
+                SSL_write(ssl, sr, (int)strlen(sr));
+            }
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK SEARCH completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "FETCH") && strstr(buffer, "FLAGS")) {
-            /* FLAGS-only fetch — no literal payload, inline response */
-            char resp[64];
-            snprintf(resp, sizeof(resp), "* 1 FETCH (FLAGS ())\r\n");
-            SSL_write(ssl, resp, (int)strlen(resp));
+            /* FLAGS-only fetch */
+            if (g_count > 1) {
+                /* Extract the UID/sequence number range or single number */
+                int uid = extract_uid(buffer);
+                /* UIDs 1..20 are unread; >20 are \Seen */
+                const char *flags = (uid <= 20) ? "()" : "(\\Seen)";
+                char resp[128];
+                snprintf(resp, sizeof(resp), "* %d FETCH (FLAGS %s)\r\n", uid, flags);
+                SSL_write(ssl, resp, (int)strlen(resp));
+            } else {
+                char resp[64];
+                snprintf(resp, sizeof(resp), "* 1 FETCH (FLAGS ())\r\n");
+                SSL_write(ssl, resp, (int)strlen(resp));
+            }
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
@@ -142,58 +441,44 @@ static void handle_client(SSL *ssl) {
             snprintf(ok, sizeof(ok), "%s OK STORE completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "FETCH")) {
-            /* Build header and full-message content using the configurable subject.
-             * This allows two server instances to serve distinguishable content. */
-            char headers[512];
-            snprintf(headers, sizeof(headers),
-                     "From: Test User <test@example.com>\r\n"
-                     "Subject: %s\r\n"
-                     "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
-                     "\r\n",
-                     g_subject);
+            int is_header = (strstr(buffer, "HEADER") != NULL);
+            const char *section = NULL;
+            char *content = NULL;
 
-            char full_msg[4096];
-            snprintf(full_msg, sizeof(full_msg),
-                     "From: Test User <test@example.com>\r\n"
-                     "Subject: %s\r\n"
-                     "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
-                     "MIME-Version: 1.0\r\n"
-                     "Content-Type: multipart/mixed; boundary=\"B001\"\r\n"
-                     "\r\n"
-                     "--B001\r\n"
-                     "Content-Type: text/html; charset=UTF-8\r\n"
-                     "\r\n"
-                     "<html>"
-                     "<head><style>body { color: red; font-size: 14px; }</style></head>"
-                     "<body><b>Hello from Mock Server!</b><br>"
-                     "Line 2<br>Line 3<br>Line 4<br>Line 5<br>"
-                     "Line 6<br>Line 7<br>Line 8<br>Line 9</body>"
-                     "</html>\r\n"
-                     "--B001\r\n"
-                     "Content-Type: text/plain; name=\"notes.txt\"\r\n"
-                     "Content-Disposition: attachment; filename=\"notes.txt\"\r\n"
-                     "Content-Transfer-Encoding: base64\r\n"
-                     "\r\n"
-                     "SGVsbG8gV29ybGQ=\r\n"
-                     "--B001\r\n"
-                     "Content-Type: application/octet-stream; name=\"data.bin\"\r\n"
-                     "Content-Disposition: attachment; filename=\"data.bin\"\r\n"
-                     "Content-Transfer-Encoding: base64\r\n"
-                     "\r\n"
-                     "dGVzdCBkYXRh\r\n"
-                     "--B001--\r\n",
-                     g_subject);
+            if (g_count > 1) {
+                /* Multi-message mode: synthesize per-UID content */
+                int uid = extract_uid(buffer);
+                if (uid < 1) uid = 1;
+                if (uid > g_count) uid = g_count;
+                content = build_message_content(uid, is_header, 0, &section);
+                /* Backward compat: UID 1 can use g_subject override */
+                if (uid == 1 && g_subject && strcmp(g_subject, "Test Message") != 0) {
+                    free(content);
+                    content = build_legacy_content(is_header, &section);
+                }
+            } else {
+                content = build_legacy_content(is_header, &section);
+            }
 
-            int is_header = strstr(buffer, "HEADER") != NULL;
-            const char *content = is_header ? headers : full_msg;
-            const char *section = is_header ? "BODY[HEADER]" : "BODY[]";
+            if (!content) {
+                char bad[64];
+                snprintf(bad, sizeof(bad), "%s BAD Internal error\r\n", tag);
+                SSL_write(ssl, bad, (int)strlen(bad));
+                break;
+            }
 
-            char head[128];
-            snprintf(head, sizeof(head), "* 1 FETCH (%s {%zu}\r\n", section, strlen(content));
+            /* Determine which sequence number to report in the response.
+             * For multi-message mode we report the UID as the seq number
+             * (sufficient for these tests). */
+            int seq = (g_count > 1) ? extract_uid(buffer) : 1;
+            if (seq < 1) seq = 1;
+
+            char head[256];
+            snprintf(head, sizeof(head), "* %d FETCH (%s {%zu}\r\n",
+                     seq, section, strlen(content));
             SSL_write(ssl, head, (int)strlen(head));
-
-            /* Send content in chunks to be realistic */
             SSL_write(ssl, content, (int)strlen(content));
+            free(content);
 
             const char *tail = ")\r\n";
             SSL_write(ssl, tail, (int)strlen(tail));
@@ -253,11 +538,15 @@ static void handle_client(SSL *ssl) {
 }
 
 int main(void) {
-    /* Configure port and subject from environment */
+    /* Configure port, subject, count, and message prefix from environment */
     const char *port_env = getenv("MOCK_IMAP_PORT");
     if (port_env && atoi(port_env) > 0) g_port = atoi(port_env);
     const char *subj_env = getenv("MOCK_IMAP_SUBJECT");
     if (subj_env && subj_env[0]) g_subject = subj_env;
+    const char *count_env = getenv("MOCK_IMAP_COUNT");
+    if (count_env && atoi(count_env) > 0) g_count = atoi(count_env);
+    const char *prefix_env = getenv("MOCK_IMAP_MSG_PREFIX");
+    if (prefix_env && prefix_env[0]) g_msg_prefix = prefix_env;
 
     int server_fd;
     struct sockaddr_in address;
@@ -315,8 +604,8 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
-    printf("Mock IMAP Server (TLS) listening on port %d (subject: %s)\n",
-           g_port, g_subject);
+    printf("Mock IMAP Server (TLS) listening on port %d (subject: %s, count: %d)\n",
+           g_port, g_subject, g_count);
 
     int client_sock;
     while ((client_sock = accept(server_fd, (struct sockaddr *)&address, &addrlen)) >= 0) {

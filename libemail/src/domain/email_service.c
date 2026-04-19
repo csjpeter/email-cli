@@ -623,11 +623,20 @@ static FolderStatus *fetch_all_folder_statuses(const Config *cfg,
             if (strcmp(folders[i], "TRASH") == 0) idx_name = "_trash";
             else if (strcmp(folders[i], "SPAM") == 0) idx_name = "_spam";
 
+            /* User labels have internal IDs ("Label_xxxxxxxx") that differ
+             * from their display names ("Felújítás").  .idx files are keyed
+             * by ID, so translate display name → ID for the lookup. */
+            char *id_alloc = (idx_name == folders[i])
+                             ? local_gmail_label_id_lookup(idx_name)
+                             : NULL;
+            if (id_alloc) idx_name = id_alloc;
+
             st[i].messages = label_idx_count(idx_name);
             st[i].unseen   = label_idx_intersect_count(idx_name,
                                  (const char (*)[17])unread_uids,  unread_count);
             st[i].flagged  = label_idx_intersect_count(idx_name,
                                  (const char (*)[17])starred_uids, starred_count);
+            free(id_alloc);
         }
         free(unread_uids);
         free(starred_uids);

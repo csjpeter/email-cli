@@ -2098,12 +2098,22 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             if (trows <= 0) trows = limit + 6;
             char sb[256];
             if (is_gmail) {
-                snprintf(sb, sizeof(sb),
-                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                         "  Backspace=labels  ESC=quit"
-                         "  c=compose  r=reply  n=unread  f=star  a=archive"
-                         "  d=rm-label  D=trash  s=sync  R=refresh  [%d/%d]",
-                         cursor + 1, show_count);
+                int in_trash = (strcmp(folder, "_trash") == 0);
+                if (in_trash) {
+                    snprintf(sb, sizeof(sb),
+                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                             "  Backspace=labels  ESC=quit"
+                             "  u=restore  t=labels  n=unread  f=star"
+                             "  s=sync  R=refresh  [%d/%d]",
+                             cursor + 1, show_count);
+                } else {
+                    snprintf(sb, sizeof(sb),
+                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                             "  Backspace=labels  ESC=quit"
+                             "  c=compose  r=reply  n=unread  f=star  a=archive"
+                             "  d=rm-label  D=trash  t=labels  s=sync  R=refresh  [%d/%d]",
+                             cursor + 1, show_count);
+                }
             } else {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
@@ -2923,6 +2933,18 @@ static void show_label_picker(MailClient *mc,
             if (adding) {
                 label_idx_add(lid, uid);
                 local_hdr_update_labels("", uid, &lid, 1, NULL, 0);
+                /* Adding a real label (not UNREAD/STARRED/CATEGORY_) to a
+                 * trashed message implicitly untrashes it: remove TRASH from
+                 * local index, .hdr, and the Gmail API. */
+                if (strcmp(lid, "UNREAD") != 0 &&
+                    strcmp(lid, "STARRED") != 0 &&
+                    strncmp(lid, "CATEGORY_", 9) != 0 &&
+                    label_idx_contains("_trash", uid)) {
+                    const char *trash_id = "TRASH";
+                    label_idx_remove("_trash", uid);
+                    local_hdr_update_labels("", uid, NULL, 0, &trash_id, 1);
+                    if (mc) mail_client_modify_label(mc, uid, "TRASH", 0);
+                }
             } else {
                 label_idx_remove(lid, uid);
                 local_hdr_update_labels("", uid, NULL, 0, &lid, 1);

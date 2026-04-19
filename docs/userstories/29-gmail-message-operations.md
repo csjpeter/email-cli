@@ -25,6 +25,9 @@
 | 13 | After pressing **d** (or **r**), the row is shown with red foreground and strikethrough until the next refresh, giving immediate visual feedback. |
 | 14 | When the cursor is on a pending-remove row, the row is rendered with **both** inverse-video (cursor highlight) and red strikethrough, so the cursor position remains clearly visible. |
 | 15 | Pressing **d** a second time on the same pending-remove row cancels the operation: the label is restored locally and the strikethrough is cleared. A subsequent refresh keeps the message visible. |
+| 16 | Adding any real label (not UNREAD/STARRED) to a trashed message via the label picker automatically removes the TRASH label — the message is restored from trash without needing a separate untrash step. |
+| 17 | When viewing the Trash folder, the status bar shows `u=restore  t=labels` instead of `d=rm-label  D=trash  a=archive`. The **u** key restores a message to its original labels (or Archive if none saved). |
+| 18 | The label picker (`t`) includes UNREAD as the first entry so users can toggle read/unread status without leaving the picker. |
 
 ---
 

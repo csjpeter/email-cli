@@ -3039,18 +3039,40 @@ char *email_service_list_labels_interactive(const Config *cfg,
         int tcols = terminal_cols();
         if (trows <= 0) trows = 24;
         if (tcols <= 0) tcols = 80;
-        int limit = (trows > 4) ? trows - 3 : 10;
+        int wend = 0;  /* computed below, after avail is known */
+        /* Name column width: "  " + 6(count) + "  " + name_w = name_w + 10 */
+        int name_w = tcols - 12;
+        if (name_w < 20) name_w = 20;
+
+        /* Fixed overhead: 1 title + 1 blank + 1 col-header + 1 separator + 1 statusbar = 5.
+         * Remaining rows are shared between items and section-separator lines. */
+        int avail = (trows > 6) ? trows - 5 : 5;
 
         if (cursor >= lbl_count) cursor = lbl_count - 1;
         if (cursor < 0) cursor = 0;
         if (cursor < wstart) wstart = cursor;
-        if (cursor >= wstart + limit) wstart = cursor - limit + 1;
-        int wend = wstart + limit;
-        if (wend > lbl_count) wend = lbl_count;
+        /* Advance wstart until cursor is within the visible window, counting
+         * separator rows so the window never overflows the terminal. */
+        for (;;) {
+            int rows = 0, found = 0;
+            for (int i = wstart; i < lbl_count && rows < avail; i++) {
+                if (lbl_seps[i] && i > wstart) rows++;   /* separator line */
+                rows++;                                    /* item line */
+                if (i == cursor) { found = 1; break; }
+            }
+            if (found) break;
+            wstart++;
+        }
 
-        /* Name column width: "  " + 6(count) + "  " + name_w = name_w + 10 */
-        int name_w = tcols - 12;
-        if (name_w < 20) name_w = 20;
+        /* Compute actual wend given avail rows */
+        int rows_counted = 0;
+        wend = wstart;
+        for (int i = wstart; i < lbl_count; i++) {
+            int extra = (lbl_seps[i] && i > wstart) ? 1 : 0;
+            if (rows_counted + extra + 1 > avail) break;
+            rows_counted += extra + 1;
+            wend = i + 1;
+        }
 
         printf("\033[H\033[2J");
         {
@@ -3069,8 +3091,8 @@ char *email_service_list_labels_interactive(const Config *cfg,
         printf("\n");
 
         for (int i = wstart; i < wend; i++) {
-            /* Section separator */
-            if (lbl_seps[i]) {
+            /* Section separator (not before the very first visible item) */
+            if (lbl_seps[i] && i > wstart) {
                 printf("  \033[2m");
                 for (int s = 0; s < tcols - 2; s++) fputs("\u2504", stdout);
                 printf("\033[0m\n");
@@ -3121,11 +3143,11 @@ char *email_service_list_labels_interactive(const Config *cfg,
             if (cursor > 0) cursor--;
             break;
         case TERM_KEY_NEXT_PAGE:
-            cursor += limit;
+            cursor += avail;
             if (cursor >= lbl_count) cursor = lbl_count - 1;
             break;
         case TERM_KEY_PREV_PAGE:
-            cursor -= limit;
+            cursor -= avail;
             if (cursor < 0) cursor = 0;
             break;
         case TERM_KEY_ENTER:

@@ -46,7 +46,7 @@ static void help_general(void) {
         "  list-labels             List all labels (Gmail) or folders (IMAP)\n"
         "  create-label <name>     Create a new label (Gmail) or folder (IMAP)\n"
         "  delete-label <id>       Delete a label (Gmail) or folder (IMAP)\n"
-        "  show-accounts           List all configured accounts\n"
+        "  list-accounts           List all configured accounts\n"
         "  add-account             Add a new account (runs setup wizard)\n"
         "  remove-account <email>  Remove an account (local data preserved)\n"
         "  config                  View or update configuration (incl. SMTP)\n"
@@ -283,14 +283,14 @@ static void help_delete_label(void) {
     );
 }
 
-static void help_show_accounts(void) {
+static void help_list_accounts(void) {
     printf(
-        "Usage: email-cli show-accounts\n"
+        "Usage: email-cli list-accounts\n"
         "\n"
         "List all configured accounts with their type and server.\n"
         "\n"
         "Examples:\n"
-        "  email-cli show-accounts\n"
+        "  email-cli list-accounts\n"
     );
 }
 
@@ -313,7 +313,7 @@ static void help_remove_account(void) {
         "Remove a configured account by email address.\n"
         "Local messages are NOT deleted — they are preserved on disk.\n"
         "\n"
-        "  <email>  Account email address shown by 'email-cli show-accounts'\n"
+        "  <email>  Account email address shown by 'email-cli list-accounts'\n"
         "\n"
         "Examples:\n"
         "  email-cli remove-account user@example.com\n"
@@ -434,7 +434,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "create-label")    == 0) { help_create_label();    return EXIT_SUCCESS; }
                 if (strcmp(cmd, "delete-label")    == 0) { help_delete_label();    return EXIT_SUCCESS; }
-                if (strcmp(cmd, "show-accounts")   == 0) { help_show_accounts();   return EXIT_SUCCESS; }
+                if (strcmp(cmd, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
                 if (strcmp(cmd, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
             }
@@ -469,7 +469,7 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
             if (strcmp(topic, "create-label")    == 0) { help_create_label();    return EXIT_SUCCESS; }
             if (strcmp(topic, "delete-label")    == 0) { help_delete_label();    return EXIT_SUCCESS; }
-            if (strcmp(topic, "show-accounts")   == 0) { help_show_accounts();   return EXIT_SUCCESS; }
+            if (strcmp(topic, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
             if (strcmp(topic, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
             if (strcmp(topic, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
@@ -496,7 +496,7 @@ int main(int argc, char *argv[]) {
     /* Determine if this command needs a specific account config.
      * migrate-credentials operates on all accounts and handles its own loading. */
     int cmd_needs_cfg = !(cmd && (strcmp(cmd, "add-account")        == 0 ||
-                                  strcmp(cmd, "show-accounts")      == 0 ||
+                                  strcmp(cmd, "list-accounts")      == 0 ||
                                   strcmp(cmd, "remove-account")     == 0 ||
                                   strcmp(cmd, "migrate-credentials") == 0));
 
@@ -509,7 +509,7 @@ int main(int argc, char *argv[]) {
             if (!cfg) {
                 fprintf(stderr,
                         "Error: Account '%s' not found.\n"
-                        "Run 'email-cli show-accounts' to list configured accounts.\n",
+                        "Run 'email-cli list-accounts' to list configured accounts.\n",
                         account_arg);
                 logger_close();
                 return EXIT_FAILURE;
@@ -526,7 +526,7 @@ int main(int argc, char *argv[]) {
                 for (int i = 0; i < count; i++)
                     fprintf(stderr, "  email-cli %s %s\n",
                             list[i].name ? list[i].name : "?", cmd ? cmd : "");
-                fprintf(stderr, "Run 'email-cli show-accounts' for the full list.\n");
+                fprintf(stderr, "Run 'email-cli list-accounts' for the full list.\n");
                 config_free_account_list(list, count);
                 logger_close();
                 return EXIT_FAILURE;
@@ -896,7 +896,7 @@ int main(int argc, char *argv[]) {
             result = email_service_delete_label(cfg, label_id);
         }
 
-    } else if (strcmp(cmd, "show-accounts") == 0) {
+    } else if (strcmp(cmd, "list-accounts") == 0) {
         int count = 0;
         AccountEntry *accs = config_list_accounts(&count);
         if (count == 0) {

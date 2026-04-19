@@ -48,7 +48,7 @@ static void help_general(void) {
         "  save-attachment <uid> <filename> [dir]\n"
         "                             Save an attachment to disk\n"
         "  list-labels                List all labels (Gmail) or folders (IMAP)\n"
-        "  show-accounts              List all configured accounts\n"
+        "  list-accounts              List all configured accounts\n"
         "  help [command]             Show this help, or detailed help for a command\n"
         "\n"
         "Run 'email-cli-ro help <command>' for more information.\n"
@@ -158,14 +158,14 @@ static void help_list_labels(void) {
     );
 }
 
-static void help_show_accounts(void) {
+static void help_list_accounts(void) {
     printf(
-        "Usage: email-cli-ro show-accounts\n"
+        "Usage: email-cli-ro list-accounts\n"
         "\n"
         "List all configured accounts with their type and server.\n"
         "\n"
         "Examples:\n"
-        "  email-cli-ro show-accounts\n"
+        "  email-cli-ro list-accounts\n"
     );
 }
 
@@ -263,7 +263,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
                 if (strcmp(cmd, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
-                if (strcmp(cmd, "show-accounts")   == 0) { help_show_accounts();   return EXIT_SUCCESS; }
+                if (strcmp(cmd, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
             }
             help_general();
             return EXIT_SUCCESS;
@@ -280,7 +280,7 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "attachments")     == 0) { help_attachments();     return EXIT_SUCCESS; }
             if (strcmp(topic, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
             if (strcmp(topic, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
-            if (strcmp(topic, "show-accounts")   == 0) { help_show_accounts();   return EXIT_SUCCESS; }
+            if (strcmp(topic, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli-ro help' for available commands.\n");
             return EXIT_FAILURE;
@@ -303,13 +303,13 @@ int main(int argc, char *argv[]) {
 
     /* 4. Load configuration — no wizard: must already exist */
     Config *cfg = NULL;
-    if (strcmp(cmd, "show-accounts") != 0) {
+    if (strcmp(cmd, "list-accounts") != 0) {
         if (account_arg) {
             cfg = config_load_account(account_arg);
             if (!cfg) {
                 fprintf(stderr,
                         "Error: Account '%s' not found.\n"
-                        "Run 'email-cli-ro show-accounts' to list configured accounts.\n",
+                        "Run 'email-cli-ro list-accounts' to list configured accounts.\n",
                         account_arg);
                 logger_close();
                 return EXIT_FAILURE;
@@ -325,7 +325,7 @@ int main(int argc, char *argv[]) {
                 for (int i = 0; i < count; i++)
                     fprintf(stderr, "  email-cli-ro %s %s\n",
                             list[i].name ? list[i].name : "?", cmd ? cmd : "");
-                fprintf(stderr, "Run 'email-cli-ro show-accounts' for the full list.\n");
+                fprintf(stderr, "Run 'email-cli-ro list-accounts' for the full list.\n");
                 config_free_account_list(list, count);
                 logger_close();
                 return EXIT_FAILURE;
@@ -474,7 +474,7 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(cmd, "list-labels") == 0) {
         result = email_service_list_labels(cfg);
 
-    } else if (strcmp(cmd, "show-accounts") == 0) {
+    } else if (strcmp(cmd, "list-accounts") == 0) {
         int count = 0;
         AccountEntry *accs = config_list_accounts(&count);
         if (count == 0) {

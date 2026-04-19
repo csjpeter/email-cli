@@ -657,14 +657,14 @@ UNSTAR=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE
 check_not "17.2 remove-starred: no error"  "Error\|error\|failed" "$UNSTAR"
 
 # ════════════════════════════════════════════════════════════════════════════
-# Phase 18 — show-accounts command
+# Phase 18 — list-accounts command
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "--- Phase 18: show-accounts command ---"
+echo "--- Phase 18: list-accounts command ---"
 ACCS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
-    "$BIN_DIR/email-cli" --batch show-accounts 2>&1 || true) )
-check "18.1 show-accounts: account listed"  "alpha@test.local"  "$ACCS"
-check "18.2 show-accounts: IMAP type"       "IMAP"              "$ACCS"
+    "$BIN_DIR/email-cli" --batch list-accounts 2>&1 || true) )
+check "18.1 list-accounts: account listed"  "alpha@test.local"  "$ACCS"
+check "18.2 list-accounts: IMAP type"       "IMAP"              "$ACCS"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 19 — config show
@@ -979,21 +979,21 @@ OUT_23_09=$(
 check "23-US09: account + help list → shows list help" \
     "Usage:" "$OUT_23_09"
 
-# ── US-10: show-accounts works without specifying an account ─────────────
+# ── US-10: list-accounts works without specifying an account ─────────────
 OUT_23_10_ro=$(
     export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli-ro" show-accounts 2>&1 || true)
-check "23-US10: email-cli-ro show-accounts lists alpha" \
+    "$BIN_DIR/email-cli-ro" list-accounts 2>&1 || true)
+check "23-US10: email-cli-ro list-accounts lists alpha" \
     "$ALPHA" "$OUT_23_10_ro"
-check "23-US10: email-cli-ro show-accounts lists beta" \
+check "23-US10: email-cli-ro list-accounts lists beta" \
     "$BETA" "$OUT_23_10_ro"
 
 OUT_23_10_rw=$(
     export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" show-accounts 2>&1 || true)
-check "23-US10: email-cli show-accounts lists alpha" \
+    "$BIN_DIR/email-cli" list-accounts 2>&1 || true)
+check "23-US10: email-cli list-accounts lists alpha" \
     "$ALPHA" "$OUT_23_10_rw"
-check "23-US10: email-cli show-accounts lists beta" \
+check "23-US10: email-cli list-accounts lists beta" \
     "$BETA" "$OUT_23_10_rw"
 
 # ════════════════════════════════════════════════════════════════════════════

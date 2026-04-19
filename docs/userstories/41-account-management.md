@@ -6,13 +6,13 @@ As a user, I want to list, add, and remove accounts from the command line (batch
 
 ## Commands
 
-- `email-cli show-accounts` — list all configured accounts with type and server
+- `email-cli list-accounts` — list all configured accounts with type and server
 - `email-cli add-account` — run the interactive setup wizard to add a new account
 - `email-cli remove-account <email>` — remove an account by email address
 
 ## Acceptance Criteria
 
-### show-accounts
+### list-accounts
 
 1. Prints a table: Account (email), Type (Gmail/IMAP), Server.
 2. Works even if no accounts are configured (prints "No accounts configured.").
@@ -47,5 +47,5 @@ The status bar includes `(*keeps local data)` annotation next to `d=delete*`.
 
 ## Notes
 
-- `show-accounts` and `remove-account` operate on `config_store` directly and do not require network connectivity.
+- `list-accounts` and `remove-account` operate on `config_store` directly and do not require network connectivity.
 - The `remove-account` path uses `platform_data_dir()` to compute the local data directory.

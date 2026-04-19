@@ -464,7 +464,7 @@ These commands require a Gmail account (`GMAIL_MODE=1`).
 ### Account management
 
 ```
-email-cli show-accounts                 # List configured accounts
+email-cli list-accounts                 # List configured accounts
 email-cli add-account                   # Interactive wizard to add an account
 email-cli remove-account <email>        # Remove an account and its config
 ```

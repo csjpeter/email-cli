@@ -2140,6 +2140,7 @@ read_key_again: ;
                 /* Restore saved labels */
                 char *saved = local_trash_labels_load(uid);
                 if (saved) {
+                    int restored_real = 0;
                     char *tok = saved, *sep;
                     while (tok && *tok) {
                         sep = strchr(tok, ',');
@@ -2153,11 +2154,15 @@ read_key_again: ;
                             label_idx_add(lb, uid);
                             if (list_mc)
                                 mail_client_modify_label(list_mc, uid, lb, 1);
+                            restored_real = 1;
                         }
                         tok = sep ? sep + 1 : NULL;
                     }
                     free(saved);
                     local_trash_labels_remove(uid);
+                    /* If only CATEGORY_* labels were saved, also restore to Archive */
+                    if (!restored_real)
+                        label_idx_add("_nolabel", uid);
                 } else {
                     /* No saved labels — put in Archive (_nolabel) */
                     label_idx_add("_nolabel", uid);
@@ -2767,6 +2772,16 @@ static const struct { const char *id; const char *name; } gmail_system_labels[] 
 };
 #define GMAIL_SYS_COUNT ((int)(sizeof(gmail_system_labels)/sizeof(gmail_system_labels[0])))
 
+/* Gmail automatic inbox category labels (shown as a separate section) */
+static const struct { const char *id; const char *name; } gmail_cat_labels[] = {
+    { "CATEGORY_PERSONAL",   "Personal"   },
+    { "CATEGORY_SOCIAL",     "Social"     },
+    { "CATEGORY_PROMOTIONS", "Promotions" },
+    { "CATEGORY_UPDATES",    "Updates"    },
+    { "CATEGORY_FORUMS",     "Forums"     },
+};
+#define GMAIL_CAT_COUNT ((int)(sizeof(gmail_cat_labels)/sizeof(gmail_cat_labels[0])))
+
 static const struct { const char *id; const char *name; } gmail_special_labels[] = {
     { "_nolabel", "Archive" },
     { "_spam",    "Spam"    },
@@ -2779,10 +2794,11 @@ static const struct { const char *id; const char *name; } gmail_special_labels[]
  * section_sep[i] = 1 means a separator line should appear before row i. */
 static int build_label_display(
     char ***ids_out, char ***names_out, int **sep_out,
-    char **user_labels, int user_count)
+    char **user_labels, int user_count,
+    char **cat_labels,  int cat_count)
 {
-    /* total = system + user + special */
-    int total = GMAIL_SYS_COUNT + user_count + GMAIL_SPECIAL_COUNT;
+    /* total = system + user + categories + special */
+    int total = GMAIL_SYS_COUNT + user_count + cat_count + GMAIL_SPECIAL_COUNT;
     char **ids   = calloc((size_t)total, sizeof(char *));
     char **names = calloc((size_t)total, sizeof(char *));
     int  *seps   = calloc((size_t)total, sizeof(int));
@@ -2803,7 +2819,22 @@ static int build_label_display(
         names[n] = disp ? disp : strdup(user_labels[i]);
         n++;
     }
-    /* Section 3: special labels (separator before first) */
+    /* Section 3: inbox category labels (separator before first) */
+    if (cat_count > 0) seps[n] = 1;
+    for (int i = 0; i < cat_count; i++) {
+        ids[n] = strdup(cat_labels[i]);
+        /* Map ID to display name */
+        const char *disp = cat_labels[i];
+        for (int k = 0; k < GMAIL_CAT_COUNT; k++) {
+            if (strcmp(cat_labels[i], gmail_cat_labels[k].id) == 0) {
+                disp = gmail_cat_labels[k].name;
+                break;
+            }
+        }
+        names[n] = strdup(disp);
+        n++;
+    }
+    /* Section 4: special labels (separator before first) */
     seps[n] = 1;
     for (int i = 0; i < GMAIL_SPECIAL_COUNT; i++) {
         ids[n]   = strdup(gmail_special_labels[i].id);
@@ -2841,18 +2872,21 @@ char *email_service_list_labels_interactive(const Config *cfg,
     local_store_init(cfg->host, cfg->user);
     if (go_up) *go_up = 0;
 
-    /* Collect user-defined labels from locally synced .idx files.
-     * We scan the labels/ directory for .idx files that are not system/special. */
+    /* Collect user and category labels from locally synced .idx files. */
     char **user_labels = NULL;
     int user_count = 0;
+    char **cat_labels = NULL;
+    int cat_count = 0;
     {
         char **all_labels = NULL;
         int all_count = 0;
         label_idx_list(&all_labels, &all_count);
-        /* Filter to user labels only */
         user_labels = calloc(all_count > 0 ? (size_t)all_count : 1, sizeof(char *));
+        cat_labels  = calloc(all_count > 0 ? (size_t)all_count : 1, sizeof(char *));
         for (int i = 0; i < all_count; i++) {
-            if (!is_system_or_special_label(all_labels[i]))
+            if (strncmp(all_labels[i], "CATEGORY_", 9) == 0)
+                cat_labels[cat_count++] = strdup(all_labels[i]);
+            else if (!is_system_or_special_label(all_labels[i]))
                 user_labels[user_count++] = strdup(all_labels[i]);
             free(all_labels[i]);
         }
@@ -2866,9 +2900,12 @@ char *email_service_list_labels_interactive(const Config *cfg,
     char **lbl_ids = NULL, **lbl_names = NULL;
     int *lbl_seps = NULL;
     int lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps,
-                                        user_labels, user_count);
+                                        user_labels, user_count,
+                                        cat_labels, cat_count);
     for (int i = 0; i < user_count; i++) free(user_labels[i]);
     free(user_labels);
+    for (int i = 0; i < cat_count; i++) free(cat_labels[i]);
+    free(cat_labels);
 
     if (lbl_count == 0) {
         free_label_display(lbl_ids, lbl_names, lbl_seps, 0);
@@ -3012,16 +3049,19 @@ char *email_service_list_labels_interactive(const Config *cfg,
                     if (email_service_create_label(cfg, new_name) == 0) {
                         /* Reload label list on next iteration */
                         free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_count);
-                        /* Rebuild user labels */
-                        char **ul2 = NULL;
-                        int uc2 = 0;
+                        /* Rebuild label list */
+                        char **ul2 = NULL, **cl2 = NULL;
+                        int uc2 = 0, cc2 = 0;
                         {
                             char **al2 = NULL;
                             int ac2 = 0;
                             label_idx_list(&al2, &ac2);
                             ul2 = calloc(ac2 > 0 ? (size_t)ac2 : 1, sizeof(char *));
+                            cl2 = calloc(ac2 > 0 ? (size_t)ac2 : 1, sizeof(char *));
                             for (int i = 0; i < ac2; i++) {
-                                if (!is_system_or_special_label(al2[i]))
+                                if (strncmp(al2[i], "CATEGORY_", 9) == 0)
+                                    cl2[cc2++] = strdup(al2[i]);
+                                else if (!is_system_or_special_label(al2[i]))
                                     ul2[uc2++] = strdup(al2[i]);
                                 free(al2[i]);
                             }
@@ -3030,9 +3070,11 @@ char *email_service_list_labels_interactive(const Config *cfg,
                         if (uc2 > 1)
                             qsort(ul2, (size_t)uc2, sizeof(char *), cmp_str);
                         lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps,
-                                                        ul2, uc2);
+                                                        ul2, uc2, cl2, cc2);
                         for (int i = 0; i < uc2; i++) free(ul2[i]);
                         free(ul2);
+                        for (int i = 0; i < cc2; i++) free(cl2[i]);
+                        free(cl2);
                         if (lbl_count == 0) {
                             free_label_display(lbl_ids, lbl_names, lbl_seps, 0);
                             goto labels_done;
@@ -3049,15 +3091,18 @@ char *email_service_list_labels_interactive(const Config *cfg,
                     email_service_delete_label(cfg, del_id);
                     /* Rebuild display after deletion */
                     free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_count);
-                    char **ul3 = NULL;
-                    int uc3 = 0;
+                    char **ul3 = NULL, **cl3 = NULL;
+                    int uc3 = 0, cc3 = 0;
                     {
                         char **al3 = NULL;
                         int ac3 = 0;
                         label_idx_list(&al3, &ac3);
                         ul3 = calloc(ac3 > 0 ? (size_t)ac3 : 1, sizeof(char *));
+                        cl3 = calloc(ac3 > 0 ? (size_t)ac3 : 1, sizeof(char *));
                         for (int i = 0; i < ac3; i++) {
-                            if (!is_system_or_special_label(al3[i]))
+                            if (strncmp(al3[i], "CATEGORY_", 9) == 0)
+                                cl3[cc3++] = strdup(al3[i]);
+                            else if (!is_system_or_special_label(al3[i]))
                                 ul3[uc3++] = strdup(al3[i]);
                             free(al3[i]);
                         }
@@ -3066,9 +3111,11 @@ char *email_service_list_labels_interactive(const Config *cfg,
                     if (uc3 > 1)
                         qsort(ul3, (size_t)uc3, sizeof(char *), cmp_str);
                     lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps,
-                                                    ul3, uc3);
+                                                    ul3, uc3, cl3, cc3);
                     for (int i = 0; i < uc3; i++) free(ul3[i]);
                     free(ul3);
+                    for (int i = 0; i < cc3; i++) free(cl3[i]);
+                    free(cl3);
                     if (cursor >= lbl_count) cursor = lbl_count - 1;
                     if (cursor < 0) cursor = 0;
                     if (lbl_count == 0) {

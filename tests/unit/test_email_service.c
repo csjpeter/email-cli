@@ -1688,7 +1688,8 @@ void test_email_service(void) {
         char *user[] = { (char*)"Work", (char*)"Personal" };
         char **ids = NULL, **nms = NULL;
         int *seps = NULL;
-        int cnt = build_label_display(&ids, &nms, &seps, user, 2);
+        char *cats[] = { (char*)"CATEGORY_SOCIAL" };
+        int cnt = build_label_display(&ids, &nms, &seps, user, 2, cats, 1);
         ASSERT(cnt > 2, "build_label_display: count > user count (system labels added)");
         ASSERT(ids   != NULL, "build_label_display: ids non-NULL");
         ASSERT(nms   != NULL, "build_label_display: names non-NULL");
@@ -1700,7 +1701,7 @@ void test_email_service(void) {
         ASSERT(1, "free_label_display: no crash after free");
 
         /* Empty user labels */
-        cnt = build_label_display(&ids, &nms, &seps, NULL, 0);
+        cnt = build_label_display(&ids, &nms, &seps, NULL, 0, NULL, 0);
         ASSERT(cnt > 0, "build_label_display: no user labels still returns system labels");
         free_label_display(ids, nms, seps, cnt);
     }

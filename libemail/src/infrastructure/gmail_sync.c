@@ -76,13 +76,20 @@ char *gmail_sync_build_hdr(const char *raw_msg, char **labels, int label_count) 
     return hdr;
 }
 
-/* ── Filtered labels (excluded from display / indexing) ───────────── */
+/* ── Filtered labels (metadata-only, excluded from indexing) ──────── */
 
 int gmail_sync_is_filtered_label(const char *label_id) {
     if (!label_id) return 1;
-    if (strncmp(label_id, "CATEGORY_", 9) == 0) return 1;
     if (strcmp(label_id, "IMPORTANT") == 0) return 1;
+    if (strcmp(label_id, "CHAT") == 0) return 1;
     return 0;
+}
+
+/* Returns 1 if label_id is a Gmail automatic inbox category (CATEGORY_*).
+ * Category labels are indexed like user labels, but a message whose ONLY
+ * non-filtered labels are CATEGORY_* is also added to _nolabel (Archive). */
+static int is_category_label(const char *label_id) {
+    return label_id && strncmp(label_id, "CATEGORY_", 9) == 0;
 }
 
 /* ── Full Sync ────────────────────────────────────────────────────── */
@@ -145,7 +152,7 @@ int gmail_sync_full(GmailClient *gc) {
         free(raw);
 
         /* Update label index files */
-        int has_label = 0;
+        int has_real_label = 0; /* non-CATEGORY_, non-filtered label */
         for (int j = 0; j < label_count; j++) {
             if (gmail_sync_is_filtered_label(labels[j])) continue;
 
@@ -155,9 +162,11 @@ int gmail_sync_full(GmailClient *gc) {
             else if (strcmp(labels[j], "TRASH") == 0) idx_name = "_trash";
 
             label_idx_add(idx_name, uid);
-            has_label = 1;
+            if (!is_category_label(labels[j]))
+                has_real_label = 1;
         }
-        if (!has_label)
+        /* Messages with no real (non-CATEGORY_) label go to Archive */
+        if (!has_real_label)
             label_idx_add("_nolabel", uid);
 
         for (int j = 0; j < label_count; j++) free(labels[j]);
@@ -296,8 +305,9 @@ static void process_labels_added(const char *obj, int index, void *ctx) {
         if (strcmp(add_labels[i], "SPAM") == 0) idx_name = "_spam";
         else if (strcmp(add_labels[i], "TRASH") == 0) idx_name = "_trash";
         label_idx_add(idx_name, id);
-        /* If any real label is added, remove from _nolabel */
-        label_idx_remove("_nolabel", id);
+        /* Only remove from _nolabel when a real (non-CATEGORY_) label is added */
+        if (!is_category_label(add_labels[i]))
+            label_idx_remove("_nolabel", id);
     }
 
     for (int i = 0; i < add_count; i++) free(add_labels[i]);
@@ -337,7 +347,9 @@ static void process_labels_removed(const char *obj, int index, void *ctx) {
 
     int has_real_label = 0;
     for (int i = 0; i < cur_count; i++) {
-        if (!gmail_sync_is_filtered_label(cur_labels[i])) has_real_label = 1;
+        if (!gmail_sync_is_filtered_label(cur_labels[i]) &&
+            !is_category_label(cur_labels[i]))
+            has_real_label = 1;
         free(cur_labels[i]);
     }
     free(cur_labels);

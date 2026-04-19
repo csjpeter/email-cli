@@ -11,16 +11,18 @@ static void test_filtered_null(void) {
 }
 
 static void test_filtered_category(void) {
-    ASSERT(gmail_sync_is_filtered_label("CATEGORY_PERSONAL") == 1,
-           "filtered: CATEGORY_PERSONAL");
-    ASSERT(gmail_sync_is_filtered_label("CATEGORY_SOCIAL") == 1,
-           "filtered: CATEGORY_SOCIAL");
-    ASSERT(gmail_sync_is_filtered_label("CATEGORY_PROMOTIONS") == 1,
-           "filtered: CATEGORY_PROMOTIONS");
-    ASSERT(gmail_sync_is_filtered_label("CATEGORY_UPDATES") == 1,
-           "filtered: CATEGORY_UPDATES");
-    ASSERT(gmail_sync_is_filtered_label("CATEGORY_FORUMS") == 1,
-           "filtered: CATEGORY_FORUMS");
+    /* CATEGORY_* labels are now indexed (not filtered) — they appear in a
+     * dedicated section in the TUI label list. */
+    ASSERT(gmail_sync_is_filtered_label("CATEGORY_PERSONAL") == 0,
+           "not filtered: CATEGORY_PERSONAL (indexed as category)");
+    ASSERT(gmail_sync_is_filtered_label("CATEGORY_SOCIAL") == 0,
+           "not filtered: CATEGORY_SOCIAL (indexed as category)");
+    ASSERT(gmail_sync_is_filtered_label("CATEGORY_PROMOTIONS") == 0,
+           "not filtered: CATEGORY_PROMOTIONS (indexed as category)");
+    ASSERT(gmail_sync_is_filtered_label("CATEGORY_UPDATES") == 0,
+           "not filtered: CATEGORY_UPDATES (indexed as category)");
+    ASSERT(gmail_sync_is_filtered_label("CATEGORY_FORUMS") == 0,
+           "not filtered: CATEGORY_FORUMS (indexed as category)");
 }
 
 static void test_filtered_important(void) {
@@ -47,10 +49,10 @@ static void test_not_filtered_user(void) {
 
 static void test_filtered_edge_cases(void) {
     ASSERT(gmail_sync_is_filtered_label("") == 0, "not filtered: empty string");
-    ASSERT(gmail_sync_is_filtered_label("CATEGORY_") == 1,
-           "filtered: bare CATEGORY_ prefix");
-    ASSERT(gmail_sync_is_filtered_label("CATEGORY_X") == 1,
-           "filtered: unknown CATEGORY_ suffix");
+    ASSERT(gmail_sync_is_filtered_label("CATEGORY_") == 0,
+           "not filtered: bare CATEGORY_ prefix (indexed as category)");
+    ASSERT(gmail_sync_is_filtered_label("CATEGORY_X") == 0,
+           "not filtered: unknown CATEGORY_ suffix (indexed as category)");
 }
 
 /* ── build_hdr ───────────────────────────────────────────────────────── */

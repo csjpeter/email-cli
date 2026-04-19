@@ -4246,21 +4246,26 @@ int email_service_set_flag(const Config *cfg, const char *uid,
         manifest_free(m);
     }
 
-    /* Update Gmail label indexes if in Gmail mode */
+    /* Update Gmail label indexes and .hdr labels CSV if in Gmail mode.
+     * Both .idx AND the labels field in .hdr must be kept in sync so that
+     * rebuild_label_indexes() (run during every full sync) does not undo
+     * locally applied flag changes. */
     if (cfg->gmail_mode) {
-        if (flag_bit == MSG_FLAG_UNSEEN) {
-            if (add)
-                label_idx_add("UNREAD", uid);
-            else
-                label_idx_remove("UNREAD", uid);
-        } else if (flag_bit == MSG_FLAG_FLAGGED) {
-            if (add)
-                label_idx_add("STARRED", uid);
-            else
-                label_idx_remove("STARRED", uid);
+        const char *lbl = NULL;
+        if (flag_bit == MSG_FLAG_UNSEEN)  lbl = "UNREAD";
+        else if (flag_bit == MSG_FLAG_FLAGGED) lbl = "STARRED";
+
+        if (lbl) {
+            if (add) {
+                label_idx_add(lbl, uid);
+                local_hdr_update_labels("", uid, &lbl, 1, NULL, 0);
+            } else {
+                label_idx_remove(lbl, uid);
+                local_hdr_update_labels("", uid, NULL, 0, &lbl, 1);
+            }
         }
 
-        /* Reload current flags from manifest to update .hdr */
+        /* Also update the flags integer field in .hdr */
         Manifest *m2 = manifest_load(use_folder);
         if (m2) {
             ManifestEntry *me2 = manifest_find(m2, uid);

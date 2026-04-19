@@ -11,7 +11,8 @@
  * Global application settings are stored in:
  *   ~/.config/email-cli/settings.ini
  *
- * CLI tools use config_load_from_store() which returns the first account found.
+ * Use config_load_account(name) to load a specific account by email address.
+ * config_load_from_store() is kept for single-account convenience.
  * The TUI accounts screen uses config_list_accounts() to show all profiles.
  *
  * Credential obfuscation is enabled by default. Passwords and tokens are
@@ -56,7 +57,16 @@ int config_save_account(const Config *cfg);
 int config_delete_account(const char *name);
 
 /**
+ * @brief Loads a specific account by email address (or directory name).
+ * @param name  The account email address, e.g. "user\@example.com".
+ * @return Pointer to Config struct, or NULL if not found.
+ *         Caller must free with config_free().
+ */
+Config *config_load_account(const char *name);
+
+/**
  * @brief Loads the first configured account from the platform config directory.
+ *        Convenience wrapper for single-account setups.
  * @return Pointer to Config struct or NULL.
  */
 Config *config_load_from_store(void);

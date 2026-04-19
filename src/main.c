@@ -21,10 +21,14 @@
 
 static void help_general(void) {
     printf(
-        "Usage: email-cli <command> [options]\n"
+        "Usage: email-cli [<account>] <command> [options]\n"
         "\n"
         "Batch-mode email CLI with read and write operations.\n"
         "For the interactive TUI, use email-tui.\n"
+        "\n"
+        "  <account>  Email address of the account to use (e.g. user@example.com).\n"
+        "             Required when multiple accounts are configured.\n"
+        "             Alternative: --account <email>.\n"
         "\n"
         "Commands:\n"
         "  list                    List messages in the configured mailbox\n"
@@ -128,13 +132,9 @@ static void help_send(void) {
 
 static void help_config(void) {
     printf(
-        "Usage: email-cli [--account <email>] config <subcommand>\n"
+        "Usage: email-cli [<account>] config <subcommand>\n"
         "\n"
         "View or update configuration settings.\n"
-        "\n"
-        "Global options:\n"
-        "  --account <email>  Select a specific account by email address.\n"
-        "                     Required when multiple accounts are configured.\n"
         "\n"
         "Subcommands:\n"
         "  show    Print current configuration (passwords masked)\n"
@@ -147,8 +147,7 @@ static void help_config(void) {
         "Examples:\n"
         "  email-cli config show\n"
         "  email-cli config imap\n"
-        "  email-cli config smtp\n"
-        "  email-cli --account user@example.com config show\n"
+        "  email-cli user@example.com config show\n"
     );
 }
 
@@ -357,28 +356,53 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* 2. Global flags: scan all args for --account */
+    /* 2. Account + command detection.
+     *    Supported forms:
+     *      email-cli [<account>] <command> [options]
+     *      email-cli --account <email> <command> [options]
+     *    <account> is the first non-flag positional arg that contains '@'. */
     const char *account_arg = NULL;
+    int account_arg_idx = -1;
+
+    /* Pass A: scan for --account flag anywhere in args */
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--batch") == 0) continue; /* accepted as no-op */
+        if (strcmp(argv[i], "--batch") == 0) continue;
         if (strcmp(argv[i], "--account") == 0 && i + 1 < argc) {
             account_arg = argv[++i]; continue;
         }
     }
 
-    /* Command: first non-global-flag arg */
+    /* Pass B: if no --account flag, check whether first positional arg is an email */
+    if (!account_arg) {
+        for (int i = 1; i < argc; i++) {
+            if (argv[i][0] == '-') {
+                if (strcmp(argv[i], "--account") == 0) i++; /* skip --account pair */
+                continue;
+            }
+            /* First non-flag arg: if it looks like an email, treat as account */
+            if (strchr(argv[i], '@')) {
+                account_arg = argv[i];
+                account_arg_idx = i;
+            }
+            break; /* stop after first non-flag arg */
+        }
+    }
+
+    /* Command: first non-flag, non-account arg */
     const char *cmd = NULL;
     int cmd_idx = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--batch") == 0) continue;
         if (strcmp(argv[i], "--help") == 0) continue;
         if (strcmp(argv[i], "--account") == 0) { i++; continue; }
+        if (i == account_arg_idx) continue; /* skip positional account */
         cmd = argv[i]; cmd_idx = i; break;
     }
 
     /* --help anywhere in the args: treat as "help <cmd>" */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--account") == 0) { i++; continue; }
+        if (i == account_arg_idx) continue;
         if (strcmp(argv[i], "--help") == 0) {
             if (cmd && strcmp(cmd, "--help") != 0) {
                 /* e.g. email-cli list --help */
@@ -458,30 +482,61 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Warning: Logging system failed to initialize.\n");
     logger_log(LOG_INFO, "--- email-cli starting (cmd: %s) ---", cmd);
 
-    /* Determine if this command needs a loaded account config */
-    int cmd_needs_cfg = !(cmd && (strcmp(cmd, "add-account")    == 0 ||
-                                  strcmp(cmd, "show-accounts")  == 0 ||
-                                  strcmp(cmd, "remove-account") == 0));
+    /* Determine if this command needs a specific account config.
+     * migrate-credentials operates on all accounts and handles its own loading. */
+    int cmd_needs_cfg = !(cmd && (strcmp(cmd, "add-account")        == 0 ||
+                                  strcmp(cmd, "show-accounts")      == 0 ||
+                                  strcmp(cmd, "remove-account")     == 0 ||
+                                  strcmp(cmd, "migrate-credentials") == 0));
 
     /* 4. Load configuration */
     Config *cfg = NULL;
     if (cmd_needs_cfg) {
-        cfg = config_load_from_store();
-        if (!cfg) {
-            logger_log(LOG_INFO, "No configuration found. Starting setup wizard.");
-            cfg = setup_wizard_run();
-            if (cfg) {
-                if (config_save_to_store(cfg) != 0) {
-                    logger_log(LOG_ERROR, "Failed to save configuration.");
-                    fprintf(stderr, "Error: Failed to save configuration to disk.\n");
-                } else {
-                    printf("Configuration saved. Run 'email-cli sync' to download your mail.\n");
-                }
-            } else {
-                logger_log(LOG_ERROR, "Configuration aborted by user.");
-                fprintf(stderr, "Configuration aborted. Exiting.\n");
+        if (account_arg) {
+            /* Specific account requested */
+            cfg = config_load_account(account_arg);
+            if (!cfg) {
+                fprintf(stderr,
+                        "Error: Account '%s' not found.\n"
+                        "Run 'email-cli show-accounts' to list configured accounts.\n",
+                        account_arg);
                 logger_close();
                 return EXIT_FAILURE;
+            }
+        } else {
+            /* No account specified: use the only account or run wizard */
+            int count = 0;
+            AccountEntry *list = config_list_accounts(&count);
+            if (count == 1) {
+                cfg = list[0].cfg; list[0].cfg = NULL;
+                config_free_account_list(list, count);
+            } else if (count > 1) {
+                fprintf(stderr, "Multiple accounts configured. Specify which to use:\n");
+                for (int i = 0; i < count; i++)
+                    fprintf(stderr, "  email-cli %s %s\n",
+                            list[i].name ? list[i].name : "?", cmd ? cmd : "");
+                fprintf(stderr, "Run 'email-cli show-accounts' for the full list.\n");
+                config_free_account_list(list, count);
+                logger_close();
+                return EXIT_FAILURE;
+            } else {
+                config_free_account_list(list, count);
+                /* No accounts: run setup wizard */
+                logger_log(LOG_INFO, "No configuration found. Starting setup wizard.");
+                cfg = setup_wizard_run();
+                if (cfg) {
+                    if (config_save_to_store(cfg) != 0) {
+                        logger_log(LOG_ERROR, "Failed to save configuration.");
+                        fprintf(stderr, "Error: Failed to save configuration to disk.\n");
+                    } else {
+                        printf("Configuration saved. Run 'email-cli sync' to download your mail.\n");
+                    }
+                } else {
+                    logger_log(LOG_ERROR, "Configuration aborted by user.");
+                    fprintf(stderr, "Configuration aborted. Exiting.\n");
+                    logger_close();
+                    return EXIT_FAILURE;
+                }
             }
         }
     }
@@ -618,60 +673,7 @@ int main(int argc, char *argv[]) {
         }
 
     } else if (strcmp(cmd, "config") == 0) {
-        /* Determine which account to operate on.
-         * --account <email> selects a specific named account.
-         * If omitted and exactly one account exists, use it (already loaded as cfg).
-         * If omitted and multiple accounts exist, list them and exit. */
-        if (account_arg) {
-            /* Load the requested account, replacing the default cfg */
-            int acc_count = 0;
-            AccountEntry *accounts = config_list_accounts(&acc_count);
-            Config *acc_cfg = NULL;
-            for (int i = 0; i < acc_count; i++) {
-                if (accounts[i].name && strcmp(accounts[i].name, account_arg) == 0) {
-                    acc_cfg = accounts[i].cfg;
-                    accounts[i].cfg = NULL; /* transfer ownership */
-                    break;
-                }
-                /* also match by user field */
-                if (accounts[i].cfg && accounts[i].cfg->user &&
-                    strcmp(accounts[i].cfg->user, account_arg) == 0) {
-                    acc_cfg = accounts[i].cfg;
-                    accounts[i].cfg = NULL;
-                    break;
-                }
-            }
-            config_free_account_list(accounts, acc_count);
-            if (!acc_cfg) {
-                fprintf(stderr,
-                        "Error: Account '%s' not found.\n"
-                        "Run 'email-cli config show' to list available accounts.\n",
-                        account_arg);
-                config_free(cfg);
-                logger_close();
-                return EXIT_FAILURE;
-            }
-            config_free(cfg);
-            cfg = acc_cfg;
-        } else {
-            /* No --account: check if multiple accounts exist */
-            int acc_count = 0;
-            AccountEntry *accounts = config_list_accounts(&acc_count);
-            if (acc_count > 1) {
-                fprintf(stderr,
-                        "Multiple accounts configured. "
-                        "Re-run with --account <email>:\n");
-                for (int i = 0; i < acc_count; i++)
-                    fprintf(stderr, "  %s\n", accounts[i].name ? accounts[i].name
-                                                               : "(unknown)");
-                config_free_account_list(accounts, acc_count);
-                config_free(cfg);
-                logger_close();
-                return EXIT_FAILURE;
-            }
-            config_free_account_list(accounts, acc_count);
-        }
-
+        /* Account already loaded globally above. */
         const char *subcmd = (argc > cmd_idx + 1) ? argv[cmd_idx + 1] : "";
 
         if (strcmp(subcmd, "show") == 0) {

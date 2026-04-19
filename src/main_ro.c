@@ -31,10 +31,14 @@
 
 static void help_general(void) {
     printf(
-        "Usage: email-cli-ro <command> [options]\n"
+        "Usage: email-cli-ro [<account>] <command> [options]\n"
         "\n"
         "Read-only email CLI. All output is non-interactive (batch mode).\n"
         "Safe for use by AI agents: no send or write operations are available.\n"
+        "\n"
+        "  <account>  Email address of the account to use (e.g. user@example.com).\n"
+        "             Required when multiple accounts are configured.\n"
+        "             Alternative: --account <email>.\n"
         "\n"
         "Commands:\n"
         "  list                       List messages in the configured mailbox\n"
@@ -199,11 +203,42 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* 2. Find command: first non-flag argument */
+    /* 2. Account + command detection (mirrors main.c logic).
+     *    Supported forms:
+     *      email-cli-ro [<account>] <command> [options]
+     *      email-cli-ro --account <email> <command> [options]  */
+    const char *account_arg = NULL;
+    int account_arg_idx = -1;
+
+    /* Pass A: scan for --account flag anywhere in args */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--account") == 0 && i + 1 < argc) {
+            account_arg = argv[++i]; continue;
+        }
+    }
+
+    /* Pass B: if no --account flag, check whether first positional arg is an email */
+    if (!account_arg) {
+        for (int i = 1; i < argc; i++) {
+            if (argv[i][0] == '-') {
+                if (strcmp(argv[i], "--account") == 0) i++;
+                continue;
+            }
+            if (strchr(argv[i], '@')) {
+                account_arg = argv[i];
+                account_arg_idx = i;
+            }
+            break;
+        }
+    }
+
+    /* Command: first non-flag, non-account arg */
     const char *cmd = NULL;
     int cmd_idx = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) continue;
+        if (strcmp(argv[i], "--account") == 0) { i++; continue; }
+        if (i == account_arg_idx) continue;
         cmd = argv[i]; cmd_idx = i; break;
     }
 
@@ -256,13 +291,42 @@ int main(int argc, char *argv[]) {
     logger_log(LOG_INFO, "--- email-cli-ro starting (cmd: %s) ---", cmd);
 
     /* 4. Load configuration — no wizard: must already exist */
-    Config *cfg = config_load_from_store();
-    if (!cfg) {
-        fprintf(stderr,
-                "Error: No configuration found.\n"
-                "Run 'email-cli' once to complete the setup wizard.\n");
-        logger_close();
-        return EXIT_FAILURE;
+    Config *cfg = NULL;
+    if (strcmp(cmd, "show-accounts") != 0) {
+        if (account_arg) {
+            cfg = config_load_account(account_arg);
+            if (!cfg) {
+                fprintf(stderr,
+                        "Error: Account '%s' not found.\n"
+                        "Run 'email-cli-ro show-accounts' to list configured accounts.\n",
+                        account_arg);
+                logger_close();
+                return EXIT_FAILURE;
+            }
+        } else {
+            int count = 0;
+            AccountEntry *list = config_list_accounts(&count);
+            if (count == 1) {
+                cfg = list[0].cfg; list[0].cfg = NULL;
+                config_free_account_list(list, count);
+            } else if (count > 1) {
+                fprintf(stderr, "Multiple accounts configured. Specify which to use:\n");
+                for (int i = 0; i < count; i++)
+                    fprintf(stderr, "  email-cli-ro %s %s\n",
+                            list[i].name ? list[i].name : "?", cmd ? cmd : "");
+                fprintf(stderr, "Run 'email-cli-ro show-accounts' for the full list.\n");
+                config_free_account_list(list, count);
+                logger_close();
+                return EXIT_FAILURE;
+            } else {
+                config_free_account_list(list, count);
+                fprintf(stderr,
+                        "Error: No configuration found.\n"
+                        "Run 'email-cli' once to complete the setup wizard.\n");
+                logger_close();
+                return EXIT_FAILURE;
+            }
+        }
     }
 
     /* 5. Initialize local store */

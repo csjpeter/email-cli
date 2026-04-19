@@ -144,6 +144,17 @@ run_list() {
      "$BIN_DIR/email-cli" "${args[@]}" 2>&1 || true)
 }
 
+# Run `email-cli <account> list` — explicit account selection (multi-account homes).
+run_list_as() {
+    local account="$1" home="$2" data_home="$3" folder="${4:-INBOX}"
+    local args=("$account" "--batch" "list")
+    [ "$folder" != "INBOX" ] && args+=("--folder" "$folder")
+    (export HOME="$home"
+     [ -n "$data_home" ] && export XDG_DATA_HOME="$data_home" || unset XDG_DATA_HOME
+     unset XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/email-cli" "${args[@]}" 2>&1 || true)
+}
+
 # Run `email-cli show <uid>` with the given HOME and optional XDG_DATA_HOME.
 run_show() {
     local home="$1" data_home="$2" uid="${3:-1}"
@@ -346,28 +357,26 @@ echo "--- Phase 5: Two-account HOME (alphabetical first wins) ---"
 
 rm -rf "$SHARED"
 
-# 5.1 H_AB has alpha + beta; alpha is alphabetically first.
-#     Pre-populate beta's cache, then run H_AB → must show alpha, not beta.
+# 5.1 H_AB has alpha + beta; explicitly select alpha → must show alpha, not beta.
 run_list "$H_BETA" "$SHARED" >/dev/null 2>&1 || true   # beta cache now warm
 
-AB_OUT=$(run_list "$H_AB" "$SHARED")
-check "5.1 AB home: alpha first (own subject)"    "AlphaAccountMsg"  "$AB_OUT"
+AB_OUT=$(run_list_as "$ALPHA" "$H_AB" "$SHARED")
+check "5.1 AB home: select alpha (own subject)"   "AlphaAccountMsg"  "$AB_OUT"
 check "5.2 AB home: alpha email in header"        "$ALPHA"           "$AB_OUT"
 check_not "5.3 AB home: beta NOT shown"           "BetaAccountMsg"   "$AB_OUT"
 
 # 5.2 Also warm alpha cache, re-run H_AB → still alpha
 run_list "$H_ALPHA" "$SHARED" >/dev/null 2>&1 || true
 
-AB_OUT2=$(run_list "$H_AB" "$SHARED")
+AB_OUT2=$(run_list_as "$ALPHA" "$H_AB" "$SHARED")
 check "5.4 AB home warm: alpha unchanged"         "AlphaAccountMsg"  "$AB_OUT2"
 check_not "5.5 AB home warm: beta still absent"   "BetaAccountMsg"   "$AB_OUT2"
 
-# 5.3 H_BG has beta + gamma; beta is alphabetically first.
-#     Pre-populate gamma's cache, run H_BG → must show beta, not gamma.
+# 5.3 H_BG has beta + gamma; explicitly select beta → must show beta, not gamma.
 run_list "$H_GAMMA" "$SHARED" >/dev/null 2>&1 || true
 
-BG_OUT=$(run_list "$H_BG" "$SHARED")
-check "5.6 BG home: beta first (own subject)"     "BetaAccountMsg"   "$BG_OUT"
+BG_OUT=$(run_list_as "$BETA" "$H_BG" "$SHARED")
+check "5.6 BG home: select beta (own subject)"    "BetaAccountMsg"   "$BG_OUT"
 check "5.7 BG home: beta email in header"         "$BETA"            "$BG_OUT"
 check_not "5.8 BG home: gamma NOT shown"          "GammaAccountMsg"  "$BG_OUT"
 
@@ -527,9 +536,9 @@ rm -rf "$SHARED"
 run_list "$H_GAMMA" "$SHARED" >/dev/null 2>&1 || true
 run_list "$H_BETA"  "$SHARED" >/dev/null 2>&1 || true
 
-# H_ALL has alpha+beta+gamma; alpha is first alphabetically → must show alpha
-ALL_OUT=$(run_list "$H_ALL" "$SHARED")
-check "10.1 all-home: alpha first (own subj)"  "AlphaAccountMsg"  "$ALL_OUT"
+# H_ALL has alpha+beta+gamma; explicitly select alpha → must show alpha only
+ALL_OUT=$(run_list_as "$ALPHA" "$H_ALL" "$SHARED")
+check "10.1 all-home: select alpha (own subj)" "AlphaAccountMsg"  "$ALL_OUT"
 check "10.2 all-home: alpha email in header"   "$ALPHA"           "$ALL_OUT"
 check_not "10.3 all-home: no beta leaked"      "BetaAccountMsg"   "$ALL_OUT"
 check_not "10.4 all-home: no gamma leaked"     "GammaAccountMsg"  "$ALL_OUT"
@@ -537,7 +546,7 @@ check_not "10.4 all-home: no gamma leaked"     "GammaAccountMsg"  "$ALL_OUT"
 # Now populate alpha and re-run → still alpha
 run_list "$H_ALPHA" "$SHARED" >/dev/null 2>&1 || true
 
-ALL_OUT2=$(run_list "$H_ALL" "$SHARED")
+ALL_OUT2=$(run_list_as "$ALPHA" "$H_ALL" "$SHARED")
 check "10.5 all-home warm: alpha unchanged"    "AlphaAccountMsg"  "$ALL_OUT2"
 check_not "10.6 all-home warm: no beta"        "BetaAccountMsg"   "$ALL_OUT2"
 check_not "10.7 all-home warm: no gamma"       "GammaAccountMsg"  "$ALL_OUT2"
@@ -881,6 +890,94 @@ check "22-US11: after auto-decrypt — list still works" \
 
 # Cleanup isolated homes
 rm -rf "$H_CRED" "$H_DUAL"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 23 — Account selection on the command line
+#
+# User Stories:
+#   US-01  Single account, no selector → works (backward compatible)
+#   US-02  Multiple accounts + positional account arg → correct account used
+#   US-03  Multiple accounts + --account flag → correct account used
+#   US-04  Multiple accounts, no selector → helpful error listing accounts
+#   US-05  email-cli-ro: positional account arg
+#   US-06  email-cli-ro: --account flag
+#   US-07  email-cli-ro: multiple accounts, no selector → error
+#   US-08  Unknown account name → error
+#   US-09  Positional account + help → shows help for command
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 23: account selection ---"
+
+# ── US-01: Single account, no selector ───────────────────────────────────
+OUT_23_01=$(run_list "$H_ALPHA" "")
+check "23-US01: single account, no selector — AlphaAccountMsg" \
+    "AlphaAccountMsg" "$OUT_23_01"
+
+# ── US-02: Positional account arg in multi-account home ──────────────────
+OUT_23_02A=$(
+    export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" "$ALPHA" list --batch 2>&1 || true)
+check "23-US02: positional alpha → AlphaAccountMsg" \
+    "AlphaAccountMsg" "$OUT_23_02A"
+
+OUT_23_02B=$(
+    export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" "$BETA" list --batch 2>&1 || true)
+check "23-US02: positional beta → BetaAccountMsg" \
+    "BetaAccountMsg" "$OUT_23_02B"
+check_not "23-US02: positional beta → not AlphaAccountMsg" \
+    "AlphaAccountMsg" "$OUT_23_02B"
+
+# ── US-03: --account flag in multi-account home ───────────────────────────
+OUT_23_03=$(
+    export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --account "$BETA" list --batch 2>&1 || true)
+check "23-US03: --account beta → BetaAccountMsg" \
+    "BetaAccountMsg" "$OUT_23_03"
+
+# ── US-04: Multiple accounts, no selector → error ────────────────────────
+OUT_23_04=$(
+    export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --batch 2>&1 || true)
+check "23-US04: no selector error mentions alpha" \
+    "$ALPHA" "$OUT_23_04"
+check "23-US04: no selector error mentions beta" \
+    "$BETA" "$OUT_23_04"
+
+# ── US-05: email-cli-ro positional account ────────────────────────────────
+OUT_23_05=$(
+    export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" "$BETA" list --batch 2>&1 || true)
+check "23-US05: email-cli-ro positional beta → BetaAccountMsg" \
+    "BetaAccountMsg" "$OUT_23_05"
+
+# ── US-06: email-cli-ro --account flag ────────────────────────────────────
+OUT_23_06=$(
+    export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" --account "$ALPHA" list --batch 2>&1 || true)
+check "23-US06: email-cli-ro --account alpha → AlphaAccountMsg" \
+    "AlphaAccountMsg" "$OUT_23_06"
+
+# ── US-07: email-cli-ro multiple accounts, no selector → error ───────────
+OUT_23_07=$(
+    export HOME="$H_AB"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list --batch 2>&1 || true)
+check "23-US07: email-cli-ro no selector error mentions alpha" \
+    "$ALPHA" "$OUT_23_07"
+
+# ── US-08: Unknown account name → error ──────────────────────────────────
+OUT_23_08=$(
+    export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" "nobody@nowhere.invalid" list --batch 2>&1 || true)
+check "23-US08: unknown account → error mentions account name" \
+    "nobody@nowhere.invalid" "$OUT_23_08"
+
+# ── US-09: Positional account + help shows command help ──────────────────
+OUT_23_09=$(
+    export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" "$ALPHA" help list 2>&1 || true)
+check "23-US09: account + help list → shows list help" \
+    "Usage:" "$OUT_23_09"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

@@ -462,6 +462,22 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
 
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
+Config *config_load_account(const char *name) {
+    if (!name || !name[0]) return NULL;
+    int count = 0;
+    AccountEntry *list = config_list_accounts(&count);
+    if (!list || count == 0) { config_free_account_list(list, count); return NULL; }
+    Config *result = NULL;
+    for (int i = 0; i < count; i++) {
+        int match = (list[i].name && strcmp(list[i].name, name) == 0) ||
+                    (list[i].cfg  && list[i].cfg->user &&
+                     strcmp(list[i].cfg->user, name) == 0);
+        if (match) { result = list[i].cfg; list[i].cfg = NULL; break; }
+    }
+    config_free_account_list(list, count);
+    return result;
+}
+
 Config* config_load_from_store(void) {
     load_settings_once(); /* ensure settings.ini exists */
     int count = 0;

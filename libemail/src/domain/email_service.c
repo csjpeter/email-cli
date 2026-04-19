@@ -1815,15 +1815,17 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (wend > show_count)           wend = show_count;
 
         /* Compute adaptive column widths.
-         * Fixed: "  " indent(2) + date(16) + "  "(2) + sts(4) + "  "(2) + "  "(2 before from) = 28
-         * subj_w gets ~60% of remaining space, from_w ~40%.
-         * On non-TTY (pipe/batch): subj_w=from_w=0 → print_padded_col prints full strings. */
+         * email-tui (opts->pager==1): date+sts+subject+from, overhead=28
+         * email-cli/ro (opts->pager==0): uid+date+sts+subject+from, overhead=46
+         * Non-TTY (pipe/batch): subj_w=from_w=0 → print_padded_col prints full strings. */
         int is_tty   = isatty(STDOUT_FILENO);
         int tcols    = is_tty ? terminal_cols() : 0;
         int is_gmail = cfg->gmail_mode;
+        int show_uid = !opts->pager;   /* UID column in CLI/RO mode, not TUI */
+        int overhead = show_uid ? 46 : 28;  /* 46 = 28 + uid(16) + sep(2) */
         int subj_w, from_w;
         if (is_tty) {
-            int avail = tcols - 28;
+            int avail = tcols - overhead;
             if (avail < 40) avail = 40;
             subj_w = avail * 3 / 5;
             from_w = avail - subj_w;
@@ -1851,8 +1853,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                      "  %d-%d of %d message(s) in %s (%d unread) [%s].%s",
                      wstart + 1, wend, show_count, folder, unseen_count,
                      cfg->user ? cfg->user : "?", suffix);
-            if (is_tty) {
-                /* Reverse-video status bar padded to full terminal width */
+            if (opts->pager) {
+                /* TUI mode: reverse-video status bar padded to full terminal width */
                 printf("\033[7m%s", cl);
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
@@ -1861,9 +1863,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 printf("%s\n\n", cl);
             }
         }
-        printf("  %-16s  %-4s  %-*s  %s\n",
-               "Date", "Sts", subj_w, "Subject", "From");
+        if (show_uid)
+            printf("  %-16s  %-16s  %-4s  %-*s  %s\n",
+                   "UID", "Date", "Sts", subj_w, "Subject", "From");
+        else
+            printf("  %-16s  %-4s  %-*s  %s\n",
+                   "Date", "Sts", subj_w, "Subject", "From");
         printf("  ");
+        if (show_uid) { print_dbar(16); printf("  "); }
         print_dbar(16); printf("  ");
         printf("\u2550\u2550\u2550\u2550  ");
         print_dbar(subj_w > 0 ? subj_w : 30); printf("  ");
@@ -1931,7 +1938,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 (entries[i].flags & MSG_FLAG_ATTACH)  ? 'A' : '-',
                 '\0'
             };
-            printf("  %-16.16s  %s  ", date, sts);
+            if (show_uid)
+                printf("  %-16.16s  %-16.16s  %s  ", entries[i].uid, date, sts);
+            else
+                printf("  %-16.16s  %s  ", date, sts);
             print_padded_col(subject, subj_w);
             printf("  ");
             print_padded_col(from,    from_w);

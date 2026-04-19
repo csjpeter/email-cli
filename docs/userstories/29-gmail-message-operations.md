@@ -15,7 +15,7 @@
 | 3 | Unread messages are rendered in bold or reverse video. |
 | 4 | Pressing **r** removes the currently-filtered label from the message via `messages.modify(removeLabelIds)`; the message disappears from the current view. |
 | 5 | Pressing **d** trashes the message via `messages.trash()`; all labels are removed and TRASH is added. |
-| 6 | Pressing **a** archives the message (removes INBOX label); this key hint appears **only** in the INBOX view. |
+| 6 | Pressing **a** archives the message: removes **all** labels (INBOX, UNREAD, CATEGORY_*, user labels) so the message lives only in All Mail. The message is also marked as read. |
 | 7 | Pressing **f** toggles the STARRED label on the message. |
 | 8 | Pressing **n** toggles the UNREAD label on the message. |
 | 9 | The message reader shows a **Labels** line (e.g. `Labels:  INBOX, ★ Starred, Work`); this line is absent for IMAP messages. |

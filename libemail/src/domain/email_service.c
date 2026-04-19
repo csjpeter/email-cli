@@ -2236,40 +2236,48 @@ read_key_again: ;
                 break;
             }
             if (ch == 'a' && is_gmail) {
-                /* Archive: remove INBOX label from current message */
+                /* Archive: remove ALL labels from this message.
+                 * Gmail "archive" = no labels → message lives only in All Mail.
+                 * Remove every label from the local .idx files, the .hdr labels
+                 * CSV, and the Gmail API; then put the message in _nolabel. */
                 const char *uid = entries[cursor].uid;
-                if (list_mc) {
-                    /* Mark as read and remove INBOX label via Gmail API */
-                    mail_client_set_flag(list_mc, uid, "\\Seen", 1);
-                    mail_client_modify_label(list_mc, uid, "INBOX", 0);
-                }
-                /* Update local index and .hdr: remove INBOX */
-                label_idx_remove("INBOX", uid);
-                { const char *_inbox = "INBOX";
-                  local_hdr_update_labels("", uid, NULL, 0, &_inbox, 1); }
-                /* If no other labels remain, add to _nolabel */
-                {
-                    char *lbl = local_hdr_get_labels("", uid);
-                    int has_real = 0;
-                    if (lbl) {
-                        char *tok = lbl, *s;
+                char *lbl_str = local_hdr_get_labels("", uid);
+                if (lbl_str) {
+                    /* Build remove array and strip each label from indexes */
+                    int n = 1;
+                    for (const char *p = lbl_str; *p; p++) if (*p == ',') n++;
+                    char **rm   = malloc((size_t)n * sizeof(char *));
+                    char *copy  = strdup(lbl_str);
+                    int   rm_n  = 0;
+                    if (rm && copy) {
+                        char *tok = copy, *sep;
                         while (tok && *tok) {
-                            s = strchr(tok, ',');
-                            size_t tl = s ? (size_t)(s - tok) : strlen(tok);
-                            char lb[64];
-                            if (tl >= sizeof(lb)) tl = sizeof(lb) - 1;
-                            memcpy(lb, tok, tl); lb[tl] = '\0';
-                            if (strcmp(lb, "INBOX") != 0 &&
-                                strcmp(lb, "UNREAD") != 0 &&
-                                strcmp(lb, "IMPORTANT") != 0 &&
-                                strncmp(lb, "CATEGORY_", 9) != 0)
-                                has_real = 1;
-                            tok = s ? s + 1 : NULL;
+                            sep = strchr(tok, ',');
+                            if (sep) *sep = '\0';
+                            if (tok[0]) {
+                                /* Remove from local index (skip meta _* labels) */
+                                if (tok[0] != '_') label_idx_remove(tok, uid);
+                                rm[rm_n++] = tok;
+                                /* Remove via Gmail API (skip IMPORTANT/CATEGORY_) */
+                                if (list_mc &&
+                                    strcmp(tok, "IMPORTANT") != 0 &&
+                                    strncmp(tok, "CATEGORY_", 9) != 0)
+                                    mail_client_modify_label(list_mc, uid, tok, 0);
+                            }
+                            tok = sep ? sep + 1 : NULL;
                         }
-                        free(lbl);
+                        /* Clear labels field in .hdr atomically */
+                        local_hdr_update_labels("", uid, NULL, 0,
+                                                (const char **)rm, rm_n);
                     }
-                    if (!has_real) label_idx_add("_nolabel", uid);
+                    free(copy); free(rm); free(lbl_str);
                 }
+                /* Ensure UNREAD index is also cleared (belt-and-suspenders) */
+                label_idx_remove("UNREAD", uid);
+                /* Mark as read via API */
+                if (list_mc) mail_client_set_flag(list_mc, uid, "\\Seen", 1);
+                /* Put in archive */
+                label_idx_add("_nolabel", uid);
                 break;
             }
             if (ch == 'D' && is_gmail) {

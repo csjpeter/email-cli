@@ -611,8 +611,13 @@ static FolderStatus *fetch_all_folder_statuses(const Config *cfg,
     if (!st || count == 0) return st;
     for (int i = 0; i < count; i++) {
         if (cfg->gmail_mode) {
-            /* Gmail: .idx gives the authoritative total count per label */
-            st[i].messages = label_idx_count(folders[i]);
+            /* Gmail: .idx gives the authoritative total count per label.
+             * SPAM and TRASH are stored under their underscore-prefixed local
+             * names (_spam, _trash) to avoid collision with user labels. */
+            const char *idx_name = folders[i];
+            if (strcmp(folders[i], "TRASH") == 0) idx_name = "_trash";
+            else if (strcmp(folders[i], "SPAM") == 0) idx_name = "_spam";
+            st[i].messages = label_idx_count(idx_name);
             /* Use manifest for unseen/flagged if available (populated by 'list --label') */
             Manifest *m = manifest_load(folders[i]);
             if (m) {
@@ -1572,41 +1577,54 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
     } else if (cfg->gmail_mode) {
         /* ── Gmail offline mode: load from local .idx + .hdr cache ─────── */
+        /* SPAM and TRASH are stored under underscore-prefixed local names */
+        const char *idx_folder = folder;
+        if (strcmp(folder, "TRASH") == 0) idx_folder = "_trash";
+        else if (strcmp(folder, "SPAM") == 0) idx_folder = "_spam";
+
         char (*idx_uids)[17] = NULL;
         int idx_count = 0;
-        label_idx_load(folder, &idx_uids, &idx_count);
+        label_idx_load(idx_folder, &idx_uids, &idx_count);
 
-        show_count = idx_count;
-        entries = malloc((size_t)(show_count > 0 ? show_count : 1) * sizeof(MsgEntry));
+        /* Only include entries that have a cached .hdr file.
+         * UIDs without a .hdr were never fully synced (e.g. sync was
+         * interrupted, or they are stale data from a previous format).
+         * Skip them silently; a run of email-sync will fetch them. */
+        entries = malloc((size_t)(idx_count > 0 ? idx_count : 1) * sizeof(MsgEntry));
         if (!entries) { free(idx_uids); manifest_free(manifest); return -1; }
+        show_count = 0;
 
         for (int i = 0; i < idx_count; i++) {
-            memcpy(entries[i].uid, idx_uids[i], 17);
-            entries[i].flags = 0;
-            entries[i].epoch = 0;
             /* .hdr format: from\tsubject\tdate\tlabels\tflags */
             char *hdr = local_hdr_load("", idx_uids[i]);
-            if (hdr) {
-                /* Split tab-separated fields */
-                char *fields[5] = {0};
-                fields[0] = hdr;
-                int f = 1;
-                for (char *p = hdr; *p && f < 5; p++) {
-                    if (*p == '\t') { *p = '\0'; fields[f++] = p + 1; }
-                }
-                const char *from = fields[0] ? fields[0] : "";
-                const char *subj = fields[1] ? fields[1] : "";
-                const char *date = fields[2] ? fields[2] : "";
-                int flags = fields[4] ? atoi(fields[4]) : 0;
-                entries[i].flags = flags;
-                entries[i].epoch = parse_manifest_date(date);
-                /* Populate manifest so the renderer can find from/subject/date.
-                 * manifest_upsert takes ownership of the strings, so strdup
-                 * them — the originals point into the hdr buffer freed below. */
-                manifest_upsert(manifest, idx_uids[i], strdup(from), strdup(subj), strdup(date), flags);
-                free(hdr);
+            if (!hdr) continue;   /* not yet synced — skip */
+
+            MsgEntry *e = &entries[show_count];
+            memcpy(e->uid, idx_uids[i], 17);
+            e->flags = 0;
+            e->epoch = 0;
+
+            /* Split tab-separated fields */
+            char *fields[5] = {0};
+            fields[0] = hdr;
+            int f = 1;
+            for (char *p = hdr; *p && f < 5; p++) {
+                if (*p == '\t') { *p = '\0'; fields[f++] = p + 1; }
             }
-            if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
+            const char *from = fields[0] ? fields[0] : "";
+            const char *subj = fields[1] ? fields[1] : "";
+            const char *date = fields[2] ? fields[2] : "";
+            int flags = fields[4] ? atoi(fields[4]) : 0;
+            e->flags = flags;
+            e->epoch = parse_manifest_date(date);
+            /* Populate manifest so the renderer can find from/subject/date.
+             * manifest_upsert takes ownership of the strings, so strdup
+             * them — the originals point into the hdr buffer freed below. */
+            manifest_upsert(manifest, idx_uids[i], strdup(from), strdup(subj), strdup(date), flags);
+            free(hdr);
+
+            if (e->flags & MSG_FLAG_UNSEEN) unseen_count++;
+            show_count++;
         }
         free(idx_uids);
     } else {

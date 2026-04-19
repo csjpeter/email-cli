@@ -113,12 +113,6 @@ in config.ini.
 | `STARRED`  | Starred     | Star toggle, also a browsable view |
 | `UNREAD`   | Unread      | Inverse of "read"; also a browsable view |
 
-### Filtered-out Labels (not displayed)
-
-- `IMPORTANT` — opaque Google ML classification, excluded
-- `CATEGORY_PERSONAL`, `CATEGORY_SOCIAL`, `CATEGORY_PROMOTIONS`,
-  `CATEGORY_UPDATES`, `CATEGORY_FORUMS` — inbox category tabs, excluded
-
 ### User Labels
 
 Created by the user, fully mutable (rename, delete).  A message can have

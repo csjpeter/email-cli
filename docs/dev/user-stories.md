@@ -82,6 +82,51 @@ sync, so the first run always produces correct indexes.
 
 ---
 
+---
+
+## Gmail hex UID acceptance
+
+### Background
+
+Gmail message IDs are 64-bit integers rendered as 16-character lowercase
+hexadecimal strings (e.g. `19d9c3c967c0cc2a`).  The `list` command displays
+this format in the UID column.  All commands that accept a UID as a CLI
+argument must accept the same format — otherwise the user cannot use the
+output of `list` as input to `mark-read`, `mark-unread`, `mark-starred`, etc.
+
+IMAP UIDs are positive decimal integers (e.g. `42`).  Both formats must be
+accepted simultaneously; neither may break the other.
+
+---
+
+### US-6 — mark-read rejects the UID shown by list
+
+> **As a Gmail user** who runs `email-cli list` and sees a hex UID such as
+> `19d9c3c967c0cc2a` in the output,
+> **when** I copy that UID and run `email-cli mark-read 19d9c3c967c0cc2a`,
+> **I want** the command to succeed (or fail for a network reason),
+> **so that** I can act on messages without manually converting UIDs.
+
+**Problem:** `parse_uid()` in `main.c` only accepted positive decimal
+integers.  Hex UIDs from the `list` output were rejected with
+`"Error: UID must be a positive integer"`.  `main_ro.c` had already been
+fixed to accept hex UIDs but the fix was not carried over to `main.c`.
+
+**Affected commands:** `mark-read`, `mark-unread`, `mark-starred`,
+`remove-starred`, `add-label`, `remove-label`, `show`, `list-attachments`,
+`save-attachment`.
+
+**Solution:** `parse_uid()` in `main.c` now first checks whether the input
+is a 16-character all-hex-digit string and accepts it as-is.  Decimal IMAP
+UIDs continue to be accepted and zero-padded to 16 characters.  Garbage
+input is still rejected.
+
+**Regression guard:** Functional test Phase 28 (28.1–28.11) verifies all
+nine affected commands accept a hex UID, that garbage is rejected, and that
+decimal IMAP UIDs continue to work.
+
+---
+
 ### US-5 — IMAP accounts not affected
 
 > **As a user** with both IMAP and Gmail accounts configured,

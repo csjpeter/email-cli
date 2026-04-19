@@ -1437,7 +1437,78 @@ check "27.10 gmail-A INBOX.idx recreated by auto-rebuild full sync" "." \
 GF27=$(run_gmail_ro_a --batch list-folders)
 check "27.11 gmail-A list-folders: INBOX listed after rebuild" "INBOX" "$GF27"
 
-# Cleanup Phase 26+27
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 28 — Hex UID acceptance (US-6: Gmail `list` outputs hex UIDs)
+# Verifies that all commands that accept a UID accept the 16-char hex format
+# returned by `list`, not just the decimal format used by IMAP.
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 28: hex UID acceptance ---"
+
+# email-cli (writable commands) with Gmail account A environment
+run_gmail_cli_a() {
+    (export XDG_CONFIG_HOME="$H_GMAIL/config"
+     export XDG_DATA_HOME="$H_GMAIL/data"
+     export XDG_CACHE_HOME="$H_GMAIL/cache"
+     export HOME="$H_GMAIL"
+     export GMAIL_TEST_TOKEN=testtoken
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL_PORT_A/gmail/v1/users/me"
+     "$BIN_DIR/email-cli" "$GMAIL_ACCT_A" --batch "$@" 2>&1 || true)
+}
+
+HEX_UID="0000000000000001"   # message 1, synced in Phase 26+27
+
+# 28.1 mark-read: hex UID must not produce a parse error
+MR28=$(run_gmail_cli_a mark-read "$HEX_UID")
+check_not "28.1 mark-read hex UID: no parse error"  "invalid UID\|positive integer" "$MR28"
+
+# 28.2 mark-unread: hex UID must not produce a parse error
+MU28=$(run_gmail_cli_a mark-unread "$HEX_UID")
+check_not "28.2 mark-unread hex UID: no parse error"  "invalid UID\|positive integer" "$MU28"
+
+# 28.3 mark-starred: hex UID must not produce a parse error
+MS28=$(run_gmail_cli_a mark-starred "$HEX_UID")
+check_not "28.3 mark-starred hex UID: no parse error"  "invalid UID\|positive integer" "$MS28"
+
+# 28.4 remove-starred: hex UID must not produce a parse error
+RS28=$(run_gmail_cli_a remove-starred "$HEX_UID")
+check_not "28.4 remove-starred hex UID: no parse error"  "invalid UID\|positive integer" "$RS28"
+
+# 28.5 add-label: hex UID must not produce a parse error
+AL28=$(run_gmail_cli_a add-label "$HEX_UID" INBOX)
+check_not "28.5 add-label hex UID: no parse error"  "invalid UID\|positive integer" "$AL28"
+
+# 28.6 remove-label: hex UID must not produce a parse error
+RL28=$(run_gmail_cli_a remove-label "$HEX_UID" INBOX)
+check_not "28.6 remove-label hex UID: no parse error"  "invalid UID\|positive integer" "$RL28"
+
+# 28.7 show (email-cli-ro): hex UID must not produce a parse error
+SH28=$(run_gmail_ro_a show "$HEX_UID")
+check_not "28.7 show hex UID: no parse error"  "invalid UID\|positive integer" "$SH28"
+
+# 28.8 list-attachments (email-cli-ro): hex UID must not produce a parse error
+LA28=$(run_gmail_ro_a --batch list-attachments "$HEX_UID")
+check_not "28.8 list-attachments hex UID: no parse error"  "invalid UID\|positive integer" "$LA28"
+
+# 28.9 save-attachment: hex UID must not produce a parse error
+#   (filename arg keeps command from showing usage; any other error is acceptable)
+SA28=$(run_gmail_ro_a save-attachment "$HEX_UID" nosuchfile.txt /tmp)
+check_not "28.9 save-attachment hex UID: no parse error"  "invalid UID\|positive integer" "$SA28"
+
+# 28.10 Truly invalid UID (garbage string) is still rejected
+BAD28=$(run_gmail_cli_a mark-read "notavaliduid123x")
+check "28.10 mark-read garbage UID rejected"  "invalid UID\|Error" "$BAD28"
+
+# 28.11 Regression: IMAP decimal UID still accepted (main.c)
+H28_IMAP="/tmp/email-cli-ft-hex28-$$"
+make_home "$H28_IMAP" "alpha@test.local" 9993
+DEC28=$( (export HOME="$H28_IMAP"
+    unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch mark-read 42 2>&1 || true) )
+check_not "28.11 mark-read decimal UID (IMAP): no parse error"  "invalid UID\|positive integer" "$DEC28"
+rm -rf "$H28_IMAP"
+
+# Cleanup Phase 26+27+28
 kill "$GMAIL_SERVER_A_PID" "$GMAIL_SERVER_B_PID" 2>/dev/null || true
 rm -rf "$H_GMAIL"
 

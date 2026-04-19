@@ -26,8 +26,13 @@
 | 14 | When the cursor is on a pending-remove row, the row is rendered with **both** inverse-video (cursor highlight) and red strikethrough, so the cursor position remains clearly visible. |
 | 15 | Pressing **d** a second time on the same pending-remove row cancels the operation: the label is restored locally and the strikethrough is cleared. A subsequent refresh keeps the message visible. |
 | 16 | Adding any real label (not UNREAD/STARRED) to a trashed message via the label picker automatically removes the TRASH label — the message is restored from trash without needing a separate untrash step. |
-| 17 | When viewing the Trash folder, the status bar shows `u=restore  t=labels` instead of `d=rm-label  D=trash  a=archive`. The **u** key restores a message to its original labels (or Archive if none saved). |
+| 17 | When viewing the Trash folder (even when empty), the status bar shows `u=restore  t=labels` instead of the normal compose/reply/archive hints. The **u** key restores a message to its original labels (or Archive if none saved). |
 | 18 | The label picker (`t`) includes UNREAD as the first entry so users can toggle read/unread status without leaving the picker. |
+| 19 | Pressing **D** (trash) sets an immediate red strikethrough on the row, same as **d** (remove label). |
+| 20 | Pressing **a** (archive) sets an immediate red strikethrough on the row — the message disappears from view on the next refresh. |
+| 21 | Pressing **u** (restore from Trash) sets an immediate **green** strikethrough on the row, distinguishing restoration from deletion. The message disappears from Trash on the next refresh. |
+| 22 | Adding a real label (not UNREAD/STARRED/CATEGORY_*) to an archived message via the label picker removes it from Archive (removes the `_nolabel` virtual index entry). |
+| 23 | Archiving removes **all** labels including UNREAD and CATEGORY_* labels; the message is also marked read. |
 
 ---
 

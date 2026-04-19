@@ -1820,11 +1820,20 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             fflush(stdout);
             char sb[256];
             if (cfg->gmail_mode) {
-                snprintf(sb, sizeof(sb),
-                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                         "  Backspace=labels  ESC=quit"
-                         "  c=compose  r=reply  n=unread  f=star"
-                         "  s=sync  R=refresh  [0/0]");
+                int in_trash_empty = (strcmp(folder, "_trash") == 0);
+                if (in_trash_empty) {
+                    snprintf(sb, sizeof(sb),
+                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                             "  Backspace=labels  ESC=quit"
+                             "  u=restore  t=labels  n=unread  f=star"
+                             "  s=sync  R=refresh  [0/0]");
+                } else {
+                    snprintf(sb, sizeof(sb),
+                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                             "  Backspace=labels  ESC=quit"
+                             "  c=compose  r=reply  n=unread  f=star"
+                             "  s=sync  R=refresh  [0/0]");
+                }
             } else {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
@@ -1853,13 +1862,18 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     if (cursor >= show_count) cursor = 0;
     int wstart = cursor;   /* top of the visible window */
 
-    /* Track entries that have been locally label-removed ('d' key) but not
-     * yet purged from the entries array.  TUI renders them with red
-     * strikethrough so the user sees immediate feedback.  Only allocated in
-     * TUI (pager) mode; always NULL in CLI/RO mode. */
-    int *pending_remove = opts->pager
-                          ? calloc((size_t)show_count, sizeof(int))
-                          : NULL;
+    /* Track entries with pending operations for immediate visual feedback.
+     * pending_remove[i] = 1: row will be gone on next refresh (red strikethrough).
+     *   Set by: 'd' (remove label), 'D' (trash), 'a' (archive).
+     * pending_restore[i] = 1: row will leave this view on next refresh (green strikethrough).
+     *   Set by: 'u' (untrash/restore).
+     * Only allocated in TUI (pager) mode; always NULL in CLI/RO mode. */
+    int *pending_remove  = opts->pager
+                           ? calloc((size_t)(show_count > 0 ? show_count : 1), sizeof(int))
+                           : NULL;
+    int *pending_restore = opts->pager
+                           ? calloc((size_t)(show_count > 0 ? show_count : 1), sizeof(int))
+                           : NULL;
 
     /* Keep the terminal in raw mode for the entire interactive TUI.
      * Without this, each terminal_read_key() call would need to briefly enter
@@ -2028,18 +2042,21 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             const char *subject = (me && me->subject && me->subject[0]) ? me->subject : "(no subject)";
             const char *date    = (me && me->date)                       ? me->date    : "";
 
-            int sel     = opts->pager && (i == cursor);
-            int pending = (pending_remove != NULL) && pending_remove[i];
+            int sel             = opts->pager && (i == cursor);
+            int remove_pending  = (pending_remove  != NULL) && pending_remove[i];
+            int restore_pending = (pending_restore != NULL) && pending_restore[i];
 
-            /* Pending-remove rows (TUI only): red + strikethrough.
-             * When the cursor is also on the row, add inverse-video so the
-             * cursor position remains visible.  The status column uses plain
-             * ASCII (no embedded colour escapes) for pending rows to avoid
-             * \033[0m conflicts with the combined attribute set. */
-            if (opts->pager && pending && sel) {
+            /* Pending rows: strikethrough + colour for immediate visual feedback.
+             * Cursor on pending row: also add inverse-video (cursor stays visible).
+             * Status column uses plain ASCII for pending rows (no \033[0m conflicts). */
+            if (opts->pager && remove_pending && sel) {
                 printf("\033[7m\033[31m\033[9m"); /* inverse + red + strikethrough */
-            } else if (opts->pager && pending) {
+            } else if (opts->pager && remove_pending) {
                 printf("\033[31m\033[9m");         /* red + strikethrough */
+            } else if (opts->pager && restore_pending && sel) {
+                printf("\033[7m\033[32m\033[9m"); /* inverse + green + strikethrough */
+            } else if (opts->pager && restore_pending) {
+                printf("\033[32m\033[9m");         /* green + strikethrough */
             } else if (sel) {
                 printf("\033[7m");
             }
@@ -2049,7 +2066,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
              * for the coloured character, then re-enter (\033[7m) so the
              * rest of the row stays highlighted. Plain CLI/RO stays ASCII. */
             char sts[64];
-            if (opts->pager && !pending) {
+            if (opts->pager && !remove_pending && !restore_pending) {
                 /* Non-sel: plain colour reset after char.
                  * Sel: \033[0m exits rev-video → colour → \033[7m re-enters. */
                 const char *n_s = (entries[i].flags & MSG_FLAG_UNSEEN)
@@ -2077,7 +2094,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             printf("  ");
             print_padded_col(from,    from_w);
 
-            if (opts->pager && (sel || pending)) printf("\033[K\033[0m");
+            if (opts->pager && (sel || remove_pending || restore_pending))
+                printf("\033[K\033[0m");
             printf("\n");
             fflush(stdout); /* show row immediately as it arrives */
         }
@@ -2105,14 +2123,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              "  Backspace=labels  ESC=quit"
                              "  u=restore  t=labels  n=unread  f=star"
                              "  s=sync  R=refresh  [%d/%d]",
-                             cursor + 1, show_count);
+                             show_count > 0 ? cursor + 1 : 0, show_count);
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  c=compose  r=reply  n=unread  f=star  a=archive"
                              "  d=rm-label  D=trash  t=labels  s=sync  R=refresh  [%d/%d]",
-                             cursor + 1, show_count);
+                             show_count > 0 ? cursor + 1 : 0, show_count);
                 }
             } else {
                 snprintf(sb, sizeof(sb),
@@ -2278,6 +2296,8 @@ read_key_again: ;
                 if (list_mc) mail_client_set_flag(list_mc, uid, "\\Seen", 1);
                 /* Put in archive */
                 label_idx_add("_nolabel", uid);
+                /* Mark for immediate visual feedback (red strikethrough) */
+                if (pending_remove) pending_remove[cursor] = 1;
                 break;
             }
             if (ch == 'D' && is_gmail) {
@@ -2302,6 +2322,8 @@ read_key_again: ;
                     free(all_labels);
                 }
                 label_idx_add("_trash", uid);
+                /* Mark for immediate visual feedback (red strikethrough) */
+                if (pending_remove) pending_remove[cursor] = 1;
                 break;
             }
             if (ch == 'u' && is_gmail) {
@@ -2342,6 +2364,8 @@ read_key_again: ;
                     /* No saved labels — put in Archive (_nolabel) */
                     label_idx_add("_nolabel", uid);
                 }
+                /* Mark for immediate visual feedback (green strikethrough) */
+                if (pending_restore) pending_restore[cursor] = 1;
                 break;
             }
             if (ch == 't' && is_gmail) {
@@ -2462,6 +2486,7 @@ read_key_again: ;
     }
 list_done:
     free(pending_remove);
+    free(pending_restore);
     /* tui_raw / folder_canonical cleaned up automatically via RAII macros */
     manifest_free(manifest);
     free(entries);
@@ -2941,17 +2966,22 @@ static void show_label_picker(MailClient *mc,
             if (adding) {
                 label_idx_add(lid, uid);
                 local_hdr_update_labels("", uid, &lid, 1, NULL, 0);
-                /* Adding a real label (not UNREAD/STARRED/CATEGORY_) to a
-                 * trashed message implicitly untrashes it: remove TRASH from
-                 * local index, .hdr, and the Gmail API. */
+                /* Adding a real label (not UNREAD/STARRED/CATEGORY_) implicitly
+                 * moves the message out of virtual archive (_nolabel) and/or trash.
+                 * Remove the old virtual location from local index + .hdr + API. */
                 if (strcmp(lid, "UNREAD") != 0 &&
                     strcmp(lid, "STARRED") != 0 &&
-                    strncmp(lid, "CATEGORY_", 9) != 0 &&
-                    label_idx_contains("_trash", uid)) {
-                    const char *trash_id = "TRASH";
-                    label_idx_remove("_trash", uid);
-                    local_hdr_update_labels("", uid, NULL, 0, &trash_id, 1);
-                    if (mc) mail_client_modify_label(mc, uid, "TRASH", 0);
+                    strncmp(lid, "CATEGORY_", 9) != 0) {
+                    /* Unarchive: remove from _nolabel virtual archive index */
+                    if (label_idx_contains("_nolabel", uid))
+                        label_idx_remove("_nolabel", uid);
+                    /* Untrash: remove TRASH label from local index, .hdr, API */
+                    if (label_idx_contains("_trash", uid)) {
+                        const char *trash_id = "TRASH";
+                        label_idx_remove("_trash", uid);
+                        local_hdr_update_labels("", uid, NULL, 0, &trash_id, 1);
+                        if (mc) mail_client_modify_label(mc, uid, "TRASH", 0);
+                    }
                 }
             } else {
                 label_idx_remove(lid, uid);

@@ -157,12 +157,20 @@ static int run_gmail_sync(void) {
  * state (all 5 messages in INBOX with their original labels).
  */
 static int reset_and_sync(void) {
-    /* Remove the entire local store for this account */
+    /* Remove the per-account local store */
     char cmd[600];
     snprintf(cmd, sizeof(cmd),
              "rm -rf '%s/.local/share/email-cli/accounts/%s'",
              g_test_home, GMAIL_TEST_EMAIL);
     system(cmd);  /* NOLINT — test-only code, path is controlled */
+
+    /* Also clear the shared UI prefs file (it remembers the last-used folder
+     * cursor; stale entries would make subsequent tests open the wrong label). */
+    char cmd2[600];
+    snprintf(cmd2, sizeof(cmd2),
+             "rm -f '%s/.local/share/email-cli/ui.ini'",
+             g_test_home);
+    system(cmd2);  /* NOLINT */
 
     return run_gmail_sync();
 }
@@ -209,6 +217,47 @@ static int navigate_to_inbox(PtySession *s) {
     }
     pty_settle(s, SETTLE_MS);
 
+    return 0;
+}
+
+/* ── Navigation helpers ─────────────────────────────────────────────── */
+
+/**
+ * From the accounts screen, navigate to the Trash label view.
+ * Trash is always the last entry in the label browser (PTY_KEY_END).
+ */
+static int navigate_to_trash(PtySession *s) {
+    if (pty_wait_for(s, "Email Accounts", WAIT_MS) != 0) {
+        printf("  [FAIL] navigate_to_trash: timed out at \"Email Accounts\"\n");
+        return -1;
+    }
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "Labels", WAIT_MS) != 0) {
+        printf("  [FAIL] navigate_to_trash: timed out at \"Labels\"\n");
+        return -1;
+    }
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_END);   /* Trash is always the last entry */
+    pty_settle(s, SETTLE_MS / 2);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    return 0;
+}
+
+/**
+ * Within an already-visible Labels browser, navigate to Archive (_nolabel).
+ * Label order (no user labels in test env): …DRAFTS | Archive Spam Trash
+ * Archive = End − 2 steps.
+ */
+static int navigate_labels_to_archive(PtySession *s) {
+    pty_send_key(s, PTY_KEY_END);   /* → Trash (last) */
+    pty_settle(s, SETTLE_MS / 2);
+    pty_send_key(s, PTY_KEY_UP);    /* → Spam */
+    pty_send_key(s, PTY_KEY_UP);    /* → Archive */
+    pty_settle(s, SETTLE_MS / 2);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
     return 0;
 }
 
@@ -394,6 +443,349 @@ static void test_d_key_toggle_undo(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  TEST: label picker shows UNREAD
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Pressing 't' opens the Toggle Labels popup which must list UNREAD. */
+static void test_label_picker_shows_unread(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "picker-unread: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "picker-unread: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "picker-unread: navigate_to_inbox");
+
+    pty_send_str(s, "t");       /* open label picker */
+    pty_wait_for(s, "Toggle Labels", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT_SCREEN_CONTAINS(s, "UNREAD");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'a' key → row has strikethrough (immediate feedback)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * After pressing 'a' (archive), the cursor row must stay visible with
+ * PTY_ATTR_STRIKE set (red strikethrough), giving immediate feedback.
+ */
+static void test_archive_row_has_strikethrough(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "arch-strike: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "arch-strike: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "arch-strike: navigate_to_inbox");
+
+    int row_before = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row_before >= 0, "arch-strike: " GMAIL_TOP_MSG " present before a");
+    if (row_before >= 0)
+        ASSERT(!(pty_cell_attr(s, row_before, 4) & PTY_ATTR_STRIKE),
+               "arch-strike: no STRIKE before a");
+
+    pty_send_str(s, "a");
+    pty_settle(s, SETTLE_MS);
+
+    int row_after = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row_after >= 0, "arch-strike: " GMAIL_TOP_MSG " still visible after a");
+    if (row_after >= 0)
+        ASSERT(pty_cell_attr(s, row_after, 4) & PTY_ATTR_STRIKE,
+               "arch-strike: STRIKE set after a");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'a' key → message gone from INBOX after refresh
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** After 'a' + 'R', the archived message must no longer appear in INBOX. */
+static void test_archive_removes_from_inbox(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "arch-gone: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "arch-gone: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "arch-gone: navigate_to_inbox");
+
+    pty_send_str(s, "a");
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "R");
+    pty_wait_for(s, GMAIL_BOT_MSG, WAIT_MS);  /* wait for list to reload */
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT(!pty_screen_contains(s, GMAIL_TOP_MSG),
+           "arch-gone: " GMAIL_TOP_MSG " absent from INBOX after R");
+    ASSERT(pty_screen_contains(s, GMAIL_BOT_MSG),
+           "arch-gone: other messages still present");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'a' key → archived message appears in Archive view
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * After archiving, navigate to Archive (_nolabel) and verify the message is there.
+ */
+static void test_archive_message_in_archive_view(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "arch-view: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "arch-view: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "arch-view: navigate_to_inbox");
+
+    /* Archive top message */
+    pty_send_str(s, "a");
+    pty_settle(s, SETTLE_MS);
+    /* Press 'R' so the inbox index is refreshed and the row is removed */
+    pty_send_str(s, "R");
+    pty_settle(s, SETTLE_MS);
+
+    /* Go back to label browser */
+    pty_send_key(s, PTY_KEY_BACK);
+    if (pty_wait_for(s, "Labels", WAIT_MS) != 0) {
+        printf("  [FAIL] arch-view: timed out waiting for Labels screen\n");
+        pty_close(s); g_tests_failed++; return;
+    }
+    pty_settle(s, SETTLE_MS);
+
+    /* Navigate to Archive (End → Trash, Up×2 → Archive) */
+    navigate_labels_to_archive(s);
+    pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT(pty_screen_contains(s, GMAIL_TOP_MSG),
+           "arch-view: " GMAIL_TOP_MSG " appears in Archive view");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: label picker → unarchive (add INBOX to archived message)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * After archiving a message, open the Archive view, use the label picker
+ * to add INBOX, and verify the message is removed from Archive on refresh.
+ */
+static void test_label_picker_unarchive(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "unarchive: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "unarchive: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "unarchive: navigate_to_inbox");
+
+    /* Archive Message 5 */
+    pty_send_str(s, "a");
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "R");
+    pty_settle(s, SETTLE_MS);
+
+    /* Back to labels */
+    pty_send_key(s, PTY_KEY_BACK);
+    pty_wait_for(s, "Labels", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Navigate to Archive */
+    navigate_labels_to_archive(s);
+    pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT(pty_screen_contains(s, GMAIL_TOP_MSG),
+           "unarchive: " GMAIL_TOP_MSG " in Archive view before restore");
+
+    /* Open label picker, add INBOX (INBOX is 2nd item: UNREAD is first, Down once) */
+    pty_send_str(s, "t");
+    pty_wait_for(s, "Toggle Labels", WAIT_MS);
+    pty_settle(s, SETTLE_MS / 2);
+    pty_send_key(s, PTY_KEY_DOWN);  /* cursor → INBOX */
+    pty_send_key(s, PTY_KEY_ENTER); /* toggle INBOX on */
+    pty_settle(s, SETTLE_MS / 2);
+    pty_send_key(s, PTY_KEY_ESC);   /* close picker */
+    pty_settle(s, SETTLE_MS);
+
+    /* Refresh Archive view — message must be gone (now in INBOX) */
+    pty_send_str(s, "R");
+    pty_settle(s, WAIT_MS / 4);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT(!pty_screen_contains(s, GMAIL_TOP_MSG),
+           "unarchive: " GMAIL_TOP_MSG " gone from Archive after INBOX added");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: Trash statusbar shows u=restore hint
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * When viewing the Trash folder, the status bar must show "u=restore" to
+ * guide the user.  This test works even with an empty Trash.
+ */
+static void test_trash_statusbar_restore_hint(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "trash-sb: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "trash-sb: pty_run");
+    ASSERT(navigate_to_trash(s) == 0, "trash-sb: navigate_to_trash");
+
+    /* The status bar (last row) must contain "u=restore" */
+    ASSERT_SCREEN_CONTAINS(s, "u=restore");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'D' key → row has red strikethrough (immediate feedback)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** After pressing 'D' (trash), cursor row must show PTY_ATTR_STRIKE immediately. */
+static void test_D_key_row_has_strikethrough(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "D-strike: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "D-strike: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "D-strike: navigate_to_inbox");
+
+    int row_before = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row_before >= 0, "D-strike: " GMAIL_TOP_MSG " present before D");
+    if (row_before >= 0)
+        ASSERT(!(pty_cell_attr(s, row_before, 4) & PTY_ATTR_STRIKE),
+               "D-strike: no STRIKE before D");
+
+    pty_send_str(s, "D");
+    pty_settle(s, SETTLE_MS);
+
+    int row_after = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row_after >= 0, "D-strike: " GMAIL_TOP_MSG " still visible after D");
+    if (row_after >= 0)
+        ASSERT(pty_cell_attr(s, row_after, 4) & PTY_ATTR_STRIKE,
+               "D-strike: STRIKE set after D");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'u' key → row has green strikethrough (immediate feedback)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * After pressing 'u' (restore from trash) in the Trash view, the row must
+ * remain visible with PTY_ATTR_STRIKE set (green strikethrough) until 'R'.
+ */
+static void test_u_key_row_has_strikethrough(void) {
+    /* First, trash a message so the Trash view has something */
+    const char *args[] = { g_tui_bin, NULL };
+
+    /* Session 1: trash Message 5 */
+    {
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "u-strike: pty_open (s1)");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "u-strike: pty_run (s1)");
+        ASSERT(navigate_to_inbox(s) == 0, "u-strike: navigate_to_inbox");
+        pty_send_str(s, "D");   /* trash Message 5 */
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+
+    /* Session 2: open Trash, verify Message 5 there, press 'u', check STRIKE */
+    {
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "u-strike: pty_open (s2)");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "u-strike: pty_run (s2)");
+        ASSERT(navigate_to_trash(s) == 0, "u-strike: navigate_to_trash");
+
+        pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+
+        int row_before = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row_before >= 0, "u-strike: " GMAIL_TOP_MSG " in Trash before u");
+        if (row_before >= 0)
+            ASSERT(!(pty_cell_attr(s, row_before, 4) & PTY_ATTR_STRIKE),
+                   "u-strike: no STRIKE before u");
+
+        pty_send_str(s, "u");   /* restore from trash */
+        pty_settle(s, SETTLE_MS);
+
+        int row_after = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row_after >= 0, "u-strike: " GMAIL_TOP_MSG " still visible after u");
+        if (row_after >= 0)
+            ASSERT(pty_cell_attr(s, row_after, 4) & PTY_ATTR_STRIKE,
+                   "u-strike: STRIKE set after u (green strikethrough)");
+
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'u' key → message gone from Trash after refresh
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** After 'u' + 'R', the restored message must no longer appear in Trash. */
+static void test_u_key_row_gone_after_refresh(void) {
+    const char *args[] = { g_tui_bin, NULL };
+
+    /* Session 1: trash Message 5 */
+    {
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "u-gone: pty_open (s1)");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "u-gone: pty_run (s1)");
+        ASSERT(navigate_to_inbox(s) == 0, "u-gone: navigate_to_inbox");
+        pty_send_str(s, "D");
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+
+    /* Session 2: open Trash, press 'u', press 'R', Message 5 must be gone */
+    {
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "u-gone: pty_open (s2)");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "u-gone: pty_run (s2)");
+        ASSERT(navigate_to_trash(s) == 0, "u-gone: navigate_to_trash");
+
+        pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+
+        pty_send_str(s, "u");
+        pty_settle(s, SETTLE_MS);
+        pty_send_str(s, "R");
+        pty_settle(s, WAIT_MS / 4);
+        pty_settle(s, SETTLE_MS);
+
+        ASSERT(!pty_screen_contains(s, GMAIL_TOP_MSG),
+               "u-gone: " GMAIL_TOP_MSG " absent from Trash after u+R");
+
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  TEST: 'd' key → message absent after explicit refresh
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -530,6 +922,82 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_d_key_row_gone_after_refresh);
+
+    printf("\n--- Gmail TUI: label picker / archive / trash / restore ---\n");
+
+    printf("--- Fresh sync (test 6) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 6\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_label_picker_shows_unread);
+
+    printf("--- Fresh sync (test 7) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 7\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_archive_row_has_strikethrough);
+
+    printf("--- Fresh sync (test 8) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 8\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_archive_removes_from_inbox);
+
+    printf("--- Fresh sync (test 9) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 9\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_archive_message_in_archive_view);
+
+    printf("--- Fresh sync (test 10) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 10\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_label_picker_unarchive);
+
+    printf("--- Fresh sync (test 11) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 11\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_trash_statusbar_restore_hint);
+
+    printf("--- Fresh sync (test 12) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 12\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_D_key_row_has_strikethrough);
+
+    /* Tests 13–14: two-session tests — reset_and_sync() covers session 1;
+     * session 2 reuses the state left by session 1 (trashed message). */
+    printf("--- Fresh sync (test 13) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 13\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_u_key_row_has_strikethrough);
+
+    printf("--- Fresh sync (test 14) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 14\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_u_key_row_gone_after_refresh);
 
     stop_gmail_mock();
 

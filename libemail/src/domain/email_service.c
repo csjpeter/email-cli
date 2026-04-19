@@ -2023,13 +2023,23 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int sel = opts->pager && (i == cursor);
             if (sel) printf("\033[7m");
 
-            char sts[5] = {
-                (entries[i].flags & MSG_FLAG_UNSEEN)  ? 'N' : '-',
-                (entries[i].flags & MSG_FLAG_FLAGGED) ? '*' : '-',
-                (entries[i].flags & MSG_FLAG_DONE)    ? 'D' : '-',
-                (entries[i].flags & MSG_FLAG_ATTACH)  ? 'A' : '-',
-                '\0'
-            };
+            /* Status column: coloured only in TUI non-selected rows.
+             * Reverse-video (sel) and plain CLI/RO output use ASCII. */
+            char sts[64];
+            if (opts->pager && !sel) {
+                /* email-tui: N=green, ★=yellow (U+2605, 1-col wide) */
+                snprintf(sts, sizeof(sts), "%s%s%c%c",
+                    (entries[i].flags & MSG_FLAG_UNSEEN)  ? "\033[32mN\033[0m" : "-",
+                    (entries[i].flags & MSG_FLAG_FLAGGED) ? "\033[33m\xe2\x98\x85\033[0m" : "-",
+                    (entries[i].flags & MSG_FLAG_DONE)    ? 'D' : '-',
+                    (entries[i].flags & MSG_FLAG_ATTACH)  ? 'A' : '-');
+            } else {
+                sts[0] = (entries[i].flags & MSG_FLAG_UNSEEN)  ? 'N' : '-';
+                sts[1] = (entries[i].flags & MSG_FLAG_FLAGGED) ? '*' : '-';
+                sts[2] = (entries[i].flags & MSG_FLAG_DONE)    ? 'D' : '-';
+                sts[3] = (entries[i].flags & MSG_FLAG_ATTACH)  ? 'A' : '-';
+                sts[4] = '\0';
+            }
             if (show_uid)
                 printf("  %-16.16s  %-16.16s  %s  ", entries[i].uid, date, sts);
             else

@@ -2023,16 +2023,24 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int sel = opts->pager && (i == cursor);
             if (sel) printf("\033[7m");
 
-            /* Status column: coloured only in TUI non-selected rows.
-             * Reverse-video (sel) and plain CLI/RO output use ASCII. */
+            /* Status column: coloured in all TUI rows (email-tui only).
+             * In sel (reverse-video) rows: temporarily exit reverse-video
+             * for the coloured character, then re-enter (\033[7m) so the
+             * rest of the row stays highlighted. Plain CLI/RO stays ASCII. */
             char sts[64];
-            if (opts->pager && !sel) {
-                /* email-tui: N=green, ★=yellow (U+2605, 1-col wide) */
-                snprintf(sts, sizeof(sts), "%s%s%c%c",
-                    (entries[i].flags & MSG_FLAG_UNSEEN)  ? "\033[32mN\033[0m" : "-",
-                    (entries[i].flags & MSG_FLAG_FLAGGED) ? "\033[33m\xe2\x98\x85\033[0m" : "-",
-                    (entries[i].flags & MSG_FLAG_DONE)    ? 'D' : '-',
-                    (entries[i].flags & MSG_FLAG_ATTACH)  ? 'A' : '-');
+            if (opts->pager) {
+                /* Non-sel: plain colour reset after char.
+                 * Sel: \033[0m exits rev-video → colour → \033[7m re-enters. */
+                const char *n_s = (entries[i].flags & MSG_FLAG_UNSEEN)
+                    ? (sel ? "\033[0m\033[32mN\033[7m" : "\033[32mN\033[0m")
+                    : "-";
+                const char *f_s = (entries[i].flags & MSG_FLAG_FLAGGED)
+                    ? (sel ? "\033[0m\033[33m\xe2\x98\x85\033[7m"
+                           : "\033[33m\xe2\x98\x85\033[0m")
+                    : "-";
+                snprintf(sts, sizeof(sts), "%s%s%c%c", n_s, f_s,
+                    (entries[i].flags & MSG_FLAG_DONE)   ? 'D' : '-',
+                    (entries[i].flags & MSG_FLAG_ATTACH) ? 'A' : '-');
             } else {
                 sts[0] = (entries[i].flags & MSG_FLAG_UNSEEN)  ? 'N' : '-';
                 sts[1] = (entries[i].flags & MSG_FLAG_FLAGGED) ? '*' : '-';

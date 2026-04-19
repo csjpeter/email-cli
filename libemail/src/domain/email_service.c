@@ -2804,15 +2804,15 @@ static void show_label_picker(MailClient *mc,
     int all_count = 0;
     label_idx_list(&all_labels, &all_count);
 
-    /* Build display: only user labels + key system labels (INBOX, STARRED, etc.)
-     * Skip UNREAD (use 'n' key), _nolabel, _spam, _trash (system-managed) */
+    /* Build display: system labels (UNREAD, INBOX, STARRED, SENT, DRAFTS) first,
+     * then user-defined labels.  Skip _nolabel, _spam, _trash (system-managed). */
     char **pick_ids   = NULL;
     char **pick_names = NULL;
     int  *pick_on     = NULL;
     int  pick_count = 0, pick_cap = 0;
 
     /* Add system labels first */
-    static const char *sys_pick[] = {"INBOX", "STARRED", "SENT", "DRAFTS"};
+    static const char *sys_pick[] = {"UNREAD", "INBOX", "STARRED", "SENT", "DRAFTS"};
     for (int s = 0; s < (int)(sizeof(sys_pick)/sizeof(sys_pick[0])); s++) {
         if (pick_count == pick_cap) {
             int nc = pick_cap ? pick_cap * 2 : 16;
@@ -2832,7 +2832,6 @@ static void show_label_picker(MailClient *mc,
             free(all_labels[i]);
             continue;
         }
-        if (strcmp(all_labels[i], "UNREAD") == 0) { free(all_labels[i]); continue; }
         if (pick_count == pick_cap) {
             int nc = pick_cap ? pick_cap * 2 : 16;
             pick_ids   = realloc(pick_ids,   (size_t)nc * sizeof(char *));

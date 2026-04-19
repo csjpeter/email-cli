@@ -297,6 +297,53 @@ static void test_d_key_row_strikethrough(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'd' key → pending-remove row retains inverse cursor highlight
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * After pressing 'd', the cursor row is rendered with red + strikethrough
+ * AND inverse-video so the cursor position remains clearly visible.
+ * PTY_ATTR_REVERSE must be set on the row's cells alongside PTY_ATTR_STRIKE.
+ *
+ * The cursor starts on GMAIL_TOP_MSG ("Message 5").
+ */
+static void test_d_key_cursor_row_has_reverse(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "d-rev: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "d-rev: pty_run");
+
+    ASSERT(navigate_to_inbox(s) == 0, "d-rev: navigate_to_inbox");
+
+    int row_before = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row_before >= 0, "d-rev: " GMAIL_TOP_MSG " present before d");
+
+    /* Before 'd': cursor row must have REVERSE, must NOT have STRIKE */
+    if (row_before >= 0) {
+        int attr = pty_cell_attr(s, row_before, 4);
+        ASSERT(attr & PTY_ATTR_REVERSE,  "d-rev: cursor row has REVERSE before d");
+        ASSERT(!(attr & PTY_ATTR_STRIKE), "d-rev: no STRIKE before d");
+    }
+
+    pty_send_str(s, "d");
+    pty_settle(s, SETTLE_MS);
+
+    int row_after = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row_after >= 0, "d-rev: " GMAIL_TOP_MSG " still present after d");
+
+    /* After 'd': cursor row must have BOTH REVERSE and STRIKE */
+    if (row_after >= 0) {
+        int attr = pty_cell_attr(s, row_after, 4);
+        ASSERT(attr & PTY_ATTR_REVERSE, "d-rev: cursor row has REVERSE after d");
+        ASSERT(attr & PTY_ATTR_STRIKE,  "d-rev: cursor row has STRIKE after d");
+    }
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  TEST: 'd' key → message absent after explicit refresh
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -413,6 +460,14 @@ int main(int argc, char *argv[]) {
     printf("--- Fresh sync (test 3) ---\n");
     if (reset_and_sync() != 0) {
         fprintf(stderr, "FATAL: reset_and_sync failed for test 3\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_d_key_cursor_row_has_reverse);
+
+    printf("--- Fresh sync (test 4) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 4\n");
         stop_gmail_mock();
         goto done;
     }

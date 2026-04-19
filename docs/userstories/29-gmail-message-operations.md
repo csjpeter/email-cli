@@ -22,6 +22,8 @@
 | 10 | The UNREAD label is **not** shown in the reader Labels line (the user is currently reading it). |
 | 11 | `messages.untrash()` removes TRASH but does **not** restore original labels. The client locally remembers pre-trash labels for undo support. |
 | 12 | Server-side label modifications update the local `.idx` files immediately. |
+| 13 | After pressing **d** (or **r**), the row is shown with red foreground and strikethrough until the next refresh, giving immediate visual feedback. |
+| 14 | When the cursor is on a pending-remove row, the row is rendered with **both** inverse-video (cursor highlight) and red strikethrough, so the cursor position remains clearly visible. |
 
 ---
 

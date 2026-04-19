@@ -2032,11 +2032,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int pending = (pending_remove != NULL) && pending_remove[i];
 
             /* Pending-remove rows (TUI only): red + strikethrough.
-             * Use plain ASCII sts to avoid \033[0m reset conflicts with
-             * embedded colour escapes.  Selected-row reverse-video is
-             * suppressed for pending rows; the cursor is still tracked. */
-            if (opts->pager && pending) {
-                printf("\033[31m\033[9m");   /* red foreground + strikethrough */
+             * When the cursor is also on the row, add inverse-video so the
+             * cursor position remains visible.  The status column uses plain
+             * ASCII (no embedded colour escapes) for pending rows to avoid
+             * \033[0m conflicts with the combined attribute set. */
+            if (opts->pager && pending && sel) {
+                printf("\033[7m\033[31m\033[9m"); /* inverse + red + strikethrough */
+            } else if (opts->pager && pending) {
+                printf("\033[31m\033[9m");         /* red + strikethrough */
             } else if (sel) {
                 printf("\033[7m");
             }

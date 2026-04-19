@@ -1137,7 +1137,7 @@ char *local_gmail_label_id_lookup(const char *name) {
         char *tab = strchr(buf, '\t');
         if (!tab) continue;
         *tab = '\0';
-        if (strcmp(tab + 1, name) == 0)
+        if (strcasecmp(tab + 1, name) == 0)
             return strdup(buf); /* return the ID */
     }
     return NULL;

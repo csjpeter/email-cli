@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <locale.h>
 #include "config_store.h"
 #include "setup_wizard.h"
@@ -330,6 +331,19 @@ static void help_remove_account(void) {
 
 static int parse_uid(const char *s, char uid_out[17]) {
     if (!s || !*s) return -1;
+    /* Accept 16-character hex strings directly (Gmail message IDs shown by list). */
+    if (strlen(s) == 16) {
+        int all_hex = 1;
+        for (int i = 0; i < 16; i++) {
+            if (!isxdigit((unsigned char)s[i])) { all_hex = 0; break; }
+        }
+        if (all_hex) {
+            memcpy(uid_out, s, 16);
+            uid_out[16] = '\0';
+            return 0;
+        }
+    }
+    /* Accept positive decimal integers (IMAP UIDs). */
     char *end;
     unsigned long v = strtoul(s, &end, 10);
     if (*end != '\0' || v == 0 || v > 4294967295UL) return -1;
@@ -630,7 +644,7 @@ int main(int argc, char *argv[]) {
             char uid[17];
             if (parse_uid(uid_str, uid) != 0)
                 fprintf(stderr,
-                        "Error: UID must be a positive integer (got '%s').\n",
+                        "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n",
                         uid_str);
             else
                 result = email_service_read(cfg, uid, 0, BATCH_DEFAULT_LIMIT);
@@ -659,7 +673,7 @@ int main(int argc, char *argv[]) {
             char uid[17];
             if (parse_uid(uid_str, uid) != 0)
                 fprintf(stderr,
-                        "Error: UID must be a positive integer (got '%s').\n",
+                        "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n",
                         uid_str);
             else
                 result = email_service_list_attachments(cfg, uid);
@@ -684,7 +698,7 @@ int main(int argc, char *argv[]) {
             char uid[17];
             if (parse_uid(uid_str, uid) != 0)
                 fprintf(stderr,
-                        "Error: UID must be a positive integer (got '%s').\n",
+                        "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n",
                         uid_str);
             else
                 result = email_service_save_attachment(cfg, uid, filename, outdir);
@@ -812,7 +826,7 @@ int main(int argc, char *argv[]) {
             } else {
                 char uid[17];
                 if (parse_uid(uid_str, uid) != 0)
-                    fprintf(stderr, "Error: UID must be a positive integer (got '%s').\n", uid_str);
+                    fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
                 else {
                     int flag_add = (strcmp(cmd, "mark-unread") == 0) ? 1 : 0;
                     result = email_service_set_flag(cfg, uid, folder, MSG_FLAG_UNSEEN, flag_add);
@@ -843,7 +857,7 @@ int main(int argc, char *argv[]) {
             } else {
                 char uid[17];
                 if (parse_uid(uid_str, uid) != 0)
-                    fprintf(stderr, "Error: UID must be a positive integer (got '%s').\n", uid_str);
+                    fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
                 else {
                     int flag_add = (strcmp(cmd, "mark-starred") == 0) ? 1 : 0;
                     result = email_service_set_flag(cfg, uid, folder, MSG_FLAG_FLAGGED, flag_add);
@@ -866,7 +880,7 @@ int main(int argc, char *argv[]) {
         } else {
             char uid[17];
             if (parse_uid(uid_str, uid) != 0)
-                fprintf(stderr, "Error: UID must be a positive integer (got '%s').\n", uid_str);
+                fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
             else {
                 int add = (strcmp(cmd, "add-label") == 0) ? 1 : 0;
                 result = email_service_set_label(cfg, uid, label, add);

@@ -2361,21 +2361,24 @@ read_key_again: ;
                 if (me) me->flags = entries[cursor].flags;
                 manifest_save(folder, manifest);
 
-                /* Gmail: update local label indexes and .hdr flags, then kick
-                 * background sync to flush the pending flag to the server. */
+                /* Gmail: update local label indexes and .hdr (both labels CSV
+                 * and flags integer), then kick background sync. */
                 if (is_gmail) {
-                    if (ch == 'n') {
-                        if (currently)
-                            label_idx_remove("UNREAD", uid);
-                        else
-                            label_idx_add("UNREAD", uid);
-                    } else if (ch == 'f') {
-                        if (currently)
-                            label_idx_remove("STARRED", uid);
-                        else
-                            label_idx_add("STARRED", uid);
+                    const char *lbl = (ch == 'n') ? "UNREAD"
+                                    : (ch == 'f') ? "STARRED" : NULL;
+                    if (lbl) {
+                        /* n/f: label-backed flag — keep .idx and .hdr in sync */
+                        if (currently) {
+                            label_idx_remove(lbl, uid);
+                            local_hdr_update_labels("", uid, NULL, 0, &lbl, 1);
+                        } else {
+                            label_idx_add(lbl, uid);
+                            local_hdr_update_labels("", uid, &lbl, 1, NULL, 0);
+                        }
+                    } else {
+                        /* d: $Done is an IMAP keyword, not a Gmail label */
+                        local_hdr_update_flags("", uid, entries[cursor].flags);
                     }
-                    local_hdr_update_flags("", uid, entries[cursor].flags);
                     flag_push_background(cfg, uid, flag_name, add_flag);
                 } else if (list_mc) {
                     /* IMAP online mode: connection already open, push immediately */

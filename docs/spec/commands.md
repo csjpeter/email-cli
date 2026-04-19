@@ -106,6 +106,22 @@ beyond the window a hint line is appended:
   -- <remaining> more message(s) --  use --offset <next> for next page
 ```
 
+### Output truncation policy
+
+**When stdout is a terminal (TTY):** `Subject` and `From` columns are truncated
+to fit the terminal width.  Column widths adapt to the terminal size at each
+redraw.
+
+**When stdout is not a terminal (pipe / redirect / batch):** `Subject` and
+`From` are printed at **full length** without any truncation or right-padding.
+The status / count line is also printed without ANSI escape codes or trailing
+spaces.  This ensures that downstream scripts and tools (awk, grep, sed, etc.)
+receive complete, unambiguous field values.
+
+> **Design principle:** output field completeness is not a cosmetic feature — it
+> is a correctness requirement for batch consumers.  Never truncate fields in
+> non-TTY mode.
+
 ### Header cache eviction
 
 Eviction is triggered only when `--all` is used and at least one UID was returned

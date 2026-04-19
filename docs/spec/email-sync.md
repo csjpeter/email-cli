@@ -50,6 +50,69 @@ Sync complete: 52 fetched, 18 already stored
 
 ---
 
+## `--rebuild-index`
+
+```
+email-sync --rebuild-index [--account <email>]
+```
+
+Rebuilds Gmail label index files from locally cached `.hdr` files.
+Does **not** contact the Gmail API — runs entirely offline.
+IMAP accounts are silently skipped (they do not use label indexes).
+
+### When to use
+
+- After restoring a backup that is missing `.idx` files.
+- After upgrading from a version that did not write `.idx` files.
+- When label message counts appear wrong (e.g. all showing 0 after a
+  sync where every message was already cached).
+- To repair a corrupted or truncated index without re-downloading messages.
+
+### Behaviour
+
+1. Load all configured accounts (from `config.ini` files).
+2. If `--account` is given, restrict to that account; return error if not found.
+3. For each Gmail account:
+   a. Scan every `.hdr` file in the local message store.
+   b. Parse the labels field (4th tab-separated column).
+   c. Build an in-memory `(label, uid)` pair list.
+   d. Sort by label then UID.
+   e. Write one `.idx` file per label (17-byte fixed-width records).
+   f. Overwrite any existing `.idx` files atomically.
+4. Print a summary per account.
+
+### Output
+
+```
+Rebuilding label indexes for test@gmail.com ...
+  Scanned 25251 messages, wrote 12 label index files.
+Rebuilding label indexes for work@gmail.com ...
+  Scanned 8120 messages, wrote 7 label index files.
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--account <email>` | Rebuild only the named account |
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Indexes rebuilt successfully for all processed accounts |
+| 1 | Named account not found, or I/O error |
+
+### Relationship to `email-sync` (normal sync)
+
+Normal sync (`email-sync` without flags) automatically rebuilds label indexes
+at the end of every **full sync** (first run or after historyId expiry).
+Incremental sync (History API) updates only the affected index files.
+`--rebuild-index` is an explicit repair tool for cases where the automatic
+rebuild was skipped or the store was modified externally.
+
+---
+
 ## `cron`
 
 ```

@@ -1360,7 +1360,84 @@ check_not "26.25 gmail-A list: no GmailB-Message 150" "GmailB-Message 150" "$GL_
 GF_B=$(run_gmail_ro_b --batch list-folders)
 check "26.26 gmail-B list-folders: INBOX listed" "INBOX" "$GF_B"
 
-# Cleanup
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 27 — Gmail label index rebuild (--rebuild-index + auto-rebuild)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 27: Gmail label index rebuild ---"
+
+LABELS_DIR_A="$H_GMAIL/data/email-cli/accounts/$GMAIL_ACCT_A/labels"
+LABELS_DIR_B="$H_GMAIL/data/email-cli/accounts/$GMAIL_ACCT_B/labels"
+INBOX_IDX_A="$LABELS_DIR_A/INBOX.idx"
+INBOX_IDX_B="$LABELS_DIR_B/INBOX.idx"
+
+# Helper: run email-sync --rebuild-index (offline, no API URL needed)
+run_rebuild_idx() {
+    (export XDG_CONFIG_HOME="$H_GMAIL/config"
+     export XDG_DATA_HOME="$H_GMAIL/data"
+     export XDG_CACHE_HOME="$H_GMAIL/cache"
+     export HOME="$H_GMAIL"
+     "$BIN_DIR/email-sync" "$@" 2>&1 || true)
+}
+
+# 27.1 After Phase 26 sync, INBOX.idx should exist for account A
+check "27.1 gmail-A INBOX.idx exists after sync" "." \
+    "$([ -f "$INBOX_IDX_A" ] && echo ok || echo missing)"
+
+# Record entry count before deletion
+IDX_A_BEFORE=$(wc -c < "$INBOX_IDX_A" 2>/dev/null || echo "0")
+
+# 27.2 Delete all .idx files for account A
+rm -f "$LABELS_DIR_A"/*.idx
+check "27.2 gmail-A idx files deleted" "." \
+    "$([ ! -f "$INBOX_IDX_A" ] && echo ok || echo still-present)"
+
+# 27.3 Run --rebuild-index for account A only (offline, no server contact)
+REBUILD27A=$(run_rebuild_idx --rebuild-index --account "$GMAIL_ACCT_A")
+check "27.3 rebuild-index --account A: exits cleanly" "." \
+    "$([ $? -eq 0 ] && echo ok || echo nonzero)"
+
+# 27.4 INBOX.idx recreated for account A
+check "27.4 gmail-A INBOX.idx recreated by --rebuild-index" "." \
+    "$([ -f "$INBOX_IDX_A" ] && echo ok || echo missing)"
+
+# 27.5 Entry count unchanged after rebuild
+IDX_A_AFTER=$(wc -c < "$INBOX_IDX_A" 2>/dev/null || echo "0")
+check "27.5 gmail-A INBOX.idx size unchanged after rebuild" "." \
+    "$([ "$IDX_A_AFTER" = "$IDX_A_BEFORE" ] && echo ok || echo "changed-${IDX_A_BEFORE}-to-${IDX_A_AFTER}")"
+
+# 27.6 Run --rebuild-index for ALL accounts (no --account flag)
+rm -f "$LABELS_DIR_A"/*.idx "$LABELS_DIR_B"/*.idx
+REBUILD27ALL=$(run_rebuild_idx --rebuild-index)
+check "27.6 rebuild-index (all accounts): exits cleanly" "." \
+    "$([ $? -eq 0 ] && echo ok || echo nonzero)"
+
+# 27.7 Account A INBOX.idx recreated
+check "27.7 gmail-A INBOX.idx recreated by all-accounts rebuild" "." \
+    "$([ -f "$INBOX_IDX_A" ] && echo ok || echo missing)"
+
+# 27.8 Account B INBOX.idx recreated
+check "27.8 gmail-B INBOX.idx recreated by all-accounts rebuild" "." \
+    "$([ -f "$INBOX_IDX_B" ] && echo ok || echo missing)"
+
+# 27.9 Auto-rebuild during full sync:
+#   Delete historyId (forces full sync) + .idx files, then run sync.
+#   Full sync should rebuild indexes even when all messages are already cached.
+HIST_A="$H_GMAIL/data/email-cli/accounts/$GMAIL_ACCT_A/gmail_history_id"
+rm -f "$HIST_A" "$LABELS_DIR_A"/*.idx
+SYNC27A=$(run_gmail_sync_a)
+check "27.9 auto-rebuild: full sync runs after historyId deleted" \
+    "fetched\|cached\|stored" "$SYNC27A"
+
+# 27.10 After auto-rebuild full sync, INBOX.idx exists for account A
+check "27.10 gmail-A INBOX.idx recreated by auto-rebuild full sync" "." \
+    "$([ -f "$INBOX_IDX_A" ] && echo ok || echo missing)"
+
+# 27.11 list-folders for account A shows INBOX with non-zero count
+GF27=$(run_gmail_ro_a --batch list-folders)
+check "27.11 gmail-A list-folders: INBOX listed after rebuild" "INBOX" "$GF27"
+
+# Cleanup Phase 26+27
 kill "$GMAIL_SERVER_A_PID" "$GMAIL_SERVER_B_PID" 2>/dev/null || true
 rm -rf "$H_GMAIL"
 

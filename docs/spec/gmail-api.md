@@ -335,14 +335,33 @@ q=has:nouserlabels -label:inbox -label:sent -label:drafts -label:spam -label:tra
 
 1. `GET /gmail/v1/users/me/messages?maxResults=500` (paginated via `nextPageToken`)
    → collect all message IDs
-2. For each message ID:
+2. For each message ID not yet in local store:
    - `GET /gmail/v1/users/me/messages/{id}?format=raw` → base64url decode → save as `.eml`
    - `GET /gmail/v1/users/me/messages/{id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`
      → extract headers + `labelIds` → save as `.hdr`
-3. Populate `.idx` files: for each label on each message, append UID to that label's `.idx`
-4. Sort all `.idx` files
-5. Build `_nolabel.idx` from messages that have no labels
-6. Save `historyId` from the most recent message to `gmail_history_id`
+   - Messages already cached (both `.eml` and `.hdr` present) are skipped.
+3. **Rebuild all label index files** from locally cached `.hdr` files (see below).
+   This runs unconditionally at the end of every full sync — even when 0 messages
+   were downloaded — ensuring indexes are always consistent with the store.
+4. Build `_nolabel.idx` from messages that have no labels
+5. Save `historyId` from the most recent message to `gmail_history_id`
+
+#### Label Index Rebuild (step 3)
+
+Rebuilding is an O(N log N) in-memory operation:
+
+1. Read all `.hdr` files in the local store.
+2. Parse the labels field (4th tab-separated column, comma-separated label IDs).
+3. Build a flat `(label_id, uid)` pair list.
+4. Sort by `label_id` then `uid`.
+5. Write one `.idx` file per unique label (17-byte records: 16-char UID + `\n`).
+
+This replaces the previous O(N²) approach of appending UIDs one by one during the
+fetch loop.  Because it reads from `.hdr` files rather than the API, it works
+identically whether messages were freshly downloaded or already cached.
+
+The same logic is exposed as `email-sync --rebuild-index` for offline repair.
+See `docs/spec/email-sync.md` → `--rebuild-index`.
 
 ### Incremental Sync (subsequent runs)
 

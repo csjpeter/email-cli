@@ -2388,8 +2388,22 @@ static char **fetch_folder_list_from_server(const Config *cfg,
 static char **fetch_folder_list(const Config *cfg, int *count_out, char *sep_out) {
     /* Try local cache first (populated by sync). */
     char **cached = local_folder_list_load(count_out, sep_out);
-    if (cached && *count_out > 0) return cached;
-    if (cached) { free(cached); }
+    if (cached && *count_out > 0) {
+        /* For Gmail, strip IMPORTANT and CATEGORY_* from stale caches. */
+        if (cfg->gmail_mode) {
+            int n = 0;
+            for (int i = 0; i < *count_out; i++) {
+                const char *name = cached[i];
+                int filtered = name && (strcmp(name, "IMPORTANT") == 0 ||
+                                        strncmp(name, "CATEGORY_", 9) == 0);
+                if (filtered) free(cached[i]);
+                else          cached[n++] = cached[i];
+            }
+            *count_out = n;
+        }
+        if (*count_out > 0) return cached;
+        free(cached);
+    } else if (cached) { free(cached); }
 
     /* Fall back to server. */
     char sep = '.';

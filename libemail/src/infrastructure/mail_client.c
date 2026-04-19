@@ -60,8 +60,24 @@ int mail_client_list(MailClient *c, char ***names_out, int *count_out, char *sep
     if (c->is_gmail) {
         char **ids = NULL;
         int rc = gmail_list_labels(c->gmail, names_out, &ids, count_out);
-        /* Free the IDs array — the caller only needs display names.
-         * TODO: in future, store ids for label_id lookups. */
+        /* Filter out IMPORTANT and CATEGORY_* labels (opaque ML/tab labels). */
+        if (rc == 0 && ids && *names_out) {
+            int n = 0;
+            for (int i = 0; i < *count_out; i++) {
+                const char *id = ids[i];
+                int filtered = id && (strcmp(id, "IMPORTANT") == 0 ||
+                                      strncmp(id, "CATEGORY_", 9) == 0);
+                if (filtered) {
+                    free((*names_out)[i]);
+                    free(ids[i]);
+                } else {
+                    (*names_out)[n] = (*names_out)[i];
+                    ids[n]          = ids[i];
+                    n++;
+                }
+            }
+            *count_out = n;
+        }
         if (ids) {
             for (int i = 0; i < *count_out; i++) free(ids[i]);
             free(ids);

@@ -3,6 +3,7 @@
 #include "local_store.h"
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* ── is_filtered_label ───────────────────────────────────────────────── */
 
@@ -148,6 +149,105 @@ static void test_incremental_no_history(void) {
     ASSERT(rc == -2, "incremental: no historyId → returns -2");
 }
 
+/* ── repair_archive_flags ────────────────────────────────────────────── */
+
+/* Helper: sets HOME to a temp dir and inits local store for Gmail. */
+static void setup_gmail_test_env(const char *home) {
+    setenv("HOME", home, 1);
+    unsetenv("XDG_DATA_HOME");
+    local_store_init("gmail://csjpeterjaket@gmail.com", "csjpeterjaket@gmail.com");
+}
+
+static void test_repair_archive_flags_clears_unseen(void) {
+    /* A message synced to _nolabel while still having UNREAD label → UNSEEN
+     * flag should be cleared by repair_archive_flags(). */
+    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    setup_gmail_test_env(home);
+
+    const char *uid = "0000000000aabbcc";
+
+    /* Write a .hdr with UNSEEN bit set (flags = 1) */
+    const char *hdr = "Sender\tArchived msg\t2026-04-20\tUNREAD\t1";
+    local_hdr_save("", uid, hdr, strlen(hdr));
+
+    /* Add to _nolabel index */
+    label_idx_add("_nolabel", uid);
+
+    /* Run repair */
+    gmail_sync_repair_archive_flags();
+
+    /* Load and verify UNSEEN was cleared */
+    char *loaded = local_hdr_load("", uid);
+    ASSERT(loaded != NULL, "repair: .hdr still exists");
+    const char *last_tab = strrchr(loaded, '\t');
+    ASSERT(last_tab != NULL, "repair: flags tab present");
+    int flags = atoi(last_tab + 1);
+    ASSERT((flags & 1) == 0, "repair: UNSEEN bit cleared for archived message");
+    free(loaded);
+}
+
+static void test_repair_archive_flags_preserves_flagged(void) {
+    /* STARRED (FLAGGED bit) must survive the repair. */
+    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    setup_gmail_test_env(home);
+
+    const char *uid = "0000000000aabbdd";
+
+    /* flags = 3 = UNSEEN | FLAGGED */
+    const char *hdr = "Sender\tStarred archived\t2026-04-20\tUNREAD,STARRED\t3";
+    local_hdr_save("", uid, hdr, strlen(hdr));
+    label_idx_add("_nolabel", uid);
+
+    gmail_sync_repair_archive_flags();
+
+    char *loaded = local_hdr_load("", uid);
+    ASSERT(loaded != NULL, "repair flagged: .hdr exists");
+    const char *last_tab = strrchr(loaded, '\t');
+    int flags = atoi(last_tab + 1);
+    ASSERT((flags & 1) == 0, "repair flagged: UNSEEN cleared");
+    ASSERT((flags & 2) != 0, "repair flagged: FLAGGED preserved");
+    free(loaded);
+}
+
+static void test_repair_archive_flags_noop_when_already_read(void) {
+    /* If UNSEEN is already 0, the .hdr should not be rewritten (flags stay). */
+    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    setup_gmail_test_env(home);
+
+    const char *uid = "0000000000aabbee";
+
+    /* flags = 0, no UNREAD */
+    const char *hdr = "Sender\tAlready read\t2026-04-20\t\t0";
+    local_hdr_save("", uid, hdr, strlen(hdr));
+    label_idx_add("_nolabel", uid);
+
+    gmail_sync_repair_archive_flags();
+
+    char *loaded = local_hdr_load("", uid);
+    ASSERT(loaded != NULL, "repair noop: .hdr exists");
+    const char *last_tab = strrchr(loaded, '\t');
+    int flags = atoi(last_tab + 1);
+    ASSERT(flags == 0, "repair noop: flags remain 0");
+    free(loaded);
+}
+
+static void test_build_hdr_archive_unread_flags(void) {
+    /* build_hdr with UNREAD but no real label → flags still has UNSEEN.
+     * The caller (sync loop) is responsible for clearing it when assigning
+     * to _nolabel.  Verify build_hdr itself does not silently drop the flag. */
+    const char *raw = "From: X\r\nSubject: Archived\r\nDate: Mon, 14 Apr 2026 08:00:00 +0000\r\n\r\n";
+    char *labels[] = {"UNREAD", "CATEGORY_PROMOTIONS"};
+    char *hdr = gmail_sync_build_hdr(raw, labels, 2);
+    ASSERT(hdr != NULL, "build_hdr archive+unread: not NULL");
+
+    const char *last_tab = strrchr(hdr, '\t');
+    int flags = atoi(last_tab + 1);
+    /* build_hdr sets UNSEEN; the caller must clear it for _nolabel messages */
+    ASSERT((flags & 1) != 0, "build_hdr archive+unread: UNSEEN set by build_hdr (caller clears it)");
+
+    free(hdr);
+}
+
 /* ── Registration ────────────────────────────────────────────────────── */
 
 void test_gmail_sync(void) {
@@ -162,5 +262,9 @@ void test_gmail_sync(void) {
     RUN_TEST(test_build_hdr_no_labels);
     RUN_TEST(test_build_hdr_missing_headers);
     RUN_TEST(test_build_hdr_combined_flags);
+    RUN_TEST(test_build_hdr_archive_unread_flags);
     RUN_TEST(test_incremental_no_history);
+    RUN_TEST(test_repair_archive_flags_clears_unseen);
+    RUN_TEST(test_repair_archive_flags_preserves_flagged);
+    RUN_TEST(test_repair_archive_flags_noop_when_already_read);
 }

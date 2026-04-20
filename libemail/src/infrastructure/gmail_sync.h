@@ -65,6 +65,18 @@ int gmail_sync_incremental(GmailClient *gc);
 int gmail_sync_rebuild_indexes(void);
 
 /**
+ * @brief Repair pass: clear MSG_FLAG_UNSEEN on all archived (_nolabel) messages.
+ *
+ * Iterates every UID in the _nolabel index and clears the UNSEEN bit in the
+ * corresponding .hdr file.  Called automatically at the end of incremental
+ * sync to fix messages that arrived from Gmail already in archive state with
+ * the UNREAD label set.
+ *
+ * Local store must be initialised (local_store_init) before calling.
+ */
+void gmail_sync_repair_archive_flags(void);
+
+/**
  * @brief Check whether a Gmail label should be filtered out from display/indexing.
  *
  * Filters out CATEGORY_* labels and IMPORTANT (opaque Google ML classification).

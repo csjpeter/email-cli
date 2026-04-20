@@ -602,7 +602,7 @@ static void process_labels_removed(const char *obj, int index, void *ctx) {
 
 /* ── One-time repair: archived messages must not be unread ─────────── */
 
-static void repair_archive_unseen_flags(void) {
+void gmail_sync_repair_archive_flags(void) {
     char (*uids)[17] = NULL;
     int count = 0;
     if (label_idx_load("_nolabel", &uids, &count) != 0 || count == 0) {
@@ -677,7 +677,7 @@ int gmail_sync_incremental(GmailClient *gc) {
     }
 
     /* Ensure no archived message is marked unread (repair existing data too) */
-    repair_archive_unseen_flags();
+    gmail_sync_repair_archive_flags();
 
     logger_log(LOG_INFO, "gmail_sync: incremental done — added=%d deleted=%d labels=%d",
                hc.added, hc.deleted, hc.label_changes);

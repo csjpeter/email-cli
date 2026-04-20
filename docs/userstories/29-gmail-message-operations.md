@@ -33,6 +33,7 @@
 | 21 | Pressing **u** (restore from Trash) sets an immediate **green** strikethrough on the row, distinguishing restoration from deletion. The message disappears from Trash on the next refresh. |
 | 22 | Adding a real label (not UNREAD/STARRED/CATEGORY_*) to an archived message via the label picker removes it from Archive (removes the `_nolabel` virtual index entry). |
 | 23 | Archiving removes **all** labels including UNREAD and CATEGORY_* labels; the message is also marked read. The UNSEEN flag in the local `.hdr` store is cleared as well, so the message never appears as unread after archiving. |
+| 24 | Messages that arrive from Gmail via sync already in Archive state (no user labels in Gmail) are also treated as read: the sync layer clears the UNSEEN flag in `.hdr` even if the message carries the UNREAD label in Gmail. Any existing archived messages with a stale UNSEEN flag are repaired on the next `email-sync` run. |
 
 ---
 

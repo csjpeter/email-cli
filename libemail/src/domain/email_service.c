@@ -1513,11 +1513,18 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
     /* Friendly display name for the folder/label (used in status bar).
      * For Gmail user labels: look up display name from ID.
+     * For virtual (underscore) labels: use a human-readable name.
      * For IMAP or system labels: use the ID as-is. */
     RAII_STRING char *folder_display_alloc = NULL;
     if (cfg->gmail_mode && folder)
         folder_display_alloc = local_gmail_label_name_lookup(folder);
     const char *folder_display = folder_display_alloc ? folder_display_alloc : folder;
+    /* Virtual label display names (not in gmail_label_names) */
+    if (cfg->gmail_mode && folder && !folder_display_alloc) {
+        if (strcmp(folder, "_nolabel") == 0) folder_display = "Archive";
+        else if (strcmp(folder, "_trash")   == 0) folder_display = "Trash";
+        else if (strcmp(folder, "_spam")    == 0) folder_display = "Spam";
+    }
 
     int list_result = 0;
 
@@ -2222,7 +2229,7 @@ read_key_again: ;
                         { "a",                 "Archive (remove INBOX label)"    },
                         { "d",                 "Remove current label"            },
                         { "D",                 "Move to Trash"                   },
-                        { "u",                 "Untrash (restore labels)"        },
+                        { "u",                 "Untrash (restore to INBOX)"      },
                         { "t",                 "Toggle labels (picker)"          },
                         { "s",                 "Start background sync"           },
                         { "R",                 "Refresh after sync"              },
@@ -2292,6 +2299,13 @@ read_key_again: ;
                 }
                 /* Ensure UNREAD index is also cleared (belt-and-suspenders) */
                 label_idx_remove("UNREAD", uid);
+                /* Clear UNSEEN bit in .hdr flags field so the message is not
+                 * displayed as unread when browsing Archive. */
+                {
+                    int new_flags = entries[cursor].flags & ~MSG_FLAG_UNSEEN;
+                    local_hdr_update_flags("", uid, new_flags);
+                    entries[cursor].flags = new_flags;
+                }
                 /* Mark as read via API */
                 if (list_mc) mail_client_set_flag(list_mc, uid, "\\Seen", 1);
                 /* Put in archive */
@@ -2303,12 +2317,6 @@ read_key_again: ;
             if (ch == 'D' && is_gmail) {
                 /* Trash: Gmail compound trash operation */
                 const char *uid = entries[cursor].uid;
-                /* Save current labels for potential untrash */
-                char *pre_trash = local_hdr_get_labels("", uid);
-                if (pre_trash) {
-                    local_trash_labels_save(uid, pre_trash);
-                    free(pre_trash);
-                }
                 if (list_mc) mail_client_trash(list_mc, uid);
                 /* Remove from all local label indexes */
                 {
@@ -2327,42 +2335,20 @@ read_key_again: ;
                 break;
             }
             if (ch == 'u' && is_gmail) {
-                /* Untrash: restore from Trash + restore saved labels */
+                /* Untrash: restore from Trash to INBOX. */
                 const char *uid = entries[cursor].uid;
-                if (list_mc) {
-                    /* Gmail API: untrash removes TRASH label */
-                    mail_client_modify_label(list_mc, uid, "TRASH", 0);
-                }
                 label_idx_remove("_trash", uid);
-                /* Restore saved labels */
-                char *saved = local_trash_labels_load(uid);
-                if (saved) {
-                    int restored_real = 0;
-                    char *tok = saved, *sep;
-                    while (tok && *tok) {
-                        sep = strchr(tok, ',');
-                        size_t tl = sep ? (size_t)(sep - tok) : strlen(tok);
-                        char lb[64];
-                        if (tl >= sizeof(lb)) tl = sizeof(lb) - 1;
-                        memcpy(lb, tok, tl); lb[tl] = '\0';
-                        if (lb[0] && strcmp(lb, "UNREAD") != 0 &&
-                            strcmp(lb, "IMPORTANT") != 0 &&
-                            strncmp(lb, "CATEGORY_", 9) != 0) {
-                            label_idx_add(lb, uid);
-                            if (list_mc)
-                                mail_client_modify_label(list_mc, uid, lb, 1);
-                            restored_real = 1;
-                        }
-                        tok = sep ? sep + 1 : NULL;
-                    }
-                    free(saved);
-                    local_trash_labels_remove(uid);
-                    /* If only CATEGORY_* labels were saved, also restore to Archive */
-                    if (!restored_real)
-                        label_idx_add("_nolabel", uid);
-                } else {
-                    /* No saved labels — put in Archive (_nolabel) */
-                    label_idx_add("_nolabel", uid);
+                label_idx_add("INBOX", uid);
+                /* Update .hdr: remove TRASH from labels, add INBOX */
+                {
+                    const char *add_lbl = "INBOX";
+                    const char *rm_lbl  = "TRASH";
+                    local_hdr_update_labels("", uid, &add_lbl, 1, &rm_lbl, 1);
+                }
+                /* Gmail API: remove TRASH label, add INBOX */
+                if (list_mc) {
+                    mail_client_modify_label(list_mc, uid, "TRASH", 0);
+                    mail_client_modify_label(list_mc, uid, "INBOX", 1);
                 }
                 /* Mark for immediate visual feedback (green strikethrough) */
                 if (pending_restore) pending_restore[cursor] = 1;

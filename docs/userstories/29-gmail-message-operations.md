@@ -20,7 +20,7 @@
 | 8 | Pressing **n** toggles the UNREAD label on the message. |
 | 9 | The message reader shows a **Labels** line (e.g. `Labels:  INBOX, ★ Starred, Work`); this line is absent for IMAP messages. |
 | 10 | The UNREAD label is **not** shown in the reader Labels line (the user is currently reading it). |
-| 11 | `messages.untrash()` removes TRASH but does **not** restore original labels. The client locally remembers pre-trash labels for undo support. |
+| 11 | Pressing **u** (restore) removes TRASH and adds **INBOX** only — it does **not** attempt to restore pre-trash labels. |
 | 12 | Server-side label modifications update the local `.idx` files immediately. |
 | 13 | After pressing **d** (or **r**), the row is shown with red foreground and strikethrough until the next refresh, giving immediate visual feedback. |
 | 14 | When the cursor is on a pending-remove row, the row is rendered with **both** inverse-video (cursor highlight) and red strikethrough, so the cursor position remains clearly visible. |
@@ -32,7 +32,7 @@
 | 20 | Pressing **a** (archive) sets an immediate red strikethrough on the row — the message disappears from view on the next refresh. |
 | 21 | Pressing **u** (restore from Trash) sets an immediate **green** strikethrough on the row, distinguishing restoration from deletion. The message disappears from Trash on the next refresh. |
 | 22 | Adding a real label (not UNREAD/STARRED/CATEGORY_*) to an archived message via the label picker removes it from Archive (removes the `_nolabel` virtual index entry). |
-| 23 | Archiving removes **all** labels including UNREAD and CATEGORY_* labels; the message is also marked read. |
+| 23 | Archiving removes **all** labels including UNREAD and CATEGORY_* labels; the message is also marked read. The UNSEEN flag in the local `.hdr` store is cleared as well, so the message never appears as unread after archiving. |
 
 ---
 

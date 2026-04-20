@@ -196,7 +196,8 @@ static void rebuild_label_indexes(const char (*uids)[17], int uid_count) {
         }
         free(lbl_copy);
 
-        /* Messages with no real (non-CATEGORY_) label → Archive */
+        /* Messages with no real (non-CATEGORY_) label → Archive.
+         * Archived messages are always considered read. */
         if (!has_real) {
             if (npairs >= (int)cap) {
                 cap = cap * 2 + 1;
@@ -208,6 +209,7 @@ static void rebuild_label_indexes(const char (*uids)[17], int uid_count) {
             strncpy(pairs[npairs].uid, uids[i], 16);
             pairs[npairs].uid[16] = '\0';
             npairs++;
+            new_flags &= ~MSG_FLAG_UNSEEN;
         }
 
         /* Sync flags integer if it disagrees with the labels CSV.
@@ -355,9 +357,20 @@ int gmail_sync_full(GmailClient *gc) {
             if (!is_category_label(labels[j]))
                 has_real_label = 1;
         }
-        /* Messages with no real (non-CATEGORY_) label go to Archive */
-        if (!has_real_label)
+        /* Messages with no real (non-CATEGORY_) label go to Archive.
+         * Archived messages are always considered read. */
+        if (!has_real_label) {
             label_idx_add("_nolabel", uid);
+            /* Clear UNSEEN in .hdr: hdr was already saved above with the
+             * raw UNREAD flag; rewrite if needed. */
+            int cur_flags = 0;
+            for (int j = 0; j < label_count; j++) {
+                if (strcmp(labels[j], "UNREAD")  == 0) cur_flags |= MSG_FLAG_UNSEEN;
+                if (strcmp(labels[j], "STARRED") == 0) cur_flags |= MSG_FLAG_FLAGGED;
+            }
+            if (cur_flags & MSG_FLAG_UNSEEN)
+                local_hdr_update_flags("", uid, cur_flags & ~MSG_FLAG_UNSEEN);
+        }
 
         for (int j = 0; j < label_count; j++) free(labels[j]);
         free(labels);
@@ -444,7 +457,17 @@ static void process_message_added(const char *obj, int index, void *ctx) {
             label_idx_add(idx_name, id);
             has_label = 1;
         }
-        if (!has_label) label_idx_add("_nolabel", id);
+        if (!has_label) {
+            label_idx_add("_nolabel", id);
+            /* Archived messages are always read */
+            int cur_flags = 0;
+            for (int j = 0; j < label_count; j++) {
+                if (strcmp(labels[j], "UNREAD")  == 0) cur_flags |= MSG_FLAG_UNSEEN;
+                if (strcmp(labels[j], "STARRED") == 0) cur_flags |= MSG_FLAG_FLAGGED;
+            }
+            if (cur_flags & MSG_FLAG_UNSEEN)
+                local_hdr_update_flags("", id, cur_flags & ~MSG_FLAG_UNSEEN);
+        }
 
         hc->added++;
     }
@@ -554,8 +577,20 @@ static void process_labels_removed(const char *obj, int index, void *ctx) {
     }
     free(cur_labels);
 
-    if (!has_real_label)
+    if (!has_real_label) {
         label_idx_add("_nolabel", id);
+        /* Archived messages are always read: clear UNSEEN from .hdr flags */
+        char *cur_hdr = local_hdr_load("", id);
+        if (cur_hdr) {
+            char *last_tab = strrchr(cur_hdr, '\t');
+            if (last_tab) {
+                int cur_flags = atoi(last_tab + 1);
+                if (cur_flags & MSG_FLAG_UNSEEN)
+                    local_hdr_update_flags("", id, cur_flags & ~MSG_FLAG_UNSEEN);
+            }
+            free(cur_hdr);
+        }
+    }
 
     /* Keep .hdr labels field in sync so rebuild_label_indexes stays accurate. */
     local_hdr_update_labels("", id,
@@ -563,6 +598,29 @@ static void process_labels_removed(const char *obj, int index, void *ctx) {
 
     free(id);
     hc->label_changes++;
+}
+
+/* ── One-time repair: archived messages must not be unread ─────────── */
+
+static void repair_archive_unseen_flags(void) {
+    char (*uids)[17] = NULL;
+    int count = 0;
+    if (label_idx_load("_nolabel", &uids, &count) != 0 || count == 0) {
+        free(uids);
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        char *hdr = local_hdr_load("", uids[i]);
+        if (!hdr) continue;
+        char *last_tab = strrchr(hdr, '\t');
+        if (last_tab) {
+            int flags = atoi(last_tab + 1);
+            if (flags & MSG_FLAG_UNSEEN)
+                local_hdr_update_flags("", uids[i], flags & ~MSG_FLAG_UNSEEN);
+        }
+        free(hdr);
+    }
+    free(uids);
 }
 
 /* ── Incremental Sync ─────────────────────────────────────────────── */
@@ -617,6 +675,9 @@ int gmail_sync_incremental(GmailClient *gc) {
             free(lbl_ids);
         }
     }
+
+    /* Ensure no archived message is marked unread (repair existing data too) */
+    repair_archive_unseen_flags();
 
     logger_log(LOG_INFO, "gmail_sync: incremental done — added=%d deleted=%d labels=%d",
                hc.added, hc.deleted, hc.label_changes);

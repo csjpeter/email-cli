@@ -9,8 +9,11 @@
 #include <arpa/inet.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#ifdef __GNUC__
+#ifdef ENABLE_GCOV
 extern void __gcov_dump(void);
+#  define GCOV_FLUSH() __gcov_dump()
+#else
+#  define GCOV_FLUSH() ((void)0)
 #endif
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
@@ -84,9 +87,7 @@ static void run_mock_server(int listen_fd,
     close(listen_fd);
     if (cfd < 0) {
         SSL_CTX_free(ctx);
-#ifdef __GNUC__
-        __gcov_dump();
-#endif
+        GCOV_FLUSH();
         _exit(1);
     }
 
@@ -101,9 +102,7 @@ static void run_mock_server(int listen_fd,
         ERR_print_errors_fp(stderr);
         SSL_free(ssl);
         close(cfd);
-#ifdef __GNUC__
-        __gcov_dump();
-#endif
+        GCOV_FLUSH();
         _exit(1);
     }
 
@@ -179,9 +178,7 @@ static void run_mock_server(int listen_fd,
     SSL_shutdown(ssl);
     SSL_free(ssl);
     close(cfd);
-#ifdef __GNUC__
-    __gcov_dump();
-#endif
+    GCOV_FLUSH();
     _exit(0);
 }
 
@@ -334,9 +331,7 @@ static void run_mock_server_full(int listen_fd, SSL_CTX *ctx) {
     int cfd = accept(listen_fd, NULL, NULL);
     close(listen_fd);
     if (cfd < 0) { SSL_CTX_free(ctx);
-#ifdef __GNUC__
-        __gcov_dump();
-#endif
+        GCOV_FLUSH();
         _exit(1);
     }
 
@@ -349,9 +344,7 @@ static void run_mock_server_full(int listen_fd, SSL_CTX *ctx) {
     if (SSL_accept(ssl) <= 0) {
         ERR_print_errors_fp(stderr);
         SSL_free(ssl); close(cfd);
-#ifdef __GNUC__
-        __gcov_dump();
-#endif
+        GCOV_FLUSH();
         _exit(1);
     }
 
@@ -477,9 +470,7 @@ static void run_mock_server_full(int listen_fd, SSL_CTX *ctx) {
     SSL_shutdown(ssl);
     SSL_free(ssl);
     close(cfd);
-#ifdef __GNUC__
-    __gcov_dump();
-#endif
+    GCOV_FLUSH();
     _exit(0);
 }
 

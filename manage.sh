@@ -162,15 +162,33 @@ case "$1" in
         cmake_configure Debug "-DENABLE_COVERAGE=ON"
         cmake_build
         build_test_runner
-        # Remove stale .gcda files to avoid checksum mismatch errors
+
+        # Pass 1 — unit suite only
         find "$BUILD_DIR" -name "*.gcda" -delete
         (cd "$BUILD_DIR" && ./tests/unit/test-runner)
+        echo "Capturing unit coverage..."
+        (cd "$BUILD_DIR" && lcov --capture --directory . \
+             --output-file coverage-unit.info)
+
+        # Pass 2 — functional suite only (fresh .gcda)
+        find "$BUILD_DIR" -name "*.gcda" -delete
         ./tests/functional/run_functional.sh
-        echo "Generating coverage report..."
+        echo "Capturing functional coverage..."
+        (cd "$BUILD_DIR" && lcov --capture --directory . \
+             --output-file coverage-functional.info)
+
+        # Combined = unit ∪ functional
         (cd "$BUILD_DIR" && \
-         lcov --capture --directory . --output-file coverage.info && \
-         genhtml coverage.info --output-directory coverage_report)
-        echo "Coverage report available at $BUILD_DIR/coverage_report/index.html"
+         lcov --add-tracefile coverage-unit.info \
+              --add-tracefile coverage-functional.info \
+              --output-file coverage.info)
+
+        echo "Generating coverage reports..."
+        (cd "$BUILD_DIR" && \
+         genhtml coverage.info --output-directory coverage_report && \
+         genhtml coverage-functional.info --output-directory coverage_functional_report)
+        echo "Combined coverage:    $BUILD_DIR/coverage_report/index.html"
+        echo "Functional coverage:  $BUILD_DIR/coverage_functional_report/index.html"
         ;;
     integration)
         build_release

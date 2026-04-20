@@ -1306,9 +1306,9 @@ void test_email_service(void) {
         opts.pager  = 1;   /* TUI mode */
 
         /* Inject ESC (27) to exit the TUI */
-        int lp[2]; pipe(lp);
+        int lp[2]; int _pr = pipe(lp); (void)_pr;
         unsigned char esc = 27;
-        write(lp[1], &esc, 1);
+        ssize_t _wr = write(lp[1], &esc, 1); (void)_wr;
         close(lp[1]);
         int saved_stdin = dup(STDIN_FILENO);
         dup2(lp[0], STDIN_FILENO); close(lp[0]);
@@ -1352,7 +1352,7 @@ void test_email_service(void) {
         opts.pager  = 0;  /* batch mode: prints to stdout, no TUI */
 
         /* Capture stdout */
-        int bp[2]; pipe(bp);
+        int bp[2]; int _pr = pipe(bp); (void)_pr;
         fflush(stdout);
         int bsout = dup(STDOUT_FILENO);
         dup2(bp[1], STDOUT_FILENO); close(bp[1]);
@@ -1390,7 +1390,7 @@ void test_email_service(void) {
         opts.folder = "test_empty_cron_folder";
         opts.pager  = 0;  /* batch mode: prints "No cached data" message */
 
-        int ep[2]; pipe(ep);
+        int ep[2]; int _pr = pipe(ep); (void)_pr;
         fflush(stdout);
         int esout = dup(STDOUT_FILENO);
         dup2(ep[1], STDOUT_FILENO); close(ep[1]);
@@ -1431,7 +1431,7 @@ void test_email_service(void) {
         rcfg.folder = "INBOX";
 
         /* Capture stdout */
-        int rp[2]; pipe(rp);
+        int rp[2]; int _pr = pipe(rp); (void)_pr;
         fflush(stdout);
         int rsout = dup(STDOUT_FILENO);
         dup2(rp[1], STDOUT_FILENO); close(rp[1]);
@@ -1504,7 +1504,7 @@ void test_email_service(void) {
         gopts.folder = "INBOX";
         gopts.pager  = 0;  /* batch */
 
-        int gp[2]; pipe(gp);
+        int gp[2]; int _pr = pipe(gp); (void)_pr;
         fflush(stdout);
         int gsout = dup(STDOUT_FILENO);
         dup2(gp[1], STDOUT_FILENO); close(gp[1]);
@@ -1531,7 +1531,7 @@ void test_email_service(void) {
 
     /* ── stdin/stdout injection helpers (local) ──────────────────────── */
 #define INJECT_STDIN(keys, klen, saved)  do { \
-        int _pfd[2]; pipe(_pfd); \
+        int _pfd[2]; int _pr = pipe(_pfd); (void)_pr; \
         ssize_t _wr = write(_pfd[1], (keys), (klen)); (void)_wr; \
         close(_pfd[1]); \
         (saved) = dup(STDIN_FILENO); \

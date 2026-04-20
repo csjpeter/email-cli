@@ -31,11 +31,21 @@ jobs:
       - name: Generate coverage report
         run: ./manage.sh coverage
 
-      - name: Generate coverage badge
+      - name: Generate coverage badges
         run: |
           pip install genbadge[coverage] lcov_cobertura --quiet
-          lcov_cobertura build/coverage.info -o build/coverage.xml
-          genbadge coverage -i build/coverage.xml -o build/coverage_report/coverage-badge.svg
+          lcov_cobertura build/coverage.info \
+              -o build/coverage.xml
+          lcov_cobertura build/coverage-functional.info \
+              -o build/coverage-functional.xml
+          genbadge coverage -i build/coverage.xml \
+              -o build/coverage_report/coverage-badge.svg
+          genbadge coverage -i build/coverage-functional.xml \
+              --name "functional coverage" \
+              -o build/coverage_report/coverage-functional-badge.svg
+          cp build/coverage_report/coverage-functional-badge.svg \
+             build/coverage_functional_report/coverage-badge.svg
+          mv build/coverage_functional_report build/coverage_report/functional
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

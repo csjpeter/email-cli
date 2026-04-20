@@ -100,7 +100,7 @@ void test_platform(void) {
         int pfd[2];
         if (pipe(pfd) == 0) {
             const char *crlf_input = "secret\r\n";
-            write(pfd[1], crlf_input, 8);
+            ssize_t _wr = write(pfd[1], crlf_input, 8); (void)_wr;
             close(pfd[1]);
             int saved = dup(STDIN_FILENO);
             dup2(pfd[0], STDIN_FILENO);

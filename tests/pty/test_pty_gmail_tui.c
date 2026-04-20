@@ -1039,6 +1039,240 @@ static void test_label_picker_unarchive_green_fg(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  FEEDBACK LINE TESTS  (US-44 / US-52-56)
+ *
+ *  The feedback line is the second-to-last terminal row (ROWS-2, 0-indexed).
+ *  Each test checks that pty_row_contains(s, ROWS-2, expected) returns 1.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+#define FEEDBACK_ROW (ROWS - 2)   /* 0-indexed PTY row for the infoline */
+
+/** Feedback row must be blank (no feedback text) when the list is first opened. */
+static void test_feedback_empty_on_open(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "fb-open: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "fb-open: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "fb-open: navigate_to_inbox");
+    /* No key pressed yet — feedback row must not contain any op-result text */
+    ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Label removed"),
+           "fb-open: no 'Label removed' on feedback row at open");
+    ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Archived"),
+           "fb-open: no 'Archived' on feedback row at open");
+    ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Moved to Trash"),
+           "fb-open: no 'Moved to Trash' on feedback row at open");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** After 'D' (trash), feedback line shows "Moved to Trash". */
+static void test_feedback_D_trash(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "fb-D: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "fb-D: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "fb-D: navigate_to_inbox");
+    pty_send_str(s, "D");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Moved to Trash"),
+           "fb-D: feedback row shows 'Moved to Trash'");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** After 'd' (remove label), feedback line shows "Label removed: INBOX". */
+static void test_feedback_d_label_removed(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "fb-d: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "fb-d: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "fb-d: navigate_to_inbox");
+    pty_send_str(s, "d");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Label removed: INBOX"),
+           "fb-d: feedback row shows 'Label removed: INBOX'");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** After 'd','d' (remove then undo), feedback line shows "Undo: INBOX restored". */
+static void test_feedback_d_undo(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "fb-dundo: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "fb-dundo: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "fb-dundo: navigate_to_inbox");
+    pty_send_str(s, "d");
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "d");  /* undo */
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Undo: INBOX restored"),
+           "fb-dundo: feedback row shows 'Undo: INBOX restored'");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** After 'a' (archive) in INBOX, feedback line shows "Archived". */
+static void test_feedback_a_archive(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "fb-arch: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "fb-arch: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "fb-arch: navigate_to_inbox");
+    pty_send_str(s, "a");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Archived"),
+           "fb-arch: feedback row shows 'Archived'");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** After 'a' in Archive view (already archived), feedback shows "Already in Archive". */
+static void test_feedback_a_noop(void) {
+    /* First archive a message */
+    reset_and_sync();
+    {
+        const char *args[] = { g_tui_bin, NULL };
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "fb-anoop: pty_open s1");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "fb-anoop: pty_run s1");
+        ASSERT(navigate_to_inbox(s) == 0, "fb-anoop: nav inbox s1");
+        pty_send_str(s, "a");   /* archive Message 5 */
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+    /* Now open Archive view and press 'a' again */
+    {
+        const char *args[] = { g_tui_bin, NULL };
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "fb-anoop: pty_open s2");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "fb-anoop: pty_run s2");
+        pty_wait_for(s, "Accounts", WAIT_MS);
+        pty_send_key(s, PTY_KEY_ENTER);
+        pty_wait_for(s, "Labels", WAIT_MS);
+        pty_settle(s, SETTLE_MS / 2);
+        navigate_labels_to_archive(s);
+        pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        pty_send_str(s, "a");   /* no-op: already in Archive */
+        pty_settle(s, SETTLE_MS);
+        ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Already in Archive"),
+               "fb-anoop: feedback shows 'Already in Archive'");
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+}
+
+/** After 'f' (first press = star), feedback line shows "Starred". */
+static void test_feedback_f_star(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "fb-f: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "fb-f: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "fb-f: navigate_to_inbox");
+    pty_send_str(s, "f");   /* message 5 is not starred → becomes starred */
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Starred"),
+           "fb-f: feedback row shows 'Starred'");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** After 'n' (first press: unread→read), feedback line shows "Marked as read". */
+static void test_feedback_n_read(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "fb-n: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "fb-n: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "fb-n: navigate_to_inbox");
+    /* Message 5 starts with UNREAD label → pressing 'n' marks it as read */
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Marked as read"),
+           "fb-n: feedback row shows 'Marked as read'");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** After 'u' (restore) in Trash view, feedback line shows "Restored to Inbox". */
+static void test_feedback_u_restore(void) {
+    /* Session 1: trash Message 5 */
+    reset_and_sync();
+    {
+        const char *args[] = { g_tui_bin, NULL };
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "fb-u: pty_open s1");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "fb-u: pty_run s1");
+        ASSERT(navigate_to_inbox(s) == 0, "fb-u: nav inbox s1");
+        pty_send_str(s, "D");   /* trash Message 5 */
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+    /* Session 2: open Trash, press 'u', check feedback */
+    {
+        const char *args[] = { g_tui_bin, NULL };
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "fb-u: pty_open s2");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "fb-u: pty_run s2");
+        ASSERT(navigate_to_trash(s) == 0, "fb-u: navigate_to_trash");
+        pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        pty_send_str(s, "u");   /* restore from trash */
+        pty_settle(s, SETTLE_MS);
+        ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Restored to Inbox"),
+               "fb-u: feedback row shows 'Restored to Inbox'");
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+}
+
+/** After 't' + add label, feedback shows "Label added: <name>". */
+static void test_feedback_t_label_added(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "fb-t: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "fb-t: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "fb-t: navigate_to_inbox");
+    /* Open label picker, navigate to STARRED (Down×2), add it, ESC close */
+    pty_send_str(s, "t");
+    pty_wait_for(s, "Toggle Labels", WAIT_MS);
+    pty_settle(s, SETTLE_MS / 2);
+    pty_send_key(s, PTY_KEY_DOWN);  /* UNREAD → INBOX */
+    pty_send_key(s, PTY_KEY_DOWN);  /* INBOX  → STARRED */
+    pty_send_key(s, PTY_KEY_ENTER); /* add STARRED (currently off) */
+    pty_settle(s, SETTLE_MS / 2);
+    pty_send_key(s, PTY_KEY_ESC);   /* close picker */
+    pty_settle(s, SETTLE_MS);
+    /* Feedback must mention the label that was added */
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Label added"),
+           "fb-t: feedback row shows 'Label added'");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  main
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -1230,6 +1464,18 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_label_picker_unarchive_green_fg);
+
+    /* ── Feedback line tests (US-44 / US-52-56) ── */
+    RUN_TEST(test_feedback_empty_on_open);
+    RUN_TEST(test_feedback_D_trash);
+    RUN_TEST(test_feedback_d_label_removed);
+    RUN_TEST(test_feedback_d_undo);
+    RUN_TEST(test_feedback_a_archive);
+    RUN_TEST(test_feedback_a_noop);
+    RUN_TEST(test_feedback_f_star);
+    RUN_TEST(test_feedback_n_read);
+    RUN_TEST(test_feedback_u_restore);
+    RUN_TEST(test_feedback_t_label_added);
 
     stop_gmail_mock();
 

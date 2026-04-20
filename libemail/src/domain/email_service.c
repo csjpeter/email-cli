@@ -201,9 +201,11 @@ static char *word_wrap(const char *text, int width) {
 
 /* Forward declaration — defined after visible_line_cols (below). */
 static void print_statusbar(int trows, int width, const char *text);
-static void show_label_picker(MailClient *mc,
-                               const char *uid);
+static void show_label_picker(MailClient *mc, const char *uid,
+                               char *feedback_out, int feedback_cap);
 static int is_system_or_special_label(const char *name);
+static void flag_push_background(const Config *cfg, const char *uid,
+                                  const char *flag_name, int add_flag);
 
 /**
  * Pager prompt for the standalone `show` command.
@@ -821,9 +823,11 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
 
 /**
  * Show a message in interactive pager mode.
- * Returns 0 = back to list (Backspace/ESC/q), -1 = error.
+ * Returns 0 = back to list (Backspace/ESC/q), 2 = reply, -1 = error.
+ * mc may be NULL (operations then queue for background sync).
  */
-static int show_uid_interactive(const Config *cfg, const char *folder,
+static int show_uid_interactive(const Config *cfg, MailClient *mc,
+                                const char *folder,
                                 const char *uid, int page_size) {
     char *raw = NULL;
     if (local_msg_exists(folder, uid)) {
@@ -851,6 +855,16 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
     free(date_raw);
     /* Gmail: load labels from .hdr cache for display in reader header */
     char *show_labels = cfg->gmail_mode ? local_hdr_get_labels("", uid) : NULL;
+    /* Load current flags for 'f' / 'n' / 'd' toggle operations */
+    int reader_flags = 0;
+    {
+        char *hdr = local_hdr_load("", uid);
+        if (hdr) {
+            char *last_tab = strrchr(hdr, '\t');
+            if (last_tab) reader_flags = atoi(last_tab + 1);
+            free(hdr);
+        }
+    }
     int term_cols = terminal_cols();
     int term_rows = terminal_rows();
     if (term_rows <= 0) term_rows = page_size;
@@ -903,15 +917,31 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         /* Shortcut hints (bottom row) */
         {
             char sb[256];
-            if (att_count > 0) {
+            int is_gmail = cfg->gmail_mode;
+            if (is_gmail) {
+                if (att_count > 0) {
+                    snprintf(sb, sizeof(sb),
+                             "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
+                             "  r=rm-label  d=rm  D=trash  f=star  n=unread"
+                             "  a=archive  t=labels  a=save(%d)  q=back --",
+                             cur_page, total_pages, att_count);
+                } else {
+                    snprintf(sb, sizeof(sb),
+                             "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
+                             "  r=rm-label  d=rm  D=trash  f=star  n=unread"
+                             "  a=archive  t=labels  q=back --",
+                             cur_page, total_pages);
+                }
+            } else if (att_count > 0) {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                         "  r=reply  a=save  A=save-all(%d)  Backspace/ESC/q=list --",
+                         "  r=reply  f=star  n=unread  d=done  a=save  A=save-all(%d)"
+                         "  Backspace/ESC/q=list --",
                          cur_page, total_pages, att_count);
             } else {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                         "  r=reply  Backspace/ESC/q=list --",
+                         "  r=reply  f=star  n=unread  d=done  Backspace/ESC/q=list --",
                          cur_page, total_pages);
             }
             print_statusbar(term_rows, wrap_cols, sb);
@@ -958,28 +988,186 @@ static int show_uid_interactive(const Config *cfg, const char *folder,
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
-            if (ch == 'r') {
-                result = 2;      /* reply to this message */
-                goto show_int_done;
-            } else if (ch == 'q') {
+            int is_gmail = cfg->gmail_mode;
+            if (ch == 'q') {
                 result = 0;      /* back to list */
                 goto show_int_done;
             } else if (ch == 'h' || ch == '?') {
-                static const char *help[][2] = {
-                    { "PgDn / \u2193",   "Scroll down one page / one line"  },
-                    { "PgUp / \u2191",   "Scroll up one page / one line"    },
-                    { "Home / End",      "Jump to top / bottom of message"  },
-                    { "r",              "Reply to this message"             },
-                    { "a",              "Save an attachment"                },
-                    { "A",              "Save all attachments"              },
-                    { "Backspace",      "Back to message list"              },
-                    { "ESC / q",        "Back to message list"              },
-                    { "h / ?",          "Show this help"                    },
-                };
-                show_help_popup("Message reader shortcuts",
-                                help, (int)(sizeof(help)/sizeof(help[0])));
+                if (is_gmail) {
+                    static const char *ghelp[][2] = {
+                        { "PgDn / \u2193",   "Scroll down one page / one line"   },
+                        { "PgUp / \u2191",   "Scroll up one page / one line"     },
+                        { "Home / End",      "Jump to top / bottom of message"   },
+                        { "r",              "Remove current label"              },
+                        { "d",              "Remove current label"              },
+                        { "D",              "Move to Trash"                     },
+                        { "f",              "Toggle Starred label"              },
+                        { "n",              "Toggle Unread label"               },
+                        { "a",              "Archive (remove all labels)"       },
+                        { "t",              "Toggle labels (picker)"            },
+                        { "A",              "Save attachment"                   },
+                        { "q / ESC",        "Back to message list"              },
+                        { "h / ?",          "Show this help"                    },
+                    };
+                    show_help_popup("Message reader shortcuts (Gmail)",
+                                    ghelp, (int)(sizeof(ghelp)/sizeof(ghelp[0])));
+                } else {
+                    static const char *help[][2] = {
+                        { "PgDn / \u2193",   "Scroll down one page / one line"  },
+                        { "PgUp / \u2191",   "Scroll up one page / one line"    },
+                        { "Home / End",      "Jump to top / bottom of message"  },
+                        { "r",              "Reply to this message"             },
+                        { "f",              "Toggle Flagged (starred)"          },
+                        { "n",              "Toggle Unread flag"                },
+                        { "d",              "Toggle Done flag"                  },
+                        { "a",              "Save an attachment"                },
+                        { "A",              "Save all attachments"              },
+                        { "Backspace",      "Back to message list"              },
+                        { "ESC / q",        "Back to message list"              },
+                        { "h / ?",          "Show this help"                    },
+                    };
+                    show_help_popup("Message reader shortcuts",
+                                    help, (int)(sizeof(help)/sizeof(help[0])));
+                }
                 break;
-            } else if (ch == 'a' && att_count > 0) {
+            } else if (is_gmail && (ch == 'r' || ch == 'd') && folder[0] != '_') {
+                /* Remove current label from this message */
+                const char *lbl = folder;
+                label_idx_remove(lbl, uid);
+                local_hdr_update_labels("", uid, NULL, 0, &lbl, 1);
+                if (mc) mail_client_modify_label(mc, uid, lbl, 0);
+                snprintf(info_msg, sizeof(info_msg), "Label removed: %s", lbl);
+                /* Reload show_labels to reflect the change */
+                free(show_labels);
+                show_labels = local_hdr_get_labels("", uid);
+                break;
+            } else if (is_gmail && ch == 'D') {
+                /* Trash: Gmail compound trash operation */
+                if (mc) mail_client_trash(mc, uid);
+                char **all_labels = NULL; int all_count = 0;
+                label_idx_list(&all_labels, &all_count);
+                for (int j = 0; j < all_count; j++) {
+                    label_idx_remove(all_labels[j], uid);
+                    free(all_labels[j]);
+                }
+                free(all_labels);
+                label_idx_add("_trash", uid);
+                snprintf(info_msg, sizeof(info_msg), "Moved to Trash");
+                break;
+            } else if (is_gmail && ch == 'a') {
+                /* Archive: remove all labels from this message */
+                if (strcmp(folder, "_nolabel") == 0) {
+                    snprintf(info_msg, sizeof(info_msg),
+                             "Already in Archive \xe2\x80\x94 no change");
+                    break;
+                }
+                char *lbl_str = local_hdr_get_labels("", uid);
+                if (lbl_str) {
+                    int n = 1;
+                    for (const char *p = lbl_str; *p; p++) if (*p == ',') n++;
+                    char **rm  = malloc((size_t)n * sizeof(char *));
+                    char *copy = strdup(lbl_str);
+                    int   rm_n = 0;
+                    if (rm && copy) {
+                        char *tok = copy, *sep;
+                        while (tok && *tok) {
+                            sep = strchr(tok, ',');
+                            if (sep) *sep = '\0';
+                            if (tok[0] && tok[0] != '_') {
+                                label_idx_remove(tok, uid);
+                                rm[rm_n++] = tok;
+                                if (mc &&
+                                    strcmp(tok, "IMPORTANT") != 0 &&
+                                    strncmp(tok, "CATEGORY_", 9) != 0)
+                                    mail_client_modify_label(mc, uid, tok, 0);
+                            }
+                            tok = sep ? sep + 1 : NULL;
+                        }
+                        local_hdr_update_labels("", uid, NULL, 0,
+                                                (const char **)rm, rm_n);
+                    }
+                    free(copy); free(rm); free(lbl_str);
+                }
+                label_idx_remove("UNREAD", uid);
+                int new_flags = reader_flags & ~MSG_FLAG_UNSEEN;
+                local_hdr_update_flags("", uid, new_flags);
+                reader_flags = new_flags;
+                if (mc) mail_client_set_flag(mc, uid, "\\Seen", 1);
+                label_idx_add("_nolabel", uid);
+                free(show_labels);
+                show_labels = local_hdr_get_labels("", uid);
+                snprintf(info_msg, sizeof(info_msg), "Archived");
+                break;
+            } else if (is_gmail && ch == 't') {
+                show_label_picker(mc, uid, info_msg, sizeof(info_msg));
+                free(show_labels);
+                show_labels = local_hdr_get_labels("", uid);
+                break;
+            } else if (ch == 'f') {
+                /* Toggle starred / flagged */
+                int currently = reader_flags & MSG_FLAG_FLAGGED;
+                int add_flag  = currently ? 0 : 1;
+                reader_flags ^= MSG_FLAG_FLAGGED;
+                local_hdr_update_flags("", uid, reader_flags);
+                local_pending_flag_add(folder, uid, "\\Flagged", add_flag);
+                if (is_gmail) {
+                    const char *lbl = "STARRED";
+                    if (currently) {
+                        label_idx_remove(lbl, uid);
+                        local_hdr_update_labels("", uid, NULL, 0, &lbl, 1);
+                    } else {
+                        label_idx_add(lbl, uid);
+                        local_hdr_update_labels("", uid, &lbl, 1, NULL, 0);
+                    }
+                    flag_push_background(cfg, uid, "\\Flagged", add_flag);
+                    free(show_labels);
+                    show_labels = local_hdr_get_labels("", uid);
+                } else if (mc) {
+                    mail_client_set_flag(mc, uid, "\\Flagged", add_flag);
+                }
+                snprintf(info_msg, sizeof(info_msg),
+                         currently ? "Unstarred" : "Starred");
+                break;
+            } else if (ch == 'n') {
+                /* Toggle unread / read */
+                int currently = reader_flags & MSG_FLAG_UNSEEN;
+                int add_flag  = currently ? 1 : 0; /* add \\Seen if currently unseen */
+                reader_flags ^= MSG_FLAG_UNSEEN;
+                local_hdr_update_flags("", uid, reader_flags);
+                local_pending_flag_add(folder, uid, "\\Seen", add_flag);
+                if (is_gmail) {
+                    const char *lbl = "UNREAD";
+                    if (currently) {
+                        label_idx_remove(lbl, uid);
+                        local_hdr_update_labels("", uid, NULL, 0, &lbl, 1);
+                    } else {
+                        label_idx_add(lbl, uid);
+                        local_hdr_update_labels("", uid, &lbl, 1, NULL, 0);
+                    }
+                    flag_push_background(cfg, uid, "\\Seen", add_flag);
+                    free(show_labels);
+                    show_labels = local_hdr_get_labels("", uid);
+                } else if (mc) {
+                    mail_client_set_flag(mc, uid, "\\Seen", add_flag);
+                }
+                snprintf(info_msg, sizeof(info_msg),
+                         currently ? "Marked as read" : "Marked as unread");
+                break;
+            } else if (!is_gmail && ch == 'd') {
+                /* IMAP only: toggle Done flag */
+                int currently = reader_flags & MSG_FLAG_DONE;
+                int add_flag  = currently ? 0 : 1;
+                reader_flags ^= MSG_FLAG_DONE;
+                local_hdr_update_flags("", uid, reader_flags);
+                local_pending_flag_add(folder, uid, "$Done", add_flag);
+                if (mc) mail_client_set_flag(mc, uid, "$Done", add_flag);
+                snprintf(info_msg, sizeof(info_msg),
+                         currently ? "Marked not done" : "Marked done");
+                break;
+            } else if (!is_gmail && ch == 'r') {
+                result = 2;      /* reply to this message */
+                goto show_int_done;
+            } else if (att_count > 0 && ((is_gmail && ch == 'A') || (!is_gmail && ch == 'a'))) {
                 int sel = 0;
                 if (att_count > 1) {
                     sel = show_attachment_picker(atts, att_count,
@@ -1886,6 +2074,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     int *pending_restore = opts->pager
                            ? calloc((size_t)(show_count > 0 ? show_count : 1), sizeof(int))
                            : NULL;
+    /* Feedback message shown on the second-to-last row after each operation.
+     * Cleared only when the list is re-opened (R/ESC/Backspace restart the view). */
+    char feedback_msg[256] = "";
 
     /* Keep the terminal in raw mode for the entire interactive TUI.
      * Without this, each terminal_read_key() call would need to briefly enter
@@ -2134,6 +2325,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         {
             int trows = terminal_rows();
             if (trows <= 0) trows = limit + 6;
+            /* Feedback line — second from bottom, shows last operation result */
+            print_infoline(trows, tcols, feedback_msg);
             char sb[256];
             if (is_gmail) {
                 int in_trash = (strcmp(folder, "_trash") == 0);
@@ -2186,7 +2379,7 @@ read_key_again: ;
             goto list_done;
         case TERM_KEY_ENTER:
             {
-                int ret = show_uid_interactive(cfg, folder, entries[cursor].uid, opts->limit);
+                int ret = show_uid_interactive(cfg, list_mc, folder, entries[cursor].uid, opts->limit);
                 if (ret == 1) goto list_done;  /* user quit from show */
                 if (ret == 2) {
                     /* 'r' pressed in reader → reply to this message */
@@ -2277,7 +2470,11 @@ read_key_again: ;
                 /* Archive: remove ALL labels from this message.
                  * Gmail "archive" = no labels → message lives only in All Mail.
                  * If already in Archive view, the message is already archived — no-op. */
-                if (strcmp(folder, "_nolabel") == 0) break;
+                if (strcmp(folder, "_nolabel") == 0) {
+                    snprintf(feedback_msg, sizeof(feedback_msg),
+                             "Already in Archive \xe2\x80\x94 no change");
+                    break;
+                }
                 const char *uid = entries[cursor].uid;
                 char *lbl_str = local_hdr_get_labels("", uid);
                 if (lbl_str) {
@@ -2325,6 +2522,7 @@ read_key_again: ;
                 label_idx_add("_nolabel", uid);
                 /* Mark for immediate visual feedback (red strikethrough) */
                 if (pending_remove) pending_remove[cursor] = 1;
+                snprintf(feedback_msg, sizeof(feedback_msg), "Archived");
                 break;
             }
             if (ch == 'D' && is_gmail) {
@@ -2345,6 +2543,7 @@ read_key_again: ;
                 label_idx_add("_trash", uid);
                 /* Mark for immediate visual feedback (red strikethrough) */
                 if (pending_remove) pending_remove[cursor] = 1;
+                snprintf(feedback_msg, sizeof(feedback_msg), "Moved to Trash");
                 break;
             }
             if (ch == 'u' && is_gmail) {
@@ -2365,6 +2564,7 @@ read_key_again: ;
                 }
                 /* Mark for immediate visual feedback (green strikethrough) */
                 if (pending_restore) pending_restore[cursor] = 1;
+                snprintf(feedback_msg, sizeof(feedback_msg), "Restored to Inbox");
                 break;
             }
             if (ch == 't' && is_gmail) {
@@ -2372,7 +2572,7 @@ read_key_again: ;
                 /* Remember whether this message is currently in Archive so we
                  * can show green feedback if a label addition removes it. */
                 int was_archived = label_idx_contains("_nolabel", uid);
-                show_label_picker(list_mc, uid);
+                show_label_picker(list_mc, uid, feedback_msg, sizeof(feedback_msg));
                 /* If the picker added a real label that moved the message out
                  * of Archive (_nolabel), mark row green (restorative action). */
                 if (was_archived && !label_idx_contains("_nolabel", uid))
@@ -2394,6 +2594,8 @@ read_key_again: ;
                         /* Remove from archive fallback if it was added */
                         label_idx_remove("_nolabel", uid);
                         pending_label[cursor] = 0;
+                        snprintf(feedback_msg, sizeof(feedback_msg),
+                                 "Undo: %s restored", folder);
                     } else {
                         /* Remove label from this message */
                         if (list_mc)
@@ -2423,6 +2625,8 @@ read_key_again: ;
                         if (!has_real) label_idx_add("_nolabel", uid);
                         /* Mark row for immediate visual feedback (yellow strikethrough) */
                         if (pending_label) pending_label[cursor] = 1;
+                        snprintf(feedback_msg, sizeof(feedback_msg),
+                                 "Label removed: %s", folder);
                     }
                 }
                 break;
@@ -2472,6 +2676,16 @@ read_key_again: ;
                     /* IMAP online mode: connection already open, push immediately */
                     mail_client_set_flag(list_mc, uid, flag_name, add_flag);
                 }
+                /* Feedback message */
+                if (ch == 'n')
+                    snprintf(feedback_msg, sizeof(feedback_msg),
+                             currently ? "Marked as read" : "Marked as unread");
+                else if (ch == 'f')
+                    snprintf(feedback_msg, sizeof(feedback_msg),
+                             currently ? "Unstarred" : "Starred");
+                else /* 'd' IMAP done toggle */
+                    snprintf(feedback_msg, sizeof(feedback_msg),
+                             currently ? "Marked not done" : "Marked done");
             }
             break;
         }
@@ -2848,8 +3062,8 @@ folders_int_done:
  * Applies changes via mail_client_set_flag and updates local .idx.
  * Returns when the user presses ESC/Backspace/q.
  */
-static void show_label_picker(MailClient *mc,
-                               const char *uid) {
+static void show_label_picker(MailClient *mc, const char *uid,
+                               char *feedback_out, int feedback_cap) {
     /* Collect available labels from local .idx files */
     char **all_labels = NULL;
     int all_count = 0;
@@ -2901,6 +3115,14 @@ static void show_label_picker(MailClient *mc,
         free(pick_ids); free(pick_names); free(pick_on);
         return;
     }
+
+    /* Remember initial label state for post-picker feedback computation */
+    int *pick_initial = malloc((size_t)pick_count * sizeof(int));
+    if (pick_initial)
+        memcpy(pick_initial, pick_on, (size_t)pick_count * sizeof(int));
+    /* Capture virtual-folder membership before any changes */
+    int was_in_nolabel = label_idx_contains("_nolabel", uid);
+    int was_in_trash   = label_idx_contains("_trash", uid);
 
     int pcursor = 0;
     int tcols = terminal_cols();
@@ -3004,6 +3226,55 @@ static void show_label_picker(MailClient *mc,
         }
     }
 
+    /* Compute feedback: diff pick_initial vs pick_on */
+    if (feedback_out && feedback_cap > 0 && pick_initial) {
+        int added = 0, removed = 0;
+        char added_name[64]   = "";
+        char removed_name[64] = "";
+        int real_added = 0;
+        for (int i = 0; i < pick_count; i++) {
+            if (pick_on[i] && !pick_initial[i]) {
+                added++;
+                if (!added_name[0]) {
+                    strncpy(added_name, pick_names[i], sizeof(added_name) - 1);
+                    added_name[sizeof(added_name) - 1] = '\0';
+                }
+                /* "Real" label = not UNREAD/STARRED/CATEGORY_ */
+                if (strcmp(pick_ids[i], "UNREAD")    != 0 &&
+                    strcmp(pick_ids[i], "STARRED")   != 0 &&
+                    strncmp(pick_ids[i], "CATEGORY_", 9) != 0)
+                    real_added = 1;
+            }
+            if (!pick_on[i] && pick_initial[i]) {
+                removed++;
+                if (!removed_name[0]) {
+                    strncpy(removed_name, pick_names[i], sizeof(removed_name) - 1);
+                    removed_name[sizeof(removed_name) - 1] = '\0';
+                }
+            }
+        }
+        if (added + removed > 0) {
+            if (was_in_trash && real_added)
+                snprintf(feedback_out, (size_t)feedback_cap,
+                         "%s added \xe2\x80\x94 restored from Trash", added_name);
+            else if (was_in_nolabel && real_added)
+                snprintf(feedback_out, (size_t)feedback_cap,
+                         "%s added \xe2\x80\x94 moved out of Archive", added_name);
+            else if (added + removed == 1) {
+                if (added == 1)
+                    snprintf(feedback_out, (size_t)feedback_cap,
+                             "Label added: %s", added_name);
+                else
+                    snprintf(feedback_out, (size_t)feedback_cap,
+                             "Label removed: %s", removed_name);
+            } else {
+                snprintf(feedback_out, (size_t)feedback_cap, "Labels updated");
+            }
+        }
+        /* If no changes, leave feedback_out unchanged (criterion 7) */
+    }
+
+    free(pick_initial);
     for (int i = 0; i < pick_count; i++) { free(pick_ids[i]); free(pick_names[i]); }
     free(pick_ids); free(pick_names); free(pick_on);
 }

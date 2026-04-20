@@ -2059,9 +2059,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
     /* Track entries with pending operations for immediate visual feedback.
      * pending_remove[i] = 1: row will be gone on next refresh (red strikethrough).
-     *   Set by: 'D' (trash), 'a' (archive, non-archive view).
-     * pending_label[i] = 1: label removed, row may stay (yellow strikethrough).
-     *   Set by: 'd' (remove current label).
+     *   Set by: 'D' (trash) only.
+     * pending_label[i] = 1: label removed/archived, row may stay (yellow strikethrough).
+     *   Set by: 'd' (remove current label), 'a' (archive).
      * pending_restore[i] = 1: row will leave this view on next refresh (green strikethrough).
      *   Set by: 'u' (untrash/restore), 't' label-picker unarchive.
      * Only allocated in TUI (pager) mode; always NULL in CLI/RO mode. */
@@ -2253,8 +2253,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             /* Pending rows: strikethrough + colour for immediate visual feedback.
              * Cursor on pending row: also add inverse-video (cursor stays visible).
              * Status column uses plain ASCII for pending rows (no \033[0m conflicts).
-             * Red   = destructive (trash, archive-from-inbox)
-             * Yellow = neutral label change (remove label)
+             * Red    = destructive (trash only)
+             * Yellow = neutral label change (remove label, archive)
              * Green  = restorative (untrash, unarchive via label picker) */
             if (opts->pager && remove_pending && sel) {
                 printf("\033[7m\033[31m\033[9m"); /* inverse + red + strikethrough */
@@ -2520,8 +2520,8 @@ read_key_again: ;
                 if (list_mc) mail_client_set_flag(list_mc, uid, "\\Seen", 1);
                 /* Put in archive */
                 label_idx_add("_nolabel", uid);
-                /* Mark for immediate visual feedback (red strikethrough) */
-                if (pending_remove) pending_remove[cursor] = 1;
+                /* Mark for immediate visual feedback (yellow strikethrough) */
+                if (pending_label) pending_label[cursor] = 1;
                 snprintf(feedback_msg, sizeof(feedback_msg), "Archived");
                 break;
             }

@@ -472,7 +472,7 @@ static void test_label_picker_shows_unread(void) {
 
 /**
  * After pressing 'a' (archive), the cursor row must stay visible with
- * PTY_ATTR_STRIKE set (red strikethrough), giving immediate feedback.
+ * PTY_ATTR_STRIKE set (yellow strikethrough), giving immediate feedback.
  */
 static void test_archive_row_has_strikethrough(void) {
     const char *args[] = { g_tui_bin, NULL };
@@ -904,6 +904,41 @@ static void test_D_row_red_fg(void) {
         int fg   = pty_cell_fg(s, row, 4);
         ASSERT(attr & PTY_ATTR_STRIKE, "D-red: STRIKE set");
         ASSERT(fg == PTY_FG_RED,       "D-red: fg is red (31)");
+    }
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'a' key (archive from INBOX) → yellow foreground strikethrough
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Archiving ('a') must render with yellow foreground + strikethrough —
+ * same as label removal ('d'), distinct from red destructive trash ('D').
+ */
+static void test_a_row_yellow_fg(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "a-yellow: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "a-yellow: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "a-yellow: navigate_to_inbox");
+
+    int row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "a-yellow: " GMAIL_TOP_MSG " present");
+
+    pty_send_str(s, "a");
+    pty_settle(s, SETTLE_MS);
+
+    row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "a-yellow: row still visible after a");
+    if (row >= 0) {
+        int attr = pty_cell_attr(s, row, 4);
+        int fg   = pty_cell_fg(s, row, 4);
+        ASSERT(attr & PTY_ATTR_STRIKE, "a-yellow: STRIKE set");
+        ASSERT(fg == PTY_FG_YELLOW,    "a-yellow: fg is yellow (33), not red");
     }
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -1449,17 +1484,25 @@ int main(int argc, char *argv[]) {
     }
     RUN_TEST(test_D_row_red_fg);
 
-    printf("--- Fresh sync (test 17: a in Archive = noop) ---\n");
+    printf("--- Fresh sync (test 17: a=yellow) ---\n");
     if (reset_and_sync() != 0) {
         fprintf(stderr, "FATAL: reset_and_sync failed for test 17\n");
         stop_gmail_mock();
         goto done;
     }
-    RUN_TEST(test_a_in_archive_no_strikethrough);
+    RUN_TEST(test_a_row_yellow_fg);
 
-    printf("--- Fresh sync (test 18: label picker unarchive = green) ---\n");
+    printf("--- Fresh sync (test 18: a in Archive = noop) ---\n");
     if (reset_and_sync() != 0) {
         fprintf(stderr, "FATAL: reset_and_sync failed for test 18\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_a_in_archive_no_strikethrough);
+
+    printf("--- Fresh sync (test 19: label picker unarchive = green) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 19\n");
         stop_gmail_mock();
         goto done;
     }

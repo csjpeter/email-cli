@@ -5,9 +5,10 @@
  * Minimal VT100 subset — only what TUI programs typically use:
  *   - Cursor positioning: CSI row;col H, CSI H (home)
  *   - Screen erase: CSI 2J (full), CSI K (to end of line), CSI 2K (full line)
- *   - SGR attributes: 0 (reset), 1 (bold), 2 (dim), 7 (reverse)
+ *   - SGR attributes: 0 (reset), 1 (bold), 2 (dim), 7 (reverse), 9 (strikethrough)
+ *   - Standard fg colours: CSI 30–37m (stored in cell.fg), CSI 39m (default)
  *   - 24-bit colour: CSI 38;2;R;G;Bm (fg), CSI 48;2;R;G;Bm (bg) — parsed, not stored
- *   - Basic colours: CSI 3Xm, CSI 4Xm — parsed, not stored
+ *   - Basic bg colours: CSI 4Xm — parsed, not stored
  *   - Newline, carriage return, backspace, tab
  */
 
@@ -136,20 +137,26 @@ static void apply_csi(PtyScreen *scr, const char *params, int param_len, char fi
 
     case 'm': /* SGR — select graphic rendition */
         for (int i = 0; i < argc; i++) {
-            if (args[i] == 0)       scr->cur_attr = PTY_ATTR_NONE;
-            else if (args[i] == 1)  scr->cur_attr |= PTY_ATTR_BOLD;
+            if (args[i] == 0) {
+                scr->cur_attr = PTY_ATTR_NONE;
+                scr->cur_fg   = PTY_FG_DEFAULT;
+            } else if (args[i] == 1)  scr->cur_attr |= PTY_ATTR_BOLD;
             else if (args[i] == 2)  scr->cur_attr |= PTY_ATTR_DIM;
             else if (args[i] == 7)  scr->cur_attr |= PTY_ATTR_REVERSE;
             else if (args[i] == 9)  scr->cur_attr |= PTY_ATTR_STRIKE;
             else if (args[i] == 22) scr->cur_attr &= ~(PTY_ATTR_BOLD | PTY_ATTR_DIM);
             else if (args[i] == 27) scr->cur_attr &= ~PTY_ATTR_REVERSE;
             else if (args[i] == 29) scr->cur_attr &= ~PTY_ATTR_STRIKE;
-            /* Skip colour args: 30-37,38,39, 40-47,48,49, 90-97, 100-107 */
+            /* Standard fg colours: 30–37 */
+            else if (args[i] >= 30 && args[i] <= 37) scr->cur_fg = (uint8_t)args[i];
+            /* Default fg colour */
+            else if (args[i] == 39) scr->cur_fg = PTY_FG_DEFAULT;
+            /* 24-bit / 256-colour fg/bg: skip sub-args */
             else if (args[i] == 38 || args[i] == 48) {
-                /* 38;2;R;G;B or 38;5;N — skip remaining args */
                 if (i + 1 < argc && args[i + 1] == 2) i += 4; /* skip 2,R,G,B */
                 else if (i + 1 < argc && args[i + 1] == 5) i += 2; /* skip 5,N */
             }
+            /* bg colours 40–47, 49, bright variants 90–107: ignored */
         }
         break;
 
@@ -258,6 +265,7 @@ void pty_screen_feed(PtyScreen *scr, const char *data, size_t len) {
             memcpy(cl->ch, p, (size_t)copy);
             cl->ch[copy] = '\0';
             cl->attr = scr->cur_attr;
+            cl->fg   = scr->cur_fg;
 
             scr->cur_col++;
             if (scr->cur_col >= scr->cols) {

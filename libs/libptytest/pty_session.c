@@ -131,6 +131,12 @@ int pty_cell_attr(PtySession *s, int row, int col) {
     return s->screen->cells[row * s->cols + col].attr;
 }
 
+int pty_cell_fg(PtySession *s, int row, int col) {
+    if (!s || !s->screen) return PTY_FG_DEFAULT;
+    if (row < 0 || row >= s->rows || col < 0 || col >= s->cols) return PTY_FG_DEFAULT;
+    return s->screen->cells[row * s->cols + col].fg;
+}
+
 char *pty_row_text(PtySession *s, int row, char *buf, size_t size) {
     if (!s || !s->screen || !buf || size == 0) { if (buf) buf[0] = '\0'; return buf; }
     if (row < 0 || row >= s->rows) { buf[0] = '\0'; return buf; }

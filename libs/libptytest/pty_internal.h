@@ -7,13 +7,15 @@
  */
 
 #include "ptytest.h"
+#include <stdint.h>
 #include <sys/types.h>
 
 /* ── Screen cell ─────────────────────────────────────────────────────── */
 
 typedef struct {
-    char ch[8];   /**< UTF-8 character (up to 4 bytes + NUL) */
-    int  attr;    /**< PTY_ATTR_* bitmask */
+    char    ch[8];   /**< UTF-8 character (up to 4 bytes + NUL) */
+    int     attr;    /**< PTY_ATTR_* bitmask */
+    uint8_t fg;      /**< Foreground colour: 0=default, 31=red, 32=green, 33=yellow, etc. */
 } PtyCell;
 
 /* ── Virtual screen buffer ───────────────────────────────────────────── */
@@ -22,6 +24,7 @@ typedef struct PtyScreen {
     int      cols, rows;
     int      cur_row, cur_col;
     int      cur_attr;        /**< Current SGR attribute state */
+    uint8_t  cur_fg;          /**< Current foreground colour (0 = default) */
     int      pending_wrap;    /**< 1 = cursor is past last column, wrap on next char */
     PtyCell *cells;           /**< rows × cols cell array */
 } PtyScreen;

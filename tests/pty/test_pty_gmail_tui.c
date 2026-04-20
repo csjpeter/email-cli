@@ -841,6 +841,204 @@ static void test_d_key_row_gone_after_refresh(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'd' key → yellow foreground strikethrough (US-43 criterion 1)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Label removal ('d') must render with yellow foreground + strikethrough,
+ * not red, so it is visually distinct from destructive trash ('D').
+ */
+static void test_d_row_yellow_fg(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "d-yellow: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "d-yellow: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "d-yellow: navigate_to_inbox");
+
+    int row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "d-yellow: " GMAIL_TOP_MSG " present");
+
+    pty_send_str(s, "d");
+    pty_settle(s, SETTLE_MS);
+
+    row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "d-yellow: row still visible after d");
+    if (row >= 0) {
+        int attr = pty_cell_attr(s, row, 4);
+        int fg   = pty_cell_fg(s, row, 4);
+        ASSERT(attr & PTY_ATTR_STRIKE, "d-yellow: STRIKE set");
+        ASSERT(fg == PTY_FG_YELLOW,    "d-yellow: fg is yellow (33), not red");
+    }
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'D' key → red foreground strikethrough (US-43 criterion 2)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Trash ('D') must render with red foreground + strikethrough to distinguish
+ * it from the yellow label-removal feedback.
+ */
+static void test_D_row_red_fg(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "D-red: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "D-red: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "D-red: navigate_to_inbox");
+
+    int row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "D-red: " GMAIL_TOP_MSG " present");
+
+    pty_send_str(s, "D");
+    pty_settle(s, SETTLE_MS);
+
+    row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "D-red: row still visible after D");
+    if (row >= 0) {
+        int attr = pty_cell_attr(s, row, 4);
+        int fg   = pty_cell_fg(s, row, 4);
+        ASSERT(attr & PTY_ATTR_STRIKE, "D-red: STRIKE set");
+        ASSERT(fg == PTY_FG_RED,       "D-red: fg is red (31)");
+    }
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'a' in Archive view → no visual change (US-43 criterion 3)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Pressing 'a' while already in the Archive (_nolabel) view is a no-op:
+ * the message is already archived, so no strikethrough must appear.
+ */
+static void test_a_in_archive_no_strikethrough(void) {
+    const char *args[] = { g_tui_bin, NULL };
+
+    /* Session 1: archive a message so Archive view has content */
+    {
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "a-noop: pty_open s1");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "a-noop: pty_run s1");
+        ASSERT(navigate_to_inbox(s) == 0, "a-noop: navigate_to_inbox");
+        pty_send_str(s, "a");   /* archive top message */
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+
+    /* Session 2: open Archive, press 'a' → no strikethrough */
+    {
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "a-noop: pty_open s2");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "a-noop: pty_run s2");
+
+        /* Navigate to Archive view */
+        pty_wait_for(s, "Accounts", WAIT_MS);
+        pty_send_key(s, PTY_KEY_ENTER); /* into Labels */
+        pty_wait_for(s, "Labels", WAIT_MS);
+        pty_settle(s, SETTLE_MS / 2);
+        navigate_labels_to_archive(s);
+        pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+
+        int row = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row >= 0, "a-noop: " GMAIL_TOP_MSG " visible in Archive");
+
+        /* Press 'a' — message is already archived, must be a no-op */
+        pty_send_str(s, "a");
+        pty_settle(s, SETTLE_MS);
+
+        row = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row >= 0, "a-noop: row still present after a");
+        if (row >= 0) {
+            int attr = pty_cell_attr(s, row, 4);
+            ASSERT(!(attr & PTY_ATTR_STRIKE),
+                   "a-noop: no strikethrough in Archive view (already archived)");
+        }
+
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  TEST: label picker unarchive → green strikethrough (US-43 criterion 5)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * When a real label is added via the label picker in Archive view (which
+ * removes the message from _nolabel), the row must show a green strikethrough
+ * — restorative, not destructive.
+ */
+static void test_label_picker_unarchive_green_fg(void) {
+    const char *args[] = { g_tui_bin, NULL };
+
+    /* Session 1: archive the top message */
+    {
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "unarch-green: pty_open s1");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "unarch-green: pty_run s1");
+        ASSERT(navigate_to_inbox(s) == 0, "unarch-green: nav inbox");
+        pty_send_str(s, "a");
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+
+    /* Session 2: navigate to Archive, open label picker, add INBOX */
+    {
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "unarch-green: pty_open s2");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "unarch-green: pty_run s2");
+
+        pty_wait_for(s, "Accounts", WAIT_MS);
+        pty_send_key(s, PTY_KEY_ENTER);
+        pty_wait_for(s, "Labels", WAIT_MS);
+        pty_settle(s, SETTLE_MS / 2);
+        navigate_labels_to_archive(s);
+        pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+
+        int row = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row >= 0, "unarch-green: " GMAIL_TOP_MSG " in Archive");
+
+        /* Open label picker, Down → INBOX, Enter to toggle on, ESC close */
+        pty_send_str(s, "t");
+        pty_wait_for(s, "Toggle Labels", WAIT_MS);
+        pty_settle(s, SETTLE_MS / 2);
+        pty_send_key(s, PTY_KEY_DOWN);   /* UNREAD → INBOX */
+        pty_send_key(s, PTY_KEY_ENTER);  /* add INBOX */
+        pty_settle(s, SETTLE_MS / 2);
+        pty_send_key(s, PTY_KEY_ESC);    /* close picker */
+        pty_settle(s, SETTLE_MS);
+
+        /* Row must now show green strikethrough (message left _nolabel) */
+        row = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row >= 0, "unarch-green: row still visible after picker");
+        if (row >= 0) {
+            int attr = pty_cell_attr(s, row, 4);
+            int fg   = pty_cell_fg(s, row, 4);
+            ASSERT(attr & PTY_ATTR_STRIKE, "unarch-green: STRIKE set");
+            ASSERT(fg == PTY_FG_GREEN,     "unarch-green: fg is green (32)");
+        }
+
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  main
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -998,6 +1196,40 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_u_key_row_gone_after_refresh);
+
+    /* ── US-43: pending-row colour semantics ──────────────────────── */
+
+    printf("--- Fresh sync (test 15: d=yellow) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 15\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_d_row_yellow_fg);
+
+    printf("--- Fresh sync (test 16: D=red) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 16\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_D_row_red_fg);
+
+    printf("--- Fresh sync (test 17: a in Archive = noop) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 17\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_a_in_archive_no_strikethrough);
+
+    printf("--- Fresh sync (test 18: label picker unarchive = green) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 18\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_label_picker_unarchive_green_fg);
 
     stop_gmail_mock();
 

@@ -23,6 +23,13 @@
 #define PTY_ATTR_REVERSE (1 << 2)
 #define PTY_ATTR_STRIKE  (1 << 3)
 
+/* ── Foreground colour values (ANSI SGR 30–37) ───────────────────────── */
+
+#define PTY_FG_DEFAULT  0
+#define PTY_FG_RED      31
+#define PTY_FG_GREEN    32
+#define PTY_FG_YELLOW   33
+
 /* ── Special keys ────────────────────────────────────────────────────── */
 
 typedef enum {
@@ -119,6 +126,14 @@ const char *pty_cell_text(PtySession *s, int row, int col);
  * @brief Returns the SGR attribute bitmask at (row, col).
  */
 int pty_cell_attr(PtySession *s, int row, int col);
+
+/**
+ * @brief Returns the foreground colour at (row, col).
+ *
+ * Returns one of PTY_FG_DEFAULT (0), PTY_FG_RED (31), PTY_FG_GREEN (32),
+ * PTY_FG_YELLOW (33), or any other ANSI SGR 30–37 value.
+ */
+int pty_cell_fg(PtySession *s, int row, int col);
 
 /**
  * @brief Checks if @p row contains @p text (substring match).

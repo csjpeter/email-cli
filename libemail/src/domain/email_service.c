@@ -2526,24 +2526,45 @@ read_key_again: ;
                 break;
             }
             if (ch == 'D' && is_gmail) {
-                /* Trash: Gmail compound trash operation */
                 const char *uid = entries[cursor].uid;
-                if (list_mc) mail_client_trash(list_mc, uid);
-                /* Remove from all local label indexes */
-                {
-                    char **all_labels = NULL;
-                    int all_count = 0;
-                    label_idx_list(&all_labels, &all_count);
-                    for (int j = 0; j < all_count; j++) {
-                        label_idx_remove(all_labels[j], uid);
-                        free(all_labels[j]);
+                if (pending_remove && pending_remove[cursor]) {
+                    /* Undo: second 'D' restores from Trash back to current folder */
+                    label_idx_remove("_trash", uid);
+                    const char *restore_lbl = (folder[0] != '_') ? folder : "INBOX";
+                    label_idx_add(restore_lbl, uid);
+                    /* Update .hdr: remove TRASH, add current folder label */
+                    {
+                        const char *add_lbl = restore_lbl;
+                        const char *rm_lbl  = "TRASH";
+                        local_hdr_update_labels("", uid, &add_lbl, 1, &rm_lbl, 1);
                     }
-                    free(all_labels);
+                    /* Gmail API: remove TRASH label, add folder label back */
+                    if (list_mc) {
+                        mail_client_modify_label(list_mc, uid, "TRASH", 0);
+                        mail_client_modify_label(list_mc, uid, restore_lbl, 1);
+                    }
+                    pending_remove[cursor] = 0;
+                    snprintf(feedback_msg, sizeof(feedback_msg),
+                             "Undo: %s restored", restore_lbl);
+                } else {
+                    /* First 'D': Gmail compound trash operation */
+                    if (list_mc) mail_client_trash(list_mc, uid);
+                    /* Remove from all local label indexes */
+                    {
+                        char **all_labels = NULL;
+                        int all_count = 0;
+                        label_idx_list(&all_labels, &all_count);
+                        for (int j = 0; j < all_count; j++) {
+                            label_idx_remove(all_labels[j], uid);
+                            free(all_labels[j]);
+                        }
+                        free(all_labels);
+                    }
+                    label_idx_add("_trash", uid);
+                    /* Mark for immediate visual feedback (red strikethrough) */
+                    if (pending_remove) pending_remove[cursor] = 1;
+                    snprintf(feedback_msg, sizeof(feedback_msg), "Moved to Trash");
                 }
-                label_idx_add("_trash", uid);
-                /* Mark for immediate visual feedback (red strikethrough) */
-                if (pending_remove) pending_remove[cursor] = 1;
-                snprintf(feedback_msg, sizeof(feedback_msg), "Moved to Trash");
                 break;
             }
             if (ch == 'u' && is_gmail) {
@@ -2623,8 +2644,11 @@ read_key_again: ;
                             free(lbl);
                         }
                         if (!has_real) label_idx_add("_nolabel", uid);
-                        /* Mark row for immediate visual feedback (yellow strikethrough) */
-                        if (pending_label) pending_label[cursor] = 1;
+                        /* Mark row for immediate visual feedback (yellow strikethrough).
+                         * Also clear pending_remove so yellow takes priority over red
+                         * if 'D' was pressed before 'd' on this row. */
+                        if (pending_remove) pending_remove[cursor] = 0;
+                        if (pending_label)  pending_label[cursor]  = 1;
                         snprintf(feedback_msg, sizeof(feedback_msg),
                                  "Label removed: %s", folder);
                     }

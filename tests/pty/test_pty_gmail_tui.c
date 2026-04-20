@@ -52,6 +52,7 @@ int g_tests_failed = 0;
 #define SETTLE_MS 700
 #define ROWS 30
 #define COLS 120
+#define FEEDBACK_ROW (ROWS - 2)   /* 0-indexed PTY row for the infoline */
 
 /* ── Global state ────────────────────────────────────────────────────── */
 
@@ -162,7 +163,7 @@ static int reset_and_sync(void) {
     snprintf(cmd, sizeof(cmd),
              "rm -rf '%s/.local/share/email-cli/accounts/%s'",
              g_test_home, GMAIL_TEST_EMAIL);
-    system(cmd);  /* NOLINT — test-only code, path is controlled */
+    int _rc1 = system(cmd);  (void)_rc1;  /* test-only, path is controlled */
 
     /* Also clear the shared UI prefs file (it remembers the last-used folder
      * cursor; stale entries would make subsequent tests open the wrong label). */
@@ -170,7 +171,7 @@ static int reset_and_sync(void) {
     snprintf(cmd2, sizeof(cmd2),
              "rm -f '%s/.local/share/email-cli/ui.ini'",
              g_test_home);
-    system(cmd2);  /* NOLINT */
+    int _rc2 = system(cmd2);  (void)_rc2;
 
     return run_gmail_sync();
 }
@@ -1074,13 +1075,101 @@ static void test_label_picker_unarchive_green_fg(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  TEST: 'D','D' undo — second D restores row to normal (no strikethrough)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * First 'D' moves to Trash (red strikethrough).
+ * Second 'D' undoes the trash: row returns to normal, no strikethrough.
+ */
+static void test_D_D_undo_clears_strikethrough(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "D-undo: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "D-undo: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "D-undo: navigate_to_inbox");
+
+    int row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "D-undo: " GMAIL_TOP_MSG " present");
+
+    /* First D: trash */
+    pty_send_str(s, "D");
+    pty_settle(s, SETTLE_MS);
+    row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "D-undo: row visible after first D");
+    if (row >= 0)
+        ASSERT(pty_cell_attr(s, row, 4) & PTY_ATTR_STRIKE,
+               "D-undo: STRIKE after first D");
+
+    /* Second D: undo trash */
+    pty_send_str(s, "D");
+    pty_settle(s, SETTLE_MS);
+    row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "D-undo: row still visible after undo");
+    if (row >= 0)
+        ASSERT(!(pty_cell_attr(s, row, 4) & PTY_ATTR_STRIKE),
+               "D-undo: no STRIKE after second D (undo)");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/**
+ * After 'D','D' (undo trash), feedback shows "Undo: INBOX restored".
+ */
+static void test_D_D_undo_feedback(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "D-undo-fb: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "D-undo-fb: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "D-undo-fb: navigate_to_inbox");
+    pty_send_str(s, "D");
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "D");   /* undo */
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Undo: INBOX restored"),
+           "D-undo-fb: feedback shows 'Undo: INBOX restored'");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/**
+ * After 'D' (trash) + 'd' (label remove), row shows yellow — not red.
+ * 'd' overrides the pending-remove state.
+ */
+static void test_D_then_d_shows_yellow(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "D-d-yellow: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "D-d-yellow: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "D-d-yellow: navigate_to_inbox");
+    pty_send_str(s, "D");   /* trash first */
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "d");   /* remove label: should override red → yellow */
+    pty_settle(s, SETTLE_MS);
+    int row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "D-d-yellow: row still visible");
+    if (row >= 0) {
+        int attr = pty_cell_attr(s, row, 4);
+        int fg   = pty_cell_fg(s, row, 4);
+        ASSERT(attr & PTY_ATTR_STRIKE, "D-d-yellow: STRIKE set");
+        ASSERT(fg == PTY_FG_YELLOW,    "D-d-yellow: fg is yellow after d overrides D");
+    }
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  FEEDBACK LINE TESTS  (US-44 / US-52-56)
  *
  *  The feedback line is the second-to-last terminal row (ROWS-2, 0-indexed).
  *  Each test checks that pty_row_contains(s, ROWS-2, expected) returns 1.
  * ══════════════════════════════════════════════════════════════════════ */
-
-#define FEEDBACK_ROW (ROWS - 2)   /* 0-indexed PTY row for the infoline */
 
 /** Feedback row must be blank (no feedback text) when the list is first opened. */
 static void test_feedback_empty_on_open(void) {
@@ -1507,6 +1596,17 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_label_picker_unarchive_green_fg);
+
+    /* ── 'D','D' undo and 'D'+'d' colour tests ── */
+    printf("--- Fresh sync (test 20: D+D undo clears strikethrough) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 20\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_D_D_undo_clears_strikethrough);
+    RUN_TEST(test_D_D_undo_feedback);
+    RUN_TEST(test_D_then_d_shows_yellow);
 
     /* ── Feedback line tests (US-44 / US-52-56) ── */
     RUN_TEST(test_feedback_empty_on_open);

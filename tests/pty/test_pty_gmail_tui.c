@@ -1070,6 +1070,68 @@ static void test_label_picker_unarchive_green_fg(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  TEST: label picker adds INBOX to trashed message → green 'u' marker
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * After 'D' (trash), open label picker via 't', navigate to INBOX and add it.
+ * The row must immediately show the green 'u' pending marker (restored from Trash).
+ */
+static void test_label_picker_untrash_green_fg(void) {
+    const char *args[] = { g_tui_bin, NULL };
+
+    /* Session 1: trash the top message */
+    {
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "untrash-green: pty_open s1");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "untrash-green: pty_run s1");
+        ASSERT(navigate_to_inbox(s) == 0, "untrash-green: nav inbox");
+        pty_send_str(s, "D");   /* trash Message 5 */
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+
+    /* Session 2: open Trash, open label picker, add INBOX */
+    {
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "untrash-green: pty_open s2");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "untrash-green: pty_run s2");
+        ASSERT(navigate_to_trash(s) == 0, "untrash-green: navigate_to_trash");
+        pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+
+        int row = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row >= 0, "untrash-green: " GMAIL_TOP_MSG " in Trash");
+
+        /* Open label picker, Down → INBOX, Enter to toggle on, ESC close */
+        pty_send_str(s, "t");
+        pty_wait_for(s, "Toggle Labels", WAIT_MS);
+        pty_settle(s, SETTLE_MS / 2);
+        pty_send_key(s, PTY_KEY_DOWN);   /* UNREAD → INBOX */
+        pty_send_key(s, PTY_KEY_ENTER);  /* add INBOX */
+        pty_settle(s, SETTLE_MS / 2);
+        pty_send_key(s, PTY_KEY_ESC);    /* close picker */
+        pty_settle(s, SETTLE_MS);
+
+        /* Row must show green 'u' pending marker (message left _trash) */
+        row = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row >= 0, "untrash-green: row still visible after picker");
+        if (row >= 0) {
+            ASSERT(strcmp(pty_cell_text(s, row, 0), "u") == 0,
+                   "untrash-green: 'u' pending marker at col 0");
+            ASSERT(pty_cell_fg(s, row, 0) == PTY_FG_GREEN,
+                   "untrash-green: fg is green (32)");
+        }
+
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  TEST: 'D','D' undo — second D restores row to normal (no pending marker)
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -1640,6 +1702,14 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_label_picker_unarchive_green_fg);
+
+    printf("--- Fresh sync (test 20: label picker untrash = green) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 20\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_label_picker_untrash_green_fg);
 
     /* ── 'D' no-op in Trash, 'D','D' undo, 'D'+'d' colour tests ── */
     printf("--- Fresh sync (test 20: D noop in Trash) ---\n");

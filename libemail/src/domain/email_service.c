@@ -2597,13 +2597,15 @@ read_key_again: ;
             }
             if (ch == 't' && is_gmail) {
                 const char *uid = entries[cursor].uid;
-                /* Remember whether this message is currently in Archive so we
-                 * can show green feedback if a label addition removes it. */
+                /* Remember whether this message is currently in Archive or Trash
+                 * so we can show green feedback if a label addition removes it. */
                 int was_archived = label_idx_contains("_nolabel", uid);
+                int was_trashed  = label_idx_contains("_trash",   uid);
                 show_label_picker(list_mc, uid, feedback_msg, sizeof(feedback_msg));
                 /* If the picker added a real label that moved the message out
-                 * of Archive (_nolabel), mark row green (restorative action). */
-                if (was_archived && !label_idx_contains("_nolabel", uid))
+                 * of Archive (_nolabel) or Trash (_trash), mark row green. */
+                if ((was_archived && !label_idx_contains("_nolabel", uid)) ||
+                    (was_trashed  && !label_idx_contains("_trash",   uid)))
                     if (pending_restore) pending_restore[cursor] = 1;
                 break;
             }

@@ -2266,7 +2266,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 row_pfx = "d ";
                 printf(sel ? "\033[7m\033[33m" : "\033[33m"); /* yellow */
             } else if (opts->pager && restore_pending) {
-                row_pfx = "\xe2\x86\xa9 "; /* ↩ + space (UTF-8) */
+                row_pfx = "u ";
                 printf(sel ? "\033[7m\033[32m" : "\033[32m"); /* green */
             } else {
                 row_pfx = "  ";
@@ -2527,6 +2527,12 @@ read_key_again: ;
                 break;
             }
             if (ch == 'D' && is_gmail) {
+                /* No-op in Trash view: message is already in Trash */
+                if (strcmp(folder, "_trash") == 0) {
+                    snprintf(feedback_msg, sizeof(feedback_msg),
+                             "Already in Trash \xe2\x80\x94 no change");
+                    break;
+                }
                 const char *uid = entries[cursor].uid;
                 if (pending_remove && pending_remove[cursor]) {
                     /* Undo: second 'D' restores from Trash back to current folder */

@@ -731,8 +731,8 @@ static void test_u_key_row_has_strikethrough(void) {
         int row_after = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row_after >= 0, "u-strike: " GMAIL_TOP_MSG " still visible after u");
         if (row_after >= 0)
-            ASSERT(pty_row_contains(s, row_after, "\xe2\x86\xa9"),
-                   "u-strike: '↩' pending marker set after u (green restore marker)");
+            ASSERT(strcmp(pty_cell_text(s, row_after, 0), "u") == 0,
+                   "u-strike: 'u' pending marker at col 0 after u (green restore marker)");
 
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -1054,13 +1054,13 @@ static void test_label_picker_unarchive_green_fg(void) {
         pty_send_key(s, PTY_KEY_ESC);    /* close picker */
         pty_settle(s, SETTLE_MS);
 
-        /* Row must now show green '↩' pending marker (message left _nolabel) */
+        /* Row must now show green 'u' pending marker (message left _nolabel) */
         row = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row >= 0, "unarch-green: row still visible after picker");
         if (row >= 0) {
             int fg = pty_cell_fg(s, row, 0);
-            ASSERT(pty_row_contains(s, row, "\xe2\x86\xa9"),
-                   "unarch-green: '↩' pending marker set");
+            ASSERT(strcmp(pty_cell_text(s, row, 0), "u") == 0,
+                   "unarch-green: 'u' pending marker at col 0");
             ASSERT(fg == PTY_FG_GREEN, "unarch-green: fg is green (32)");
         }
 
@@ -1072,6 +1072,55 @@ static void test_label_picker_unarchive_green_fg(void) {
 /* ══════════════════════════════════════════════════════════════════════
  *  TEST: 'D','D' undo — second D restores row to normal (no pending marker)
  * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * In Trash view, pressing 'D' is a no-op: message is already in Trash.
+ * No pending marker must appear and feedback shows "Already in Trash".
+ */
+static void test_D_noop_in_trash_view(void) {
+    /* Session 1: trash a message */
+    reset_and_sync();
+    {
+        const char *args[] = { g_tui_bin, NULL };
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "D-noop: pty_open s1");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "D-noop: pty_run s1");
+        ASSERT(navigate_to_inbox(s) == 0, "D-noop: nav inbox s1");
+        pty_send_str(s, "D");
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+    /* Session 2: open Trash, press 'D' — must be no-op */
+    {
+        const char *args[] = { g_tui_bin, NULL };
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "D-noop: pty_open s2");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "D-noop: pty_run s2");
+        ASSERT(navigate_to_trash(s) == 0, "D-noop: navigate_to_trash");
+        pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+
+        int row = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row >= 0, "D-noop: " GMAIL_TOP_MSG " visible in Trash");
+
+        pty_send_str(s, "D");
+        pty_settle(s, SETTLE_MS);
+
+        row = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row >= 0, "D-noop: row still present after D (no-op)");
+        if (row >= 0)
+            ASSERT(strcmp(pty_cell_text(s, row, 0), " ") == 0,
+                   "D-noop: no pending marker in Trash view after D");
+        ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Already in Trash"),
+               "D-noop: feedback shows 'Already in Trash'");
+
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+}
 
 /**
  * First 'D' moves to Trash (red 'D' pending marker).
@@ -1592,10 +1641,18 @@ int main(int argc, char *argv[]) {
     }
     RUN_TEST(test_label_picker_unarchive_green_fg);
 
-    /* ── 'D','D' undo and 'D'+'d' colour tests ── */
-    printf("--- Fresh sync (test 20: D+D undo clears strikethrough) ---\n");
+    /* ── 'D' no-op in Trash, 'D','D' undo, 'D'+'d' colour tests ── */
+    printf("--- Fresh sync (test 20: D noop in Trash) ---\n");
     if (reset_and_sync() != 0) {
         fprintf(stderr, "FATAL: reset_and_sync failed for test 20\n");
+        stop_gmail_mock();
+        goto done;
+    }
+    RUN_TEST(test_D_noop_in_trash_view);
+
+    printf("--- Fresh sync (test 21: D+D undo) ---\n");
+    if (reset_and_sync() != 0) {
+        fprintf(stderr, "FATAL: reset_and_sync failed for test 21\n");
         stop_gmail_mock();
         goto done;
     }

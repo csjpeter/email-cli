@@ -2250,29 +2250,30 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int label_pending   = (pending_label   != NULL) && pending_label[i];
             int restore_pending = (pending_restore != NULL) && pending_restore[i];
 
-            /* Pending rows: strikethrough + colour for immediate visual feedback.
-             * Cursor on pending row: also add inverse-video (cursor stays visible).
-             * Status column uses plain ASCII for pending rows (no \033[0m conflicts).
-             * Red    = destructive (trash only)
-             * Yellow = neutral label change (remove label, archive)
-             * Green  = restorative (untrash, unarchive via label picker) */
-            if (opts->pager && remove_pending && sel) {
-                printf("\033[7m\033[31m\033[9m"); /* inverse + red + strikethrough */
-            } else if (opts->pager && remove_pending) {
-                printf("\033[31m\033[9m");         /* red + strikethrough */
-            } else if (opts->pager && label_pending && sel) {
-                printf("\033[7m\033[33m\033[9m"); /* inverse + yellow + strikethrough */
+            /* Pending rows: visible marker prefix + colour (no strikethrough).
+             * The marker character is visible in every terminal and survives
+             * copy-paste; colour provides additional visual hint where supported.
+             * Cursor on pending row: add inverse-video so cursor stays visible.
+             *   D + red    = trash pending (destructive, first char 'D')
+             *   d + yellow = label-remove / archive pending (neutral)
+             *   ↩ + green  = restore / unarchive pending (restorative)
+             *     (space)  = normal row */
+            const char *row_pfx;  /* 2-byte row prefix (marker + space or 2 spaces) */
+            if (opts->pager && remove_pending) {
+                row_pfx = "D ";
+                printf(sel ? "\033[7m\033[31m" : "\033[31m"); /* red (+ inverse if sel) */
             } else if (opts->pager && label_pending) {
-                printf("\033[33m\033[9m");         /* yellow + strikethrough */
-            } else if (opts->pager && restore_pending && sel) {
-                printf("\033[7m\033[32m\033[9m"); /* inverse + green + strikethrough */
+                row_pfx = "d ";
+                printf(sel ? "\033[7m\033[33m" : "\033[33m"); /* yellow */
             } else if (opts->pager && restore_pending) {
-                printf("\033[32m\033[9m");         /* green + strikethrough */
-            } else if (sel) {
-                printf("\033[7m");
+                row_pfx = "\xe2\x86\xa9 "; /* ↩ + space (UTF-8) */
+                printf(sel ? "\033[7m\033[32m" : "\033[32m"); /* green */
+            } else {
+                row_pfx = "  ";
+                if (sel) printf("\033[7m");
             }
 
-            /* Status column: coloured in TUI (except pending-remove rows).
+            /* Status column: coloured in TUI (except pending rows).
              * In sel (reverse-video) rows: temporarily exit reverse-video
              * for the coloured character, then re-enter (\033[7m) so the
              * rest of the row stays highlighted. Plain CLI/RO stays ASCII. */
@@ -2298,9 +2299,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 sts[4] = '\0';
             }
             if (show_uid)
-                printf("  %-16.16s  %-16.16s  %s  ", entries[i].uid, date, sts);
+                printf("%s%-16.16s  %-16.16s  %s  ", row_pfx, entries[i].uid, date, sts);
             else
-                printf("  %-16.16s  %s  ", date, sts);
+                printf("%s%-16.16s  %s  ", row_pfx, date, sts);
             print_padded_col(subject, subj_w);
             printf("  ");
             print_padded_col(from,    from_w);

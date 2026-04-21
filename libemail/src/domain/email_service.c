@@ -3138,7 +3138,8 @@ static void show_label_picker(MailClient *mc, const char *uid,
             pick_cap   = nc;
         }
         pick_ids[pick_count]   = all_labels[i]; /* transfer ownership */
-        pick_names[pick_count] = strdup(all_labels[i]);
+        char *resolved = local_gmail_label_name_lookup(all_labels[i]);
+        pick_names[pick_count] = resolved ? resolved : strdup(all_labels[i]);
         pick_on[pick_count]    = label_idx_contains(all_labels[i], uid);
         pick_count++;
     }

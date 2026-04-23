@@ -2205,8 +2205,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         /* Number of rows visible under current filter (= show_count when no filter) */
         int disp_count = filter_active ? fcount : show_count;
 
-        /* Effective row budget: filter bar occupies 1 row at the bottom */
-        int eff_limit = (opts->pager && filter_active) ? limit - 1 : limit;
+        /* Effective row budget: filter bar occupies 2 rows (separator + input) */
+        int eff_limit = (opts->pager && filter_active) ? limit - 2 : limit;
         if (eff_limit < 1) eff_limit = 1;
 
         /* Scroll window to keep cursor visible */
@@ -2454,10 +2454,12 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             break;
         }
 
-        /* Filter bar — shown when filter is active (1 row) */
+        /* Filter bar — shown when filter is active (separator + input = 2 rows) */
         if (filter_active) {
             static const char *scope_names[] = {"Subject","From","To","Body"};
-            printf("  Filter [");
+            printf("  \xe2\x94\x80"); /* ─ */
+            for (int _p = 3; _p < tcols - 2; _p++) printf("\xe2\x94\x80");
+            printf("\n  Filter [");
             for (int _s = 0; _s < 4; _s++) {
                 if (_s > 0) printf("|");
                 if (_s == filter_scope) printf("\033[7m%s\033[0m", scope_names[_s]);

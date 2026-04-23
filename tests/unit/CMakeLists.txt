@@ -50,6 +50,7 @@ set(TEST_SOURCES
     test_gmail_sync.c
     test_compose_service.c
     test_smtp_adapter.c
+    test_mail_rules.c
     ../../libwrite/src/compose_service.c
     ../../libwrite/src/smtp_adapter.c
     ../../libemail/src/core/fs_util.c
@@ -70,6 +71,7 @@ set(TEST_SOURCES
     ../../libemail/src/infrastructure/setup_wizard.c
     ../../libemail/src/infrastructure/imap_client.c
     ../../libemail/src/infrastructure/local_store.c
+    ../../libemail/src/infrastructure/mail_rules.c
     html_medium_stub.c
     ${TEST_PLATFORM_SOURCES}
 )

@@ -187,6 +187,18 @@ int email_service_sync_all(const char *only_account);
 int email_service_rebuild_indexes(const char *only_account);
 
 /**
+ * @brief Apply mail sorting rules retroactively to all locally cached messages.
+ *
+ * Loads the rules.ini for each configured account, iterates all cached
+ * .hdr files, and applies matching rules (label add/remove).
+ * Does not re-download messages or contact the server.
+ *
+ * @param only_account  Email address to process, or NULL for all accounts.
+ * @return 0 on success, -1 on error or account not found.
+ */
+int email_service_apply_rules(const char *only_account);
+
+/**
  * @brief Installs a user crontab entry to run 'email-cli sync' periodically.
  *
  * Uses cfg->sync_interval (minutes) to set the cron frequency.

@@ -14,6 +14,7 @@
 /* ── Account base path (set by local_store_init) ─────────────────────── */
 
 static char g_account_base[8192];
+static char g_account_name[520];
 
 int local_store_init(const char *host_url, const char *username) {
     const char *data_base = platform_data_dir();
@@ -27,6 +28,7 @@ int local_store_init(const char *host_url, const char *username) {
     if (username && username[0]) {
         snprintf(g_account_base, sizeof(g_account_base),
                  "%s/email-cli/accounts/%s", data_base, username);
+        snprintf(g_account_name, sizeof(g_account_name), "%s", username);
     } else {
         /* Extract hostname from URL: imaps://host:port → host */
         const char *p = strstr(host_url, "://");
@@ -39,11 +41,14 @@ int local_store_init(const char *host_url, const char *username) {
         for (char *c = hostname; *c; c++) *c = (char)tolower((unsigned char)*c);
         snprintf(g_account_base, sizeof(g_account_base),
                  "%s/email-cli/accounts/imap.%s", data_base, hostname);
+        snprintf(g_account_name, sizeof(g_account_name), "imap.%s", hostname);
     }
 
     logger_log(LOG_DEBUG, "local_store: account base = %s", g_account_base);
     return 0;
 }
+
+const char *local_store_account_name(void) { return g_account_name; }
 
 /* ── Reverse digit bucketing helpers ─────────────────────────────────── */
 

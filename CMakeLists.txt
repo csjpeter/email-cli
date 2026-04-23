@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(email-cli VERSION 0.2.3 LANGUAGES C)
+project(email-cli VERSION 0.2.4 LANGUAGES C)
 
 # Version string: prefer "git describe", fall back to project version
 find_program(GIT_EXECUTABLE git)
@@ -79,6 +79,9 @@ target_link_libraries(email-sync libemail)
 
 add_executable(email-tui src/main_tui.c)
 target_link_libraries(email-tui libemail libwrite)
+
+add_executable(email-import-rules src/main_import_rules.c)
+target_link_libraries(email-import-rules libemail)
 
 # Test Build
 enable_testing()

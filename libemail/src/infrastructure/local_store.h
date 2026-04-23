@@ -37,6 +37,9 @@
  */
 int local_store_init(const char *host_url, const char *username);
 
+/** @brief Returns the account name (email address or hostname) set by local_store_init. */
+const char *local_store_account_name(void);
+
 /* ── Message store ───────────────────────────────────────────────────── */
 
 /** @brief Checks whether a locally stored message exists. */

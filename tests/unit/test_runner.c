@@ -43,6 +43,7 @@ void test_mail_client(void);
 void test_gmail_sync(void);
 void test_compose_service(void);
 void test_smtp_adapter(void);
+void test_mail_rules(void);
 
 int main() {
     printf("--- email-cli Unit Test Suite ---\n\n");
@@ -85,6 +86,7 @@ int main() {
     RUN_TEST(test_gmail_sync);
     RUN_TEST(test_compose_service);
     RUN_TEST(test_smtp_adapter);
+    RUN_TEST(test_mail_rules);
 
     printf("\n--- Test Results ---\n");
     printf("Tests Run:    %d\n", g_tests_run);

@@ -1,6 +1,7 @@
 #include "gmail_sync.h"
 #include "gmail_client.h"
 #include "local_store.h"
+#include "mail_rules.h"
 #include "mime_util.h"
 #include "json_util.h"
 #include "logger.h"
@@ -91,6 +92,69 @@ int gmail_sync_is_filtered_label(const char *label_id) {
  * non-filtered labels are CATEGORY_* is also added to _nolabel (Archive). */
 static int is_category_label(const char *label_id) {
     return label_id && strncmp(label_id, "CATEGORY_", 9) == 0;
+}
+
+/* ── Mail rules helper ───────────────────────────────────────────── */
+
+/* Apply mail rules to a newly stored message.
+ * Builds labels_csv from Gmail label IDs (resolving user labels to names),
+ * calls mail_rules_apply(), then updates the local .hdr and label indexes. */
+static void apply_rules_to_new_message(const MailRules *rules, const char *uid,
+                                        const char *raw_msg,
+                                        char **labels, int label_count)
+{
+    if (!rules || rules->count == 0) return;
+
+    RAII_STRING char *from_raw = mime_get_header(raw_msg, "From");
+    RAII_STRING char *subj_raw = mime_get_header(raw_msg, "Subject");
+    RAII_STRING char *to_raw   = mime_get_header(raw_msg, "To");
+    RAII_STRING char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;
+    RAII_STRING char *subj_dec = subj_raw ? mime_decode_words(subj_raw) : NULL;
+    RAII_STRING char *to_dec   = to_raw   ? mime_decode_words(to_raw)   : NULL;
+
+    /* Build labels_csv using friendly names where available */
+    size_t lcsz = 1;
+    for (int i = 0; i < label_count; i++) {
+        char *name = local_gmail_label_name_lookup(labels[i]);
+        lcsz += strlen(name ? name : labels[i]) + 2;
+        free(name);
+    }
+    char *lcsv = calloc(lcsz, 1);
+    if (!lcsv) return;
+    for (int i = 0; i < label_count; i++) {
+        char *name = local_gmail_label_name_lookup(labels[i]);
+        const char *display = name ? name : labels[i];
+        if (lcsv[0]) strcat(lcsv, ",");
+        strcat(lcsv, display);
+        free(name);
+    }
+
+    char **add_out = NULL; int add_count = 0;
+    char **rm_out  = NULL; int rm_count  = 0;
+    int fired = mail_rules_apply(rules,
+                                  from_dec, subj_dec, to_dec, lcsv,
+                                  &add_out, &add_count,
+                                  &rm_out,  &rm_count);
+    free(lcsv);
+    if (fired <= 0) return;
+
+    logger_log(LOG_INFO, "gmail_sync: rules fired=%d for %s (add=%d rm=%d)",
+               fired, uid, add_count, rm_count);
+
+    /* Update local .hdr and label indexes */
+    local_hdr_update_labels("", uid,
+                             (const char **)add_out, add_count,
+                             (const char **)rm_out,  rm_count);
+    for (int i = 0; i < add_count; i++) {
+        label_idx_add(add_out[i], uid);
+        free(add_out[i]);
+    }
+    for (int i = 0; i < rm_count; i++) {
+        label_idx_remove(rm_out[i], uid);
+        free(rm_out[i]);
+    }
+    free(add_out);
+    free(rm_out);
 }
 
 /* ── Label index rebuild ──────────────────────────────────────────── */
@@ -303,6 +367,7 @@ int gmail_sync_full(GmailClient *gc) {
     logger_log(LOG_INFO, "gmail_sync: %d messages to sync", uid_count);
 
     /* 2. For each message: fetch, store .eml, build .hdr, collect labels */
+    MailRules *rules = mail_rules_load(local_store_account_name());
     int fetched = 0, skipped = 0;
 #define PROGRESS_STEP 50   /* refresh the in-place counter every N messages */
     for (int i = 0; i < uid_count; i++) {
@@ -341,6 +406,9 @@ int gmail_sync_full(GmailClient *gc) {
             local_hdr_save("", uid, hdr, strlen(hdr));
             free(hdr);
         }
+
+        /* Apply mail sorting rules before freeing raw (rules may read headers) */
+        apply_rules_to_new_message(rules, uid, raw, labels, label_count);
         free(raw);
 
         /* Update label index files */
@@ -410,6 +478,7 @@ int gmail_sync_full(GmailClient *gc) {
         }
     }
 
+    mail_rules_free(rules);
     free(all_uids);
     logger_log(LOG_INFO, "gmail_sync: full sync completed (%d messages)", uid_count);
     return 0;
@@ -419,6 +488,7 @@ int gmail_sync_full(GmailClient *gc) {
 
 struct history_ctx {
     GmailClient *gc;
+    MailRules   *rules;
     int added;
     int deleted;
     int label_changes;
@@ -446,6 +516,8 @@ static void process_message_added(const char *obj, int index, void *ctx) {
             local_hdr_save("", id, hdr, strlen(hdr));
             free(hdr);
         }
+
+        apply_rules_to_new_message(hc->rules, id, raw, labels, label_count);
         free(raw);
 
         int has_label = 0;
@@ -642,7 +714,8 @@ int gmail_sync_incremental(GmailClient *gc) {
         return -2;  /* Signal: need full sync */
     }
 
-    struct history_ctx hc = { .gc = gc, .added = 0, .deleted = 0, .label_changes = 0 };
+    MailRules *inc_rules = mail_rules_load(local_store_account_name());
+    struct history_ctx hc = { .gc = gc, .rules = inc_rules, .added = 0, .deleted = 0, .label_changes = 0 };
 
     /* Process each history record */
     /* The history response has: {"history": [{...}, ...], "historyId": "..."} */
@@ -679,6 +752,7 @@ int gmail_sync_incremental(GmailClient *gc) {
     /* Ensure no archived message is marked unread (repair existing data too) */
     gmail_sync_repair_archive_flags();
 
+    mail_rules_free(inc_rules);
     logger_log(LOG_INFO, "gmail_sync: incremental done — added=%d deleted=%d labels=%d",
                hc.added, hc.deleted, hc.label_changes);
     return 0;

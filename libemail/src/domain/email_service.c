@@ -6,6 +6,7 @@
 #include "mail_client.h"
 #include "gmail_sync.h"
 #include "local_store.h"
+#include "mail_rules.h"
 #include "mime_util.h"
 #include "html_render.h"
 #include "imap_util.h"
@@ -4747,6 +4748,102 @@ int email_service_rebuild_indexes(const char *only_account) {
         local_store_init(accounts[i].cfg->host, accounts[i].cfg->user);
         if (gmail_sync_rebuild_indexes() < 0)
             errors++;
+        done++;
+    }
+    config_free_account_list(accounts, count);
+
+    if (done == 0) {
+        fprintf(stderr, "Account '%s' not found.\n",
+                only_account ? only_account : "");
+        return -1;
+    }
+    return errors > 0 ? -1 : 0;
+}
+
+int email_service_apply_rules(const char *only_account) {
+    int count = 0;
+    AccountEntry *accounts = config_list_accounts(&count);
+    if (!accounts || count == 0) {
+        fprintf(stderr, "No accounts configured.\n");
+        config_free_account_list(accounts, count);
+        return -1;
+    }
+
+    int errors = 0, done = 0;
+    for (int i = 0; i < count; i++) {
+        if (only_account && only_account[0] &&
+            strcmp(accounts[i].name, only_account) != 0)
+            continue;
+
+        printf("=== Applying rules: %s ===\n", accounts[i].name);
+        local_store_init(accounts[i].cfg->host, accounts[i].cfg->user);
+
+        MailRules *rules = mail_rules_load(accounts[i].name);
+        if (!rules || rules->count == 0) {
+            printf("  No rules found for %s.\n", accounts[i].name);
+            mail_rules_free(rules);
+            done++;
+            continue;
+        }
+
+        /* List all UIDs in the account */
+        char (*uids)[17] = NULL;
+        int uid_count = 0;
+        local_hdr_list_all_uids("", &uids, &uid_count);
+
+        int fired_total = 0;
+        for (int u = 0; u < uid_count; u++) {
+            const char *uid = uids[u];
+
+            /* Parse .hdr: from\tsubject\tdate\tlabels\tflags */
+            char *hdr = local_hdr_load("", uid);
+            if (!hdr) continue;
+
+            char *fields[5] = {NULL};
+            char *p = hdr;
+            for (int f = 0; f < 5; f++) {
+                fields[f] = p;
+                char *tab = strchr(p, '\t');
+                if (tab) { *tab = '\0'; p = tab + 1; }
+                else     { p += strlen(p); }
+            }
+            /* Trim trailing newline from last field */
+            for (int f = 0; f < 5; f++) {
+                if (fields[f]) {
+                    char *nl = strchr(fields[f], '\n');
+                    if (nl) *nl = '\0';
+                }
+            }
+
+            char **add_out = NULL; int add_count = 0;
+            char **rm_out  = NULL; int rm_count  = 0;
+            int fired = mail_rules_apply(rules,
+                                          fields[0], fields[1], NULL, fields[3],
+                                          &add_out, &add_count,
+                                          &rm_out,  &rm_count);
+            free(hdr);
+
+            if (fired > 0) {
+                fired_total++;
+                local_hdr_update_labels("", uid,
+                                         (const char **)add_out, add_count,
+                                         (const char **)rm_out,  rm_count);
+                for (int j = 0; j < add_count; j++) {
+                    label_idx_add(add_out[j], uid);
+                    free(add_out[j]);
+                }
+                for (int j = 0; j < rm_count;  j++) {
+                    label_idx_remove(rm_out[j], uid);
+                    free(rm_out[j]);
+                }
+            }
+            free(add_out);
+            free(rm_out);
+        }
+
+        free(uids);
+        mail_rules_free(rules);
+        printf("  Rules applied: %d message(s) modified.\n", fired_total);
         done++;
     }
     config_free_account_list(accounts, count);

@@ -23,7 +23,7 @@
 
 static void help(void) {
     printf(
-        "Usage: email-sync [--account <email>] [--rebuild-index]\n"
+        "Usage: email-sync [--account <email>] [--rebuild-index] [--apply-rules]\n"
         "       email-sync cron <setup|remove|status>\n"
         "\n"
         "Downloads all messages from all accounts to the local store.\n"
@@ -41,6 +41,8 @@ static void help(void) {
         "  --account <email>   Sync only the account with this email address\n"
         "  --rebuild-index     Rebuild label index files from cached .hdr files\n"
         "                      (Gmail only; does not re-download messages)\n"
+        "  --apply-rules       Apply mail sorting rules from rules.ini to all\n"
+        "                      locally cached messages (retroactive; no download)\n"
         "  --help, -h          Show this help message\n"
         "\n"
         "Exit Codes:\n"
@@ -156,6 +158,7 @@ int main(int argc, char *argv[]) {
     /* Parse remaining options (sync mode) */
     const char *account_filter = NULL;
     int do_rebuild_index = 0;
+    int do_apply_rules   = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--account") == 0) {
             if (i + 1 >= argc) {
@@ -170,6 +173,10 @@ int main(int argc, char *argv[]) {
             do_rebuild_index = 1;
             continue;
         }
+        if (strcmp(argv[i], "--apply-rules") == 0) {
+            do_apply_rules = 1;
+            continue;
+        }
         fprintf(stderr, "Unknown option '%s'.\nRun 'email-sync --help' for usage.\n",
                 argv[i]);
         logger_close();
@@ -179,6 +186,12 @@ int main(int argc, char *argv[]) {
     /* Run requested operation */
     if (do_rebuild_index) {
         int rc = email_service_rebuild_indexes(account_filter);
+        logger_close();
+        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (do_apply_rules) {
+        int rc = email_service_apply_rules(account_filter);
         logger_close();
         return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }

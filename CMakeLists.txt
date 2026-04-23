@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(email-cli VERSION 0.2.2 LANGUAGES C)
+project(email-cli VERSION 0.2.3 LANGUAGES C)
 
 # Version string: prefer "git describe", fall back to project version
 find_program(GIT_EXECUTABLE git)

@@ -1247,7 +1247,7 @@ show_int_done:
 
 /* ── List helpers ────────────────────────────────────────────────────── */
 
-typedef struct { char uid[17]; int flags; time_t epoch; } MsgEntry;
+typedef struct { char uid[17]; int flags; time_t epoch; char folder[256]; } MsgEntry;
 
 /* Parse "YYYY-MM-DD HH:MM" (manifest date format) to time_t in local time.
  * Returns 0 on failure. */
@@ -1770,12 +1770,31 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (strcmp(folder, "__flagged__") == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_FLAGGED; folder_display = "Flagged"; }
     }
 
+    /* Cross-folder content search: folder = "__search__:<scope>:<query>" */
+    int   is_virtual_search = 0;
+    int   search_scope      = 0;
+    char  search_query[256] = "";
+    char  search_display[320] = "";
+    if (folder && strncmp(folder, "__search__:", 11) == 0) {
+        is_virtual_search = 1;
+        search_scope = (folder[11] >= '0' && folder[11] <= '3') ? (folder[11] - '0') : 0;
+        snprintf(search_query, sizeof(search_query), "%s",
+                 (strlen(folder) > 13) ? folder + 13 : "");
+        static const char *snames[] = {"Subject","From","To","Body"};
+        snprintf(search_display, sizeof(search_display),
+                 "Search: \"%s\" [%s]", search_query, snames[search_scope]);
+        folder_display = search_display;
+    }
+
     logger_log(LOG_INFO, "Listing %s @ %s/%s", cfg->user, cfg->host, folder);
 
-    /* Load manifest (or build synthetic cross-folder manifest for virtual views) */
+    /* Load manifest (or build synthetic manifest for virtual views) */
     Manifest *manifest = NULL;
     if (is_virtual_flags) {
         manifest = manifest_load_all_with_flag(virtual_flag_mask);
+        if (!manifest) return -1;
+    } else if (is_virtual_search) {
+        manifest = calloc(1, sizeof(Manifest));
         if (!manifest) return -1;
     } else {
         manifest = manifest_load(folder);
@@ -1793,7 +1812,27 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
      * Kept alive for the full rendering loop so header fetches reuse it. */
     RAII_MAIL MailClient *list_mc = NULL;
 
-    if (cfg->sync_interval > 0) {
+    if (is_virtual_search) {
+        /* ── Cross-folder content search (always local data) ────────────── */
+        SearchResult *sr = NULL;
+        int sr_count = 0;
+        local_search(search_query, search_scope, &sr, &sr_count);
+        show_count = sr_count;
+        entries = calloc((size_t)(sr_count > 0 ? sr_count : 1), sizeof(MsgEntry));
+        if (!entries) { if (sr) free(sr); manifest_free(manifest); return -1; }
+        for (int i = 0; i < sr_count; i++) {
+            memcpy(entries[i].uid, sr[i].uid, 17);
+            snprintf(entries[i].folder, sizeof(entries[i].folder), "%s", sr[i].folder);
+            entries[i].flags = sr[i].flags;
+            entries[i].epoch = sr[i].date ? parse_manifest_date(sr[i].date) : 0;
+            /* Transfer ownership of strings to manifest; null them in sr so free() is safe */
+            manifest_upsert(manifest, sr[i].uid,
+                            sr[i].from, sr[i].subject, sr[i].date, sr[i].flags);
+            sr[i].from = sr[i].subject = sr[i].date = NULL;
+            if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
+        }
+        free(sr);
+    } else if (cfg->sync_interval > 0) {
         /* ── Cron / cache-only mode: serve entirely from manifest ──────── */
         if (manifest->count == 0) {
             manifest_free(manifest);
@@ -1846,6 +1885,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (!entries) { manifest_free(manifest); return -1; }
         for (int i = 0; i < show_count; i++) {
             memcpy(entries[i].uid, manifest->entries[i].uid, 17);
+            entries[i].folder[0] = '\0';
             entries[i].flags = manifest->entries[i].flags;
             entries[i].epoch = parse_manifest_date(manifest->entries[i].date);
         }
@@ -1877,6 +1917,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
             MsgEntry *e = &entries[show_count];
             memcpy(e->uid, idx_uids[i], 17);
+            e->folder[0] = '\0';
             e->flags = 0;
             e->epoch = 0;
 
@@ -2023,6 +2064,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
         for (int i = 0; i < show_count; i++) {
             memcpy(entries[i].uid, all_uids[i], 17);
+            entries[i].folder[0] = '\0';
             entries[i].flags = 0;
             for (int j = 0; j < unseen_uid_count;  j++)
                 if (strcmp(unseen_uids[j],  all_uids[i]) == 0) { entries[i].flags |= MSG_FLAG_UNSEEN;  break; }
@@ -2298,9 +2340,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                         }
                     }
                 }
+                const char *hf = entries[ei].folder[0] ? entries[ei].folder : folder;
                 char *hdrs     = list_mc
-                                 ? fetch_uid_headers_via(list_mc, folder, entries[ei].uid)
-                                 : fetch_uid_headers_cached(cfg, folder, entries[ei].uid);
+                                 ? fetch_uid_headers_via(list_mc, hf, entries[ei].uid)
+                                 : fetch_uid_headers_cached(cfg, hf, entries[ei].uid);
                 char *fr_raw   = hdrs ? mime_get_header(hdrs, "From")    : NULL;
                 char *fr       = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
                 free(fr_raw);
@@ -2396,7 +2439,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             printf("\n");
             fflush(stdout); /* show row immediately as it arrives */
         }
-        if (manifest_dirty) manifest_save(folder, manifest);
+        if (manifest_dirty && !is_virtual_search) manifest_save(folder, manifest);
         if (load_interrupted) goto list_done;
 
         if (!opts->pager) {
@@ -2508,7 +2551,8 @@ read_key_again: ;
             }
             {
                 int ei_cur = (filter_active && fentries) ? fentries[cursor] : cursor;
-                int ret = show_uid_interactive(cfg, list_mc, folder, entries[ei_cur].uid, opts->limit);
+                const char *efolder = entries[ei_cur].folder[0] ? entries[ei_cur].folder : folder;
+                int ret = show_uid_interactive(cfg, list_mc, efolder, entries[ei_cur].uid, opts->limit);
                 if (ret == 1) goto list_done;  /* user quit from show */
                 if (ret == 2) {
                     /* 'r' pressed in reader → reply to this message */
@@ -2567,6 +2611,7 @@ read_key_again: ;
 
             /* ── Normal action keys ─────────────────────────────────────── */
             int ei_cur = (filter_active && fentries) ? fentries[cursor] : cursor;
+            const char *efolder = entries[ei_cur].folder[0] ? entries[ei_cur].folder : folder;
             if (ch == 'c') {
                 list_result = 2;
                 goto list_done;
@@ -2843,11 +2888,11 @@ read_key_again: ;
                 int add_flag = (ch == 'n') ? (currently ? 1 : 0) : (!currently ? 1 : 0);
 
                 /* Local update first — instant UI response regardless of network */
-                local_pending_flag_add(folder, uid, flag_name, add_flag);
+                local_pending_flag_add(efolder, uid, flag_name, add_flag);
                 entries[ei_cur].flags ^= bit;
                 ManifestEntry *me = manifest_find(manifest, uid);
                 if (me) me->flags = entries[ei_cur].flags;
-                manifest_save(folder, manifest);
+                if (!is_virtual_search) manifest_save(efolder, manifest);
 
                 /* Gmail: update local label indexes and .hdr (both labels CSV
                  * and flags integer), then kick background sync. */
@@ -3270,7 +3315,42 @@ char *email_service_list_folders_interactive(const Config *cfg,
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
-            if (ch == 't') {
+            if (ch == '/') {
+                /* Cross-folder content search */
+                static const char *snames[] = {"Subject","From","To","Body"};
+                int sscope = 0;
+                char sbuf[256] = "";
+                int slen = 0;
+                int srows = terminal_rows(), scols = terminal_cols();
+                if (srows <= 0) srows = 24;
+                for (;;) {
+                    printf("\033[%d;1H\033[K  Search [%s]: %s_",
+                           srows - 1, snames[sscope], sbuf);
+                    fflush(stdout);
+                    TermKey ikey = terminal_read_key();
+                    int ich = terminal_last_printable();
+                    if (ikey == TERM_KEY_ESC || ikey == TERM_KEY_QUIT) break;
+                    if (ikey == TERM_KEY_ENTER) {
+                        if (sbuf[0]) {
+                            char sfolder[512];
+                            snprintf(sfolder, sizeof(sfolder),
+                                     "__search__:%d:%s", sscope, sbuf);
+                            selected = strdup(sfolder);
+                            goto folders_int_done;
+                        }
+                        break;
+                    }
+                    if (ikey == TERM_KEY_TAB) {
+                        sscope = (sscope + 1) % 4;
+                    } else if (ikey == TERM_KEY_BACK) {
+                        if (slen > 0) sbuf[--slen] = '\0';
+                    } else if (ich > 0 && slen + 1 < (int)sizeof(sbuf)) {
+                        sbuf[slen++] = (char)ich;
+                        sbuf[slen]   = '\0';
+                    }
+                }
+                (void)scols;
+            } else if (ch == 't') {
                 tree_mode = !tree_mode;
                 ui_pref_set_int("folder_view_mode", tree_mode);
                 cursor = 0; wstart = 0;
@@ -3280,6 +3360,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
                     { "\u2191 / \u2193",   "Move cursor up / down"                   },
                     { "PgUp / PgDn",        "Move cursor one page up / down"          },
                     { "Enter",             "Open folder / navigate into subfolder"   },
+                    { "/",                 "Cross-folder content search"             },
                     { "t",                 "Toggle tree / flat view"                 },
                     { "Backspace",         "Go up one level (or back to accounts)"   },
                     { "ESC / q",           "Quit"                                    },
@@ -3846,11 +3927,47 @@ char *email_service_list_labels_interactive(const Config *cfg,
             goto labels_done;
         default: {
             int ch = terminal_last_printable();
+            if (ch == '/') {
+                /* Cross-folder content search */
+                static const char *snames[] = {"Subject","From","To","Body"};
+                int sscope = 0;
+                char sbuf[256] = "";
+                int slen = 0;
+                int srows = trows;
+                for (;;) {
+                    printf("\033[%d;1H\033[K  Search [%s]: %s_",
+                           srows - 1, snames[sscope], sbuf);
+                    fflush(stdout);
+                    TermKey ikey = terminal_read_key();
+                    int ich = terminal_last_printable();
+                    if (ikey == TERM_KEY_ESC || ikey == TERM_KEY_QUIT) break;
+                    if (ikey == TERM_KEY_ENTER) {
+                        if (sbuf[0]) {
+                            char sfolder[512];
+                            snprintf(sfolder, sizeof(sfolder),
+                                     "__search__:%d:%s", sscope, sbuf);
+                            selected = strdup(sfolder);
+                            goto labels_done;
+                        }
+                        break;
+                    }
+                    if (ikey == TERM_KEY_TAB) {
+                        sscope = (sscope + 1) % 4;
+                    } else if (ikey == TERM_KEY_BACK) {
+                        if (slen > 0) sbuf[--slen] = '\0';
+                    } else if (ich > 0 && slen + 1 < (int)sizeof(sbuf)) {
+                        sbuf[slen++] = (char)ich;
+                        sbuf[slen]   = '\0';
+                    }
+                }
+                break;
+            }
             if (ch == 'h' || ch == '?') {
                 static const char *help[][2] = {
                     { "\u2191 / \u2193",   "Move cursor up / down"      },
                     { "PgUp / PgDn",       "Page up / down"             },
                     { "Enter",             "Open selected label"        },
+                    { "/",                 "Cross-folder content search"},
                     { "c",                 "Create new label"           },
                     { "d",                 "Delete selected label"      },
                     { "Backspace",         "Back to accounts"           },

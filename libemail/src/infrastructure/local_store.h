@@ -351,6 +351,44 @@ char *local_gmail_label_name_lookup(const char *id);
  */
 char *local_gmail_label_id_lookup(const char *name);
 
+/* ── Cross-folder text search ────────────────────────────────────────── */
+
+/**
+ * One matching entry returned by local_search().
+ * Strings (from, subject, date) are heap-allocated; caller must either
+ * free them or transfer ownership to manifest_upsert().
+ */
+typedef struct {
+    char  uid[17];
+    char  folder[256];  /**< Empty string for Gmail flat store */
+    int   flags;
+    char *from;         /**< Heap-allocated, MIME-decoded display string */
+    char *subject;      /**< Heap-allocated, MIME-decoded display string */
+    char *date;         /**< Heap-allocated "YYYY-MM-DD HH:MM" string */
+} SearchResult;
+
+/**
+ * @brief Search all local manifests for entries matching @p query in @p scope.
+ *
+ * scope: 0=Subject (manifest), 1=From (manifest),
+ *        2=To (.hdr file), 3=Body (.eml file).
+ *
+ * @param query       Search term (case-insensitive substring).
+ * @param scope       0-3, see above.
+ * @param results_out Heap-allocated array of SearchResult.  Caller frees with
+ *                    local_search_free() — or may steal strings first.
+ * @param count_out   Number of entries in *results_out.
+ * @return 0 on success, -1 on allocation error.
+ */
+int  local_search(const char *query, int scope,
+                  SearchResult **results_out, int *count_out);
+
+/**
+ * @brief Free a SearchResult array returned by local_search().
+ * Frees each string field and then the array itself.
+ */
+void local_search_free(SearchResult *results, int count);
+
 /* ── UI preferences ──────────────────────────────────────────────────── */
 
 /** @brief Reads an integer UI preference. */

@@ -939,6 +939,92 @@ void manifest_count_all_flags(int *unread_out, int *flagged_out) {
     }
 }
 
+/* ── Cross-folder text search ─────────────────────────────────────────── */
+
+int local_search(const char *query, int scope,
+                 SearchResult **results_out, int *count_out)
+{
+    *results_out = NULL;
+    *count_out   = 0;
+    if (!query || !query[0] || !g_account_base[0]) return 0;
+
+    char dir_path[8300];
+    snprintf(dir_path, sizeof(dir_path), "%s/manifests", g_account_base);
+    RAII_DIR DIR *dp = opendir(dir_path);
+    if (!dp) return 0;   /* no manifests — not an error */
+
+    int cap = 64;
+    SearchResult *results = malloc((size_t)cap * sizeof(SearchResult));
+    if (!results) return -1;
+    int count = 0;
+
+    struct dirent *ent;
+    while ((ent = readdir(dp)) != NULL) {
+        const char *name = ent->d_name;
+        size_t nlen = strlen(name);
+        if (nlen <= 4 || strcmp(name + nlen - 4, ".tsv") != 0) continue;
+
+        RAII_STRING char *fold = strndup(name, nlen - 4);
+        if (!fold) continue;
+
+        Manifest *m = manifest_load(fold);
+        if (!m) continue;
+
+        for (int i = 0; i < m->count; i++) {
+            ManifestEntry *me = &m->entries[i];
+            int match = 0;
+            if (scope == 0) {
+                const char *s = (me->subject && me->subject[0]) ? me->subject : "";
+                match = strcasestr(s, query) != NULL;
+            } else if (scope == 1) {
+                const char *s = (me->from && me->from[0]) ? me->from : "";
+                match = strcasestr(s, query) != NULL;
+            } else if (scope == 2) {
+                char *hdr = local_hdr_load(fold, me->uid);
+                if (hdr) {
+                    char *to_raw = mime_get_header(hdr, "To");
+                    if (to_raw) { match = strcasestr(to_raw, query) != NULL; free(to_raw); }
+                    free(hdr);
+                }
+            } else {
+                char *body = local_msg_load(fold, me->uid);
+                if (body) { match = strcasestr(body, query) != NULL; free(body); }
+            }
+            if (!match) continue;
+
+            if (count >= cap) {
+                cap *= 2;
+                SearchResult *tmp = realloc(results, (size_t)cap * sizeof(SearchResult));
+                if (!tmp) { manifest_free(m); free(results); return -1; }
+                results = tmp;
+            }
+            SearchResult *r = &results[count++];
+            memcpy(r->uid, me->uid, 17);
+            snprintf(r->folder, sizeof(r->folder), "%s", fold);
+            r->flags   = me->flags;
+            r->from    = me->from    ? strdup(me->from)    : strdup("");
+            r->subject = me->subject ? strdup(me->subject) : strdup("");
+            r->date    = me->date    ? strdup(me->date)    : strdup("");
+        }
+        manifest_free(m);
+    }
+
+    *results_out = results;
+    *count_out   = count;
+    return 0;
+}
+
+void local_search_free(SearchResult *results, int count)
+{
+    if (!results) return;
+    for (int i = 0; i < count; i++) {
+        free(results[i].from);
+        free(results[i].subject);
+        free(results[i].date);
+    }
+    free(results);
+}
+
 /* ── Pending flag changes ─────────────────────────────────────────────── */
 
 static char *pending_flag_path(const char *folder) {

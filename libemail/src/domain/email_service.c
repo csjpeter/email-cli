@@ -1678,6 +1678,52 @@ static char *resolve_folder_name_dup(const char *name) {
     return result;
 }
 
+/* Rebuild filtered entry index.
+ * fentries[0..fcount-1] holds original indices from entries[] that match fbuf.
+ * Empty fbuf = identity (all entries match). */
+static void list_filter_rebuild(
+    const MsgEntry *entries, int show_count,
+    Manifest *manifest, const Config *cfg,
+    const char *folder,
+    const char *fbuf, int fscope,
+    int *fentries, int *fcount_out)
+{
+    if (!fbuf || fbuf[0] == '\0') {
+        for (int i = 0; i < show_count; i++) fentries[i] = i;
+        *fcount_out = show_count;
+        return;
+    }
+    int fc = 0;
+    for (int i = 0; i < show_count; i++) {
+        ManifestEntry *me = manifest_find(manifest, entries[i].uid);
+        int match = 0;
+        if (fscope == 0) {
+            const char *s = (me && me->subject) ? me->subject : "";
+            match = strcasestr(s, fbuf) != NULL;
+        } else if (fscope == 1) {
+            const char *s = (me && me->from) ? me->from : "";
+            match = strcasestr(s, fbuf) != NULL;
+        } else if (fscope == 2) {
+            char *hdrs = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
+            if (hdrs) {
+                char *to_raw = mime_get_header(hdrs, "To");
+                if (to_raw) {
+                    char *to_dec = mime_decode_words(to_raw);
+                    if (to_dec) { match = strcasestr(to_dec, fbuf) != NULL; free(to_dec); }
+                    free(to_raw);
+                }
+                free(hdrs);
+            }
+        } else {
+            const char *lf = cfg->gmail_mode ? "" : folder;
+            char *body = local_msg_load(lf, entries[i].uid);
+            if (body) { match = strcasestr(body, fbuf) != NULL; free(body); }
+        }
+        if (match) fentries[fc++] = i;
+    }
+    *fcount_out = fc;
+}
+
 int email_service_list(const Config *cfg, EmailListOpts *opts) {
     /* Always re-initialise the local store so the correct account's manifests
      * and header cache are used, regardless of which account was active before. */
@@ -2092,6 +2138,17 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
      * Cleared only when the list is re-opened (R/ESC/Backspace restart the view). */
     char feedback_msg[256] = "";
 
+    /* ── Live filter state ──────────────────────────────────────────── */
+    int   filter_active = 0;   /* filter bar is visible */
+    int   filter_input  = 0;   /* typing mode (vs navigation mode) */
+    int   filter_scope  = 0;   /* 0=Subject  1=From  2=To  3=Body */
+    char  filter_buf[256] = "";
+    int  *fentries = opts->pager
+                     ? calloc((size_t)(show_count > 0 ? show_count : 1), sizeof(int))
+                     : NULL;
+    int   fcount = show_count;
+    if (fentries) { for (int _fi = 0; _fi < show_count; _fi++) fentries[_fi] = _fi; }
+
     /* Keep the terminal in raw mode for the entire interactive TUI.
      * Without this, each terminal_read_key() call would need to briefly enter
      * and exit raw mode per keystroke, which causes escape sequence echo and
@@ -2102,12 +2159,15 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                                           : NULL;
 
     for (;;) {
+        /* Number of rows visible under current filter (= show_count when no filter) */
+        int disp_count = filter_active ? fcount : show_count;
+
         /* Scroll window to keep cursor visible */
         if (cursor < wstart)             wstart = cursor;
         if (cursor >= wstart + limit)    wstart = cursor - limit + 1;
         if (wstart < 0)                  wstart = 0;
         int wend = wstart + limit;
-        if (wend > show_count)           wend = show_count;
+        if (wend > disp_count)           wend = disp_count;
 
         /* Compute adaptive column widths.
          * email-tui (opts->pager==1): date+sts+subject+from, overhead=28
@@ -2181,10 +2241,19 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 suffix = "  \u26a0 auto-delete: 30 days";
             else
                 suffix = "";
-            snprintf(cl, sizeof(cl),
-                     "  %d-%d of %d message(s) in %s (%d unread) [%s].%s",
-                     wstart + 1, wend, show_count, folder_display, unseen_count,
-                     cfg->user ? cfg->user : "?", suffix);
+            if (filter_active) {
+                static const char *scn[] = {"Subject","From","To","Body"};
+                snprintf(cl, sizeof(cl),
+                         "  Showing %d of %d  [filter:%s]  %s (%d unread) [%s].%s",
+                         fcount, show_count, scn[filter_scope],
+                         folder_display, unseen_count,
+                         cfg->user ? cfg->user : "?", suffix);
+            } else {
+                snprintf(cl, sizeof(cl),
+                         "  %d-%d of %d message(s) in %s (%d unread) [%s].%s",
+                         wstart + 1, wend, show_count, folder_display, unseen_count,
+                         cfg->user ? cfg->user : "?", suffix);
+            }
             if (opts->pager) {
                 /* TUI mode: reverse-video status bar padded to full terminal width */
                 printf("\033[7m%s", cl);
@@ -2211,8 +2280,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         /* Data rows: fetch-on-demand + immediate render per row */
         int load_interrupted = 0;
         for (int i = wstart; i < wend; i++) {
+            /* Map display index to original entries[] index */
+            int ei = (filter_active && fentries) ? fentries[i] : i;
             /* Fetch into manifest if missing; always sync unseen flag */
-            ManifestEntry *cached_me = manifest_find(manifest, entries[i].uid);
+            ManifestEntry *cached_me = manifest_find(manifest, entries[ei].uid);
             if (!cached_me) {
                 /* Check for user interrupt before slow network fetch */
                 if (opts->pager) {
@@ -2228,8 +2299,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     }
                 }
                 char *hdrs     = list_mc
-                                 ? fetch_uid_headers_via(list_mc, folder, entries[i].uid)
-                                 : fetch_uid_headers_cached(cfg, folder, entries[i].uid);
+                                 ? fetch_uid_headers_via(list_mc, folder, entries[ei].uid)
+                                 : fetch_uid_headers_cached(cfg, folder, entries[ei].uid);
                 char *fr_raw   = hdrs ? mime_get_header(hdrs, "From")    : NULL;
                 char *fr       = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
                 free(fr_raw);
@@ -2242,27 +2313,27 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 /* Detect attachment: Content-Type: multipart/mixed */
                 char *ct_raw = hdrs ? mime_get_header(hdrs, "Content-Type") : NULL;
                 if (ct_raw && strcasestr(ct_raw, "multipart/mixed"))
-                    entries[i].flags |= MSG_FLAG_ATTACH;
+                    entries[ei].flags |= MSG_FLAG_ATTACH;
                 free(ct_raw);
                 free(hdrs);
-                manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].flags);
+                manifest_upsert(manifest, entries[ei].uid, fr, su, dt, entries[ei].flags);
                 manifest_dirty = 1;
-            } else if (cached_me->flags != entries[i].flags) {
+            } else if (cached_me->flags != entries[ei].flags) {
                 /* Keep manifest flags in sync (relevant in online mode) */
-                cached_me->flags = entries[i].flags;
+                cached_me->flags = entries[ei].flags;
                 manifest_dirty = 1;
             }
 
             /* Render this row immediately */
-            ManifestEntry *me = manifest_find(manifest, entries[i].uid);
+            ManifestEntry *me = manifest_find(manifest, entries[ei].uid);
             const char *from    = (me && me->from    && me->from[0])    ? me->from    : "(no from)";
             const char *subject = (me && me->subject && me->subject[0]) ? me->subject : "(no subject)";
             const char *date    = (me && me->date)                       ? me->date    : "";
 
             int sel             = opts->pager && (i == cursor);
-            int remove_pending  = (pending_remove  != NULL) && pending_remove[i];
-            int label_pending   = (pending_label   != NULL) && pending_label[i];
-            int restore_pending = (pending_restore != NULL) && pending_restore[i];
+            int remove_pending  = (pending_remove  != NULL) && pending_remove[ei];
+            int label_pending   = (pending_label   != NULL) && pending_label[ei];
+            int restore_pending = (pending_restore != NULL) && pending_restore[ei];
 
             /* Pending rows: visible marker prefix + colour (no strikethrough).
              * The marker character is visible in every terminal and survives
@@ -2295,25 +2366,25 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             if (opts->pager && !remove_pending && !label_pending && !restore_pending) {
                 /* Non-sel: plain colour reset after char.
                  * Sel: \033[0m exits rev-video → colour → \033[7m re-enters. */
-                const char *n_s = (entries[i].flags & MSG_FLAG_UNSEEN)
+                const char *n_s = (entries[ei].flags & MSG_FLAG_UNSEEN)
                     ? (sel ? "\033[0m\033[32mN\033[7m" : "\033[32mN\033[0m")
                     : "-";
-                const char *f_s = (entries[i].flags & MSG_FLAG_FLAGGED)
+                const char *f_s = (entries[ei].flags & MSG_FLAG_FLAGGED)
                     ? (sel ? "\033[0m\033[33m\xe2\x98\x85\033[7m"
                            : "\033[33m\xe2\x98\x85\033[0m")
                     : "-";
                 snprintf(sts, sizeof(sts), "%s%s%c%c", n_s, f_s,
-                    (entries[i].flags & MSG_FLAG_DONE)   ? 'D' : '-',
-                    (entries[i].flags & MSG_FLAG_ATTACH) ? 'A' : '-');
+                    (entries[ei].flags & MSG_FLAG_DONE)   ? 'D' : '-',
+                    (entries[ei].flags & MSG_FLAG_ATTACH) ? 'A' : '-');
             } else {
-                sts[0] = (entries[i].flags & MSG_FLAG_UNSEEN)  ? 'N' : '-';
-                sts[1] = (entries[i].flags & MSG_FLAG_FLAGGED) ? '*' : '-';
-                sts[2] = (entries[i].flags & MSG_FLAG_DONE)    ? 'D' : '-';
-                sts[3] = (entries[i].flags & MSG_FLAG_ATTACH)  ? 'A' : '-';
+                sts[0] = (entries[ei].flags & MSG_FLAG_UNSEEN)  ? 'N' : '-';
+                sts[1] = (entries[ei].flags & MSG_FLAG_FLAGGED) ? '*' : '-';
+                sts[2] = (entries[ei].flags & MSG_FLAG_DONE)    ? 'D' : '-';
+                sts[3] = (entries[ei].flags & MSG_FLAG_ATTACH)  ? 'A' : '-';
                 sts[4] = '\0';
             }
             if (show_uid)
-                printf("%s%-16.16s  %-16.16s  %s  ", row_pfx, entries[i].uid, date, sts);
+                printf("%s%-16.16s  %-16.16s  %s  ", row_pfx, entries[ei].uid, date, sts);
             else
                 printf("%s%-16.16s  %s  ", row_pfx, date, sts);
             print_padded_col(subject, subj_w);
@@ -2333,6 +2404,21 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 printf("\n  -- %d more message(s) --  use --offset %d for next page\n",
                        show_count - wend, wend + 1);
             break;
+        }
+
+        /* Filter bar — shown when filter is active */
+        if (filter_active) {
+            static const char *scope_names[] = {"Subject","From","To","Body"};
+            printf("  \xe2\x94\x80"); /* ─ */
+            for (int _p = 3; _p < tcols - 2; _p++) printf("\xe2\x94\x80");
+            printf("\n  Filter [");
+            for (int _s = 0; _s < 4; _s++) {
+                if (_s > 0) printf("|");
+                if (_s == filter_scope) printf("\033[7m%s\033[0m", scope_names[_s]);
+                else printf("%s", scope_names[_s]);
+            }
+            printf("]: %s%s  Showing %d of %d\033[K\n",
+                   filter_buf, filter_input ? "_" : " ", fcount, show_count);
         }
 
         /* Navigation hint (status bar) — anchored at last terminal row */
@@ -2387,18 +2473,46 @@ read_key_again: ;
 
         switch (key) {
         case TERM_KEY_BACK:
+            if (filter_input) {
+                /* Backspace in filter input mode: delete last char */
+                size_t fl = strlen(filter_buf);
+                if (fl > 0) {
+                    filter_buf[fl - 1] = '\0';
+                    list_filter_rebuild(entries, show_count, manifest, cfg, folder,
+                                        filter_buf, filter_scope, fentries, &fcount);
+                    cursor = 0;
+                }
+                break;
+            }
             list_result = 1;
             goto list_done;
         case TERM_KEY_QUIT:
+            goto list_done;
         case TERM_KEY_ESC:
+            if (filter_active) {
+                /* First ESC clears the filter; second ESC quits */
+                filter_active = 0;
+                filter_input  = 0;
+                filter_buf[0] = '\0';
+                list_filter_rebuild(entries, show_count, manifest, cfg, folder,
+                                    filter_buf, filter_scope, fentries, &fcount);
+                cursor = 0;
+                break;
+            }
             goto list_done;
         case TERM_KEY_ENTER:
+            if (filter_input) {
+                /* Enter commits filter text; switch to navigation mode */
+                filter_input = 0;
+                break;
+            }
             {
-                int ret = show_uid_interactive(cfg, list_mc, folder, entries[cursor].uid, opts->limit);
+                int ei_cur = (filter_active && fentries) ? fentries[cursor] : cursor;
+                int ret = show_uid_interactive(cfg, list_mc, folder, entries[ei_cur].uid, opts->limit);
                 if (ret == 1) goto list_done;  /* user quit from show */
                 if (ret == 2) {
                     /* 'r' pressed in reader → reply to this message */
-                    memcpy(opts->action_uid, entries[cursor].uid, 17);
+                    memcpy(opts->action_uid, entries[ei_cur].uid, 17);
                     list_result = 3;
                     goto list_done;
                 }
@@ -2409,7 +2523,7 @@ read_key_again: ;
             cursor = 0;
             break;
         case TERM_KEY_END:
-            cursor = show_count > 0 ? show_count - 1 : 0;
+            cursor = disp_count > 0 ? disp_count - 1 : 0;
             break;
         case TERM_KEY_LEFT:
         case TERM_KEY_RIGHT:
@@ -2418,12 +2532,47 @@ read_key_again: ;
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
+
+            /* ── Filter input mode: Tab cycles scope, printable chars typed ── */
+            if (filter_input && key == TERM_KEY_TAB) {
+                filter_scope = (filter_scope + 1) % 4;
+                if (filter_buf[0]) {
+                    list_filter_rebuild(entries, show_count, manifest, cfg, folder,
+                                        filter_buf, filter_scope, fentries, &fcount);
+                    cursor = 0;
+                }
+                break;
+            }
+            if (filter_input && ch > 0) {
+                size_t fl = strlen(filter_buf);
+                if (fl + 1 < sizeof(filter_buf)) {
+                    filter_buf[fl]     = (char)ch;
+                    filter_buf[fl + 1] = '\0';
+                }
+                list_filter_rebuild(entries, show_count, manifest, cfg, folder,
+                                    filter_buf, filter_scope, fentries, &fcount);
+                cursor = 0;
+                break;
+            }
+            /* ── Filter activation (/) ──────────────────────────────────── */
+            if (ch == '/' && !filter_input) {
+                filter_active = 1;
+                filter_input  = 1;
+                filter_buf[0] = '\0';
+                list_filter_rebuild(entries, show_count, manifest, cfg, folder,
+                                    filter_buf, filter_scope, fentries, &fcount);
+                cursor = 0;
+                break;
+            }
+
+            /* ── Normal action keys ─────────────────────────────────────── */
+            int ei_cur = (filter_active && fentries) ? fentries[cursor] : cursor;
             if (ch == 'c') {
                 list_result = 2;
                 goto list_done;
             }
             if (ch == 'r') {
-                memcpy(opts->action_uid, entries[cursor].uid, 17);
+                memcpy(opts->action_uid, entries[ei_cur].uid, 17);
                 list_result = 3;
                 goto list_done;
             }
@@ -2490,7 +2639,7 @@ read_key_again: ;
                              "Already in Archive \xe2\x80\x94 no change");
                     break;
                 }
-                const char *uid = entries[cursor].uid;
+                const char *uid = entries[ei_cur].uid;
                 char *lbl_str = local_hdr_get_labels("", uid);
                 if (lbl_str) {
                     /* Build remove array and strip each label from indexes */
@@ -2527,16 +2676,16 @@ read_key_again: ;
                 /* Clear UNSEEN bit in .hdr flags field so the message is not
                  * displayed as unread when browsing Archive. */
                 {
-                    int new_flags = entries[cursor].flags & ~MSG_FLAG_UNSEEN;
+                    int new_flags = entries[ei_cur].flags & ~MSG_FLAG_UNSEEN;
                     local_hdr_update_flags("", uid, new_flags);
-                    entries[cursor].flags = new_flags;
+                    entries[ei_cur].flags = new_flags;
                 }
                 /* Mark as read via API */
                 if (list_mc) mail_client_set_flag(list_mc, uid, "\\Seen", 1);
                 /* Put in archive */
                 label_idx_add("_nolabel", uid);
                 /* Mark for immediate visual feedback (yellow strikethrough) */
-                if (pending_label) pending_label[cursor] = 1;
+                if (pending_label) pending_label[ei_cur] = 1;
                 snprintf(feedback_msg, sizeof(feedback_msg), "Archived");
                 break;
             }
@@ -2547,8 +2696,8 @@ read_key_again: ;
                              "Already in Trash \xe2\x80\x94 no change");
                     break;
                 }
-                const char *uid = entries[cursor].uid;
-                if (pending_remove && pending_remove[cursor]) {
+                const char *uid = entries[ei_cur].uid;
+                if (pending_remove && pending_remove[ei_cur]) {
                     /* Undo: second 'D' restores from Trash back to current folder */
                     label_idx_remove("_trash", uid);
                     const char *restore_lbl = (folder[0] != '_') ? folder : "INBOX";
@@ -2564,7 +2713,7 @@ read_key_again: ;
                         mail_client_modify_label(list_mc, uid, "TRASH", 0);
                         mail_client_modify_label(list_mc, uid, restore_lbl, 1);
                     }
-                    pending_remove[cursor] = 0;
+                    pending_remove[ei_cur] = 0;
                     snprintf(feedback_msg, sizeof(feedback_msg),
                              "Undo: %s restored", restore_lbl);
                 } else {
@@ -2583,14 +2732,14 @@ read_key_again: ;
                     }
                     label_idx_add("_trash", uid);
                     /* Mark for immediate visual feedback (red strikethrough) */
-                    if (pending_remove) pending_remove[cursor] = 1;
+                    if (pending_remove) pending_remove[ei_cur] = 1;
                     snprintf(feedback_msg, sizeof(feedback_msg), "Moved to Trash");
                 }
                 break;
             }
             if (ch == 'u' && is_gmail) {
                 /* Untrash: restore from Trash to INBOX. */
-                const char *uid = entries[cursor].uid;
+                const char *uid = entries[ei_cur].uid;
                 label_idx_remove("_trash", uid);
                 label_idx_add("INBOX", uid);
                 /* Update .hdr: remove TRASH from labels, add INBOX */
@@ -2605,12 +2754,12 @@ read_key_again: ;
                     mail_client_modify_label(list_mc, uid, "INBOX", 1);
                 }
                 /* Mark for immediate visual feedback (green strikethrough) */
-                if (pending_restore) pending_restore[cursor] = 1;
+                if (pending_restore) pending_restore[ei_cur] = 1;
                 snprintf(feedback_msg, sizeof(feedback_msg), "Restored to Inbox");
                 break;
             }
             if (ch == 't' && is_gmail) {
-                const char *uid = entries[cursor].uid;
+                const char *uid = entries[ei_cur].uid;
                 /* Remember whether this message is currently in Archive or Trash
                  * so we can show green feedback if a label addition removes it. */
                 int was_archived = label_idx_contains("_nolabel", uid);
@@ -2620,7 +2769,7 @@ read_key_again: ;
                  * of Archive (_nolabel) or Trash (_trash), mark row green. */
                 if ((was_archived && !label_idx_contains("_nolabel", uid)) ||
                     (was_trashed  && !label_idx_contains("_trash",   uid)))
-                    if (pending_restore) pending_restore[cursor] = 1;
+                    if (pending_restore) pending_restore[ei_cur] = 1;
                 break;
             }
             if (ch == 'd' && is_gmail) {
@@ -2628,8 +2777,8 @@ read_key_again: ;
                  * second 'd' on the same row restores it (undo).
                  * Restricted to non-meta labels (no underscore prefix). */
                 if (folder[0] != '_') {
-                    const char *uid = entries[cursor].uid;
-                    if (pending_label && pending_label[cursor]) {
+                    const char *uid = entries[ei_cur].uid;
+                    if (pending_label && pending_label[ei_cur]) {
                         /* Undo: restore the label that was removed */
                         if (list_mc)
                             mail_client_modify_label(list_mc, uid, folder, 1);
@@ -2637,7 +2786,7 @@ read_key_again: ;
                         local_hdr_update_labels("", uid, &folder, 1, NULL, 0);
                         /* Remove from archive fallback if it was added */
                         label_idx_remove("_nolabel", uid);
-                        pending_label[cursor] = 0;
+                        pending_label[ei_cur] = 0;
                         snprintf(feedback_msg, sizeof(feedback_msg),
                                  "Undo: %s restored", folder);
                     } else {
@@ -2670,8 +2819,8 @@ read_key_again: ;
                         /* Mark row for immediate visual feedback (yellow strikethrough).
                          * Also clear pending_remove so yellow takes priority over red
                          * if 'D' was pressed before 'd' on this row. */
-                        if (pending_remove) pending_remove[cursor] = 0;
-                        if (pending_label)  pending_label[cursor]  = 1;
+                        if (pending_remove) pending_remove[ei_cur] = 0;
+                        if (pending_label)  pending_label[ei_cur]  = 1;
                         snprintf(feedback_msg, sizeof(feedback_msg),
                                  "Label removed: %s", folder);
                     }
@@ -2679,7 +2828,7 @@ read_key_again: ;
                 break;
             }
             if (ch == 'n' || ch == 'f' || ch == 'd') {
-                const char *uid = entries[cursor].uid;
+                const char *uid = entries[ei_cur].uid;
                 int bit;
                 const char *flag_name;
                 if (ch == 'n') {
@@ -2689,15 +2838,15 @@ read_key_again: ;
                 } else {
                     bit = MSG_FLAG_DONE;    flag_name = "$Done";
                 }
-                int currently = entries[cursor].flags & bit;
+                int currently = entries[ei_cur].flags & bit;
                 /* Determine the IMAP add/remove direction */
                 int add_flag = (ch == 'n') ? (currently ? 1 : 0) : (!currently ? 1 : 0);
 
                 /* Local update first — instant UI response regardless of network */
                 local_pending_flag_add(folder, uid, flag_name, add_flag);
-                entries[cursor].flags ^= bit;
+                entries[ei_cur].flags ^= bit;
                 ManifestEntry *me = manifest_find(manifest, uid);
-                if (me) me->flags = entries[cursor].flags;
+                if (me) me->flags = entries[ei_cur].flags;
                 manifest_save(folder, manifest);
 
                 /* Gmail: update local label indexes and .hdr (both labels CSV
@@ -2716,7 +2865,7 @@ read_key_again: ;
                         }
                     } else {
                         /* d: $Done is an IMAP keyword, not a Gmail label */
-                        local_hdr_update_flags("", uid, entries[cursor].flags);
+                        local_hdr_update_flags("", uid, entries[ei_cur].flags);
                     }
                     flag_push_background(cfg, uid, flag_name, add_flag);
                 } else if (list_mc) {
@@ -2737,14 +2886,14 @@ read_key_again: ;
             break;
         }
         case TERM_KEY_NEXT_LINE:
-            if (cursor < show_count - 1) cursor++;
+            if (cursor < disp_count - 1) cursor++;
             break;
         case TERM_KEY_PREV_LINE:
             if (cursor > 0) cursor--;
             break;
         case TERM_KEY_NEXT_PAGE:
             cursor += limit;
-            if (cursor >= show_count) cursor = show_count - 1;
+            if (cursor >= disp_count) cursor = disp_count > 0 ? disp_count - 1 : 0;
             break;
         case TERM_KEY_PREV_PAGE:
             cursor -= limit;
@@ -2756,6 +2905,7 @@ list_done:
     free(pending_remove);
     free(pending_label);
     free(pending_restore);
+    free(fentries);
     /* tui_raw / folder_canonical cleaned up automatically via RAII macros */
     manifest_free(manifest);
     free(entries);

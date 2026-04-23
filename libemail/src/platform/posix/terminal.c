@@ -79,13 +79,16 @@ static int read_byte(void) {
     return (n == 1) ? (int)c : -1;
 }
 
-static int g_last_printable = 0;
+static int  g_last_printable  = 0;
+static char g_last_utf8[5]    = "";
 
-int terminal_last_printable(void) { return g_last_printable; }
+int         terminal_last_printable(void) { return g_last_printable; }
+const char *terminal_last_utf8(void)      { return g_last_utf8; }
 
 TermKey terminal_read_key(void) {
     /* The terminal must already be in raw mode (VMIN=1, VTIME=0). */
     g_last_printable = 0;
+    g_last_utf8[0]   = '\0';
     int c = read_byte();
     TermKey result = TERM_KEY_IGNORE;   /* unknown input → silent no-op */
 
@@ -146,7 +149,42 @@ TermKey terminal_read_key(void) {
         result = TERM_KEY_TAB;
     } else if (c >= 32 && c <= 126) {
         g_last_printable = c;
+        g_last_utf8[0] = (char)c;
+        g_last_utf8[1] = '\0';
         result = TERM_KEY_IGNORE;
+    } else if ((c & 0xE0) == 0xC0) {
+        /* 2-byte UTF-8 sequence (U+0080..U+07FF, covers all Latin accented chars) */
+        int c2 = read_byte();
+        if ((c2 & 0xC0) == 0x80) {
+            g_last_utf8[0] = (char)c;
+            g_last_utf8[1] = (char)c2;
+            g_last_utf8[2] = '\0';
+            g_last_printable = 1;
+            result = TERM_KEY_IGNORE;
+        }
+    } else if ((c & 0xF0) == 0xE0) {
+        /* 3-byte UTF-8 sequence (U+0800..U+FFFF) */
+        int c2 = read_byte(), c3 = read_byte();
+        if ((c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80) {
+            g_last_utf8[0] = (char)c;
+            g_last_utf8[1] = (char)c2;
+            g_last_utf8[2] = (char)c3;
+            g_last_utf8[3] = '\0';
+            g_last_printable = 1;
+            result = TERM_KEY_IGNORE;
+        }
+    } else if ((c & 0xF8) == 0xF0) {
+        /* 4-byte UTF-8 sequence (U+10000..U+10FFFF) */
+        int c2 = read_byte(), c3 = read_byte(), c4 = read_byte();
+        if ((c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80 && (c4 & 0xC0) == 0x80) {
+            g_last_utf8[0] = (char)c;
+            g_last_utf8[1] = (char)c2;
+            g_last_utf8[2] = (char)c3;
+            g_last_utf8[3] = (char)c4;
+            g_last_utf8[4] = '\0';
+            g_last_printable = 1;
+            result = TERM_KEY_IGNORE;
+        }
     }
     /* c == -1 (read error/timeout) → result stays TERM_KEY_IGNORE */
 

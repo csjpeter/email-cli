@@ -71,6 +71,13 @@ TermKey terminal_read_key(void);
 int terminal_last_printable(void);
 
 /**
+ * Returns the last printable character as a NUL-terminated UTF-8 string.
+ * Works for both ASCII and multi-byte UTF-8 characters.
+ * Returns "" (empty string) if the last keystroke was not printable.
+ */
+const char *terminal_last_utf8(void);
+
+/**
  * Display column width of Unicode codepoint cp.
  * Returns 0 for non-printable/control characters,
  * 1 for normal characters, 2 for wide (CJK/emoji) characters.

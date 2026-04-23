@@ -2185,6 +2185,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     int   filter_active = 0;   /* filter bar is visible */
     int   filter_input  = 0;   /* typing mode (vs navigation mode) */
     int   filter_scope  = 0;   /* 0=Subject  1=From  2=To  3=Body */
+    int   filter_dirty    = 0;   /* rebuild needed after next render */
+    int   filter_scanning = 0;   /* body scan in progress — show progress bar */
     char  filter_buf[256] = "";
     int  *fentries = opts->pager
                      ? calloc((size_t)(show_count > 0 ? show_count : 1), sizeof(int))
@@ -2465,8 +2467,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if (_s == filter_scope) printf("\033[7m%s\033[0m", scope_names[_s]);
                 else printf("%s", scope_names[_s]);
             }
-            printf("]: %s%s  Showing %d of %d\033[K\n",
-                   filter_buf, filter_input ? "_" : " ", fcount, show_count);
+            if (filter_scanning)
+                printf("]: %s  Scanning body...\033[K\n", filter_buf);
+            else
+                printf("]: %s%s  Showing %d of %d\033[K\n",
+                       filter_buf, filter_input ? "_" : " ", fcount, show_count);
         }
 
         /* Navigation hint (status bar) — anchored at last terminal row */
@@ -2505,6 +2510,28 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             print_statusbar(trows, tcols, sb);
         }
 
+        /* After render: if rebuild is needed (new char, backspace, Tab), show
+         * "Scanning body..." first for body scope, then do the actual rebuild. */
+        if (filter_dirty) {
+            filter_dirty = 0;
+            if (filter_buf[0] && filter_scope == 3) {
+                filter_scanning = 1;
+                continue;  /* re-render showing "Scanning body..." */
+            }
+            if (filter_buf[0])
+                list_filter_rebuild(entries, show_count, manifest, cfg, folder,
+                                    filter_buf, filter_scope, fentries, &fcount);
+            cursor = 0;
+            continue;
+        }
+        if (filter_scanning) {
+            filter_scanning = 0;
+            list_filter_rebuild(entries, show_count, manifest, cfg, folder,
+                                filter_buf, filter_scope, fentries, &fcount);
+            cursor = 0;
+            continue;
+        }
+
         /* terminal_read_key() blocks in read().  When the background sync child
          * exits, SIGCHLD fires (SA_RESTART not set) and interrupts read() with
          * EINTR — terminal_read_key() returns TERM_KEY_IGNORE (last_printable=0).
@@ -2522,14 +2549,13 @@ read_key_again: ;
         switch (key) {
         case TERM_KEY_BACK:
             if (filter_input) {
-                /* Backspace in filter input mode: delete last char */
+                /* Backspace: remove last UTF-8 character (skip continuation bytes) */
                 size_t fl = strlen(filter_buf);
-                if (fl > 0) {
-                    filter_buf[fl - 1] = '\0';
-                    list_filter_rebuild(entries, show_count, manifest, cfg, folder,
-                                        filter_buf, filter_scope, fentries, &fcount);
-                    cursor = 0;
-                }
+                while (fl > 0 && (filter_buf[fl - 1] & 0xC0) == 0x80) fl--;
+                if (fl > 0) fl--;
+                filter_buf[fl] = '\0';
+                filter_dirty = 1;
+                cursor = 0;
                 break;
             }
             list_result = 1;
@@ -2539,9 +2565,11 @@ read_key_again: ;
         case TERM_KEY_ESC:
             if (filter_active) {
                 /* First ESC clears the filter; second ESC quits */
-                filter_active = 0;
-                filter_input  = 0;
-                filter_buf[0] = '\0';
+                filter_active   = 0;
+                filter_input    = 0;
+                filter_scanning = 0;
+                filter_dirty    = 0;
+                filter_buf[0]   = '\0';
                 list_filter_rebuild(entries, show_count, manifest, cfg, folder,
                                     filter_buf, filter_scope, fentries, &fcount);
                 cursor = 0;
@@ -2585,21 +2613,17 @@ read_key_again: ;
             /* ── Filter input mode: Tab cycles scope, printable chars typed ── */
             if (filter_input && key == TERM_KEY_TAB) {
                 filter_scope = (filter_scope + 1) % 4;
-                if (filter_buf[0]) {
-                    list_filter_rebuild(entries, show_count, manifest, cfg, folder,
-                                        filter_buf, filter_scope, fentries, &fcount);
-                    cursor = 0;
-                }
+                if (filter_buf[0]) filter_dirty = 1;  /* rebuild after next render */
                 break;
             }
-            if (filter_input && ch > 0) {
-                size_t fl = strlen(filter_buf);
-                if (fl + 1 < sizeof(filter_buf)) {
-                    filter_buf[fl]     = (char)ch;
-                    filter_buf[fl + 1] = '\0';
+            if (filter_input && terminal_last_utf8()[0]) {
+                const char *u8 = terminal_last_utf8();
+                size_t ulen = strlen(u8);
+                size_t fl   = strlen(filter_buf);
+                if (fl + ulen < sizeof(filter_buf)) {
+                    memcpy(filter_buf + fl, u8, ulen + 1);
                 }
-                list_filter_rebuild(entries, show_count, manifest, cfg, folder,
-                                    filter_buf, filter_scope, fentries, &fcount);
+                filter_dirty = 1;
                 cursor = 0;
                 break;
             }
@@ -3333,7 +3357,6 @@ char *email_service_list_folders_interactive(const Config *cfg,
                            srows - 1, snames[sscope], sbuf);
                     fflush(stdout);
                     TermKey ikey = terminal_read_key();
-                    int ich = terminal_last_printable();
                     if (ikey == TERM_KEY_ESC || ikey == TERM_KEY_QUIT) break;
                     if (ikey == TERM_KEY_ENTER) {
                         if (sbuf[0]) {
@@ -3348,10 +3371,16 @@ char *email_service_list_folders_interactive(const Config *cfg,
                     if (ikey == TERM_KEY_TAB) {
                         sscope = (sscope + 1) % 4;
                     } else if (ikey == TERM_KEY_BACK) {
+                        /* Remove last UTF-8 character */
+                        while (slen > 0 && (sbuf[slen - 1] & 0xC0) == 0x80) slen--;
                         if (slen > 0) sbuf[--slen] = '\0';
-                    } else if (ich > 0 && slen + 1 < (int)sizeof(sbuf)) {
-                        sbuf[slen++] = (char)ich;
-                        sbuf[slen]   = '\0';
+                    } else if (terminal_last_utf8()[0]) {
+                        const char *u8 = terminal_last_utf8();
+                        size_t ulen = strlen(u8);
+                        if (slen + (int)ulen < (int)sizeof(sbuf)) {
+                            memcpy(sbuf + slen, u8, ulen + 1);
+                            slen += (int)ulen;
+                        }
                     }
                 }
                 (void)scols;
@@ -3944,7 +3973,6 @@ char *email_service_list_labels_interactive(const Config *cfg,
                            srows - 1, snames[sscope], sbuf);
                     fflush(stdout);
                     TermKey ikey = terminal_read_key();
-                    int ich = terminal_last_printable();
                     if (ikey == TERM_KEY_ESC || ikey == TERM_KEY_QUIT) break;
                     if (ikey == TERM_KEY_ENTER) {
                         if (sbuf[0]) {
@@ -3959,10 +3987,15 @@ char *email_service_list_labels_interactive(const Config *cfg,
                     if (ikey == TERM_KEY_TAB) {
                         sscope = (sscope + 1) % 4;
                     } else if (ikey == TERM_KEY_BACK) {
+                        while (slen > 0 && (sbuf[slen - 1] & 0xC0) == 0x80) slen--;
                         if (slen > 0) sbuf[--slen] = '\0';
-                    } else if (ich > 0 && slen + 1 < (int)sizeof(sbuf)) {
-                        sbuf[slen++] = (char)ich;
-                        sbuf[slen]   = '\0';
+                    } else if (terminal_last_utf8()[0]) {
+                        const char *u8 = terminal_last_utf8();
+                        size_t ulen = strlen(u8);
+                        if (slen + (int)ulen < (int)sizeof(sbuf)) {
+                            memcpy(sbuf + slen, u8, ulen + 1);
+                            slen += (int)ulen;
+                        }
                     }
                 }
                 break;

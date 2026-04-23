@@ -102,6 +102,24 @@ static const struct { const char *name; unsigned cp; } ENTITIES[] = {
     {"bull",0x2022},{"middot",0xB7},{"trade",0x2122},{"euro",0x20AC},
     {"pound",0xA3},{"cent",0xA2},{"yen",0xA5},
     {"times",0xD7},{"divide",0xF7},
+    /* Latin-1 supplement (HTML 4, U+00C0–U+00FF) */
+    {"Agrave",0xC0},{"agrave",0xE0},{"Aacute",0xC1},{"aacute",0xE1},
+    {"Acirc", 0xC2},{"acirc", 0xE2},{"Atilde",0xC3},{"atilde",0xE3},
+    {"Auml",  0xC4},{"auml",  0xE4},{"Aring",  0xC5},{"aring",  0xE5},
+    {"AElig", 0xC6},{"aelig", 0xE6},{"Ccedil",0xC7},{"ccedil",0xE7},
+    {"Egrave",0xC8},{"egrave",0xE8},{"Eacute",0xC9},{"eacute",0xE9},
+    {"Ecirc", 0xCA},{"ecirc", 0xEA},{"Euml",  0xCB},{"euml",  0xEB},
+    {"Igrave",0xCC},{"igrave",0xEC},{"Iacute",0xCD},{"iacute",0xED},
+    {"Icirc", 0xCE},{"icirc", 0xEE},{"Iuml",  0xCF},{"iuml",  0xEF},
+    {"ETH",   0xD0},{"eth",   0xF0},{"Ntilde",0xD1},{"ntilde",0xF1},
+    {"Ograve",0xD2},{"ograve",0xF2},{"Oacute",0xD3},{"oacute",0xF3},
+    {"Ocirc", 0xD4},{"ocirc", 0xF4},{"Otilde",0xD5},{"otilde",0xF5},
+    {"Ouml",  0xD6},{"ouml",  0xF6},{"Oslash",0xD8},{"oslash",0xF8},
+    {"Ugrave",0xD9},{"ugrave",0xF9},{"Uacute",0xDA},{"uacute",0xFA},
+    {"Ucirc", 0xDB},{"ucirc", 0xFB},{"Uuml",  0xDC},{"uuml",  0xFC},
+    {"Yacute",0xDD},{"yacute",0xFD},{"THORN",  0xDE},{"thorn",  0xFE},
+    {"szlig", 0xDF},{"yuml",  0xFF},{"iexcl",0xA1},{"iquest",0xBF},
+    {"Iuml",  0xCF},{"ordf",  0xAA},{"ordm",  0xBA},
     {NULL,0}
 };
 static int cp_to_utf8(unsigned cp, char *out) {

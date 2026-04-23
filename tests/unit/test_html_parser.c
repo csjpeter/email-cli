@@ -397,6 +397,44 @@ void test_html_parser(void) {
         ASSERT(strcmp(c->tag, "div") == 0, "attr immediate: tag is div");
     }
 
+    /* 38b. Latin-1 named entities (aacute, eacute, uuml, ouml, uacute, iacute) */
+    {
+        /* &aacute; → á = U+00E1 = 0xC3 0xA1 in UTF-8 */
+        RAII_HTML_NODE HtmlNode *r = html_parse("&aacute;");
+        ASSERT(r != NULL, "latin1 aacute: root not NULL");
+        HtmlNode *c = r->first_child;
+        ASSERT(c && c->type == HTML_NODE_TEXT, "latin1 aacute: text node");
+        ASSERT(c->text &&
+               (unsigned char)c->text[0] == 0xC3 &&
+               (unsigned char)c->text[1] == 0xA1,
+               "latin1 aacute: UTF-8 C3 A1");
+    }
+    {
+        /* &eacute; → é = U+00E9 = 0xC3 0xA9 */
+        RAII_HTML_NODE HtmlNode *r = html_parse("&eacute;");
+        HtmlNode *c = r ? r->first_child : NULL;
+        ASSERT(c && c->text &&
+               (unsigned char)c->text[0] == 0xC3 &&
+               (unsigned char)c->text[1] == 0xA9,
+               "latin1 eacute: UTF-8 C3 A9");
+    }
+    {
+        /* &uuml; → ü = U+00FC = 0xC3 0xBC */
+        RAII_HTML_NODE HtmlNode *r = html_parse("&uuml;");
+        HtmlNode *c = r ? r->first_child : NULL;
+        ASSERT(c && c->text &&
+               (unsigned char)c->text[0] == 0xC3 &&
+               (unsigned char)c->text[1] == 0xBC,
+               "latin1 uuml: UTF-8 C3 BC");
+    }
+    {
+        /* sentence with multiple Latin-1 entities */
+        RAII_HTML_NODE HtmlNode *r = html_parse("Cs&aacute;sz&aacute;r");
+        HtmlNode *c = r ? r->first_child : NULL;
+        ASSERT(c && c->text && strstr(c->text, "á") != NULL,
+               "latin1 multi: entities decoded in sentence");
+    }
+
     /* 38. Codepoint > 0x10FFFF → cp_to_utf8 returns 0 (entity dropped) */
     {
         /* &#x200000; is 0x200000 > 0x10FFFF → cp_to_utf8 returns 0, entity skipped */

@@ -885,6 +885,60 @@ void manifest_count_folder(const char *folder, int *total_out,
     manifest_free(m);
 }
 
+Manifest *manifest_load_all_with_flag(int flag_mask) {
+    Manifest *result = calloc(1, sizeof(Manifest));
+    if (!result) return NULL;
+    if (!g_account_base[0]) return result;
+    char dir_path[8300];
+    snprintf(dir_path, sizeof(dir_path), "%s/manifests", g_account_base);
+    RAII_DIR DIR *dp = opendir(dir_path);
+    if (!dp) return result;
+    struct dirent *ent;
+    while ((ent = readdir(dp)) != NULL) {
+        const char *name = ent->d_name;
+        size_t nlen = strlen(name);
+        if (nlen <= 4 || strcmp(name + nlen - 4, ".tsv") != 0) continue;
+        RAII_STRING char *folder = strndup(name, nlen - 4);
+        if (!folder) continue;
+        Manifest *m = manifest_load(folder);
+        if (!m) continue;
+        for (int i = 0; i < m->count; i++) {
+            if (m->entries[i].flags & flag_mask)
+                manifest_upsert(result, m->entries[i].uid,
+                                strdup(m->entries[i].from    ? m->entries[i].from    : ""),
+                                strdup(m->entries[i].subject ? m->entries[i].subject : ""),
+                                strdup(m->entries[i].date    ? m->entries[i].date    : ""),
+                                m->entries[i].flags);
+        }
+        manifest_free(m);
+    }
+    return result;
+}
+
+void manifest_count_all_flags(int *unread_out, int *flagged_out) {
+    *unread_out = 0; *flagged_out = 0;
+    if (!g_account_base[0]) return;
+    char dir_path[8300];
+    snprintf(dir_path, sizeof(dir_path), "%s/manifests", g_account_base);
+    RAII_DIR DIR *dp = opendir(dir_path);
+    if (!dp) return;
+    struct dirent *ent;
+    while ((ent = readdir(dp)) != NULL) {
+        const char *name = ent->d_name;
+        size_t nlen = strlen(name);
+        if (nlen <= 4 || strcmp(name + nlen - 4, ".tsv") != 0) continue;
+        RAII_STRING char *folder = strndup(name, nlen - 4);
+        if (!folder) continue;
+        Manifest *m = manifest_load(folder);
+        if (!m) continue;
+        for (int i = 0; i < m->count; i++) {
+            if (m->entries[i].flags & MSG_FLAG_UNSEEN)  (*unread_out)++;
+            if (m->entries[i].flags & MSG_FLAG_FLAGGED) (*flagged_out)++;
+        }
+        manifest_free(m);
+    }
+}
+
 /* ── Pending flag changes ─────────────────────────────────────────────── */
 
 static char *pending_flag_path(const char *folder) {

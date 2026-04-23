@@ -190,6 +190,12 @@ char **local_folder_list_load(int *count_out, char *sep_out);
 void manifest_count_folder(const char *folder, int *total_out,
                             int *unseen_out, int *flagged_out);
 
+/** @brief Count unread and flagged messages across ALL local manifests. */
+void manifest_count_all_flags(int *unread_out, int *flagged_out);
+
+/** @brief Build a synthetic manifest with entries from ALL folders matching flag_mask. */
+Manifest *manifest_load_all_with_flag(int flag_mask);
+
 /* ── Pending flag changes (server sync queue) ────────────────────────── */
 
 /**

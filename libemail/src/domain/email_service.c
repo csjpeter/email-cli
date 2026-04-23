@@ -1716,13 +1716,27 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
     int list_result = 0;
 
+    /* Virtual cross-folder views for IMAP (aggregate all manifests by flag) */
+    int is_virtual_flags = 0;
+    int virtual_flag_mask = 0;
+    if (!cfg->gmail_mode && folder) {
+        if (strcmp(folder, "__unread__")  == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_UNSEEN;  folder_display = "Unread";  }
+        if (strcmp(folder, "__flagged__") == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_FLAGGED; folder_display = "Flagged"; }
+    }
+
     logger_log(LOG_INFO, "Listing %s @ %s/%s", cfg->user, cfg->host, folder);
 
-    /* Load manifest (needed in both online and cron modes) */
-    Manifest *manifest = manifest_load(folder);
-    if (!manifest) {
-        manifest = calloc(1, sizeof(Manifest));
-        if (!manifest) { return -1; }
+    /* Load manifest (or build synthetic cross-folder manifest for virtual views) */
+    Manifest *manifest = NULL;
+    if (is_virtual_flags) {
+        manifest = manifest_load_all_with_flag(virtual_flag_mask);
+        if (!manifest) return -1;
+    } else {
+        manifest = manifest_load(folder);
+        if (!manifest) {
+            manifest = calloc(1, sizeof(Manifest));
+            if (!manifest) return -1;
+        }
     }
 
     int show_count = 0;
@@ -2854,23 +2868,27 @@ char *email_service_list_folders_interactive(const Config *cfg,
         return NULL;
     }
 
-    int cursor = 0, wstart = 0;
+    /* Virtual prefix rows: [0] "Tags / Flags" header, [1] Unread,
+     *                      [2] Flagged,              [3] "Folders" header */
+    enum { VP_HDR_FLAGS=0, VP_UNREAD=1, VP_FLAGGED=2, VP_HDR_FOLD=3, VPREFIX=4 };
+    int vf_unread = 0, vf_flagged = 0;
+    manifest_count_all_flags(&vf_unread, &vf_flagged);
+
+    int cursor = VPREFIX, wstart = 0;  /* default: first real folder */
     int tree_mode = ui_pref_get_int("folder_view_mode", 1);
     char current_prefix[512] = "";   /* flat mode: current navigation level */
 
-    /* Pre-position cursor on current_folder.
+    /* Pre-position cursor on current_folder (offset by VPREFIX).
      * INBOX is case-insensitive per RFC 3501 — use strcasecmp so that a
      * config value of "inbox" still matches the server's "INBOX". */
     if (current_folder && *current_folder) {
         if (tree_mode) {
-            /* In tree mode the flat view is folders[0..count-1] directly */
             for (int i = 0; i < count; i++) {
                 if (strcasecmp(folders[i], current_folder) == 0) {
-                    cursor = i; break;
+                    cursor = VPREFIX + i; break;
                 }
             }
         } else {
-            /* In flat mode, navigate to the level that contains current_folder */
             const char *last = strrchr(current_folder, sep);
             if (last) {
                 size_t plen = (size_t)(last - current_folder);
@@ -2883,7 +2901,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
             int tv = build_flat_view(folders, count, sep, current_prefix, tmp_vis);
             for (int i = 0; i < tv; i++) {
                 if (strcasecmp(folders[tmp_vis[i]], current_folder) == 0) {
-                    cursor = i; break;
+                    cursor = VPREFIX + i; break;
                 }
             }
         }
@@ -2900,13 +2918,15 @@ char *email_service_list_folders_interactive(const Config *cfg,
         /* Rebuild flat view on each iteration (alphabetical order) */
         int display_count;
         if (tree_mode) {
-            display_count = count;
+            display_count = VPREFIX + count;
         } else {
             vcount = build_flat_view(folders, count, sep, current_prefix, vis);
-            display_count = vcount;
+            display_count = VPREFIX + vcount;
         }
         if (cursor >= display_count && display_count > 0)
             cursor = display_count - 1;
+        /* Never land on a section header */
+        if (cursor == VP_HDR_FLAGS || cursor == VP_HDR_FOLD) cursor = VP_UNREAD;
 
         if (cursor < wstart) wstart = cursor;
         if (cursor >= wstart + limit) wstart = cursor - limit + 1;
@@ -2943,14 +2963,41 @@ char *email_service_list_folders_interactive(const Config *cfg,
         printf("  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
 
         for (int i = wstart; i < wend; i++) {
+            /* Virtual prefix rows */
+            if (i < VPREFIX) {
+                if (i == VP_HDR_FLAGS || i == VP_HDR_FOLD) {
+                    const char *htitle = (i == VP_HDR_FLAGS) ? "Tags / Flags" : "Folders";
+                    printf("  \033[2m\u2500\u2500 %s ", htitle);
+                    int used = 6 + (int)strlen(htitle) + 1;
+                    for (int s = used; s < name_w + 28 - 2; s++) fputs("\u2500", stdout);
+                    printf("\033[0m\n");
+                } else {
+                    const char *vname = (i == VP_UNREAD) ? "Unread" : "Flagged";
+                    int vu   = (i == VP_UNREAD)  ? vf_unread  : 0;
+                    int vfl  = (i == VP_FLAGGED) ? vf_flagged : 0;
+                    char u[16], f[16];
+                    fmt_thou(u, sizeof(u), vu);
+                    fmt_thou(f, sizeof(f), vfl);
+                    if (i == cursor) printf("\033[7m");
+                    else if (vu == 0 && vfl == 0) printf("\033[2m");
+                    printf("  %6s  %7s  %-*s  %7s",
+                           u, f, name_w, vname, "-");
+                    if (i == cursor) printf("\033[K\033[0m");
+                    else printf("\033[0m");
+                    printf("\n");
+                }
+                continue;
+            }
+            /* Real folder rows (offset by VPREFIX) */
+            int ri = i - VPREFIX;
             if (tree_mode) {
-                int msgs = statuses ? statuses[i].messages : 0;
-                int unsn = statuses ? statuses[i].unseen   : 0;
-                int flgd = statuses ? statuses[i].flagged  : 0;
-                print_folder_item(folders, count, i, sep, 1, i == cursor, 0,
+                int msgs = statuses ? statuses[ri].messages : 0;
+                int unsn = statuses ? statuses[ri].unseen   : 0;
+                int flgd = statuses ? statuses[ri].flagged  : 0;
+                print_folder_item(folders, count, ri, sep, 1, i == cursor, 0,
                                   msgs, unsn, flgd, name_w);
             } else {
-                int fi = vis[i];
+                int fi = vis[ri];
                 int hk = folder_has_children(folders, count, folders[fi], sep);
                 int msgs, unsn, flgd;
                 if (hk) {
@@ -3000,12 +3047,10 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 char *last_sep = strrchr(current_prefix, sep);
                 if (last_sep) *last_sep = '\0';
                 else          current_prefix[0] = '\0';
-                cursor = 0; wstart = 0;
+                cursor = VPREFIX; wstart = 0;
             } else {
-                /* at root: go up to accounts screen (if caller supports it),
-                 * or return unchanged current folder (legacy behaviour). */
                 if (go_up) {
-                    *go_up = 1; /* selected stays NULL */
+                    *go_up = 1;
                 } else {
                     if (current_folder && *current_folder)
                         selected = strdup(current_folder);
@@ -3014,16 +3059,24 @@ char *email_service_list_folders_interactive(const Config *cfg,
             }
             break;
         case TERM_KEY_ENTER:
-            if (tree_mode) {
-                selected = strdup(folders[cursor]);
+            if (cursor == VP_UNREAD) {
+                selected = strdup("__unread__");
                 goto folders_int_done;
-            } else if (display_count > 0) {
-                int fi = vis[cursor];
+            } else if (cursor == VP_FLAGGED) {
+                selected = strdup("__flagged__");
+                goto folders_int_done;
+            } else if (cursor == VP_HDR_FLAGS || cursor == VP_HDR_FOLD) {
+                break; /* header row — ignore */
+            } else if (tree_mode) {
+                selected = strdup(folders[cursor - VPREFIX]);
+                goto folders_int_done;
+            } else if (display_count > VPREFIX) {
+                int ri = cursor - VPREFIX;
+                int fi = vis[ri];
                 if (folder_has_children(folders, count, folders[fi], sep)) {
-                    /* navigate into subfolder */
                     strncpy(current_prefix, folders[fi], sizeof(current_prefix) - 1);
                     current_prefix[sizeof(current_prefix) - 1] = '\0';
-                    cursor = 0; wstart = 0;
+                    cursor = VPREFIX; wstart = 0;
                 } else {
                     selected = strdup(folders[fi]);
                     goto folders_int_done;
@@ -3031,24 +3084,34 @@ char *email_service_list_folders_interactive(const Config *cfg,
             }
             break;
         case TERM_KEY_NEXT_LINE:
-            if (cursor < display_count - 1) cursor++;
+            if (cursor < display_count - 1) {
+                cursor++;
+                if (cursor == VP_HDR_FLAGS || cursor == VP_HDR_FOLD) cursor++;
+            }
             break;
         case TERM_KEY_PREV_LINE:
-            if (cursor > 0) cursor--;
+            if (cursor > 0) {
+                cursor--;
+                if (cursor == VP_HDR_FLAGS || cursor == VP_HDR_FOLD) {
+                    if (cursor > 0) cursor--;
+                }
+            }
             break;
         case TERM_KEY_NEXT_PAGE:
             cursor += limit;
             if (cursor >= display_count) cursor = display_count > 0 ? display_count - 1 : 0;
+            if (cursor == VP_HDR_FLAGS || cursor == VP_HDR_FOLD) cursor++;
             break;
         case TERM_KEY_PREV_PAGE:
             cursor -= limit;
             if (cursor < 0) cursor = 0;
+            if (cursor == VP_HDR_FLAGS || cursor == VP_HDR_FOLD) cursor++;
             break;
         case TERM_KEY_HOME:
-            cursor = 0; wstart = 0;
+            cursor = VP_UNREAD; wstart = 0;
             break;
         case TERM_KEY_END:
-            cursor = display_count > 0 ? display_count - 1 : 0;
+            cursor = display_count > 0 ? display_count - 1 : VP_UNREAD;
             break;
         case TERM_KEY_LEFT:
         case TERM_KEY_RIGHT:
@@ -3318,12 +3381,15 @@ static void show_label_picker(MailClient *mc, const char *uid,
 /* System labels in display order.  id = .idx filename, name = display name. */
 static const struct { const char *id; const char *name; } gmail_system_labels[] = {
     { "UNREAD",   "Unread"  },
-    { "STARRED",  "Starred" },
+    { "STARRED",  "Flagged" },
     { "INBOX",    "Inbox"   },
     { "SENT",     "Sent"    },
     { "DRAFTS",   "Drafts"  },
 };
 #define GMAIL_SYS_COUNT ((int)(sizeof(gmail_system_labels)/sizeof(gmail_system_labels[0])))
+/* First 2 system labels are Tags/Flags; the rest (INBOX, SENT, DRAFTS) are Folders */
+#define GMAIL_SYS_FLAGS   2
+#define GMAIL_SYS_FOLDERS (GMAIL_SYS_COUNT - GMAIL_SYS_FLAGS)
 
 /* Gmail automatic inbox category labels (shown as a separate section) */
 static const struct { const char *id; const char *name; } gmail_cat_labels[] = {
@@ -3343,51 +3409,58 @@ static const struct { const char *id; const char *name; } gmail_special_labels[]
 #define GMAIL_SPECIAL_COUNT ((int)(sizeof(gmail_special_labels)/sizeof(gmail_special_labels[0])))
 
 /* Build a flat label display list.  Returns count.
- * Each entry has id (for .idx lookup / selection) and display name.
- * section_sep[i] = 1 means a separator line should appear before row i. */
+ * Layout: "── Tags / Flags ──" header, UNREAD+STARRED, user labels,
+ *         "── Folders ──" header, INBOX+SENT+DRAFTS, categories, special.
+ * is_header[i]=1 marks non-selectable section header rows. */
 static int build_label_display(
-    char ***ids_out, char ***names_out, int **sep_out,
+    char ***ids_out, char ***names_out, int **sep_out, int **is_header_out,
     char **user_labels, int user_count,
     char **cat_labels,  int cat_count)
 {
-    /* total = system + user + categories + special */
-    int total = GMAIL_SYS_COUNT + user_count + cat_count + GMAIL_SPECIAL_COUNT;
+    /* 2 section headers + flags + user + folders + cats + special */
+    int total = 2 + GMAIL_SYS_FLAGS + user_count
+              + GMAIL_SYS_FOLDERS + cat_count + GMAIL_SPECIAL_COUNT;
     char **ids   = calloc((size_t)total, sizeof(char *));
     char **names = calloc((size_t)total, sizeof(char *));
     int  *seps   = calloc((size_t)total, sizeof(int));
-    if (!ids || !names || !seps) { free(ids); free(names); free(seps); return 0; }
+    int  *hdrs   = calloc((size_t)total, sizeof(int));
+    if (!ids || !names || !seps || !hdrs) {
+        free(ids); free(names); free(seps); free(hdrs); return 0;
+    }
 
     int n = 0;
-    /* Section 1: system labels */
-    for (int i = 0; i < GMAIL_SYS_COUNT; i++) {
+
+    /* ── Tags / Flags section ──────────────────────────────────────────── */
+    ids[n] = strdup("__header__"); names[n] = strdup("Tags / Flags"); hdrs[n] = 1; n++;
+    for (int i = 0; i < GMAIL_SYS_FLAGS; i++) {
         ids[n]   = strdup(gmail_system_labels[i].id);
         names[n] = strdup(gmail_system_labels[i].name);
         n++;
     }
-    /* Section 2: user labels (separator before first) */
-    if (user_count > 0) seps[n] = 1;
     for (int i = 0; i < user_count; i++) {
         ids[n]   = strdup(user_labels[i]);
         char *disp = local_gmail_label_name_lookup(user_labels[i]);
         names[n] = disp ? disp : strdup(user_labels[i]);
         n++;
     }
-    /* Section 3: inbox category labels (separator before first) */
-    if (cat_count > 0) seps[n] = 1;
+
+    /* ── Folders section ───────────────────────────────────────────────── */
+    ids[n] = strdup("__header__"); names[n] = strdup("Folders"); hdrs[n] = 1; n++;
+    for (int i = GMAIL_SYS_FLAGS; i < GMAIL_SYS_COUNT; i++) {
+        ids[n]   = strdup(gmail_system_labels[i].id);
+        names[n] = strdup(gmail_system_labels[i].name);
+        n++;
+    }
     for (int i = 0; i < cat_count; i++) {
         ids[n] = strdup(cat_labels[i]);
-        /* Map ID to display name */
         const char *disp = cat_labels[i];
-        for (int k = 0; k < GMAIL_CAT_COUNT; k++) {
-            if (strcmp(cat_labels[i], gmail_cat_labels[k].id) == 0) {
-                disp = gmail_cat_labels[k].name;
-                break;
-            }
-        }
+        for (int k = 0; k < GMAIL_CAT_COUNT; k++)
+            if (strcmp(cat_labels[i], gmail_cat_labels[k].id) == 0)
+                { disp = gmail_cat_labels[k].name; break; }
         names[n] = strdup(disp);
         n++;
     }
-    /* Section 4: special labels (separator before first) */
+    /* Special labels with a thin separator before the first */
     seps[n] = 1;
     for (int i = 0; i < GMAIL_SPECIAL_COUNT; i++) {
         ids[n]   = strdup(gmail_special_labels[i].id);
@@ -3395,15 +3468,16 @@ static int build_label_display(
         n++;
     }
 
-    *ids_out   = ids;
-    *names_out = names;
-    *sep_out   = seps;
+    *ids_out        = ids;
+    *names_out      = names;
+    *sep_out        = seps;
+    *is_header_out  = hdrs;
     return n;
 }
 
-static void free_label_display(char **ids, char **names, int *seps, int count) {
+static void free_label_display(char **ids, char **names, int *seps, int *hdrs, int count) {
     for (int i = 0; i < count; i++) { free(ids[i]); free(names[i]); }
-    free(ids); free(names); free(seps);
+    free(ids); free(names); free(seps); free(hdrs);
 }
 
 /* Check if a label name is a system or special label (skip for user list). */
@@ -3451,8 +3525,8 @@ char *email_service_list_labels_interactive(const Config *cfg,
         qsort(user_labels, (size_t)user_count, sizeof(char *), cmp_str);
 
     char **lbl_ids = NULL, **lbl_names = NULL;
-    int *lbl_seps = NULL;
-    int lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps,
+    int *lbl_seps = NULL, *lbl_hdr = NULL;
+    int lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps, &lbl_hdr,
                                         user_labels, user_count,
                                         cat_labels, cat_count);
     for (int i = 0; i < user_count; i++) free(user_labels[i]);
@@ -3461,21 +3535,23 @@ char *email_service_list_labels_interactive(const Config *cfg,
     free(cat_labels);
 
     if (lbl_count == 0) {
-        free_label_display(lbl_ids, lbl_names, lbl_seps, 0);
+        free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_hdr, 0);
         return NULL;
     }
 
     int cursor = 0, wstart = 0;
     char *selected = NULL;
 
-    /* Pre-position cursor on current_label */
+    /* Pre-position cursor on current_label; skip header rows */
     if (current_label && *current_label) {
         for (int i = 0; i < lbl_count; i++) {
-            if (strcmp(lbl_ids[i], current_label) == 0) {
+            if (!lbl_hdr[i] && strcmp(lbl_ids[i], current_label) == 0) {
                 cursor = i; break;
             }
         }
     }
+    /* Ensure initial cursor is not on a header row */
+    while (cursor < lbl_count - 1 && lbl_hdr[cursor]) cursor++;
 
     RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
 
@@ -3536,7 +3612,15 @@ char *email_service_list_labels_interactive(const Config *cfg,
         printf("\n");
 
         for (int i = wstart; i < wend; i++) {
-            /* Section separator (not before the very first visible item) */
+            /* Section header row */
+            if (lbl_hdr[i]) {
+                printf("  \033[2m\u2500\u2500 %s ", lbl_names[i]);
+                int used = 6 + (int)strlen(lbl_names[i]) + 1;
+                for (int s = used; s < tcols - 2; s++) fputs("\u2500", stdout);
+                printf("\033[0m\n");
+                continue;
+            }
+            /* Thin separator before certain groups (not before the first visible item) */
             if (lbl_seps[i] && i > wstart) {
                 printf("  \033[2m");
                 for (int s = 0; s < tcols - 2; s++) fputs("\u2504", stdout);
@@ -3577,26 +3661,38 @@ char *email_service_list_labels_interactive(const Config *cfg,
             goto labels_done;
         case TERM_KEY_HOME:
             cursor = 0; wstart = 0;
+            while (cursor < lbl_count - 1 && lbl_hdr[cursor]) cursor++;
             break;
         case TERM_KEY_END:
             cursor = lbl_count > 0 ? lbl_count - 1 : 0;
+            while (cursor > 0 && lbl_hdr[cursor]) cursor--;
             break;
         case TERM_KEY_NEXT_LINE:
-            if (cursor < lbl_count - 1) cursor++;
+            if (cursor < lbl_count - 1) {
+                cursor++;
+                while (cursor < lbl_count - 1 && lbl_hdr[cursor]) cursor++;
+                if (lbl_hdr[cursor]) cursor--;
+            }
             break;
         case TERM_KEY_PREV_LINE:
-            if (cursor > 0) cursor--;
+            if (cursor > 0) {
+                cursor--;
+                while (cursor > 0 && lbl_hdr[cursor]) cursor--;
+            }
             break;
         case TERM_KEY_NEXT_PAGE:
             cursor += avail;
             if (cursor >= lbl_count) cursor = lbl_count - 1;
+            while (cursor > 0 && lbl_hdr[cursor]) cursor--;
             break;
         case TERM_KEY_PREV_PAGE:
             cursor -= avail;
             if (cursor < 0) cursor = 0;
+            while (cursor < lbl_count - 1 && lbl_hdr[cursor]) cursor++;
             break;
         case TERM_KEY_ENTER:
-            selected = strdup(lbl_ids[cursor]);
+            if (!lbl_hdr[cursor])
+                selected = strdup(lbl_ids[cursor]);
             goto labels_done;
         default: {
             int ch = terminal_last_printable();
@@ -3623,7 +3719,8 @@ char *email_service_list_labels_interactive(const Config *cfg,
                 if (confirmed && new_name[0]) {
                     if (email_service_create_label(cfg, new_name) == 0) {
                         /* Reload label list on next iteration */
-                        free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_count);
+                        free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_hdr, lbl_count);
+                        lbl_hdr = NULL;
                         /* Rebuild label list */
                         char **ul2 = NULL, **cl2 = NULL;
                         int uc2 = 0, cc2 = 0;
@@ -3644,20 +3741,20 @@ char *email_service_list_labels_interactive(const Config *cfg,
                         }
                         if (uc2 > 1)
                             qsort(ul2, (size_t)uc2, sizeof(char *), cmp_str);
-                        lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps,
+                        lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps, &lbl_hdr,
                                                         ul2, uc2, cl2, cc2);
                         for (int i = 0; i < uc2; i++) free(ul2[i]);
                         free(ul2);
                         for (int i = 0; i < cc2; i++) free(cl2[i]);
                         free(cl2);
                         if (lbl_count == 0) {
-                            free_label_display(lbl_ids, lbl_names, lbl_seps, 0);
+                            free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_hdr, 0);
                             goto labels_done;
                         }
                     }
                 }
             }
-            if (ch == 'd' && lbl_count > 0) {
+            if (ch == 'd' && lbl_count > 0 && !lbl_hdr[cursor]) {
                 /* Delete selected label — use the label name as ID (best effort).
                  * TODO: use label ID instead of name for Gmail (ID != name for
                  *       user-defined labels). For IMAP this is correct (name == ID). */
@@ -3665,7 +3762,8 @@ char *email_service_list_labels_interactive(const Config *cfg,
                 if (del_id) {
                     email_service_delete_label(cfg, del_id);
                     /* Rebuild display after deletion */
-                    free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_count);
+                    free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_hdr, lbl_count);
+                    lbl_hdr = NULL;
                     char **ul3 = NULL, **cl3 = NULL;
                     int uc3 = 0, cc3 = 0;
                     {
@@ -3685,7 +3783,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
                     }
                     if (uc3 > 1)
                         qsort(ul3, (size_t)uc3, sizeof(char *), cmp_str);
-                    lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps,
+                    lbl_count = build_label_display(&lbl_ids, &lbl_names, &lbl_seps, &lbl_hdr,
                                                     ul3, uc3, cl3, cc3);
                     for (int i = 0; i < uc3; i++) free(ul3[i]);
                     free(ul3);
@@ -3693,8 +3791,9 @@ char *email_service_list_labels_interactive(const Config *cfg,
                     free(cl3);
                     if (cursor >= lbl_count) cursor = lbl_count - 1;
                     if (cursor < 0) cursor = 0;
+                    while (cursor < lbl_count - 1 && lbl_hdr[cursor]) cursor++;
                     if (lbl_count == 0) {
-                        free_label_display(lbl_ids, lbl_names, lbl_seps, 0);
+                        free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_hdr, 0);
                         goto labels_done;
                     }
                 }
@@ -3704,7 +3803,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
         }
     }
 labels_done:
-    free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_count);
+    free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_hdr, lbl_count);
     return selected;
 }
 

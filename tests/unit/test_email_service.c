@@ -1687,23 +1687,24 @@ void test_email_service(void) {
     {
         char *user[] = { (char*)"Work", (char*)"Personal" };
         char **ids = NULL, **nms = NULL;
-        int *seps = NULL;
+        int *seps = NULL, *hdrs = NULL;
         char *cats[] = { (char*)"CATEGORY_SOCIAL" };
-        int cnt = build_label_display(&ids, &nms, &seps, user, 2, cats, 1);
+        int cnt = build_label_display(&ids, &nms, &seps, &hdrs, user, 2, cats, 1);
         ASSERT(cnt > 2, "build_label_display: count > user count (system labels added)");
         ASSERT(ids   != NULL, "build_label_display: ids non-NULL");
         ASSERT(nms   != NULL, "build_label_display: names non-NULL");
         ASSERT(seps  != NULL, "build_label_display: seps non-NULL");
-        /* Verify INBOX is first system label */
-        ASSERT(strcmp(ids[0], "INBOX") == 0 || ids[0] != NULL,
-               "build_label_display: first id present");
-        free_label_display(ids, nms, seps, cnt);
+        ASSERT(hdrs  != NULL, "build_label_display: hdrs non-NULL");
+        /* First row is "Tags / Flags" section header */
+        ASSERT(hdrs[0] == 1, "build_label_display: first row is header");
+        ASSERT(ids[0] != NULL, "build_label_display: first id non-NULL");
+        free_label_display(ids, nms, seps, hdrs, cnt);
         ASSERT(1, "free_label_display: no crash after free");
 
         /* Empty user labels */
-        cnt = build_label_display(&ids, &nms, &seps, NULL, 0, NULL, 0);
+        cnt = build_label_display(&ids, &nms, &seps, &hdrs, NULL, 0, NULL, 0);
         ASSERT(cnt > 0, "build_label_display: no user labels still returns system labels");
-        free_label_display(ids, nms, seps, cnt);
+        free_label_display(ids, nms, seps, hdrs, cnt);
     }
 
     /* ── fetch_uid_headers_cached ────────────────────────────────────── */

@@ -2205,12 +2205,16 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         /* Number of rows visible under current filter (= show_count when no filter) */
         int disp_count = filter_active ? fcount : show_count;
 
+        /* Effective row budget: filter bar consumes 2 rows (separator + input line) */
+        int eff_limit = (opts->pager && filter_active) ? limit - 2 : limit;
+        if (eff_limit < 1) eff_limit = 1;
+
         /* Scroll window to keep cursor visible */
-        if (cursor < wstart)             wstart = cursor;
-        if (cursor >= wstart + limit)    wstart = cursor - limit + 1;
-        if (wstart < 0)                  wstart = 0;
-        int wend = wstart + limit;
-        if (wend > disp_count)           wend = disp_count;
+        if (cursor < wstart)                 wstart = cursor;
+        if (cursor >= wstart + eff_limit)    wstart = cursor - eff_limit + 1;
+        if (wstart < 0)                      wstart = 0;
+        int wend = wstart + eff_limit;
+        if (wend > disp_count)               wend = disp_count;
 
         /* Compute adaptive column widths.
          * email-tui (opts->pager==1): date+sts+subject+from, overhead=28

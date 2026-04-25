@@ -826,10 +826,14 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
  * Show a message in interactive pager mode.
  * Returns 0 = back to list (Backspace/ESC/q), 2 = reply, -1 = error.
  * mc may be NULL (operations then queue for background sync).
+ * initial_flags: caller-supplied MSG_FLAG_* bitmask (used for IMAP where .hdr
+ *   does not carry a flags field).
+ * flags_out: if non-NULL, receives the final flag state on exit.
  */
 static int show_uid_interactive(const Config *cfg, MailClient *mc,
                                 const char *folder,
-                                const char *uid, int page_size) {
+                                const char *uid, int page_size,
+                                int initial_flags, int *flags_out) {
     char *raw = NULL;
     if (local_msg_exists(folder, uid)) {
         raw = local_msg_load(folder, uid);
@@ -856,9 +860,12 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
     free(date_raw);
     /* Gmail: load labels from .hdr cache for display in reader header */
     char *show_labels = cfg->gmail_mode ? local_hdr_get_labels("", uid) : NULL;
-    /* Load current flags for 'f' / 'n' / 'd' toggle operations */
-    int reader_flags = 0;
-    {
+    /* Load current flags for 'f' / 'n' / 'd' toggle operations.
+     * For Gmail: .hdr contains a flags field — use it if available.
+     * For IMAP:  .hdr contains raw RFC 2822 headers without flags — use
+     *            the caller-supplied initial_flags instead. */
+    int reader_flags = initial_flags;
+    if (cfg->gmail_mode) {
         char *hdr = local_hdr_load("", uid);
         if (hdr) {
             char *last_tab = strrchr(hdr, '\t');
@@ -1109,7 +1116,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 int currently = reader_flags & MSG_FLAG_FLAGGED;
                 int add_flag  = currently ? 0 : 1;
                 reader_flags ^= MSG_FLAG_FLAGGED;
-                local_hdr_update_flags("", uid, reader_flags);
+                if (is_gmail) local_hdr_update_flags("", uid, reader_flags);
                 local_pending_flag_add(folder, uid, "\\Flagged", add_flag);
                 if (is_gmail) {
                     const char *lbl = "STARRED";
@@ -1134,7 +1141,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 int currently = reader_flags & MSG_FLAG_UNSEEN;
                 int add_flag  = currently ? 1 : 0; /* add \\Seen if currently unseen */
                 reader_flags ^= MSG_FLAG_UNSEEN;
-                local_hdr_update_flags("", uid, reader_flags);
+                if (is_gmail) local_hdr_update_flags("", uid, reader_flags);
                 local_pending_flag_add(folder, uid, "\\Seen", add_flag);
                 if (is_gmail) {
                     const char *lbl = "UNREAD";
@@ -1159,7 +1166,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 int currently = reader_flags & MSG_FLAG_DONE;
                 int add_flag  = currently ? 0 : 1;
                 reader_flags ^= MSG_FLAG_DONE;
-                local_hdr_update_flags("", uid, reader_flags);
+                /* .hdr flags field is not used for IMAP; skip local_hdr_update_flags */
                 local_pending_flag_add(folder, uid, "$Done", add_flag);
                 if (mc) mail_client_set_flag(mc, uid, "$Done", add_flag);
                 snprintf(info_msg, sizeof(info_msg),
@@ -1243,6 +1250,7 @@ show_int_done:
 #undef SHOW_HDR_LINES_INT
     mime_free_attachments(atts, att_count);
     free(body); free(body_wrapped); free(from); free(subject); free(date); free(show_labels); free(raw);
+    if (flags_out) *flags_out = reader_flags;
     return result;
 }
 
@@ -1813,7 +1821,28 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
      * Kept alive for the full rendering loop so header fetches reuse it. */
     RAII_MAIL MailClient *list_mc = NULL;
 
-    if (is_virtual_search) {
+    if (is_virtual_flags) {
+        /* ── Virtual Unread/Flagged: local manifest aggregate (always cache-only).
+         * Each entry carries its source folder so Enter, 'n', etc. can route
+         * back to the correct per-folder manifest and IMAP SELECT. */
+        SearchResult *fr = NULL;
+        int fr_count = 0;
+        local_flag_search(virtual_flag_mask, &fr, &fr_count);
+        show_count = fr_count;
+        entries = calloc((size_t)(fr_count > 0 ? fr_count : 1), sizeof(MsgEntry));
+        if (!entries) { if (fr) free(fr); manifest_free(manifest); return -1; }
+        for (int i = 0; i < fr_count; i++) {
+            memcpy(entries[i].uid, fr[i].uid, 17);
+            snprintf(entries[i].folder, sizeof(entries[i].folder), "%s", fr[i].folder);
+            entries[i].flags = fr[i].flags;
+            entries[i].epoch = fr[i].date ? parse_manifest_date(fr[i].date) : 0;
+            manifest_upsert(manifest, fr[i].uid,
+                            fr[i].from, fr[i].subject, fr[i].date, fr[i].flags);
+            fr[i].from = fr[i].subject = fr[i].date = NULL;
+            if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
+        }
+        free(fr);
+    } else if (is_virtual_search) {
         /* ── Cross-folder content search (always local data) ────────────── */
         SearchResult *sr = NULL;
         int sr_count = 0;
@@ -2585,7 +2614,28 @@ read_key_again: ;
             {
                 int ei_cur = (filter_active && fentries) ? fentries[cursor] : cursor;
                 const char *efolder = entries[ei_cur].folder[0] ? entries[ei_cur].folder : folder;
-                int ret = show_uid_interactive(cfg, list_mc, efolder, entries[ei_cur].uid, opts->limit);
+                int prev_flags = entries[ei_cur].flags;
+                int new_flags  = prev_flags;
+                int ret = show_uid_interactive(cfg, list_mc, efolder,
+                                               entries[ei_cur].uid, opts->limit,
+                                               prev_flags, &new_flags);
+                /* Propagate any flag changes made inside the reader */
+                if (new_flags != prev_flags) {
+                    entries[ei_cur].flags = new_flags;
+                    ManifestEntry *rme = manifest_find(manifest, entries[ei_cur].uid);
+                    if (rme) rme->flags = new_flags;
+                    if (is_virtual_flags) {
+                        /* Virtual list: update the per-folder manifest on disk */
+                        Manifest *fm = manifest_load(efolder);
+                        if (fm) {
+                            ManifestEntry *fme = manifest_find(fm, entries[ei_cur].uid);
+                            if (fme) { fme->flags = new_flags; manifest_save(efolder, fm); }
+                            manifest_free(fm);
+                        }
+                    } else if (!is_virtual_search) {
+                        manifest_save(folder, manifest);
+                    }
+                }
                 if (ret == 1) goto list_done;  /* user quit from show */
                 if (ret == 2) {
                     /* 'r' pressed in reader → reply to this message */
@@ -2921,7 +2971,19 @@ read_key_again: ;
                 entries[ei_cur].flags ^= bit;
                 ManifestEntry *me = manifest_find(manifest, uid);
                 if (me) me->flags = entries[ei_cur].flags;
-                if (!is_virtual_search) manifest_save(efolder, manifest);
+                if (is_virtual_flags) {
+                    /* Virtual list: save the real per-folder manifest, not the
+                     * synthesized one — only then will manifest_count_all_flags
+                     * return updated counts for the folder list. */
+                    Manifest *fm = manifest_load(efolder);
+                    if (fm) {
+                        ManifestEntry *fme = manifest_find(fm, uid);
+                        if (fme) { fme->flags = entries[ei_cur].flags; manifest_save(efolder, fm); }
+                        manifest_free(fm);
+                    }
+                } else if (!is_virtual_search) {
+                    manifest_save(efolder, manifest);
+                }
 
                 /* Gmail: update local label indexes and .hdr (both labels CSV
                  * and flags integer), then kick background sync. */

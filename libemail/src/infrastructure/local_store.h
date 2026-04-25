@@ -392,6 +392,22 @@ int  local_search(const char *query, int scope,
  */
 void local_search_free(SearchResult *results, int count);
 
+/**
+ * @brief Collect entries from ALL local manifests matching flag_mask.
+ *
+ * Like local_search() but filters by flag bits rather than text.  Each
+ * SearchResult carries the source folder so callers can route operations
+ * (manifest saves, IMAP commands) back to the correct per-folder store.
+ *
+ * @param flag_mask    Bitmask of MSG_FLAG_* bits to match (any matching bit passes).
+ * @param results_out  Heap-allocated array of SearchResult.  Free with
+ *                     local_search_free() after stealing or copying strings.
+ * @param count_out    Number of entries in *results_out.
+ * @return 0 on success, -1 on allocation error.
+ */
+int local_flag_search(int flag_mask,
+                      SearchResult **results_out, int *count_out);
+
 /* ── UI preferences ──────────────────────────────────────────────────── */
 
 /** @brief Reads an integer UI preference. */

@@ -944,6 +944,56 @@ void manifest_count_all_flags(int *unread_out, int *flagged_out) {
     }
 }
 
+/* ── Cross-folder flag search ────────────────────────────────────────── */
+
+int local_flag_search(int flag_mask,
+                      SearchResult **results_out, int *count_out)
+{
+    *results_out = NULL;
+    *count_out   = 0;
+    if (!g_account_base[0]) return 0;
+
+    int cap = 64, cnt = 0;
+    SearchResult *res = malloc((size_t)cap * sizeof(SearchResult));
+    if (!res) return -1;
+
+    char dir_path[8300];
+    snprintf(dir_path, sizeof(dir_path), "%s/manifests", g_account_base);
+    RAII_DIR DIR *dp = opendir(dir_path);
+    if (!dp) { free(res); return 0; }
+
+    struct dirent *ent;
+    while ((ent = readdir(dp)) != NULL) {
+        const char *name = ent->d_name;
+        size_t nlen = strlen(name);
+        if (nlen <= 4 || strcmp(name + nlen - 4, ".tsv") != 0) continue;
+        RAII_STRING char *folder = strndup(name, nlen - 4);
+        if (!folder) continue;
+        Manifest *m = manifest_load(folder);
+        if (!m) continue;
+        for (int i = 0; i < m->count; i++) {
+            if (!(m->entries[i].flags & flag_mask)) continue;
+            if (cnt == cap) {
+                int nc = cap * 2;
+                SearchResult *tmp = realloc(res, (size_t)nc * sizeof(SearchResult));
+                if (!tmp) { manifest_free(m); free(res); return -1; }
+                res = tmp; cap = nc;
+            }
+            SearchResult *r = &res[cnt++];
+            snprintf(r->uid,    sizeof(r->uid),    "%s", m->entries[i].uid);
+            snprintf(r->folder, sizeof(r->folder), "%s", folder);
+            r->flags   = m->entries[i].flags;
+            r->from    = strdup(m->entries[i].from    ? m->entries[i].from    : "");
+            r->subject = strdup(m->entries[i].subject ? m->entries[i].subject : "");
+            r->date    = strdup(m->entries[i].date    ? m->entries[i].date    : "");
+        }
+        manifest_free(m);
+    }
+    *results_out = res;
+    *count_out   = cnt;
+    return 0;
+}
+
 /* ── Cross-folder text search ─────────────────────────────────────────── */
 
 int local_search(const char *query, int scope,

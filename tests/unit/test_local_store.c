@@ -537,3 +537,176 @@ void test_local_hdr_get_labels(void) {
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
 }
+
+/* ── local_flag_search tests ────────────────────────────────────────────── */
+
+void test_local_flag_search(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-flag-search-test");
+
+    /* Pre-clean */
+    unlink("/tmp/email-cli-flag-search-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/INBOX.tsv");
+    unlink("/tmp/email-cli-flag-search-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/Sent.tsv");
+
+    /* Build two manifests across two folders */
+    Manifest *inbox = calloc(1, sizeof(Manifest));
+    manifest_upsert(inbox, "0000000000000001", strdup("Alice"), strdup("Unread in INBOX"),
+                    strdup("2024-03-01 10:00"), MSG_FLAG_UNSEEN);
+    manifest_upsert(inbox, "0000000000000002", strdup("Bob"),   strdup("Read in INBOX"),
+                    strdup("2024-03-02 11:00"), 0);
+    manifest_save("INBOX", inbox);
+    manifest_free(inbox);
+
+    Manifest *sent = calloc(1, sizeof(Manifest));
+    manifest_upsert(sent, "0000000000000003", strdup("Carol"), strdup("Flagged in Sent"),
+                    strdup("2024-03-03 12:00"), MSG_FLAG_FLAGGED);
+    manifest_upsert(sent, "0000000000000004", strdup("Dave"),  strdup("Unread in Sent"),
+                    strdup("2024-03-04 13:00"), MSG_FLAG_UNSEEN);
+    manifest_save("Sent", sent);
+    manifest_free(sent);
+
+    /* Test 1: flag_search for UNSEEN finds UID 1 (INBOX) and UID 4 (Sent) */
+    SearchResult *res = NULL;
+    int cnt = 0;
+    int rc = local_flag_search(MSG_FLAG_UNSEEN, &res, &cnt);
+    ASSERT(rc == 0,   "flag_search: returns 0");
+    ASSERT(cnt == 2,  "flag_search UNSEEN: 2 results");
+    int found1 = 0, found4 = 0;
+    for (int i = 0; i < cnt; i++) {
+        if (strcmp(res[i].uid, "0000000000000001") == 0) {
+            found1 = 1;
+            ASSERT(strcmp(res[i].folder, "INBOX") == 0, "flag_search: UID1 folder is INBOX");
+            ASSERT(res[i].flags & MSG_FLAG_UNSEEN,       "flag_search: UID1 has UNSEEN");
+        }
+        if (strcmp(res[i].uid, "0000000000000004") == 0) {
+            found4 = 1;
+            ASSERT(strcmp(res[i].folder, "Sent") == 0,   "flag_search: UID4 folder is Sent");
+        }
+    }
+    ASSERT(found1, "flag_search UNSEEN: UID1 found");
+    ASSERT(found4, "flag_search UNSEEN: UID4 found");
+    local_search_free(res, cnt);
+
+    /* Test 2: flag_search for FLAGGED finds only UID 3 (Sent) */
+    res = NULL; cnt = 0;
+    local_flag_search(MSG_FLAG_FLAGGED, &res, &cnt);
+    ASSERT(cnt == 1,  "flag_search FLAGGED: 1 result");
+    ASSERT(strcmp(res[0].uid, "0000000000000003") == 0, "flag_search FLAGGED: UID3");
+    ASSERT(strcmp(res[0].folder, "Sent") == 0,           "flag_search FLAGGED: Sent folder");
+    local_search_free(res, cnt);
+
+    /* Test 3: flag_search for both bits returns union (UID1, UID3, UID4) */
+    res = NULL; cnt = 0;
+    local_flag_search(MSG_FLAG_UNSEEN | MSG_FLAG_FLAGGED, &res, &cnt);
+    ASSERT(cnt == 3,  "flag_search UNSEEN|FLAGGED: 3 results");
+    local_search_free(res, cnt);
+
+    /* Test 4: UID2 (read, no flags) is never returned */
+    res = NULL; cnt = 0;
+    local_flag_search(MSG_FLAG_UNSEEN, &res, &cnt);
+    int found2 = 0;
+    for (int i = 0; i < cnt; i++)
+        if (strcmp(res[i].uid, "0000000000000002") == 0) found2 = 1;
+    ASSERT(!found2, "flag_search: read UID2 not in UNSEEN results");
+    local_search_free(res, cnt);
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+void test_manifest_count_after_flag_update(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-count-update-test");
+
+    /* Pre-clean */
+    unlink("/tmp/email-cli-count-update-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/INBOX.tsv");
+
+    /* Build a manifest with 3 unread messages */
+    Manifest *m = calloc(1, sizeof(Manifest));
+    manifest_upsert(m, "0000000000000010", strdup("A"), strdup("Msg1"),
+                    strdup("2024-01-01 08:00"), MSG_FLAG_UNSEEN);
+    manifest_upsert(m, "0000000000000020", strdup("B"), strdup("Msg2"),
+                    strdup("2024-01-02 09:00"), MSG_FLAG_UNSEEN);
+    manifest_upsert(m, "0000000000000030", strdup("C"), strdup("Msg3"),
+                    strdup("2024-01-03 10:00"), 0 /* read */);
+    manifest_save("INBOX", m);
+
+    /* Initial count: 2 unread, 0 flagged */
+    int unread = -1, flagged = -1;
+    manifest_count_all_flags(&unread, &flagged);
+    ASSERT(unread  == 2, "count_after_update: initial unread is 2");
+    ASSERT(flagged == 0, "count_after_update: initial flagged is 0");
+
+    /* Simulate user pressing 'n' on UID 10 — mark as read */
+    ManifestEntry *e = manifest_find(m, "0000000000000010");
+    ASSERT(e != NULL, "count_after_update: UID10 found");
+    e->flags &= ~MSG_FLAG_UNSEEN;
+    manifest_save("INBOX", m);
+
+    /* Count should now be 1 */
+    manifest_count_all_flags(&unread, &flagged);
+    ASSERT(unread == 1, "count_after_update: unread drops to 1 after save");
+
+    /* Mark UID 20 as read too */
+    e = manifest_find(m, "0000000000000020");
+    e->flags &= ~MSG_FLAG_UNSEEN;
+    manifest_save("INBOX", m);
+
+    manifest_count_all_flags(&unread, &flagged);
+    ASSERT(unread == 0, "count_after_update: unread drops to 0");
+
+    /* Flag UID 30 */
+    e = manifest_find(m, "0000000000000030");
+    e->flags |= MSG_FLAG_FLAGGED;
+    manifest_save("INBOX", m);
+
+    manifest_count_all_flags(&unread, &flagged);
+    ASSERT(flagged == 1, "count_after_update: flagged becomes 1");
+
+    manifest_free(m);
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+void test_flag_search_folder_isolation(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-flag-iso-test");
+
+    /* Pre-clean */
+    unlink("/tmp/email-cli-flag-iso-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/INBOX.tsv");
+    unlink("/tmp/email-cli-flag-iso-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/Spam.tsv");
+
+    /* Same UID in two different folders (shouldn't happen in practice but verify
+     * that flag_search reports the correct folder for each) */
+    Manifest *inbox = calloc(1, sizeof(Manifest));
+    manifest_upsert(inbox, "0000000000000099", strdup("X"), strdup("INBOX copy"),
+                    strdup("2024-06-01 00:00"), MSG_FLAG_UNSEEN);
+    manifest_save("INBOX", inbox);
+    manifest_free(inbox);
+
+    Manifest *spam = calloc(1, sizeof(Manifest));
+    manifest_upsert(spam, "0000000000000099", strdup("X"), strdup("Spam copy"),
+                    strdup("2024-06-01 00:00"), MSG_FLAG_UNSEEN);
+    manifest_save("Spam", spam);
+    manifest_free(spam);
+
+    SearchResult *res = NULL; int cnt = 0;
+    local_flag_search(MSG_FLAG_UNSEEN, &res, &cnt);
+    ASSERT(cnt == 2, "flag_search isolation: 2 results (same UID in 2 folders)");
+    int found_inbox = 0, found_spam = 0;
+    for (int i = 0; i < cnt; i++) {
+        if (strcmp(res[i].folder, "INBOX") == 0) found_inbox = 1;
+        if (strcmp(res[i].folder, "Spam")  == 0) found_spam  = 1;
+    }
+    ASSERT(found_inbox, "flag_search isolation: INBOX result present");
+    ASSERT(found_spam,  "flag_search isolation: Spam result present");
+    local_search_free(res, cnt);
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}

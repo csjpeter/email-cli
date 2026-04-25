@@ -341,6 +341,93 @@ static void test_batch_cron_status(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  COMMAND SEPARATION: labels (Gmail) vs folders (IMAP)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_list_labels_blocked_on_imap(void) {
+    /* 'list-labels' is Gmail-only; on IMAP it must print an error and exit non-0 */
+    restart_mock();
+    const char *a[] = {"list-labels", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "list-labels on IMAP: opens");
+    ASSERT_WAIT_FOR(s, "list-labels", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Gmail");
+    pty_close(s);
+}
+
+static void test_list_folders_works_on_imap(void) {
+    /* 'list-folders' must succeed on IMAP and list folder names */
+    restart_mock();
+    const char *a[] = {"list-folders", "--batch", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "list-folders on IMAP: opens");
+    ASSERT_WAIT_FOR(s, "INBOX", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_create_label_blocked_on_imap(void) {
+    /* 'create-label' is Gmail-only; on IMAP it must print an error */
+    restart_mock();
+    const char *a[] = {"create-label", "TestLabel", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "create-label on IMAP: opens");
+    ASSERT_WAIT_FOR(s, "create-label", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Gmail");
+    pty_close(s);
+}
+
+static void test_delete_label_blocked_on_imap(void) {
+    /* 'delete-label' is Gmail-only; on IMAP it must print an error */
+    restart_mock();
+    const char *a[] = {"delete-label", "SomeLabel", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "delete-label on IMAP: opens");
+    ASSERT_WAIT_FOR(s, "delete-label", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Gmail");
+    pty_close(s);
+}
+
+static void test_create_folder_help(void) {
+    /* 'create-folder --help' must show usage */
+    const char *a[] = {"create-folder", "--help", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "create-folder --help: opens");
+    ASSERT_WAIT_FOR(s, "create-folder", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "IMAP");
+    pty_close(s);
+}
+
+static void test_delete_folder_help(void) {
+    /* 'delete-folder --help' must show usage */
+    const char *a[] = {"delete-folder", "--help", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "delete-folder --help: opens");
+    ASSERT_WAIT_FOR(s, "delete-folder", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "IMAP");
+    pty_close(s);
+}
+
+static void test_create_folder_missing_arg(void) {
+    /* 'create-folder' with no argument must print error and show usage */
+    restart_mock();
+    const char *a[] = {"create-folder", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "create-folder no arg: opens");
+    ASSERT_WAIT_FOR(s, "create-folder", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_delete_folder_missing_arg(void) {
+    /* 'delete-folder' with no argument must print error and show usage */
+    restart_mock();
+    const char *a[] = {"delete-folder", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "delete-folder no arg: opens");
+    ASSERT_WAIT_FOR(s, "delete-folder", WAIT_MS);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  INTERACTIVE LIST VIEW
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -2318,6 +2405,640 @@ static void test_pending_flags_offline_queue(void) {
     restart_mock();
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  VIRTUAL UNREAD / FLAGGED LIST (Ticket 4 + IMAP bug fixes)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/* Helper: create directory chain for account data under g_test_home. */
+static void make_account_dirs(void) {
+    char p[700];
+    snprintf(p, sizeof(p), "%s/.local",                             g_test_home); mkdir(p, 0700);
+    snprintf(p, sizeof(p), "%s/.local/share",                       g_test_home); mkdir(p, 0700);
+    snprintf(p, sizeof(p), "%s/.local/share/email-cli",             g_test_home); mkdir(p, 0700);
+    snprintf(p, sizeof(p), "%s/.local/share/email-cli/accounts",    g_test_home); mkdir(p, 0700);
+    snprintf(p, sizeof(p), "%s/.local/share/email-cli/accounts/testuser", g_test_home); mkdir(p, 0700);
+    snprintf(p, sizeof(p), "%s/.local/share/email-cli/accounts/testuser/manifests", g_test_home); mkdir(p, 0700);
+}
+
+/*
+ * Helper: write a manifest TSV file for the given folder.
+ * Each element of `lines` must be a complete TSV line:
+ *   uid TAB from TAB subject TAB date TAB flags
+ */
+static void write_test_manifest(const char *folder,
+                                 const char **lines, int n) {
+    make_account_dirs();
+    char path[700];
+    snprintf(path, sizeof(path),
+             "%s/.local/share/email-cli/accounts/testuser/manifests/%s.tsv",
+             g_test_home, folder);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    for (int i = 0; i < n; i++) fprintf(fp, "%s\n", lines[i]);
+    fclose(fp);
+}
+
+/* Helper: write a minimal .eml cache file so the reader can open a UID.
+ * UID "0000000000000001" → d1='1', d2='0' → messages/INBOX/1/0/<uid>.eml */
+static void write_test_eml(const char *folder, const char *uid,
+                            const char *from, const char *subject,
+                            const char *body) {
+    make_account_dirs();
+    char last = uid[strlen(uid) - 1];
+    char prev = strlen(uid) > 1 ? uid[strlen(uid) - 2] : '0';
+    char dir[700], path[800];
+    snprintf(dir, sizeof(dir),
+             "%s/.local/share/email-cli/accounts/testuser/messages/%s/%c/%c",
+             g_test_home, folder, last, prev);
+    /* mkdir -p equivalent for four levels */
+    {
+        char tmp[700];
+        snprintf(tmp, sizeof(tmp),
+                 "%s/.local/share/email-cli/accounts/testuser/messages", g_test_home);
+        mkdir(tmp, 0700);
+        snprintf(tmp, sizeof(tmp),
+                 "%s/.local/share/email-cli/accounts/testuser/messages/%s", g_test_home, folder);
+        mkdir(tmp, 0700);
+        char d1dir[700];
+        snprintf(d1dir, sizeof(d1dir),
+                 "%s/.local/share/email-cli/accounts/testuser/messages/%s/%c", g_test_home, folder, last);
+        mkdir(d1dir, 0700);
+        mkdir(dir, 0700);
+    }
+    snprintf(path, sizeof(path), "%s/%s.eml", dir, uid);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp,
+            "From: %s\r\n"
+            "Subject: %s\r\n"
+            "MIME-Version: 1.0\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            "\r\n"
+            "%s\r\n", from, subject, body);
+    fclose(fp);
+}
+
+/* Helper: open email-tui and stop at the folder browser (before INBOX list).
+ * Caller must call pty_close(s) and ESC/settle as needed. */
+static PtySession *tui_open_to_folders(void) {
+    PtySession *s = cli_run(NULL);
+    if (!s) return NULL;
+    if (pty_wait_for(s, "Email Account", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "Folders", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    return s;
+}
+
+static void test_virtual_folder_sections_shown(void) {
+    /* Ticket 4: folder browser shows Tags/Flags and Folders section headers
+     * with Unread and Flagged virtual rows */
+    restart_mock();
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "virtual sections: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Tags / Flags");
+    ASSERT_SCREEN_CONTAINS(s, "Unread");
+    ASSERT_SCREEN_CONTAINS(s, "Flagged");
+    ASSERT_SCREEN_CONTAINS(s, "Folders");
+    ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_virtual_unread_count_from_manifests(void) {
+    /* Ticket 4 / Bug 1: Unread row in folder browser reflects local manifests.
+     * Two folders have unread messages → count is non-zero. */
+
+    /* Sync first to populate the local folder list cache */
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "unread count: sync opens");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* Seed: INBOX has 2 unread (flag=1) and 1 read (flag=0) */
+    const char *inbox[] = {
+        "0000000000000011\tsender@example.com\tUnread One\t2026-04-25 10:00\t1",
+        "0000000000000012\tsender@example.com\tUnread Two\t2026-04-25 09:00\t1",
+        "0000000000000013\tsender@example.com\tAlready Read\t2026-04-25 08:00\t0",
+    };
+    write_test_manifest("INBOX", inbox, 3);
+    /* Seed: Sent has 1 unread */
+    const char *sent[] = {
+        "0000000000000021\tme@example.com\tSent Unread\t2026-04-24 08:00\t1",
+    };
+    write_test_manifest("Sent", sent, 1);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "unread count: opens folder browser offline");
+    pty_settle(s, SETTLE_MS);
+
+    /* Navigate UP twice to highlight the Unread row:
+     * VPREFIX(4=INBOX) → UP → VP_FLAGGED(2) → UP → VP_UNREAD(1) */
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+
+    /* The Unread row must show total unread = 3 (2 from INBOX + 1 from Sent) */
+    ASSERT_SCREEN_CONTAINS(s, "3");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+static void test_virtual_unread_list_shows_messages(void) {
+    /* Bug 2 / Bug 3 prerequisite: navigating into the virtual Unread list
+     * shows all unread messages across folders. */
+
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "unread list: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    const char *inbox[] = {
+        "0000000000000031\tsender@example.com\tImportant Update\t2026-04-25 10:00\t1",
+        "0000000000000032\tsender@example.com\tAlready Read\t2026-04-25 09:00\t0",
+    };
+    write_test_manifest("INBOX", inbox, 2);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "unread list: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    /* Navigate to VP_UNREAD row (2 UP from INBOX) and press Enter */
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Only the unread message should appear (the read one is filtered out) */
+    ASSERT_SCREEN_CONTAINS(s, "Important Update");
+    ASSERT(pty_screen_contains(s, "Already Read") == 0,
+           "unread list: read message must not appear in Unread virtual list");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+static void test_virtual_enter_opens_reader(void) {
+    /* Bug 3 fix: Enter in the virtual Unread list opens the message reader.
+     * Previously failed because entries[i].folder was empty. */
+
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "virtual enter: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    const char uid[] = "0000000000000041";
+    const char *inbox[] = {
+        "0000000000000041\tsender@example.com\tOpen Me Please\t2026-04-25 10:00\t1",
+    };
+    write_test_manifest("INBOX", inbox, 1);
+    write_test_eml("INBOX", uid, "sender@example.com", "Open Me Please",
+                   "This is the message body.");
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "virtual enter: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    /* Navigate to Unread and open the virtual list */
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Open Me Please");
+
+    /* Press Enter on the first (and only) message → opens reader */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "sender@example.com");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+static void test_virtual_n_marks_message_read(void) {
+    /* Bug 2 fix: pressing 'n' in the virtual Unread list marks the message read.
+     * Previously 'n' saved to __unread__.tsv instead of the real folder manifest,
+     * so the status marker did not change. */
+
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "virtual n: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    const char *inbox[] = {
+        "0000000000000051\tsender@example.com\tMark Me Read\t2026-04-25 10:00\t1",
+    };
+    write_test_manifest("INBOX", inbox, 1);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "virtual n: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    /* Navigate to Unread virtual list */
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Mark Me Read");
+
+    /* Status column must show 'N' (unread marker) before toggling */
+    ASSERT_SCREEN_CONTAINS(s, "N");
+
+    /* Press 'n' to mark as read */
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+
+    /* 'N' status marker must disappear; message should show as read "----" */
+    ASSERT_SCREEN_CONTAINS(s, "----");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    /* Verify the per-folder manifest on disk was updated (flags=0) */
+    char mpath[600];
+    snprintf(mpath, sizeof(mpath),
+             "%s/.local/share/email-cli/accounts/testuser/manifests/INBOX.tsv",
+             g_test_home);
+    FILE *fp = fopen(mpath, "r");
+    ASSERT(fp != NULL, "virtual n: INBOX manifest exists");
+    if (fp) {
+        char line[512] = "";
+        while (fgets(line, sizeof(line), fp)) {
+            if (strstr(line, "0000000000000051")) break;
+        }
+        fclose(fp);
+        /* Last field (flags) must be 0 after marking read */
+        ASSERT(strstr(line, "\t0\n") || strstr(line, "\t0\r"),
+               "virtual n: INBOX manifest updated to flags=0");
+    }
+
+    write_config();
+    restart_mock();
+}
+
+static void test_virtual_flagged_shows_messages(void) {
+    /* Ticket 4: Flagged virtual list shows messages with MSG_FLAG_FLAGGED(=2). */
+
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "virtual flagged: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    const char *inbox[] = {
+        "0000000000000061\tsender@example.com\tStarred Message\t2026-04-25 10:00\t2",
+        "0000000000000062\tsender@example.com\tNot Starred\t2026-04-25 09:00\t0",
+    };
+    write_test_manifest("INBOX", inbox, 2);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "virtual flagged: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    /* Navigate UP once to VP_FLAGGED(2) and press Enter */
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT_SCREEN_CONTAINS(s, "Starred Message");
+    ASSERT(pty_screen_contains(s, "Not Starred") == 0,
+           "virtual flagged: unflagged message must not appear in Flagged list");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+static void test_unread_count_refreshes_after_mark(void) {
+    /* Bug 1 fix: after marking a message read in INBOX and going back to the
+     * folder browser, manifest_count_all_flags is re-called and shows the
+     * updated (lower) unread count. */
+
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "count refresh: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* Seed INBOX with exactly one unread message */
+    const char *inbox[] = {
+        "0000000000000071\tsender@example.com\tSingle Unread\t2026-04-25 10:00\t1",
+    };
+    write_test_manifest("INBOX", inbox, 1);
+
+    /* Open folder browser; the Unread row should show "1" */
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "count refresh: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "1");
+
+    /* Navigate to INBOX (default position) and open the message list */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Single Unread");
+
+    /* Mark it as read */
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+
+    /* Go back to folder browser via Backspace */
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Unread row must now show "0" (or the number is absent from the Unread row) */
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "0");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  FLAG STATUS COLUMN (P/J/R/F markers)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_status_junk_marker_shown(void) {
+    /* A message with MSG_FLAG_JUNK(=64) must display 'J' in the status column. */
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "junk marker: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* flags=64 = MSG_FLAG_JUNK */
+    const char *inbox[] = {
+        "00000000000000a1\tspammer@bad.com\tWin a Prize!\t2026-04-25 10:00\t64",
+    };
+    write_test_manifest("INBOX", inbox, 1);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "junk marker: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    /* Open INBOX (default cursor position) */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT_SCREEN_CONTAINS(s, "Win a Prize!");
+    /* Status column: position 1 must be 'J' (junk) */
+    ASSERT_SCREEN_CONTAINS(s, "J");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+static void test_status_phishing_marker_shown(void) {
+    /* A message with MSG_FLAG_PHISHING(=128) must display 'P' in the status column.
+     * P has higher priority than J. */
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "phishing marker: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* flags=128 = MSG_FLAG_PHISHING */
+    const char *inbox[] = {
+        "00000000000000b1\tphisher@evil.com\tUpdate Your Password\t2026-04-25 11:00\t128",
+    };
+    write_test_manifest("INBOX", inbox, 1);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "phishing marker: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT_SCREEN_CONTAINS(s, "Update Your Password");
+    ASSERT_SCREEN_CONTAINS(s, "P");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+static void test_status_answered_marker_shown(void) {
+    /* A message with MSG_FLAG_ANSWERED(=16) must display 'R' in position 5. */
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "answered marker: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* flags=16 = MSG_FLAG_ANSWERED */
+    const char *inbox[] = {
+        "00000000000000c1\tboss@acme.com\tRe: Meeting\t2026-04-25 09:00\t16",
+    };
+    write_test_manifest("INBOX", inbox, 1);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "answered marker: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT_SCREEN_CONTAINS(s, "Re: Meeting");
+    /* Status column position 5: 'R' for answered */
+    ASSERT_SCREEN_CONTAINS(s, "R");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+static void test_status_forwarded_marker_shown(void) {
+    /* A message with MSG_FLAG_FORWARDED(=32) must display 'F' in position 5. */
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "forwarded marker: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* flags=32 = MSG_FLAG_FORWARDED */
+    const char *inbox[] = {
+        "00000000000000d1\tcolleague@acme.com\tFwd: Proposal\t2026-04-25 08:30\t32",
+    };
+    write_test_manifest("INBOX", inbox, 1);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "forwarded marker: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT_SCREEN_CONTAINS(s, "Fwd: Proposal");
+    ASSERT_SCREEN_CONTAINS(s, "F");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  mark-junk / mark-notjunk CLI COMMANDS
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_mark_junk_help(void) {
+    /* 'mark-junk --help' must show usage with $Junk and SPAM references. */
+    const char *a[] = {"mark-junk", "--help", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "mark-junk --help: opens");
+    ASSERT_WAIT_FOR(s, "mark-junk", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "junk");
+    pty_close(s);
+}
+
+static void test_mark_notjunk_help(void) {
+    /* 'mark-notjunk --help' must show usage. */
+    const char *a[] = {"mark-notjunk", "--help", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "mark-notjunk --help: opens");
+    ASSERT_WAIT_FOR(s, "mark-notjunk", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "junk");
+    pty_close(s);
+}
+
+static void test_mark_junk_missing_arg(void) {
+    /* 'mark-junk' with no UID must print an error and show usage. */
+    restart_mock();
+    const char *a[] = {"mark-junk", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "mark-junk no arg: opens");
+    ASSERT_WAIT_FOR(s, "mark-junk", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_mark_notjunk_missing_arg(void) {
+    /* 'mark-notjunk' with no UID must print an error and show usage. */
+    restart_mock();
+    const char *a[] = {"mark-notjunk", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "mark-notjunk no arg: opens");
+    ASSERT_WAIT_FOR(s, "mark-notjunk", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_mark_junk_blocked_in_ro(void) {
+    /* email-cli-ro must reject mark-junk. */
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_cli_ro_bin);
+    restart_mock();
+    const char *a[] = {"mark-junk", "0000000000000001", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "mark-junk ro block: opens");
+    ASSERT_WAIT_FOR(s, "read-only", WAIT_MS);
+    pty_close(s);
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_tui_bin);
+}
+
+static void test_mark_notjunk_blocked_in_ro(void) {
+    /* email-cli-ro must reject mark-notjunk. */
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_cli_ro_bin);
+    restart_mock();
+    const char *a[] = {"mark-notjunk", "0000000000000001", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "mark-notjunk ro block: opens");
+    ASSERT_WAIT_FOR(s, "read-only", WAIT_MS);
+    pty_close(s);
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_tui_bin);
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 #define RUN_TEST(fn) do { printf("  %s...\n", #fn); fn(); } while(0)
@@ -2372,6 +3093,16 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_batch_folders_tree);
     RUN_TEST(test_batch_sync);
     RUN_TEST(test_batch_cron_status);
+
+    printf("\n--- Command separation: labels vs folders ---\n");
+    RUN_TEST(test_list_labels_blocked_on_imap);
+    RUN_TEST(test_list_folders_works_on_imap);
+    RUN_TEST(test_create_label_blocked_on_imap);
+    RUN_TEST(test_delete_label_blocked_on_imap);
+    RUN_TEST(test_create_folder_help);
+    RUN_TEST(test_delete_folder_help);
+    RUN_TEST(test_create_folder_missing_arg);
+    RUN_TEST(test_delete_folder_missing_arg);
 
     printf("\n--- Interactive list ---\n");
     RUN_TEST(test_interactive_list_content);
@@ -2562,6 +3293,32 @@ int main(int argc, char *argv[]) {
     printf("\n--- pending flags offline queue (US-26) ---\n");
     restart_mock();
     RUN_TEST(test_pending_flags_offline_queue);
+
+    printf("\n--- virtual Unread/Flagged list ---\n");
+    restart_mock();
+    RUN_TEST(test_virtual_folder_sections_shown);
+    RUN_TEST(test_virtual_unread_count_from_manifests);
+    RUN_TEST(test_virtual_unread_list_shows_messages);
+    RUN_TEST(test_virtual_enter_opens_reader);
+    RUN_TEST(test_virtual_n_marks_message_read);
+    RUN_TEST(test_virtual_flagged_shows_messages);
+    RUN_TEST(test_unread_count_refreshes_after_mark);
+
+    printf("\n--- flag status column (P/J/R/F markers) ---\n");
+    restart_mock();
+    RUN_TEST(test_status_junk_marker_shown);
+    RUN_TEST(test_status_phishing_marker_shown);
+    RUN_TEST(test_status_answered_marker_shown);
+    RUN_TEST(test_status_forwarded_marker_shown);
+
+    printf("\n--- mark-junk / mark-notjunk commands ---\n");
+    restart_mock();
+    RUN_TEST(test_mark_junk_help);
+    RUN_TEST(test_mark_notjunk_help);
+    RUN_TEST(test_mark_junk_missing_arg);
+    RUN_TEST(test_mark_notjunk_missing_arg);
+    RUN_TEST(test_mark_junk_blocked_in_ro);
+    RUN_TEST(test_mark_notjunk_blocked_in_ro);
 
     /* Restore full email-cli binary */
     snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", argv[1]);

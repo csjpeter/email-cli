@@ -206,6 +206,28 @@ int mail_client_trash(MailClient *c, const char *uid) {
     return imap_uid_set_flag(c->imap, uid, "\\Deleted", 1);
 }
 
+int mail_client_mark_junk(MailClient *c, const char *uid) {
+    if (c->is_gmail) {
+        const char *add[] = { "SPAM" };
+        const char *rm[]  = { "INBOX" };
+        return gmail_modify_labels(c->gmail, uid, add, 1, rm, 1);
+    }
+    /* IMAP: set $Junk, clear $NotJunk */
+    imap_uid_set_flag(c->imap, uid, "$NotJunk", 0);
+    return imap_uid_set_flag(c->imap, uid, "$Junk", 1);
+}
+
+int mail_client_mark_notjunk(MailClient *c, const char *uid) {
+    if (c->is_gmail) {
+        const char *add[] = { "INBOX" };
+        const char *rm[]  = { "SPAM" };
+        return gmail_modify_labels(c->gmail, uid, add, 1, rm, 1);
+    }
+    /* IMAP: set $NotJunk, clear $Junk */
+    imap_uid_set_flag(c->imap, uid, "$Junk", 0);
+    return imap_uid_set_flag(c->imap, uid, "$NotJunk", 1);
+}
+
 /* ── List with IDs ────────────────────────────────────────────────── */
 
 int mail_client_list_with_ids(MailClient *c, char ***names_out,
@@ -251,24 +273,35 @@ int mail_client_list_with_ids(MailClient *c, char ***names_out,
 
 int mail_client_create_label(MailClient *c, const char *name, char **id_out) {
     if (id_out) *id_out = NULL;
-
-    if (c->is_gmail) {
-        return gmail_create_label(c->gmail, name, id_out);
+    if (!c->is_gmail) {
+        fprintf(stderr, "Error: 'create-label' is Gmail-only. Use 'create-folder' for IMAP.\n");
+        return -1;
     }
-
-    /* IMAP: create folder */
-    int rc = imap_create_folder(c->imap, name);
-    if (rc == 0 && id_out) {
-        *id_out = strdup(name);
-    }
-    return rc;
+    return gmail_create_label(c->gmail, name, id_out);
 }
 
 int mail_client_delete_label(MailClient *c, const char *label_id) {
-    if (c->is_gmail) {
-        return gmail_delete_label(c->gmail, label_id);
+    if (!c->is_gmail) {
+        fprintf(stderr, "Error: 'delete-label' is Gmail-only. Use 'delete-folder' for IMAP.\n");
+        return -1;
     }
-    return imap_delete_folder(c->imap, label_id);
+    return gmail_delete_label(c->gmail, label_id);
+}
+
+int mail_client_create_folder(MailClient *c, const char *name) {
+    if (c->is_gmail) {
+        fprintf(stderr, "Error: 'create-folder' is IMAP-only. Use 'create-label' for Gmail.\n");
+        return -1;
+    }
+    return imap_create_folder(c->imap, name);
+}
+
+int mail_client_delete_folder(MailClient *c, const char *name) {
+    if (c->is_gmail) {
+        fprintf(stderr, "Error: 'delete-folder' is IMAP-only. Use 'delete-label' for Gmail.\n");
+        return -1;
+    }
+    return imap_delete_folder(c->imap, name);
 }
 
 /* ── Label modify (Gmail only) ────────────────────────────────────── */

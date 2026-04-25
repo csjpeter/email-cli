@@ -521,6 +521,8 @@ int main(int argc, char *argv[]) {
         static const char *ro_blocked[] = {
             "mark-read", "mark-unread", "mark-starred", "remove-starred",
             "add-label", "remove-label", "create-label", "delete-label",
+            "create-folder", "delete-folder",
+            "mark-junk", "mark-notjunk",
             "add-account", "remove-account", NULL
         };
         int blocked = 0;

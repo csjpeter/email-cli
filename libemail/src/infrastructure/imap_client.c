@@ -806,10 +806,15 @@ static int parse_imap_flags(const char *line) {
     if (!p) return 0;
     p += 7; /* skip "FLAGS (" */
     int flags = 0;
-    /* Check for known flags */
-    if (strstr(p, "\\Seen") == NULL) flags |= MSG_FLAG_UNSEEN;  /* absence of \Seen = unseen */
-    if (strstr(p, "\\Flagged") != NULL) flags |= MSG_FLAG_FLAGGED;
-    if (strstr(p, "$Done")     != NULL) flags |= MSG_FLAG_DONE;
+    if (strstr(p, "\\Seen")     == NULL) flags |= MSG_FLAG_UNSEEN;
+    if (strstr(p, "\\Flagged")  != NULL) flags |= MSG_FLAG_FLAGGED;
+    if (strstr(p, "$Done")      != NULL) flags |= MSG_FLAG_DONE;
+    if (strstr(p, "\\Answered") != NULL) flags |= MSG_FLAG_ANSWERED;
+    if (strstr(p, "$Forwarded") != NULL) flags |= MSG_FLAG_FORWARDED;
+    if (strstr(p, "$Phishing")  != NULL) flags |= MSG_FLAG_PHISHING;
+    /* $Junk and $NotJunk: $NotJunk wins if both somehow present */
+    if (strstr(p, "$Junk")      != NULL) flags |= MSG_FLAG_JUNK;
+    if (strstr(p, "$NotJunk")   != NULL) flags &= ~MSG_FLAG_JUNK;
     return flags;
 }
 

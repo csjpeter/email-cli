@@ -105,6 +105,20 @@ int mail_client_set_flag(MailClient *c, const char *uid,
                          const char *flag, int add);
 
 /**
+ * @brief Mark a message as junk/spam.
+ * IMAP: sets $Junk, clears $NotJunk.
+ * Gmail: adds SPAM label, removes INBOX.
+ */
+int mail_client_mark_junk(MailClient *c, const char *uid);
+
+/**
+ * @brief Mark a message as not-junk (ham).
+ * IMAP: sets $NotJunk, clears $Junk.
+ * Gmail: removes SPAM label, adds INBOX.
+ */
+int mail_client_mark_notjunk(MailClient *c, const char *uid);
+
+/**
  * @brief Move a message to Trash.
  *
  * IMAP: sets \\Deleted flag (caller may need EXPUNGE).
@@ -133,19 +147,33 @@ int mail_client_list_with_ids(MailClient *c, char ***names_out,
                               char ***ids_out, int *count_out);
 
 /**
- * @brief Create a label (Gmail) or folder (IMAP).
- * @param name   Display name / folder path.
- * @param id_out Optional: receives new label ID (Gmail only). Caller frees.
+ * @brief Create a Gmail label. Fails if called on an IMAP account.
+ * @param name   Display name for the new label.
+ * @param id_out Optional: receives new label ID. Caller frees.
  * @return 0 on success, -1 on error.
  */
 int mail_client_create_label(MailClient *c, const char *name, char **id_out);
 
 /**
- * @brief Delete a label (Gmail) or folder (IMAP).
- * @param label_id  Label ID for Gmail; folder name for IMAP.
+ * @brief Delete a Gmail label. Fails if called on an IMAP account.
+ * @param label_id  Label ID (from list-labels).
  * @return 0 on success, -1 on error.
  */
 int mail_client_delete_label(MailClient *c, const char *label_id);
+
+/**
+ * @brief Create an IMAP folder. Fails if called on a Gmail account.
+ * @param name  Folder path / name.
+ * @return 0 on success, -1 on error.
+ */
+int mail_client_create_folder(MailClient *c, const char *name);
+
+/**
+ * @brief Delete an IMAP folder. Fails if called on a Gmail account.
+ * @param name  Folder path / name.
+ * @return 0 on success, -1 on error.
+ */
+int mail_client_delete_folder(MailClient *c, const char *name);
 
 /**
  * @brief Add or remove a label on a Gmail message (no-op for IMAP).

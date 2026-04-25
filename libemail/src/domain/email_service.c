@@ -1351,6 +1351,30 @@ static void flag_push_background(const Config *cfg, const char *uid,
     /* Parent continues; child reaped by bg_sync_sigchld. */
 }
 
+static void junk_push_background(const Config *cfg, const char *uid, int mark_junk) {
+    struct sigaction sa = {0};
+    sa.sa_handler = bg_sync_sigchld;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGCHLD, &sa, NULL);
+    pid_t pid = fork();
+    if (pid < 0) return;
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            dup2(devnull, STDIN_FILENO); dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            if (devnull > STDERR_FILENO) close(devnull);
+        }
+        MailClient *mc = make_mail(cfg);
+        if (mc) {
+            if (mark_junk) mail_client_mark_junk(mc, uid);
+            else           mail_client_mark_notjunk(mc, uid);
+            mail_client_free(mc);
+        }
+        _exit(0);
+    }
+}
+
 /**
  * Fork and exec email-sync in the background.
  * Installs a SIGCHLD handler (without SA_RESTART) so the blocked read() in
@@ -1886,10 +1910,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
                 printf("\033[0m\n\n");
-                printf("  %-16s  %-4s  %-*s  %s\n",
+                printf("  %-16s  %-5s  %-*s  %s\n",
                        "Date", "Sts", subj_w, "Subject", "From");
                 printf("  ");
-                print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
+                print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
                 printf("\n  \033[2m(empty)\033[0m\n");
                 fflush(stdout);
@@ -2054,10 +2078,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
                 printf("\033[0m\n\n");
-                printf("  %-16s  %-4s  %-*s  %s\n",
+                printf("  %-16s  %-5s  %-*s  %s\n",
                        "Date", "Sts", subj_w, "Subject", "From");
                 printf("  ");
-                print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
+                print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
                 printf("\n  \033[2m(empty)\033[0m\n");
                 fflush(stdout);
@@ -2138,10 +2162,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
             printf("\033[0m\n\n");
-            printf("  %-16s  %-4s  %-*s  %s\n",
+            printf("  %-16s  %-5s  %-*s  %s\n",
                    "Date", "Sts", subj_w, "Subject", "From");
             printf("  ");
-            print_dbar(16); printf("  \u2550\u2550\u2550\u2550  ");
+            print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550  ");
             print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
             printf("\n  \033[2m(empty)\033[0m\n");
             fflush(stdout);
@@ -2343,15 +2367,15 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             }
         }
         if (show_uid)
-            printf("  %-16s  %-16s  %-4s  %-*s  %s\n",
+            printf("  %-16s  %-16s  %-5s  %-*s  %s\n",
                    "UID", "Date", "Sts", subj_w, "Subject", "From");
         else
-            printf("  %-16s  %-4s  %-*s  %s\n",
+            printf("  %-16s  %-5s  %-*s  %s\n",
                    "Date", "Sts", subj_w, "Subject", "From");
         printf("  ");
         if (show_uid) { print_dbar(16); printf("  "); }
         print_dbar(16); printf("  ");
-        printf("\u2550\u2550\u2550\u2550  ");
+        printf("\u2550\u2550\u2550\u2550\u2550  ");
         print_dbar(subj_w > 0 ? subj_w : 30); printf("  ");
         print_dbar(from_w > 0 ? from_w : 40); printf("\n");
 
@@ -2437,30 +2461,51 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if (sel) printf("\033[7m");
             }
 
-            /* Status column: coloured in TUI (except pending rows).
-             * In sel (reverse-video) rows: temporarily exit reverse-video
-             * for the coloured character, then re-enter (\033[7m) so the
-             * rest of the row stays highlighted. Plain CLI/RO stays ASCII. */
-            char sts[64];
+            /* Status column (5 chars): [P/J/N/-][star/-][D/-][A/-][R/F/-]
+             * Position 1: P=phishing(red) > J=junk(yellow) > N=unread(green) > -
+             * Position 2: star = flagged (yellow)
+             * Position 3: D = done
+             * Position 4: A = attachment
+             * Position 5: R=answered(cyan), F=forwarded(cyan), - = neither
+             *
+             * TUI: ANSI colours; sel rows exit/re-enter reverse-video around colour. */
+            char sts[96];
+            int eflags = entries[ei].flags;
             if (opts->pager && !remove_pending && !label_pending && !restore_pending) {
-                /* Non-sel: plain colour reset after char.
-                 * Sel: \033[0m exits rev-video → colour → \033[7m re-enters. */
-                const char *n_s = (entries[ei].flags & MSG_FLAG_UNSEEN)
-                    ? (sel ? "\033[0m\033[32mN\033[7m" : "\033[32mN\033[0m")
-                    : "-";
-                const char *f_s = (entries[ei].flags & MSG_FLAG_FLAGGED)
+                const char *n_s;
+                if      (eflags & MSG_FLAG_PHISHING)
+                    n_s = sel ? "\033[0m\033[1;31mP\033[7m" : "\033[1;31mP\033[0m";
+                else if (eflags & MSG_FLAG_JUNK)
+                    n_s = sel ? "\033[0m\033[33mJ\033[7m"   : "\033[33mJ\033[0m";
+                else if (eflags & MSG_FLAG_UNSEEN)
+                    n_s = sel ? "\033[0m\033[32mN\033[7m"   : "\033[32mN\033[0m";
+                else
+                    n_s = "-";
+                const char *f_s = (eflags & MSG_FLAG_FLAGGED)
                     ? (sel ? "\033[0m\033[33m\xe2\x98\x85\033[7m"
                            : "\033[33m\xe2\x98\x85\033[0m")
                     : "-";
-                snprintf(sts, sizeof(sts), "%s%s%c%c", n_s, f_s,
-                    (entries[ei].flags & MSG_FLAG_DONE)   ? 'D' : '-',
-                    (entries[ei].flags & MSG_FLAG_ATTACH) ? 'A' : '-');
+                const char *rf_s;
+                if      (eflags & MSG_FLAG_ANSWERED)
+                    rf_s = sel ? "\033[0m\033[36mR\033[7m" : "\033[36mR\033[0m";
+                else if (eflags & MSG_FLAG_FORWARDED)
+                    rf_s = sel ? "\033[0m\033[36mF\033[7m" : "\033[36mF\033[0m";
+                else
+                    rf_s = "-";
+                snprintf(sts, sizeof(sts), "%s%s%c%c%s", n_s, f_s,
+                    (eflags & MSG_FLAG_DONE)   ? 'D' : '-',
+                    (eflags & MSG_FLAG_ATTACH) ? 'A' : '-',
+                    rf_s);
             } else {
-                sts[0] = (entries[ei].flags & MSG_FLAG_UNSEEN)  ? 'N' : '-';
-                sts[1] = (entries[ei].flags & MSG_FLAG_FLAGGED) ? '*' : '-';
-                sts[2] = (entries[ei].flags & MSG_FLAG_DONE)    ? 'D' : '-';
-                sts[3] = (entries[ei].flags & MSG_FLAG_ATTACH)  ? 'A' : '-';
-                sts[4] = '\0';
+                sts[0] = (eflags & MSG_FLAG_PHISHING)  ? 'P'
+                       : (eflags & MSG_FLAG_JUNK)       ? 'J'
+                       : (eflags & MSG_FLAG_UNSEEN)     ? 'N' : '-';
+                sts[1] = (eflags & MSG_FLAG_FLAGGED)   ? '*' : '-';
+                sts[2] = (eflags & MSG_FLAG_DONE)      ? 'D' : '-';
+                sts[3] = (eflags & MSG_FLAG_ATTACH)    ? 'A' : '-';
+                sts[4] = (eflags & MSG_FLAG_ANSWERED)  ? 'R'
+                       : (eflags & MSG_FLAG_FORWARDED) ? 'F' : '-';
+                sts[5] = '\0';
             }
             if (show_uid)
                 printf("%s%-16.16s  %-16.16s  %s  ", row_pfx, entries[ei].uid, date, sts);
@@ -2742,6 +2787,7 @@ read_key_again: ;
                         { "c",                 "Compose new message"             },
                         { "n",                 "Toggle New (unread) flag"        },
                         { "f",                 "Toggle Flagged (starred) flag"   },
+                        { "j",                 "Toggle Junk (spam) flag"         },
                         { "d",                 "Toggle Done flag"                },
                         { "s",                 "Start background sync"           },
                         { "R",                 "Refresh after sync"              },
@@ -2951,7 +2997,38 @@ read_key_again: ;
                 }
                 break;
             }
-            if (ch == 'n' || ch == 'f' || ch == 'd') {
+            if (ch == 'j') {
+                /* Toggle junk: uses dedicated mark_junk / mark_notjunk */
+                const char *uid = entries[ei_cur].uid;
+                int is_junk = entries[ei_cur].flags & MSG_FLAG_JUNK;
+                if (is_junk) {
+                    entries[ei_cur].flags &= ~MSG_FLAG_JUNK;
+                } else {
+                    entries[ei_cur].flags |= MSG_FLAG_JUNK;
+                }
+                ManifestEntry *me = manifest_find(manifest, uid);
+                if (me) me->flags = entries[ei_cur].flags;
+                if (is_virtual_flags) {
+                    Manifest *fm = manifest_load(efolder);
+                    if (fm) {
+                        ManifestEntry *fme = manifest_find(fm, uid);
+                        if (fme) { fme->flags = entries[ei_cur].flags; manifest_save(efolder, fm); }
+                        manifest_free(fm);
+                    }
+                } else if (!is_virtual_search) {
+                    manifest_save(efolder, manifest);
+                }
+                if (is_gmail) {
+                    junk_push_background(cfg, uid, !is_junk);
+                } else if (list_mc) {
+                    if (is_junk)
+                        mail_client_mark_notjunk(list_mc, uid);
+                    else
+                        mail_client_mark_junk(list_mc, uid);
+                }
+                snprintf(feedback_msg, sizeof(feedback_msg),
+                         is_junk ? "Marked as not-junk" : "Marked as junk");
+            } else if (ch == 'n' || ch == 'f' || ch == 'd') {
                 const char *uid = entries[ei_cur].uid;
                 int bit;
                 const char *flag_name;
@@ -3081,6 +3158,10 @@ static char **fetch_folder_list(const Config *cfg, int *count_out, char *sep_out
 }
 
 int email_service_list_folders(const Config *cfg, int tree) {
+    if (cfg->gmail_mode) {
+        fprintf(stderr, "Error: 'list-folders' is IMAP-only. Use 'list-labels' for Gmail.\n");
+        return -1;
+    }
     int count = 0;
     char sep = '.';
     char **folders = fetch_folder_list(cfg, &count, &sep);
@@ -5307,6 +5388,10 @@ int email_service_set_label(const Config *cfg, const char *uid,
 }
 
 int email_service_list_labels(const Config *cfg) {
+    if (!cfg->gmail_mode) {
+        fprintf(stderr, "Error: 'list-labels' is Gmail-only. Use 'list-folders' for IMAP.\n");
+        return -1;
+    }
     MailClient *mc = make_mail(cfg);
     if (!mc) {
         fprintf(stderr, "Error: Could not connect.\n");
@@ -5319,7 +5404,7 @@ int email_service_list_labels(const Config *cfg) {
     mail_client_free(mc);
 
     if (rc != 0 || count == 0) {
-        if (rc == 0) printf("No labels/folders found.\n");
+        if (rc == 0) printf("No labels found.\n");
         /* free any partial results */
         for (int i = 0; i < count; i++) {
             if (names) free(names[i]);
@@ -5330,18 +5415,13 @@ int email_service_list_labels(const Config *cfg) {
         return rc;
     }
 
-    if (cfg->gmail_mode) {
-        printf("%-30s  %s\n", "Label", "ID");
-        printf("%-30s  %s\n", "------------------------------",
-               "------------------------------");
-        for (int i = 0; i < count; i++) {
-            printf("%-30s  %s\n",
-                   names[i] ? names[i] : "",
-                   ids[i]   ? ids[i]   : "");
-        }
-    } else {
-        for (int i = 0; i < count; i++)
-            printf("%s\n", names[i] ? names[i] : "");
+    printf("%-30s  %s\n", "Label", "ID");
+    printf("%-30s  %s\n", "------------------------------",
+           "------------------------------");
+    for (int i = 0; i < count; i++) {
+        printf("%-30s  %s\n",
+               names[i] ? names[i] : "",
+               ids[i]   ? ids[i]   : "");
     }
 
     for (int i = 0; i < count; i++) {
@@ -5354,6 +5434,10 @@ int email_service_list_labels(const Config *cfg) {
 }
 
 int email_service_create_label(const Config *cfg, const char *name) {
+    if (!cfg->gmail_mode) {
+        fprintf(stderr, "Error: 'create-label' is Gmail-only. Use 'create-folder' for IMAP.\n");
+        return -1;
+    }
     MailClient *mc = make_mail(cfg);
     if (!mc) {
         fprintf(stderr, "Error: Could not connect.\n");
@@ -5370,6 +5454,10 @@ int email_service_create_label(const Config *cfg, const char *name) {
 }
 
 int email_service_delete_label(const Config *cfg, const char *label_id) {
+    if (!cfg->gmail_mode) {
+        fprintf(stderr, "Error: 'delete-label' is Gmail-only. Use 'delete-folder' for IMAP.\n");
+        return -1;
+    }
     MailClient *mc = make_mail(cfg);
     if (!mc) {
         fprintf(stderr, "Error: Could not connect.\n");
@@ -5380,6 +5468,62 @@ int email_service_delete_label(const Config *cfg, const char *label_id) {
 
     if (rc == 0)
         printf("Label '%s' deleted.\n", label_id);
+    return rc;
+}
+
+int email_service_mark_junk(const Config *cfg, const char *uid) {
+    local_store_init(cfg->host, cfg->user);
+    MailClient *mc = make_mail(cfg);
+    if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+    int rc = mail_client_mark_junk(mc, uid);
+    mail_client_free(mc);
+    if (rc == 0) printf("Message %s marked as junk.\n", uid);
+    return rc;
+}
+
+int email_service_mark_notjunk(const Config *cfg, const char *uid) {
+    local_store_init(cfg->host, cfg->user);
+    MailClient *mc = make_mail(cfg);
+    if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+    int rc = mail_client_mark_notjunk(mc, uid);
+    mail_client_free(mc);
+    if (rc == 0) printf("Message %s marked as not-junk.\n", uid);
+    return rc;
+}
+
+int email_service_create_folder(const Config *cfg, const char *name) {
+    if (cfg->gmail_mode) {
+        fprintf(stderr, "Error: 'create-folder' is IMAP-only. Use 'create-label' for Gmail.\n");
+        return -1;
+    }
+    MailClient *mc = make_mail(cfg);
+    if (!mc) {
+        fprintf(stderr, "Error: Could not connect.\n");
+        return -1;
+    }
+    int rc = mail_client_create_folder(mc, name);
+    mail_client_free(mc);
+
+    if (rc == 0)
+        printf("Folder '%s' created.\n", name);
+    return rc;
+}
+
+int email_service_delete_folder(const Config *cfg, const char *name) {
+    if (cfg->gmail_mode) {
+        fprintf(stderr, "Error: 'delete-folder' is IMAP-only. Use 'delete-label' for Gmail.\n");
+        return -1;
+    }
+    MailClient *mc = make_mail(cfg);
+    if (!mc) {
+        fprintf(stderr, "Error: Could not connect.\n");
+        return -1;
+    }
+    int rc = mail_client_delete_folder(mc, name);
+    mail_client_free(mc);
+
+    if (rc == 0)
+        printf("Folder '%s' deleted.\n", name);
     return rc;
 }
 

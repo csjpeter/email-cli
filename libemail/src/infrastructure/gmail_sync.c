@@ -56,8 +56,9 @@ char *gmail_sync_build_hdr(const char *raw_msg, char **labels, int label_count) 
     /* Compute flags bitmask from labels */
     int flags = 0;
     for (int i = 0; i < label_count; i++) {
-        if (strcmp(labels[i], "UNREAD") == 0)  flags |= MSG_FLAG_UNSEEN;
+        if (strcmp(labels[i], "UNREAD")  == 0) flags |= MSG_FLAG_UNSEEN;
         if (strcmp(labels[i], "STARRED") == 0) flags |= MSG_FLAG_FLAGGED;
+        if (strcmp(labels[i], "SPAM")    == 0) flags |= MSG_FLAG_JUNK;
     }
 
     /* Replace tabs in fields with spaces */

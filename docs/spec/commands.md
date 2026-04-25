@@ -45,7 +45,9 @@ Prints usage text to **stdout** and exits with code **0**.
 
 If `<command>` is given and unknown, prints an error to **stderr** and exits **1**.
 
-Supported topics: `list`, `show`, `list-folders`, `list-attachments`, `save-attachment`, `send`, `config`.
+Supported topics: `list`, `show`, `list-folders`, `list-labels`, `list-attachments`,
+`save-attachment`, `send`, `create-folder`, `delete-folder`, `create-label`, `delete-label`,
+`mark-junk`, `mark-notjunk`, `config`.
 
 ---
 
@@ -182,13 +184,57 @@ issued (no-op).
 
 ---
 
+## Concepts: folders, labels, and flags
+
+### Folders (IMAP)
+
+IMAP organises messages into a **server-side folder hierarchy** (e.g. `INBOX`,
+`INBOX/Work`, `Sent`, `Trash`).  Each message lives in exactly one folder.
+Folders are created with `create-folder` and removed with `delete-folder`.
+
+### Labels (Gmail)
+
+Gmail has **no folders** in the IMAP sense.  Every message is stored once and
+can carry zero or more **labels** (e.g. `INBOX`, `Work`, `Invoices`).  Labels
+are created with `create-label` and removed with `delete-label`.  The label
+ID (needed for `delete-label`) is obtained from `list-labels`.
+
+### Flags as a fixed label set (IMAP)
+
+IMAP defines a small, **server-defined** set of message flags.  The set
+includes RFC 3501 system flags and well-known keyword flags (RFC 5788):
+
+| IMAP flag      | Meaning                                | CLI / TUI              | Status col |
+|----------------|----------------------------------------|------------------------|-----------|
+| `\Seen`        | Message has been read                  | `mark-read` / `mark-unread` | pos 1: `N`/`-` |
+| `\Flagged`     | Starred / important                    | `mark-starred` / `remove-starred` | pos 2: `★`/`-` |
+| `\Answered`    | A reply has been sent for this message | (automatic, set by MUA) | pos 5: `R` |
+| `$Forwarded`   | Message was forwarded                  | (automatic, set by MUA) | pos 5: `F` |
+| `$Done`        | Processed / archived                   | 'd' in TUI              | pos 3: `D` |
+| `$Junk`        | Spam / junk mail                       | `mark-junk` / TUI 'j'  | pos 1: `J` |
+| `$NotJunk`     | Confirmed as not spam                  | `mark-notjunk`         | (clears `J`) |
+| `$Phishing`    | Phishing warning (set by server)       | (automatic)             | pos 1: `P` |
+
+**Status column priority** (position 1): `P` (phishing) > `J` (junk) > `N` (unread) > `-`.
+**Position 5** (reply/forward): `R` (answered) > `F` (forwarded) > `-`.
+
+Gmail translates flags to labels: `$Junk` ↔ SPAM label, `\Seen` ↔ removing
+UNREAD label, `\Flagged` ↔ STARRED label.
+
+These are not user-extensible folders; they are effectively a fixed label
+vocabulary.  The folder browser surfaces them as virtual rows under
+"Tags / Flags" alongside Gmail user labels.
+
+---
+
 ## `list-folders`
 
 ```
-email-cli [--batch] folders [--tree]
+email-cli [--batch] list-folders [--tree]
 ```
 
-Lists all IMAP folders available on the server.
+**IMAP only.** Lists all IMAP folders available on the server.
+Use `list-labels` for Gmail accounts.
 
 ### Options
 
@@ -209,7 +255,188 @@ Lists all IMAP folders available on the server.
 | Code | Condition |
 |------|-----------|
 | 0 | Folders listed (even if list is empty) |
-| −1 | IMAP LIST failed |
+| −1 | IMAP LIST failed or called on a Gmail account |
+
+---
+
+## `list-labels`
+
+```
+email-cli [--batch] list-labels
+```
+
+**Gmail only.** Lists all Gmail labels with their display name and label ID.
+Use `list-folders` for IMAP accounts.
+
+### Behaviour
+
+1. Call Gmail REST API `GET /gmail/v1/users/me/labels`.
+2. Print table: `Label` (display name) | `ID` (opaque label ID string).
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Labels listed |
+| −1 | API call failed or called on an IMAP account |
+
+---
+
+## `create-folder`
+
+```
+email-cli create-folder <name>
+```
+
+**IMAP only.** Creates a new IMAP folder on the server.
+Use `create-label` for Gmail accounts.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<name>` | Folder path / name (e.g. `Work` or `Archive/2025`) |
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Folder created |
+| −1 | IMAP CREATE failed or called on a Gmail account |
+
+---
+
+## `delete-folder`
+
+```
+email-cli delete-folder <name>
+```
+
+**IMAP only.** Deletes an IMAP folder on the server.
+System folders (INBOX, Trash, Sent, etc.) cannot be deleted.
+Use `delete-label` for Gmail accounts.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<name>` | Folder path / name |
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Folder deleted |
+| −1 | IMAP DELETE failed or called on a Gmail account |
+
+---
+
+## `create-label`
+
+```
+email-cli create-label <name>
+```
+
+**Gmail only.** Creates a new Gmail label.
+Use `create-folder` for IMAP accounts.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<name>` | Display name for the new label |
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Label created |
+| −1 | API call failed or called on an IMAP account |
+
+---
+
+## `delete-label`
+
+```
+email-cli delete-label <label-id>
+```
+
+**Gmail only.** Deletes a Gmail label.
+System labels (INBOX, TRASH, SENT, etc.) cannot be deleted.
+Use `delete-folder` for IMAP accounts.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<label-id>` | Label ID as shown by `list-labels` |
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Label deleted |
+| −1 | API call failed or called on an IMAP account |
+
+---
+
+## `mark-junk`
+
+```
+email-cli [<account>] mark-junk <uid>
+```
+
+**User story:** As a user I want to report a message as junk/spam so that my
+mail server and clients know it is unwanted mail.
+
+Mark the message identified by `<uid>` as junk/spam.
+
+* **IMAP:** sets `$Junk` and clears `$NotJunk` on the server.
+* **Gmail:** adds the `SPAM` label and removes `INBOX`.
+
+After the operation the status column shows `J` in the TUI list view.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<uid>` | Positive integer IMAP UID (as shown in `list` output) |
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Flag set successfully |
+| −1 | IMAP / API error |
+
+---
+
+## `mark-notjunk`
+
+```
+email-cli [<account>] mark-notjunk <uid>
+```
+
+**User story:** As a user I want to mark a message as not-junk (ham) so that
+false-positive spam filtering is corrected.
+
+Mark the message identified by `<uid>` as not junk.
+
+* **IMAP:** sets `$NotJunk` and clears `$Junk` on the server.
+* **Gmail:** removes the `SPAM` label and adds `INBOX`.
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<uid>` | Positive integer IMAP UID (as shown in `list` output) |
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Flag set successfully |
+| −1 | IMAP / API error |
 
 ---
 

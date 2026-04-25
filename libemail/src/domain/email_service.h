@@ -293,18 +293,44 @@ int email_service_set_label(const Config *cfg, const char *uid,
 int email_service_list_labels(const Config *cfg);
 
 /**
- * @brief Create a new label (Gmail) or folder (IMAP).
- * @param name  Display name for the new label/folder.
+ * @brief Create a new Gmail label. Fails on IMAP accounts.
+ * @param name  Display name for the new label.
  * @return 0 on success, -1 on error.
  */
 int email_service_create_label(const Config *cfg, const char *name);
 
 /**
- * @brief Delete a label (Gmail) or folder (IMAP).
- * @param label_id  Label ID (Gmail) or folder name (IMAP).
+ * @brief Delete a Gmail label. Fails on IMAP accounts.
+ * @param label_id  Label ID (from list-labels).
  * @return 0 on success, -1 on error.
  */
 int email_service_delete_label(const Config *cfg, const char *label_id);
+
+/**
+ * @brief Mark a message as junk/spam ($Junk / Gmail SPAM).
+ * @return 0 on success, -1 on error.
+ */
+int email_service_mark_junk(const Config *cfg, const char *uid);
+
+/**
+ * @brief Mark a message as not-junk/ham ($NotJunk / remove Gmail SPAM).
+ * @return 0 on success, -1 on error.
+ */
+int email_service_mark_notjunk(const Config *cfg, const char *uid);
+
+/**
+ * @brief Create a new IMAP folder. Fails on Gmail accounts.
+ * @param name  Folder path / name.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_create_folder(const Config *cfg, const char *name);
+
+/**
+ * @brief Delete an IMAP folder. Fails on Gmail accounts.
+ * @param name  Folder path / name.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_delete_folder(const Config *cfg, const char *name);
 
 /**
  * @brief Lists all attachments in a message identified by IMAP UID.

@@ -5,10 +5,14 @@
 
 /* ── Message flag bitmask constants ─────────────────────────────────────── */
 
-#define MSG_FLAG_UNSEEN   (1 << 0)  /* \Seen not set on server */
-#define MSG_FLAG_FLAGGED  (1 << 1)  /* \Flagged — starred / important */
-#define MSG_FLAG_DONE     (1 << 2)  /* $Done keyword */
-#define MSG_FLAG_ATTACH   (1 << 3)  /* message has at least one attachment */
+#define MSG_FLAG_UNSEEN    (1 << 0)  /* \Seen not set on server */
+#define MSG_FLAG_FLAGGED   (1 << 1)  /* \Flagged — starred / important */
+#define MSG_FLAG_DONE      (1 << 2)  /* $Done keyword */
+#define MSG_FLAG_ATTACH    (1 << 3)  /* message has at least one attachment */
+#define MSG_FLAG_ANSWERED  (1 << 4)  /* \Answered — replied to */
+#define MSG_FLAG_FORWARDED (1 << 5)  /* $Forwarded — forwarded */
+#define MSG_FLAG_JUNK      (1 << 6)  /* $Junk / SPAM — spam-filtered */
+#define MSG_FLAG_PHISHING  (1 << 7)  /* $Phishing — phishing warning */
 
 /**
  * @file local_store.h

@@ -34,8 +34,8 @@ static void help_general(void) {
         "Reading:\n"
         "  list                        List messages in the configured mailbox\n"
         "  show <uid>                  Display the full content of a message\n"
-        "  list-folders                List available IMAP folders / Gmail labels\n"
-        "  list-labels                 List all labels (Gmail) or folders (IMAP)\n"
+        "  list-folders                List IMAP folders (IMAP only)\n"
+        "  list-labels                 List Gmail labels with IDs (Gmail only)\n"
         "  list-attachments <uid>      List attachments in a message\n"
         "  save-attachment <uid>       Save a named attachment to disk\n"
         "\n"
@@ -47,8 +47,12 @@ static void help_general(void) {
         "  remove-starred <uid>        Remove star from a message\n"
         "  add-label <uid> <lbl>       Add a Gmail label to a message\n"
         "  remove-label <uid> <lbl>    Remove a Gmail label from a message\n"
-        "  create-label <name>         Create a new label (Gmail) or folder (IMAP)\n"
-        "  delete-label <id>           Delete a label (Gmail) or folder (IMAP)\n"
+        "  create-label <name>         Create a Gmail label (Gmail only)\n"
+        "  delete-label <id>           Delete a Gmail label (Gmail only)\n"
+        "  create-folder <name>        Create an IMAP folder (IMAP only)\n"
+        "  delete-folder <name>        Delete an IMAP folder (IMAP only)\n"
+        "  mark-junk <uid>             Mark a message as junk/spam\n"
+        "  mark-notjunk <uid>          Mark a message as not-junk (ham)\n"
         "\n"
         "Account management:\n"
         "  list-accounts               List all configured accounts\n"
@@ -119,7 +123,8 @@ static void help_folders(void) {
     printf(
         "Usage: email-cli list-folders [options]\n"
         "\n"
-        "Lists all available IMAP folders on the server.\n"
+        "Lists all IMAP folders on the server. IMAP accounts only.\n"
+        "Use 'list-labels' for Gmail accounts.\n"
         "\n"
         "Options:\n"
         "  --tree    Render the folder hierarchy as a tree.\n"
@@ -251,8 +256,8 @@ static void help_list_labels(void) {
     printf(
         "Usage: email-cli list-labels\n"
         "\n"
-        "List all available labels (Gmail) or folders (IMAP).\n"
-        "For Gmail, shows both the display name and the label ID.\n"
+        "List all Gmail labels with their IDs. Gmail accounts only.\n"
+        "Use 'list-folders' for IMAP accounts.\n"
         "\n"
         "Examples:\n"
         "  email-cli list-labels\n"
@@ -263,9 +268,9 @@ static void help_create_label(void) {
     printf(
         "Usage: email-cli create-label <name>\n"
         "\n"
-        "Create a new Gmail label or IMAP folder.\n"
+        "Create a new Gmail label. Gmail accounts only.\n"
         "\n"
-        "  <name>  Display name for the new label/folder\n"
+        "  <name>  Display name for the new label\n"
         "\n"
         "Examples:\n"
         "  email-cli create-label Work\n"
@@ -277,16 +282,71 @@ static void help_delete_label(void) {
     printf(
         "Usage: email-cli delete-label <label-id>\n"
         "\n"
-        "Delete a Gmail label or IMAP folder.\n"
-        "For Gmail, <label-id> is the label ID (from list-labels).\n"
-        "For IMAP, <label-id> is the folder name.\n"
+        "Delete a Gmail label. Gmail accounts only.\n"
         "System labels (INBOX, TRASH, etc.) cannot be deleted.\n"
         "\n"
-        "  <label-id>  Label ID (Gmail) or folder name (IMAP)\n"
+        "  <label-id>  Label ID (from list-labels)\n"
         "\n"
         "Examples:\n"
         "  email-cli delete-label Label_12345\n"
-        "  email-cli delete-label MyFolder\n"
+    );
+}
+
+static void help_create_folder(void) {
+    printf(
+        "Usage: email-cli create-folder <name>\n"
+        "\n"
+        "Create a new IMAP folder. IMAP accounts only.\n"
+        "\n"
+        "  <name>  Folder path / name\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli create-folder Work\n"
+        "  email-cli create-folder Archive/2025\n"
+    );
+}
+
+static void help_delete_folder(void) {
+    printf(
+        "Usage: email-cli delete-folder <name>\n"
+        "\n"
+        "Delete an IMAP folder. IMAP accounts only.\n"
+        "System folders (INBOX, Trash, etc.) cannot be deleted.\n"
+        "\n"
+        "  <name>  Folder path / name\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli delete-folder OldWork\n"
+    );
+}
+
+static void help_mark_junk(void) {
+    printf(
+        "Usage: email-cli mark-junk <uid>\n"
+        "\n"
+        "Mark a message as junk/spam.\n"
+        "IMAP: sets $Junk and clears $NotJunk.\n"
+        "Gmail: adds SPAM label and removes INBOX.\n"
+        "\n"
+        "  <uid>  UID of the message (decimal or 16-char hex)\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli mark-junk 12345\n"
+    );
+}
+
+static void help_mark_notjunk(void) {
+    printf(
+        "Usage: email-cli mark-notjunk <uid>\n"
+        "\n"
+        "Mark a message as not-junk (ham).\n"
+        "IMAP: sets $NotJunk and clears $Junk.\n"
+        "Gmail: removes SPAM label and adds INBOX.\n"
+        "\n"
+        "  <uid>  UID of the message (decimal or 16-char hex)\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli mark-notjunk 12345\n"
     );
 }
 
@@ -454,6 +514,10 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "create-label")    == 0) { help_create_label();    return EXIT_SUCCESS; }
                 if (strcmp(cmd, "delete-label")    == 0) { help_delete_label();    return EXIT_SUCCESS; }
+                if (strcmp(cmd, "create-folder")   == 0) { help_create_folder();   return EXIT_SUCCESS; }
+                if (strcmp(cmd, "delete-folder")   == 0) { help_delete_folder();   return EXIT_SUCCESS; }
+                if (strcmp(cmd, "mark-junk")       == 0) { help_mark_junk();       return EXIT_SUCCESS; }
+                if (strcmp(cmd, "mark-notjunk")    == 0) { help_mark_notjunk();    return EXIT_SUCCESS; }
                 if (strcmp(cmd, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
                 if (strcmp(cmd, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
@@ -489,6 +553,10 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
             if (strcmp(topic, "create-label")    == 0) { help_create_label();    return EXIT_SUCCESS; }
             if (strcmp(topic, "delete-label")    == 0) { help_delete_label();    return EXIT_SUCCESS; }
+            if (strcmp(topic, "create-folder")   == 0) { help_create_folder();   return EXIT_SUCCESS; }
+            if (strcmp(topic, "delete-folder")   == 0) { help_delete_folder();   return EXIT_SUCCESS; }
+            if (strcmp(topic, "mark-junk")       == 0) { help_mark_junk();       return EXIT_SUCCESS; }
+            if (strcmp(topic, "mark-notjunk")    == 0) { help_mark_notjunk();    return EXIT_SUCCESS; }
             if (strcmp(topic, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
             if (strcmp(topic, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
             if (strcmp(topic, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
@@ -914,6 +982,56 @@ int main(int argc, char *argv[]) {
             help_delete_label();
         } else {
             result = email_service_delete_label(cfg, label_id);
+        }
+
+    } else if (strcmp(cmd, "create-folder") == 0) {
+        const char *name = NULL;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            name = argv[i]; break;
+        }
+        if (!name) {
+            fprintf(stderr, "Error: 'create-folder' requires a folder name.\n");
+            help_create_folder();
+        } else {
+            result = email_service_create_folder(cfg, name);
+        }
+
+    } else if (strcmp(cmd, "delete-folder") == 0) {
+        const char *name = NULL;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            name = argv[i]; break;
+        }
+        if (!name) {
+            fprintf(stderr, "Error: 'delete-folder' requires a folder name.\n");
+            help_delete_folder();
+        } else {
+            result = email_service_delete_folder(cfg, name);
+        }
+
+    } else if (strcmp(cmd, "mark-junk") == 0 || strcmp(cmd, "mark-notjunk") == 0) {
+        const char *uid_str = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (!uid_str) { uid_str = argv[i]; }
+            else { unknown_option(cmd, argv[i]); ok = 0; }
+        }
+        if (ok) {
+            if (!uid_str) {
+                fprintf(stderr, "Error: '%s' requires a UID argument.\n", cmd);
+                if (strcmp(cmd, "mark-junk") == 0) help_mark_junk();
+                else help_mark_notjunk();
+            } else {
+                char uid[17];
+                if (parse_uid(uid_str, uid) != 0)
+                    fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
+                else if (strcmp(cmd, "mark-junk") == 0)
+                    result = email_service_mark_junk(cfg, uid);
+                else
+                    result = email_service_mark_notjunk(cfg, uid);
+            }
         }
 
     } else if (strcmp(cmd, "list-accounts") == 0) {

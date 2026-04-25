@@ -2490,8 +2490,7 @@ static PtySession *tui_open_to_folders(void) {
 }
 
 static void test_virtual_folder_sections_shown(void) {
-    /* Ticket 4: folder browser shows Tags/Flags and Folders section headers
-     * with Unread and Flagged virtual rows */
+    /* Ticket 4: folder browser shows all virtual rows under Tags/Flags */
     restart_mock();
     PtySession *s = tui_open_to_folders();
     ASSERT(s != NULL, "virtual sections: opens folder browser");
@@ -2499,6 +2498,10 @@ static void test_virtual_folder_sections_shown(void) {
     ASSERT_SCREEN_CONTAINS(s, "Tags / Flags");
     ASSERT_SCREEN_CONTAINS(s, "Unread");
     ASSERT_SCREEN_CONTAINS(s, "Flagged");
+    ASSERT_SCREEN_CONTAINS(s, "Junk");
+    ASSERT_SCREEN_CONTAINS(s, "Phishing");
+    ASSERT_SCREEN_CONTAINS(s, "Answered");
+    ASSERT_SCREEN_CONTAINS(s, "Forwarded");
     ASSERT_SCREEN_CONTAINS(s, "Folders");
     ASSERT_SCREEN_CONTAINS(s, "INBOX");
     pty_send_key(s, PTY_KEY_ESC);
@@ -2811,6 +2814,141 @@ static void test_unread_count_refreshes_after_mark(void) {
     pty_send_key(s, PTY_KEY_UP);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "0");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  VIRTUAL JUNK / ANSWERED / FORWARDED LISTS
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_virtual_junk_list_shows_messages(void) {
+    /* Junk virtual row opens a message list showing $Junk flagged messages. */
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "virtual junk: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* flags=64 = MSG_FLAG_JUNK */
+    const char *inbox[] = {
+        "00000000000000e1\tspam@bad.com\tYou Won!\t2026-04-25 08:00\t64",
+        "00000000000000e2\tnormal@ok.com\tNormal mail\t2026-04-25 09:00\t0",
+    };
+    write_test_manifest("INBOX", inbox, 2);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "virtual junk: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    /* Junk row is VP_JUNK=3, which is 3 rows below VP_HDR_FLAGS(0):
+     * HOME lands at VP_UNREAD(1), then 2× DOWN reaches VP_JUNK(3) */
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT_SCREEN_CONTAINS(s, "You Won!");
+    /* Normal mail must NOT appear in Junk list */
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Normal mail");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+static void test_virtual_answered_list_shows_messages(void) {
+    /* Answered virtual row (VP_ANSWERED=5) opens a list of replied messages. */
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "virtual answered: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* flags=16 = MSG_FLAG_ANSWERED */
+    const char *inbox[] = {
+        "00000000000000f1\tboss@acme.com\tRe: Budget\t2026-04-25 10:00\t16",
+        "00000000000000f2\tteam@acme.com\tTeam update\t2026-04-25 11:00\t0",
+    };
+    write_test_manifest("INBOX", inbox, 2);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "virtual answered: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    /* VP_ANSWERED=5: HOME → VP_UNREAD(1), then 4× DOWN skipping VP_HDR_FOLD(7)? No:
+     * order is HDR(0) UNREAD(1) FLAGGED(2) JUNK(3) PHISHING(4) ANSWERED(5) FORWARDED(6) HDR_FOLD(7)
+     * So from UNREAD(1): 4× DOWN = JUNK(3) PHISHING(4) ANSWERED(5)... wait that's 4 downs.
+     * Actually: 1→2→3→4→5 = 4 downs from VP_UNREAD */
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_settle(s, SETTLE_MS);
+    for (int k = 0; k < 4; k++) { pty_send_key(s, PTY_KEY_DOWN); pty_settle(s, SETTLE_MS); }
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT_SCREEN_CONTAINS(s, "Re: Budget");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Team update");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    write_config();
+    restart_mock();
+}
+
+static void test_virtual_forwarded_list_shows_messages(void) {
+    /* Forwarded virtual row (VP_FORWARDED=6) opens a list of forwarded messages. */
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "virtual forwarded: sync");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    /* flags=32 = MSG_FLAG_FORWARDED */
+    const char *inbox[] = {
+        "0000000000000101\tcolleague@acme.com\tFwd: Offer\t2026-04-25 12:00\t32",
+        "0000000000000102\tother@acme.com\tUnrelated\t2026-04-25 13:00\t0",
+    };
+    write_test_manifest("INBOX", inbox, 2);
+
+    PtySession *s = tui_open_to_folders();
+    ASSERT(s != NULL, "virtual forwarded: opens folder browser");
+    pty_settle(s, SETTLE_MS);
+
+    /* VP_FORWARDED=6: 5× DOWN from VP_UNREAD(1) */
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_settle(s, SETTLE_MS);
+    for (int k = 0; k < 5; k++) { pty_send_key(s, PTY_KEY_DOWN); pty_settle(s, SETTLE_MS); }
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT_SCREEN_CONTAINS(s, "Fwd: Offer");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Unrelated");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -3303,6 +3441,12 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_virtual_n_marks_message_read);
     RUN_TEST(test_virtual_flagged_shows_messages);
     RUN_TEST(test_unread_count_refreshes_after_mark);
+
+    printf("\n--- virtual Junk/Answered/Forwarded lists ---\n");
+    restart_mock();
+    RUN_TEST(test_virtual_junk_list_shows_messages);
+    RUN_TEST(test_virtual_answered_list_shows_messages);
+    RUN_TEST(test_virtual_forwarded_list_shows_messages);
 
     printf("\n--- flag status column (P/J/R/F markers) ---\n");
     restart_mock();

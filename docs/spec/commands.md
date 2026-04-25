@@ -124,6 +124,41 @@ receive complete, unambiguous field values.
 > is a correctness requirement for batch consumers.  Never truncate fields in
 > non-TTY mode.
 
+### Status column
+
+Each message row begins with a **5-character status column** (displayed as
+`PJNFD` or the relevant characters, with dashes for unset flags).  Each
+character position has an independent meaning:
+
+| Position | Characters | Meaning |
+|----------|-----------|---------|
+| 1 | `P` | **Phishing** warning set by server (`$Phishing` flag).  Shown in red. |
+| 1 | `J` | **Junk / spam** (`$Junk` flag).  Shown in yellow.  Priority: P > J. |
+| 1 | `N` | **New / unread** (`\Seen` not set).  Shown in green.  Priority: P > J > N. |
+| 1 | `-` | Message has been read. |
+| 2 | `★` | **Starred / flagged** (`\Flagged`).  Shown in yellow. |
+| 2 | `-` | Not starred. |
+| 3 | `D` | **Done** — processed / archived (`$Done` keyword). |
+| 3 | `-` | Not marked done. |
+| 4 | `A` | Has **attachment(s)** (detected from MIME structure). |
+| 4 | `-` | No attachments. |
+| 5 | `R` | **Replied** — a reply has been sent (`\Answered` flag). |
+| 5 | `F` | **Forwarded** (`$Forwarded` flag).  Priority: R > F. |
+| 5 | `-` | Neither replied nor forwarded. |
+
+In the TUI, colours are applied only to non-selected rows.  Selected rows use
+reverse-video; the colour briefly exits and re-enters reverse-video around the
+coloured character to keep both effects visible.
+
+**Key bindings that affect the status column:**
+
+| Key | Effect |
+|-----|--------|
+| `n` | Toggle Unread/Read (position 1: `N`/`-`) |
+| `f` | Toggle Starred (position 2: `★`/`-`) |
+| `j` | Toggle Junk (position 1: `J`/`-`; also clears/sets `$NotJunk`) |
+| `d` | Toggle Done (position 3: `D`/`-`) |
+
 ### Header cache eviction
 
 Eviction is triggered only when `--all` is used and at least one UID was returned

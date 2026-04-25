@@ -197,8 +197,11 @@ char **local_folder_list_load(int *count_out, char *sep_out);
 void manifest_count_folder(const char *folder, int *total_out,
                             int *unseen_out, int *flagged_out);
 
-/** @brief Count unread and flagged messages across ALL local manifests. */
-void manifest_count_all_flags(int *unread_out, int *flagged_out);
+/** @brief Count messages by flag across ALL local manifests.
+ *  Any output pointer may be NULL if the caller does not need that count. */
+void manifest_count_all_flags(int *unread_out, int *flagged_out,
+                               int *junk_out, int *phishing_out,
+                               int *answered_out, int *forwarded_out);
 
 /** @brief Build a synthetic manifest with entries from ALL folders matching flag_mask. */
 Manifest *manifest_load_all_with_flag(int flag_mask);

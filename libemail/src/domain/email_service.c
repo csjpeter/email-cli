@@ -1799,8 +1799,12 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     int is_virtual_flags = 0;
     int virtual_flag_mask = 0;
     if (!cfg->gmail_mode && folder) {
-        if (strcmp(folder, "__unread__")  == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_UNSEEN;  folder_display = "Unread";  }
-        if (strcmp(folder, "__flagged__") == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_FLAGGED; folder_display = "Flagged"; }
+        if (strcmp(folder, "__unread__")    == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_UNSEEN;    folder_display = "Unread";    }
+        if (strcmp(folder, "__flagged__")   == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_FLAGGED;   folder_display = "Flagged";   }
+        if (strcmp(folder, "__junk__")      == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_JUNK;      folder_display = "Junk";      }
+        if (strcmp(folder, "__phishing__")  == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_PHISHING;  folder_display = "Phishing";  }
+        if (strcmp(folder, "__answered__")  == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_ANSWERED;  folder_display = "Answered";  }
+        if (strcmp(folder, "__forwarded__") == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_FORWARDED; folder_display = "Forwarded"; }
     }
 
     /* Cross-folder content search: folder = "__search__:<scope>:<query>" */
@@ -2775,6 +2779,12 @@ read_key_again: ;
                         { "Backspace",         "Open label browser"              },
                         { "ESC / q",           "Quit"                            },
                         { "h / ?",             "Show this help"                  },
+                        { "────────────",      "──────────────────────────────" },
+                        { "Status col 1:",     "P=Phishing  J=Junk  N=Unread  -" },
+                        { "Status col 2:",     "\u2605=Starred  -=normal"          },
+                        { "Status col 3:",     "D=Done  -=active"                 },
+                        { "Status col 4:",     "A=has Attachment  -=none"         },
+                        { "Status col 5:",     "R=Replied  F=Forwarded  -"        },
                     };
                     show_help_popup("Message list shortcuts (Gmail)",
                                     ghelp, (int)(sizeof(ghelp)/sizeof(ghelp[0])));
@@ -2794,6 +2804,12 @@ read_key_again: ;
                         { "Backspace",         "Open folder browser"             },
                         { "ESC / q",           "Quit"                            },
                         { "h / ?",             "Show this help"                  },
+                        { "────────────",      "──────────────────────────────" },
+                        { "Status col 1:",     "P=Phishing  J=Junk  N=Unread  -" },
+                        { "Status col 2:",     "\u2605=Starred  -=normal"          },
+                        { "Status col 3:",     "D=Done  -=active"                 },
+                        { "Status col 4:",     "A=has Attachment  -=none"         },
+                        { "Status col 5:",     "R=Replied  F=Forwarded  -"        },
                     };
                     show_help_popup("Message list shortcuts",
                                     help, (int)(sizeof(help)/sizeof(help[0])));
@@ -3237,9 +3253,11 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
     /* Virtual prefix rows: [0] "Tags / Flags" header, [1] Unread,
      *                      [2] Flagged,              [3] "Folders" header */
-    enum { VP_HDR_FLAGS=0, VP_UNREAD=1, VP_FLAGGED=2, VP_HDR_FOLD=3, VPREFIX=4 };
-    int vf_unread = 0, vf_flagged = 0;
-    manifest_count_all_flags(&vf_unread, &vf_flagged);
+    enum { VP_HDR_FLAGS=0, VP_UNREAD=1, VP_FLAGGED=2, VP_JUNK=3, VP_PHISHING=4,
+           VP_ANSWERED=5, VP_FORWARDED=6, VP_HDR_FOLD=7, VPREFIX=8 };
+    int vf_unread=0, vf_flagged=0, vf_junk=0, vf_phishing=0, vf_answered=0, vf_forwarded=0;
+    manifest_count_all_flags(&vf_unread, &vf_flagged, &vf_junk, &vf_phishing,
+                             &vf_answered, &vf_forwarded);
 
     int cursor = VPREFIX, wstart = 0;  /* default: first real folder */
     int tree_mode = ui_pref_get_int("folder_view_mode", 1);
@@ -3339,16 +3357,24 @@ char *email_service_list_folders_interactive(const Config *cfg,
                     for (int s = used; s < name_w + 28 - 2; s++) fputs("\u2500", stdout);
                     printf("\033[0m\n");
                 } else {
-                    const char *vname = (i == VP_UNREAD) ? "Unread" : "Flagged";
-                    int vu   = (i == VP_UNREAD)  ? vf_unread  : 0;
-                    int vfl  = (i == VP_FLAGGED) ? vf_flagged : 0;
-                    char u[16], f[16];
-                    fmt_thou(u, sizeof(u), vu);
-                    fmt_thou(f, sizeof(f), vfl);
+                    const char *vname, *vcolor;
+                    int vc;
+                    switch (i) {
+                        case VP_UNREAD:    vc=vf_unread;    vname="Unread";    vcolor="\033[32m"; break;
+                        case VP_FLAGGED:   vc=vf_flagged;   vname="Flagged";   vcolor="\033[33m"; break;
+                        case VP_JUNK:      vc=vf_junk;      vname="Junk";      vcolor="\033[33m"; break;
+                        case VP_PHISHING:  vc=vf_phishing;  vname="Phishing";  vcolor="\033[31m"; break;
+                        case VP_ANSWERED:  vc=vf_answered;  vname="Answered";  vcolor="\033[36m"; break;
+                        case VP_FORWARDED: vc=vf_forwarded; vname="Forwarded"; vcolor="\033[36m"; break;
+                        default:           vc=0; vname="?"; vcolor=""; break;
+                    }
+                    char cnt[16];
+                    fmt_thou(cnt, sizeof(cnt), vc);
                     if (i == cursor) printf("\033[7m");
-                    else if (vu == 0 && vfl == 0) printf("\033[2m");
+                    else if (vc == 0) printf("\033[2m");
+                    else printf("%s", vcolor);
                     printf("  %6s  %7s  %-*s  %7s",
-                           u, f, name_w, vname, "-");
+                           cnt, "-", name_w, vname, "-");
                     if (i == cursor) printf("\033[K\033[0m");
                     else printf("\033[0m");
                     printf("\n");
@@ -3427,11 +3453,17 @@ char *email_service_list_folders_interactive(const Config *cfg,
             break;
         case TERM_KEY_ENTER:
             if (cursor == VP_UNREAD) {
-                selected = strdup("__unread__");
-                goto folders_int_done;
+                selected = strdup("__unread__");    goto folders_int_done;
             } else if (cursor == VP_FLAGGED) {
-                selected = strdup("__flagged__");
-                goto folders_int_done;
+                selected = strdup("__flagged__");   goto folders_int_done;
+            } else if (cursor == VP_JUNK) {
+                selected = strdup("__junk__");      goto folders_int_done;
+            } else if (cursor == VP_PHISHING) {
+                selected = strdup("__phishing__");  goto folders_int_done;
+            } else if (cursor == VP_ANSWERED) {
+                selected = strdup("__answered__");  goto folders_int_done;
+            } else if (cursor == VP_FORWARDED) {
+                selected = strdup("__forwarded__"); goto folders_int_done;
             } else if (cursor == VP_HDR_FLAGS || cursor == VP_HDR_FOLD) {
                 break; /* header row — ignore */
             } else if (tree_mode) {

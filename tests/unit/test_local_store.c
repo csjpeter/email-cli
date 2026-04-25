@@ -636,7 +636,7 @@ void test_manifest_count_after_flag_update(void) {
 
     /* Initial count: 2 unread, 0 flagged */
     int unread = -1, flagged = -1;
-    manifest_count_all_flags(&unread, &flagged);
+    manifest_count_all_flags(&unread, &flagged, NULL, NULL, NULL, NULL);
     ASSERT(unread  == 2, "count_after_update: initial unread is 2");
     ASSERT(flagged == 0, "count_after_update: initial flagged is 0");
 
@@ -647,7 +647,7 @@ void test_manifest_count_after_flag_update(void) {
     manifest_save("INBOX", m);
 
     /* Count should now be 1 */
-    manifest_count_all_flags(&unread, &flagged);
+    manifest_count_all_flags(&unread, &flagged, NULL, NULL, NULL, NULL);
     ASSERT(unread == 1, "count_after_update: unread drops to 1 after save");
 
     /* Mark UID 20 as read too */
@@ -655,7 +655,7 @@ void test_manifest_count_after_flag_update(void) {
     e->flags &= ~MSG_FLAG_UNSEEN;
     manifest_save("INBOX", m);
 
-    manifest_count_all_flags(&unread, &flagged);
+    manifest_count_all_flags(&unread, &flagged, NULL, NULL, NULL, NULL);
     ASSERT(unread == 0, "count_after_update: unread drops to 0");
 
     /* Flag UID 30 */
@@ -663,7 +663,7 @@ void test_manifest_count_after_flag_update(void) {
     e->flags |= MSG_FLAG_FLAGGED;
     manifest_save("INBOX", m);
 
-    manifest_count_all_flags(&unread, &flagged);
+    manifest_count_all_flags(&unread, &flagged, NULL, NULL, NULL, NULL);
     ASSERT(flagged == 1, "count_after_update: flagged becomes 1");
 
     manifest_free(m);

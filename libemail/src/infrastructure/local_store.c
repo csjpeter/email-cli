@@ -920,8 +920,15 @@ Manifest *manifest_load_all_with_flag(int flag_mask) {
     return result;
 }
 
-void manifest_count_all_flags(int *unread_out, int *flagged_out) {
-    *unread_out = 0; *flagged_out = 0;
+void manifest_count_all_flags(int *unread_out, int *flagged_out,
+                               int *junk_out, int *phishing_out,
+                               int *answered_out, int *forwarded_out) {
+    if (unread_out)   *unread_out   = 0;
+    if (flagged_out)  *flagged_out  = 0;
+    if (junk_out)     *junk_out     = 0;
+    if (phishing_out) *phishing_out = 0;
+    if (answered_out) *answered_out = 0;
+    if (forwarded_out)*forwarded_out= 0;
     if (!g_account_base[0]) return;
     char dir_path[8300];
     snprintf(dir_path, sizeof(dir_path), "%s/manifests", g_account_base);
@@ -937,8 +944,13 @@ void manifest_count_all_flags(int *unread_out, int *flagged_out) {
         Manifest *m = manifest_load(folder);
         if (!m) continue;
         for (int i = 0; i < m->count; i++) {
-            if (m->entries[i].flags & MSG_FLAG_UNSEEN)  (*unread_out)++;
-            if (m->entries[i].flags & MSG_FLAG_FLAGGED) (*flagged_out)++;
+            int f = m->entries[i].flags;
+            if (unread_out   && (f & MSG_FLAG_UNSEEN))    (*unread_out)++;
+            if (flagged_out  && (f & MSG_FLAG_FLAGGED))   (*flagged_out)++;
+            if (junk_out     && (f & MSG_FLAG_JUNK))      (*junk_out)++;
+            if (phishing_out && (f & MSG_FLAG_PHISHING))  (*phishing_out)++;
+            if (answered_out && (f & MSG_FLAG_ANSWERED))  (*answered_out)++;
+            if (forwarded_out&& (f & MSG_FLAG_FORWARDED)) (*forwarded_out)++;
         }
         manifest_free(m);
     }

@@ -59,6 +59,17 @@
     } \
 } while(0)
 
+/** @brief Assert that the full screen does NOT contain the given text. */
+#define ASSERT_SCREEN_NOT_CONTAINS(s, text) do { \
+    g_tests_run++; \
+    if (pty_screen_contains(s, text)) { \
+        printf("  [FAIL] %s:%d: screen should NOT contain \"%s\"\n", \
+               __FILE__, __LINE__, text); \
+        g_tests_failed++; \
+        return; \
+    } \
+} while(0)
+
 /** @brief Assert that pty_wait_for succeeds within the timeout. */
 #define ASSERT_WAIT_FOR(s, text, timeout_ms) do { \
     g_tests_run++; \

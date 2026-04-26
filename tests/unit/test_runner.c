@@ -27,6 +27,7 @@ void test_local_hdr_get_labels(void);
 void test_local_flag_search(void);
 void test_manifest_count_after_flag_update(void);
 void test_flag_search_folder_isolation(void);
+void test_local_contacts_update(void);
 void test_imap_util(void);
 void test_platform(void);
 void test_email_service(void);
@@ -73,6 +74,7 @@ int main() {
     RUN_TEST(test_local_flag_search);
     RUN_TEST(test_manifest_count_after_flag_update);
     RUN_TEST(test_flag_search_folder_isolation);
+    RUN_TEST(test_local_contacts_update);
     RUN_TEST(test_imap_util);
     RUN_TEST(test_platform);
     RUN_TEST(test_email_service);

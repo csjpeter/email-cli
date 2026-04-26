@@ -196,6 +196,71 @@ static void test_extract_reply_to_header(void) {
 
 /* ── Registration ────────────────────────────────────────────────────── */
 
+static void test_build_cc(void) {
+    ComposeParams p = {
+        .from = "alice@example.com",
+        .to   = "bob@example.com",
+        .cc   = "carol@example.com",
+        .subject = "Hello",
+        .body = "Hi"
+    };
+    char *out = NULL; size_t len = 0;
+    ASSERT(compose_build_message(&p, &out, &len) == 0, "build cc: success");
+    ASSERT(strstr(out, "Cc: carol@example.com\r\n") != NULL,
+           "build cc: Cc header present");
+    ASSERT(strstr(out, "Bcc:") == NULL, "build cc: no Bcc when bcc NULL");
+    free(out);
+}
+
+static void test_build_bcc(void) {
+    ComposeParams p = {
+        .from = "alice@example.com",
+        .to   = "bob@example.com",
+        .bcc  = "secret@example.com",
+        .subject = "Hello",
+        .body = "Hi"
+    };
+    char *out = NULL; size_t len = 0;
+    ASSERT(compose_build_message(&p, &out, &len) == 0, "build bcc: success");
+    ASSERT(strstr(out, "Bcc: secret@example.com\r\n") != NULL,
+           "build bcc: Bcc header present");
+    ASSERT(strstr(out, "Cc:") == NULL, "build bcc: no Cc when cc NULL");
+    free(out);
+}
+
+static void test_build_cc_and_bcc(void) {
+    ComposeParams p = {
+        .from = "alice@example.com",
+        .to   = "bob@example.com",
+        .cc   = "carol@example.com, dave@example.com",
+        .bcc  = "eve@example.com",
+        .subject = "Meeting",
+        .body = "See you there"
+    };
+    char *out = NULL; size_t len = 0;
+    ASSERT(compose_build_message(&p, &out, &len) == 0, "build cc+bcc: success");
+    ASSERT(strstr(out, "Cc: carol@example.com, dave@example.com\r\n") != NULL,
+           "build cc+bcc: Cc header");
+    ASSERT(strstr(out, "Bcc: eve@example.com\r\n") != NULL,
+           "build cc+bcc: Bcc header");
+    ASSERT(strstr(out, "To: bob@example.com\r\n") != NULL,
+           "build cc+bcc: To header still present");
+    free(out);
+}
+
+static void test_build_empty_cc_omitted(void) {
+    ComposeParams p = {
+        .from = "a@b.com", .to = "c@d.com",
+        .cc = "", .bcc = "",
+        .subject = "X", .body = "Y"
+    };
+    char *out = NULL; size_t len = 0;
+    ASSERT(compose_build_message(&p, &out, &len) == 0, "build empty cc: success");
+    ASSERT(strstr(out, "Cc:") == NULL,  "build empty cc: no Cc header");
+    ASSERT(strstr(out, "Bcc:") == NULL, "build empty cc: no Bcc header");
+    free(out);
+}
+
 void test_compose_service(void) {
     RUN_TEST(test_build_null_params);
     RUN_TEST(test_build_missing_fields);
@@ -204,6 +269,10 @@ void test_compose_service(void) {
     RUN_TEST(test_build_reply);
     RUN_TEST(test_build_empty_body);
     RUN_TEST(test_build_lf_to_crlf);
+    RUN_TEST(test_build_cc);
+    RUN_TEST(test_build_bcc);
+    RUN_TEST(test_build_cc_and_bcc);
+    RUN_TEST(test_build_empty_cc_omitted);
     RUN_TEST(test_extract_null);
     RUN_TEST(test_extract_basic);
     RUN_TEST(test_extract_re_dedup);

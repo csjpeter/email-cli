@@ -710,3 +710,157 @@ void test_flag_search_folder_isolation(void) {
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
 }
+
+/* ── local_contacts_update tests ─────────────────────────────────────── */
+
+#define CONTACTS_PATH \
+    "/tmp/email-cli-contacts-test/.local/share/email-cli/accounts/testuser/contacts.tsv"
+
+static void contacts_cleanup(void) { unlink(CONTACTS_PATH); }
+
+static int contacts_count_lines(void) {
+    FILE *f = fopen(CONTACTS_PATH, "r");
+    if (!f) return 0;
+    int n = 0; char line[512];
+    while (fgets(line, sizeof(line), f)) n++;
+    fclose(f);
+    return n;
+}
+
+static int contacts_has_addr(const char *addr) {
+    FILE *f = fopen(CONTACTS_PATH, "r");
+    if (!f) return 0;
+    char line[512]; int found = 0;
+    while (fgets(line, sizeof(line), f)) {
+        char *tab = strchr(line, '\t');
+        if (tab) *tab = '\0';
+        char *nl = strchr(line, '\n'); if (nl) *nl = '\0';
+        if (strcasecmp(line, addr) == 0) { found = 1; break; }
+    }
+    fclose(f);
+    return found;
+}
+
+static int contacts_get_freq(const char *addr) {
+    FILE *f = fopen(CONTACTS_PATH, "r");
+    if (!f) return -1;
+    char line[512]; int freq = -1;
+    while (fgets(line, sizeof(line), f)) {
+        char copy[512]; snprintf(copy, sizeof(copy), "%s", line);
+        char *t1 = strchr(copy, '\t');
+        if (!t1) continue;
+        *t1 = '\0';
+        if (strcasecmp(copy, addr) != 0) continue;
+        char *t2 = strchr(t1 + 1, '\t');
+        if (t2) freq = atoi(t2 + 1);
+        break;
+    }
+    fclose(f);
+    return freq;
+}
+
+static char *contacts_get_name(const char *addr) {
+    FILE *f = fopen(CONTACTS_PATH, "r");
+    if (!f) return NULL;
+    char line[512]; static char cname[256]; cname[0] = '\0';
+    while (fgets(line, sizeof(line), f)) {
+        char *t1 = strchr(line, '\t');
+        if (!t1) continue;
+        *t1 = '\0';
+        if (strcasecmp(line, addr) != 0) continue;
+        char *t2 = strchr(t1 + 1, '\t');
+        if (t2) { *t2 = '\0'; snprintf(cname, sizeof(cname), "%s", t1 + 1); }
+        break;
+    }
+    fclose(f);
+    return cname[0] ? cname : NULL;
+}
+
+void test_local_contacts_update(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-contacts-test");
+    contacts_cleanup();
+
+    /* 1. Bare address in From creates entry with freq=1 */
+    local_contacts_update("alice@example.com", NULL, NULL);
+    ASSERT(contacts_has_addr("alice@example.com"),
+           "contacts: bare From address added");
+    ASSERT(contacts_get_freq("alice@example.com") == 1,
+           "contacts: initial frequency is 1");
+
+    /* 2. Display-name form: addr extracted, name stored */
+    contacts_cleanup();
+    local_contacts_update("Alice Smith <alice@example.com>", NULL, NULL);
+    ASSERT(contacts_has_addr("alice@example.com"),
+           "contacts: addr extracted from display-name form");
+    char *cn = contacts_get_name("alice@example.com");
+    ASSERT(cn && strcmp(cn, "Alice Smith") == 0,
+           "contacts: display name stored correctly");
+
+    /* 3. Multiple comma-separated addresses in To */
+    contacts_cleanup();
+    local_contacts_update(NULL, "alice@example.com, bob@example.com", NULL);
+    ASSERT(contacts_has_addr("alice@example.com"), "contacts: To addr1 added");
+    ASSERT(contacts_has_addr("bob@example.com"),   "contacts: To addr2 added");
+    ASSERT(contacts_count_lines() == 2,            "contacts: 2 entries total");
+
+    /* 4. Cc addresses are also collected */
+    contacts_cleanup();
+    local_contacts_update(NULL, NULL, "carol@example.com");
+    ASSERT(contacts_has_addr("carol@example.com"), "contacts: Cc addr added");
+
+    /* 5. Frequency increments on repeated calls */
+    contacts_cleanup();
+    local_contacts_update("alice@example.com", NULL, NULL);
+    local_contacts_update("alice@example.com", NULL, NULL);
+    local_contacts_update("alice@example.com", NULL, NULL);
+    ASSERT(contacts_get_freq("alice@example.com") == 3,
+           "contacts: frequency increments to 3 on 3 calls");
+
+    /* 6. Case-insensitive deduplication */
+    contacts_cleanup();
+    local_contacts_update("ALICE@EXAMPLE.COM", NULL, NULL);
+    local_contacts_update("alice@example.com", NULL, NULL);
+    ASSERT(contacts_count_lines() == 1,
+           "contacts: case-insensitive dedup — only 1 entry");
+    ASSERT(contacts_get_freq("alice@example.com") == 2,
+           "contacts: case-insensitive freq increment");
+
+    /* 7. Name updated when initially absent */
+    contacts_cleanup();
+    local_contacts_update("alice@example.com", NULL, NULL);
+    local_contacts_update("Alice Smith <alice@example.com>", NULL, NULL);
+    char *cn2 = contacts_get_name("alice@example.com");
+    ASSERT(cn2 && strcmp(cn2, "Alice Smith") == 0,
+           "contacts: name updated when initially missing");
+
+    /* 8. Most frequent addr appears first in file */
+    contacts_cleanup();
+    local_contacts_update("bob@example.com", NULL, NULL);
+    local_contacts_update("alice@example.com", NULL, NULL);
+    local_contacts_update("alice@example.com", NULL, NULL);
+    {
+        FILE *cf = fopen(CONTACTS_PATH, "r");
+        ASSERT(cf != NULL, "contacts: file exists after updates");
+        if (cf) {
+            char fline[256]; fgets(fline, sizeof(fline), cf); fclose(cf);
+            char *tab = strchr(fline, '\t'); if (tab) *tab = '\0';
+            ASSERT(strcasecmp(fline, "alice@example.com") == 0,
+                   "contacts: most frequent addr is first");
+        }
+    }
+
+    /* 9. NULL headers are safe (no crash) */
+    contacts_cleanup();
+    local_contacts_update(NULL, NULL, NULL);
+    ASSERT(1, "contacts: all-NULL headers do not crash");
+
+    /* 10. Semicolon-separated addresses parsed */
+    contacts_cleanup();
+    local_contacts_update(NULL, "dave@example.com; eve@example.com", NULL);
+    ASSERT(contacts_has_addr("dave@example.com"), "contacts: semicolon sep addr1");
+    ASSERT(contacts_has_addr("eve@example.com"),  "contacts: semicolon sep addr2");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}

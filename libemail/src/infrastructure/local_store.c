@@ -1555,9 +1555,9 @@ static void parse_addr_list(const char *hdr,
     char buf[512];
     const char *p = hdr;
     while (*p) {
-        /* skip leading whitespace / commas */
+        /* skip leading whitespace / commas / semicolons */
         while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' ||
-               *p == ',') p++;
+               *p == ',' || *p == ';') p++;
         if (!*p) break;
 
         /* Copy until the next top-level comma (respecting quoted strings
@@ -1568,7 +1568,7 @@ static void parse_addr_list(const char *hdr,
             if (*p == '"') { in_q = !in_q; }
             else if (!in_q && *p == '<') { depth++; }
             else if (!in_q && *p == '>') { depth--; }
-            else if (!in_q && depth == 0 && *p == ',') break;
+            else if (!in_q && depth == 0 && (*p == ',' || *p == ';')) break;
             if (i < sizeof(buf) - 1) buf[i++] = *p;
             p++;
         }
@@ -1676,10 +1676,10 @@ void local_contacts_update(const char *from_hdr,
             int freq = 1;
             if (t2) { *t2 = '\0'; freq = atoi(t2 + 1); if (freq < 1) freq = 1; }
             char *nl = strchr(name, '\n'); if (nl) *nl = '\0';
-            strncpy(arr[cb.count].addr, line, sizeof(arr[cb.count].addr) - 1);
-            arr[cb.count].addr[sizeof(arr[cb.count].addr) - 1] = '\0';
-            strncpy(arr[cb.count].name, name, sizeof(arr[cb.count].name) - 1);
-            arr[cb.count].name[sizeof(arr[cb.count].name) - 1] = '\0';
+            size_t _al = strlen(line); if (_al >= sizeof(arr[cb.count].addr)) _al = sizeof(arr[cb.count].addr) - 1;
+            memcpy(arr[cb.count].addr, line, _al); arr[cb.count].addr[_al] = '\0';
+            size_t _nl = strlen(name); if (_nl >= sizeof(arr[cb.count].name)) _nl = sizeof(arr[cb.count].name) - 1;
+            memcpy(arr[cb.count].name, name, _nl); arr[cb.count].name[_nl] = '\0';
             arr[cb.count].freq = freq;
             cb.count++;
         }

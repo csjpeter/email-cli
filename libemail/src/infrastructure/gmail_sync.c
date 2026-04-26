@@ -156,6 +156,15 @@ static void apply_rules_to_new_message(const MailRules *rules, const char *uid,
     }
     free(add_out);
     free(rm_out);
+
+    /* Update contact suggestion cache */
+    {
+        char *from_h = mime_get_header(raw_msg, "From");
+        char *to_h   = mime_get_header(raw_msg, "To");
+        char *cc_h   = mime_get_header(raw_msg, "Cc");
+        local_contacts_update(from_h, to_h, cc_h);
+        free(from_h); free(to_h); free(cc_h);
+    }
 }
 
 /* ── Label index rebuild ──────────────────────────────────────────── */

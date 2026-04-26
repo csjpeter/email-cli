@@ -2094,13 +2094,13 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
-                             "  c=compose  r=reply  n=unread  f=star"
+                             "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
                              "  s=sync  R=refresh  [0/0]");
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=folders  ESC=quit"
-                             "  c=compose  r=reply  n=new  f=flag  d=done"
+                             "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
                              "  s=sync  R=refresh  [0/0]");
                 }
                 print_statusbar(trows, tcols, sb);
@@ -2186,14 +2186,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
-                             "  c=compose  r=reply  n=unread  f=star"
+                             "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
                              "  s=sync  R=refresh  [0/0]");
                 }
             } else {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=folders  ESC=quit"
-                         "  c=compose  r=reply  n=new  f=flag  d=done"
+                         "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
                          "  s=sync  R=refresh  [0/0]");
             }
             print_statusbar(trows, tcols, sb);
@@ -2573,7 +2573,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
-                             "  c=compose  r=reply  n=unread  f=star  a=archive"
+                             "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star  a=archive"
                              "  d=rm-label  D=trash  t=labels  s=sync  R=refresh  [%d/%d]",
                              show_count > 0 ? cursor + 1 : 0, show_count);
                 }
@@ -2581,7 +2581,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=folders  ESC=quit"
-                         "  c=compose  r=reply  n=new  f=flag  d=done"
+                         "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
                          "  s=sync  R=refresh  [%d/%d]",
                          cursor + 1, show_count);
             }
@@ -4760,6 +4760,8 @@ int email_service_sync(const Config *cfg) {
         return -1;
     }
 
+    MailRules *imap_rules = mail_rules_load(local_store_account_name());
+
     for (int fi = 0; fi < folder_count; fi++) {
         const char *folder = folders[fi];
         printf("Syncing %s ...\n", folder);
@@ -4858,6 +4860,51 @@ int email_service_sync(const Config *cfg) {
                     }
                     local_msg_save(folder, uid, raw, strlen(raw));
                     local_index_update(folder, uid, raw);
+                    /* Update contact suggestions from newly downloaded message */
+                    {
+                        char *from_h = mime_get_header(raw, "From");
+                        char *to_h   = mime_get_header(raw, "To");
+                        char *cc_h   = mime_get_header(raw, "Cc");
+                        local_contacts_update(from_h, to_h, cc_h);
+                        free(from_h); free(to_h); free(cc_h);
+                    }
+                    /* Apply sorting rules to new message */
+                    if (imap_rules && imap_rules->count > 0) {
+                        char *from_r = mime_get_header(raw, "From");
+                        char *subj_r = mime_get_header(raw, "Subject");
+                        char *to_r   = mime_get_header(raw, "To");
+                        char *fr_dec = from_r ? mime_decode_words(from_r) : NULL;
+                        char *su_dec = subj_r ? mime_decode_words(subj_r) : NULL;
+                        char **add_labels = NULL; int add_count = 0;
+                        char **rm_labels  = NULL; int rm_count  = 0;
+                        if (mail_rules_apply(imap_rules,
+                                             fr_dec ? fr_dec : "",
+                                             su_dec ? su_dec : "",
+                                             to_r   ? to_r   : "",
+                                             NULL,  /* no label-based rules for IMAP */
+                                             &add_labels, &add_count,
+                                             &rm_labels,  &rm_count) > 0) {
+                            /* Map label names to IMAP flags for local storage */
+                            static const struct { const char *label; int flag; } lmap[] = {
+                                { "_junk",      MSG_FLAG_JUNK      },
+                                { "_spam",      MSG_FLAG_JUNK      },
+                                { "_phishing",  MSG_FLAG_PHISHING  },
+                                { "_done",      MSG_FLAG_DONE      },
+                                { "_flagged",   MSG_FLAG_FLAGGED   },
+                            };
+                            for (int ai = 0; ai < add_count; ai++) {
+                                for (int li = 0; li < (int)(sizeof(lmap)/sizeof(lmap[0])); li++) {
+                                    if (strcasecmp(add_labels[ai], lmap[li].label) == 0)
+                                        uid_flags |= lmap[li].flag;
+                                }
+                                free(add_labels[ai]);
+                            }
+                            for (int ri = 0; ri < rm_count; ri++) free(rm_labels[ri]);
+                            free(add_labels); free(rm_labels);
+                        }
+                        free(from_r); free(subj_r); free(to_r);
+                        free(fr_dec); free(su_dec);
+                    }
                     free(raw);
                     fetched++;
                 } else {
@@ -4911,6 +4958,9 @@ int email_service_sync(const Config *cfg) {
     printf("\nSync complete: %d fetched, %d already stored", total_fetched, total_skipped);
     if (errors) printf(", %d errors", errors);
     printf("\n");
+
+    mail_rules_free(imap_rules);
+    imap_rules = NULL;
 
     /* Release PID lock */
     if (pid_path[0]) unlink(pid_path);

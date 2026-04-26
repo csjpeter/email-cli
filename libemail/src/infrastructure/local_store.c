@@ -1540,3 +1540,166 @@ char *local_gmail_history_load(void) {
         data[--len] = '\0';
     return data;
 }
+
+/* ── Contact suggestion cache ────────────────────────────────────────── */
+
+/** Extract all "addr" tokens from a comma/semicolon-separated RFC 2822
+ *  address list like  "Alice B <alice@x.com>, bob@y.com" .
+ *  Calls cb(addr, display_name, userdata) for each address found.
+ *  Addresses longer than 255 bytes are silently skipped. */
+static void parse_addr_list(const char *hdr,
+                             void (*cb)(const char *, const char *, void *),
+                             void *ud) {
+    if (!hdr || !hdr[0]) return;
+    /* Walk comma-separated tokens */
+    char buf[512];
+    const char *p = hdr;
+    while (*p) {
+        /* skip leading whitespace / commas */
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' ||
+               *p == ',') p++;
+        if (!*p) break;
+
+        /* Copy until the next top-level comma (respecting quoted strings
+         * and angle-bracket groups). */
+        int depth = 0; int in_q = 0; const char *start = p;
+        size_t i = 0;
+        while (*p) {
+            if (*p == '"') { in_q = !in_q; }
+            else if (!in_q && *p == '<') { depth++; }
+            else if (!in_q && *p == '>') { depth--; }
+            else if (!in_q && depth == 0 && *p == ',') break;
+            if (i < sizeof(buf) - 1) buf[i++] = *p;
+            p++;
+        }
+        buf[i] = '\0';
+        if (buf[0] == '\0') continue;
+
+        /* Extract: "Display Name <addr>" or bare "addr" */
+        char addr[256] = ""; char name[256] = "";
+        char *lt = strchr(buf, '<');
+        char *gt = lt ? strchr(lt, '>') : NULL;
+        if (lt && gt) {
+            size_t alen = (size_t)(gt - lt - 1);
+            if (alen < sizeof(addr)) {
+                memcpy(addr, lt + 1, alen); addr[alen] = '\0';
+            }
+            /* display name: everything before '<', trimmed, dequoted */
+            size_t nlen = (size_t)(lt - buf);
+            if (nlen > 0 && nlen < sizeof(name)) {
+                memcpy(name, buf, nlen); name[nlen] = '\0';
+                /* trim whitespace */
+                char *ns = name;
+                while (*ns == ' ' || *ns == '\t') ns++;
+                char *ne = ns + strlen(ns);
+                while (ne > ns && (*(ne-1) == ' ' || *(ne-1) == '\t' ||
+                                   *(ne-1) == '"')) ne--;
+                if (*ns == '"') ns++;
+                *ne = '\0';
+                memmove(name, ns, strlen(ns) + 1);
+            }
+        } else {
+            /* bare address */
+            char *ns = buf;
+            while (*ns == ' ' || *ns == '\t') ns++;
+            char *ne = ns + strlen(ns);
+            while (ne > ns && (*(ne-1) == ' ' || *(ne-1) == '\t')) ne--;
+            size_t alen = (size_t)(ne - ns);
+            if (alen < sizeof(addr)) { memcpy(addr, ns, alen); addr[alen] = '\0'; }
+        }
+        if (addr[0]) cb(addr, name, ud);
+        (void)start;
+    }
+}
+
+/* ---- contacts.tsv upsert ---- */
+
+#define CONTACTS_MAX 4096
+
+typedef struct {
+    char addr[256];
+    char name[128];
+    int  freq;
+} ContactEntry;
+
+static int contact_cmp_freq(const void *a, const void *b) {
+    return ((const ContactEntry *)b)->freq - ((const ContactEntry *)a)->freq;
+}
+
+typedef struct { ContactEntry *arr; int count; int cap; } ContactBuf;
+
+static void contact_add_cb(const char *addr, const char *name, void *ud) {
+    ContactBuf *cb = (ContactBuf *)ud;
+    if (!addr || !addr[0]) return;
+    /* case-insensitive dedup on address */
+    for (int i = 0; i < cb->count; i++) {
+        if (strcasecmp(cb->arr[i].addr, addr) == 0) {
+            cb->arr[i].freq++;
+            /* update name if we now have one and didn't before */
+            if (name && name[0] && !cb->arr[i].name[0])
+                strncpy(cb->arr[i].name, name, sizeof(cb->arr[i].name) - 1);
+            return;
+        }
+    }
+    if (cb->count >= cb->cap) return; /* full */
+    strncpy(cb->arr[cb->count].addr, addr, sizeof(cb->arr[cb->count].addr) - 1);
+    strncpy(cb->arr[cb->count].name, name ? name : "", sizeof(cb->arr[cb->count].name) - 1);
+    cb->arr[cb->count].freq = 1;
+    cb->count++;
+}
+
+void local_contacts_update(const char *from_hdr,
+                            const char *to_hdr,
+                            const char *cc_hdr) {
+    const char *data_base = platform_data_dir();
+    if (!data_base || !g_account_name[0]) return;
+
+    char path[8192];
+    snprintf(path, sizeof(path), "%s/email-cli/accounts/%s/contacts.tsv",
+             data_base, g_account_name);
+
+    /* Load existing entries */
+    ContactEntry *arr = calloc(CONTACTS_MAX, sizeof(ContactEntry));
+    if (!arr) return;
+    ContactBuf cb = { arr, 0, CONTACTS_MAX };
+
+    FILE *f = fopen(path, "r");
+    if (f) {
+        char line[512];
+        while (cb.count < CONTACTS_MAX && fgets(line, sizeof(line), f)) {
+            /* format: addr\tname\tfreq\n */
+            char *t1 = strchr(line, '\t');
+            if (!t1) continue;
+            *t1 = '\0';
+            char *t2 = strchr(t1 + 1, '\t');
+            char *name = t1 + 1;
+            int freq = 1;
+            if (t2) { *t2 = '\0'; freq = atoi(t2 + 1); if (freq < 1) freq = 1; }
+            char *nl = strchr(name, '\n'); if (nl) *nl = '\0';
+            strncpy(arr[cb.count].addr, line, sizeof(arr[cb.count].addr) - 1);
+            arr[cb.count].addr[sizeof(arr[cb.count].addr) - 1] = '\0';
+            strncpy(arr[cb.count].name, name, sizeof(arr[cb.count].name) - 1);
+            arr[cb.count].name[sizeof(arr[cb.count].name) - 1] = '\0';
+            arr[cb.count].freq = freq;
+            cb.count++;
+        }
+        fclose(f);
+    }
+
+    /* Add new addresses from headers */
+    parse_addr_list(from_hdr, contact_add_cb, &cb);
+    parse_addr_list(to_hdr,   contact_add_cb, &cb);
+    parse_addr_list(cc_hdr,   contact_add_cb, &cb);
+
+    /* Sort by frequency descending */
+    qsort(arr, (size_t)cb.count, sizeof(ContactEntry), contact_cmp_freq);
+
+    /* Write back */
+    f = fopen(path, "w");
+    if (f) {
+        for (int i = 0; i < cb.count; i++)
+            fprintf(f, "%s\t%s\t%d\n", arr[i].addr, arr[i].name, arr[i].freq);
+        fclose(f);
+    }
+    free(arr);
+}

@@ -206,6 +206,24 @@ void manifest_count_all_flags(int *unread_out, int *flagged_out,
 /** @brief Build a synthetic manifest with entries from ALL folders matching flag_mask. */
 Manifest *manifest_load_all_with_flag(int flag_mask);
 
+/**
+ * @brief Update the per-account contacts suggestion cache from message headers.
+ *
+ * Parses From / To / Cc RFC 2822 header values, extracts addresses, and
+ * upserts them into  accounts/<user>/contacts.tsv  (addr TAB display_name TAB
+ * frequency).  The file is kept sorted by frequency descending so the most
+ * frequently seen contacts appear first.
+ *
+ * This is a best-effort helper: it silently ignores any I/O errors.
+ *
+ * @param from_hdr  Raw (undecoded) From header value, e.g. "Alice <alice@x.com>".  May be NULL.
+ * @param to_hdr    Raw To header value.  May be NULL.
+ * @param cc_hdr    Raw Cc header value.  May be NULL.
+ */
+void local_contacts_update(const char *from_hdr,
+                            const char *to_hdr,
+                            const char *cc_hdr);
+
 /* ── Pending flag changes (server sync queue) ────────────────────────── */
 
 /**

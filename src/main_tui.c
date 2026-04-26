@@ -810,6 +810,18 @@ static int cmd_reply(Config *cfg, const char *uid, const char *folder) {
         rc = -1;
     } else {
         rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, msg_id, quoted);
+        if (rc == 0) {
+            /* Mark original message as Replied */
+            Manifest *mf = manifest_load(folder);
+            if (mf) {
+                ManifestEntry *me = manifest_find(mf, uid);
+                if (me) {
+                    me->flags |= MSG_FLAG_ANSWERED;
+                    manifest_save(folder, mf);
+                }
+                manifest_free(mf);
+            }
+        }
     }
     free(quoted);
     free(reply_to);
@@ -899,6 +911,18 @@ static int cmd_forward(Config *cfg, const char *uid, const char *folder) {
         return -1;
     }
     int rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, NULL, quoted);
+    if (rc == 0) {
+        /* Mark original message as Forwarded */
+        Manifest *mf = manifest_load(folder);
+        if (mf) {
+            ManifestEntry *me = manifest_find(mf, uid);
+            if (me) {
+                me->flags |= MSG_FLAG_FORWARDED;
+                manifest_save(folder, mf);
+            }
+            manifest_free(mf);
+        }
+    }
     free(quoted);
     return rc;
 }
@@ -1046,6 +1070,18 @@ static int cmd_reply_all(Config *cfg, const char *uid, const char *folder) {
         rc = -1;
     } else {
         rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, msg_id, quoted);
+        if (rc == 0) {
+            /* Mark original message as Replied */
+            Manifest *mf = manifest_load(folder);
+            if (mf) {
+                ManifestEntry *me = manifest_find(mf, uid);
+                if (me) {
+                    me->flags |= MSG_FLAG_ANSWERED;
+                    manifest_save(folder, mf);
+                }
+                manifest_free(mf);
+            }
+        }
     }
     free(quoted);
     free(reply_to);

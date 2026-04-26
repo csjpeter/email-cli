@@ -1903,7 +1903,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int tcols = terminal_cols(); int trows = terminal_rows();
                 if (tcols <= 0) tcols = 80;
                 if (trows <= 0) trows = 24;
-                int avail = tcols - 28; if (avail < 40) avail = 40;
+                int avail = tcols - 29; if (avail < 40) avail = 40;
                 int subj_w = avail * 3 / 5, from_w = avail - subj_w;
                 printf("\033[H\033[2J");
                 char cl[512];
@@ -2071,7 +2071,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int tcols = terminal_cols(); int trows = terminal_rows();
                 if (tcols <= 0) tcols = 80;
                 if (trows <= 0) trows = 24;
-                int avail = tcols - 28; if (avail < 40) avail = 40;
+                int avail = tcols - 29; if (avail < 40) avail = 40;
                 int subj_w = avail * 3 / 5, from_w = avail - subj_w;
                 printf("\033[H\033[2J");
                 char cl[512];
@@ -2155,7 +2155,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int tcols = terminal_cols(); int trows = terminal_rows();
             if (tcols <= 0) tcols = 80;
             if (trows <= 0) trows = 24;
-            int avail = tcols - 28; if (avail < 40) avail = 40;
+            int avail = tcols - 29; if (avail < 40) avail = 40;
             int subj_w = avail * 3 / 5, from_w = avail - subj_w;
             printf("\033[H\033[2J");
             char cl[512];
@@ -2276,14 +2276,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (wend > disp_count)               wend = disp_count;
 
         /* Compute adaptive column widths.
-         * email-tui (opts->pager==1): date+sts+subject+from, overhead=28
-         * email-cli/ro (opts->pager==0): uid+date+sts+subject+from, overhead=46
+         * email-tui (opts->pager==1): date+sts+subject+from, overhead=29
+         * email-cli/ro (opts->pager==0): uid+date+sts+subject+from, overhead=47
          * Non-TTY CLI: two-pass — pre-load all entries, use max Subject width. */
         int is_tty   = isatty(STDOUT_FILENO);
         int tcols    = is_tty ? terminal_cols() : 0;
         int is_gmail = cfg->gmail_mode;
         int show_uid = !opts->pager;   /* UID column in CLI/RO mode, not TUI */
-        int overhead = show_uid ? 46 : 28;  /* 46 = 28 + uid(16) + sep(2) */
+        int overhead = show_uid ? 47 : 29;  /* 47 = 29 + uid(16) + sep(2) */
         int subj_w, from_w;
         if (is_tty) {
             int avail = tcols - overhead;

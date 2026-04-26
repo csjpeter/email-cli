@@ -126,3 +126,26 @@ add_custom_target(run-pty-compose
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running PTY compose/send tests"
 )
+
+# ── Pre-compose dialog PTY tests ──────────────────────────────────────
+add_executable(test-pty-compose-dialog EXCLUDE_FROM_ALL
+    test_pty_compose_dialog.c
+)
+target_include_directories(test-pty-compose-dialog PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-compose-dialog ptytest)
+if(NOT APPLE)
+    target_link_libraries(test-pty-compose-dialog util)
+endif()
+add_dependencies(test-pty-compose-dialog email-tui mock-imap-server mock-smtp-server)
+
+add_custom_target(run-pty-compose-dialog
+    COMMAND test-pty-compose-dialog
+        $<TARGET_FILE:email-tui>
+        $<TARGET_FILE:mock-imap-server>
+        $<TARGET_FILE:mock-smtp-server>
+    DEPENDS test-pty-compose-dialog email-tui mock-imap-server mock-smtp-server
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running PTY pre-compose dialog tests"
+)

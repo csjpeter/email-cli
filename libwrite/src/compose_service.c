@@ -70,6 +70,15 @@ int compose_build_message(const ComposeParams *p, char **out, size_t *outlen) {
                  "In-Reply-To: %s\r\nReferences: %s\r\n",
                  p->reply_to_msg_id, p->reply_to_msg_id);
 
+    /* Cc/Bcc headers (optional) */
+    char cc_hdr[600] = "";
+    if (p->cc && p->cc[0])
+        snprintf(cc_hdr, sizeof(cc_hdr), "Cc: %s\r\n", p->cc);
+
+    char bcc_hdr[600] = "";
+    if (p->bcc && p->bcc[0])
+        snprintf(bcc_hdr, sizeof(bcc_hdr), "Bcc: %s\r\n", p->bcc);
+
     /* Convert body line endings to CRLF */
     char *body_crlf = lf_to_crlf(p->body ? p->body : "");
     if (!body_crlf) return -1;
@@ -80,6 +89,8 @@ int compose_build_message(const ComposeParams *p, char **out, size_t *outlen) {
         "Date: %s\r\n"
         "From: %s\r\n"
         "To: %s\r\n"
+        "%s"
+        "%s"
         "Subject: %s\r\n"
         "Message-ID: %s\r\n"
         "%s"
@@ -91,6 +102,8 @@ int compose_build_message(const ComposeParams *p, char **out, size_t *outlen) {
         date_str,
         p->from,
         p->to,
+        cc_hdr,
+        bcc_hdr,
         p->subject,
         msgid,
         reply_hdr,

@@ -851,7 +851,7 @@ int main(int argc, char *argv[]) {
                 help_send();
             } else {
                 const char *from = cfg->smtp_user ? cfg->smtp_user : cfg->user;
-                ComposeParams p = {from, to, subject, body, NULL};
+                ComposeParams p = {from, to, NULL, NULL, subject, body, NULL};
                 char *msg = NULL;
                 size_t msg_len = 0;
                 if (compose_build_message(&p, &msg, &msg_len) != 0) {

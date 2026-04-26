@@ -14,6 +14,8 @@
 typedef struct {
     const char *from;           /**< Sender address (e.g. "user@example.com"). */
     const char *to;             /**< Recipient address. */
+    const char *cc;             /**< Comma-separated Cc recipients (may be NULL). */
+    const char *bcc;            /**< Comma-separated Bcc recipients (may be NULL). */
     const char *subject;        /**< Subject line (UTF-8, unencoded). */
     const char *body;           /**< Plain-text body (UTF-8, may use LF or CRLF). */
     const char *reply_to_msg_id; /**< Message-ID of the original message, for In-Reply-To.

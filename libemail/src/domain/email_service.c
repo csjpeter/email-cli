@@ -2749,6 +2749,16 @@ read_key_again: ;
                 list_result = 3;
                 goto list_done;
             }
+            if (ch == 'F') {
+                memcpy(opts->action_uid, entries[ei_cur].uid, 17);
+                list_result = 5;
+                goto list_done;
+            }
+            if (ch == 'A') {
+                memcpy(opts->action_uid, entries[ei_cur].uid, 17);
+                list_result = 6;
+                goto list_done;
+            }
             if (ch == 's') {
                 sync_start_background();
                 break; /* re-render: shows ⟳ syncing... indicator */
@@ -2766,6 +2776,8 @@ read_key_again: ;
                         { "PgUp / PgDn",        "Page up / down"                  },
                         { "Enter",             "Open selected message"           },
                         { "r",                 "Reply to selected message"       },
+                        { "A",                 "Reply-all to selected message"   },
+                        { "F",                 "Forward selected message"        },
                         { "c",                 "Compose new message"             },
                         { "n",                 "Toggle Unread label"             },
                         { "f",                 "Toggle Starred label"            },
@@ -2794,6 +2806,8 @@ read_key_again: ;
                         { "PgUp / PgDn",        "Page up / down"                  },
                         { "Enter",             "Open selected message"           },
                         { "r",                 "Reply to selected message"       },
+                        { "A",                 "Reply-all to selected message"   },
+                        { "F",                 "Forward selected message"        },
                         { "c",                 "Compose new message"             },
                         { "n",                 "Toggle New (unread) flag"        },
                         { "f",                 "Toggle Flagged (starred) flag"   },

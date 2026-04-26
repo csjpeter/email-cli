@@ -1636,14 +1636,20 @@ static void contact_add_cb(const char *addr, const char *name, void *ud) {
         if (strcasecmp(cb->arr[i].addr, addr) == 0) {
             cb->arr[i].freq++;
             /* update name if we now have one and didn't before */
-            if (name && name[0] && !cb->arr[i].name[0])
-                strncpy(cb->arr[i].name, name, sizeof(cb->arr[i].name) - 1);
+            if (name && name[0] && !cb->arr[i].name[0]) {
+                size_t _n = strlen(name);
+                if (_n >= sizeof(cb->arr[i].name)) _n = sizeof(cb->arr[i].name) - 1;
+                memcpy(cb->arr[i].name, name, _n); cb->arr[i].name[_n] = '\0';
+            }
             return;
         }
     }
     if (cb->count >= cb->cap) return; /* full */
-    strncpy(cb->arr[cb->count].addr, addr, sizeof(cb->arr[cb->count].addr) - 1);
-    strncpy(cb->arr[cb->count].name, name ? name : "", sizeof(cb->arr[cb->count].name) - 1);
+    { size_t _a = strlen(addr); if (_a >= sizeof(cb->arr[cb->count].addr)) _a = sizeof(cb->arr[cb->count].addr) - 1;
+      memcpy(cb->arr[cb->count].addr, addr, _a); cb->arr[cb->count].addr[_a] = '\0'; }
+    { const char *_nm = name ? name : "";
+      size_t _n = strlen(_nm); if (_n >= sizeof(cb->arr[cb->count].name)) _n = sizeof(cb->arr[cb->count].name) - 1;
+      memcpy(cb->arr[cb->count].name, _nm, _n); cb->arr[cb->count].name[_n] = '\0'; }
     cb->arr[cb->count].freq = 1;
     cb->count++;
 }

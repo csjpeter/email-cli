@@ -95,7 +95,7 @@ static void write_config(void) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imap://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:9993\n"
         "EMAIL_USER=testuser@example.com\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"

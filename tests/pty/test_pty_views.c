@@ -56,11 +56,11 @@ static void write_config(void) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imap://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:9993\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SSL_NO_VERIFY=1\n");   /* permit non-TLS mock server in tests */
+        "SSL_NO_VERIFY=1\n");   /* TLS with self-signed cert */
     fclose(fp);
     chmod(path, 0600);
 }
@@ -80,11 +80,11 @@ static void write_config_with_interval(int interval) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imap://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:9993\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SSL_NO_VERIFY=1\n"   /* permit non-TLS mock server in tests */
+        "SSL_NO_VERIFY=1\n"   /* TLS with self-signed cert */
         "SYNC_INTERVAL=%d\n", interval);
     fclose(fp);
     chmod(path, 0600);
@@ -1812,11 +1812,11 @@ static void write_second_account(const char *name) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imap://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:9993\n"
         "EMAIL_USER=%s\n"
         "EMAIL_PASS=pass2\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SSL_NO_VERIFY=1\n", name);  /* permit non-TLS mock server in tests */
+        "SSL_NO_VERIFY=1\n", name);  /* TLS with self-signed cert */
     fclose(fp);
     chmod(path, 0600);
 }

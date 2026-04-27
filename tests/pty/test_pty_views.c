@@ -574,12 +574,16 @@ static void test_interactive_show_statusbar(void) {
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    int sb = find_row(s, "Backspace/ESC/q=list");
-    ASSERT(sb >= 0, "show sb: found Backspace/ESC/q=list");
+    int sb = find_row(s, "BS=list");
+    ASSERT(sb >= 0, "show sb: found BS=list");
     if (sb >= 0) {
-        ASSERT(pty_row_contains(s, sb, "PgDn"), "show sb: PgDn");
+        ASSERT(pty_row_contains(s, sb, "ESC=quit"), "show sb: ESC=quit");
+        ASSERT(pty_row_contains(s, sb, "/=search"), "show sb: /=search");
+        ASSERT(pty_row_contains(s, sb, "v=source"), "show sb: v=source");
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
     }
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -600,17 +604,131 @@ static void test_interactive_show_backspace(void) {
     pty_close(s);
 }
 
-static void test_interactive_show_esc_to_list(void) {
+static void test_interactive_show_esc_exits(void) {
     restart_mock();
     PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "show ESC→list: opens");
+    ASSERT(s != NULL, "show ESC→exit: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* ESC from show view returns to the message list */
+    /* ESC from reader exits the program (does NOT return to list) */
     pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS * 2);
+    int r = pty_wait_for(s, "message(s) in", 1500);
+    ASSERT(r != 0, "show ESC: does NOT return to list");
+    pty_close(s);
+}
+
+static void test_interactive_show_uid_in_header(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "show UID header: opens");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "UID:");
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_show_source_toggle(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "show source toggle: opens");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Default: rendered view */
+    ASSERT_SCREEN_CONTAINS(s, "Hello from Mock Server");
+    /* Press v → raw source view */
+    pty_send_str(s, "v");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Content-Type:");
+    ASSERT_SCREEN_CONTAINS(s, "v=rendered");
+    /* Press v again → back to rendered */
+    pty_send_str(s, "v");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Hello from Mock Server");
+    ASSERT_SCREEN_CONTAINS(s, "v=source");
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_show_search_finds(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "show search: opens");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Search for "Mock" — present in body */
+    pty_send_str(s, "/");
+    pty_settle(s, SETTLE_MS / 2);
+    pty_send_str(s, "Mock");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    /* Heading still visible, no "No match" error */
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    int r = find_row(s, "No match");
+    ASSERT(r < 0, "show search: no 'No match' error");
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_show_search_no_match(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "show search no match: opens");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "/");
+    pty_settle(s, SETTLE_MS / 2);
+    pty_send_str(s, "xyzzy_no_such_text");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "No match");
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_interactive_show_url_rendered(void) {
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "show URL rendered: opens");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Scroll to end to reveal URL (body may be multi-page) */
+    pty_send_key(s, PTY_KEY_END);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "https://click.example.com/test");
+    /* Verify URL is rendered in blue (ANSI color 34) */
+    int url_row = find_row(s, "https://click.example.com/test");
+    ASSERT(url_row >= 0, "show URL: row found");
+    if (url_row >= 0)
+        ASSERT(pty_cell_fg(s, url_row, 0) == 34, "show URL: blue color (34)");
+    pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1502,18 +1620,20 @@ static void test_tui_list_esc_quit(void) {
     pty_close(s);
 }
 
-static void test_tui_show_esc_to_list(void) {
+static void test_tui_show_esc_exits(void) {
     restart_mock();
     PtySession *s = tui_open_to_list();
-    ASSERT(s != NULL, "tui show ESC→list: opens through accounts screen");
+    ASSERT(s != NULL, "tui show ESC→exit: opens through accounts screen");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
+    /* ESC exits the program, not back to list */
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
-    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS * 2);
+    int r = pty_wait_for(s, "message(s) in", 1500);
+    ASSERT(r != 0, "tui show ESC: does NOT return to list");
     pty_close(s);
 }
 
@@ -3255,10 +3375,15 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_show_separator);
     RUN_TEST(test_interactive_show_statusbar);
     RUN_TEST(test_interactive_show_backspace);
-    RUN_TEST(test_interactive_show_esc_to_list);
+    RUN_TEST(test_interactive_show_esc_exits);
     RUN_TEST(test_interactive_show_q_to_list);
     RUN_TEST(test_interactive_show_pgdn);
     RUN_TEST(test_interactive_show_arrow_scroll);
+    RUN_TEST(test_interactive_show_uid_in_header);
+    RUN_TEST(test_interactive_show_source_toggle);
+    RUN_TEST(test_interactive_show_search_finds);
+    RUN_TEST(test_interactive_show_search_no_match);
+    RUN_TEST(test_interactive_show_url_rendered);
 
     printf("\n--- Interactive list-folders ---\n");
     RUN_TEST(test_interactive_folders_content);
@@ -3368,7 +3493,7 @@ int main(int argc, char *argv[]) {
     printf("\n--- email-tui: interactive ---\n");
     RUN_TEST(test_tui_list_content);
     RUN_TEST(test_tui_list_esc_quit);
-    RUN_TEST(test_tui_show_esc_to_list);
+    RUN_TEST(test_tui_show_esc_exits);
 
     printf("\n--- email-tui: TUI launch ---\n");
     restart_mock();

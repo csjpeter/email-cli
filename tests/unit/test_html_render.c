@@ -47,8 +47,8 @@ static void assert_style_balanced(const char *html, const char *label) {
     int strike_off = count_str(r, "\033[29m");
     ASSERT(strike_on == strike_off, label);
 
-    /* fg color */
-    int fg_on  = count_str(r, "\033[38;2;");
+    /* fg color — both 24-bit (CSS) and named palette (URL blue) */
+    int fg_on  = count_str(r, "\033[38;2;") + count_str(r, "\033[34m");
     int fg_off = count_str(r, "\033[39m");
     ASSERT(fg_on == fg_off,       label);
 
@@ -822,7 +822,7 @@ static void assert_style_closed_before(const char *html, const char *marker,
     int strike_off = count_str(prefix, "\033[29m");
     ASSERT(strike_on == strike_off, label);
 
-    int fg_on  = count_str(prefix, "\033[38;2;");
+    int fg_on  = count_str(prefix, "\033[38;2;") + count_str(prefix, "\033[34m");
     int fg_off = count_str(prefix, "\033[39m");
     ASSERT(fg_on == fg_off, label);
 
@@ -1329,4 +1329,33 @@ void test_html_render_url_isolation(void)
 
 #undef URL
 #undef URL2
+}
+
+void test_html_render_url_color(void) {
+    /* Plain-text URL in ANSI mode must be wrapped in blue (ESC[34m / ESC[39m) */
+    {
+        char *r = html_render("https://example.com/path", 80, 1);
+        ASSERT(r != NULL, "url color: not NULL");
+        ASSERT(strstr(r, "\033[34m") != NULL, "url color: opens blue");
+        ASSERT(strstr(r, "\033[39m") != NULL, "url color: closes fg");
+        ASSERT(strstr(r, "https://example.com/path") != NULL, "url color: URL present");
+        free(r);
+    }
+
+    /* No ANSI in non-ANSI mode */
+    {
+        char *r = html_render("https://example.com/path", 80, 0);
+        ASSERT(r != NULL, "url nocolor: not NULL");
+        ASSERT(strstr(r, "\033[34m") == NULL, "url nocolor: no blue escape");
+        free(r);
+    }
+
+    /* <a href> URL rendered blue */
+    {
+        char *r = html_render("<a href=\"https://click.example.com\">Click</a>", 80, 1);
+        ASSERT(r != NULL, "url href color: not NULL");
+        ASSERT(strstr(r, "\033[34m") != NULL, "url href color: opens blue");
+        ASSERT(strstr(r, "https://click.example.com") != NULL, "url href color: URL present");
+        free(r);
+    }
 }

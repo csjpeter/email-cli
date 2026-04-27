@@ -261,7 +261,9 @@ static void emit_text(RS *rs, const char *text) {
 
         if (is_url) {
             if (rs->col > rs->bq * 2) emit_wrap_nl(rs);  /* start own line */
+            esc(rs, "\033[34m");        /* blue */
             rs_write(rs, ws, wlen);
+            esc(rs, "\033[39m");        /* reset fg */
             rs->col += ww;
             rs_push(rs, '\n');          /* trailing newline: next content fresh line */
             rs->col = 0;
@@ -465,8 +467,11 @@ static void tag_close(RS *rs, const HtmlNode *node) {
     else if (!strcmp(t,"a")) {
         const char *href = html_attr_get(node, "href");
         if (href && *href && href[0] != '#' &&
-            strncmp(href, "javascript:", 11) != 0)
+            strncmp(href, "javascript:", 11) != 0) {
+            esc(rs, "\033[34m");
             emit_text(rs, href);
+            esc(rs, "\033[39m");
+        }
     }
     else if (!strcmp(t,"script")||!strcmp(t,"style")) { if (rs->skip>0) rs->skip--; }
     else if (!strcmp(t,"tr"))   req_nl(rs, 1);

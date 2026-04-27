@@ -734,14 +734,43 @@ static void print_clean(const char *s, const char *fallback, int max_cols) {
 }
 
 static void print_show_headers(const char *from, const char *subject,
-                                const char *date, const char *labels) {
+                                const char *date, const char *uid,
+                                const char *labels) {
     /* label = 9 chars ("From:    "), remaining = SHOW_WIDTH - 9 = 71 */
     printf("From:    "); print_clean(from,    "(none)", SHOW_WIDTH - 9); putchar('\n');
     printf("Subject: "); print_clean(subject, "(none)", SHOW_WIDTH - 9); putchar('\n');
     printf("Date:    "); print_clean(date,    "(none)", SHOW_WIDTH - 9); putchar('\n');
+    printf("UID:     %s\n", uid ? uid : "(none)");
     if (labels && labels[0])
         printf("Labels:  %s\n", labels);
     printf(SHOW_SEPARATOR);
+}
+
+/* Find the line number (0-based) in body containing term.
+ * Searches forward (dir >= 0) or backward (dir < 0) from from_line.
+ * Wraps around. Returns -1 if no match. */
+static int find_match_line(const char *body, const char *term, int from_line, int dir) {
+    if (!term || !*term || !body) return -1;
+    int matches[8192]; int nm = 0;
+    const char *p = body; int ln = 0;
+    while (*p && nm < 8192) {
+        const char *nl = strchr(p, '\n');
+        size_t llen = nl ? (size_t)(nl - p) : strlen(p);
+        char tmp[512];
+        size_t cp = llen < sizeof(tmp) - 1 ? llen : sizeof(tmp) - 1;
+        memcpy(tmp, p, cp); tmp[cp] = '\0';
+        if (strcasestr(tmp, term)) matches[nm++] = ln;
+        p = nl ? nl + 1 : p + strlen(p);
+        ln++;
+    }
+    if (nm == 0) return -1;
+    if (dir >= 0) {
+        for (int i = 0; i < nm; i++) if (matches[i] > from_line) return matches[i];
+        return matches[0]; /* wrap */
+    } else {
+        for (int i = nm - 1; i >= 0; i--) if (matches[i] < from_line) return matches[i];
+        return matches[nm - 1]; /* wrap */
+    }
 }
 
 /* ── Attachment picker ───────────────────────────────────────────────── */
@@ -900,12 +929,14 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
 /* Header: From+Subject+Date+separator = 4 rows; +1 if Labels line present.
  * Footer: info line (trows-1) + statusbar (trows) = 2 rows. */
 #define SHOW_HDR_LINES_INT 6  /* kept for #undef below */
-    int hdr_rows    = (show_labels && show_labels[0]) ? 5 : 4;
+    int hdr_rows    = (show_labels && show_labels[0]) ? 6 : 5;
     int rows_avail  = (term_rows > hdr_rows + 2) ? term_rows - hdr_rows - 2 : 1;
     int view_raw    = 0; /* 0=rendered, 1=raw source */
     int body_vrows  = count_visual_rows(body_text, term_cols);
     int total_pages = (body_vrows + rows_avail - 1) / rows_avail;
     if (total_pages < 1) total_pages = 1;
+
+    char search_buf[256] = ""; /* last search term; empty = none */
 
     /* Persistent info message — stays until replaced by a newer one */
     char info_msg[2048] = "";
@@ -919,7 +950,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
         if (total_pages < 1) total_pages = 1;
 
         printf("\033[0m\033[H\033[2J");     /* reset attrs + clear screen */
-        print_show_headers(from, subject, date, show_labels);
+        print_show_headers(from, subject, date, uid, show_labels);
         print_body_page(body_text, cur_line, rows_avail, term_cols);
         printf("\033[0m");                  /* close any open ANSI from body */
         fflush(stdout);
@@ -937,27 +968,27 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
             if (is_gmail) {
                 if (att_count > 0) {
                     snprintf(sb, sizeof(sb),
-                             "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                             "  r=rm-label  d=rm  D=trash  f=star  n=unread"
-                             "  a=archive  t=labels  A=save(%d)  %s  q=back --",
+                             "-- [%d/%d] \u2191\u2193=scroll  r=rm-label  d=rm  D=trash"
+                             "  f=star  n=unread  a=arch  t=labels  A=save(%d)"
+                             "  /=search  %s  q=back  ESC=quit --",
                              cur_page, total_pages, att_count, vtog);
                 } else {
                     snprintf(sb, sizeof(sb),
-                             "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                             "  r=rm-label  d=rm  D=trash  f=star  n=unread"
-                             "  a=archive  t=labels  %s  q=back --",
+                             "-- [%d/%d] \u2191\u2193=scroll  r=rm-label  d=rm  D=trash"
+                             "  f=star  n=unread  a=arch  t=labels"
+                             "  /=search  %s  q=back  ESC=quit --",
                              cur_page, total_pages, vtog);
                 }
             } else if (att_count > 0) {
                 snprintf(sb, sizeof(sb),
-                         "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                         "  r=reply  f=star  n=unread  d=done  a=save  A=save-all(%d)"
-                         "  %s  Backspace/ESC/q=list --",
+                         "-- [%d/%d] \u2191\u2193=scroll  r=reply  f=star  n=unread"
+                         "  d=done  a=save  A=save-all(%d)"
+                         "  /=search  %s  BS=list  ESC=quit --",
                          cur_page, total_pages, att_count, vtog);
             } else {
                 snprintf(sb, sizeof(sb),
-                         "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                         "  r=reply  f=star  n=unread  d=done  %s  Backspace/ESC/q=list --",
+                         "-- [%d/%d] \u2191\u2193=scroll  r=reply  f=star  n=unread"
+                         "  d=done  /=search  %s  BS=list  ESC=quit --",
                          cur_page, total_pages, vtog);
             }
             print_statusbar(term_rows, wrap_cols, sb);
@@ -969,9 +1000,11 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
 
         switch (key) {
         case TERM_KEY_BACK:
-        case TERM_KEY_ESC:
         case TERM_KEY_QUIT:
             result = 0;          /* back to list */
+            goto show_int_done;
+        case TERM_KEY_ESC:
+            result = 1;          /* exit program */
             goto show_int_done;
         case TERM_KEY_NEXT_PAGE:
         {
@@ -1012,6 +1045,47 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 view_raw = !view_raw;
                 cur_line = 0;
                 break;
+            } else if (ch == '/') {
+                /* Inline search prompt on the status row */
+                printf("\033[%d;1H\033[2K/", term_rows);
+                fflush(stdout);
+                size_t slen = 0; search_buf[0] = '\0';
+                int srch_cancel = 0;
+                for (;;) {
+                    TermKey sk = terminal_read_key();
+                    if (sk == TERM_KEY_ESC) { srch_cancel = 1; break; }
+                    if (sk == TERM_KEY_ENTER) break;
+                    if (sk == TERM_KEY_BACK) {
+                        if (slen > 0) search_buf[--slen] = '\0';
+                    } else if (sk == TERM_KEY_IGNORE) {
+                        int sc = terminal_last_printable();
+                        if (sc == 127 || sc == 8) {
+                            if (slen > 0) search_buf[--slen] = '\0';
+                        } else if (sc >= 32 && sc < 127 && slen + 1 < sizeof(search_buf)) {
+                            search_buf[slen++] = (char)sc; search_buf[slen] = '\0';
+                        }
+                    }
+                    printf("\033[%d;1H\033[2K/%s_", term_rows, search_buf);
+                    fflush(stdout);
+                }
+                if (!srch_cancel && search_buf[0]) {
+                    int ml = find_match_line(body_text, search_buf, cur_line - 1, 1);
+                    if (ml >= 0) { cur_line = ml; info_msg[0] = '\0'; }
+                    else snprintf(info_msg, sizeof(info_msg), "No match: %s", search_buf);
+                } else if (srch_cancel) {
+                    search_buf[0] = '\0';
+                }
+                break;
+            } else if (ch == 'n' && search_buf[0]) {
+                int ml = find_match_line(body_text, search_buf, cur_line, 1);
+                if (ml >= 0) { cur_line = ml; info_msg[0] = '\0'; }
+                else snprintf(info_msg, sizeof(info_msg), "No more matches");
+                break;
+            } else if (ch == 'N' && search_buf[0]) {
+                int ml = find_match_line(body_text, search_buf, cur_line, -1);
+                if (ml >= 0) { cur_line = ml; info_msg[0] = '\0'; }
+                else snprintf(info_msg, sizeof(info_msg), "No more matches");
+                break;
             } else if (ch == 'h' || ch == '?') {
                 if (is_gmail) {
                     static const char *ghelp[][2] = {
@@ -1027,7 +1101,10 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                         { "t",              "Toggle labels (picker)"                    },
                         { "A",              "Save attachment"                           },
                         { "v",              "Toggle rendered / raw source view"         },
-                        { "q / ESC",        "Back to message list"                      },
+                        { "/",              "Search in message body"                    },
+                        { "n / N",          "Next / previous search match"             },
+                        { "q / Backspace",  "Back to message list"                     },
+                        { "ESC",            "Exit program"                              },
                         { "h / ?",          "Show this help"                            },
                     };
                     show_help_popup("Message reader shortcuts (Gmail)",
@@ -1044,8 +1121,10 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                         { "a",              "Save an attachment"                        },
                         { "A",              "Save all attachments"                      },
                         { "v",              "Toggle rendered / raw source view"         },
-                        { "Backspace",      "Back to message list"                      },
-                        { "ESC / q",        "Back to message list"                      },
+                        { "/",              "Search in message body"                    },
+                        { "n / N",          "Next / previous search match"             },
+                        { "Backspace / q",  "Back to message list"                     },
+                        { "ESC",            "Exit program"                              },
                         { "h / ?",          "Show this help"                            },
                     };
                     show_help_popup("Message reader shortcuts",
@@ -2699,7 +2778,7 @@ read_key_again: ;
                         manifest_save(folder, manifest);
                     }
                 }
-                if (ret == 1) goto list_done;  /* user quit from show */
+                if (ret == 1) { list_result = 1; goto list_done; } /* ESC=exit */
                 if (ret == 2) {
                     /* 'r' pressed in reader → reply to this message */
                     memcpy(opts->action_uid, entries[ei_cur].uid, 17);
@@ -4618,7 +4697,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
     free(date_raw);
     char *ro_labels = cfg->gmail_mode ? local_hdr_get_labels("", uid) : NULL;
 
-    print_show_headers(from, subject, date, ro_labels);
+    print_show_headers(from, subject, date, uid, ro_labels);
 
     int term_cols_show = pager ? terminal_cols() : SHOW_WIDTH;
     int wrap_cols = term_cols_show > SHOW_WIDTH ? SHOW_WIDTH : term_cols_show;
@@ -4639,7 +4718,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
     }
     const char *body_text = body ? body : "(no readable text body)";
 
-#define SHOW_HDR_LINES 5
+#define SHOW_HDR_LINES 6
     if (!pager || page_size <= SHOW_HDR_LINES) {
         printf("%s\n", body_text);
     } else {
@@ -4655,7 +4734,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
         for (int cur_line = 0, show_displayed = 0; ; ) {
             if (show_displayed) {
                 printf("\033[0m\033[H\033[2J");   /* reset attrs + clear screen */
-                print_show_headers(from, subject, date, ro_labels);
+                print_show_headers(from, subject, date, uid, ro_labels);
             }
             show_displayed = 1;
             print_body_page(body_text, cur_line, rows_avail, term_cols_show);

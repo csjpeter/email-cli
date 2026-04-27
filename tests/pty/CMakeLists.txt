@@ -127,6 +127,29 @@ add_custom_target(run-pty-compose
     COMMENT "Running PTY compose/send tests"
 )
 
+# ── Mail rules PTY tests ──────────────────────────────────────────────
+add_executable(test-pty-mail-rules EXCLUDE_FROM_ALL
+    test_pty_mail_rules.c
+)
+target_include_directories(test-pty-mail-rules PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-mail-rules ptytest)
+if(NOT APPLE)
+    target_link_libraries(test-pty-mail-rules util)
+endif()
+add_dependencies(test-pty-mail-rules email-sync email-tui mock-imap-server)
+
+add_custom_target(run-pty-mail-rules
+    COMMAND test-pty-mail-rules
+        $<TARGET_FILE:email-sync>
+        $<TARGET_FILE:email-tui>
+        $<TARGET_FILE:mock-imap-server>
+    DEPENDS test-pty-mail-rules email-sync email-tui mock-imap-server
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running PTY mail rules tests"
+)
+
 # ── Pre-compose dialog PTY tests ──────────────────────────────────────
 add_executable(test-pty-compose-dialog EXCLUDE_FROM_ALL
     test_pty_compose_dialog.c

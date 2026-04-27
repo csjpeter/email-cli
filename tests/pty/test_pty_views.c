@@ -604,7 +604,18 @@ static void test_interactive_show_backspace(void) {
     pty_close(s);
 }
 
+/*
+ * ══════════════════════════════════════════════════════════════════════
+ * US-RD-05: As a user reading a message, pressing ESC exits the program
+ *           immediately; Backspace returns to the message list.
+ * Acceptance criteria:
+ *   - ESC in reader: program terminates, list NOT shown.
+ *   - Backspace in reader: list view shown again.
+ *   - 'q' in reader: list view shown again.
+ * ══════════════════════════════════════════════════════════════════════
+ */
 static void test_interactive_show_esc_exits(void) {
+    /* US-RD-05 */
     restart_mock();
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "show ESC→exit: opens");
@@ -621,7 +632,17 @@ static void test_interactive_show_esc_exits(void) {
     pty_close(s);
 }
 
+/*
+ * ══════════════════════════════════════════════════════════════════════
+ * US-RD-01: As a user, I want to see the message UID in the reader header
+ *           so that I can identify the message for debugging or scripting.
+ * Acceptance criteria:
+ *   - A "UID:" line is visible in the reader header area.
+ *   - The UID value is a non-empty string.
+ * ══════════════════════════════════════════════════════════════════════
+ */
 static void test_interactive_show_uid_in_header(void) {
+    /* US-RD-01 */
     restart_mock();
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "show UID header: opens");
@@ -637,7 +658,19 @@ static void test_interactive_show_uid_in_header(void) {
     pty_close(s);
 }
 
+/*
+ * ══════════════════════════════════════════════════════════════════════
+ * US-RD-02: As a user, I want to toggle between rendered and raw source
+ *           view with 'v' so I can inspect headers and raw MIME content.
+ * Acceptance criteria:
+ *   - Default view is rendered (HTML/text body visible).
+ *   - 'v' switches to raw source: MIME headers (Content-Type:) visible.
+ *   - Statusbar shows "v=rendered" in source mode, "v=source" in rendered.
+ *   - Second 'v' returns to rendered view.
+ * ══════════════════════════════════════════════════════════════════════
+ */
 static void test_interactive_show_source_toggle(void) {
+    /* US-RD-02 */
     restart_mock();
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "show source toggle: opens");
@@ -664,7 +697,20 @@ static void test_interactive_show_source_toggle(void) {
     pty_close(s);
 }
 
+/*
+ * ══════════════════════════════════════════════════════════════════════
+ * US-RD-03: As a user, I want to search within a message body using '/'
+ *           so I can quickly jump to relevant content.
+ * Acceptance criteria:
+ *   - '/' opens an inline search prompt on the bottom row.
+ *   - Typing and Enter jumps to the first matching line.
+ *   - 'n' goes to the next match; 'N' goes to the previous match.
+ *   - ESC in search prompt cancels without jumping.
+ *   - Non-matching search shows "No match:" in the info line.
+ * ══════════════════════════════════════════════════════════════════════
+ */
 static void test_interactive_show_search_finds(void) {
+    /* US-RD-03 */
     restart_mock();
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "show search: opens");
@@ -710,7 +756,18 @@ static void test_interactive_show_search_no_match(void) {
     pty_close(s);
 }
 
+/*
+ * ══════════════════════════════════════════════════════════════════════
+ * US-RD-04: As a user, I want URLs rendered in blue so they stand out
+ *           from surrounding text and are easy to identify.
+ * Acceptance criteria:
+ *   - URLs (https://…) appear on their own line.
+ *   - The URL text is rendered with ANSI foreground color 34 (blue).
+ *   - Non-URL text is NOT blue.
+ * ══════════════════════════════════════════════════════════════════════
+ */
 static void test_interactive_show_url_rendered(void) {
+    /* US-RD-04 */
     restart_mock();
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "show URL rendered: opens");

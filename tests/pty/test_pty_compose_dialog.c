@@ -1601,6 +1601,76 @@ static void test_multiple_cc_semicolon_separated(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ * US-CD-13 / US-CD-14: Answered and Forwarded status markers
+ *
+ * US-CD-13: As a user, after I reply to a message, the message list
+ *           shows an 'a' (answered) marker in the status column so I can
+ *           see which messages I have responded to.
+ * Acceptance:
+ *   - 'r' + fill dialog + send → list shows 'a' marker for that message.
+ *
+ * US-CD-14: As a user, after I forward a message, the message list shows
+ *           an 'f' (forwarded) marker in the status column.
+ * Acceptance:
+ *   - 'F' + fill To + send → list shows 'f' marker for that message.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_replied_message_shows_answered_marker(void) {
+    /* TC-CD-64 / US-CD-13 */
+    restart_imap(); restart_smtp();
+    write_editor_script();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "answered marker: reached inbox");
+
+    /* Reply: r → navigate to Subject → Enter to send */
+    pty_send_str(s, "r");
+    ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_TAB);   /* To → Cc */
+    pty_send_key(s, PTY_KEY_TAB);   /* Cc → Bcc */
+    pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Return to list and check for 'a' (answered) marker */
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "a");  /* answered marker in status column */
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_forwarded_message_shows_forwarded_marker(void) {
+    /* TC-CD-65 / US-CD-14 */
+    restart_imap(); restart_smtp();
+    write_editor_script();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "forwarded marker: reached inbox");
+
+    /* Forward: F → fill To → Enter to send */
+    pty_send_str(s, "F");
+    ASSERT_WAIT_FOR(s, "Forward", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "fwd@example.com");
+    pty_send_key(s, PTY_KEY_TAB);   /* To → Cc */
+    pty_send_key(s, PTY_KEY_TAB);   /* Cc → Bcc */
+    pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Return to list and check for 'f' (forwarded) marker */
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "f");  /* forwarded marker in status column */
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  Main
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -1730,6 +1800,12 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_cc_in_smtp_envelope);
     RUN_TEST(test_bcc_not_in_message_headers);
     RUN_TEST(test_multiple_cc_semicolon_separated);
+
+    /* ── Answered / Forwarded status markers (US-CD-13 / US-CD-14) ───── */
+    printf("\n--- Answered / Forwarded status markers ---\n");
+    restart_imap();
+    RUN_TEST(test_replied_message_shows_answered_marker);
+    RUN_TEST(test_forwarded_message_shows_forwarded_marker);
 
     /* ── Cleanup ──────────────────────────────────────────────────────── */
     stop_server(&g_imap_pid);

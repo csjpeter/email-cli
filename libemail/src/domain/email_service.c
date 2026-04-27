@@ -902,6 +902,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
 #define SHOW_HDR_LINES_INT 6  /* kept for #undef below */
     int hdr_rows    = (show_labels && show_labels[0]) ? 5 : 4;
     int rows_avail  = (term_rows > hdr_rows + 2) ? term_rows - hdr_rows - 2 : 1;
+    int view_raw    = 0; /* 0=rendered, 1=raw source */
     int body_vrows  = count_visual_rows(body_text, term_cols);
     int total_pages = (body_vrows + rows_avail - 1) / rows_avail;
     if (total_pages < 1) total_pages = 1;
@@ -911,6 +912,12 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
 
     int result = 0;
     for (int cur_line = 0;;) {
+        /* Recompute active body text and pagination for current view mode */
+        body_text  = view_raw ? raw : (body ? body : "(no readable text body)");
+        body_vrows = count_visual_rows(body_text, term_cols);
+        total_pages = (body_vrows + rows_avail - 1) / rows_avail;
+        if (total_pages < 1) total_pages = 1;
+
         printf("\033[0m\033[H\033[2J");     /* reset attrs + clear screen */
         print_show_headers(from, subject, date, show_labels);
         print_body_page(body_text, cur_line, rows_avail, term_cols);
@@ -926,31 +933,32 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
         {
             char sb[256];
             int is_gmail = cfg->gmail_mode;
+            const char *vtog = view_raw ? "v=rendered" : "v=source";
             if (is_gmail) {
                 if (att_count > 0) {
                     snprintf(sb, sizeof(sb),
                              "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
                              "  r=rm-label  d=rm  D=trash  f=star  n=unread"
-                             "  a=archive  t=labels  a=save(%d)  q=back --",
-                             cur_page, total_pages, att_count);
+                             "  a=archive  t=labels  A=save(%d)  %s  q=back --",
+                             cur_page, total_pages, att_count, vtog);
                 } else {
                     snprintf(sb, sizeof(sb),
                              "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
                              "  r=rm-label  d=rm  D=trash  f=star  n=unread"
-                             "  a=archive  t=labels  q=back --",
-                             cur_page, total_pages);
+                             "  a=archive  t=labels  %s  q=back --",
+                             cur_page, total_pages, vtog);
                 }
             } else if (att_count > 0) {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
                          "  r=reply  f=star  n=unread  d=done  a=save  A=save-all(%d)"
-                         "  Backspace/ESC/q=list --",
-                         cur_page, total_pages, att_count);
+                         "  %s  Backspace/ESC/q=list --",
+                         cur_page, total_pages, att_count, vtog);
             } else {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back"
-                         "  r=reply  f=star  n=unread  d=done  Backspace/ESC/q=list --",
-                         cur_page, total_pages);
+                         "  r=reply  f=star  n=unread  d=done  %s  Backspace/ESC/q=list --",
+                         cur_page, total_pages, vtog);
             }
             print_statusbar(term_rows, wrap_cols, sb);
         }
@@ -1000,39 +1008,45 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
             if (ch == 'q') {
                 result = 0;      /* back to list */
                 goto show_int_done;
+            } else if (ch == 'v') {
+                view_raw = !view_raw;
+                cur_line = 0;
+                break;
             } else if (ch == 'h' || ch == '?') {
                 if (is_gmail) {
                     static const char *ghelp[][2] = {
-                        { "PgDn / \u2193",   "Scroll down one page / one line"   },
-                        { "PgUp / \u2191",   "Scroll up one page / one line"     },
-                        { "Home / End",      "Jump to top / bottom of message"   },
-                        { "r",              "Remove current label"              },
-                        { "d",              "Remove current label"              },
-                        { "D",              "Move to Trash"                     },
-                        { "f",              "Toggle Starred label"              },
-                        { "n",              "Toggle Unread label"               },
-                        { "a",              "Archive (remove all labels)"       },
-                        { "t",              "Toggle labels (picker)"            },
-                        { "A",              "Save attachment"                   },
-                        { "q / ESC",        "Back to message list"              },
-                        { "h / ?",          "Show this help"                    },
+                        { "PgDn / \u2193",   "Scroll down one page / one line"          },
+                        { "PgUp / \u2191",   "Scroll up one page / one line"            },
+                        { "Home / End",      "Jump to top / bottom of message"          },
+                        { "r",              "Remove current label"                      },
+                        { "d",              "Remove current label"                      },
+                        { "D",              "Move to Trash"                             },
+                        { "f",              "Toggle Starred label"                      },
+                        { "n",              "Toggle Unread label"                       },
+                        { "a",              "Archive (remove all labels)"               },
+                        { "t",              "Toggle labels (picker)"                    },
+                        { "A",              "Save attachment"                           },
+                        { "v",              "Toggle rendered / raw source view"         },
+                        { "q / ESC",        "Back to message list"                      },
+                        { "h / ?",          "Show this help"                            },
                     };
                     show_help_popup("Message reader shortcuts (Gmail)",
                                     ghelp, (int)(sizeof(ghelp)/sizeof(ghelp[0])));
                 } else {
                     static const char *help[][2] = {
-                        { "PgDn / \u2193",   "Scroll down one page / one line"  },
-                        { "PgUp / \u2191",   "Scroll up one page / one line"    },
-                        { "Home / End",      "Jump to top / bottom of message"  },
-                        { "r",              "Reply to this message"             },
-                        { "f",              "Toggle Flagged (starred)"          },
-                        { "n",              "Toggle Unread flag"                },
-                        { "d",              "Toggle Done flag"                  },
-                        { "a",              "Save an attachment"                },
-                        { "A",              "Save all attachments"              },
-                        { "Backspace",      "Back to message list"              },
-                        { "ESC / q",        "Back to message list"              },
-                        { "h / ?",          "Show this help"                    },
+                        { "PgDn / \u2193",   "Scroll down one page / one line"          },
+                        { "PgUp / \u2191",   "Scroll up one page / one line"            },
+                        { "Home / End",      "Jump to top / bottom of message"          },
+                        { "r",              "Reply to this message"                     },
+                        { "f",              "Toggle Flagged (starred)"                  },
+                        { "n",              "Toggle Unread flag"                        },
+                        { "d",              "Toggle Done flag"                          },
+                        { "a",              "Save an attachment"                        },
+                        { "A",              "Save all attachments"                      },
+                        { "v",              "Toggle rendered / raw source view"         },
+                        { "Backspace",      "Back to message list"                      },
+                        { "ESC / q",        "Back to message list"                      },
+                        { "h / ?",          "Show this help"                            },
                     };
                     show_help_popup("Message reader shortcuts",
                                     help, (int)(sizeof(help)/sizeof(help[0])));

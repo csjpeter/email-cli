@@ -2778,7 +2778,7 @@ read_key_again: ;
                         manifest_save(folder, manifest);
                     }
                 }
-                if (ret == 1) { list_result = 1; goto list_done; } /* ESC=exit */
+                if (ret == 1) { goto list_done; } /* ESC=exit → list_result=0 → quit */
                 if (ret == 2) {
                     /* 'r' pressed in reader → reply to this message */
                     memcpy(opts->action_uid, entries[ei_cur].uid, 17);

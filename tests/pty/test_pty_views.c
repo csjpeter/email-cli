@@ -167,7 +167,7 @@ static void test_help_general(void) {
     const char *a[] = {"--help", NULL};
     PtySession *s = cli_open_size(120, 50, a);
     ASSERT(s != NULL, "help: opens");
-    ASSERT_WAIT_FOR(s, "Commands:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Reading:", WAIT_MS);
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "list");
     ASSERT_SCREEN_CONTAINS(s, "show");
@@ -1219,7 +1219,7 @@ static void test_ro_help_general(void) {
     const char *a[] = {"--help", NULL};
     PtySession *s = cli_open_size(120, 50, a);
     ASSERT(s != NULL, "ro help: opens");
-    ASSERT_WAIT_FOR(s, "Commands:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Reading:", WAIT_MS);
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "list");
     ASSERT_SCREEN_CONTAINS(s, "show");
@@ -1355,7 +1355,7 @@ static void test_nonttty_shows_help(void) {
         (void)n;
         pclose(fp);
     }
-    ASSERT(strstr(out, "Commands:") != NULL, "non-tty: shows general help (Commands:)");
+    ASSERT(strstr(out, "Reading:") != NULL, "non-tty: shows general help (Reading:)");
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1702,28 +1702,26 @@ static void test_tui_help_general(void) {
     ASSERT(s != NULL, "tui help: opens");
     ASSERT_WAIT_FOR(s, "Usage: email-tui", WAIT_MS);
     pty_settle(s, 300);
-    ASSERT_SCREEN_CONTAINS(s, "Commands:");
-    ASSERT_SCREEN_CONTAINS(s, "list");
-    ASSERT_SCREEN_CONTAINS(s, "cron");
+    ASSERT_SCREEN_CONTAINS(s, "Options:");
+    ASSERT_SCREEN_CONTAINS(s, "account selector");
     pty_close(s);
 }
 
 static void test_tui_help_list(void) {
-    const char *a[] = {"list", "--help", NULL};
+    /* email-tui does not accept arguments; verify the rejection message */
+    const char *a[] = {"list", NULL};
     PtySession *s = cli_open_size(120, 50, a);
-    ASSERT(s != NULL, "tui help list: opens");
-    ASSERT_WAIT_FOR(s, "Usage: email-tui list", WAIT_MS);
-    pty_settle(s, 300);
-    ASSERT_SCREEN_CONTAINS(s, "--all");
-    ASSERT_SCREEN_CONTAINS(s, "--folder");
+    ASSERT(s != NULL, "tui no-args reject: opens");
+    ASSERT_WAIT_FOR(s, "does not accept arguments", WAIT_MS);
     pty_close(s);
 }
 
 static void test_tui_help_cron(void) {
-    const char *a[] = {"cron", "--help", NULL};
+    /* email-tui does not accept arguments; verify the rejection message */
+    const char *a[] = {"cron", NULL};
     PtySession *s = cli_open_size(120, 50, a);
-    ASSERT(s != NULL, "tui help cron: opens");
-    ASSERT_WAIT_FOR(s, "Usage: email-tui cron", WAIT_MS);
+    ASSERT(s != NULL, "tui cron reject: opens");
+    ASSERT_WAIT_FOR(s, "does not accept arguments", WAIT_MS);
     pty_close(s);
 }
 
@@ -3419,6 +3417,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_create_folder_missing_arg);
     RUN_TEST(test_delete_folder_missing_arg);
 
+    /* Interactive tests require the TUI binary */
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_tui_bin);
+
     printf("\n--- Interactive list ---\n");
     RUN_TEST(test_interactive_list_content);
     RUN_TEST(test_interactive_list_separator);
@@ -3462,6 +3463,9 @@ int main(int argc, char *argv[]) {
     printf("\n--- Empty folder ---\n");
     RUN_TEST(test_interactive_empty_folder);
     RUN_TEST(test_interactive_empty_folder_cron);
+
+    /* Remaining sections use batch commands — restore email-cli */
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", argv[1]);
 
     printf("\n--- Sync progress ---\n");
     RUN_TEST(test_sync_progress);
@@ -3540,12 +3544,15 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_tui_help_list);
     RUN_TEST(test_tui_help_cron);
 
-    printf("\n--- email-tui: batch mode ---\n");
+    /* Batch-mode tests use email-cli; TUI binary does not accept arguments */
+    printf("\n--- email-tui: batch mode (via email-cli) ---\n");
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", argv[1]);
     restart_mock();
     RUN_TEST(test_batch_list);
     RUN_TEST(test_batch_list_all);
     RUN_TEST(test_batch_show);
     RUN_TEST(test_batch_folders_flat);
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_tui_bin);
 
     printf("\n--- email-tui: interactive ---\n");
     RUN_TEST(test_tui_list_content);

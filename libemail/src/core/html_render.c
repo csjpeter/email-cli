@@ -421,7 +421,11 @@ static void tag_open(RS *rs, const HtmlNode *node) {
             rs->col += 2 + str_vis_width(alt);
         }
     }
-    else if (!strcmp(t,"a"))      { /* render children as-is */ }
+    else if (!strcmp(t,"a")) {
+        const char *href = html_attr_get(node, "href");
+        if (href && *href && href[0] != '#' && strncmp(href, "javascript:", 11) != 0)
+            if (rs->ansi) { esc(rs, "\033[34m"); rs->color_fg++; }
+    }
     else if (!strcmp(t,"td")||!strcmp(t,"th")) {
         if (rs->col > rs->bq * 2) { rs_push(rs, '\t'); rs->col++; }
     }
@@ -468,6 +472,7 @@ static void tag_close(RS *rs, const HtmlNode *node) {
         const char *href = html_attr_get(node, "href");
         if (href && *href && href[0] != '#' &&
             strncmp(href, "javascript:", 11) != 0) {
+            if (rs->ansi && rs->color_fg > 0) { esc(rs, "\033[39m"); rs->color_fg--; }
             esc(rs, "\033[34m");
             emit_text(rs, href);
             esc(rs, "\033[39m");

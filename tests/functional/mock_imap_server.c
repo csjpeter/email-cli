@@ -620,7 +620,6 @@ int main(void) {
             continue;
         }
         handle_client(ssl);
-        SSL_shutdown(ssl);
         SSL_free(ssl);
         close(client_sock);
         printf("Connection closed\n");

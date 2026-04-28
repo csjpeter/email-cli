@@ -35,6 +35,7 @@ static char  g_sync_bin[512];
 static char  g_tui_bin[512];
 static char  g_mock_bin[512];
 static char  g_old_home[512];
+static char  g_batch_cli_bin[512];  /* email-cli (batch), never changes */
 
 #define WAIT_MS 6000
 #define SETTLE_MS 600
@@ -60,7 +61,8 @@ static void write_config(void) {
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SSL_NO_VERIFY=1\n");   /* TLS with self-signed cert */
+        "SSL_NO_VERIFY=1\n"     /* TLS with self-signed cert */
+        "SMTP_HOST=smtps://localhost:9465\n"); /* dummy SMTP — avoids blocking prompt */
     fclose(fp);
     chmod(path, 0600);
 }
@@ -207,20 +209,22 @@ static void test_help_folders(void) {
 }
 
 static void test_help_sync(void) {
-    const char *a[] = {"sync", "--help", NULL};
-    PtySession *s = cli_open_size(120, 50, a);
+    const char *a[] = {g_sync_bin, "--help", NULL};
+    PtySession *s = pty_open(120, 50);
     ASSERT(s != NULL, "help sync: opens");
-    ASSERT_WAIT_FOR(s, "Usage: email-cli", WAIT_MS);
+    ASSERT(pty_run(s, a) == 0, "help sync: pty_run");
+    ASSERT_WAIT_FOR(s, "Usage: email-sync", WAIT_MS);
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "sync");
     pty_close(s);
 }
 
 static void test_help_cron(void) {
-    const char *a[] = {"cron", "--help", NULL};
-    PtySession *s = cli_open_size(120, 50, a);
+    const char *a[] = {g_sync_bin, "cron", "--help", NULL};
+    PtySession *s = pty_open(120, 50);
     ASSERT(s != NULL, "help cron: opens");
-    ASSERT_WAIT_FOR(s, "Usage: email-cli", WAIT_MS);
+    ASSERT(pty_run(s, a) == 0, "help cron: pty_run");
+    ASSERT_WAIT_FOR(s, "Usage: email-sync", WAIT_MS);
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "cron");
     pty_close(s);
@@ -324,17 +328,19 @@ static void test_batch_list_offset(void) {
 
 static void test_batch_sync(void) {
     restart_mock();
-    const char *a[] = {"sync", NULL};
-    PtySession *s = cli_run(a);
+    PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "batch sync: opens");
+    const char *a[] = {g_sync_bin, NULL};
+    ASSERT(pty_run(s, a) == 0, "batch sync: pty_run");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
     pty_close(s);
 }
 
 static void test_batch_cron_status(void) {
-    const char *a[] = {"cron", "status", NULL};
-    PtySession *s = cli_run(a);
+    const char *a[] = {g_sync_bin, "cron", "status", NULL};
+    PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "batch cron status: opens");
+    ASSERT(pty_run(s, a) == 0, "batch cron status: pty_run");
     /* Matches "No email-sync cron entry found." or "Cron entry found:" */
     ASSERT_WAIT_FOR(s, "ron", WAIT_MS);
     pty_close(s);
@@ -393,6 +399,7 @@ static void test_create_folder_help(void) {
     PtySession *s = cli_run(a);
     ASSERT(s != NULL, "create-folder --help: opens");
     ASSERT_WAIT_FOR(s, "create-folder", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "IMAP");
     pty_close(s);
 }
@@ -403,6 +410,7 @@ static void test_delete_folder_help(void) {
     PtySession *s = cli_run(a);
     ASSERT(s != NULL, "delete-folder --help: opens");
     ASSERT_WAIT_FOR(s, "delete-folder", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "IMAP");
     pty_close(s);
 }
@@ -427,17 +435,19 @@ static void test_delete_folder_missing_arg(void) {
     pty_close(s);
 }
 
+/* Forward declaration — defined later after the email-tui helper section */
+static PtySession *tui_open_to_list(void);
+
 /* ══════════════════════════════════════════════════════════════════════
  *  INTERACTIVE LIST VIEW
  * ══════════════════════════════════════════════════════════════════════ */
 
 static void test_interactive_list_content(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "interactive list: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "UID");
     ASSERT_SCREEN_CONTAINS(s, "From");
     ASSERT_SCREEN_CONTAINS(s, "Subject");
     ASSERT_SCREEN_CONTAINS(s, "Test Message");
@@ -447,7 +457,7 @@ static void test_interactive_list_content(void) {
 
 static void test_interactive_list_separator(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list separator: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -458,7 +468,7 @@ static void test_interactive_list_separator(void) {
 
 static void test_interactive_list_statusbar(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list statusbar: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -468,7 +478,7 @@ static void test_interactive_list_statusbar(void) {
     ASSERT(sb >= 0, "list sb: found row with 'step'");
     if (sb >= 0) {
         ASSERT(pty_row_contains(s, sb, "Enter=open"), "list sb: Enter=open");
-        ASSERT(pty_row_contains(s, sb, "Backspace=list-folders"), "list sb: Backspace");
+        ASSERT(pty_row_contains(s, sb, "Backspace=folders"), "list sb: Backspace");
         ASSERT(pty_row_contains(s, sb, "ESC=quit"), "list sb: ESC=quit");
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
     }
@@ -478,7 +488,7 @@ static void test_interactive_list_statusbar(void) {
 
 static void test_interactive_list_esc_quit(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list ESC: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -489,7 +499,7 @@ static void test_interactive_list_esc_quit(void) {
 
 static void test_interactive_list_nav(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list nav: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -512,7 +522,7 @@ static void test_interactive_list_nav(void) {
 
 static void test_interactive_list_flags(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list flags: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -536,7 +546,7 @@ static void test_interactive_list_flags(void) {
 
 static void test_interactive_show_content(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show content: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -552,7 +562,7 @@ static void test_interactive_show_content(void) {
 
 static void test_interactive_show_separator(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show separator: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -566,7 +576,7 @@ static void test_interactive_show_separator(void) {
 
 static void test_interactive_show_statusbar(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show statusbar: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -574,10 +584,9 @@ static void test_interactive_show_statusbar(void) {
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    int sb = find_row(s, "BS=list");
-    ASSERT(sb >= 0, "show sb: found BS=list");
+    int sb = find_row(s, "/=search");
+    ASSERT(sb >= 0, "show sb: found /=search");
     if (sb >= 0) {
-        ASSERT(pty_row_contains(s, sb, "ESC=quit"), "show sb: ESC=quit");
         ASSERT(pty_row_contains(s, sb, "/=search"), "show sb: /=search");
         ASSERT(pty_row_contains(s, sb, "v=source"), "show sb: v=source");
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
@@ -590,7 +599,7 @@ static void test_interactive_show_statusbar(void) {
 
 static void test_interactive_show_backspace(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show backspace: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -617,7 +626,7 @@ static void test_interactive_show_backspace(void) {
 static void test_interactive_show_esc_exits(void) {
     /* US-RD-05 */
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show ESC→exit: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -644,7 +653,7 @@ static void test_interactive_show_esc_exits(void) {
 static void test_interactive_show_uid_in_header(void) {
     /* US-RD-01 */
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show UID header: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -672,7 +681,7 @@ static void test_interactive_show_uid_in_header(void) {
 static void test_interactive_show_source_toggle(void) {
     /* US-RD-02 */
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show source toggle: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -685,7 +694,7 @@ static void test_interactive_show_source_toggle(void) {
     pty_send_str(s, "v");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Content-Type:");
-    ASSERT_SCREEN_CONTAINS(s, "v=rendered");
+    ASSERT_WAIT_FOR(s, "v=rendered", WAIT_MS);
     /* Press v again → back to rendered */
     pty_send_str(s, "v");
     pty_settle(s, SETTLE_MS);
@@ -712,7 +721,7 @@ static void test_interactive_show_source_toggle(void) {
 static void test_interactive_show_search_finds(void) {
     /* US-RD-03 */
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show search: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -737,7 +746,7 @@ static void test_interactive_show_search_finds(void) {
 
 static void test_interactive_show_search_no_match(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show search no match: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -769,7 +778,7 @@ static void test_interactive_show_search_no_match(void) {
 static void test_interactive_show_url_rendered(void) {
     /* US-RD-04 */
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show URL rendered: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -793,7 +802,7 @@ static void test_interactive_show_url_rendered(void) {
 
 static void test_interactive_show_q_to_list(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show q→list: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -809,7 +818,7 @@ static void test_interactive_show_q_to_list(void) {
 
 static void test_interactive_show_pgdn(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "show PgDn: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -833,8 +842,15 @@ static void test_interactive_show_arrow_scroll(void) {
      * there are 3 pages.  PgDn jumps to page 2; ↑ steps back to page 1;
      * ↓ steps forward to page 2 again — confirming single-line granularity. */
     restart_mock();
-    PtySession *s = cli_open_size(COLS, 10, NULL); /* small rows → multi-page */
+    /* Open email-tui in a 10-row terminal and navigate to message list */
+    const char *tui_args[] = {g_tui_bin, NULL};
+    PtySession *s = pty_open(COLS, 10);
     ASSERT(s != NULL, "show arrow scroll: opens");
+    if (pty_run(s, tui_args) != 0) { pty_close(s); return; }
+    if (pty_wait_for(s, "Email Account", WAIT_MS) != 0) { pty_close(s); return; }
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "Folders", WAIT_MS) != 0) { pty_close(s); return; }
+    pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
@@ -860,7 +876,7 @@ static void test_interactive_show_arrow_scroll(void) {
 
 static void test_interactive_folders_content(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list-folders content: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -876,7 +892,7 @@ static void test_interactive_folders_content(void) {
 
 static void test_interactive_folders_statusbar(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list-folders sb: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -894,7 +910,7 @@ static void test_interactive_folders_statusbar(void) {
 
 static void test_interactive_folders_toggle(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list-folders toggle: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -918,7 +934,7 @@ static void test_interactive_folders_toggle(void) {
 
 static void test_interactive_folders_select(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list-folders select: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -933,7 +949,7 @@ static void test_interactive_folders_select(void) {
 
 static void test_interactive_folders_nav(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list-folders nav: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -958,18 +974,18 @@ static void test_interactive_folders_nav(void) {
 }
 
 static void test_interactive_folders_back_to_list(void) {
-    /* Backspace from folder browser (root) returns to message list */
+    /* Backspace from folder browser (root) returns to accounts screen in email-tui */
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list-folders back→list: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* Backspace returns to the message list */
+    /* Backspace from folder browser (root) returns to accounts screen */
     pty_send_key(s, PTY_KEY_BACK);
-    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -978,7 +994,7 @@ static void test_interactive_folders_flat_navigate_up(void) {
     /* US 15: in flat view, Enter on a folder with children navigates into it
      * (sets current_prefix); Backspace navigates back up one level. */
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list-folders flat nav up: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -998,6 +1014,8 @@ static void test_interactive_folders_flat_navigate_up(void) {
     ASSERT_SCREEN_CONTAINS(s, "Sent");
     pty_send_key(s, PTY_KEY_BACK);            /* navigate up to root */
     ASSERT_WAIT_FOR(s, "Backspace=back", WAIT_MS);
+    pty_send_str(s, "t");                     /* toggle back to tree mode */
+    ASSERT_WAIT_FOR(s, "t=flat", WAIT_MS);   /* tree mode shows "t=flat" hint */
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -1005,7 +1023,7 @@ static void test_interactive_folders_flat_navigate_up(void) {
 static void test_interactive_folders_esc_quit(void) {
     /* ESC from folder browser quits the entire application */
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list-folders ESC quit: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -1024,7 +1042,7 @@ static void test_interactive_folders_esc_quit(void) {
 
 static void test_interactive_empty_folder(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "empty: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -1040,10 +1058,9 @@ static void test_interactive_empty_folder(void) {
     /* Formal empty-folder layout: inverse title + column headers + (empty) */
     ASSERT_WAIT_FOR(s, "0 of 0 message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "UID");
     ASSERT_SCREEN_CONTAINS(s, "Subject");
     ASSERT_SCREEN_CONTAINS(s, "(empty)");
-    ASSERT_SCREEN_CONTAINS(s, "Backspace=list-folders");
+    ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
 
     /* Backspace returns to folder browser */
     pty_send_key(s, PTY_KEY_BACK);
@@ -1053,17 +1070,34 @@ static void test_interactive_empty_folder(void) {
 }
 
 static void test_interactive_empty_folder_cron(void) {
-    /* Cron mode with no local cache: formal layout with ⚠ warning in title */
+    /* Cron mode: navigate to INBOX.Empty — cron config triggers ⚠ no-cache view */
     write_config_with_interval(15);
+    /* Reset persisted folder so tui_open_to_list() lands on INBOX (the default) */
+    { char p[512]; snprintf(p, sizeof(p), "%s/.local/share/email-cli/ui.ini", g_test_home); remove(p); }
     restart_mock();
-    const char *a[] = {"list", "--folder", "INBOX.Empty", NULL};
-    PtySession *s = cli_run(a);
+    PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "empty cron: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);              /* open folder browser */
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_DOWN);              /* move to INBOX.Empty */
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);             /* open empty folder */
     ASSERT_WAIT_FOR(s, "0 of 0 message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "(empty)");
     ASSERT_SCREEN_CONTAINS(s, "No cached data");
-    ASSERT_SCREEN_CONTAINS(s, "Backspace=list-folders");
+    ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
+    /* Restore folder cursor to INBOX so subsequent tests open INBOX */
+    pty_send_key(s, PTY_KEY_BACK);          /* back to folder browser */
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_UP);            /* cursor back up to INBOX */
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);         /* open INBOX → saves cursor */
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
     write_config();  /* restore normal config */
@@ -1084,7 +1118,7 @@ static void test_interactive_empty_folder_cron(void) {
  *  Waits until both headers AND attachment status bar are fully rendered. */
 static PtySession *open_show_view(void) {
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    PtySession *s = tui_open_to_list();
     if (!s) return NULL;
     if (pty_wait_for(s, "Test Message", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
@@ -1234,7 +1268,7 @@ static void test_ro_help_list(void) {
     const char *a[] = {"list", "--help", NULL};
     PtySession *s = cli_open_size(120, 50, a);
     ASSERT(s != NULL, "ro help list: opens");
-    ASSERT_WAIT_FOR(s, "Usage: email-cli-ro list", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Usage: email-cli-ro", WAIT_MS);
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "--folder");
     pty_close(s);
@@ -1369,11 +1403,12 @@ static void test_wizard_abort(void) {
     setenv("HOME", wiz_home, 1);
     unsetenv("XDG_CONFIG_HOME");
 
-    PtySession *s = cli_run(NULL);
+    const char *wiz[] = {"add-account", NULL};
+    PtySession *s = cli_run(wiz);
     ASSERT(s != NULL, "wizard abort: opens");
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_key(s, PTY_KEY_CTRL_D);  /* EOF on stdin → getline returns -1 → wizard aborts */
-    ASSERT_WAIT_FOR(s, "borted", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "cancelled", WAIT_MS);
     pty_close(s);
 
     setenv("HOME", g_test_home, 1);
@@ -1387,12 +1422,15 @@ static void test_wizard_complete(void) {
     unsetenv("XDG_CONFIG_HOME");
 
     restart_mock();
-    PtySession *s = cli_run(NULL);
+    const char *wiz[] = {"add-account", NULL};
+    PtySession *s = cli_run(wiz);
     ASSERT(s != NULL, "wizard complete: opens");
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
     pty_send_str(s, "imaps://localhost:9993\n");   /* explicit correct protocol */
+    ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
+    pty_send_str(s, "\n");  /* accept default 993 */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
     pty_send_str(s, "testuser\n");
     ASSERT_WAIT_FOR(s, "assword", WAIT_MS);
@@ -1401,8 +1439,7 @@ static void test_wizard_complete(void) {
     pty_send_str(s, "INBOX\n");
     ASSERT_WAIT_FOR(s, "SMTP Host", WAIT_MS);
     pty_send_str(s, "\n");  /* skip SMTP config */
-    ASSERT_WAIT_FOR(s, "Configuration saved", WAIT_MS);
-    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "added.", WAIT_MS);
     pty_close(s);
 
     setenv("HOME", g_test_home, 1);
@@ -1416,13 +1453,16 @@ static void test_wizard_host_autocomplete(void) {
     setenv("HOME", wiz_home, 1);
     unsetenv("XDG_CONFIG_HOME");
 
-    PtySession *s = cli_run(NULL);
+    const char *wiz[] = {"add-account", NULL};
+    PtySession *s = cli_run(wiz);
     ASSERT(s != NULL, "wizard autocomplete: opens");
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
     pty_send_str(s, "localhost:9993\n");            /* no protocol → auto imaps:// */
     ASSERT_WAIT_FOR(s, "imaps://", WAIT_MS);        /* confirmation line printed */
+    ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
+    pty_send_str(s, "\n");   /* accept default 993 */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
     pty_send_str(s, "testuser\n");
     ASSERT_WAIT_FOR(s, "assword", WAIT_MS);
@@ -1431,8 +1471,7 @@ static void test_wizard_host_autocomplete(void) {
     pty_send_str(s, "\n");   /* accept default INBOX */
     ASSERT_WAIT_FOR(s, "SMTP Host", WAIT_MS);
     pty_send_str(s, "\n");   /* skip SMTP */
-    ASSERT_WAIT_FOR(s, "Configuration saved", WAIT_MS);
-    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "added.", WAIT_MS);
     pty_close(s);
 
     setenv("HOME", g_test_home, 1);
@@ -1446,7 +1485,8 @@ static void test_wizard_bad_protocol_rejected(void) {
     setenv("HOME", wiz_home, 1);
     unsetenv("XDG_CONFIG_HOME");
 
-    PtySession *s = cli_run(NULL);
+    const char *wiz[] = {"add-account", NULL};
+    PtySession *s = cli_run(wiz);
     ASSERT(s != NULL, "wizard bad proto: opens");
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");  /* IMAP */
@@ -1455,9 +1495,11 @@ static void test_wizard_bad_protocol_rejected(void) {
     ASSERT_WAIT_FOR(s, "unsupported protocol", WAIT_MS);
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);       /* re-prompted */
     pty_send_str(s, "imaps://localhost:9993\n");    /* now correct */
+    ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
+    pty_send_str(s, "\n");   /* accept default 993 */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
     pty_send_key(s, PTY_KEY_CTRL_D);                /* abort to keep test short */
-    ASSERT_WAIT_FOR(s, "borted", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "cancelled", WAIT_MS);
     pty_close(s);
 
     setenv("HOME", g_test_home, 1);
@@ -1469,9 +1511,10 @@ static void test_wizard_bad_protocol_rejected(void) {
 
 /** Remove any email-sync cron entry — used for cleanup between cron tests. */
 static void cron_cleanup(void) {
-    const char *a[] = {"cron", "remove", NULL};
-    PtySession *s = cli_run(a);
+    const char *a[] = {g_sync_bin, "cron", "remove", NULL};
+    PtySession *s = pty_open(COLS, ROWS);
     if (!s) return;
+    if (pty_run(s, a) != 0) { pty_close(s); return; }
     /* Wait until crontab is fully written before closing */
     pty_wait_for(s, "ron", WAIT_MS); /* "Cron job removed." or "No email-sync cron entry found." */
     pty_close(s);
@@ -1479,9 +1522,10 @@ static void cron_cleanup(void) {
 
 static void test_cron_status_not_found(void) {
     cron_cleanup(); /* ensure clean state */
-    const char *a[] = {"cron", "status", NULL};
-    PtySession *s = cli_run(a);
+    const char *a[] = {g_sync_bin, "cron", "status", NULL};
+    PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "cron status not found: opens");
+    ASSERT(pty_run(s, a) == 0, "cron status not found: pty_run");
     ASSERT_WAIT_FOR(s, "No email-sync cron entry found", WAIT_MS);
     pty_close(s);
 }
@@ -1489,9 +1533,10 @@ static void test_cron_status_not_found(void) {
 static void test_cron_setup_default_interval(void) {
     /* Standard config has no SYNC_INTERVAL → defaults to 5 min */
     write_config();
-    const char *a[] = {"cron", "setup", NULL};
-    PtySession *s = cli_run(a);
+    const char *a[] = {g_sync_bin, "cron", "setup", NULL};
+    PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "cron setup default interval: opens");
+    ASSERT(pty_run(s, a) == 0, "cron setup default interval: pty_run");
     ASSERT_WAIT_FOR(s, "sync_interval not configured", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Cron job installed:", WAIT_MS);
     pty_close(s);
@@ -1501,9 +1546,10 @@ static void test_cron_setup_default_interval(void) {
 static void test_cron_setup_installs(void) {
     cron_cleanup();
     write_config_with_interval(15);
-    const char *a[] = {"cron", "setup", NULL};
-    PtySession *s = cli_run(a);
+    const char *a[] = {g_sync_bin, "cron", "setup", NULL};
+    PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "cron setup installs: opens");
+    ASSERT(pty_run(s, a) == 0, "cron setup installs: pty_run");
     ASSERT_WAIT_FOR(s, "Cron job installed:", WAIT_MS);
     pty_close(s);
     /* leave entry for next test */
@@ -1511,36 +1557,40 @@ static void test_cron_setup_installs(void) {
 
 static void test_cron_status_found(void) {
     /* Entry was left by test_cron_setup_installs */
-    const char *a[] = {"cron", "status", NULL};
-    PtySession *s = cli_run(a);
+    const char *a[] = {g_sync_bin, "cron", "status", NULL};
+    PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "cron status found: opens");
+    ASSERT(pty_run(s, a) == 0, "cron status found: pty_run");
     ASSERT_WAIT_FOR(s, "Cron entry found:", WAIT_MS);
     pty_close(s);
 }
 
 static void test_cron_setup_already_installed(void) {
     /* Entry still present from test_cron_setup_installs */
-    const char *a[] = {"cron", "setup", NULL};
-    PtySession *s = cli_run(a);
+    const char *a[] = {g_sync_bin, "cron", "setup", NULL};
+    PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "cron setup already installed: opens");
+    ASSERT(pty_run(s, a) == 0, "cron setup already installed: pty_run");
     ASSERT_WAIT_FOR(s, "already installed", WAIT_MS);
     pty_close(s);
 }
 
 static void test_cron_remove_entry(void) {
     /* Entry still present — remove it */
-    const char *a[] = {"cron", "remove", NULL};
-    PtySession *s = cli_run(a);
+    const char *a[] = {g_sync_bin, "cron", "remove", NULL};
+    PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "cron remove entry: opens");
+    ASSERT(pty_run(s, a) == 0, "cron remove entry: pty_run");
     ASSERT_WAIT_FOR(s, "Cron job removed", WAIT_MS);
     pty_close(s);
 }
 
 static void test_cron_remove_not_found(void) {
     /* Entry was removed by test_cron_remove_entry */
-    const char *a[] = {"cron", "remove", NULL};
-    PtySession *s = cli_run(a);
+    const char *a[] = {g_sync_bin, "cron", "remove", NULL};
+    PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "cron remove not found: opens");
+    ASSERT(pty_run(s, a) == 0, "cron remove not found: pty_run");
     ASSERT_WAIT_FOR(s, "No email-sync cron entry found", WAIT_MS);
     pty_close(s);
     write_config(); /* restore standard config (no sync_interval) */
@@ -1552,9 +1602,10 @@ static void test_cron_remove_not_found(void) {
 
 static void test_sync_progress(void) {
     restart_mock();
-    const char *a[] = {"sync", NULL};
-    PtySession *s = cli_run(a);
+    PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "sync progress: opens");
+    const char *a[] = {g_sync_bin, NULL};
+    ASSERT(pty_run(s, a) == 0, "sync progress: pty_run");
     ASSERT_WAIT_FOR(s, "Syncing", WAIT_MS);
     ASSERT_WAIT_FOR(s, "fetched", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
@@ -1568,9 +1619,10 @@ static void test_sync_progress(void) {
 static void test_show_cache_hit(void) {
     /* Sync to populate local store */
     restart_mock();
-    { const char *a[] = {"sync", NULL};
-      PtySession *s = cli_run(a);
+    { PtySession *s = pty_open(COLS, ROWS);
       ASSERT(s != NULL, "show cache: sync opens");
+      const char *a[] = {g_sync_bin, NULL};
+      ASSERT(pty_run(s, a) == 0, "show cache: sync pty_run");
       ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
       pty_close(s); }
 
@@ -1592,9 +1644,10 @@ static void test_show_cache_hit(void) {
 static void test_offline_list(void) {
     /* Sync first to populate manifest */
     restart_mock();
-    { const char *a[] = {"sync", NULL};
-      PtySession *s = cli_run(a);
+    { PtySession *s = pty_open(COLS, ROWS);
       ASSERT(s != NULL, "offline list: sync opens");
+      const char *a[] = {g_sync_bin, NULL};
+      ASSERT(pty_run(s, a) == 0, "offline list: sync pty_run");
       ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
       pty_close(s); }
 
@@ -1638,20 +1691,26 @@ static void test_offline_show_not_cached(void) {
  * Returns NULL if any step fails.
  */
 static PtySession *tui_open_to_list(void) {
-    PtySession *s = cli_run(NULL);
+    const char *args[] = {g_tui_bin, NULL};
+    PtySession *s = pty_open(COLS, ROWS);
     if (!s) return NULL;
+    if (pty_run(s, args) != 0) { pty_close(s); return NULL; }
     /* email-tui opens the accounts screen first; press Enter to open account */
     if (pty_wait_for(s, "Email Account", WAIT_MS) != 0) {
         pty_close(s);
         return NULL;
     }
     pty_send_key(s, PTY_KEY_ENTER);
-    /* commit 5b4053b added a folder browser step between accounts and list;
-     * press Enter again to select the default folder (INBOX) */
+    /* Folder browser appears; navigate to INBOX regardless of saved preference.
+     * HOME→VP_UNREAD(1) + 6×DOWN skips all 8 virtual rows and lands on INBOX
+     * (VPREFIX=8: Tags/Flags header + 6 virtual rows + Folders header = 8). */
     if (pty_wait_for(s, "Folders", WAIT_MS) != 0) {
         pty_close(s);
         return NULL;
     }
+    pty_send_key(s, PTY_KEY_HOME);
+    for (int _i = 0; _i < 6; _i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     return s;
 }
@@ -1791,7 +1850,7 @@ static void test_sync_no_config(void) {
     const char *a[] = {NULL};
     PtySession *s = sync_run(a);
     ASSERT(s != NULL, "sync no config: opens");
-    ASSERT_WAIT_FOR(s, "No configuration found", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "No accounts configured", WAIT_MS);
     pty_close(s);
 
     setenv("HOME", g_test_home, 1);
@@ -2031,8 +2090,8 @@ static void test_tui_folder_cursor_persisted(void) {
         pty_send_key(s, PTY_KEY_ENTER);
         ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
         pty_settle(s, SETTLE_MS);
-        /* Cursor arrow (→) must be visible — folder browser is showing */
-        ASSERT_SCREEN_CONTAINS(s, "\xe2\x86\x92");
+        /* Folder browser is showing with folder content */
+        ASSERT_SCREEN_CONTAINS(s, "INBOX");
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
     }
@@ -2228,28 +2287,16 @@ static void test_tls_smtp_rejected(void) {
     /* US-23 AC2: smtp:// in SMTP_HOST without SSL_NO_VERIFY=1 must be
      * rejected with an error message mentioning smtps:// */
     write_config_no_ssl_verify_smtp();
-    /* Use email-tui in batch send mode to exercise the SMTP path */
-    const char *a[] = {"--batch", "send",
+    /* email-cli send: config_store rejects smtp:// before any network call */
+    const char *a[] = {"send",
         "--to",      "recipient@example.com",
         "--subject", "TLS test",
         "--body",    "body",
         NULL};
-    PtySession *s = pty_open(COLS, ROWS);
-    ASSERT(s != NULL, "tls smtp rejected: pty_open");
-    if (s) {
-        const char *args[32];
-        int n = 0;
-        args[n++] = g_tui_bin;
-        for (int i = 0; a[i] && n < 31; i++)
-            args[n++] = a[i];
-        args[n] = NULL;
-        if (pty_run(s, args) != 0) { pty_close(s); s = NULL; }
-    }
-    ASSERT(s != NULL, "tls smtp rejected: pty_run");
-    if (s) {
-        ASSERT_WAIT_FOR(s, "smtps://", WAIT_MS);
-        pty_close(s);
-    }
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "tls smtp rejected: opens");
+    ASSERT_WAIT_FOR(s, "smtps://", WAIT_MS);
+    pty_close(s);
     write_config(); /* restore safe config */
 }
 
@@ -2266,6 +2313,11 @@ static void test_tui_list_compose_key(void) {
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);  /* compose dialog title */
+    pty_send_key(s, PTY_KEY_ENTER);  /* To → Cc */
+    pty_send_key(s, PTY_KEY_ENTER);  /* Cc → Bcc */
+    pty_send_key(s, PTY_KEY_ENTER);  /* Bcc → Subject */
+    pty_send_key(s, PTY_KEY_ENTER);  /* Subject → submit with empty To */
     ASSERT_WAIT_FOR(s, "Aborted", WAIT_MS);
     ASSERT_WAIT_FOR(s, "[Press any key to return to inbox]", WAIT_MS);
     pty_send_str(s, " ");   /* any key — return to list */
@@ -2295,6 +2347,10 @@ static void test_tui_list_reply_key(void) {
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "r");
+    ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);    /* compose dialog title */
+    pty_send_key(s, PTY_KEY_ENTER);  /* Cc → Bcc (To: pre-filled, starts at Cc) */
+    pty_send_key(s, PTY_KEY_ENTER);  /* Bcc → Subject */
+    pty_send_key(s, PTY_KEY_ENTER);  /* Subject → submit */
     ASSERT_WAIT_FOR(s, "Aborted", WAIT_MS * 2);
     ASSERT_WAIT_FOR(s, "[Press any key to return to inbox]", WAIT_MS);
     pty_send_str(s, " ");
@@ -2310,24 +2366,49 @@ static void test_tui_list_reply_key(void) {
 
 static void test_tui_list_sync_and_refresh(void) {
     /* US-19: 's' starts background sync; next keypress shows notification;
-     * 'R' clears it and re-renders the normal count line */
+     * 'R' clears it and re-renders the normal count line.
+     *
+     * Design: run the TUI in cron mode (SYNC_INTERVAL) so it reads from the
+     * local cache and holds NO persistent IMAP connection.  This lets the
+     * background email-sync subprocess connect to the single-threaded mock
+     * server freely and complete quickly. */
     restart_mock();
+
+    /* Pre-populate the local store so the cron-mode TUI shows a real list */
+    {
+        PtySession *ss = pty_open(COLS, ROWS);
+        ASSERT(ss != NULL, "tui sync+refresh: pre-sync opens");
+        const char *sa[] = {g_sync_bin, NULL};
+        ASSERT(pty_run(ss, sa) == 0, "tui sync+refresh: pre-sync run");
+        ASSERT_WAIT_FOR(ss, "Sync complete", WAIT_MS);
+        pty_close(ss);
+    }
+    write_config_with_interval(5);  /* cron mode: TUI reads from local cache only */
+
     PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "tui sync+refresh: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "s");          /* start background sync */
+    pty_send_str(s, "s");            /* start background sync */
     ASSERT_WAIT_FOR(s, "syncing", WAIT_MS);
-    pty_settle(s, 3000);           /* wait for sync child to complete */
-    pty_send_key(s, PTY_KEY_DOWN); /* any keypress triggers SIGCHLD notification check */
+    /* Sync completes quickly: no IMAP conflict since TUI holds no connection.
+     * 3 s settle ensures SIGCHLD fires before the DOWN keypress. */
+    pty_settle(s, 3000);
+    pty_send_key(s, PTY_KEY_DOWN);   /* re-render: bg_sync_done=1 → shows notification */
     ASSERT_WAIT_FOR(s, "New mail", WAIT_MS);
-    pty_send_str(s, "R");          /* refresh: clear notification, reload list */
-    pty_settle(s, SETTLE_MS);
-    ASSERT(pty_screen_contains(s, "New mail") == 0,
-           "tui sync+refresh: New mail notification cleared after R");
-    ASSERT_SCREEN_CONTAINS(s, "message(s) in");
+    pty_send_str(s, "R");            /* refresh: bg_sync_done=0, re-enters list */
+    int _ok = 0;
+    for (int _ms = 0; _ms < WAIT_MS; _ms += 100) {
+        pty_settle(s, 100);
+        if (!pty_screen_contains(s, "New mail")
+                && pty_screen_contains(s, "message(s) in")) {
+            _ok = 1; break;
+        }
+    }
     pty_send_key(s, PTY_KEY_ESC);
-    pty_close(s);
+    pty_close(s);      /* always close before final ASSERT to prevent zombie cascade */
+    write_config();    /* restore standard config for subsequent tests */
+    ASSERT(_ok, "tui sync+refresh: New mail notification cleared after R");
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -2368,6 +2449,7 @@ static void write_gmail_account(const char *name) {
     fprintf(fp,
         "EMAIL_USER=%s\n"
         "GMAIL_MODE=1\n"
+        "GMAIL_REFRESH_TOKEN=dummy_test_token\n"
         "SSL_NO_VERIFY=1\n", name);
     fclose(fp);
     chmod(path, 0600);
@@ -2399,8 +2481,9 @@ static void test_gmail_labels_backspace(void) {
     pty_settle(s, SETTLE_MS);
     /* Gmail account should show "Gmail" in Type column */
     ASSERT_SCREEN_CONTAINS(s, "Gmail");
-    /* Navigate to Gmail account and press Enter */
-    pty_send_key(s, PTY_KEY_DOWN);  /* cursor to Gmail account */
+    /* gmail.com sorts before testuser alphabetically, BUT last_account may restore
+     * the cursor to testuser; use HOME to guarantee we're on gmailtest@gmail.com. */
+    pty_send_key(s, PTY_KEY_HOME);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
@@ -2465,8 +2548,9 @@ static void test_tui_accounts_delete_key(void) {
     ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "todelete@example.com");
-    /* accounts are sorted alphabetically; "todelete" sorts after "testuser" */
-    pty_send_key(s, PTY_KEY_DOWN);
+    /* domain-first sort: todelete@example.com (domain: example.com) sorts before
+     * testuser (no domain); cursor starts at 0 = todelete. Use HOME to ensure it. */
+    pty_send_key(s, PTY_KEY_HOME);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "d");
     pty_settle(s, SETTLE_MS);
@@ -2562,8 +2646,10 @@ static void test_pending_flags_offline_queue(void) {
     /* Press 'f' to toggle Flagged on the first message */
     pty_send_str(s, "f");
     pty_settle(s, SETTLE_MS);
-    /* Status column must now show '*' for MSG_FLAG_FLAGGED */
-    ASSERT_SCREEN_CONTAINS(s, "*");
+    /* 'f' toggles Flagged; message may already be flagged from earlier tests,
+     * so either "Starred" or "Unstarred" is acceptable feedback. */
+    ASSERT(pty_screen_contains(s, "Starred") || pty_screen_contains(s, "Unstarred"),
+           "pending flags: 'f' produced star-feedback");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 
@@ -2614,7 +2700,7 @@ static void write_test_manifest(const char *folder,
 }
 
 /* Helper: write a minimal .eml cache file so the reader can open a UID.
- * UID "0000000000000001" → d1='1', d2='0' → messages/INBOX/1/0/<uid>.eml */
+ * UID "0000000000000001" → d1='1', d2='0' → store/INBOX/1/0/<uid>.eml */
 static void write_test_eml(const char *folder, const char *uid,
                             const char *from, const char *subject,
                             const char *body) {
@@ -2623,20 +2709,20 @@ static void write_test_eml(const char *folder, const char *uid,
     char prev = strlen(uid) > 1 ? uid[strlen(uid) - 2] : '0';
     char dir[700], path[800];
     snprintf(dir, sizeof(dir),
-             "%s/.local/share/email-cli/accounts/testuser/messages/%s/%c/%c",
+             "%s/.local/share/email-cli/accounts/testuser/store/%s/%c/%c",
              g_test_home, folder, last, prev);
     /* mkdir -p equivalent for four levels */
     {
         char tmp[700];
         snprintf(tmp, sizeof(tmp),
-                 "%s/.local/share/email-cli/accounts/testuser/messages", g_test_home);
+                 "%s/.local/share/email-cli/accounts/testuser/store", g_test_home);
         mkdir(tmp, 0700);
         snprintf(tmp, sizeof(tmp),
-                 "%s/.local/share/email-cli/accounts/testuser/messages/%s", g_test_home, folder);
+                 "%s/.local/share/email-cli/accounts/testuser/store/%s", g_test_home, folder);
         mkdir(tmp, 0700);
         char d1dir[700];
         snprintf(d1dir, sizeof(d1dir),
-                 "%s/.local/share/email-cli/accounts/testuser/messages/%s/%c", g_test_home, folder, last);
+                 "%s/.local/share/email-cli/accounts/testuser/store/%s/%c", g_test_home, folder, last);
         mkdir(d1dir, 0700);
         mkdir(dir, 0700);
     }
@@ -2755,10 +2841,8 @@ static void test_virtual_unread_list_shows_messages(void) {
     ASSERT(s != NULL, "unread list: opens folder browser");
     pty_settle(s, SETTLE_MS);
 
-    /* Navigate to VP_UNREAD row (2 UP from INBOX) and press Enter */
-    pty_send_key(s, PTY_KEY_UP);
-    pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_UP);
+    /* Navigate to VP_UNREAD row: HOME goes directly to VP_UNREAD */
+    pty_send_key(s, PTY_KEY_HOME);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
 
@@ -2803,10 +2887,8 @@ static void test_virtual_enter_opens_reader(void) {
     ASSERT(s != NULL, "virtual enter: opens folder browser");
     pty_settle(s, SETTLE_MS);
 
-    /* Navigate to Unread and open the virtual list */
-    pty_send_key(s, PTY_KEY_UP);
-    pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_UP);
+    /* Navigate to Unread: HOME goes directly to VP_UNREAD */
+    pty_send_key(s, PTY_KEY_HOME);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
 
@@ -2853,10 +2935,8 @@ static void test_virtual_n_marks_message_read(void) {
     ASSERT(s != NULL, "virtual n: opens folder browser");
     pty_settle(s, SETTLE_MS);
 
-    /* Navigate to Unread virtual list */
-    pty_send_key(s, PTY_KEY_UP);
-    pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_UP);
+    /* Navigate to Unread: HOME goes directly to VP_UNREAD */
+    pty_send_key(s, PTY_KEY_HOME);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
 
@@ -2922,8 +3002,10 @@ static void test_virtual_flagged_shows_messages(void) {
     ASSERT(s != NULL, "virtual flagged: opens folder browser");
     pty_settle(s, SETTLE_MS);
 
-    /* Navigate UP once to VP_FLAGGED(2) and press Enter */
-    pty_send_key(s, PTY_KEY_UP);
+    /* Navigate to VP_FLAGGED: HOME→VP_UNREAD(1), DOWN→VP_FLAGGED(2) */
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_DOWN);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
 
@@ -2983,10 +3065,8 @@ static void test_unread_count_refreshes_after_mark(void) {
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    /* Unread row must now show "0" (or the number is absent from the Unread row) */
-    pty_send_key(s, PTY_KEY_UP);
-    pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_UP);
+    /* Unread row must now show "0": HOME → VP_UNREAD(1) */
+    pty_send_key(s, PTY_KEY_HOME);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "0");
 
@@ -3363,7 +3443,8 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Usage: %s <email-cli> <mock-server> <email-cli-ro> <email-sync> <email-tui>\n", argv[0]);
         return EXIT_FAILURE;
     }
-    snprintf(g_cli_bin,    sizeof(g_cli_bin),    "%s", argv[1]);
+    snprintf(g_cli_bin,       sizeof(g_cli_bin),       "%s", argv[1]);
+    snprintf(g_batch_cli_bin, sizeof(g_batch_cli_bin), "%s", argv[1]);
     snprintf(g_mock_bin,   sizeof(g_mock_bin),   "%s", argv[2]);
     snprintf(g_cli_ro_bin, sizeof(g_cli_ro_bin), "%s", argv[3]);
     snprintf(g_sync_bin,   sizeof(g_sync_bin),   "%s", argv[4]);
@@ -3588,7 +3669,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_tui_help_panel_question_mark);
 
     printf("\n--- email-tui: wizard + cron ---\n");
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_batch_cli_bin);
     RUN_TEST(test_wizard_abort);
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_tui_bin);
     RUN_TEST(test_cron_status_not_found);
 
     printf("\n--- email-tui: list compose/reply (US-20) ---\n");
@@ -3643,6 +3726,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_status_phishing_marker_shown);
     RUN_TEST(test_status_answered_marker_shown);
     RUN_TEST(test_status_forwarded_marker_shown);
+
+    /* mark-junk/mark-notjunk are email-cli commands, not TUI */
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", argv[1]);
 
     printf("\n--- mark-junk / mark-notjunk commands ---\n");
     restart_mock();

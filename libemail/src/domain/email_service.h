@@ -130,7 +130,8 @@ char *email_service_list_labels_interactive(const Config *cfg,
  *                     always start at position 0.
  * @return 0 = quit, 1 = open account, 2 = edit SMTP, 3 = add new account.
  */
-int email_service_account_interactive(Config **cfg_out, int *cursor_inout);
+int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
+                                      const char *flash_msg);
 
 /**
  * @brief Reads and displays one message identified by its IMAP UID.

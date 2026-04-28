@@ -5,3 +5,4 @@ bin/
 *.log
 *.gcov
 .claude/
+compile_commands.json

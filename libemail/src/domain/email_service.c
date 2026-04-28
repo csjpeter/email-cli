@@ -866,6 +866,13 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
     char *raw = NULL;
     if (local_msg_exists(folder, uid)) {
         raw = local_msg_load(folder, uid);
+    } else if (mc) {
+        if (mail_client_select(mc, folder) == 0)
+            raw = mail_client_fetch_body(mc, uid);
+        if (raw) {
+            local_msg_save(folder, uid, raw, strlen(raw));
+            local_index_update(folder, uid, raw);
+        }
     } else {
         raw = fetch_uid_content_in(cfg, folder, uid, 0);
         if (raw) {
@@ -904,6 +911,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
     }
     int term_cols = terminal_cols();
     int term_rows = terminal_rows();
+    if (term_cols <= 0) term_cols = 80;
     if (term_rows <= 0) term_rows = page_size;
     int wrap_cols = term_cols > SHOW_WIDTH ? SHOW_WIDTH : term_cols;
     char *body = NULL;
@@ -991,7 +999,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                          "  d=done  /=search  %s  BS=list  ESC=quit --",
                          cur_page, total_pages, vtog);
             }
-            print_statusbar(term_rows, wrap_cols, sb);
+            print_statusbar(term_rows, term_cols, sb);
         }
 
         TermKey key = terminal_read_key();
@@ -2430,7 +2438,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         /* Count / status line */
         {
             char cl[512];
-            int sync = sync_is_running();
+            int sync = (bg_sync_pid > 0) || sync_is_running();
             const char *suffix;
             if (bg_sync_done)
                 suffix = "  \u2709 New mail may have arrived!  R=refresh";
@@ -2713,8 +2721,13 @@ read_key_again: ;
         int prev_sync_done = bg_sync_done;
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K"); fflush(stderr);
-        if (bg_sync_done && !prev_sync_done) {
-            goto read_key_again; /* SIGCHLD woke us — wait for real keypress */
+        /* Only loop if read() was actually interrupted by SIGCHLD (EINTR path
+         * returns TERM_KEY_IGNORE with no printable char).  If SIGCHLD fired
+         * between prev_sync_done and read(), the real key is not TERM_KEY_IGNORE
+         * and must be processed — otherwise the keypress is silently consumed. */
+        if (bg_sync_done && !prev_sync_done && key == TERM_KEY_IGNORE
+                && !terminal_last_printable()) {
+            goto read_key_again;
         }
 
         switch (key) {
@@ -2887,9 +2900,6 @@ read_key_again: ;
                         { "────────────",      "──────────────────────────────" },
                         { "Status col 1:",     "P=Phishing  J=Junk  N=Unread  -" },
                         { "Status col 2:",     "\u2605=Starred  -=normal"          },
-                        { "Status col 3:",     "D=Done  -=active"                 },
-                        { "Status col 4:",     "A=has Attachment  -=none"         },
-                        { "Status col 5:",     "R=Replied  F=Forwarded  -"        },
                     };
                     show_help_popup("Message list shortcuts (Gmail)",
                                     ghelp, (int)(sizeof(ghelp)/sizeof(ghelp[0])));
@@ -2914,9 +2924,6 @@ read_key_again: ;
                         { "────────────",      "──────────────────────────────" },
                         { "Status col 1:",     "P=Phishing  J=Junk  N=Unread  -" },
                         { "Status col 2:",     "\u2605=Starred  -=normal"          },
-                        { "Status col 3:",     "D=Done  -=active"                 },
-                        { "Status col 4:",     "A=has Attachment  -=none"         },
-                        { "Status col 5:",     "R=Replied  F=Forwarded  -"        },
                     };
                     show_help_popup("Message list shortcuts",
                                     help, (int)(sizeof(help)/sizeof(help[0])));
@@ -3476,7 +3483,9 @@ char *email_service_list_folders_interactive(const Config *cfg,
                         default:           vc=0; vname="?"; vcolor=""; break;
                     }
                     char cnt[16];
-                    fmt_thou(cnt, sizeof(cnt), vc);
+                    /* Virtual rows always show the count, even when zero */
+                    if (vc == 0) snprintf(cnt, sizeof(cnt), "0");
+                    else fmt_thou(cnt, sizeof(cnt), vc);
                     if (i == cursor) printf("\033[7m");
                     else if (vc == 0) printf("\033[2m");
                     else printf("%s", vcolor);
@@ -3669,7 +3678,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
             } else if (ch == 't') {
                 tree_mode = !tree_mode;
                 ui_pref_set_int("folder_view_mode", tree_mode);
-                cursor = 0; wstart = 0;
+                cursor = VPREFIX; wstart = 0;
                 if (!tree_mode) current_prefix[0] = '\0';
             } else if (ch == 'h' || ch == '?') {
                 static const char *help[][2] = {
@@ -4083,7 +4092,30 @@ char *email_service_list_labels_interactive(const Config *cfg,
 
     if (lbl_count == 0) {
         free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_hdr, 0);
-        return NULL;
+        /* Show an empty "Labels" screen so the user can press Backspace to return. */
+        RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
+        (void)_raw;
+        int _tc = terminal_cols(), _tr = terminal_rows();
+        if (_tc <= 0) _tc = 80;
+        if (_tr <= 0) _tr = 24;
+        printf("\033[H\033[2J");
+        {
+            char _cl[256];
+            snprintf(_cl, sizeof(_cl), "  Labels \u2014 %s  (0)",
+                     cfg->user ? cfg->user : "?");
+            printf("\033[7m%s", _cl);
+            int _used = visible_line_cols(_cl, _cl + strlen(_cl));
+            for (int _p = _used; _p < _tc; _p++) putchar(' ');
+            printf("\033[0m\n\n");
+        }
+        printf("  No labels synced yet. Run 'email-sync' to populate.\n");
+        fflush(stdout);
+        print_statusbar(_tr, _tc, "  Backspace=back  ESC=quit");
+        for (;;) {
+            TermKey _k = terminal_read_key();
+            if (_k == TERM_KEY_BACK) { if (go_up) *go_up = 1; return NULL; }
+            if (_k == TERM_KEY_QUIT || _k == TERM_KEY_ESC) return NULL;
+        }
     }
 
     int cursor = 0, wstart = 0;
@@ -4496,7 +4528,8 @@ static void print_account_row(const Config *cfg, int cursor,
     }
 }
 
-int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
+int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
+                                      const char *flash_msg) {
     *cfg_out = NULL;
     RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
     (void)tui_raw;
@@ -4564,6 +4597,10 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout) {
         snprintf(sb, sizeof(sb),
                  "  \u2191\u2193=select  Enter=open  n=add  d=delete*  i=IMAP  e=SMTP  ESC=quit  (*keeps local data)");
         print_statusbar(trows, tcols, sb);
+        if (flash_msg) {
+            print_infoline(trows, tcols, flash_msg);
+            flash_msg = NULL;
+        }
 
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K"); fflush(stderr);

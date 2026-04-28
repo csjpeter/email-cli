@@ -1201,11 +1201,14 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    const char *acc_flash = NULL;
     for (;;) {  /* outer: accounts screen */
         Config *sel_cfg = NULL;
 
         {
-            int acc = email_service_account_interactive(&sel_cfg, &account_cursor);
+            int acc = email_service_account_interactive(&sel_cfg, &account_cursor,
+                                                        acc_flash);
+            acc_flash = NULL;
             if (acc == 0) break;  /* ESC/quit */
             if (acc == 3) {
                 /* 'n' → add new account via wizard */
@@ -1214,6 +1217,8 @@ int main(int argc, char *argv[]) {
                     if (config_save_account(new_cfg) != 0)
                         fprintf(stderr, "Warning: Failed to save new account.\n");
                     config_free(new_cfg);
+                } else {
+                    acc_flash = "  Wizard aborted.";
                 }
                 continue;  /* re-display accounts screen */
             }

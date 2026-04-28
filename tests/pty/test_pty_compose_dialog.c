@@ -18,7 +18,6 @@
 #include "ptytest.h"
 #include "pty_assert.h"
 
-#include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -99,7 +98,7 @@ static void write_config(void) {
         "EMAIL_USER=testuser@example.com\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SMTP_HOST=smtp://localhost:9025\n"
+        "SMTP_HOST=smtps://localhost:9025\n"
         "SMTP_PORT=9025\n"
         "SMTP_USER=testuser@example.com\n"
         "SMTP_PASS=testpass\n"
@@ -237,11 +236,11 @@ static PtySession *tui_open_to_inbox(void) {
     if (pty_wait_for(s, "testuser", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
-    /* Folder browser → open INBOX */
-    if (pty_wait_for(s, "INBOX", WAIT_MS) != 0) { pty_close(s); return NULL; }
-    pty_settle(s, SETTLE_MS);
-    /* Navigate down past virtual rows to reach INBOX (position VPREFIX=8) */
-    for (int i = 0; i < 8; i++) { pty_send_key(s, PTY_KEY_DOWN); pty_settle(s, 50); }
+    /* Folder browser: HOME → VP_UNREAD(1), then 6× DOWN reaches INBOX(8),
+     * skipping VP_HDR_FOLD which the browser auto-skips on navigation. */
+    if (pty_wait_for(s, "Folders", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_send_key(s, PTY_KEY_HOME);
+    for (int i = 0; i < 6; i++) { pty_send_key(s, PTY_KEY_DOWN); pty_settle(s, 50); }
     pty_send_key(s, PTY_KEY_ENTER);
     if (pty_wait_for(s, "message(s) in", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
@@ -295,9 +294,9 @@ static void test_compose_dialog_status_line(void) {
     pty_send_str(s, "c");
     ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* At least Tab and Esc must be mentioned */
+    /* At least Tab and ESC must be mentioned */
     ASSERT_SCREEN_CONTAINS(s, "Tab");
-    ASSERT_SCREEN_CONTAINS(s, "Esc");
+    ASSERT_SCREEN_CONTAINS(s, "ESC");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -314,7 +313,9 @@ static void test_compose_esc_cancels(void) {
     pty_settle(s, SETTLE_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
-    /* Message list must reappear */
+    /* After compose cancel, TUI shows "[Press any key]" before returning to list */
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     /* Must NOT have opened editor (vim is not running) */
@@ -953,6 +954,8 @@ static void test_reply_esc_cancels(void) {
     pty_settle(s, SETTLE_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -970,12 +973,13 @@ static void test_reply_can_add_cc(void) {
     ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    /* Move to Cc and add an address */
-    pty_send_key(s, PTY_KEY_TAB);   /* To → Cc */
+    /* Reply dialog starts at Cc (To is pre-filled with sender address).
+     * Type Cc address directly, then Tab to Subject. */
     pty_send_str(s, "carol@example.org");
+    pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "carol@example.org");
 
-    /* Move to Subject and confirm */
+    /* Move to Subject and confirm: Cc→Bcc→Subject = 2× Tab */
     pty_send_key(s, PTY_KEY_TAB);   /* Cc → Bcc */
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);
@@ -1012,7 +1016,7 @@ static void test_reply_editor_opens_with_quoted_body(void) {
     ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    pty_send_key(s, PTY_KEY_TAB);   /* To → Cc */
+    /* Reply dialog starts at Cc (To pre-filled): Cc→Bcc→Subject = 2× Tab */
     pty_send_key(s, PTY_KEY_TAB);   /* Cc → Bcc */
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);
@@ -1094,6 +1098,8 @@ static void test_reply_all_esc_cancels(void) {
     ASSERT_WAIT_FOR(s, "Reply All", WAIT_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -1305,6 +1311,8 @@ static void test_forward_esc_cancels(void) {
     ASSERT_WAIT_FOR(s, "Forward", WAIT_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -1337,7 +1345,7 @@ static PtySession *tui_open_to_folders(void) {
     if (pty_wait_for(s, "testuser", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);  /* open account → folder browser */
-    if (pty_wait_for(s, "INBOX", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    if (pty_wait_for(s, "Folders", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
     return s;
 }
@@ -1601,6 +1609,78 @@ static void test_multiple_cc_semicolon_separated(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  TC-CD-66 / TC-CD-67: Reader-view 'r' reply and Sent folder saving
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_reader_reply_opens_compose(void) {
+    /* TC-CD-66: 'r' pressed inside the message reader opens the reply dialog */
+    restart_imap();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "reader reply: reached inbox");
+
+    /* Open first message in reader */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* 'r' in reader → exits reader, compose reply dialog opens */
+    pty_send_str(s, "r");
+    ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    ASSERT_SCREEN_CONTAINS(s, "To:");
+    ASSERT_SCREEN_CONTAINS(s, "Re:");
+
+    /* ESC → dialog closed; main_tui shows "[Press any key]" prompt */
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_reply_send_saves_to_sent(void) {
+    /* TC-CD-67: reply from reader → send → Sent folder saved ("Saved." visible) */
+    restart_imap(); restart_smtp();
+    write_editor_script();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "sent folder: reached inbox");
+
+    /* Open first message in reader */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* 'r' in reader → reply dialog */
+    pty_send_str(s, "r");
+    ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Navigate to Subject (reply starts at Cc since To is pre-filled):
+     * Cc→Bcc→Subject = 2× Tab */
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+
+    /* Verify full send + Sent folder flow */
+    ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message sent.", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Saving to Sent", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Saved.", WAIT_MS);
+
+    /* Dismiss "[Press any key]" prompt → back to inbox */
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  * US-CD-13 / US-CD-14: Answered and Forwarded status markers
  *
  * US-CD-13: As a user, after I reply to a message, the message list
@@ -1626,12 +1706,14 @@ static void test_replied_message_shows_answered_marker(void) {
     pty_send_str(s, "r");
     ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_TAB);   /* To → Cc */
+    /* Reply dialog starts at Cc (To is pre-filled with sender address).
+     * Cc→Bcc→Subject = 2× Tab */
     pty_send_key(s, PTY_KEY_TAB);   /* Cc → Bcc */
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
-    pty_settle(s, SETTLE_MS);
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
 
     /* Return to list and check for 'a' (answered) marker */
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
@@ -1659,7 +1741,8 @@ static void test_forwarded_message_shows_forwarded_marker(void) {
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
-    pty_settle(s, SETTLE_MS);
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
 
     /* Return to list and check for 'f' (forwarded) marker */
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
@@ -1800,6 +1883,12 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_cc_in_smtp_envelope);
     RUN_TEST(test_bcc_not_in_message_headers);
     RUN_TEST(test_multiple_cc_semicolon_separated);
+
+    /* ── Reader reply / Send + Sent folder (TC-CD-66 / TC-CD-67) ────── */
+    printf("\n--- Reader reply / Send + Sent ---\n");
+    restart_imap();
+    RUN_TEST(test_reader_reply_opens_compose);
+    RUN_TEST(test_reply_send_saves_to_sent);
 
     /* ── Answered / Forwarded status markers (US-CD-13 / US-CD-14) ───── */
     printf("\n--- Answered / Forwarded status markers ---\n");

@@ -1338,7 +1338,7 @@ int main(int argc, char *argv[]) {
 
         int back_to_accounts = 0;
         for (;;) {  /* inner: message list + folder browser */
-            EmailListOpts opts = {0, tui_folder, page_size, 0, 1, {0}};
+            EmailListOpts opts = {0, tui_folder, page_size, 0, 1, {0}, {0}};
             int ret = email_service_list(sel_cfg, &opts);
             if (ret == 1) {
                 /* Backspace from message list → folder/label browser */
@@ -1375,7 +1375,8 @@ int main(int argc, char *argv[]) {
                 }
             } else if (ret == 3) {
                 /* 'r' → reply to current message */
-                cmd_reply(sel_cfg, opts.action_uid, tui_folder);
+                const char *af = opts.action_folder[0] ? opts.action_folder : tui_folder;
+                cmd_reply(sel_cfg, opts.action_uid, af);
                 printf("\n  [Press any key to return to inbox]\n");
                 fflush(stdout);
                 {
@@ -1388,7 +1389,10 @@ int main(int argc, char *argv[]) {
                 continue;
             } else if (ret == 5) {
                 /* 'F' → forward current message */
-                cmd_forward(sel_cfg, opts.action_uid, tui_folder);
+                {
+                    const char *af = opts.action_folder[0] ? opts.action_folder : tui_folder;
+                    cmd_forward(sel_cfg, opts.action_uid, af);
+                }
                 printf("\n  [Press any key to return to inbox]\n");
                 fflush(stdout);
                 {
@@ -1398,7 +1402,10 @@ int main(int argc, char *argv[]) {
                 }
             } else if (ret == 6) {
                 /* 'A' → reply-all */
-                cmd_reply_all(sel_cfg, opts.action_uid, tui_folder);
+                {
+                    const char *af = opts.action_folder[0] ? opts.action_folder : tui_folder;
+                    cmd_reply_all(sel_cfg, opts.action_uid, af);
+                }
                 printf("\n  [Press any key to return to inbox]\n");
                 fflush(stdout);
                 {

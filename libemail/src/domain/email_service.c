@@ -1274,6 +1274,10 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                          currently ? "Marked not done" : "Marked done");
                 break;
             } else if (!is_gmail && ch == 'r') {
+                /* Ensure the raw message is in the local cache so cmd_reply
+                 * can reload it without requiring a live IMAP connection. */
+                if (!local_msg_exists(folder, uid))
+                    local_msg_save(folder, uid, raw, strlen(raw));
                 result = 2;      /* reply to this message */
                 goto show_int_done;
             } else if (att_count > 0 && ((is_gmail && ch == 'A') || (!is_gmail && ch == 'a'))) {
@@ -2795,6 +2799,7 @@ read_key_again: ;
                 if (ret == 2) {
                     /* 'r' pressed in reader → reply to this message */
                     memcpy(opts->action_uid, entries[ei_cur].uid, 17);
+                    snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
                     list_result = 3;
                     goto list_done;
                 }
@@ -2852,16 +2857,19 @@ read_key_again: ;
             }
             if (ch == 'r') {
                 memcpy(opts->action_uid, entries[ei_cur].uid, 17);
+                snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
                 list_result = 3;
                 goto list_done;
             }
             if (ch == 'F') {
                 memcpy(opts->action_uid, entries[ei_cur].uid, 17);
+                snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
                 list_result = 5;
                 goto list_done;
             }
             if (ch == 'A') {
                 memcpy(opts->action_uid, entries[ei_cur].uid, 17);
+                snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
                 list_result = 6;
                 goto list_done;
             }

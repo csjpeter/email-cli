@@ -18,8 +18,10 @@
  * limit      Maximum number of rows to display per page (0 = no limit)
  * offset     1-based index of the first message to show (0 or 1 = start)
  * pager      1 = interactive pager (less-like); 0 = one-shot with hint line
- * action_uid Output: UID of the message the user acted on (set when return
- *            value is 3 = reply). Unused for other return values.
+ * action_uid    Output: UID of the message the user acted on (set when return
+ *              value is 3/5/6 = reply/fwd/reply-all). Unused otherwise.
+ * action_folder Output: physical IMAP folder of action_uid (may differ from
+ *              the virtual/search folder the list was opened with).
  */
 typedef struct {
     int         all;
@@ -27,7 +29,8 @@ typedef struct {
     int         limit;
     int         offset;
     int         pager;
-    char        action_uid[17]; /**< Output: UID for reply action (ret==3) */
+    char        action_uid[17];  /**< Output: UID for reply/fwd/reply-all */
+    char        action_folder[512]; /**< Output: physical folder for action_uid */
 } EmailListOpts;
 
 /**

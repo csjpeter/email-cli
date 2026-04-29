@@ -4832,6 +4832,32 @@ static void sync_progress_cb(size_t received, size_t total, void *ctx) {
     fflush(stdout);
 }
 
+/** Convert bare LF to CRLF throughout msg, and ensure a trailing CRLF.
+ *  RFC 3501 §4.3 requires message literals to use CRLF line endings.
+ *  Returns a heap-allocated NUL-terminated string; sets *len_out.
+ *  Returns NULL on allocation failure. */
+static char *msg_to_crlf(const char *msg, size_t *len_out) {
+    size_t in_len = strlen(msg);
+    size_t bare_lf = 0;
+    for (size_t i = 0; i < in_len; i++)
+        if (msg[i] == '\n' && (i == 0 || msg[i-1] != '\r'))
+            bare_lf++;
+    int need_trail = (in_len < 2 || msg[in_len-2] != '\r' || msg[in_len-1] != '\n');
+    size_t out_len = in_len + bare_lf + (need_trail ? 2 : 0);
+    char *out = malloc(out_len + 1);
+    if (!out) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; i < in_len; i++) {
+        if (msg[i] == '\n' && (i == 0 || msg[i-1] != '\r'))
+            out[j++] = '\r';
+        out[j++] = msg[i];
+    }
+    if (need_trail) { out[j++] = '\r'; out[j++] = '\n'; }
+    out[j] = '\0';
+    *len_out = j;
+    return out;
+}
+
 int email_service_sync(const Config *cfg) {
     /* ── PID-file lock: exit immediately if another sync is running ──────── */
     char pid_path[2048] = {0};
@@ -4892,6 +4918,52 @@ int email_service_sync(const Config *cfg) {
 
     int total_fetched = 0, total_skipped = 0, errors = 0;
 
+    /* Upload locally-queued outgoing messages (sent/draft) to the server.
+     * A dedicated connection is used so that a slow or failed APPEND never
+     * corrupts the main sync connection used for folder operations. */
+    {
+        int pac = 0;
+        PendingAppend *pa = local_pending_append_load(&pac);
+        if (pa && pac > 0) {
+            printf("Uploading %d pending message(s)...\n", pac);
+            fflush(stdout);
+            RAII_MAIL MailClient *append_mc = make_mail(cfg);
+            if (!append_mc) {
+                printf("  (Upload skipped: cannot connect; will retry on next sync.)\n");
+            } else {
+                for (int i = 0; i < pac; i++) {
+                    char *raw = local_msg_load(pa[i].folder, pa[i].uid);
+                    if (!raw) {
+                        local_pending_append_remove(pa[i].folder, pa[i].uid);
+                        continue;
+                    }
+                    /* RFC 3501 requires CRLF line endings throughout the message
+                     * body.  Normalise bare LF so strict servers accept the literal. */
+                    size_t append_len = 0;
+                    char *append_msg = msg_to_crlf(raw, &append_len);
+                    if (!append_msg) { append_msg = raw; append_len = strlen(raw); }
+                    printf("  → %s ...", pa[i].folder); fflush(stdout);
+                    if (mail_client_append(append_mc, pa[i].folder, append_msg, append_len) == 0) {
+                        local_msg_delete(pa[i].folder, pa[i].uid);
+                        Manifest *mf = manifest_load(pa[i].folder);
+                        if (mf) {
+                            manifest_remove(mf, pa[i].uid);
+                            manifest_save(pa[i].folder, mf);
+                            manifest_free(mf);
+                        }
+                        local_pending_append_remove(pa[i].folder, pa[i].uid);
+                        printf(" uploaded.\n");
+                    } else {
+                        printf(" failed (retry on next sync).\n");
+                    }
+                    if (append_msg != raw) free(append_msg);
+                    free(raw);
+                }
+            }
+        }
+        free(pa);
+    }
+
     /* One shared mail client connection for all folder operations */
     RAII_MAIL MailClient *sync_mc = make_mail(cfg);
     if (!sync_mc) {
@@ -4900,58 +4972,6 @@ int email_service_sync(const Config *cfg) {
         free(folders);
         if (pid_path[0]) unlink(pid_path);
         return -1;
-    }
-
-    /* Upload locally-queued outgoing messages (sent/draft) to the server */
-    {
-        int pac = 0;
-        PendingAppend *pa = local_pending_append_load(&pac);
-        if (pa && pac > 0) {
-            printf("Uploading %d pending message(s)...\n", pac);
-            fflush(stdout);
-            for (int i = 0; i < pac; i++) {
-                char *raw = local_msg_load(pa[i].folder, pa[i].uid);
-                if (!raw) {
-                    local_pending_append_remove(pa[i].folder, pa[i].uid);
-                    continue;
-                }
-                /* RFC 2822 requires messages to end with CRLF.  Ensure this
-                 * so Dovecot and other strict servers don't reject the APPEND. */
-                size_t raw_len = strlen(raw);
-                char *append_msg = raw;
-                size_t append_len = raw_len;
-                char *padded = NULL;
-                if (raw_len < 2 ||
-                    raw[raw_len - 2] != '\r' || raw[raw_len - 1] != '\n') {
-                    padded = malloc(raw_len + 3);
-                    if (padded) {
-                        memcpy(padded, raw, raw_len);
-                        padded[raw_len]     = '\r';
-                        padded[raw_len + 1] = '\n';
-                        padded[raw_len + 2] = '\0';
-                        append_msg = padded;
-                        append_len = raw_len + 2;
-                    }
-                }
-                printf("  → %s ...", pa[i].folder); fflush(stdout);
-                if (mail_client_append(sync_mc, pa[i].folder, append_msg, append_len) == 0) {
-                    local_msg_delete(pa[i].folder, pa[i].uid);
-                    Manifest *mf = manifest_load(pa[i].folder);
-                    if (mf) {
-                        manifest_remove(mf, pa[i].uid);
-                        manifest_save(pa[i].folder, mf);
-                        manifest_free(mf);
-                    }
-                    local_pending_append_remove(pa[i].folder, pa[i].uid);
-                    printf(" uploaded.\n");
-                } else {
-                    printf(" failed (retry on next sync).\n");
-                }
-                free(padded);
-                free(raw);
-            }
-        }
-        free(pa);
     }
 
     MailRules *imap_rules = mail_rules_load(local_store_account_name());

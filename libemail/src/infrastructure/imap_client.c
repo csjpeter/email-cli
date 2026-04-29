@@ -910,13 +910,12 @@ int imap_append(ImapClient *c, const char *folder,
         return -1;
     }
 
-    /* Step 4: wait for tagged response.  APPEND can take longer than other
-     * commands (server-side AV/spam plugins, quota checks).  Use 300 s so
-     * that even slow Dovecot configurations (SpamAssassin, ClamAV, Sieve)
-     * have time to respond before we time out and desync the connection. */
+    /* Step 4: wait for tagged response.  30 s is generous for a well-configured
+     * server; the caller uses a dedicated connection so a timeout here never
+     * disrupts the main sync connection. */
     {
-        struct timeval long_tv  = { .tv_sec = 300, .tv_usec = 0 };
-        struct timeval short_tv = { .tv_sec =  15, .tv_usec = 0 };
+        struct timeval long_tv  = { .tv_sec = 30, .tv_usec = 0 };
+        struct timeval short_tv = { .tv_sec = 15, .tv_usec = 0 };
         setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &long_tv,  sizeof(long_tv));
         Response resp = {0};
         int rc = read_response(c, tag, &resp);

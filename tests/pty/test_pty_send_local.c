@@ -147,7 +147,7 @@ static void stop_server(pid_t *pid_out) {
 static void kill_listeners_on_port(int port) {
     char cmd[80];
     snprintf(cmd, sizeof(cmd), "fuser -k -KILL %d/tcp >/dev/null 2>&1", port);
-    (void)system(cmd);
+    int _unused = system(cmd); (void)_unused;
     usleep(200000);
 }
 

@@ -854,42 +854,64 @@ int imap_uid_set_flag(ImapClient *c, const char *uid, const char *flag_name, int
 
 int imap_append(ImapClient *c, const char *folder,
                 const char *msg, size_t msg_len) {
-    /* Use LITERAL+ (RFC 7888 non-synchronising literal, "{N+}") which all
-     * modern IMAP servers advertise.  This sends the command line and the
-     * message body in a single write, eliminating the two-phase
-     * synchronising-literal handshake that caused Dovecot to wait 120 s
-     * for data that never arrived due to TLS-layer buffering. */
+    /* Use a synchronising literal "{N}" (RFC 3501).  The two-phase handshake
+     * is mandatory here: we send the command line, wait for the server's
+     * "+ go ahead" continuation, then send the literal body.  This works
+     * with every IMAP server regardless of LITERAL+ support.
+     *
+     * NOTE: a previous LITERAL+ ("{N+}") approach failed on Dovecot servers
+     * that do not advertise LITERAL+ — they send "+ go ahead" and then wait
+     * for the literal, but our client (having already sent the body) was also
+     * waiting, creating a 120-second deadlock. */
     c->tag_num++;
     char tag[16];
     snprintf(tag, sizeof(tag), "A%04d", c->tag_num);
 
+    /* Step 1: send the command line (literal size only, no body yet) */
     char cmd[1024];
     int cmdlen = snprintf(cmd, sizeof(cmd),
-                          "%s APPEND \"%s\" (\\Seen) {%zu+}\r\n",
+                          "%s APPEND \"%s\" (\\Seen) {%zu}\r\n",
                           tag, folder, msg_len);
     if (cmdlen < 0 || (size_t)cmdlen >= sizeof(cmd)) return -1;
 
-    /* Allocate a single buffer: command line + message body.
-     * Sending them together guarantees they go in one TLS record. */
-    char *buf = malloc((size_t)cmdlen + msg_len);
-    if (!buf) return -1;
-    memcpy(buf,              cmd, (size_t)cmdlen);
-    memcpy(buf + cmdlen,     msg, msg_len);
-
-    logger_log(LOG_DEBUG, "IMAP [OUT] %s APPEND \"%s\" (\\Seen) {%zu+}",
+    logger_log(LOG_DEBUG, "IMAP [OUT] %s APPEND \"%s\" (\\Seen) {%zu}",
                tag, folder, msg_len);
-    logger_log(LOG_DEBUG, "IMAP APPEND: sending %zu-byte literal", msg_len);
 
-    int wrc = net_write(c, buf, (size_t)cmdlen + msg_len);
-    free(buf);
-    if (wrc != 0) {
-        logger_log(LOG_ERROR, "IMAP APPEND: write failed");
+    {
+        struct timeval tv15 = { .tv_sec = 15, .tv_usec = 0 };
+        setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv15, sizeof(tv15));
+    }
+    if (net_write(c, cmd, (size_t)cmdlen) != 0) {
+        logger_log(LOG_ERROR, "IMAP APPEND: write command failed");
         return -1;
     }
 
-    /* Wait for the server's tagged response.  APPEND can take longer than
-     * other commands (server-side AV/spam plugins, quota checks).
-     * Temporarily raise SO_RCVTIMEO to 120 s and restore to 15 s after. */
+    /* Step 2: read server's response — expect "+ go ahead" continuation.
+     * If we receive a tagged NO/BAD before the continuation, report it. */
+    {
+        LineBuf lb = {NULL, 0, 0};
+        if (read_line(c, &lb) != 0) {
+            linebuf_free(&lb);
+            logger_log(LOG_ERROR, "IMAP APPEND: no continuation from server");
+            return -1;
+        }
+        const char *line = lb.data ? lb.data : "";
+        logger_log(LOG_DEBUG, "IMAP [ IN] %s", line);
+        int ok = (line[0] == '+');
+        if (!ok) logger_log(LOG_WARN, "IMAP APPEND: expected continuation, got: %s", line);
+        linebuf_free(&lb);
+        if (!ok) return -1;
+    }
+
+    /* Step 3: send the literal body */
+    logger_log(LOG_DEBUG, "IMAP APPEND: sending %zu-byte literal", msg_len);
+    if (net_write(c, msg, msg_len) != 0) {
+        logger_log(LOG_ERROR, "IMAP APPEND: write literal failed");
+        return -1;
+    }
+
+    /* Step 4: wait for tagged response.  APPEND can take longer than other
+     * commands (server-side AV/spam plugins, quota checks). */
     {
         struct timeval long_tv  = { .tv_sec = 120, .tv_usec = 0 };
         struct timeval short_tv = { .tv_sec =  15, .tv_usec = 0 };

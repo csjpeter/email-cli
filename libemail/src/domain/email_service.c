@@ -4915,8 +4915,26 @@ int email_service_sync(const Config *cfg) {
                     local_pending_append_remove(pa[i].folder, pa[i].uid);
                     continue;
                 }
+                /* RFC 2822 requires messages to end with CRLF.  Ensure this
+                 * so Dovecot and other strict servers don't reject the APPEND. */
+                size_t raw_len = strlen(raw);
+                char *append_msg = raw;
+                size_t append_len = raw_len;
+                char *padded = NULL;
+                if (raw_len < 2 ||
+                    raw[raw_len - 2] != '\r' || raw[raw_len - 1] != '\n') {
+                    padded = malloc(raw_len + 3);
+                    if (padded) {
+                        memcpy(padded, raw, raw_len);
+                        padded[raw_len]     = '\r';
+                        padded[raw_len + 1] = '\n';
+                        padded[raw_len + 2] = '\0';
+                        append_msg = padded;
+                        append_len = raw_len + 2;
+                    }
+                }
                 printf("  → %s ...", pa[i].folder); fflush(stdout);
-                if (mail_client_append(sync_mc, pa[i].folder, raw, strlen(raw)) == 0) {
+                if (mail_client_append(sync_mc, pa[i].folder, append_msg, append_len) == 0) {
                     local_msg_delete(pa[i].folder, pa[i].uid);
                     Manifest *mf = manifest_load(pa[i].folder);
                     if (mf) {
@@ -4929,6 +4947,7 @@ int email_service_sync(const Config *cfg) {
                 } else {
                     printf(" failed (retry on next sync).\n");
                 }
+                free(padded);
                 free(raw);
             }
         }

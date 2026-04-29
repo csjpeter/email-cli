@@ -10,6 +10,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <time.h>
 
 /* ── Account base path (set by local_store_init) ─────────────────────── */
 
@@ -820,6 +821,22 @@ void manifest_retain(Manifest *m, const char (*keep_uids)[17], int keep_count) {
         }
     }
     m->count = dst;
+}
+
+void manifest_remove(Manifest *m, const char *uid) {
+    if (!m || !uid) return;
+    for (int i = 0; i < m->count; i++) {
+        if (strcmp(m->entries[i].uid, uid) == 0) {
+            free(m->entries[i].from);
+            free(m->entries[i].subject);
+            free(m->entries[i].date);
+            /* Shift remaining entries down */
+            for (int j = i + 1; j < m->count; j++)
+                m->entries[j - 1] = m->entries[j];
+            m->count--;
+            return;
+        }
+    }
 }
 
 /* ── Folder list cache ───────────────────────────────────────────────── */
@@ -1781,4 +1798,139 @@ void local_contacts_update(const char *from_hdr,
         fclose(f);
     }
     free(arr);
+}
+
+/* ── Pending APPEND queue ────────────────────────────────────────────── */
+
+static char *pending_append_path(void) {
+    if (!g_account_base[0]) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/pending_appends.tsv", g_account_base) == -1)
+        return NULL;
+    return path;
+}
+
+int local_pending_append_add(const char *folder, const char *uid) {
+    RAII_STRING char *path = pending_append_path();
+    if (!path) return -1;
+    RAII_FILE FILE *fp = fopen(path, "a");
+    if (!fp) return -1;
+    fprintf(fp, "%s\t%s\n", folder, uid);
+    return 0;
+}
+
+PendingAppend *local_pending_append_load(int *count_out) {
+    *count_out = 0;
+    RAII_STRING char *path = pending_append_path();
+    if (!path) return NULL;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+
+    int cap = 8, count = 0;
+    PendingAppend *arr = malloc((size_t)cap * sizeof(PendingAppend));
+    if (!arr) return NULL;
+
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = '\0';
+        char *nl = strchr(tab + 1, '\n'); if (nl) *nl = '\0';
+        if (count == cap) {
+            cap *= 2;
+            PendingAppend *tmp = realloc(arr, (size_t)cap * sizeof(PendingAppend));
+            if (!tmp) break;
+            arr = tmp;
+        }
+        strncpy(arr[count].folder, line,    sizeof(arr[count].folder) - 1);
+        arr[count].folder[sizeof(arr[count].folder) - 1] = '\0';
+        strncpy(arr[count].uid,    tab + 1, sizeof(arr[count].uid) - 1);
+        arr[count].uid[sizeof(arr[count].uid) - 1] = '\0';
+        count++;
+    }
+    *count_out = count;
+    return arr;
+}
+
+void local_pending_append_remove(const char *folder, const char *uid) {
+    RAII_STRING char *path = pending_append_path();
+    if (!path) return;
+
+    /* Read all lines except the matching one */
+    FILE *rfp = fopen(path, "r");
+    if (!rfp) return;
+
+    char lines[4096][512];
+    int lcount = 0;
+    char line[512];
+    while (lcount < 4096 && fgets(line, sizeof(line), rfp)) {
+        char tmp[512];
+        strncpy(tmp, line, sizeof(tmp) - 1); tmp[sizeof(tmp) - 1] = '\0';
+        char *tab = strchr(tmp, '\t');
+        if (!tab) { snprintf(lines[lcount++], 512, "%s", line); continue; }
+        *tab = '\0';
+        char *nl = strchr(tab + 1, '\n'); if (nl) *nl = '\0';
+        if (strcmp(tmp, folder) == 0 && strcmp(tab + 1, uid) == 0)
+            continue; /* skip this entry */
+        snprintf(lines[lcount++], 512, "%s", line);
+    }
+    fclose(rfp);
+
+    FILE *wfp = fopen(path, "w");
+    if (!wfp) return;
+    for (int i = 0; i < lcount; i++)
+        fputs(lines[i], wfp);
+    fclose(wfp);
+}
+
+/* ── Local outgoing message save ─────────────────────────────────────── */
+
+int local_save_outgoing(const char *folder, const char *msg, size_t msg_len) {
+    if (!g_account_base[0] || !folder || !msg) return -1;
+
+    /* Generate temporary UID: t<milliseconds_since_epoch> */
+    char uid[17];
+    {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        long long ms = (long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000LL;
+        snprintf(uid, sizeof(uid), "t%lld", ms);
+    }
+
+    /* Save full message */
+    if (local_msg_save(folder, uid, msg, msg_len) != 0) return -1;
+
+    /* Extract raw header block (everything up to the first blank line) */
+    const char *blank = strstr(msg, "\r\n\r\n");
+    if (!blank) blank = strstr(msg, "\n\n");
+    size_t hdr_len = blank ? (size_t)(blank - msg) : msg_len;
+    local_hdr_save(folder, uid, msg, hdr_len);
+
+    /* Decode fields for the manifest */
+    char *from_raw = mime_get_header(msg, "From");
+    char *subj_raw = mime_get_header(msg, "Subject");
+    char *date_raw = mime_get_header(msg, "Date");
+    char *from_dec = from_raw ? mime_decode_words(from_raw) : strdup("");
+    char *subj_dec = subj_raw ? mime_decode_words(subj_raw) : strdup("");
+    char *date_dec = date_raw ? mime_format_date(date_raw)  : strdup("");
+    free(from_raw); free(subj_raw); free(date_raw);
+
+    /* Update manifest (MSG_FLAG_SEEN: sent messages are already read) */
+    Manifest *mf = manifest_load(folder);
+    if (!mf) mf = calloc(1, sizeof(Manifest));
+    if (mf) {
+        /* flags=0: no UNSEEN bit → sent message is already read */
+        manifest_upsert(mf, uid, from_dec, subj_dec, date_dec, 0);
+        manifest_save(folder, mf);
+        manifest_free(mf);
+    } else {
+        free(from_dec); free(subj_dec); free(date_dec);
+    }
+
+    /* Queue for IMAP APPEND on next sync */
+    local_pending_append_add(folder, uid);
+
+    logger_log(LOG_INFO, "local_save_outgoing: saved %s/%s, queued for APPEND",
+               folder, uid);
+    return 0;
 }

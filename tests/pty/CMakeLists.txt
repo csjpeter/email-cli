@@ -172,3 +172,27 @@ add_custom_target(run-pty-compose-dialog
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running PTY pre-compose dialog tests"
 )
+
+# ── Local-first send PTY tests (US-SL-01 … US-SL-04) ─────────────────
+add_executable(test-pty-send-local EXCLUDE_FROM_ALL
+    test_pty_send_local.c
+)
+target_include_directories(test-pty-send-local PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-send-local ptytest)
+if(NOT APPLE)
+    target_link_libraries(test-pty-send-local util)
+endif()
+add_dependencies(test-pty-send-local email-tui email-sync mock-imap-server mock-smtp-server)
+
+add_custom_target(run-pty-send-local
+    COMMAND test-pty-send-local
+        $<TARGET_FILE:email-tui>
+        $<TARGET_FILE:email-sync>
+        $<TARGET_FILE:mock-imap-server>
+        $<TARGET_FILE:mock-smtp-server>
+    DEPENDS test-pty-send-local email-tui email-sync mock-imap-server mock-smtp-server
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running PTY local-first send tests"
+)

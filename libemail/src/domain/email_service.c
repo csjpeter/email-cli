@@ -4902,6 +4902,39 @@ int email_service_sync(const Config *cfg) {
         return -1;
     }
 
+    /* Upload locally-queued outgoing messages (sent/draft) to the server */
+    {
+        int pac = 0;
+        PendingAppend *pa = local_pending_append_load(&pac);
+        if (pa && pac > 0) {
+            printf("Uploading %d pending message(s)...\n", pac);
+            fflush(stdout);
+            for (int i = 0; i < pac; i++) {
+                char *raw = local_msg_load(pa[i].folder, pa[i].uid);
+                if (!raw) {
+                    local_pending_append_remove(pa[i].folder, pa[i].uid);
+                    continue;
+                }
+                printf("  → %s ...", pa[i].folder); fflush(stdout);
+                if (mail_client_append(sync_mc, pa[i].folder, raw, strlen(raw)) == 0) {
+                    local_msg_delete(pa[i].folder, pa[i].uid);
+                    Manifest *mf = manifest_load(pa[i].folder);
+                    if (mf) {
+                        manifest_remove(mf, pa[i].uid);
+                        manifest_save(pa[i].folder, mf);
+                        manifest_free(mf);
+                    }
+                    local_pending_append_remove(pa[i].folder, pa[i].uid);
+                    printf(" uploaded.\n");
+                } else {
+                    printf(" failed (retry on next sync).\n");
+                }
+                free(raw);
+            }
+        }
+        free(pa);
+    }
+
     MailRules *imap_rules = mail_rules_load(local_store_account_name());
 
     for (int fi = 0; fi < folder_count; fi++) {
@@ -5795,14 +5828,12 @@ int email_service_delete_folder(const Config *cfg, const char *name) {
 }
 
 int email_service_save_sent(const Config *cfg, const char *msg, size_t msg_len) {
-    RAII_MAIL MailClient *mc = make_mail(cfg);
-    if (!mc) {
-        fprintf(stderr, "Warning: could not connect to save message to Sent folder.\n");
-        return -1;
-    }
-    const char *sent_folder = cfg->sent_folder ? cfg->sent_folder : "Sent";
-    int rc = mail_client_append(mc, sent_folder, msg, msg_len);
-    if (rc != 0)
-        fprintf(stderr, "Warning: could not save message to '%s' folder.\n", sent_folder);
-    return rc;
+    local_store_init(cfg->host, cfg->user);
+    const char *folder = cfg->sent_folder ? cfg->sent_folder : "Sent";
+    return local_save_outgoing(folder, msg, msg_len);
+}
+
+int email_service_save_draft(const Config *cfg, const char *msg, size_t msg_len) {
+    local_store_init(cfg->host, cfg->user);
+    return local_save_outgoing("Drafts", msg, msg_len);
 }

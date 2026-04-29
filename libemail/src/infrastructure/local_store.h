@@ -161,6 +161,9 @@ void manifest_upsert(Manifest *m, const char *uid,
 /** @brief Removes entries whose UID is not in keep_uids (sorted). */
 void manifest_retain(Manifest *m, const char (*keep_uids)[17], int keep_count);
 
+/** @brief Removes the entry with the given UID (no-op if not found). */
+void manifest_remove(Manifest *m, const char *uid);
+
 /* ── Folder list cache ───────────────────────────────────────────────── */
 
 /**
@@ -237,6 +240,42 @@ void local_contacts_update(const char *from_hdr,
  * This is a best-effort helper: it silently ignores any I/O errors.
  */
 void local_contacts_rebuild(void);
+
+/* ── Outgoing message queue (local → IMAP upload on sync) ────────────── */
+
+/**
+ * @brief Save an outgoing message to the local store and queue it for
+ * IMAP APPEND on the next sync.  Does NOT open an IMAP connection.
+ *
+ * Generates a temporary local UID, saves the full message and its
+ * RFC 2822 headers, updates the folder manifest, and appends the entry
+ * to pending_appends.tsv so the sync process can upload it.
+ *
+ * @param folder   IMAP folder name (e.g. "Sent", "Drafts").
+ * @param msg      Full RFC 2822 message.
+ * @param msg_len  Message length in bytes.
+ * @return 0 on success, -1 on I/O error.
+ */
+int local_save_outgoing(const char *folder, const char *msg, size_t msg_len);
+
+/**
+ * One pending IMAP APPEND entry: a locally-saved message that has not yet
+ * been uploaded to the server.
+ */
+typedef struct {
+    char folder[256]; /**< IMAP folder to append to */
+    char uid[17];     /**< Local temp UID (format: t<ms_timestamp>) */
+} PendingAppend;
+
+/** @brief Appends one entry to the pending-APPEND queue. */
+int local_pending_append_add(const char *folder, const char *uid);
+
+/** @brief Loads all pending-APPEND entries.
+ *  Returns heap-allocated array (caller must free), or NULL if none. */
+PendingAppend *local_pending_append_load(int *count_out);
+
+/** @brief Removes a single entry from the pending-APPEND queue. */
+void local_pending_append_remove(const char *folder, const char *uid);
 
 /* ── Pending flag changes (server sync queue) ────────────────────────── */
 

@@ -697,17 +697,22 @@ static int cmd_compose_interactive(Config *cfg,
                 if (rc == 0)
                     printf("  Message sent.\n");
             } else {
-                /* IMAP: send via SMTP, then save to Sent folder */
+                /* IMAP: send via SMTP, save locally (sync will upload) */
                 rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
                 if (rc == 0) {
                     printf("  Message sent.\n");
-                    printf("  Saving to Sent folder...\n");
                     fflush(stdout);
-                    if (email_service_save_sent(cfg, msg, msg_len) != 0)
-                        fprintf(stderr, "  (Could not save to Sent folder — "
-                                "check EMAIL_SENT_FOLDER in config.)\n");
+                    if (email_service_save_sent(cfg, msg, msg_len) == 0)
+                        printf("  Saved locally (will upload on next sync).\n");
                     else
-                        printf("  Saved.\n");
+                        fprintf(stderr, "  Warning: could not save to local Sent folder.\n");
+                } else {
+                    printf("  Send failed. Saving to Drafts...\n");
+                    fflush(stdout);
+                    if (email_service_save_draft(cfg, msg, msg_len) == 0)
+                        printf("  Saved to Drafts (will retry on next sync).\n");
+                    else
+                        fprintf(stderr, "  Warning: could not save to local Drafts folder.\n");
                 }
             }
             fflush(stdout);

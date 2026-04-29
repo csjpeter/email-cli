@@ -2023,18 +2023,30 @@ void test_email_service(void) {
         ASSERT(sar == 0 || sar == -1, "email_service_sync_all NULL: returns 0 or -1");
     }
 
-    /* ── email_service_save_sent (fail path: no connection) ────────────── */
+    /* ── email_service_save_sent (local save, no IMAP connection needed) ── */
     {
         Config sscfg = {0};
         sscfg.host   = "imaps://no.such.host.invalid";
         sscfg.user   = "nobody";
         sscfg.folder = "INBOX";
-        const char *msg = "From: a@b.com\r\n\r\nHello";
+        const char *msg = "From: a@b.com\r\nTo: b@c.com\r\nSubject: Test\r\n\r\nHello";
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
         int ssr = email_service_save_sent(&sscfg, msg, strlen(msg));
         RESTORE_OUT(sout, serr);
-        ASSERT(ssr == -1, "email_service_save_sent: no connection → -1");
+        ASSERT(ssr == 0, "email_service_save_sent: saves locally without IMAP → 0");
+    }
+    /* ── email_service_save_sent (fail path: NULL msg) ─────────────────── */
+    {
+        Config sscfg = {0};
+        sscfg.host   = "imaps://no.such.host.invalid";
+        sscfg.user   = "nobody";
+        sscfg.folder = "INBOX";
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int ssr = email_service_save_sent(&sscfg, NULL, 0);
+        RESTORE_OUT(sout, serr);
+        ASSERT(ssr == -1, "email_service_save_sent: NULL msg → -1");
     }
 
     /* ── show_label_picker via stdin injection ───────────────────────── */

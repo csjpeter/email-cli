@@ -1665,11 +1665,10 @@ static void test_reply_send_saves_to_sent(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
 
-    /* Verify full send + Sent folder flow */
+    /* Verify full send + local Sent folder flow */
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Message sent.", WAIT_MS);
-    ASSERT_WAIT_FOR(s, "Saving to Sent", WAIT_MS);
-    ASSERT_WAIT_FOR(s, "Saved.", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
 
     /* Dismiss "[Press any key]" prompt → back to inbox */
     ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);

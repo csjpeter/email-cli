@@ -269,6 +269,19 @@ char *email_service_fetch_raw(const Config *cfg, const char *uid);
 int email_service_save_sent(const Config *cfg, const char *msg, size_t msg_len);
 
 /**
+ * @brief Save a message to the local Drafts folder and queue for IMAP APPEND.
+ *
+ * Saves the message locally (no IMAP connection required) and records it in
+ * pending_appends.tsv so the next sync uploads it to the server's Drafts folder.
+ *
+ * @param cfg      Account configuration.
+ * @param msg      Raw RFC 2822 message bytes.
+ * @param msg_len  Length in bytes.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_save_draft(const Config *cfg, const char *msg, size_t msg_len);
+
+/**
  * @brief Set or clear a flag on a message (batch mode — synchronous push).
  *
  * Updates local manifest, Gmail label indexes (gmail_mode), pending queue,

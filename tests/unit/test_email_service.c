@@ -1959,7 +1959,7 @@ void test_email_service(void) {
         INJECT_STDIN("\033x", 2, saved_stdin);
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int aret = email_service_account_interactive(&acc_out, &cursor);
+        int aret = email_service_account_interactive(&acc_out, &cursor, NULL);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         ASSERT(aret == 0 || aret == -1 || aret == 1,
@@ -2652,7 +2652,7 @@ void test_email_service(void) {
         INJECT_STDIN("\033[B\033[A\x7fh\rn", 10, saved_stdin);
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int aret2 = email_service_account_interactive(&acc_out2, &cursor2);
+        int aret2 = email_service_account_interactive(&acc_out2, &cursor2, NULL);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         config_free(acc_out2);
@@ -2831,7 +2831,7 @@ void test_email_service(void) {
         INJECT_STDIN("d\033x", 3, saved_stdin);
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int aretD = email_service_account_interactive(&acc_d, &cursorD);
+        int aretD = email_service_account_interactive(&acc_d, &cursorD, NULL);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         ASSERT(aretD == 0, "email_service_account_interactive: d+ESC → 0");
@@ -2855,7 +2855,7 @@ void test_email_service(void) {
         INJECT_STDIN("\r", 1, saved_stdin);   /* Enter → return 1 */
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int aret_en = email_service_account_interactive(&acc_out_en, &cursor_en);
+        int aret_en = email_service_account_interactive(&acc_out_en, &cursor_en, NULL);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         config_free(acc_out_en);
@@ -2880,7 +2880,7 @@ void test_email_service(void) {
         INJECT_STDIN("i", 1, saved_stdin);   /* 'i' → return 4 */
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int aret_iv = email_service_account_interactive(&acc_out_iv, &cursor_iv);
+        int aret_iv = email_service_account_interactive(&acc_out_iv, &cursor_iv, NULL);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         config_free(acc_out_iv);
@@ -2905,7 +2905,7 @@ void test_email_service(void) {
         INJECT_STDIN("e", 1, saved_stdin);   /* 'e' → return 2 */
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int aret_ev = email_service_account_interactive(&acc_out_ev, &cursor_ev);
+        int aret_ev = email_service_account_interactive(&acc_out_ev, &cursor_ev, NULL);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         config_free(acc_out_ev);
@@ -2939,7 +2939,7 @@ void test_email_service(void) {
         INJECT_STDIN("\033x", 2, saved_stdin);   /* ESC → return 0 */
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int aret_imap = email_service_account_interactive(&acc_imap, &cursor_imap);
+        int aret_imap = email_service_account_interactive(&acc_imap, &cursor_imap, NULL);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         ASSERT(aret_imap == 0, "email_service_account_interactive: IMAP acct ESC → 0");

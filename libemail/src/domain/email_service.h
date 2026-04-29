@@ -203,6 +203,18 @@ int email_service_rebuild_indexes(const char *only_account);
 int email_service_apply_rules(const char *only_account);
 
 /**
+ * @brief Rebuild the contact suggestion cache from all locally cached headers.
+ *
+ * Iterates every configured account (or a single one if @p only_account is
+ * set), scans all cached .hdr files, extracts From / To / Cc addresses, and
+ * writes a fresh contacts.tsv.  Does not contact the server.
+ *
+ * @param only_account  Email address to process, or NULL for all accounts.
+ * @return 0 on success, -1 on error or account not found.
+ */
+int email_service_rebuild_contacts(const char *only_account);
+
+/**
  * @brief Installs a user crontab entry to run 'email-cli sync' periodically.
  *
  * Uses cfg->sync_interval (minutes) to set the cron frequency.

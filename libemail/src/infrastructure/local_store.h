@@ -224,6 +224,20 @@ void local_contacts_update(const char *from_hdr,
                             const char *to_hdr,
                             const char *cc_hdr);
 
+/**
+ * @brief Rebuild the contact suggestion cache from all locally cached headers.
+ *
+ * Scans every .hdr file under the current account's headers/ directory,
+ * extracts From / To / Cc addresses, and writes a fresh contacts.tsv sorted
+ * by frequency descending.  Existing contacts.tsv is replaced.
+ *
+ * For IMAP accounts the .hdr files contain raw RFC 2822 headers.
+ * For Gmail accounts (no folder cache) the full .eml files are used instead.
+ *
+ * This is a best-effort helper: it silently ignores any I/O errors.
+ */
+void local_contacts_rebuild(void);
+
 /* ── Pending flag changes (server sync queue) ────────────────────────── */
 
 /**

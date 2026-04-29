@@ -24,6 +24,7 @@
 static void help(void) {
     printf(
         "Usage: email-sync [--account <email>] [--rebuild-index] [--apply-rules]\n"
+        "                  [--rebuild-contacts]\n"
         "       email-sync cron <setup|remove|status>\n"
         "\n"
         "Downloads all messages from all accounts to the local store.\n"
@@ -43,6 +44,8 @@ static void help(void) {
         "                      (Gmail only; does not re-download messages)\n"
         "  --apply-rules       Apply mail sorting rules from rules.ini to all\n"
         "                      locally cached messages (retroactive; no download)\n"
+        "  --rebuild-contacts  Rebuild contacts.tsv from all cached message headers\n"
+        "                      (no download; useful after first-time bulk sync)\n"
         "  --help, -h          Show this help message\n"
         "\n"
         "Exit Codes:\n"
@@ -156,9 +159,10 @@ int main(int argc, char *argv[]) {
     logger_log(LOG_INFO, "--- email-sync starting ---");
 
     /* Parse remaining options (sync mode) */
-    const char *account_filter = NULL;
-    int do_rebuild_index = 0;
-    int do_apply_rules   = 0;
+    const char *account_filter    = NULL;
+    int do_rebuild_index    = 0;
+    int do_apply_rules      = 0;
+    int do_rebuild_contacts = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--account") == 0) {
             if (i + 1 >= argc) {
@@ -177,6 +181,10 @@ int main(int argc, char *argv[]) {
             do_apply_rules = 1;
             continue;
         }
+        if (strcmp(argv[i], "--rebuild-contacts") == 0) {
+            do_rebuild_contacts = 1;
+            continue;
+        }
         fprintf(stderr, "Unknown option '%s'.\nRun 'email-sync --help' for usage.\n",
                 argv[i]);
         logger_close();
@@ -192,6 +200,12 @@ int main(int argc, char *argv[]) {
 
     if (do_apply_rules) {
         int rc = email_service_apply_rules(account_filter);
+        logger_close();
+        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (do_rebuild_contacts) {
+        int rc = email_service_rebuild_contacts(account_filter);
         logger_close();
         return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }

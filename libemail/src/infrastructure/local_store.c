@@ -1654,6 +1654,79 @@ static void contact_add_cb(const char *addr, const char *name, void *ud) {
     cb->count++;
 }
 
+void local_contacts_rebuild(void) {
+    const char *data_base = platform_data_dir();
+    if (!data_base || !g_account_name[0]) return;
+
+    ContactEntry *arr = calloc(CONTACTS_MAX, sizeof(ContactEntry));
+    if (!arr) return;
+    ContactBuf cb = { arr, 0, CONTACTS_MAX };
+
+    int fcount = 0;
+    char **folders = local_folder_list_load(&fcount, NULL);
+
+    if (fcount > 0 && folders) {
+        /* IMAP account: .hdr files contain raw RFC 2822 headers */
+        for (int fi = 0; fi < fcount && cb.count < CONTACTS_MAX; fi++) {
+            char (*uids)[17] = NULL;
+            int uid_count = 0;
+            local_hdr_list_all_uids(folders[fi], &uids, &uid_count);
+            for (int u = 0; u < uid_count && cb.count < CONTACTS_MAX; u++) {
+                char *raw = local_hdr_load(folders[fi], uids[u]);
+                if (!raw) continue;
+                char *from_h = mime_get_header(raw, "From");
+                char *to_h   = mime_get_header(raw, "To");
+                char *cc_h   = mime_get_header(raw, "Cc");
+                parse_addr_list(from_h, contact_add_cb, &cb);
+                parse_addr_list(to_h,   contact_add_cb, &cb);
+                parse_addr_list(cc_h,   contact_add_cb, &cb);
+                free(from_h); free(to_h); free(cc_h);
+                free(raw);
+            }
+            free(uids);
+        }
+        for (int i = 0; i < fcount; i++) free(folders[i]);
+        free(folders);
+    } else {
+        /* Gmail account (or no folder cache): .hdr files are tab-separated;
+         * load full .eml files to extract From/To/Cc. */
+        if (folders) {
+            for (int i = 0; i < fcount; i++) free(folders[i]);
+            free(folders);
+        }
+        char (*uids)[17] = NULL;
+        int uid_count = 0;
+        local_hdr_list_all_uids("", &uids, &uid_count);
+        for (int u = 0; u < uid_count && cb.count < CONTACTS_MAX; u++) {
+            char *raw = local_msg_load("", uids[u]);
+            if (!raw) continue;
+            char *from_h = mime_get_header(raw, "From");
+            char *to_h   = mime_get_header(raw, "To");
+            char *cc_h   = mime_get_header(raw, "Cc");
+            parse_addr_list(from_h, contact_add_cb, &cb);
+            parse_addr_list(to_h,   contact_add_cb, &cb);
+            parse_addr_list(cc_h,   contact_add_cb, &cb);
+            free(from_h); free(to_h); free(cc_h);
+            free(raw);
+        }
+        free(uids);
+    }
+
+    qsort(arr, (size_t)cb.count, sizeof(ContactEntry), contact_cmp_freq);
+
+    char path[8192];
+    snprintf(path, sizeof(path), "%s/email-cli/accounts/%s/contacts.tsv",
+             data_base, g_account_name);
+    FILE *f = fopen(path, "w");
+    if (f) {
+        for (int i = 0; i < cb.count; i++)
+            fprintf(f, "%s\t%s\t%d\n", arr[i].addr, arr[i].name, arr[i].freq);
+        fclose(f);
+    }
+    printf("Contacts rebuilt: %d entries written to %s\n", cb.count, path);
+    free(arr);
+}
+
 void local_contacts_update(const char *from_hdr,
                             const char *to_hdr,
                             const char *cc_hdr) {

@@ -5270,6 +5270,35 @@ int email_service_apply_rules(const char *only_account) {
     return errors > 0 ? -1 : 0;
 }
 
+int email_service_rebuild_contacts(const char *only_account) {
+    int count = 0;
+    AccountEntry *accounts = config_list_accounts(&count);
+    if (!accounts || count == 0) {
+        fprintf(stderr, "No accounts configured.\n");
+        config_free_account_list(accounts, count);
+        return -1;
+    }
+
+    int done = 0;
+    for (int i = 0; i < count; i++) {
+        if (only_account && only_account[0] &&
+            strcmp(accounts[i].name, only_account) != 0)
+            continue;
+        printf("=== Rebuilding contacts: %s ===\n", accounts[i].name);
+        local_store_init(accounts[i].cfg->host, accounts[i].cfg->user);
+        local_contacts_rebuild();
+        done++;
+    }
+    config_free_account_list(accounts, count);
+
+    if (done == 0) {
+        fprintf(stderr, "Account '%s' not found.\n",
+                only_account ? only_account : "");
+        return -1;
+    }
+    return 0;
+}
+
 int email_service_cron_setup(const Config *cfg) {
 
     /* Find the path to this binary */

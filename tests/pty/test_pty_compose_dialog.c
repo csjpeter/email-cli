@@ -1028,7 +1028,7 @@ static void test_reply_editor_opens_with_quoted_body(void) {
     ASSERT(cap != NULL, "reply body: draft captured");
     if (cap) {
         char buf[4096] = "";
-        fread(buf, 1, sizeof(buf) - 1, cap);
+        buf[fread(buf, 1, sizeof(buf) - 1, cap)] = '\0';
         fclose(cap);
         ASSERT(strstr(buf, "> ") != NULL, "reply body: quoted lines with '> '");
     }
@@ -1272,7 +1272,7 @@ static void test_forward_body_has_original(void) {
     ASSERT(cap != NULL, "forward body: draft captured");
     if (cap) {
         char buf[8192] = "";
-        fread(buf, 1, sizeof(buf) - 1, cap);
+        buf[fread(buf, 1, sizeof(buf) - 1, cap)] = '\0';
         fclose(cap);
         /* Forwarded draft must contain "--- Forwarded" separator */
         ASSERT(strstr(buf, "Forwarded") != NULL,
@@ -1344,7 +1344,7 @@ static PtySession *tui_open_to_folders(void) {
     if (!s) return NULL;
     if (pty_wait_for(s, "testuser", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_ENTER);  /* open account → folder browser */
+    pty_send_key(s, PTY_KEY_ENTER);  /* accounts screen → folder browser */
     if (pty_wait_for(s, "Folders", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
     return s;
@@ -1548,7 +1548,7 @@ static void test_bcc_not_in_message_headers(void) {
     ASSERT(cap != NULL, "bcc strip: draft captured");
     if (cap) {
         char buf[4096] = "";
-        fread(buf, 1, sizeof(buf) - 1, cap);
+        buf[fread(buf, 1, sizeof(buf) - 1, cap)] = '\0';
         fclose(cap);
         ASSERT(strstr(buf, "Bcc:") != NULL,
                "bcc strip: draft file contains Bcc: header for editing");
@@ -1597,7 +1597,7 @@ static void test_multiple_cc_semicolon_separated(void) {
     ASSERT(cap != NULL, "multi cc: draft captured");
     if (cap) {
         char buf[4096] = "";
-        fread(buf, 1, sizeof(buf) - 1, cap);
+        buf[fread(buf, 1, sizeof(buf) - 1, cap)] = '\0';
         fclose(cap);
         ASSERT(strstr(buf, "carol@example.org") != NULL,
                "multi cc: first Cc address in draft");

@@ -3688,12 +3688,16 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 ui_pref_set_int("folder_view_mode", tree_mode);
                 cursor = VPREFIX; wstart = 0;
                 if (!tree_mode) current_prefix[0] = '\0';
+            } else if (ch == 'c') {
+                selected = strdup("__compose__");
+                goto folders_int_done;
             } else if (ch == 'h' || ch == '?') {
                 static const char *help[][2] = {
                     { "\u2191 / \u2193",   "Move cursor up / down"                   },
                     { "PgUp / PgDn",        "Move cursor one page up / down"          },
                     { "Enter",             "Open folder / navigate into subfolder"   },
                     { "/",                 "Cross-folder content search"             },
+                    { "c",                 "Compose new message"                     },
                     { "t",                 "Toggle tree / flat view"                 },
                     { "Backspace",         "Go up one level (or back to accounts)"   },
                     { "ESC / q",           "Quit"                                    },

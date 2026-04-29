@@ -142,6 +142,15 @@ static void stop_server(pid_t *pid_out) {
     }
 }
 
+/* Kill any process still listening on the given TCP port (cleanup of
+ * lingering instances from previous test runs). */
+static void kill_listeners_on_port(int port) {
+    char cmd[80];
+    snprintf(cmd, sizeof(cmd), "fuser -k -KILL %d/tcp >/dev/null 2>&1", port);
+    (void)system(cmd);
+    usleep(200000);
+}
+
 static void restart_imap(void) {
     stop_server(&g_imap_pid);
     usleep(200000);
@@ -291,7 +300,8 @@ static void test_successful_send_saves_locally(void) {
 static void test_failed_send_saves_to_drafts(void) {
     pending_reset();
     restart_imap();
-    stop_server(&g_smtp_pid); /* SMTP unavailable */
+    stop_server(&g_smtp_pid);       /* kill the server we started */
+    kill_listeners_on_port(9025);   /* kill any lingering instance */
     write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "TC-SL-02: reached inbox");

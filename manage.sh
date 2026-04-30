@@ -25,6 +25,7 @@ show_help() {
     echo "  valgrind       Build and run unit tests with Valgrind"
     echo "  coverage       Run tests and generate coverage report"
     echo "  integration    Run integration test against Dovecot IMAP container"
+    echo "  integration-local  Run APPEND integration test with local Dovecot (no Docker)"
     echo "  imap-down      Stop integration test container (preserves emails volume)"
     echo "  imap-clean     Remove integration test container and volume"
     echo "  install        Build (release) and install binaries to ~/.local/bin"
@@ -197,6 +198,10 @@ case "$1" in
     integration)
         build_release
         ./tests/integration/run_integration.sh
+        ;;
+    integration-local)
+        build_release
+        ./tests/integration/run_local_dovecot.sh
         ;;
     imap-down)
         ./tests/integration/run_integration.sh --down

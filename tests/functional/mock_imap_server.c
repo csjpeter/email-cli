@@ -519,8 +519,17 @@ static void handle_client(SSL *ssl) {
                 }
                 free(litbuf);
                 printf("Mock server: APPEND received %ld-byte message\n", literal_size);
-                char ok[64];
-                snprintf(ok, sizeof(ok), "%s OK [APPENDUID 1 42] APPEND completed\r\n", tag);
+                /* RFC 3501: command = ... CRLF — the command-terminating \r\n
+                 * comes AFTER the literal body and must not be skipped. */
+                char trail[4] = {0};
+                int tr = SSL_read(ssl, trail, 2);
+                char ok[128];
+                if (tr == 2 && trail[0] == '\r' && trail[1] == '\n') {
+                    snprintf(ok, sizeof(ok), "%s OK [APPENDUID 1 42] APPEND completed\r\n", tag);
+                } else {
+                    snprintf(ok, sizeof(ok),
+                             "%s BAD Missing command-terminating CRLF after literal\r\n", tag);
+                }
                 SSL_write(ssl, ok, (int)strlen(ok));
             }
         } else if (strstr(buffer, "LOGOUT")) {

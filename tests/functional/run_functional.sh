@@ -1306,10 +1306,10 @@ check "26.10 gmail-A save-attachment: file exists" "." \
     "$(test -f "$GSAVE_A_DIR/notes_10.txt" && echo ok || echo missing)"
 rm -rf "$GSAVE_A_DIR"
 
-# 26.11 list-folders account A
-GF_A=$(run_gmail_ro_a --batch list-folders)
-check "26.11 gmail-A list-folders: INBOX listed" "INBOX" "$GF_A"
-check "26.12 gmail-A list-folders: Work listed" "Work" "$GF_A"
+# 26.11 list-labels account A
+GF_A=$(run_gmail_ro_a --batch list-labels)
+check "26.11 gmail-A list-labels: INBOX listed" "INBOX" "$GF_A"
+check "26.12 gmail-A list-labels: Work listed" "Work" "$GF_A"
 
 # ── Gmail account B (test2@gmail.com, 150 messages, prefix GmailB-) ───────
 # 26.13 Sync account B
@@ -1356,9 +1356,9 @@ check_not "26.24 gmail-B list: subjects have prefix (no plain 'Message 1')" \
 GL_A_FULL=$(run_gmail_ro_a --batch list --all --limit 200)
 check_not "26.25 gmail-A list: no GmailB-Message 150" "GmailB-Message 150" "$GL_A_FULL"
 
-# 26.26 list-folders account B
-GF_B=$(run_gmail_ro_b --batch list-folders)
-check "26.26 gmail-B list-folders: INBOX listed" "INBOX" "$GF_B"
+# 26.26 list-labels account B
+GF_B=$(run_gmail_ro_b --batch list-labels)
+check "26.26 gmail-B list-labels: INBOX listed" "INBOX" "$GF_B"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 27 — Gmail label index rebuild (--rebuild-index + auto-rebuild)
@@ -1433,9 +1433,9 @@ check "27.9 auto-rebuild: full sync runs after historyId deleted" \
 check "27.10 gmail-A INBOX.idx recreated by auto-rebuild full sync" "." \
     "$([ -f "$INBOX_IDX_A" ] && echo ok || echo missing)"
 
-# 27.11 list-folders for account A shows INBOX with non-zero count
-GF27=$(run_gmail_ro_a --batch list-folders)
-check "27.11 gmail-A list-folders: INBOX listed after rebuild" "INBOX" "$GF27"
+# 27.11 After rebuild, list shows messages — confirms index is functional, not just present
+GL27=$(run_gmail_ro_a --batch list --all --limit 200)
+check "27.11 gmail-A list: messages accessible after rebuild (index functional)" "Message 1" "$GL27"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 28 — Hex UID acceptance (US-6: Gmail `list` outputs hex UIDs)

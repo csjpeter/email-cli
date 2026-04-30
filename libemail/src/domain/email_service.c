@@ -4842,7 +4842,11 @@ static char *msg_to_crlf(const char *msg, size_t *len_out) {
     for (size_t i = 0; i < in_len; i++)
         if (msg[i] == '\n' && (i == 0 || msg[i-1] != '\r'))
             bare_lf++;
-    int need_trail = (in_len < 2 || msg[in_len-2] != '\r' || msg[in_len-1] != '\n');
+    /* need_trail: does the output need a final CRLF appended?
+     * If the input ends with \n (bare or as part of \r\n), the CRLF loop
+     * already produces a trailing \r\n in the output — no extra needed.
+     * Only add \r\n when the input has no terminal newline at all. */
+    int need_trail = (in_len == 0 || msg[in_len - 1] != '\n');
     size_t out_len = in_len + bare_lf + (need_trail ? 2 : 0);
     char *out = malloc(out_len + 1);
     if (!out) return NULL;

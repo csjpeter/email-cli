@@ -157,9 +157,19 @@ static void run_mock_server(int listen_fd,
                     if (r2 <= 0) break;
                     remaining -= r2;
                 }
-                char ok2[80];
-                snprintf(ok2, sizeof(ok2),
-                         "%s OK [APPENDUID 1 99] APPEND completed\r\n", tag);
+                /* RFC 3501: command = ... CRLF — the command-terminating \r\n
+                 * comes AFTER the literal body and must not be skipped. */
+                char trail[4] = {0};
+                int tr = SSL_read(ssl, trail, 2);
+                int good_trail = (tr == 2 && trail[0] == '\r' && trail[1] == '\n');
+                char ok2[128];
+                if (good_trail) {
+                    snprintf(ok2, sizeof(ok2),
+                             "%s OK [APPENDUID 1 99] APPEND completed\r\n", tag);
+                } else {
+                    snprintf(ok2, sizeof(ok2),
+                             "%s BAD Missing command-terminating CRLF after literal\r\n", tag);
+                }
                 SSL_write(ssl, ok2, (int)strlen(ok2));
             }
         } else if (strstr(buf, "LOGOUT")) {

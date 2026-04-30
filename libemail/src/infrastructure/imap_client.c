@@ -288,12 +288,14 @@ typedef struct {
     int     cap;
     char   *literal;  /* the last literal body (first literal wins) */
     size_t  lit_len;
+    char   *tagged;   /* the final tagged response line (e.g. "A0001 NO [TRYCREATE] ...") */
 } Response;
 
 static void response_free(Response *r) {
     for (int i = 0; i < r->count; i++) free(r->untagged[i]);
     free(r->untagged);
     free(r->literal);
+    free(r->tagged);
     memset(r, 0, sizeof(*r));
 }
 
@@ -335,6 +337,7 @@ static int read_response(ImapClient *c, const char *tag, Response *r) {
             int ok = (strncasecmp(status, "OK", 2) == 0);
             if (!ok)
                 logger_log(LOG_WARN, "IMAP %s", line);
+            r->tagged = strdup(line);
             linebuf_free(&lb);  /* free AFTER all accesses to line/status */
             return ok ? 0 : -1;
         }
@@ -473,6 +476,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
             return NULL;
         }
         SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+        SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
         if (!verify_tls) {
             SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
         } else {
@@ -669,6 +673,10 @@ int imap_create_folder(ImapClient *c, const char *name) {
 
     Response resp = {0};
     rc = read_response(c, tag, &resp);
+    /* Treat [ALREADYEXISTS] as success — the folder is there, which is all we need. */
+    if (rc != 0 && resp.tagged &&
+        strcasestr(resp.tagged, "[ALREADYEXISTS]") != NULL)
+        rc = 0;
     response_free(&resp);
     return rc;
 }
@@ -854,73 +862,68 @@ int imap_uid_set_flag(ImapClient *c, const char *uid, const char *flag_name, int
 
 int imap_append(ImapClient *c, const char *folder,
                 const char *msg, size_t msg_len) {
-    /* Use a synchronising literal "{N}" (RFC 3501).  The two-phase handshake
-     * is mandatory here: we send the command line, wait for the server's
-     * "+ go ahead" continuation, then send the literal body.  This works
-     * with every IMAP server regardless of LITERAL+ support.
+    /* Strategy: ensure the target folder exists BEFORE sending the literal,
+     * then use a non-synchronising literal "{N+}" (RFC 7888 LITERAL+).
      *
-     * NOTE: a previous LITERAL+ ("{N+}") approach failed on Dovecot servers
-     * that do not advertise LITERAL+ — they send "+ go ahead" and then wait
-     * for the literal, but our client (having already sent the body) was also
-     * waiting, creating a 120-second deadlock. */
+     * Why pre-create instead of relying on TRYCREATE retry:
+     *   Dovecot returns NO [TRYCREATE] without consuming the literal bytes
+     *   when the folder is absent.  Those unread bytes corrupt subsequent
+     *   commands on the same connection.  Pre-creating avoids the race.
+     *   imap_create_folder() ignores [ALREADYEXISTS], so this is idempotent.
+     *
+     * Why LITERAL+ instead of synchronising "{N}":
+     *   With "{N}" we had to send the command, wait for "+ OK", and then
+     *   SSL_write the body.  The 15-second SO_RCVTIMEO set for the "+ OK"
+     *   read could fire during SSL_write (OpenSSL reads TLS records internally
+     *   during writes), causing Dovecot to time out and return BAD.
+     *   With "{N+}" the command line and body are sent before any read, so
+     *   SO_RCVTIMEO is only active during the final tagged-response read.
+     *
+     * For servers that do not support LITERAL+ but honour synchronising
+     * semantics: they will send "+ OK" which read_response() harmlessly
+     * treats as an untagged line before reading the true tagged response. */
+
+    /* Step 1: ensure the target folder exists (idempotent). */
+    if (imap_create_folder(c, folder) != 0)
+        logger_log(LOG_WARN, "IMAP APPEND: pre-create of '%s' failed, trying anyway",
+                   folder);
+
+    /* Step 2: send command + literal with LITERAL+. */
     c->tag_num++;
     char tag[16];
     snprintf(tag, sizeof(tag), "A%04d", c->tag_num);
 
-    /* Step 1: send the command line (literal size only, no body yet) */
     char cmd[1024];
     int cmdlen = snprintf(cmd, sizeof(cmd),
-                          "%s APPEND \"%s\" (\\Seen) {%zu}\r\n",
+                          "%s APPEND \"%s\" (\\Seen) {%zu+}\r\n",
                           tag, folder, msg_len);
     if (cmdlen < 0 || (size_t)cmdlen >= sizeof(cmd)) return -1;
 
-    logger_log(LOG_DEBUG, "IMAP [OUT] %s APPEND \"%s\" (\\Seen) {%zu}",
+    logger_log(LOG_DEBUG, "IMAP [OUT] %s APPEND \"%s\" (\\Seen) {%zu+}",
                tag, folder, msg_len);
 
+    /* Generous 30-second receive timeout for the response. */
     {
-        struct timeval tv15 = { .tv_sec = 15, .tv_usec = 0 };
-        setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv15, sizeof(tv15));
-    }
-    if (net_write(c, cmd, (size_t)cmdlen) != 0) {
-        logger_log(LOG_ERROR, "IMAP APPEND: write command failed");
-        return -1;
+        struct timeval tv = { .tv_sec = 30, .tv_usec = 0 };
+        setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     }
 
-    /* Step 2: read server's response — expect "+ go ahead" continuation.
-     * If we receive a tagged NO/BAD before the continuation, report it. */
-    {
-        LineBuf lb = {NULL, 0, 0};
-        if (read_line(c, &lb) != 0) {
-            linebuf_free(&lb);
-            logger_log(LOG_ERROR, "IMAP APPEND: no continuation from server");
-            return -1;
-        }
-        const char *line = lb.data ? lb.data : "";
-        logger_log(LOG_DEBUG, "IMAP [ IN] %s", line);
-        int ok = (line[0] == '+');
-        if (!ok) logger_log(LOG_WARN, "IMAP APPEND: expected continuation, got: %s", line);
-        linebuf_free(&lb);
-        if (!ok) return -1;
-    }
-
-    /* Step 3: send the literal body */
-    logger_log(LOG_DEBUG, "IMAP APPEND: sending %zu-byte literal", msg_len);
-    if (net_write(c, msg, msg_len) != 0) {
-        logger_log(LOG_ERROR, "IMAP APPEND: write literal failed");
-        return -1;
-    }
-
-    /* Step 4: wait for tagged response.  30 s is generous for a well-configured
-     * server; the caller uses a dedicated connection so a timeout here never
-     * disrupts the main sync connection. */
-    {
-        struct timeval long_tv  = { .tv_sec = 30, .tv_usec = 0 };
-        struct timeval short_tv = { .tv_sec = 15, .tv_usec = 0 };
-        setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &long_tv,  sizeof(long_tv));
+    int rc = -1;
+    if (net_write(c, cmd, (size_t)cmdlen) != 0 ||
+        net_write(c, msg, msg_len) != 0 ||
+        net_write(c, "\r\n", 2) != 0) {
+        logger_log(LOG_ERROR, "IMAP APPEND: write failed");
+    } else {
+        logger_log(LOG_DEBUG, "IMAP APPEND: sent %zu-byte literal", msg_len);
         Response resp = {0};
-        int rc = read_response(c, tag, &resp);
+        rc = read_response(c, tag, &resp);
         response_free(&resp);
-        setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &short_tv, sizeof(short_tv));
-        return rc;
     }
+
+    /* Restore normal 15-second receive timeout. */
+    {
+        struct timeval tv = { .tv_sec = 15, .tv_usec = 0 };
+        setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    }
+    return rc;
 }

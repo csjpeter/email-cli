@@ -24,7 +24,7 @@
 static void help(void) {
     printf(
         "Usage: email-sync [--account <email>] [--rebuild-index] [--apply-rules]\n"
-        "                  [--rebuild-contacts]\n"
+        "                  [--rebuild-contacts] [--reconcile]\n"
         "       email-sync cron <setup|remove|status>\n"
         "\n"
         "Downloads all messages from all accounts to the local store.\n"
@@ -46,6 +46,9 @@ static void help(void) {
         "                      locally cached messages (retroactive; no download)\n"
         "  --rebuild-contacts  Rebuild contacts.tsv from all cached message headers\n"
         "                      (no download; useful after first-time bulk sync)\n"
+        "  --reconcile         Force a full server reconcile for Gmail accounts\n"
+        "                      (bypass the incremental fast path; use when the\n"
+        "                      automatic sync seems stuck or out of sync)\n"
         "  --help, -h          Show this help message\n"
         "\n"
         "Exit Codes:\n"
@@ -163,6 +166,7 @@ int main(int argc, char *argv[]) {
     int do_rebuild_index    = 0;
     int do_apply_rules      = 0;
     int do_rebuild_contacts = 0;
+    int do_force_reconcile  = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--account") == 0) {
             if (i + 1 >= argc) {
@@ -183,6 +187,10 @@ int main(int argc, char *argv[]) {
         }
         if (strcmp(argv[i], "--rebuild-contacts") == 0) {
             do_rebuild_contacts = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--reconcile") == 0) {
+            do_force_reconcile = 1;
             continue;
         }
         fprintf(stderr, "Unknown option '%s'.\nRun 'email-sync --help' for usage.\n",
@@ -211,7 +219,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Normal sync */
-    int result = email_service_sync_all(account_filter);
+    int result = email_service_sync_all(account_filter, do_force_reconcile);
 
     logger_log(LOG_INFO, "--- email-sync finished (result: %d) ---", result);
     logger_close();

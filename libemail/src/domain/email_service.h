@@ -161,7 +161,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
  * @param cfg  Connection configuration.
  * @return 0 on success, -1 on error.
  */
-int email_service_sync(const Config *cfg);
+int email_service_sync(const Config *cfg, int force_reconcile);
 
 /**
  * @brief Sync all configured accounts, or only the one matching only_account.
@@ -170,11 +170,13 @@ int email_service_sync(const Config *cfg);
  * (or the single matching account when only_account is non-NULL) it calls
  * local_store_init() then email_service_sync().
  *
- * @param only_account  Email address to restrict sync to, or NULL for all.
+ * @param only_account    Email address to restrict sync to, or NULL for all.
+ * @param force_reconcile Non-zero to force a full reconcile for Gmail accounts
+ *                        (bypass the incremental fast path).
  * @return 0 if every account synced successfully, -1 if any failed or the
  *         requested account was not found.
  */
-int email_service_sync_all(const char *only_account);
+int email_service_sync_all(const char *only_account, int force_reconcile);
 
 /**
  * @brief Rebuild label .idx files from cached .hdr files for Gmail accounts.

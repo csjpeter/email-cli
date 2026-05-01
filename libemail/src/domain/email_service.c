@@ -4866,7 +4866,7 @@ static char *msg_to_crlf(const char *msg, size_t *len_out) {
     return out;
 }
 
-int email_service_sync(const Config *cfg) {
+int email_service_sync(const Config *cfg, int force_reconcile) {
     /* ── PID-file lock: exit immediately if another sync is running ──────── */
     char pid_path[2048] = {0};
     const char *cache_base = platform_cache_dir();
@@ -4902,7 +4902,7 @@ int email_service_sync(const Config *cfg) {
             if (pid_path[0]) unlink(pid_path);
             return -1;
         }
-        int rc = gmail_sync(gc);
+        int rc = force_reconcile ? gmail_sync_full(gc) : gmail_sync(gc);
         gmail_disconnect(gc);
         if (pid_path[0]) unlink(pid_path);
         return rc;
@@ -5190,7 +5190,7 @@ int email_service_sync(const Config *cfg) {
     return errors ? -1 : 0;
 }
 
-int email_service_sync_all(const char *only_account) {
+int email_service_sync_all(const char *only_account, int force_reconcile) {
     int count = 0;
     AccountEntry *accounts = config_list_accounts(&count);
     if (!accounts || count == 0) {
@@ -5208,7 +5208,7 @@ int email_service_sync_all(const char *only_account) {
         if (count > 1)
             printf("\n=== Syncing account: %s ===\n", accounts[i].name);
         local_store_init(accounts[i].cfg->host, accounts[i].cfg->user);
-        if (email_service_sync(accounts[i].cfg) < 0)
+        if (email_service_sync(accounts[i].cfg, force_reconcile) < 0)
             errors++;
         synced++;
     }

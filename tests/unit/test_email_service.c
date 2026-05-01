@@ -2029,7 +2029,7 @@ void test_email_service(void) {
     {
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int sar = email_service_sync_all(NULL);
+        int sar = email_service_sync_all(NULL, 0);
         RESTORE_OUT(sout, serr);
         ASSERT(sar == 0 || sar == -1, "email_service_sync_all NULL: returns 0 or -1");
     }

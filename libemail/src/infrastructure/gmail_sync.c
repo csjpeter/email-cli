@@ -793,6 +793,7 @@ int gmail_sync_incremental(GmailClient *gc) {
     free(history_id);
 
     if (!resp) {
+        fprintf(stderr, "  Incremental: History API returned error/404 (historyId expired or network issue).\n");
         logger_log(LOG_WARN, "gmail_sync: history expired or error");
         return -2;  /* Signal: need full sync */
     }
@@ -876,10 +877,17 @@ int gmail_sync(GmailClient *gc) {
     free(history_id);
 
     if (have_history) {
+        fprintf(stderr, "  Incremental sync (historyId present)...\n");
         int rc = gmail_sync_incremental(gc);
-        if (rc == 0) return 0; /* fast path — done */
+        if (rc == 0) {
+            fprintf(stderr, "  Incremental sync: up to date.\n");
+            return 0; /* fast path — done */
+        }
         if (rc != -2) return rc; /* unexpected error */
+        fprintf(stderr, "  Incremental sync: historyId expired — falling back to full reconcile.\n");
         logger_log(LOG_INFO, "gmail_sync: historyId expired, falling back to reconcile");
+    } else {
+        fprintf(stderr, "  No saved historyId — full reconcile needed.\n");
     }
 
     /* Step 4: reconcile (discover what is missing) */

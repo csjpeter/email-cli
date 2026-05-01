@@ -715,15 +715,18 @@ char *gmail_get_history(GmailClient *c, const char *history_id) {
     if (!resp) return NULL;
 
     if (code == 404) {
+        fprintf(stderr, "  History API: 404 — historyId %s expired.\n", history_id);
         logger_log(LOG_WARN, "gmail: history %s expired — full resync needed", history_id);
         free(resp);
         return NULL;
     }
     if (code != 200) {
+        fprintf(stderr, "  History API: HTTP %ld for historyId %s.\n", code, history_id);
         logger_log(LOG_WARN, "gmail_get_history: HTTP %ld (will retry with full sync)", code);
         free(resp);
         return NULL;
     }
+    fprintf(stderr, "  History API: OK (historyId %s accepted).\n", history_id);
 
     return resp;
 }

@@ -866,12 +866,16 @@ int gmail_sync(GmailClient *gc) {
     if (had_pending)
         gmail_sync_fetch_pending(gc);
 
-    /* Step 3: choose fast or full path */
+    /* Step 3: try fast incremental path if we have a saved historyId.
+     * We do this regardless of whether there were pending downloads —
+     * draining pending_fetch.tsv already brought the local store up to the
+     * reconcile snapshot; incremental then catches anything that arrived
+     * on the server after that snapshot. */
     char *history_id = local_gmail_history_load();
     int have_history = (history_id != NULL);
     free(history_id);
 
-    if (!had_pending && have_history) {
+    if (have_history) {
         int rc = gmail_sync_incremental(gc);
         if (rc == 0) return 0; /* fast path — done */
         if (rc != -2) return rc; /* unexpected error */

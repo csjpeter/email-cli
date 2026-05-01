@@ -1701,14 +1701,16 @@ echo "$RESUME_UID" > "$GSYNC_PENDING"
 PF_BEFORE=$(wc -l < "$GSYNC_PENDING")
 check "30.6 interrupted sync: pending_fetch.tsv has 1 entry before resume" "1" "$PF_BEFORE"
 
-# 30.7 Run sync with pending entry: should download the missing message
-# Since pending is non-empty, fast path is skipped → reconcile runs and
-# re-discovers + re-downloads the missing message.
+# 30.7 Run sync with pending entry: should drain pending then go incremental
+# (not reconcile — historyId is valid so fast path is taken after drain)
 SYNC30C=$(run_gsync)
 check "30.7 resume sync: completes without error" "." "$(echo ok)"
 # After resume, pending_fetch.tsv must be empty again
 PF_AFTER=$(wc -l < "$GSYNC_PENDING" 2>/dev/null || echo 0)
 check "30.8 resume sync: pending_fetch.tsv empty after resume" "0" "$PF_AFTER"
+# Must NOT have run a full reconcile — incremental fast path after draining pending
+check_not "30.8b resume sync: no reconcile (incremental after drain)" \
+    "Listing messages" "$SYNC30C"
 
 # 30.9 Force reconcile by removing historyId: should re-list server
 rm -f "$GSYNC_HISTID"

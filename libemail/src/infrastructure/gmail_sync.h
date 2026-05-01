@@ -16,9 +16,12 @@
  *
  * Smart multi-phase flow:
  *  1. Drain any queued downloads from pending_fetch.tsv (resumable).
- *  2. If store is complete and historyId is valid: fast incremental sync.
- *  3. Otherwise: reconcile (list server UIDs, queue missing ones) then
- *     download the queue.
+ *  2. If a valid historyId exists: fast incremental sync (O(1) API calls).
+ *     This is attempted even after draining pending downloads, because the
+ *     historyId snapshot already covers them; incremental catches anything
+ *     that arrived on the server after the snapshot.
+ *  3. Otherwise (no historyId, or historyId expired): full reconcile —
+ *     list all server UIDs, queue missing ones, then download the queue.
  *
  * Local store must be initialised (local_store_init) before calling.
  *

@@ -490,9 +490,11 @@ static void collect_msg_id(const char *obj, int index, void *ctx) {
 
 int gmail_list_messages(GmailClient *c, const char *label_id,
                         const char *query,
-                        char (**uids_out)[17], int *count_out) {
+                        char (**uids_out)[17], int *count_out,
+                        char **history_id_out) {
     *uids_out  = NULL;
     *count_out = 0;
+    if (history_id_out) *history_id_out = NULL;
 
     struct msg_id_ctx mc = {0};
     char *page_token = NULL;
@@ -519,6 +521,14 @@ int gmail_list_messages(GmailClient *c, const char *label_id,
         }
 
         json_foreach_object(resp, "messages", collect_msg_id, &mc);
+
+        if (history_id_out) {
+            char *hid = json_get_string(resp, "historyId");
+            if (hid) {
+                free(*history_id_out);
+                *history_id_out = hid;
+            }
+        }
 
         page_token = json_get_string(resp, "nextPageToken");
         free(resp);

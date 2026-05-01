@@ -74,13 +74,17 @@ int gmail_delete_label(GmailClient *c, const char *label_id);
  * @param label_id   Label ID filter (e.g. "INBOX"), or NULL for all messages.
  * @param query      Optional Gmail search query (e.g. "has:nouserlabels -in:sent"),
  *                   or NULL for no additional filter.
- * @param uids_out   Heap-allocated array of 16-char UID strings. Caller must free().
- * @param count_out  Number of UIDs returned.
+ * @param uids_out        Heap-allocated array of 16-char UID strings. Caller must free().
+ * @param count_out       Number of UIDs returned.
+ * @param history_id_out  Optional: set to the mailbox historyId from the last
+ *                        page response (heap-allocated; caller must free).
+ *                        Pass NULL to discard.
  * @return 0 on success, -1 on error.
  */
 int gmail_list_messages(GmailClient *c, const char *label_id,
                         const char *query,
-                        char (**uids_out)[17], int *count_out);
+                        char (**uids_out)[17], int *count_out,
+                        char **history_id_out);
 
 /**
  * @brief Fetch a message: decoded RFC 2822 body + label IDs.

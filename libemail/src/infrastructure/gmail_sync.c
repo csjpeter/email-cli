@@ -429,8 +429,10 @@ int gmail_sync_reconcile(GmailClient *gc) {
 
     char (*all_uids)[17] = NULL;
     int uid_count = 0;
-    if (gmail_list_messages(gc, NULL, NULL, &all_uids, &uid_count) != 0) {
+    char *list_history_id = NULL;
+    if (gmail_list_messages(gc, NULL, NULL, &all_uids, &uid_count, &list_history_id) != 0) {
         gmail_set_progress(gc, NULL, NULL);
+        free(list_history_id);
         logger_log(LOG_ERROR, "gmail_sync: reconcile failed to list messages");
         return -1;
     }
@@ -464,8 +466,15 @@ int gmail_sync_reconcile(GmailClient *gc) {
         fprintf(stderr, "\r\033[K  %d cached, %d queued for download\n",
                 cached, queued);
 
-    /* Save historyId so next run can use incremental sync */
-    {
+    /* Save historyId so next run can use incremental sync.
+     * Prefer the historyId from the messages.list response (always fresh);
+     * fall back to the /profile endpoint only if that field was absent. */
+    if (list_history_id) {
+        fprintf(stderr, "  historyId from list response: %s\n", list_history_id);
+        local_gmail_history_save(list_history_id);
+        free(list_history_id);
+        list_history_id = NULL;
+    } else {
         RAII_STRING char *hid = gmail_get_history_id(gc);
         if (hid)
             local_gmail_history_save(hid);

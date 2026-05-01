@@ -98,7 +98,7 @@ int mail_client_search(MailClient *c, MailSearchCriteria criteria,
             case MAIL_SEARCH_DONE:    query = NULL; break;  /* Not yet supported */
             case MAIL_SEARCH_ALL:     break;
         }
-        return gmail_list_messages(c->gmail, c->selected, query, uids_out, count_out);
+        return gmail_list_messages(c->gmail, c->selected, query, uids_out, count_out, NULL);
     }
 
     /* IMAP: map criteria to IMAP search string */

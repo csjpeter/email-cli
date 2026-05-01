@@ -46,6 +46,9 @@ int local_store_init(const char *host_url, const char *username) {
     }
 
     logger_log(LOG_DEBUG, "local_store: account base = %s", g_account_base);
+    /* Ensure the account base directory exists so callers can write files
+     * (e.g. pending_fetch.tsv) before any message has been downloaded. */
+    fs_mkdir_p(g_account_base, 0700);
     return 0;
 }
 
@@ -354,11 +357,15 @@ int local_hdr_list_all_uids(const char *folder,
     if (!arr) return -1;
     int count = 0;
 
-    /* Walk all 100 buckets (d1=0..9, d2=0..9) */
-    for (int d1 = 0; d1 <= 9; d1++) {
-        for (int d2 = 0; d2 <= 9; d2++) {
+    /* Walk all 256 buckets (d1, d2 ∈ 0-9 + a-f).
+     * IMAP UIDs use decimal digits only; Gmail UIDs use full hex.
+     * Hex directories a-f will simply not exist for IMAP accounts. */
+    static const char hex[] = "0123456789abcdef";
+    for (int i1 = 0; i1 < 16; i1++) {
+        for (int i2 = 0; i2 < 16; i2++) {
+            char d1 = hex[i1], d2 = hex[i2];
             RAII_STRING char *dir = NULL;
-            if (asprintf(&dir, "%s/headers/%s/%d/%d",
+            if (asprintf(&dir, "%s/headers/%s/%c/%c",
                          g_account_base, folder, d1, d2) == -1)
                 continue;
             RAII_DIR DIR *dp = opendir(dir);
@@ -1881,6 +1888,113 @@ void local_pending_append_remove(const char *folder, const char *uid) {
     for (int i = 0; i < lcount; i++)
         fputs(lines[i], wfp);
     fclose(wfp);
+}
+
+/* ── Pending Gmail fetch queue ───────────────────────────────────────── */
+
+static char *pending_fetch_path(void) {
+    if (!g_account_base[0]) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/pending_fetch.tsv", g_account_base) == -1)
+        return NULL;
+    return path;
+}
+
+int local_pending_fetch_add(const char *uid) {
+    RAII_STRING char *path = pending_fetch_path();
+    if (!path || !uid) return -1;
+    RAII_FILE FILE *fp = fopen(path, "a");
+    if (!fp) return -1;
+    fprintf(fp, "%s\n", uid);
+    return 0;
+}
+
+char (*local_pending_fetch_load(int *count_out))[17] {
+    *count_out = 0;
+    RAII_STRING char *path = pending_fetch_path();
+    if (!path) return NULL;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+
+    int cap = 64, count = 0;
+    char (*arr)[17] = malloc((size_t)cap * sizeof(char[17]));
+    if (!arr) return NULL;
+
+    char line[32];
+    while (fgets(line, sizeof(line), fp)) {
+        char *nl = strchr(line, '\n'); if (nl) *nl = '\0';
+        char *cr = strchr(line, '\r'); if (cr) *cr = '\0';
+        if (line[0] == '\0') continue;
+        if (count == cap) {
+            cap *= 2;
+            char (*tmp)[17] = realloc(arr, (size_t)cap * sizeof(char[17]));
+            if (!tmp) break;
+            arr = tmp;
+        }
+        memcpy(arr[count], line, 16);
+        arr[count][16] = '\0';
+        count++;
+    }
+    *count_out = count;
+    return arr;
+}
+
+void local_pending_fetch_remove(const char *uid) {
+    RAII_STRING char *path = pending_fetch_path();
+    if (!path || !uid) return;
+
+    FILE *rfp = fopen(path, "r");
+    if (!rfp) return;
+
+    /* Read all lines, skip the matching UID */
+    int cap = 64, count = 0;
+    char (*lines)[32] = malloc((size_t)cap * sizeof(char[32]));
+    if (!lines) { fclose(rfp); return; }
+
+    char line[32];
+    while (fgets(line, sizeof(line), rfp)) {
+        char tmp[32];
+        strncpy(tmp, line, 31); tmp[31] = '\0';
+        char *nl = strchr(tmp, '\n'); if (nl) *nl = '\0';
+        char *cr = strchr(tmp, '\r'); if (cr) *cr = '\0';
+        if (strcmp(tmp, uid) == 0) continue;
+        if (count == cap) {
+            cap *= 2;
+            char (*newlines)[32] = realloc(lines, (size_t)cap * sizeof(char[32]));
+            if (!newlines) break;
+            lines = newlines;
+        }
+        memcpy(lines[count++], line, 31);
+        lines[count - 1][31] = '\0';
+    }
+    fclose(rfp);
+
+    FILE *wfp = fopen(path, "w");
+    if (wfp) {
+        for (int i = 0; i < count; i++)
+            fputs(lines[i], wfp);
+        fclose(wfp);
+    }
+    free(lines);
+}
+
+int local_pending_fetch_count(void) {
+    RAII_STRING char *path = pending_fetch_path();
+    if (!path) return 0;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return 0;
+    int count = 0;
+    char line[32];
+    while (fgets(line, sizeof(line), fp)) {
+        if (line[0] != '\n' && line[0] != '\r' && line[0] != '\0')
+            count++;
+    }
+    return count;
+}
+
+void local_pending_fetch_clear(void) {
+    RAII_STRING char *path = pending_fetch_path();
+    if (path) remove(path);
 }
 
 /* ── Local outgoing message save ─────────────────────────────────────── */

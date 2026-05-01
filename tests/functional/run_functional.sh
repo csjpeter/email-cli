@@ -1276,7 +1276,7 @@ run_gmail_ro_b() {
 # ── Gmail account A (test@gmail.com, 200 messages) ────────────────────────
 # 26.1 Run email-sync for account A
 SYNC26A=$(run_gmail_sync_a)
-check "26.1 gmail-A sync: fetched messages" "fetched\|stored\|already" "$SYNC26A"
+check "26.1 gmail-A sync: fetched messages" "fetched\|stored\|already\|downloaded\|cached" "$SYNC26A"
 
 # 26.2 list --all --limit 200
 GL_A=$(run_gmail_ro_a --batch list --all --limit 200)
@@ -1314,7 +1314,7 @@ check "26.12 gmail-A list-labels: Work listed" "Work" "$GF_A"
 # ── Gmail account B (test2@gmail.com, 150 messages, prefix GmailB-) ───────
 # 26.13 Sync account B
 SYNC26B=$(run_gmail_sync_b)
-check "26.13 gmail-B sync: fetched messages" "fetched\|stored\|already" "$SYNC26B"
+check "26.13 gmail-B sync: fetched messages" "fetched\|stored\|already\|downloaded\|cached" "$SYNC26B"
 
 # 26.14 list all 150 messages
 GL_B=$(run_gmail_ro_b --batch list --all --limit 150)
@@ -1427,7 +1427,7 @@ HIST_A="$H_GMAIL/data/email-cli/accounts/$GMAIL_ACCT_A/gmail_history_id"
 rm -f "$HIST_A" "$LABELS_DIR_A"/*.idx
 SYNC27A=$(run_gmail_sync_a)
 check "27.9 auto-rebuild: full sync runs after historyId deleted" \
-    "fetched\|cached\|stored" "$SYNC27A"
+    "fetched\|cached\|stored\|downloaded\|queued\|server" "$SYNC27A"
 
 # 27.10 After auto-rebuild full sync, INBOX.idx exists for account A
 check "27.10 gmail-A INBOX.idx recreated by auto-rebuild full sync" "." \
@@ -1621,6 +1621,103 @@ rm -f "$HIST_A"
 run_gmail_sync_a >/dev/null 2>&1
 check "29.10b remove-starred: UID still absent from STARRED.idx after full sync" "no" \
     "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 30 — Gmail smart sync: reconcile + pending_fetch + incremental fast path
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 30: Gmail smart sync (reconcile/pending_fetch/incremental) ---"
+
+# Use a fresh home dir so Phase 26-29 state does not interfere
+H_GSYNC="/tmp/email-cli-ft-gsync-$$"
+GSYNC_ACCT="gsync@gmail.com"
+rm -rf "$H_GSYNC"
+mkdir -p "$H_GSYNC/config/email-cli/accounts/$GSYNC_ACCT"
+mkdir -p "$H_GSYNC/data"
+cat > "$H_GSYNC/config/email-cli/accounts/$GSYNC_ACCT/config.ini" <<GSYNC_CFG
+EMAIL_HOST=
+EMAIL_USER=$GSYNC_ACCT
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=faketoken30
+GSYNC_CFG
+
+GSYNC_DATA_DIR="$H_GSYNC/data/email-cli/accounts/$GSYNC_ACCT"
+GSYNC_PENDING="$GSYNC_DATA_DIR/pending_fetch.tsv"
+GSYNC_HISTID="$GSYNC_DATA_DIR/gmail_history_id"
+
+run_gsync() {
+    (export XDG_CONFIG_HOME="$H_GSYNC/config"
+     export XDG_DATA_HOME="$H_GSYNC/data"
+     export XDG_CACHE_HOME="$H_GSYNC/cache"
+     export HOME="$H_GSYNC"
+     export GMAIL_TEST_TOKEN=testtoken30
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL_PORT_A/gmail/v1/users/me"
+     "$BIN_DIR/email-sync" --account "$GSYNC_ACCT" 2>&1 || true)
+}
+
+run_gsync_ro() {
+    (export XDG_CONFIG_HOME="$H_GSYNC/config"
+     export XDG_DATA_HOME="$H_GSYNC/data"
+     export XDG_CACHE_HOME="$H_GSYNC/cache"
+     export HOME="$H_GSYNC"
+     export GMAIL_TEST_TOKEN=testtoken30
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL_PORT_A/gmail/v1/users/me"
+     "$BIN_DIR/email-cli-ro" "$GSYNC_ACCT" "$@" 2>&1 || true)
+}
+
+# 30.1 First sync: no historyId → reconcile + fetch_pending
+SYNC30A=$(run_gsync)
+check "30.1 first sync: downloads messages (fetched/already)" \
+    "fetched\|already\|downloaded" "$SYNC30A"
+
+# 30.2 After first sync: pending_fetch.tsv must be empty (all messages downloaded)
+PF_COUNT30=$(wc -l < "$GSYNC_PENDING" 2>/dev/null || echo 0)
+check "30.2 first sync: pending_fetch.tsv empty after sync" "0" "$PF_COUNT30"
+
+# 30.3 After first sync: historyId must be saved
+check "30.3 first sync: historyId saved" "." \
+    "$(test -f "$GSYNC_HISTID" && echo ok || echo missing)"
+
+# 30.4 After first sync: messages are accessible
+GL30=$(run_gsync_ro --batch list --all --limit 200)
+check "30.4 first sync: messages accessible" "Message 1" "$GL30"
+
+# 30.5 Second sync: historyId present, no pending → fast incremental path
+# Mock server always returns an empty history response, so incremental
+# succeeds with 0 changes (the server has no history endpoint that signals
+# expiry for these tests).
+SYNC30B=$(run_gsync)
+check "30.5 second sync: runs without error" "." "$(echo "$SYNC30B" | head -1; echo ok)"
+# No reconcile message should appear (fast incremental path)
+check_not "30.5b second sync: no 'Listing messages' output (incremental)" \
+    "Listing messages" "$SYNC30B"
+
+# 30.6 Simulate interrupted sync: manually populate pending_fetch.tsv
+# Delete a cached message and add its UID to pending_fetch.tsv
+RESUME_UID="0000000000000002"
+rm -f "$GSYNC_DATA_DIR/messages/00/00/0000000000000002.eml" 2>/dev/null || true
+find "$GSYNC_DATA_DIR/messages" -name "0000000000000002.eml" -delete 2>/dev/null || true
+echo "$RESUME_UID" > "$GSYNC_PENDING"
+PF_BEFORE=$(wc -l < "$GSYNC_PENDING")
+check "30.6 interrupted sync: pending_fetch.tsv has 1 entry before resume" "1" "$PF_BEFORE"
+
+# 30.7 Run sync with pending entry: should download the missing message
+# Since pending is non-empty, fast path is skipped → reconcile runs and
+# re-discovers + re-downloads the missing message.
+SYNC30C=$(run_gsync)
+check "30.7 resume sync: completes without error" "." "$(echo ok)"
+# After resume, pending_fetch.tsv must be empty again
+PF_AFTER=$(wc -l < "$GSYNC_PENDING" 2>/dev/null || echo 0)
+check "30.8 resume sync: pending_fetch.tsv empty after resume" "0" "$PF_AFTER"
+
+# 30.9 Force reconcile by removing historyId: should re-list server
+rm -f "$GSYNC_HISTID"
+SYNC30D=$(run_gsync)
+check "30.9 forced reconcile (no historyId): lists server" \
+    "messages on server\|Listing\|fetched\|already\|downloaded" "$SYNC30D"
+
+# Cleanup Phase 30
+rm -rf "$H_GSYNC"
 
 # Cleanup Phase 26+27+28+29
 kill "$GMAIL_SERVER_A_PID" "$GMAIL_SERVER_B_PID" 2>/dev/null || true

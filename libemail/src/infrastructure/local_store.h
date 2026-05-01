@@ -299,6 +299,49 @@ PendingFlag *local_pending_flag_load(const char *folder, int *count_out);
 /** @brief Removes the pending flag queue file for a folder. */
 void local_pending_flag_clear(const char *folder);
 
+/* ── Pending Gmail fetch queue (missing .eml/.hdr to download) ───────── */
+
+/**
+ * @brief Add a Gmail message UID to the pending-fetch queue.
+ *
+ * The pending-fetch queue (pending_fetch.tsv) lists Gmail message UIDs
+ * whose .eml or .hdr file is missing locally.  The sync process downloads
+ * them on the next run before attempting incremental sync.
+ *
+ * @param uid  16-char Gmail message UID.
+ * @return 0 on success, -1 on error.
+ */
+int local_pending_fetch_add(const char *uid);
+
+/**
+ * @brief Load all UIDs from the pending-fetch queue.
+ *
+ * @param count_out  Set to number of entries.
+ * @return Heap-allocated array of char[17] (caller must free), or NULL if empty.
+ */
+char (*local_pending_fetch_load(int *count_out))[17];
+
+/**
+ * @brief Remove a single UID from the pending-fetch queue.
+ *
+ * @param uid  16-char Gmail message UID.
+ */
+void local_pending_fetch_remove(const char *uid);
+
+/**
+ * @brief Return the number of UIDs in the pending-fetch queue.
+ *
+ * Reads the file without allocating a full array.
+ *
+ * @return Number of entries, or 0 if the file is absent or empty.
+ */
+int local_pending_fetch_count(void);
+
+/**
+ * @brief Remove the pending-fetch queue file entirely.
+ */
+void local_pending_fetch_clear(void);
+
 /* ── Gmail label index files (.idx) ──────────────────────────────────── */
 
 /**

@@ -14,9 +14,11 @@
 /**
  * @brief Synchronise a Gmail account to the local store.
  *
- * Checks for a saved historyId.  If present, attempts incremental sync
- * via the History API.  If the historyId is stale or absent, performs
- * a full sync.
+ * Smart multi-phase flow:
+ *  1. Drain any queued downloads from pending_fetch.tsv (resumable).
+ *  2. If store is complete and historyId is valid: fast incremental sync.
+ *  3. Otherwise: reconcile (list server UIDs, queue missing ones) then
+ *     download the queue.
  *
  * Local store must be initialised (local_store_init) before calling.
  *
@@ -26,10 +28,11 @@
 int gmail_sync(GmailClient *gc);
 
 /**
- * @brief Full sync: download all messages and rebuild label indexes.
+ * @brief Full sync: reconcile + fetch all missing messages.
  *
- * Expensive operation (O(total messages)).  Used on first sync or when
- * the saved historyId has expired.
+ * Equivalent to gmail_sync_reconcile() followed by gmail_sync_fetch_pending().
+ * Expensive on first run (O(total messages)); subsequent calls only download
+ * what has changed since the last sync.
  *
  * @param gc  Connected Gmail client.
  * @return 0 on success, -1 on error.
@@ -44,9 +47,34 @@ int gmail_sync_full(GmailClient *gc);
  *
  * @param gc  Connected Gmail client.
  * @return 0 on success, -1 on error, -2 on expired historyId (caller
- *         should fall back to full sync).
+ *         should fall back to reconcile).
  */
 int gmail_sync_incremental(GmailClient *gc);
+
+/**
+ * @brief Reconcile: list all server message IDs and queue missing ones.
+ *
+ * Calls gmail_list_messages(), compares with the local store, and appends
+ * any missing UIDs to pending_fetch.tsv.  Does NOT download messages.
+ * Also saves the current historyId and label name mapping.
+ *
+ * @param gc  Connected Gmail client.
+ * @return Number of UIDs queued (>=0), or -1 on fatal error.
+ */
+int gmail_sync_reconcile(GmailClient *gc);
+
+/**
+ * @brief Download all messages listed in pending_fetch.tsv.
+ *
+ * Iterates the pending-fetch queue, downloads each missing message,
+ * saves .eml + .hdr, applies mail rules, updates label indexes, and
+ * removes the entry from the queue.  Failed downloads are left in the
+ * queue for retry on the next call.
+ *
+ * @param gc  Connected Gmail client.
+ * @return Number of messages successfully downloaded.
+ */
+int gmail_sync_fetch_pending(GmailClient *gc);
 
 /**
  * @brief Rebuild all label .idx files from locally cached .hdr files.

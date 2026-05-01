@@ -355,12 +355,74 @@ int gmail_sync_rebuild_indexes(void) {
     return 0;
 }
 
-/* ── Full Sync ────────────────────────────────────────────────────── */
+/* ── Single message fetch+store helper ───────────────────────────────── */
 
-int gmail_sync_full(GmailClient *gc) {
-    logger_log(LOG_INFO, "gmail_sync: starting full sync");
+/**
+ * Fetch one message from the Gmail API, save .eml + .hdr, apply rules,
+ * update label indexes.
+ * Returns 0 on success, -1 on fetch error (transient; caller should retry).
+ */
+static int store_fetched_message(GmailClient *gc, const char *uid,
+                                  const MailRules *rules)
+{
+    char **labels = NULL;
+    int label_count = 0;
+    char *raw = gmail_fetch_message(gc, uid, &labels, &label_count);
+    if (!raw) {
+        logger_log(LOG_WARN, "gmail_sync: failed to fetch %s", uid);
+        for (int j = 0; j < label_count; j++) free(labels[j]);
+        free(labels);
+        return -1;
+    }
 
-    /* 1. List all message IDs (paginated — show running count while fetching) */
+    local_msg_save("", uid, raw, strlen(raw));
+
+    char *hdr = gmail_sync_build_hdr(raw, labels, label_count);
+    if (hdr) { local_hdr_save("", uid, hdr, strlen(hdr)); free(hdr); }
+
+    apply_rules_to_new_message(rules, uid, raw, labels, label_count);
+    free(raw);
+
+    int has_real_label = 0;
+    for (int j = 0; j < label_count; j++) {
+        if (gmail_sync_is_filtered_label(labels[j])) continue;
+        const char *idx_name = labels[j];
+        if      (strcmp(labels[j], "SPAM")  == 0) idx_name = "_spam";
+        else if (strcmp(labels[j], "TRASH") == 0) idx_name = "_trash";
+        label_idx_add(idx_name, uid);
+        if (!is_category_label(labels[j])) has_real_label = 1;
+    }
+    if (!has_real_label) {
+        label_idx_add("_nolabel", uid);
+        int cur_flags = 0;
+        for (int j = 0; j < label_count; j++) {
+            if (strcmp(labels[j], "UNREAD")  == 0) cur_flags |= MSG_FLAG_UNSEEN;
+            if (strcmp(labels[j], "STARRED") == 0) cur_flags |= MSG_FLAG_FLAGGED;
+        }
+        if (cur_flags & MSG_FLAG_UNSEEN)
+            local_hdr_update_flags("", uid, cur_flags & ~MSG_FLAG_UNSEEN);
+    }
+
+    for (int j = 0; j < label_count; j++) free(labels[j]);
+    free(labels);
+    return 0;
+}
+
+/* ── Reconcile: discover missing UIDs and queue them ─────────────────── */
+
+/**
+ * List all server-side message IDs, compare with the local store, and
+ * add any missing UIDs to pending_fetch.tsv.  Does NOT download messages.
+ *
+ * Also updates the historyId and label name mapping so subsequent
+ * incremental syncs know where to resume from.
+ *
+ * Returns the number of UIDs added to the pending-fetch queue, or -1 on
+ * a fatal error (e.g. the server cannot be reached).
+ */
+int gmail_sync_reconcile(GmailClient *gc) {
+    logger_log(LOG_INFO, "gmail_sync: reconcile — listing server messages");
+
     fprintf(stderr, "  Listing messages...");
     fflush(stderr);
     gmail_set_progress(gc, list_progress_cb, NULL);
@@ -369,128 +431,139 @@ int gmail_sync_full(GmailClient *gc) {
     int uid_count = 0;
     if (gmail_list_messages(gc, NULL, NULL, &all_uids, &uid_count) != 0) {
         gmail_set_progress(gc, NULL, NULL);
-        logger_log(LOG_ERROR, "gmail_sync: failed to list messages");
+        logger_log(LOG_ERROR, "gmail_sync: reconcile failed to list messages");
         return -1;
     }
     gmail_set_progress(gc, NULL, NULL);
-    fprintf(stderr, "\r\033[K  %d messages found\n", uid_count);
-    logger_log(LOG_INFO, "gmail_sync: %d messages to sync", uid_count);
+    fprintf(stderr, "\r\033[K  %d messages on server\n", uid_count);
 
-    /* 2. For each message: fetch, store .eml, build .hdr, collect labels */
-    MailRules *rules = mail_rules_load(local_store_account_name());
-    int fetched = 0, skipped = 0;
-#define PROGRESS_STEP 50   /* refresh the in-place counter every N messages */
+    /* Clear any stale pending_fetch entries before repopulating */
+    local_pending_fetch_clear();
+
+    int queued = 0, cached = 0;
     for (int i = 0; i < uid_count; i++) {
         const char *uid = all_uids[i];
-
-        /* Skip only when BOTH .eml and .hdr are present.
-         * If .eml exists but .hdr is missing (e.g. sync interrupted or
-         * upgraded from an older version that did not write .hdr files),
-         * re-fetch so the .hdr is created. */
         if (local_msg_exists("", uid) && local_hdr_exists("", uid)) {
-            skipped++;
-            if (i % PROGRESS_STEP == 0 || i == uid_count - 1) {
-                fprintf(stderr, "\r\033[K  [%d/%d] (cached)", i + 1, uid_count);
+            cached++;
+            if (i % 500 == 0 || i == uid_count - 1) {
+                fprintf(stderr, "\r\033[K  Scanning local store: %d/%d",
+                        i + 1, uid_count);
                 fflush(stderr);
             }
             continue;
         }
-
-        /* Fetch raw message + labels */
-        char **labels = NULL;
-        int label_count = 0;
-        char *raw = gmail_fetch_message(gc, uid, &labels, &label_count);
-        if (!raw) {
-            logger_log(LOG_WARN, "gmail_sync: failed to fetch %s, skipping", uid);
-            for (int j = 0; j < label_count; j++) free(labels[j]);
-            free(labels);
-            continue;
+        local_pending_fetch_add(uid);
+        queued++;
+        if ((cached + queued) % 500 == 0 || i == uid_count - 1) {
+            fprintf(stderr, "\r\033[K  Scanning local store: %d/%d",
+                    i + 1, uid_count);
+            fflush(stderr);
         }
-
-        /* Save .eml (flat, empty folder string for Gmail) */
-        local_msg_save("", uid, raw, strlen(raw));
-
-        /* Build and save .hdr */
-        char *hdr = gmail_sync_build_hdr(raw, labels, label_count);
-        if (hdr) {
-            local_hdr_save("", uid, hdr, strlen(hdr));
-            free(hdr);
-        }
-
-        /* Apply mail sorting rules before freeing raw (rules may read headers) */
-        apply_rules_to_new_message(rules, uid, raw, labels, label_count);
-        free(raw);
-
-        /* Update label index files */
-        int has_real_label = 0; /* non-CATEGORY_, non-filtered label */
-        for (int j = 0; j < label_count; j++) {
-            if (gmail_sync_is_filtered_label(labels[j])) continue;
-
-            /* Map SPAM/TRASH to underscore-prefixed filenames */
-            const char *idx_name = labels[j];
-            if (strcmp(labels[j], "SPAM") == 0) idx_name = "_spam";
-            else if (strcmp(labels[j], "TRASH") == 0) idx_name = "_trash";
-
-            label_idx_add(idx_name, uid);
-            if (!is_category_label(labels[j]))
-                has_real_label = 1;
-        }
-        /* Messages with no real (non-CATEGORY_) label go to Archive.
-         * Archived messages are always considered read. */
-        if (!has_real_label) {
-            label_idx_add("_nolabel", uid);
-            /* Clear UNSEEN in .hdr: hdr was already saved above with the
-             * raw UNREAD flag; rewrite if needed. */
-            int cur_flags = 0;
-            for (int j = 0; j < label_count; j++) {
-                if (strcmp(labels[j], "UNREAD")  == 0) cur_flags |= MSG_FLAG_UNSEEN;
-                if (strcmp(labels[j], "STARRED") == 0) cur_flags |= MSG_FLAG_FLAGGED;
-            }
-            if (cur_flags & MSG_FLAG_UNSEEN)
-                local_hdr_update_flags("", uid, cur_flags & ~MSG_FLAG_UNSEEN);
-        }
-
-        for (int j = 0; j < label_count; j++) free(labels[j]);
-        free(labels);
-
-        fetched++;
-        fprintf(stderr, "\r\033[K  [%d/%d] fetched", i + 1, uid_count);
-        fflush(stderr);
     }
     if (uid_count > 0)
-        fprintf(stderr, "\r\033[K  %d fetched, %d already cached\n",
-                fetched, skipped);
+        fprintf(stderr, "\r\033[K  %d cached, %d queued for download\n",
+                cached, queued);
 
-    /* 3. Rebuild label indexes from .hdr files (covers cached messages too).
-     * Efficient O(N log N) bulk rebuild ensures indexes are complete even
-     * when messages were cached before this sync run. */
-    if (uid_count > 0)
-        rebuild_label_indexes((const char (*)[17])all_uids, uid_count);
-
-    /* 5. Save historyId from the Gmail profile */
+    /* Save historyId so next run can use incremental sync */
     {
         RAII_STRING char *hid = gmail_get_history_id(gc);
         if (hid)
             local_gmail_history_save(hid);
         else
-            logger_log(LOG_WARN, "gmail_sync: could not retrieve historyId");
+            logger_log(LOG_WARN, "gmail_sync: reconcile: could not retrieve historyId");
     }
 
-    /* 6. Save label ID→name mapping for friendly display */
+    /* Save label ID→name mapping */
     {
         char **lbl_names = NULL, **lbl_ids = NULL;
         int lbl_count = 0;
         if (gmail_list_labels(gc, &lbl_names, &lbl_ids, &lbl_count) == 0) {
             local_gmail_label_names_save(lbl_ids, lbl_names, lbl_count);
             for (int i = 0; i < lbl_count; i++) { free(lbl_names[i]); free(lbl_ids[i]); }
-            free(lbl_names);
-            free(lbl_ids);
+            free(lbl_names); free(lbl_ids);
         }
     }
 
-    mail_rules_free(rules);
     free(all_uids);
-    logger_log(LOG_INFO, "gmail_sync: full sync completed (%d messages)", uid_count);
+    logger_log(LOG_INFO, "gmail_sync: reconcile done — %d cached, %d queued",
+               cached, queued);
+    return queued;
+}
+
+/* ── Fetch pending: download queued messages ─────────────────────────── */
+
+/**
+ * Download all message UIDs listed in pending_fetch.tsv.
+ * Removes each entry from the queue on successful download.
+ * Leaves failures in the queue for retry on the next sync.
+ *
+ * Returns number of messages successfully downloaded.
+ */
+int gmail_sync_fetch_pending(GmailClient *gc) {
+    int count = 0;
+    char (*uids)[17] = local_pending_fetch_load(&count);
+    if (!uids || count == 0) {
+        free(uids);
+        return 0;
+    }
+
+    logger_log(LOG_INFO, "gmail_sync: fetch_pending — %d messages to download", count);
+    fprintf(stderr, "  Downloading %d message(s)...\n", count);
+
+    MailRules *rules = mail_rules_load(local_store_account_name());
+    int fetched = 0;
+#define PROGRESS_STEP 50
+    for (int i = 0; i < count; i++) {
+        const char *uid = uids[i];
+
+        if (local_msg_exists("", uid) && local_hdr_exists("", uid)) {
+            /* Already present — clean up stale pending entry */
+            local_pending_fetch_remove(uid);
+            continue;
+        }
+
+        if (store_fetched_message(gc, uid, rules) == 0) {
+            local_pending_fetch_remove(uid);
+            fetched++;
+        }
+        /* On failure: leave in queue for retry */
+
+        if (i % PROGRESS_STEP == 0 || i == count - 1) {
+            fprintf(stderr, "\r\033[K  [%d/%d] downloaded", fetched, count);
+            fflush(stderr);
+        }
+    }
+    if (count > 0)
+        fprintf(stderr, "\r\033[K  %d of %d downloaded\n", fetched, count);
+
+    mail_rules_free(rules);
+    free(uids);
+    logger_log(LOG_INFO, "gmail_sync: fetch_pending done — %d/%d downloaded",
+               fetched, count);
+    return fetched;
+}
+
+/* ── Full Sync ────────────────────────────────────────────────────── */
+
+int gmail_sync_full(GmailClient *gc) {
+    logger_log(LOG_INFO, "gmail_sync: starting full sync");
+
+    int queued = gmail_sync_reconcile(gc);
+    if (queued < 0) return -1;
+
+    if (queued > 0)
+        gmail_sync_fetch_pending(gc);
+
+    /* Rebuild label indexes from .hdr files so that even when all messages
+     * were already cached (queued == 0) the indexes are consistent. */
+    {
+        char (*all_uids)[17] = NULL;
+        int all_count = 0;
+        if (local_hdr_list_all_uids("", &all_uids, &all_count) == 0 && all_count > 0)
+            rebuild_label_indexes((const char (*)[17])all_uids, all_count);
+        free(all_uids);
+    }
+
     return 0;
 }
 
@@ -770,11 +843,60 @@ int gmail_sync_incremental(GmailClient *gc) {
 
 /* ── Auto Sync (public entry point) ───────────────────────────────── */
 
+/**
+ * Smart sync flow:
+ *
+ *   1. If pending_fetch.tsv is non-empty, download those first (resuming an
+ *      interrupted previous sync or initial download).
+ *   2. If the local store was already complete (no pending at start) AND a
+ *      valid historyId exists, use the fast incremental path (1–2 API calls).
+ *   3. Otherwise, run reconcile (full UID listing) to discover any missing
+ *      messages, then download them.
+ *
+ * This ensures:
+ *   - First run or expired historyId: O(N) reconcile → O(missing) downloads.
+ *   - Subsequent runs on a mature store: O(1) incremental (no listing at all).
+ *   - Interrupted downloads: resume from pending_fetch.tsv without re-listing.
+ */
 int gmail_sync(GmailClient *gc) {
-    int rc = gmail_sync_incremental(gc);
-    if (rc == -2) {
-        logger_log(LOG_INFO, "gmail_sync: falling back to full sync");
-        return gmail_sync_full(gc);
+    /* Step 1: check readiness before downloading anything */
+    int had_pending = local_pending_fetch_count() > 0;
+
+    /* Step 2: drain any queued downloads from a previous (possibly interrupted) sync */
+    if (had_pending)
+        gmail_sync_fetch_pending(gc);
+
+    /* Step 3: choose fast or full path */
+    char *history_id = local_gmail_history_load();
+    int have_history = (history_id != NULL);
+    free(history_id);
+
+    if (!had_pending && have_history) {
+        int rc = gmail_sync_incremental(gc);
+        if (rc == 0) return 0; /* fast path — done */
+        if (rc != -2) return rc; /* unexpected error */
+        logger_log(LOG_INFO, "gmail_sync: historyId expired, falling back to reconcile");
     }
-    return rc;
+
+    /* Step 4: reconcile (discover what is missing) */
+    int queued = gmail_sync_reconcile(gc);
+    if (queued < 0) return -1;
+
+    /* Step 5: download what reconcile found */
+    if (queued > 0)
+        gmail_sync_fetch_pending(gc);
+
+    /* Step 6: rebuild label indexes from .hdr files.
+     * Necessary when all messages were already cached (queued == 0) but
+     * label .idx files were deleted or are missing (e.g. manual deletion
+     * or upgrade from an older version). */
+    {
+        char (*all_uids)[17] = NULL;
+        int all_count = 0;
+        if (local_hdr_list_all_uids("", &all_uids, &all_count) == 0 && all_count > 0)
+            rebuild_label_indexes((const char (*)[17])all_uids, all_count);
+        free(all_uids);
+    }
+
+    return 0;
 }

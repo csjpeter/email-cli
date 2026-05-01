@@ -248,6 +248,95 @@ static void test_build_hdr_archive_unread_flags(void) {
     free(hdr);
 }
 
+/* ── pending_fetch queue (local_store) ───────────────────────────────── */
+
+static void test_pending_fetch_empty_initially(void) {
+    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    setup_gmail_test_env(home);
+
+    local_pending_fetch_clear();
+    ASSERT(local_pending_fetch_count() == 0, "pending_fetch: empty initially");
+    int count = -1;
+    char (*uids)[17] = local_pending_fetch_load(&count);
+    ASSERT(count == 0, "pending_fetch: load count is 0");
+    free(uids);
+}
+
+static void test_pending_fetch_add_and_load(void) {
+    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    setup_gmail_test_env(home);
+    local_pending_fetch_clear();
+
+    const char *uid1 = "aaaa000000000001";
+    const char *uid2 = "aaaa000000000002";
+    ASSERT(local_pending_fetch_add(uid1) == 0, "pending_fetch: add uid1");
+    ASSERT(local_pending_fetch_add(uid2) == 0, "pending_fetch: add uid2");
+
+    ASSERT(local_pending_fetch_count() == 2, "pending_fetch: count == 2");
+
+    int count = 0;
+    char (*uids)[17] = local_pending_fetch_load(&count);
+    ASSERT(count == 2, "pending_fetch: load returns 2");
+    ASSERT(uids != NULL, "pending_fetch: uids not NULL");
+    ASSERT(strcmp(uids[0], uid1) == 0 || strcmp(uids[1], uid1) == 0,
+           "pending_fetch: uid1 present");
+    ASSERT(strcmp(uids[0], uid2) == 0 || strcmp(uids[1], uid2) == 0,
+           "pending_fetch: uid2 present");
+    free(uids);
+}
+
+static void test_pending_fetch_remove(void) {
+    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    setup_gmail_test_env(home);
+    local_pending_fetch_clear();
+
+    local_pending_fetch_add("bbbb000000000001");
+    local_pending_fetch_add("bbbb000000000002");
+    local_pending_fetch_add("bbbb000000000003");
+
+    local_pending_fetch_remove("bbbb000000000002");
+
+    int count = 0;
+    char (*uids)[17] = local_pending_fetch_load(&count);
+    ASSERT(count == 2, "pending_fetch remove: 2 entries remain");
+    int found2 = 0;
+    for (int i = 0; i < count; i++)
+        if (strcmp(uids[i], "bbbb000000000002") == 0) found2 = 1;
+    ASSERT(!found2, "pending_fetch remove: uid2 gone");
+    free(uids);
+}
+
+static void test_pending_fetch_clear(void) {
+    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    setup_gmail_test_env(home);
+
+    local_pending_fetch_add("cccc000000000001");
+    local_pending_fetch_add("cccc000000000002");
+    ASSERT(local_pending_fetch_count() >= 2, "pending_fetch clear: non-zero before clear");
+
+    local_pending_fetch_clear();
+    ASSERT(local_pending_fetch_count() == 0, "pending_fetch clear: zero after clear");
+}
+
+static void test_pending_fetch_count_matches_load(void) {
+    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    setup_gmail_test_env(home);
+    local_pending_fetch_clear();
+
+    for (int i = 0; i < 5; i++) {
+        char uid[17];
+        snprintf(uid, sizeof(uid), "dddd%012d", i);
+        local_pending_fetch_add(uid);
+    }
+
+    int cnt_fast = local_pending_fetch_count();
+    int cnt_load = 0;
+    char (*uids)[17] = local_pending_fetch_load(&cnt_load);
+    ASSERT(cnt_fast == cnt_load,
+           "pending_fetch: count() matches load() count");
+    free(uids);
+}
+
 /* ── Registration ────────────────────────────────────────────────────── */
 
 void test_gmail_sync(void) {
@@ -267,4 +356,9 @@ void test_gmail_sync(void) {
     RUN_TEST(test_repair_archive_flags_clears_unseen);
     RUN_TEST(test_repair_archive_flags_preserves_flagged);
     RUN_TEST(test_repair_archive_flags_noop_when_already_read);
+    RUN_TEST(test_pending_fetch_empty_initially);
+    RUN_TEST(test_pending_fetch_add_and_load);
+    RUN_TEST(test_pending_fetch_remove);
+    RUN_TEST(test_pending_fetch_clear);
+    RUN_TEST(test_pending_fetch_count_matches_load);
 }

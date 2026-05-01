@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <poll.h>
@@ -176,8 +177,12 @@ static char *word_wrap(const char *text, int width) {
                 *wp++ = '\n';
                 seg = brk + 1;
             } else {
-                /* No space found: hard break. */
-                size_t n = (size_t)(chunk_end - seg);
+                /* No space found: never hard-break a word — emit the whole
+                 * token and let the terminal handle visual wrapping. */
+                const char *word_end = (const char *)p;
+                while (word_end < line_end && !isspace((unsigned char)*word_end))
+                    word_end++;
+                size_t n = (size_t)(word_end - seg);
                 if (n == 0) {
                     /* Single wide char exceeds width: emit it anyway. */
                     const unsigned char *u = (const unsigned char *)seg;
@@ -187,8 +192,7 @@ static char *word_wrap(const char *text, int width) {
                     memcpy(wp, seg, (size_t)sl); wp += sl; seg += sl;
                 } else {
                     memcpy(wp, seg, n); wp += n;
-                    *wp++ = '\n';
-                    seg = chunk_end;
+                    seg = word_end;
                 }
             }
         }

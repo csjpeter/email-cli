@@ -1724,6 +1724,40 @@ kill "$GMAIL_SERVER_A_PID" "$GMAIL_SERVER_B_PID" 2>/dev/null || true
 rm -rf "$H_GMAIL"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 31 — URL word-wrap: long URLs must not be hard-broken mid-token
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 31: URL word-wrap (plain-text, no hard line breaks) ---"
+
+LONG_URL="https://www.agroinform.hu/aprohirdetes_adatlap/gep/gyumolcstermesztes-gepei/perfect-rf-egyoldalas-lengotarcsas-kasza-gyumolcs-es-szoloultetvenyekhez/h_7206309?ref=0a20571a"
+
+URL_PORT=9991
+H_URL="/tmp/email-cli-ft-urlwrap"
+URL_LOG="$PROJECT_ROOT/build/tests/functional/mock_urlwrap.log"
+make_home "$H_URL" "urlwrap@test.local" "$URL_PORT"
+
+(cd "$PROJECT_ROOT/build" && \
+    MOCK_IMAP_PORT=$URL_PORT \
+    MOCK_IMAP_LONG_URL="$LONG_URL" \
+    "$MOCK_SERVER_BIN") >"$URL_LOG" 2>&1 &
+URL_SERVER_PID=$!
+sleep 0.3
+
+URL_OUT=$(run_show "$H_URL" "")
+
+check     "31.1 long URL: hostname present"    "agroinform.hu"   "$URL_OUT"
+check     "31.2 long URL: query param present" "ref=0a20571a"    "$URL_OUT"
+# Chars 71-91 of the URL straddle the col-80 boundary ("gepei/perfect-rf-egyo").
+# With a hard break the sequence is split by \n; without a hard break it is intact.
+# (Start at 71, not 70, to avoid a leading '-' that grep would interpret as option.)
+URL_STRADDLE=$(printf '%s' "$LONG_URL" | cut -c71-91)
+check     "31.3 URL not broken at col 80"      "$URL_STRADDLE"   "$URL_OUT"
+
+# Cleanup Phase 31
+kill "$URL_SERVER_PID" 2>/dev/null || true
+rm -rf "$H_URL"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

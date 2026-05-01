@@ -79,11 +79,22 @@ void test_email_service(void) {
         free(r);
     }
 
-    /* Hard break — no spaces (lines 185-188): width=20, 25-char word */
+    /* Long word without spaces: emitted whole (terminal wraps, not us) */
     {
         char *r = word_wrap("aaaaaaaaaaaaaaaaaaaaaaaaa", 20);
-        ASSERT(r != NULL, "word_wrap: hard break not NULL");
-        ASSERT(strstr(r, "\n") != NULL, "word_wrap: hard break produces newline");
+        ASSERT(r != NULL, "word_wrap: long word not NULL");
+        ASSERT(strstr(r, "aaaaaaaaaaaaaaaaaaaaaaaaa") != NULL,
+               "word_wrap: long word emitted intact");
+        free(r);
+    }
+
+    /* URL longer than width must not be broken mid-URL */
+    {
+        const char *url = "https://www.example.com/very/long/path/that/exceeds/"
+                          "the/wrap/width/limit/by/far/and/keeps/going";
+        char *r = word_wrap(url, 40);
+        ASSERT(r != NULL, "word_wrap: long URL not NULL");
+        ASSERT(strstr(r, url) != NULL, "word_wrap: long URL emitted intact");
         free(r);
     }
 

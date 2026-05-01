@@ -32,6 +32,7 @@ static int         g_port       = 9993;
 static const char *g_subject    = "Test Message";
 static int         g_count      = 1;
 static const char *g_msg_prefix = "Message"; /* MOCK_IMAP_MSG_PREFIX */
+static const char *g_long_url   = NULL;      /* MOCK_IMAP_LONG_URL */
 
 /**
  * Read one CRLF-terminated line from ssl into buf (max len-1 chars + NUL).
@@ -247,6 +248,35 @@ static char *build_message_content(int uid, int is_header, int is_flags_only,
  * Uses g_subject and the original full multipart body.
  */
 static char *build_legacy_content(int is_header, const char **section_out) {
+    /* Plain-text message mode: serve a message with a long URL in the body */
+    if (g_long_url) {
+        const char *hdr =
+            "From: Test User <test@example.com>\r\n"
+            "Subject: Long URL Test\r\n"
+            "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+            "\r\n";
+        if (is_header) {
+            *section_out = "BODY[HEADER]";
+            return strdup(hdr);
+        }
+        *section_out = "BODY[]";
+        char *full_msg = NULL;
+        if (asprintf(&full_msg,
+                     "From: Test User <test@example.com>\r\n"
+                     "Subject: Long URL Test\r\n"
+                     "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+                     "MIME-Version: 1.0\r\n"
+                     "Content-Type: text/plain; charset=UTF-8\r\n"
+                     "\r\n"
+                     "Szia Peti!\r\n"
+                     "\r\n"
+                     "Check this link:\r\n"
+                     "%s\r\n",
+                     g_long_url) == -1)
+            return NULL;
+        return full_msg;
+    }
+
     char headers[512];
     snprintf(headers, sizeof(headers),
              "From: Test User <test@example.com>\r\n"
@@ -557,6 +587,8 @@ int main(void) {
     if (count_env && atoi(count_env) > 0) g_count = atoi(count_env);
     const char *prefix_env = getenv("MOCK_IMAP_MSG_PREFIX");
     if (prefix_env && prefix_env[0]) g_msg_prefix = prefix_env;
+    const char *long_url_env = getenv("MOCK_IMAP_LONG_URL");
+    if (long_url_env && long_url_env[0]) g_long_url = long_url_env;
 
     int server_fd;
     struct sockaddr_in address;

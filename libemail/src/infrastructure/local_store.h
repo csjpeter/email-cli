@@ -2,6 +2,7 @@
 #define LOCAL_STORE_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* ── Message flag bitmask constants ─────────────────────────────────────── */
 
@@ -444,6 +445,26 @@ char *local_trash_labels_load(const char *uid);
 
 /** @brief Remove pre-trash labels file after successful untrash. */
 void local_trash_labels_remove(const char *uid);
+
+/* ── IMAP CONDSTORE folder sync state ────────────────────────────────────── */
+
+/**
+ * Per-folder CONDSTORE sync state: persisted UIDVALIDITY and HIGHESTMODSEQ.
+ * Zero values mean "no saved state".
+ */
+typedef struct {
+    uint32_t uidvalidity;
+    uint64_t highestmodseq;
+} FolderSyncState;
+
+/** @brief Persist the CONDSTORE sync state for a folder. */
+int local_sync_state_save(const char *folder, const FolderSyncState *state);
+
+/** @brief Load the saved sync state. Returns 0 on success, -1 if absent. */
+int local_sync_state_load(const char *folder, FolderSyncState *state);
+
+/** @brief Delete the saved sync state file for a folder. */
+void local_sync_state_clear(const char *folder);
 
 /**
  * @brief Saves the gmail_history_id for incremental sync.

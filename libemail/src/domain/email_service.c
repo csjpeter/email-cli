@@ -4989,38 +4989,82 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
         printf("Syncing %s ...\n", folder);
         fflush(stdout);
 
-        if (mail_client_select(sync_mc, folder) != 0) {
+        /* ── Load saved CONDSTORE sync state ──────────────────────────── */
+        FolderSyncState saved_state = {0, 0};
+        int have_saved = (!force_reconcile &&
+                          local_sync_state_load(folder, &saved_state) == 0);
+
+        ImapSelectResult sel = {0};
+        if (mail_client_select_ext(sync_mc, folder,
+                                   have_saved ? saved_state.uidvalidity : 0,
+                                   have_saved ? saved_state.highestmodseq : 0,
+                                   &sel) != 0) {
             fprintf(stderr, "  WARN: SELECT failed for %s\n", folder);
             errors++;
             continue;
         }
 
+        /* ── Fast path: no changes since last sync ─────────────────────── */
+        if (have_saved && sel.highestmodseq != 0 &&
+            sel.highestmodseq == saved_state.highestmodseq &&
+            sel.uidvalidity   == saved_state.uidvalidity) {
+            printf("  (up to date, modseq=%llu)\n",
+                   (unsigned long long)sel.highestmodseq);
+            free(sel.vanished_uids);
+            continue;
+        }
+
+        /* ── UIDVALIDITY changed: clear saved state, force full resync ── */
+        if (have_saved && sel.uidvalidity != 0 &&
+            sel.uidvalidity != saved_state.uidvalidity) {
+            fprintf(stderr,
+                    "  WARN: UIDVALIDITY changed for %s (%u→%u) — full resync\n",
+                    folder, saved_state.uidvalidity, sel.uidvalidity);
+            local_sync_state_clear(folder);
+            have_saved = 0;
+            saved_state.uidvalidity   = 0;
+            saved_state.highestmodseq = 0;
+        }
+
+        /* incremental=1 when we have a valid saved modseq to use */
+        int incremental = (have_saved && saved_state.highestmodseq != 0 &&
+                           sel.highestmodseq != 0);
+
+        /* ── SEARCH ALL: current UID set (needed in all paths) ─────────── */
         char (*uids)[17] = NULL;
         int  uid_count = 0;
         if (mail_client_search(sync_mc, MAIL_SEARCH_ALL, &uids, &uid_count) != 0) {
             fprintf(stderr, "  WARN: SEARCH ALL failed for %s\n", folder);
+            free(sel.vanished_uids);
             errors++;
             continue;
         }
         if (uid_count == 0) {
             printf("  (empty)\n");
             free(uids);
+            free(sel.vanished_uids);
+            /* Persist sync state even for empty folders */
+            if (sel.uidvalidity && sel.highestmodseq) {
+                FolderSyncState ns = { sel.uidvalidity, sel.highestmodseq };
+                local_sync_state_save(folder, &ns);
+            }
             continue;
         }
 
-        /* Load or create manifest for this folder */
+        /* Load or create manifest */
         Manifest *manifest = manifest_load(folder);
         if (!manifest) {
             manifest = calloc(1, sizeof(Manifest));
             if (!manifest) {
                 fprintf(stderr, "  WARN: out of memory for manifest %s\n", folder);
                 free(uids);
+                free(sel.vanished_uids);
                 errors++;
                 continue;
             }
         }
 
-        /* Flush pending local flag changes to the server before reading state */
+        /* Flush pending local flag changes before reading server state */
         {
             int pcount = 0;
             PendingFlag *pending = local_pending_flag_load(folder, &pcount);
@@ -5033,33 +5077,69 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
             free(pending);
         }
 
-        /* Get UNSEEN set to mark entries */
-        char (*unseen_uids)[17] = NULL;
-        int  unseen_count = 0;
-        if (mail_client_search(sync_mc, MAIL_SEARCH_UNREAD, &unseen_uids, &unseen_count) != 0)
-            unseen_count = 0;
-
-        char (*flagged_uids)[17] = NULL;
-        int flagged_count = 0;
-        mail_client_search(sync_mc, MAIL_SEARCH_FLAGGED, &flagged_uids, &flagged_count);
-
-        char (*done_uids)[17] = NULL;
-        int done_count = 0;
-        mail_client_search(sync_mc, MAIL_SEARCH_DONE, &done_uids, &done_count);
-
         /* Evict deleted messages from manifest */
         manifest_retain(manifest, (const char (*)[17])uids, uid_count);
+
+        /* ── Flag acquisition ─────────────────────────────────────────── */
+        ImapFlagUpdate *change_updates = NULL;
+        int             change_count   = 0;
+
+        char (*unseen_uids)[17]  = NULL; int unseen_count  = 0;
+        char (*flagged_uids)[17] = NULL; int flagged_count = 0;
+        char (*done_uids)[17]    = NULL; int done_count    = 0;
+
+        if (incremental) {
+            /* CONDSTORE path: CHANGEDSINCE replaces three SEARCH commands */
+            mail_client_fetch_flags_changedsince(sync_mc,
+                                                 saved_state.highestmodseq,
+                                                 &change_updates, &change_count);
+            /* Apply flag updates to existing manifest entries now */
+            for (int ui = 0; ui < change_count; ui++) {
+                ManifestEntry *me = manifest_find(manifest, change_updates[ui].uid);
+                if (me) me->flags = change_updates[ui].flags;
+            }
+        } else {
+            /* Full path: three SEARCH commands */
+            if (mail_client_search(sync_mc, MAIL_SEARCH_UNREAD,
+                                   &unseen_uids, &unseen_count) != 0)
+                unseen_count = 0;
+            mail_client_search(sync_mc, MAIL_SEARCH_FLAGGED,
+                               &flagged_uids, &flagged_count);
+            mail_client_search(sync_mc, MAIL_SEARCH_DONE,
+                               &done_uids, &done_count);
+        }
 
         int fetched = 0, skipped = 0;
         for (int i = 0; i < uid_count; i++) {
             const char *uid = uids[i];
             int uid_flags = 0;
-            for (int j = 0; j < unseen_count;  j++)
-                if (strcmp(unseen_uids[j],  uid) == 0) { uid_flags |= MSG_FLAG_UNSEEN;  break; }
-            for (int j = 0; j < flagged_count; j++)
-                if (strcmp(flagged_uids[j], uid) == 0) { uid_flags |= MSG_FLAG_FLAGGED; break; }
-            for (int j = 0; j < done_count;    j++)
-                if (strcmp(done_uids[j],    uid) == 0) { uid_flags |= MSG_FLAG_DONE;    break; }
+
+            if (incremental) {
+                ManifestEntry *me = manifest_find(manifest, uid);
+                if (me) {
+                    /* Existing entry: flags already updated from CHANGEDSINCE above */
+                    skipped++;
+                    printf("  [%d/%d] UID %s\r", i + 1, uid_count, uid);
+                    fflush(stdout);
+                    continue;
+                }
+                /* New message: look up flags in change_updates */
+                for (int ui = 0; ui < change_count; ui++) {
+                    if (strcmp(change_updates[ui].uid, uid) == 0) {
+                        uid_flags = change_updates[ui].flags;
+                        break;
+                    }
+                }
+                /* Default: new message is unseen */
+                if (uid_flags == 0) uid_flags = MSG_FLAG_UNSEEN;
+            } else {
+                for (int j = 0; j < unseen_count;  j++)
+                    if (strcmp(unseen_uids[j],  uid) == 0) { uid_flags |= MSG_FLAG_UNSEEN;  break; }
+                for (int j = 0; j < flagged_count; j++)
+                    if (strcmp(flagged_uids[j], uid) == 0) { uid_flags |= MSG_FLAG_FLAGGED; break; }
+                for (int j = 0; j < done_count;    j++)
+                    if (strcmp(done_uids[j],    uid) == 0) { uid_flags |= MSG_FLAG_DONE;    break; }
+            }
 
             /* Show progress BEFORE the potentially slow network fetch */
             printf("  [%d/%d] UID %s...\r", i + 1, uid_count, uid);
@@ -5161,12 +5241,20 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
             printf("  [%d/%d] UID %s   \r", i + 1, uid_count, uid);
             fflush(stdout);
         }
+        free(change_updates);
         free(unseen_uids);
         free(flagged_uids);
         free(done_uids);
+        free(sel.vanished_uids);
         manifest_save(folder, manifest);
         manifest_free(manifest);
         free(uids);
+
+        /* Persist sync state for incremental sync on next run */
+        if (sel.uidvalidity && sel.highestmodseq) {
+            FolderSyncState new_state = { sel.uidvalidity, sel.highestmodseq };
+            local_sync_state_save(folder, &new_state);
+        }
 
         printf("\r\033[K  %d fetched, %d already stored%s\n",
                fetched, skipped, errors ? " (some errors)" : "");

@@ -95,8 +95,8 @@ fi
 ensure_env_running
 
 # 3. Write temporary config pointing at the TLS server
-TEST_HOME="$(mktemp -d)"
-trap "rm -rf $TEST_HOME" EXIT
+TEST_HOME="$(mktemp -d /tmp/email-cli-itest-XXXXXX)"
+trap 'rm -rf "/tmp/email-cli-itest-${TEST_HOME##*/tmp/email-cli-itest-}"' EXIT
 mkdir -p "$TEST_HOME/.config/email-cli"
 cat > "$TEST_HOME/.config/email-cli/config.ini" <<EOF
 EMAIL_HOST=$IMAP_HOST

@@ -54,7 +54,7 @@ static void fs_setup(void)
 static void fs_teardown(void)
 {
     char cmd[512];
-    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);
+    snprintf(cmd, sizeof(cmd), "rm -rf '/tmp/il_pty_%d'", (int)getpid());
     int r = system(cmd);
     (void)r;
 }

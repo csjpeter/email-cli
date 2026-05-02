@@ -190,6 +190,40 @@ int mail_client_modify_label(MailClient *c, const char *uid,
  */
 void mail_client_set_progress(MailClient *c, ImapProgressFn fn, void *ctx);
 
+/* ── Incremental sync (CONDSTORE / QRESYNC) ─────────────────────────────── */
+
+/**
+ * @brief Extended SELECT with CONDSTORE/QRESYNC support.
+ *
+ * Selects the folder. For IMAP with CONDSTORE/QRESYNC the server is asked
+ * for incremental sync information; for Gmail this is a no-op SELECT.
+ *
+ * Pass known_uidval=0 / known_modseq=0 on first run or after a forced
+ * reconcile; the server will respond with full state.
+ *
+ * @param known_uidval  Last saved UIDVALIDITY (0 = no saved state).
+ * @param known_modseq  Last saved HIGHESTMODSEQ (0 = no saved state).
+ * @param res_out       Filled on return. Caller must free res_out->vanished_uids.
+ * @return 0 on success, -1 on error.
+ */
+int mail_client_select_ext(MailClient *c, const char *folder,
+                            uint32_t known_uidval, uint64_t known_modseq,
+                            ImapSelectResult *res_out);
+
+/**
+ * @brief Fetch flag updates for messages changed since @p modseq.
+ *
+ * IMAP: sends UID FETCH 1:* (UID FLAGS) (CHANGEDSINCE modseq).
+ * Gmail: not supported — returns empty result (success).
+ *
+ * @param modseq     Messages with modseq > this value are returned.
+ * @param out        Set to heap-alloc'd ImapFlagUpdate array. Caller frees.
+ * @param count_out  Number of entries.
+ * @return 0 on success, -1 on error.
+ */
+int mail_client_fetch_flags_changedsince(MailClient *c, uint64_t modseq,
+                                          ImapFlagUpdate **out, int *count_out);
+
 /**
  * @brief Synchronise the account (Gmail: full/incremental sync).
  *

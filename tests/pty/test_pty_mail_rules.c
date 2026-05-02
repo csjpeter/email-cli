@@ -109,7 +109,8 @@ static void write_rules(const char *content) {
 static void reset_all_state(void) {
     char cmd[600];
     snprintf(cmd, sizeof(cmd),
-             "rm -rf '%s/.local/share/email-cli'", g_test_home);
+             "rm -rf '/tmp/email-cli-rules-test-%d/.local/share/email-cli'",
+             (int)getpid());
     int _rc = system(cmd); (void)_rc;
 }
 

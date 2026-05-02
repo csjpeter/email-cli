@@ -5,6 +5,7 @@
 #include "raii.h"
 #include "logger.h"
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2047,4 +2048,48 @@ int local_save_outgoing(const char *folder, const char *msg, size_t msg_len) {
     logger_log(LOG_INFO, "local_save_outgoing: saved %s/%s, queued for APPEND",
                folder, uid);
     return 0;
+}
+
+/* ── CONDSTORE folder sync state ─────────────────────────────────────────── */
+
+static char *sync_state_path(const char *folder) {
+    if (!g_account_base[0]) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/sync_state/%s.tsv", g_account_base, folder) == -1)
+        return NULL;
+    return path;
+}
+
+int local_sync_state_save(const char *folder, const FolderSyncState *state) {
+    if (!folder || !state) return -1;
+    RAII_STRING char *path = sync_state_path(folder);
+    if (!path) return -1;
+    char *last_slash = strrchr(path, '/');
+    if (last_slash) {
+        char saved = *last_slash; *last_slash = '\0';
+        fs_mkdir_p(path, 0700);
+        *last_slash = saved;
+    }
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "%" PRIu32 "\t%" PRIu64 "\n",
+                     state->uidvalidity, state->highestmodseq);
+    return write_file(path, buf, (size_t)n);
+}
+
+int local_sync_state_load(const char *folder, FolderSyncState *state) {
+    state->uidvalidity    = 0;
+    state->highestmodseq  = 0;
+    RAII_STRING char *path = sync_state_path(folder);
+    if (!path) return -1;
+    char *data = load_file(path);
+    if (!data) return -1;
+    int rc = sscanf(data, "%" SCNu32 "\t%" SCNu64,
+                    &state->uidvalidity, &state->highestmodseq);
+    free(data);
+    return (rc == 2) ? 0 : -1;
+}
+
+void local_sync_state_clear(const char *folder) {
+    RAII_STRING char *path = sync_state_path(folder);
+    if (path) unlink(path);
 }

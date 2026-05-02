@@ -161,8 +161,8 @@ static int reset_and_sync(void) {
     /* Remove the per-account local store */
     char cmd[600];
     snprintf(cmd, sizeof(cmd),
-             "rm -rf '%s/.local/share/email-cli/accounts/%s'",
-             g_test_home, GMAIL_TEST_EMAIL);
+             "rm -rf '/tmp/email-cli-gmail-pty-%d/.local/share/email-cli/accounts/%s'",
+             (int)getpid(), GMAIL_TEST_EMAIL);
     int _rc1 = system(cmd);  (void)_rc1;  /* test-only, path is controlled */
 
     /* Also clear the shared UI prefs file (it remembers the last-used folder

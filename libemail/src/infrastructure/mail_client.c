@@ -331,6 +331,37 @@ int mail_client_append(MailClient *c, const char *folder,
     return imap_append(c->imap, folder, msg, msg_len);
 }
 
+/* ── Incremental sync (CONDSTORE / QRESYNC) ─────────────────────────────── */
+
+int mail_client_select_ext(MailClient *c, const char *folder,
+                            uint32_t known_uidval, uint64_t known_modseq,
+                            ImapSelectResult *res_out) {
+    memset(res_out, 0, sizeof(*res_out));
+    free(c->selected);
+    c->selected = folder ? strdup(folder) : NULL;
+
+    if (c->is_gmail) return 0;  /* Gmail: no server-side SELECT */
+
+    int caps = imap_get_caps(c->imap);
+
+    if ((caps & IMAP_CAP_QRESYNC) && known_uidval && known_modseq)
+        return imap_select_qresync(c->imap, folder,
+                                   known_uidval, known_modseq, res_out);
+    if (caps & IMAP_CAP_CONDSTORE)
+        return imap_select_condstore(c->imap, folder, res_out);
+
+    /* Fallback: plain SELECT (res_out stays zeroed) */
+    return imap_select(c->imap, folder);
+}
+
+int mail_client_fetch_flags_changedsince(MailClient *c, uint64_t modseq,
+                                          ImapFlagUpdate **out, int *count_out) {
+    *out       = NULL;
+    *count_out = 0;
+    if (c->is_gmail) return 0;  /* not supported for Gmail */
+    return imap_uid_fetch_flags_changedsince(c->imap, modseq, out, count_out);
+}
+
 /* ── Progress ─────────────────────────────────────────────────────── */
 
 void mail_client_set_progress(MailClient *c, ImapProgressFn fn, void *ctx) {

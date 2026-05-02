@@ -1,4 +1,5 @@
 #include "imap_util.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -113,6 +114,54 @@ char *imap_utf7_decode(const char *s) {
     }
     *dst = '\0';
     return out;
+}
+
+int imap_uid_set_expand(const char *set, char (**uids_out)[17], int *count_out) {
+    *uids_out  = NULL;
+    *count_out = 0;
+    if (!set || !*set) return 0;
+
+    int cap = 32, cnt = 0;
+    char (*uids)[17] = NULL;
+
+    const char *p = set;
+    while (*p) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+
+        char *end;
+        unsigned long lo = strtoul(p, &end, 10);
+        if (end == p) break;   /* not a number — stop */
+        p = end;
+
+        unsigned long hi = lo;
+        if (*p == ':') {
+            p++;
+            hi = strtoul(p, &end, 10);
+            if (end == p) hi = lo;  /* malformed range */
+            else p = end;
+        }
+
+        for (unsigned long uid = lo; uid <= hi; uid++) {
+            if (!uids) {
+                uids = malloc((size_t)cap * sizeof(char[17]));
+                if (!uids) return -1;
+            }
+            if (cnt == cap) {
+                cap *= 2;
+                char (*tmp)[17] = realloc(uids, (size_t)cap * sizeof(char[17]));
+                if (!tmp) { free(uids); return -1; }
+                uids = tmp;
+            }
+            snprintf(uids[cnt++], 17, "%016u", (unsigned)uid);
+        }
+
+        if (*p == ',') p++;
+    }
+
+    *uids_out  = uids;
+    *count_out = cnt;
+    return 0;
 }
 
 char *imap_utf7_encode(const char *s) {

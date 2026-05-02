@@ -36,6 +36,11 @@ struct ImapClient {
     /* Optional download-progress callback (set via imap_set_progress) */
     ImapProgressFn on_progress;
     void          *progress_ctx;
+
+    /* Cached capability flags (IMAP_CAP_*) */
+    int      caps;
+    int      caps_queried;
+    int      qresync_enabled;  /* 1 after ENABLE QRESYNC sent */
 };
 
 /* ── Low-level I/O ───────────────────────────────────────────────────── */
@@ -926,4 +931,169 @@ int imap_append(ImapClient *c, const char *folder,
         setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     }
     return rc;
+}
+
+/* ── CONDSTORE / QRESYNC (RFC 4551 / RFC 5162) ──────────────────────────── */
+
+int imap_get_caps(ImapClient *c) {
+    if (c->caps_queried) return c->caps;
+    c->caps_queried = 1;
+
+    char tag[16];
+    if (send_cmd(c, tag, "CAPABILITY") != 0) return 0;
+    Response resp = {0};
+    if (read_response(c, tag, &resp) != 0) { response_free(&resp); return 0; }
+    for (int i = 0; i < resp.count; i++) {
+        const char *line = resp.untagged[i];
+        if (strstr(line, "CONDSTORE")) c->caps |= IMAP_CAP_CONDSTORE;
+        if (strstr(line, "QRESYNC"))   c->caps |= IMAP_CAP_QRESYNC;
+    }
+    response_free(&resp);
+    return c->caps;
+}
+
+/** Parse UIDVALIDITY and HIGHESTMODSEQ from untagged + tagged SELECT responses. */
+static void parse_select_result(const Response *resp, ImapSelectResult *res) {
+    for (int i = 0; i < resp->count; i++) {
+        const char *line = resp->untagged[i];
+        const char *p;
+        p = strstr(line, "[HIGHESTMODSEQ ");
+        if (p) res->highestmodseq = (uint64_t)strtoull(p + 15, NULL, 10);
+        p = strstr(line, "[UIDVALIDITY ");
+        if (p) res->uidvalidity   = (uint32_t)strtoul (p + 13, NULL, 10);
+    }
+    /* Some servers put HIGHESTMODSEQ in the tagged OK response */
+    if (resp->tagged) {
+        const char *p = strstr(resp->tagged, "[HIGHESTMODSEQ ");
+        if (p) res->highestmodseq = (uint64_t)strtoull(p + 15, NULL, 10);
+    }
+}
+
+int imap_select_condstore(ImapClient *c, const char *folder, ImapSelectResult *res) {
+    memset(res, 0, sizeof(*res));
+
+    char *utf7 = imap_utf7_encode(folder);
+    const char *name = utf7 ? utf7 : folder;
+    char tag[16];
+    int rc = send_cmd(c, tag, "SELECT \"%s\" (CONDSTORE)", name);
+    free(utf7);
+    if (rc != 0) return -1;
+
+    Response resp = {0};
+    rc = read_response(c, tag, &resp);
+    if (rc == 0)
+        parse_select_result(&resp, res);
+    response_free(&resp);
+    return rc;
+}
+
+int imap_select_qresync(ImapClient *c, const char *folder,
+                         uint32_t known_uidval, uint64_t known_modseq,
+                         ImapSelectResult *res) {
+    memset(res, 0, sizeof(*res));
+
+    /* ENABLE QRESYNC once per session (RFC 5161/5162) */
+    if (!c->qresync_enabled) {
+        char entag[16];
+        if (send_cmd(c, entag, "ENABLE QRESYNC") == 0) {
+            Response enr = {0};
+            read_response(c, entag, &enr);  /* ignore errors */
+            response_free(&enr);
+        }
+        c->qresync_enabled = 1;
+    }
+
+    char *utf7 = imap_utf7_encode(folder);
+    const char *name = utf7 ? utf7 : folder;
+    char tag[16];
+    int rc = send_cmd(c, tag,
+                      "SELECT \"%s\" (QRESYNC (%u %llu))",
+                      name, known_uidval, (unsigned long long)known_modseq);
+    free(utf7);
+    if (rc != 0) return -1;
+
+    Response resp = {0};
+    rc = read_response(c, tag, &resp);
+    if (rc == 0) {
+        parse_select_result(&resp, res);
+
+        /* Parse VANISHED (EARLIER) uid-set from untagged responses */
+        for (int i = 0; i < resp.count; i++) {
+            const char *line = resp.untagged[i];
+            if (strncmp(line, "* VANISHED", 10) != 0) continue;
+            /* Skip past "(EARLIER)" if present */
+            const char *vs = strstr(line, ") ");
+            if (vs) vs += 2;
+            else {
+                vs = strstr(line, "VANISHED ");
+                if (vs) vs += 9;
+            }
+            if (vs && *vs)
+                imap_uid_set_expand(vs, &res->vanished_uids, &res->vanished_count);
+        }
+    }
+    response_free(&resp);
+    return rc;
+}
+
+/** Extract UID value from a FETCH response parenthesised data item. */
+static unsigned long parse_fetch_uid(const char *line) {
+    /* Look for "(UID nnn" or " UID nnn" inside the FETCH data */
+    const char *p = strstr(line, "FETCH (");
+    if (!p) return 0;
+    p += 7;
+    const char *uid_p = strstr(p, "UID ");
+    if (!uid_p) return 0;
+    char *end;
+    unsigned long uid = strtoul(uid_p + 4, &end, 10);
+    return (end == uid_p + 4) ? 0 : uid;
+}
+
+int imap_uid_fetch_flags_changedsince(ImapClient *c, uint64_t modseq,
+                                       ImapFlagUpdate **out, int *count_out) {
+    *out       = NULL;
+    *count_out = 0;
+
+    char tag[16];
+    if (send_cmd(c, tag, "UID FETCH 1:* (UID FLAGS) (CHANGEDSINCE %llu)",
+                 (unsigned long long)modseq) != 0)
+        return -1;
+
+    Response resp = {0};
+    if (read_response(c, tag, &resp) != 0) {
+        response_free(&resp);
+        return -1;
+    }
+
+    int cap = 32, cnt = 0;
+    ImapFlagUpdate *updates = NULL;
+
+    for (int i = 0; i < resp.count; i++) {
+        const char *line = resp.untagged[i];
+        if (!strstr(line, "FETCH")) continue;
+        if (!strstr(line, "FLAGS")) continue;
+
+        unsigned long uid_val = parse_fetch_uid(line);
+        if (!uid_val) continue;
+
+        if (!updates) {
+            updates = malloc((size_t)cap * sizeof(ImapFlagUpdate));
+            if (!updates) { response_free(&resp); return -1; }
+        }
+        if (cnt == cap) {
+            cap *= 2;
+            ImapFlagUpdate *tmp = realloc(updates,
+                                          (size_t)cap * sizeof(ImapFlagUpdate));
+            if (!tmp) { free(updates); response_free(&resp); return -1; }
+            updates = tmp;
+        }
+        snprintf(updates[cnt].uid, 17, "%016u", (unsigned)uid_val);
+        updates[cnt].flags = parse_imap_flags(line);
+        cnt++;
+    }
+
+    response_free(&resp);
+    *out       = updates;
+    *count_out = cnt;
+    return 0;
 }

@@ -34,6 +34,21 @@ static int         g_count      = 1;
 static const char *g_msg_prefix = "Message"; /* MOCK_IMAP_MSG_PREFIX */
 static const char *g_long_url   = NULL;      /* MOCK_IMAP_LONG_URL */
 
+/*
+ * CONDSTORE / QRESYNC support (RFC 4551 / RFC 5162):
+ *   MOCK_IMAP_CAPS          - "CONDSTORE" or "QRESYNC" (QRESYNC implies CONDSTORE)
+ *   MOCK_IMAP_MODSEQ        - HIGHESTMODSEQ to report in SELECT (default 0 = disabled)
+ *   MOCK_IMAP_UIDVAL        - UIDVALIDITY override (default 1)
+ *   MOCK_IMAP_VANISHED      - space-separated UIDs for QRESYNC VANISHED response
+ *   MOCK_IMAP_CHANGED_COUNT - N first UIDs returned by CHANGEDSINCE (default 0 = none)
+ */
+static int         g_cap_condstore    = 0;
+static int         g_cap_qresync      = 0;
+static long long   g_modseq           = 0;   /* 0 = CONDSTORE disabled */
+static int         g_uidval           = 1;
+static const char *g_vanished         = NULL; /* space-separated UIDs */
+static int         g_changed_count    = 0;
+
 /**
  * Read one CRLF-terminated line from ssl into buf (max len-1 chars + NUL).
  * Strips the trailing CR and LF.  Returns the number of characters placed
@@ -357,10 +372,26 @@ static void handle_client(SSL *ssl) {
 
         /* Simple State Machine */
         if (strstr(buffer, "CAPABILITY")) {
-            const char *resp = "* CAPABILITY IMAP4rev1\r\n";
-            SSL_write(ssl, resp, (int)strlen(resp));
+            char cap_resp[128];
+            if (g_cap_qresync)
+                snprintf(cap_resp, sizeof(cap_resp),
+                         "* CAPABILITY IMAP4rev1 CONDSTORE QRESYNC\r\n");
+            else if (g_cap_condstore)
+                snprintf(cap_resp, sizeof(cap_resp),
+                         "* CAPABILITY IMAP4rev1 CONDSTORE\r\n");
+            else
+                snprintf(cap_resp, sizeof(cap_resp),
+                         "* CAPABILITY IMAP4rev1\r\n");
+            SSL_write(ssl, cap_resp, (int)strlen(cap_resp));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK CAPABILITY completed\r\n", tag);
+            SSL_write(ssl, ok, (int)strlen(ok));
+        } else if (strstr(buffer, "ENABLE")) {
+            /* ENABLE QRESYNC / CONDSTORE */
+            const char *enabled = "* ENABLED QRESYNC\r\n";
+            SSL_write(ssl, enabled, (int)strlen(enabled));
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK ENABLE completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "LOGIN")) {
             char ok[64];
@@ -388,25 +419,34 @@ static void handle_client(SSL *ssl) {
                 }
             }
             int is_empty = (strstr(selected_folder, "Empty") != NULL);
-            if (is_empty) {
-                const char *exists =
-                    "* 0 EXISTS\r\n* 0 RECENT\r\n"
-                    "* OK [UIDVALIDITY 1] UIDs are valid\r\n";
-                SSL_write(ssl, exists, (int)strlen(exists));
-            } else if (g_count > 1) {
-                /* Multi-message mode */
-                char exists[128];
-                snprintf(exists, sizeof(exists),
-                         "* %d EXISTS\r\n* 0 RECENT\r\n"
-                         "* OK [UIDVALIDITY 1] UIDs are valid\r\n",
-                         g_count);
-                SSL_write(ssl, exists, (int)strlen(exists));
-            } else {
-                const char *exists =
-                    "* 1 EXISTS\r\n* 1 RECENT\r\n"
-                    "* OK [UIDVALIDITY 1] UIDs are valid\r\n";
-                SSL_write(ssl, exists, (int)strlen(exists));
+            int cnt = is_empty ? 0 : (g_count > 1 ? g_count : 1);
+            int recent = is_empty ? 0 : (g_count > 1 ? 0 : 1);
+
+            /* EXISTS / RECENT / UIDVALIDITY */
+            char exists_resp[256];
+            snprintf(exists_resp, sizeof(exists_resp),
+                     "* %d EXISTS\r\n* %d RECENT\r\n"
+                     "* OK [UIDVALIDITY %d] UIDs are valid\r\n",
+                     cnt, recent, g_uidval);
+            SSL_write(ssl, exists_resp, (int)strlen(exists_resp));
+
+            /* HIGHESTMODSEQ (CONDSTORE/QRESYNC) */
+            if (g_modseq > 0) {
+                char modseq_resp[64];
+                snprintf(modseq_resp, sizeof(modseq_resp),
+                         "* OK [HIGHESTMODSEQ %lld]\r\n", g_modseq);
+                SSL_write(ssl, modseq_resp, (int)strlen(modseq_resp));
             }
+
+            /* QRESYNC: VANISHED (EARLIER) if the client sent a known modseq */
+            int is_qresync_select = (strstr(buffer, "QRESYNC") != NULL);
+            if (is_qresync_select && g_vanished && g_vanished[0]) {
+                char van_resp[256];
+                snprintf(van_resp, sizeof(van_resp),
+                         "* VANISHED (EARLIER) %s\r\n", g_vanished);
+                SSL_write(ssl, van_resp, (int)strlen(van_resp));
+            }
+
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK [READ-WRITE] SELECT completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
@@ -445,6 +485,20 @@ static void handle_client(SSL *ssl) {
             }
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK SEARCH completed\r\n", tag);
+            SSL_write(ssl, ok, (int)strlen(ok));
+        } else if (strstr(buffer, "FETCH") && strstr(buffer, "CHANGEDSINCE")) {
+            /* CONDSTORE: UID FETCH 1:* (UID FLAGS) (CHANGEDSINCE n) */
+            /* Return messages 1..g_changed_count with their current flags */
+            for (int ci = 1; ci <= g_changed_count; ci++) {
+                const char *flags_str = (ci <= 20) ? "()" : "(\\Seen)";
+                char resp[128];
+                snprintf(resp, sizeof(resp),
+                         "* %d FETCH (UID %d FLAGS %s MODSEQ (%lld))\r\n",
+                         ci, ci, flags_str, g_modseq);
+                SSL_write(ssl, resp, (int)strlen(resp));
+            }
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "FETCH") && strstr(buffer, "FLAGS")) {
             /* FLAGS-only fetch */
@@ -578,6 +632,9 @@ static void handle_client(SSL *ssl) {
 }
 
 int main(void) {
+    /* Disable stdout buffering so log-watchers see lines immediately */
+    setbuf(stdout, NULL);
+
     /* Configure port, subject, count, and message prefix from environment */
     const char *port_env = getenv("MOCK_IMAP_PORT");
     if (port_env && atoi(port_env) > 0) g_port = atoi(port_env);
@@ -589,6 +646,21 @@ int main(void) {
     if (prefix_env && prefix_env[0]) g_msg_prefix = prefix_env;
     const char *long_url_env = getenv("MOCK_IMAP_LONG_URL");
     if (long_url_env && long_url_env[0]) g_long_url = long_url_env;
+
+    /* CONDSTORE / QRESYNC */
+    const char *caps_env = getenv("MOCK_IMAP_CAPS");
+    if (caps_env) {
+        if (strstr(caps_env, "QRESYNC"))   { g_cap_qresync = 1; g_cap_condstore = 1; }
+        else if (strstr(caps_env, "CONDSTORE")) g_cap_condstore = 1;
+    }
+    const char *modseq_env = getenv("MOCK_IMAP_MODSEQ");
+    if (modseq_env && atoll(modseq_env) > 0) g_modseq = atoll(modseq_env);
+    const char *uidval_env = getenv("MOCK_IMAP_UIDVAL");
+    if (uidval_env && atoi(uidval_env) > 0) g_uidval = atoi(uidval_env);
+    const char *vanished_env = getenv("MOCK_IMAP_VANISHED");
+    if (vanished_env && vanished_env[0]) g_vanished = vanished_env;
+    const char *changed_env = getenv("MOCK_IMAP_CHANGED_COUNT");
+    if (changed_env && atoi(changed_env) >= 0) g_changed_count = atoi(changed_env);
 
     int server_fd;
     struct sockaddr_in address;

@@ -36,4 +36,16 @@ char *imap_utf7_decode(const char *s);
  */
 char *imap_utf7_encode(const char *s);
 
+/**
+ * @brief Expand an IMAP UID set string into an array of 16-char UID strings.
+ *
+ * Handles comma-separated values and colon-ranges: "1,3:5,7" → 1,3,4,5,7.
+ *
+ * @param set       NUL-terminated IMAP UID set (may be NULL or empty).
+ * @param uids_out  Set to heap-allocated array of char[17]. Caller must free().
+ * @param count_out Number of UIDs in the array.
+ * @return 0 on success, -1 on allocation failure.
+ */
+int imap_uid_set_expand(const char *set, char (**uids_out)[17], int *count_out);
+
 #endif /* IMAP_UTIL_H */

@@ -6,6 +6,7 @@
 set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$PROJECT_ROOT"
 BIN_DIR="$PROJECT_ROOT/bin"
 MOCK_SERVER_SRC="$PROJECT_ROOT/tests/functional/mock_imap_server.c"
 MOCK_SERVER_BIN="$PROJECT_ROOT/build/tests/functional/mock_imap_server"
@@ -29,6 +30,7 @@ fi
 
 # 1. Compile mock servers
 mkdir -p "$PROJECT_ROOT/build/tests/functional"
+mkdir -p "./build/tests/functional/homes"
 gcc "$MOCK_SERVER_SRC" -o "$MOCK_SERVER_BIN" -lssl -lcrypto
 gcc "$MOCK_SMTP_SRC"   -o "$MOCK_SMTP_BIN"   -lssl -lcrypto
 gcc "$MOCK_GMAIL_SRC"  -o "$MOCK_GMAIL_BIN"
@@ -106,7 +108,11 @@ check_not() {
 #   make_home <home_path> <email_address> <imap_port>
 make_home() {
     local home="$1" email="$2" port="$3"
-    rm -rf "$home"
+    case "$home" in
+        ./build/tests/functional/homes/*) ;;
+        *) echo "ERROR: make_home: refusing unsafe path '$home'" >&2; exit 1 ;;
+    esac
+    rm -rf "./build/tests/functional/homes/${home##./build/tests/functional/homes/}"
     mkdir -p "$home/.config/email-cli/accounts/$email"
     cat > "$home/.config/email-cli/accounts/$email/config.ini" <<CONFIG
 EMAIL_HOST=imaps://localhost:$port
@@ -192,14 +198,14 @@ ALPHA="alpha@test.local"
 BETA="beta@test.local"
 GAMMA="gamma@test.local"
 
-H_ALPHA="/tmp/email-cli-ft-alpha"    # single-account home for alpha
-H_BETA="/tmp/email-cli-ft-beta"      # single-account home for beta
-H_GAMMA="/tmp/email-cli-ft-gamma"    # single-account home for gamma
-H_AB="/tmp/email-cli-ft-ab"          # alpha + beta  (alpha first alphabetically)
-H_BG="/tmp/email-cli-ft-bg"          # beta  + gamma (beta first alphabetically)
-H_ALL="/tmp/email-cli-ft-all"        # all three      (alpha first alphabetically)
+H_ALPHA="./build/tests/functional/homes/alpha"    # single-account home for alpha
+H_BETA="./build/tests/functional/homes/beta"      # single-account home for beta
+H_GAMMA="./build/tests/functional/homes/gamma"    # single-account home for gamma
+H_AB="./build/tests/functional/homes/ab"          # alpha + beta  (alpha first alphabetically)
+H_BG="./build/tests/functional/homes/bg"          # beta  + gamma (beta first alphabetically)
+H_ALL="./build/tests/functional/homes/all"        # all three      (alpha first alphabetically)
 
-SHARED="/tmp/email-cli-ft-shared"    # shared XDG_DATA_HOME for isolation tests
+SHARED="./build/tests/functional/homes/shared"    # shared XDG_DATA_HOME for isolation tests
 
 make_home "$H_ALPHA" "$ALPHA" 9993
 make_home "$H_BETA"  "$BETA"  9994
@@ -291,7 +297,7 @@ check_not "2.4 warm: no gamma subject"     "GammaAccountMsg"  "$L1W"
 echo ""
 echo "--- Phase 3: Fresh multi-account isolation (shared data dir) ---"
 
-rm -rf "$SHARED"
+rm -rf "./build/tests/functional/homes/shared"
 
 # 3.1 alpha — first run, shared data dir empty
 A3=$(run_list "$H_ALPHA" "$SHARED")
@@ -359,7 +365,7 @@ check_not "4.12 gamma warm: no beta leak"   "BetaAccountMsg"   "$G4"
 echo ""
 echo "--- Phase 5: Two-account HOME (alphabetical first wins) ---"
 
-rm -rf "$SHARED"
+rm -rf "./build/tests/functional/homes/shared"
 
 # 5.1 H_AB has alpha + beta; explicitly select alpha → must show alpha, not beta.
 run_list "$H_BETA" "$SHARED" >/dev/null 2>&1 || true   # beta cache now warm
@@ -390,7 +396,7 @@ check_not "5.8 BG home: gamma NOT shown"          "GammaAccountMsg"  "$BG_OUT"
 echo ""
 echo "--- Phase 6: Folder-specific isolation ---"
 
-rm -rf "$SHARED"
+rm -rf "./build/tests/functional/homes/shared"
 
 # 6.1 INBOX.Sent — each account sees its own content
 AS=$(run_list "$H_ALPHA" "$SHARED" "INBOX.Sent")
@@ -431,7 +437,7 @@ check "6.14 gamma Empty: no messages"       "No messages"      "$GE"
 echo ""
 echo "--- Phase 7: show command isolation ---"
 
-rm -rf "$SHARED"
+rm -rf "./build/tests/functional/homes/shared"
 
 # 7.1 Fresh show: alpha
 SA=$(run_show "$H_ALPHA" "$SHARED")
@@ -461,7 +467,7 @@ check_not "7.9 gamma show: no beta"         "BetaAccountMsg"   "$SG"
 echo ""
 echo "--- Phase 8: Alternating account runs (3 rounds) ---"
 
-rm -rf "$SHARED"
+rm -rf "./build/tests/functional/homes/shared"
 
 for ROUND in 1 2 3; do
     RA=$(run_list "$H_ALPHA" "$SHARED")
@@ -486,7 +492,7 @@ done
 echo ""
 echo "--- Phase 9: Manifest file content inspection ---"
 
-rm -rf "$SHARED"
+rm -rf "./build/tests/functional/homes/shared"
 run_list "$H_ALPHA" "$SHARED" >/dev/null 2>&1 || true
 run_list "$H_BETA"  "$SHARED" >/dev/null 2>&1 || true
 run_list "$H_GAMMA" "$SHARED" >/dev/null 2>&1 || true
@@ -534,7 +540,7 @@ check "9.17 header dirs are distinct"          "." \
 echo ""
 echo "--- Phase 10: Three-account HOME (alpha alphabetically first) ---"
 
-rm -rf "$SHARED"
+rm -rf "./build/tests/functional/homes/shared"
 
 # Pre-populate gamma and beta caches so cross-contamination is detectable
 run_list "$H_GAMMA" "$SHARED" >/dev/null 2>&1 || true
@@ -625,13 +631,13 @@ check "14.2 attachments: data.bin listed"   "data.bin"   "$ATTACH_OUT"
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 15: save-attachment command ---"
-SAVE_DIR="/tmp/email-cli-ft-attach-$$"
+SAVE_DIR="./build/tests/functional/homes/attach-$$"
 mkdir -p "$SAVE_DIR"
 SAVE_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
     "$BIN_DIR/email-cli" --batch save-attachment 1 notes.txt "$SAVE_DIR" 2>&1 || true) )
 check "15.1 save-attachment: saved confirmation"  "aved\|uccessful\|notes" "$SAVE_OUT"
 check "15.2 save-attachment: file exists"  "." "$(test -f "$SAVE_DIR/notes.txt" && echo ok || echo missing)"
-rm -rf "$SAVE_DIR"
+rm -rf "./build/tests/functional/homes/attach-$$"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 16 — mark-read and mark-unread
@@ -729,14 +735,14 @@ echo ""
 echo "--- Phase 22: credential obfuscation ---"
 
 # Isolated home for obfuscation tests (no mock server needed for format checks)
-H_CRED="$PROJECT_ROOT/build/tests/functional/cred_home"
+H_CRED="./build/tests/functional/homes/cred-$$"
 CRED_EMAIL="cred@test.local"
 CRED_CFG="$H_CRED/.config/email-cli/accounts/$CRED_EMAIL/config.ini"
 CRED_SETTINGS="$H_CRED/.config/email-cli/settings.ini"
 
 # Helper: write a plaintext account config
 make_cred_home() {
-    rm -rf "$H_CRED"
+    rm -rf "./build/tests/functional/homes/cred-$$"
     mkdir -p "$H_CRED/.config/email-cli/accounts/$CRED_EMAIL"
     cat > "$CRED_CFG" <<CFG
 EMAIL_HOST=imaps://localhost:9993
@@ -830,10 +836,10 @@ check "22-US06: after re-encrypt — list still works" \
     "AlphaAccountMsg" "$OUT_06"
 
 # ── US-07: Two accounts with the same password have different enc: values ─
-H_DUAL="$PROJECT_ROOT/build/tests/functional/dual_home"
+H_DUAL="./build/tests/functional/homes/dual-$$"
 DUAL_A="dual-a@test.local"
 DUAL_B="dual-b@test.local"
-rm -rf "$H_DUAL"
+rm -rf "./build/tests/functional/homes/dual-$$"
 for ACCT in "$DUAL_A" "$DUAL_B"; do
     mkdir -p "$H_DUAL/.config/email-cli/accounts/$ACCT"
     cat > "$H_DUAL/.config/email-cli/accounts/$ACCT/config.ini" <<CFG
@@ -893,7 +899,7 @@ check "22-US11: after auto-decrypt — list still works" \
     "AlphaAccountMsg" "$OUT_11"
 
 # Cleanup isolated homes
-rm -rf "$H_CRED" "$H_DUAL"
+rm -rf "./build/tests/functional/homes/cred-$$" "./build/tests/functional/homes/dual-$$"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 23 — Account selection on the command line
@@ -1057,10 +1063,10 @@ echo "Starting mock IMAP server B (port $IMAP250_PORT, 250 messages)..."
 SERVER250_PID=$!
 sleep 0.5
 
-H_200="/tmp/email-cli-ft-200-$$"
+H_200="./build/tests/functional/homes/200-$$"
 ACCT200="imap200@test.local"
 ACCT250="imap250@test.local"
-rm -rf "$H_200"
+rm -rf "./build/tests/functional/homes/200-$$"
 mkdir -p "$H_200/.config/email-cli/accounts/$ACCT200"
 mkdir -p "$H_200/.config/email-cli/accounts/$ACCT250"
 cat > "$H_200/.config/email-cli/accounts/$ACCT200/config.ini" <<CFG200
@@ -1126,13 +1132,13 @@ LA200_1=$(run_200 --batch list-attachments 1)
 check_not "25.10 imap-A list-attachments UID 1: no notes_10.txt" "notes_10" "$LA200_1"
 
 # 25.11 save-attachment
-SAVE200_DIR="/tmp/email-cli-ft-attach200-$$"
+SAVE200_DIR="./build/tests/functional/homes/attach200-$$"
 mkdir -p "$SAVE200_DIR"
 SA200=$(run_200 --batch save-attachment 10 notes_10.txt "$SAVE200_DIR")
 check "25.11 imap-A save-attachment UID 10: confirmation" "aved\|uccessful\|notes" "$SA200"
 check "25.12 imap-A save-attachment UID 10: file exists" "." \
     "$(test -f "$SAVE200_DIR/notes_10.txt" && echo ok || echo missing)"
-rm -rf "$SAVE200_DIR"
+rm -rf "./build/tests/functional/homes/attach200-$$"
 
 # 25.13 list-folders
 F200=$(run_200 list-folders)
@@ -1164,13 +1170,13 @@ LA250=$(run_250 --batch list-attachments 20)
 check "25.19 imap-B list-attachments UID 20: notes_20.txt listed" "notes_20" "$LA250"
 
 # 25.20 save-attachment
-SAVE250_DIR="/tmp/email-cli-ft-attach250-$$"
+SAVE250_DIR="./build/tests/functional/homes/attach250-$$"
 mkdir -p "$SAVE250_DIR"
 SA250=$(run_250 --batch save-attachment 20 notes_20.txt "$SAVE250_DIR")
 check "25.20 imap-B save-attachment UID 20: confirmation" "aved\|uccessful\|notes" "$SA250"
 check "25.21 imap-B save-attachment UID 20: file exists" "." \
     "$(test -f "$SAVE250_DIR/notes_20.txt" && echo ok || echo missing)"
-rm -rf "$SAVE250_DIR"
+rm -rf "./build/tests/functional/homes/attach250-$$"
 
 # ── IMAP cross-contamination checks ──────────────────────────────────────
 # 25.22 IMAP-A list must NOT contain IMAP-B subjects
@@ -1209,10 +1215,10 @@ GMAIL_SERVER_B_PID=$!
 sleep 0.5
 
 # Shared temp home for both Gmail accounts (tests account isolation within one HOME)
-H_GMAIL="/tmp/email-cli-ft-gmail-$$"
+H_GMAIL="./build/tests/functional/homes/gmail-$$"
 GMAIL_ACCT_A="test@gmail.com"
 GMAIL_ACCT_B="test2@gmail.com"
-rm -rf "$H_GMAIL"
+rm -rf "./build/tests/functional/homes/gmail-$$"
 mkdir -p "$H_GMAIL/config/email-cli/accounts/$GMAIL_ACCT_A"
 mkdir -p "$H_GMAIL/config/email-cli/accounts/$GMAIL_ACCT_B"
 mkdir -p "$H_GMAIL/data"
@@ -1298,13 +1304,13 @@ GLA_A=$(run_gmail_ro_a --batch list-attachments 000000000000000a)
 check "26.8 gmail-A list-attachments 10: notes_10.txt listed" "notes_10" "$GLA_A"
 
 # 26.9 save-attachment for message 10
-GSAVE_A_DIR="/tmp/email-cli-ft-gattach-a-$$"
+GSAVE_A_DIR="./build/tests/functional/homes/gattach-a-$$"
 mkdir -p "$GSAVE_A_DIR"
 GSA_A=$(run_gmail_ro_a --batch save-attachment 000000000000000a notes_10.txt "$GSAVE_A_DIR")
 check "26.9 gmail-A save-attachment: exit ok" "aved\|uccessful\|notes\|ok" "$GSA_A"
 check "26.10 gmail-A save-attachment: file exists" "." \
     "$(test -f "$GSAVE_A_DIR/notes_10.txt" && echo ok || echo missing)"
-rm -rf "$GSAVE_A_DIR"
+rm -rf "./build/tests/functional/homes/gattach-a-$$"
 
 # 26.11 list-labels account A
 GF_A=$(run_gmail_ro_a --batch list-labels)
@@ -1336,13 +1342,13 @@ GLA_B=$(run_gmail_ro_b --batch list-attachments 0000000000000014)
 check "26.20 gmail-B list-attachments 20: GmailB-notes_20.txt listed" "GmailB-notes_20" "$GLA_B"
 
 # 26.21 save-attachment for message 20 (account B)
-GSAVE_B_DIR="/tmp/email-cli-ft-gattach-b-$$"
+GSAVE_B_DIR="./build/tests/functional/homes/gattach-b-$$"
 mkdir -p "$GSAVE_B_DIR"
 GSA_B=$(run_gmail_ro_b --batch save-attachment 0000000000000014 GmailB-notes_20.txt "$GSAVE_B_DIR")
 check "26.21 gmail-B save-attachment: exit ok" "aved\|uccessful\|notes\|ok" "$GSA_B"
 check "26.22 gmail-B save-attachment: file exists" "." \
     "$(test -f "$GSAVE_B_DIR/GmailB-notes_20.txt" && echo ok || echo missing)"
-rm -rf "$GSAVE_B_DIR"
+rm -rf "./build/tests/functional/homes/gattach-b-$$"
 
 # ── Gmail cross-contamination checks ─────────────────────────────────────
 # 26.23 Account A list must NOT contain account B's GmailB- prefix
@@ -1500,13 +1506,13 @@ BAD28=$(run_gmail_cli_a mark-read "notavaliduid123x")
 check "28.10 mark-read garbage UID rejected"  "invalid UID\|Error" "$BAD28"
 
 # 28.11 Regression: IMAP decimal UID still accepted (main.c)
-H28_IMAP="/tmp/email-cli-ft-hex28-$$"
+H28_IMAP="./build/tests/functional/homes/hex28-$$"
 make_home "$H28_IMAP" "alpha@test.local" 9993
 DEC28=$( (export HOME="$H28_IMAP"
     unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-cli" --batch mark-read 42 2>&1 || true) )
 check_not "28.11 mark-read decimal UID (IMAP): no parse error"  "invalid UID\|positive integer" "$DEC28"
-rm -rf "$H28_IMAP"
+rm -rf "./build/tests/functional/homes/hex28-$$"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 29 — .hdr labels CSV / flags-int consistency after local mutations
@@ -1629,9 +1635,9 @@ echo ""
 echo "--- Phase 30: Gmail smart sync (reconcile/pending_fetch/incremental) ---"
 
 # Use a fresh home dir so Phase 26-29 state does not interfere
-H_GSYNC="/tmp/email-cli-ft-gsync-$$"
+H_GSYNC="./build/tests/functional/homes/gsync-$$"
 GSYNC_ACCT="gsync@gmail.com"
-rm -rf "$H_GSYNC"
+rm -rf "./build/tests/functional/homes/gsync-$$"
 mkdir -p "$H_GSYNC/config/email-cli/accounts/$GSYNC_ACCT"
 mkdir -p "$H_GSYNC/data"
 cat > "$H_GSYNC/config/email-cli/accounts/$GSYNC_ACCT/config.ini" <<GSYNC_CFG
@@ -1719,11 +1725,11 @@ check "30.9 forced reconcile (no historyId): lists server" \
     "messages on server\|Listing\|fetched\|already\|downloaded" "$SYNC30D"
 
 # Cleanup Phase 30
-rm -rf "$H_GSYNC"
+rm -rf "./build/tests/functional/homes/gsync-$$"
 
 # Cleanup Phase 26+27+28+29
 kill "$GMAIL_SERVER_A_PID" "$GMAIL_SERVER_B_PID" 2>/dev/null || true
-rm -rf "$H_GMAIL"
+rm -rf "./build/tests/functional/homes/gmail-$$"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 31 — URL word-wrap: long URLs must not be hard-broken mid-token
@@ -1734,7 +1740,7 @@ echo "--- Phase 31: URL word-wrap (plain-text, no hard line breaks) ---"
 LONG_URL="https://www.agroinform.hu/aprohirdetes_adatlap/gep/gyumolcstermesztes-gepei/perfect-rf-egyoldalas-lengotarcsas-kasza-gyumolcs-es-szoloultetvenyekhez/h_7206309?ref=0a20571a"
 
 URL_PORT=9991
-H_URL="/tmp/email-cli-ft-urlwrap"
+H_URL="./build/tests/functional/homes/urlwrap"
 URL_LOG="$PROJECT_ROOT/build/tests/functional/mock_urlwrap.log"
 make_home "$H_URL" "urlwrap@test.local" "$URL_PORT"
 
@@ -1757,7 +1763,7 @@ check     "31.3 URL not broken at col 80"      "$URL_STRADDLE"   "$URL_OUT"
 
 # Cleanup Phase 31
 kill "$URL_SERVER_PID" 2>/dev/null || true
-rm -rf "$H_URL"
+rm -rf "./build/tests/functional/homes/urlwrap"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 32 — Gmail incremental sync: historyId from list, new messages, expired
@@ -1771,9 +1777,9 @@ GMAIL_INC_LOG="$PROJECT_ROOT/build/tests/functional"
 # MOCK_GMAIL_HISTID=7777 → messages.list returns "historyId":"7777"
 # MOCK_GMAIL_PROFILE_FAIL=1 → /profile returns 404 (proves we don't rely on it)
 GINC_PORT_A=9990
-H_GINC_A="/tmp/email-cli-ft-ginc-a-$$"
+H_GINC_A="./build/tests/functional/homes/ginc-a-$$"
 GINC_ACCT_A="ginca@gmail.com"
-rm -rf "$H_GINC_A"
+rm -rf "./build/tests/functional/homes/ginc-a-$$"
 mkdir -p "$H_GINC_A/config/email-cli/accounts/$GINC_ACCT_A"
 cat > "$H_GINC_A/config/email-cli/accounts/$GINC_ACCT_A/config.ini" <<GINC_CFG_A
 EMAIL_HOST=
@@ -1818,15 +1824,15 @@ check_not "32.4 second sync: no reconcile (incremental)" "Listing messages" "$SY
 check     "32.5 second sync: up to date" "up to date" "$SYNC32B"
 
 kill "$GINC_A_PID" 2>/dev/null || true
-rm -rf "$H_GINC_A"
+rm -rf "./build/tests/functional/homes/ginc-a-$$"
 
 # ── Phase 32b: New messages via History API ───────────────────────────────
 # First sync downloads 5 messages.  Second sync: history returns 2 new msgs.
 GINC_PORT_B=9989
 GINC_PORT_B2=9987
-H_GINC_B="/tmp/email-cli-ft-ginc-b-$$"
+H_GINC_B="./build/tests/functional/homes/ginc-b-$$"
 GINC_ACCT_B="gincb@gmail.com"
-rm -rf "$H_GINC_B"
+rm -rf "./build/tests/functional/homes/ginc-b-$$"
 mkdir -p "$H_GINC_B/config/email-cli/accounts/$GINC_ACCT_B"
 cat > "$H_GINC_B/config/email-cli/accounts/$GINC_ACCT_B/config.ini" <<GINC_CFG_B
 EMAIL_HOST=
@@ -1898,13 +1904,13 @@ check "32.10 new message 7 accessible after incremental" "Message 7" "$GL32"
 check "32.11 historyId updated after incremental" "5001" "$(cat "$GINC_HISTID_B" 2>/dev/null || echo '')"
 
 kill "$GINC_B2_PID" 2>/dev/null || true
-rm -rf "$H_GINC_B"
+rm -rf "./build/tests/functional/homes/ginc-b-$$"
 
 # ── Phase 32c: Expired historyId → fallback to full reconcile ─────────────
 GINC_PORT_C=9988
-H_GINC_C="/tmp/email-cli-ft-ginc-c-$$"
+H_GINC_C="./build/tests/functional/homes/ginc-c-$$"
 GINC_ACCT_C="gincc@gmail.com"
-rm -rf "$H_GINC_C"
+rm -rf "./build/tests/functional/homes/ginc-c-$$"
 mkdir -p "$H_GINC_C/config/email-cli/accounts/$GINC_ACCT_C"
 cat > "$H_GINC_C/config/email-cli/accounts/$GINC_ACCT_C/config.ini" <<GINC_CFG_C
 EMAIL_HOST=
@@ -1957,7 +1963,132 @@ check     "32.14 expired historyId: new historyId saved after reconcile" "9001" 
     "$(cat "$GINC_HISTID_C" 2>/dev/null || echo '')"
 
 kill "$GINC_C2_PID" 2>/dev/null || true
-rm -rf "$H_GINC_C"
+rm -rf "./build/tests/functional/homes/ginc-c-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 33 — IMAP CONDSTORE incremental sync (RFC 4551)
+#
+# User Stories:
+#   US-CS-01  First sync with CONDSTORE server saves HIGHESTMODSEQ + UIDVALIDITY
+#   US-CS-02  Second sync with unchanged modseq → "up to date" (no server traffic)
+#   US-CS-03  Modseq changed → incremental sync: CHANGEDSINCE replaces SEARCH UNSEEN
+#   US-CS-04  UIDVALIDITY changed → full resync, old sync state discarded
+#   US-CS-05  No CONDSTORE → regular sync works; no sync_state file created
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 33: IMAP CONDSTORE incremental sync ---"
+
+CS_PORT=9984
+H_CS="./build/tests/functional/homes/cs-$$"
+CS_ACCT="condtest@imap.local"
+CS_LOG="$H_CS/logs"
+make_home "$H_CS" "$CS_ACCT" "$CS_PORT"
+mkdir -p "$CS_LOG"
+
+CS_DATA="$H_CS/.local/share/email-cli/accounts/$CS_ACCT"
+CS_SYNC_STATE="$CS_DATA/sync_state/INBOX.tsv"
+
+run_cs_sync() {
+    (export HOME="$H_CS"
+     unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/email-sync" 2>&1 || true)
+}
+
+# ── Phase 33a: first sync + up-to-date detection ──────────────────────────
+
+(cd "$PROJECT_ROOT/build" && \
+    MOCK_IMAP_PORT="$CS_PORT" \
+    MOCK_IMAP_CAPS=CONDSTORE \
+    MOCK_IMAP_UIDVAL=42 \
+    MOCK_IMAP_MODSEQ=100 \
+    MOCK_IMAP_COUNT=1 \
+    "$MOCK_SERVER_BIN") >"$CS_LOG/mock_cs_a.log" 2>&1 &
+CS_A_PID=$!
+sleep 0.3
+
+SYNC33A=$(run_cs_sync)
+
+check "33.1 CONDSTORE first sync: message fetched" "fetched" "$SYNC33A"
+check "33.2 CONDSTORE sync_state: uidvalidity saved" "42" \
+    "$(cat "$CS_SYNC_STATE" 2>/dev/null || echo '')"
+check "33.2b CONDSTORE sync_state: modseq saved" "100" \
+    "$(cat "$CS_SYNC_STATE" 2>/dev/null || echo '')"
+
+SYNC33A2=$(run_cs_sync)
+check "33.3 CONDSTORE same modseq → up to date" "up to date" "$SYNC33A2"
+
+kill "$CS_A_PID" 2>/dev/null || true
+sleep 0.1
+
+# ── Phase 33b: modseq changed → incremental sync ─────────────────────────
+
+(cd "$PROJECT_ROOT/build" && \
+    MOCK_IMAP_PORT=$CS_PORT \
+    MOCK_IMAP_CAPS=CONDSTORE \
+    MOCK_IMAP_UIDVAL=42 \
+    MOCK_IMAP_MODSEQ=200 \
+    MOCK_IMAP_COUNT=1 \
+    MOCK_IMAP_CHANGED_COUNT=1 \
+    "$MOCK_SERVER_BIN") >"$CS_LOG/mock_cs_b.log" 2>&1 &
+CS_B_PID=$!
+sleep 0.3
+
+SYNC33B=$(run_cs_sync)
+# Sync should run (not up to date) and process the change
+check_not "33.4 CONDSTORE new modseq → not up to date" "up to date" "$SYNC33B"
+# Mock log must show the CHANGEDSINCE command was sent
+check "33.5 CONDSTORE incremental: CHANGEDSINCE command sent" \
+    "CHANGEDSINCE" "$(cat "$CS_LOG/mock_cs_b.log" 2>/dev/null || echo '')"
+# sync_state updated with new modseq
+check "33.6 CONDSTORE sync_state updated to new modseq" "200" \
+    "$(cat "$CS_SYNC_STATE" 2>/dev/null || echo '')"
+
+kill "$CS_B_PID" 2>/dev/null || true
+sleep 0.1
+
+# ── Phase 33c: UIDVALIDITY changed → full resync ─────────────────────────
+
+(cd "$PROJECT_ROOT/build" && \
+    MOCK_IMAP_PORT=$CS_PORT \
+    MOCK_IMAP_CAPS=CONDSTORE \
+    MOCK_IMAP_UIDVAL=99 \
+    MOCK_IMAP_MODSEQ=300 \
+    MOCK_IMAP_COUNT=1 \
+    "$MOCK_SERVER_BIN") >"$CS_LOG/mock_cs_c.log" 2>&1 &
+CS_C_PID=$!
+sleep 0.3
+
+SYNC33C=$(run_cs_sync)
+check "33.7 UIDVALIDITY changed → resync warning" "UIDVALIDITY" "$SYNC33C"
+check "33.8 UIDVALIDITY changed → new uidval in sync_state" "99" \
+    "$(cat "$CS_SYNC_STATE" 2>/dev/null || echo '')"
+
+kill "$CS_C_PID" 2>/dev/null || true
+rm -rf "./build/tests/functional/homes/cs-$$"
+
+# ── Phase 33d: no CONDSTORE → regular sync; no sync_state ────────────────
+
+H_CS_D="./build/tests/functional/homes/csd-$$"
+make_home "$H_CS_D" "$CS_ACCT" "$CS_PORT"
+CS_SYNC_STATE_D="$H_CS_D/.local/share/email-cli/accounts/$CS_ACCT/sync_state/INBOX.tsv"
+
+(cd "$PROJECT_ROOT/build" && \
+    MOCK_IMAP_PORT=$CS_PORT \
+    MOCK_IMAP_COUNT=1 \
+    "$MOCK_SERVER_BIN") >"$PROJECT_ROOT/build/tests/functional/mock_cs_d.log" 2>&1 &
+CS_D_PID=$!
+sleep 0.3
+
+SYNC33D=$( (export HOME="$H_CS_D"
+     unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/email-sync" 2>&1 || true) )
+
+check "33.9 no CONDSTORE → regular sync succeeds" "fetched\|stored" "$SYNC33D"
+check "33.10 no CONDSTORE → no sync_state file" \
+    "absent" "$(test -f "$CS_SYNC_STATE_D" && echo present || echo absent)"
+
+kill "$CS_D_PID" 2>/dev/null || true
+rm -rf "./build/tests/functional/homes/csd-$$"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

@@ -2,6 +2,7 @@
 #define IMAP_CLIENT_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /**
  * @file imap_client.h
@@ -197,6 +198,71 @@ typedef void (*ImapProgressFn)(size_t received, size_t total, void *ctx);
  * imap_set_progress(c, NULL, NULL) when no longer needed.
  */
 void imap_set_progress(ImapClient *c, ImapProgressFn fn, void *ctx);
+
+/* ── CONDSTORE / QRESYNC (RFC 4551 / RFC 5162) ──────────────────────────── */
+
+/** Bitmask flags returned by imap_get_caps(). */
+#define IMAP_CAP_CONDSTORE (1 << 0)
+#define IMAP_CAP_QRESYNC   (1 << 1)
+
+/**
+ * Result from imap_select_condstore() or imap_select_qresync().
+ * Caller must free vanished_uids when non-NULL.
+ */
+typedef struct {
+    uint32_t  uidvalidity;
+    uint64_t  highestmodseq;
+    char    (*vanished_uids)[17]; /**< QRESYNC VANISHED set; NULL if none */
+    int       vanished_count;
+} ImapSelectResult;
+
+/** One flag-change record from UID FETCH ... (CHANGEDSINCE n). */
+typedef struct {
+    char uid[17];
+    int  flags;    /**< MSG_FLAG_* bitmask */
+} ImapFlagUpdate;
+
+/**
+ * @brief Query and cache server capabilities (CAPABILITY command).
+ * @return Bitmask of IMAP_CAP_* flags (0 if none / on error).
+ */
+int imap_get_caps(ImapClient *c);
+
+/**
+ * @brief SELECT a folder with CONDSTORE activation.
+ *
+ * Sends: SELECT "folder" (CONDSTORE)
+ * Fills res with UIDVALIDITY and HIGHESTMODSEQ.
+ * @return 0 on success, -1 on error.
+ */
+int imap_select_condstore(ImapClient *c, const char *folder, ImapSelectResult *res);
+
+/**
+ * @brief SELECT a folder with QRESYNC.
+ *
+ * Sends ENABLE QRESYNC (once per session), then:
+ *   SELECT "folder" (QRESYNC (uidval modseq))
+ *
+ * Fills res with UIDVALIDITY, HIGHESTMODSEQ, and any VANISHED UIDs.
+ * Caller must free res->vanished_uids.
+ *
+ * @return 0 on success, -1 on error.
+ */
+int imap_select_qresync(ImapClient *c, const char *folder,
+                         uint32_t known_uidval, uint64_t known_modseq,
+                         ImapSelectResult *res);
+
+/**
+ * @brief Fetch flags for all messages with modseq > @p modseq.
+ *
+ * Sends: UID FETCH 1:* (UID FLAGS) (CHANGEDSINCE modseq)
+ *
+ * @param out        Set to heap-alloc'd ImapFlagUpdate array. Caller frees.
+ * @param count_out  Number of entries.
+ * @return 0 on success, -1 on error.
+ */
+int imap_uid_fetch_flags_changedsince(ImapClient *c, uint64_t modseq,
+                                       ImapFlagUpdate **out, int *count_out);
 
 /* ── Inline RAII cleanup ─────────────────────────────────────────────── */
 

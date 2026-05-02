@@ -58,7 +58,7 @@ dovecot_stop() {
 
 cleanup() {
     dovecot_stop
-    sudo rm -rf "$TMPDIR_BASE"
+    sudo rm -rf "/tmp/dovecot-itest-${TMPDIR_BASE##*/tmp/dovecot-itest-}"
 }
 trap cleanup EXIT
 

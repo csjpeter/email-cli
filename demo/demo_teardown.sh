@@ -28,23 +28,9 @@ else
 fi
 
 # ── Remove /tmp temp files ───────────────────────────────────────────────────
-for path in \
-    /tmp/email-cli-demo-home \
-    /tmp/email-cli-demo-imap.log \
-    /tmp/email-cli-demo-smtp.log \
-    /tmp/email-cli-ft-alpha \
-    /tmp/email-cli-ft-beta \
-    /tmp/email-cli-ft-gamma \
-    /tmp/email-cli-ft-ab \
-    /tmp/email-cli-ft-bg \
-    /tmp/email-cli-ft-all \
-    /tmp/email-cli-ft-shared
-do
-    if [[ -e "$path" ]]; then
-        rm -rf "$path"
-        echo "  Removed $path"
-    fi
-done
+[ -e "/tmp/email-cli-demo-home" ]     && rm -rf "/tmp/email-cli-demo-home"     && echo "  Removed /tmp/email-cli-demo-home"
+[ -e "/tmp/email-cli-demo-imap.log" ] && rm -f  "/tmp/email-cli-demo-imap.log" && echo "  Removed /tmp/email-cli-demo-imap.log"
+[ -e "/tmp/email-cli-demo-smtp.log" ] && rm -f  "/tmp/email-cli-demo-smtp.log" && echo "  Removed /tmp/email-cli-demo-smtp.log"
 
 # ── Remove intermediate demo output files ───────────────────────────────────
 if $KEEP_INTERMEDIATE; then

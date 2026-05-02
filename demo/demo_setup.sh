@@ -69,7 +69,7 @@ export DEMO_SMTP_PID
 sleep 0.8
 
 # ── Create demo HOME ─────────────────────────────────────────────────────────
-rm -rf "$DEMO_HOME"
+rm -rf "/tmp/email-cli-demo-home"
 mkdir -p "$DEMO_HOME/.config/email-cli/accounts/$DEMO_ACCOUNT"
 cat > "$DEMO_HOME/.config/email-cli/accounts/$DEMO_ACCOUNT/config.ini" <<CONFIG
 EMAIL_HOST=imaps://localhost:$IMAP_PORT

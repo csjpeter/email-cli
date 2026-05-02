@@ -225,7 +225,7 @@ case "$1" in
         fi
         ;;
     clean)
-        rm -rf "$BUILD_DIR" "$BIN_DIR"
+        rm -rf "./build" "./bin"
         echo "Cleaned."
         ;;
     help|*)

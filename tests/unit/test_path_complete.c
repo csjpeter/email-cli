@@ -19,7 +19,7 @@ static void fixture_setup(void) {
 static void fixture_teardown(void) {
     /* Recursively remove the temp tree via shell to keep test code short. */
     char cmd[512];
-    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);
+    snprintf(cmd, sizeof(cmd), "rm -rf '/tmp/pc_test_%d'", (int)getpid());
     if (system(cmd)) { /* cleanup failure ignored in tests */ }
 }
 

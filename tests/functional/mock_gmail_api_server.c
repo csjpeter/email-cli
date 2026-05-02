@@ -41,6 +41,12 @@ static int  g_count   = 200;
 static char g_prefix[64]  = "";   /* MOCK_GMAIL_SUBJECT_PREFIX  */
 static char g_email[128]  = "test@gmail.com"; /* MOCK_GMAIL_EMAIL */
 
+/* Incremental-sync control (Phase 32 tests) */
+static char g_histid[32]     = "5000"; /* MOCK_GMAIL_HISTID           */
+static int  g_extra_count    = 0;      /* MOCK_GMAIL_EXTRA_COUNT       */
+static int  g_history_expired = 0;     /* MOCK_GMAIL_HISTORY_EXPIRED=1 */
+static int  g_profile_fail   = 0;      /* MOCK_GMAIL_PROFILE_FAIL=1    */
+
 /* ── Base64url encoding ───────────────────────────────────────────── */
 
 static const char b64url_chars[] =
@@ -279,10 +285,14 @@ static char *query_param(const char *url, const char *param) {
 
 /** Build the /profile response */
 static void handle_profile(int fd) {
+    if (g_profile_fail) {
+        send_404(fd);
+        return;
+    }
     char body[256];
     snprintf(body, sizeof(body),
-        "{\"historyId\":\"5000\","
-        "\"emailAddress\":\"%s\"}", g_email);
+        "{\"historyId\":\"%s\","
+        "\"emailAddress\":\"%s\"}", g_histid, g_email);
     send_json(fd, body);
 }
 
@@ -330,7 +340,8 @@ static char *build_messages_json(int first, int last, const char *next_token) {
         off += snprintf(buf + off, cap - (size_t)off,
                         ",\"nextPageToken\":\"%s\"", next_token);
     off += snprintf(buf + off, cap - (size_t)off,
-                    ",\"resultSizeEstimate\":%d}", count);
+                    ",\"resultSizeEstimate\":%d"
+                    ",\"historyId\":\"%s\"}", count, g_histid);
     (void)off;
     return buf;
 }
@@ -406,7 +417,7 @@ static void handle_messages_list(int fd, const char *url) {
 /** Handle GET /messages/{id}?format=raw */
 static void handle_message_get(int fd, const char *msg_id_str) {
     int n = id_to_n(msg_id_str);
-    if (n < 1 || n > g_count) {
+    if (n < 1 || n > g_count + g_extra_count) {
         send_404(fd);
         return;
     }
@@ -446,9 +457,41 @@ static void handle_message_get(int fd, const char *msg_id_str) {
 
 /** Handle GET /history?startHistoryId=... */
 static void handle_history(int fd) {
-    send_json(fd,
-        "{\"historyId\":\"5001\","
-        "\"history\":[]}");
+    if (g_history_expired) {
+        send_404(fd);
+        return;
+    }
+
+    if (g_extra_count > 0) {
+        /* Return messagesAdded for messages g_count+1 .. g_count+g_extra_count */
+        int new_hid = atoi(g_histid) + 1;
+        size_t cap = (size_t)g_extra_count * 64 + 256;
+        char *buf = malloc(cap);
+        if (!buf) { send_404(fd); return; }
+
+        int off = 0;
+        off += snprintf(buf + off, cap - (size_t)off,
+                        "{\"historyId\":\"%d\",\"messagesAdded\":[", new_hid);
+        for (int i = 0; i < g_extra_count; i++) {
+            int n = g_count + 1 + i;
+            char id[17];
+            msg_id(n, id);
+            if (i > 0) off += snprintf(buf + off, cap - (size_t)off, ",");
+            off += snprintf(buf + off, cap - (size_t)off,
+                            "{\"id\":\"%s\",\"threadId\":\"%s\"}", id, id);
+        }
+        off += snprintf(buf + off, cap - (size_t)off, "]}");
+        (void)off;
+        send_json(fd, buf);
+        free(buf);
+        return;
+    }
+
+    /* No changes — return empty history with current historyId */
+    char body[128];
+    snprintf(body, sizeof(body),
+             "{\"historyId\":\"%s\",\"history\":[]}", g_histid);
+    send_json(fd, body);
 }
 
 /* ── Request dispatcher ───────────────────────────────────────────── */
@@ -539,6 +582,17 @@ int main(void) {
         strncpy(g_email, email_env, sizeof(g_email) - 1);
         g_email[sizeof(g_email) - 1] = '\0';
     }
+    const char *histid_env = getenv("MOCK_GMAIL_HISTID");
+    if (histid_env && histid_env[0]) {
+        strncpy(g_histid, histid_env, sizeof(g_histid) - 1);
+        g_histid[sizeof(g_histid) - 1] = '\0';
+    }
+    const char *extra_env  = getenv("MOCK_GMAIL_EXTRA_COUNT");
+    if (extra_env && atoi(extra_env) > 0) g_extra_count = atoi(extra_env);
+    const char *expired_env = getenv("MOCK_GMAIL_HISTORY_EXPIRED");
+    if (expired_env && strcmp(expired_env, "1") == 0) g_history_expired = 1;
+    const char *profail_env = getenv("MOCK_GMAIL_PROFILE_FAIL");
+    if (profail_env && strcmp(profail_env, "1") == 0) g_profile_fail = 1;
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) { perror("socket"); return 1; }
@@ -564,8 +618,8 @@ int main(void) {
         return 1;
     }
 
-    printf("Mock Gmail API server listening on port %d (count: %d, prefix: '%s', email: %s)\n",
-           g_port, g_count, g_prefix, g_email);
+    printf("Mock Gmail API server listening on port %d (count: %d, prefix: '%s', email: %s, histid: %s, extra: %d, expired: %d)\n",
+           g_port, g_count, g_prefix, g_email, g_histid, g_extra_count, g_history_expired);
     fflush(stdout);
 
     struct sockaddr_in cli = {0};

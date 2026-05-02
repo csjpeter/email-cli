@@ -1760,6 +1760,206 @@ kill "$URL_SERVER_PID" 2>/dev/null || true
 rm -rf "$H_URL"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 32 — Gmail incremental sync: historyId from list, new messages, expired
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 32: Gmail incremental sync (historyId / new msgs / expired) ---"
+
+GMAIL_INC_LOG="$PROJECT_ROOT/build/tests/functional"
+
+# ── Phase 32a: historyId captured from messages.list (not /profile) ──────
+# MOCK_GMAIL_HISTID=7777 → messages.list returns "historyId":"7777"
+# MOCK_GMAIL_PROFILE_FAIL=1 → /profile returns 404 (proves we don't rely on it)
+GINC_PORT_A=9990
+H_GINC_A="/tmp/email-cli-ft-ginc-a-$$"
+GINC_ACCT_A="ginca@gmail.com"
+rm -rf "$H_GINC_A"
+mkdir -p "$H_GINC_A/config/email-cli/accounts/$GINC_ACCT_A"
+cat > "$H_GINC_A/config/email-cli/accounts/$GINC_ACCT_A/config.ini" <<GINC_CFG_A
+EMAIL_HOST=
+EMAIL_USER=$GINC_ACCT_A
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=faketoken32a
+GINC_CFG_A
+
+GINC_DATA_A="$H_GINC_A/data/email-cli/accounts/$GINC_ACCT_A"
+GINC_HISTID_A="$GINC_DATA_A/gmail_history_id"
+
+(cd "$PROJECT_ROOT/build" && \
+    MOCK_GMAIL_PORT=$GINC_PORT_A \
+    MOCK_GMAIL_COUNT=5 \
+    MOCK_GMAIL_HISTID=7777 \
+    MOCK_GMAIL_PROFILE_FAIL=1 \
+    "$MOCK_GMAIL_BIN") >"$GMAIL_INC_LOG/mock_ginc_a.log" 2>&1 &
+GINC_A_PID=$!
+sleep 0.3
+
+run_ginc_a_sync() {
+    (export XDG_CONFIG_HOME="$H_GINC_A/config"
+     export XDG_DATA_HOME="$H_GINC_A/data"
+     export XDG_CACHE_HOME="$H_GINC_A/cache"
+     export HOME="$H_GINC_A"
+     export GMAIL_TEST_TOKEN=testtoken32a
+     export GMAIL_API_BASE_URL="http://localhost:$GINC_PORT_A/gmail/v1/users/me"
+     "$BIN_DIR/email-sync" --account "$GINC_ACCT_A" 2>&1 || true)
+}
+
+# 32.1 First sync (reconcile): historyId must come from messages.list, not /profile
+SYNC32A=$(run_ginc_a_sync)
+check "32.1 first sync: completes successfully" "fetched\|already\|downloaded" "$SYNC32A"
+check "32.2 first sync: historyId saved" "." \
+    "$(test -f "$GINC_HISTID_A" && echo ok || echo missing)"
+SAVED_HID=$(cat "$GINC_HISTID_A" 2>/dev/null || echo "")
+check "32.3 historyId from messages.list (not /profile)" "7777" "$SAVED_HID"
+
+# 32.4 Second sync: historyId present, mock returns empty history → incremental fast path
+SYNC32B=$(run_ginc_a_sync)
+check_not "32.4 second sync: no reconcile (incremental)" "Listing messages" "$SYNC32B"
+check     "32.5 second sync: up to date" "up to date" "$SYNC32B"
+
+kill "$GINC_A_PID" 2>/dev/null || true
+rm -rf "$H_GINC_A"
+
+# ── Phase 32b: New messages via History API ───────────────────────────────
+# First sync downloads 5 messages.  Second sync: history returns 2 new msgs.
+GINC_PORT_B=9989
+GINC_PORT_B2=9987
+H_GINC_B="/tmp/email-cli-ft-ginc-b-$$"
+GINC_ACCT_B="gincb@gmail.com"
+rm -rf "$H_GINC_B"
+mkdir -p "$H_GINC_B/config/email-cli/accounts/$GINC_ACCT_B"
+cat > "$H_GINC_B/config/email-cli/accounts/$GINC_ACCT_B/config.ini" <<GINC_CFG_B
+EMAIL_HOST=
+EMAIL_USER=$GINC_ACCT_B
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=faketoken32b
+GINC_CFG_B
+
+GINC_DATA_B="$H_GINC_B/data/email-cli/accounts/$GINC_ACCT_B"
+GINC_HISTID_B="$GINC_DATA_B/gmail_history_id"
+
+# Start mock without extra messages (base state: 5 messages, historyId=5000)
+(cd "$PROJECT_ROOT/build" && \
+    MOCK_GMAIL_PORT=$GINC_PORT_B \
+    MOCK_GMAIL_COUNT=5 \
+    MOCK_GMAIL_HISTID=5000 \
+    "$MOCK_GMAIL_BIN") >"$GMAIL_INC_LOG/mock_ginc_b1.log" 2>&1 &
+GINC_B1_PID=$!
+sleep 0.3
+
+run_ginc_b_sync() {
+    (export XDG_CONFIG_HOME="$H_GINC_B/config"
+     export XDG_DATA_HOME="$H_GINC_B/data"
+     export XDG_CACHE_HOME="$H_GINC_B/cache"
+     export HOME="$H_GINC_B"
+     export GMAIL_TEST_TOKEN=testtoken32b
+     export GMAIL_API_BASE_URL="http://localhost:$1/gmail/v1/users/me"
+     "$BIN_DIR/email-sync" --account "$GINC_ACCT_B" 2>&1 || true)
+}
+run_ginc_b_ro() {
+    local port=$1; shift
+    (export XDG_CONFIG_HOME="$H_GINC_B/config"
+     export XDG_DATA_HOME="$H_GINC_B/data"
+     export XDG_CACHE_HOME="$H_GINC_B/cache"
+     export HOME="$H_GINC_B"
+     export GMAIL_TEST_TOKEN=testtoken32b
+     export GMAIL_API_BASE_URL="http://localhost:$port/gmail/v1/users/me"
+     "$BIN_DIR/email-cli-ro" "$GINC_ACCT_B" "$@" 2>&1 || true)
+}
+
+# Base sync: 5 messages downloaded, historyId "5000" saved
+SYNC32C=$(run_ginc_b_sync $GINC_PORT_B)
+check "32.6 base sync: downloads 5 messages" "fetched\|already\|downloaded" "$SYNC32C"
+check "32.7 base sync: historyId saved" "5000" "$(cat "$GINC_HISTID_B" 2>/dev/null || echo '')"
+
+kill "$GINC_B1_PID" 2>/dev/null || true
+sleep 0.1
+
+# Start mock WITH 2 extra messages (messages 6 and 7) available via history
+(cd "$PROJECT_ROOT/build" && \
+    MOCK_GMAIL_PORT=$GINC_PORT_B2 \
+    MOCK_GMAIL_COUNT=5 \
+    MOCK_GMAIL_HISTID=5000 \
+    MOCK_GMAIL_EXTRA_COUNT=2 \
+    "$MOCK_GMAIL_BIN") >"$GMAIL_INC_LOG/mock_ginc_b2.log" 2>&1 &
+GINC_B2_PID=$!
+sleep 0.3
+
+# Incremental sync: history returns messagesAdded for msgs 6 and 7
+SYNC32D=$(run_ginc_b_sync $GINC_PORT_B2)
+check_not "32.8 incremental: no reconcile" "Listing messages" "$SYNC32D"
+
+# Messages 6 and 7 now accessible
+GL32=$(run_ginc_b_ro $GINC_PORT_B2 --batch list --all --limit 20)
+check "32.9  new message 6 accessible after incremental" "Message 6" "$GL32"
+check "32.10 new message 7 accessible after incremental" "Message 7" "$GL32"
+
+# historyId updated to 5001 (base + 1)
+check "32.11 historyId updated after incremental" "5001" "$(cat "$GINC_HISTID_B" 2>/dev/null || echo '')"
+
+kill "$GINC_B2_PID" 2>/dev/null || true
+rm -rf "$H_GINC_B"
+
+# ── Phase 32c: Expired historyId → fallback to full reconcile ─────────────
+GINC_PORT_C=9988
+H_GINC_C="/tmp/email-cli-ft-ginc-c-$$"
+GINC_ACCT_C="gincc@gmail.com"
+rm -rf "$H_GINC_C"
+mkdir -p "$H_GINC_C/config/email-cli/accounts/$GINC_ACCT_C"
+cat > "$H_GINC_C/config/email-cli/accounts/$GINC_ACCT_C/config.ini" <<GINC_CFG_C
+EMAIL_HOST=
+EMAIL_USER=$GINC_ACCT_C
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=faketoken32c
+GINC_CFG_C
+
+GINC_DATA_C="$H_GINC_C/data/email-cli/accounts/$GINC_ACCT_C"
+GINC_HISTID_C="$GINC_DATA_C/gmail_history_id"
+
+run_ginc_c_sync() {
+    (export XDG_CONFIG_HOME="$H_GINC_C/config"
+     export XDG_DATA_HOME="$H_GINC_C/data"
+     export XDG_CACHE_HOME="$H_GINC_C/cache"
+     export HOME="$H_GINC_C"
+     export GMAIL_TEST_TOKEN=testtoken32c
+     export GMAIL_API_BASE_URL="http://localhost:$GINC_PORT_C/gmail/v1/users/me"
+     "$BIN_DIR/email-sync" --account "$GINC_ACCT_C" 2>&1 || true)
+}
+
+# Start normal mock, do first sync to get a saved historyId
+(cd "$PROJECT_ROOT/build" && \
+    MOCK_GMAIL_PORT=$GINC_PORT_C \
+    MOCK_GMAIL_COUNT=3 \
+    MOCK_GMAIL_HISTID=9000 \
+    "$MOCK_GMAIL_BIN") >"$GMAIL_INC_LOG/mock_ginc_c1.log" 2>&1 &
+GINC_C1_PID=$!
+sleep 0.3
+run_ginc_c_sync >/dev/null 2>&1
+check "32.12 expired-test setup: historyId saved" "9000" "$(cat "$GINC_HISTID_C" 2>/dev/null || echo '')"
+kill "$GINC_C1_PID" 2>/dev/null || true
+sleep 0.1
+
+# Start mock with expired history → 404 on /history
+(cd "$PROJECT_ROOT/build" && \
+    MOCK_GMAIL_PORT=$GINC_PORT_C \
+    MOCK_GMAIL_COUNT=3 \
+    MOCK_GMAIL_HISTID=9001 \
+    MOCK_GMAIL_HISTORY_EXPIRED=1 \
+    "$MOCK_GMAIL_BIN") >"$GMAIL_INC_LOG/mock_ginc_c2.log" 2>&1 &
+GINC_C2_PID=$!
+sleep 0.3
+
+SYNC32E=$(run_ginc_c_sync)
+# Must have fallen back to full reconcile
+check     "32.13 expired historyId: fell back to reconcile" "messages on server" "$SYNC32E"
+# New historyId must be saved after reconcile (from messages.list = "9001")
+check     "32.14 expired historyId: new historyId saved after reconcile" "9001" \
+    "$(cat "$GINC_HISTID_C" 2>/dev/null || echo '')"
+
+kill "$GINC_C2_PID" 2>/dev/null || true
+rm -rf "$H_GINC_C"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

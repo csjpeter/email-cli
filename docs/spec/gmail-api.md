@@ -338,7 +338,9 @@ q=has:nouserlabels -label:inbox -label:sent -label:drafts -label:spam -label:tra
    This runs unconditionally at the end of every full sync — even when 0 messages
    were downloaded — ensuring indexes are always consistent with the store.
 4. Build `_nolabel.idx` from messages that have no labels
-5. Save `historyId` from the most recent message to `gmail_history_id`
+5. Save `historyId` to `gmail_history_id` — taken from the `messages.list`
+   API response (the last page always includes a fresh `historyId` field).
+   The `/profile` endpoint is used only as a fallback if the field is absent.
 
 #### Label Index Rebuild (step 3)
 
@@ -361,7 +363,11 @@ See `docs/spec/email-sync.md` → `--rebuild-index`.
 
 Uses the Gmail History API for O(changes) efficiency instead of O(total messages).
 
-1. `GET /gmail/v1/users/me/history?startHistoryId=<saved>&historyTypes=messageAdded,messageDeleted,labelAdded,labelRemoved`
+1. `GET /gmail/v1/users/me/history?startHistoryId=<saved>&historyTypes=messageAdded&historyTypes=messageDeleted&historyTypes=labelAdded&historyTypes=labelRemoved`
+
+   The `historyTypes` parameter is declared as `repeated` in the Gmail API schema.
+   Each value must be a separate query parameter — comma-separated values are
+   treated as a single unknown enum value, causing HTTP 400.
 
 2. Process delta records:
 
@@ -701,3 +707,91 @@ All Gmail API calls go through a single `gmail_request()` helper that handles:
 - On timeout: display `"Network error — check internet connection"` in the
   status bar; operation is not retried automatically (user can press `s` to
   retry sync).
+
+---
+
+## 18. User Stories — Incremental Sync
+
+### US-GS-INC-01 — Fast second sync (no changes)
+
+**As a user** running `email-sync` when my inbox has not changed since the
+last sync, I want the sync to complete in under a second without downloading
+anything, so that background cron runs stay cheap.
+
+**Acceptance criteria:**
+- If a `gmail_history_id` file exists, `email-sync` calls the History API
+  (`/history?startHistoryId=<saved>`) instead of listing all messages.
+- When the server returns an empty delta (no `messagesAdded`, `messagesDeleted`,
+  `labelsAdded`, `labelsRemoved`), sync exits with "Incremental sync: up to date."
+- No "Listing messages" output appears (the O(N) reconcile is skipped).
+- The saved `historyId` is unchanged.
+
+---
+
+### US-GS-INC-02 — New messages downloaded incrementally
+
+**As a user** whose inbox received new email since the last sync, I want
+`email-sync` to download only the new messages (not re-scan all 25 000),
+so that sync is proportional to the number of changes, not the mailbox size.
+
+**Acceptance criteria:**
+- The History API response includes a `messagesAdded` array.
+- Each new message is fetched via `GET /messages/{id}?format=raw` and stored
+  locally (`.eml` + `.hdr`).
+- The message is inserted into the relevant label index files (`.idx`).
+- No "Listing messages" output appears.
+- After sync, the new message is accessible via `email-cli-ro list` and
+  `email-cli-ro show`.
+- The `historyId` file is updated to the value returned by the History API.
+
+---
+
+### US-GS-INC-03 — historyId saved from messages.list (not /profile)
+
+**As a developer** maintaining the sync logic, I want the `historyId`
+persisted after a full reconcile to come from the `messages.list` API
+response, so that it is always a valid, current ID even if the `/profile`
+endpoint is temporarily unavailable or slow.
+
+**Acceptance criteria:**
+- The last page of every `GET /messages` response includes a `historyId`
+  field; `gmail_list_messages` captures the last-seen value.
+- After reconcile, the saved `historyId` equals the value from `messages.list`,
+  not the value from `GET /profile`.
+- If `messages.list` does not return a `historyId` (unexpected), the code
+  falls back to `GET /profile`; if that also fails, logs a warning and
+  continues without saving a historyId (next run does another reconcile).
+
+---
+
+### US-GS-INC-04 — Expired historyId falls back to full reconcile
+
+**As a user** who has not synced for a long time (or whose historyId was
+invalidated server-side), I want `email-sync` to automatically recover by
+performing a full reconcile and saving a fresh historyId, so that subsequent
+runs can use the fast incremental path again.
+
+**Acceptance criteria:**
+- When the History API returns HTTP 404 (historyId expired), sync logs
+  "historyId expired — falling back to full reconcile" and proceeds with
+  reconcile.
+- After the reconcile, a new, valid `historyId` is saved to disk.
+- The next `email-sync` run successfully uses the incremental path (no
+  "Listing messages" output).
+- No user intervention is required; the recovery is fully automatic.
+
+---
+
+### US-GS-INC-05 — Force reconcile via --reconcile flag
+
+**As a user** suspecting that my local store is out of sync with the server,
+I want to force a full reconcile with `email-sync --reconcile`, bypassing
+the incremental fast path, so I can recover from any state inconsistency
+without deleting config files.
+
+**Acceptance criteria:**
+- `email-sync --reconcile` always runs a full server reconcile, regardless
+  of whether a `historyId` is saved.
+- "Listing messages" output appears, confirming the reconcile ran.
+- After `--reconcile`, the saved `historyId` is updated to a fresh value.
+- `email-sync --help` documents the `--reconcile` flag.

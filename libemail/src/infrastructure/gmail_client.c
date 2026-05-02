@@ -716,7 +716,10 @@ char *gmail_get_history_id(GmailClient *c) {
 char *gmail_get_history(GmailClient *c, const char *history_id) {
     RAII_STRING char *url = NULL;
     if (asprintf(&url, "%s/history?startHistoryId=%s"
-                 "&historyTypes=messageAdded,messageDeleted,labelAdded,labelRemoved",
+                 "&historyTypes=messageAdded"
+                 "&historyTypes=messageDeleted"
+                 "&historyTypes=labelAdded"
+                 "&historyTypes=labelRemoved",
                  gmail_api_base(), history_id) == -1)
         return NULL;
 

@@ -28,6 +28,13 @@
 #include <signal.h>
 #include <time.h>
 
+/* ── Verbose mode ────────────────────────────────────────────────────── */
+
+static int g_verbose = 0;
+
+/** @brief Set verbose mode for sync and apply-rules operations. */
+void email_service_set_verbose(int v) { g_verbose = v; }
+
 /* ── Column-aware printing ───────────────────────────────────────────── */
 
 /**
@@ -2034,7 +2041,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=%s  ESC=quit"
-                         "  s=sync  R=refresh  [0/0]",
+                         "  s=sync  U=refresh  R=rules  [0/0]",
                          cfg->gmail_mode ? "labels" : "folders");
                 print_statusbar(trows, tcols, sb);
             }
@@ -2044,7 +2051,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
                 int ch = terminal_last_printable();
                 if (ch == 's') { sync_start_background(); }
-                if (ch == 'R') return 4; /* refresh: re-list */
+                if (ch == 'U') return 4; /* refresh: re-list */
+                if (ch == 'R') return 7; /* rules editor */
             }
         }
         show_count = manifest->count;
@@ -2204,13 +2212,13 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
-                             "  s=sync  R=refresh  [0/0]");
+                             "  s=sync  U=refresh  R=rules  [0/0]");
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=folders  ESC=quit"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                             "  s=sync  R=refresh  [0/0]");
+                             "  s=sync  U=refresh  R=rules  [0/0]");
                 }
                 print_statusbar(trows, tcols, sb);
             }
@@ -2221,7 +2229,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int ch = terminal_last_printable();
                 if (ch == 'c') return 2; /* compose */
                 if (ch == 's') { sync_start_background(); }
-                if (ch == 'R') return 4; /* refresh */
+                if (ch == 'U') return 4; /* refresh */
+                if (ch == 'R') return 7; /* rules editor */
             }
         }
 
@@ -2290,20 +2299,20 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  u=restore  t=labels  n=unread  f=star"
-                             "  s=sync  R=refresh  [0/0]");
+                             "  s=sync  U=refresh  R=rules  [0/0]");
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
-                             "  s=sync  R=refresh  [0/0]");
+                             "  s=sync  U=refresh  R=rules  [0/0]");
                 }
             } else {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=folders  ESC=quit"
                          "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                         "  s=sync  R=refresh  [0/0]");
+                         "  s=sync  U=refresh  R=rules  [0/0]");
             }
             print_statusbar(trows, tcols, sb);
         }
@@ -2314,7 +2323,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int ch = terminal_last_printable();
             if (ch == 'c') return 2; /* compose */
             if (ch == 's') { sync_start_background(); }
-            if (ch == 'R') return 4; /* refresh */
+            if (ch == 'U') return 4; /* refresh */
+            if (ch == 'R') return 7; /* rules editor */
         }
     }
 
@@ -2449,7 +2459,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int sync = (bg_sync_pid > 0) || sync_is_running();
             const char *suffix;
             if (bg_sync_done)
-                suffix = "  \u2709 New mail may have arrived!  R=refresh";
+                suffix = "  \u2709 New mail may have arrived!  U=refresh";
             else if (sync)
                 suffix = "  \u21bb syncing...";
             else if (is_gmail && strcmp(folder, "_trash") == 0)
@@ -2676,14 +2686,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  u=restore  t=labels  n=unread  f=star"
-                             "  s=sync  R=refresh  [%d/%d]",
+                             "  s=sync  U=refresh  R=rules  [%d/%d]",
                              show_count > 0 ? cursor + 1 : 0, show_count);
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star  a=archive"
-                             "  d=rm-label  D=trash  t=labels  s=sync  R=refresh  [%d/%d]",
+                             "  d=rm-label  D=trash  t=labels  s=sync  U=refresh  R=rules  [%d/%d]",
                              show_count > 0 ? cursor + 1 : 0, show_count);
                 }
             } else {
@@ -2691,7 +2701,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=folders  ESC=quit"
                          "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                         "  s=sync  R=refresh  [%d/%d]",
+                         "  s=sync  U=refresh  R=rules  [%d/%d]",
                          cursor + 1, show_count);
             }
             print_statusbar(trows, tcols, sb);
@@ -2881,10 +2891,15 @@ read_key_again: ;
                 sync_start_background();
                 break; /* re-render: shows ⟳ syncing... indicator */
             }
-            if (ch == 'R') {
+            if (ch == 'U') {
                 /* Explicit refresh after sync notification */
                 bg_sync_done = 0;
                 list_result = 4;
+                goto list_done;
+            }
+            if (ch == 'R') {
+                /* Rules editor */
+                list_result = 7;
                 goto list_done;
             }
             if (ch == 'h' || ch == '?') {
@@ -2905,7 +2920,8 @@ read_key_again: ;
                         { "u",                 "Untrash (restore to INBOX)"      },
                         { "t",                 "Toggle labels (picker)"          },
                         { "s",                 "Start background sync"           },
-                        { "R",                 "Refresh after sync"              },
+                        { "U",                 "Refresh after sync"              },
+                        { "R",                 "Open rules editor"               },
                         { "Backspace",         "Open label browser"              },
                         { "ESC / q",           "Quit"                            },
                         { "h / ?",             "Show this help"                  },
@@ -2929,7 +2945,8 @@ read_key_again: ;
                         { "j",                 "Toggle Junk (spam) flag"         },
                         { "d",                 "Toggle Done flag"                },
                         { "s",                 "Start background sync"           },
-                        { "R",                 "Refresh after sync"              },
+                        { "U",                 "Refresh after sync"              },
+                        { "R",                 "Open rules editor"               },
                         { "Backspace",         "Open folder browser"             },
                         { "ESC / q",           "Quit"                            },
                         { "h / ?",             "Show this help"                  },
@@ -5179,13 +5196,34 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
                         char *su_dec = subj_r ? mime_decode_words(subj_r) : NULL;
                         char **add_labels = NULL; int add_count = 0;
                         char **rm_labels  = NULL; int rm_count  = 0;
-                        if (mail_rules_apply(imap_rules,
+                        int fired_count = mail_rules_apply(imap_rules,
                                              fr_dec ? fr_dec : "",
                                              su_dec ? su_dec : "",
                                              to_r   ? to_r   : "",
                                              NULL,  /* no label-based rules for IMAP */
                                              &add_labels, &add_count,
-                                             &rm_labels,  &rm_count) > 0) {
+                                             &rm_labels,  &rm_count);
+                        if (fired_count > 0) {
+                            if (g_verbose) {
+                                for (int ri = 0; ri < imap_rules->count; ri++) {
+                                    const MailRule *mr = &imap_rules->rules[ri];
+                                    if (mail_rule_matches(mr,
+                                                          fr_dec ? fr_dec : "",
+                                                          su_dec ? su_dec : "",
+                                                          to_r   ? to_r   : "",
+                                                          NULL)) {
+                                        printf("  [rule] \"%s\" \xe2\x86\x92 uid:%s",
+                                               mr->name ? mr->name : "?", uid);
+                                        for (int j = 0; j < mr->then_add_count; j++)
+                                            printf("  +%s", mr->then_add_label[j]);
+                                        for (int j = 0; j < mr->then_rm_count; j++)
+                                            printf("  -%s", mr->then_rm_label[j]);
+                                        if (mr->then_move_folder)
+                                            printf("  \xe2\x86\x92%s", mr->then_move_folder);
+                                        printf("\n");
+                                    }
+                                }
+                            }
                             /* Map label names to IMAP flags for local storage */
                             static const struct { const char *label; int flag; } lmap[] = {
                                 { "_junk",      MSG_FLAG_JUNK      },
@@ -5346,7 +5384,149 @@ int email_service_rebuild_indexes(const char *only_account) {
     return errors > 0 ? -1 : 0;
 }
 
-int email_service_apply_rules(const char *only_account) {
+/* ── IMAP per-account custom label helpers for apply_rules ──────────── */
+
+typedef struct { char uid[17]; char *labels; } UidLabel;
+
+static void ul_free_all(UidLabel *arr, int count) {
+    for (int i = 0; i < count; i++) free(arr[i].labels);
+    free(arr);
+}
+
+static const char *ul_get(const UidLabel *arr, int count, const char *uid) {
+    for (int i = 0; i < count; i++)
+        if (strcmp(arr[i].uid, uid) == 0) return arr[i].labels;
+    return NULL;
+}
+
+static void ul_set(UidLabel **arr, int *count, int *cap, const char *uid, const char *lbl) {
+    for (int i = 0; i < *count; i++) {
+        if (strcmp((*arr)[i].uid, uid) != 0) continue;
+        free((*arr)[i].labels);
+        (*arr)[i].labels = strdup(lbl);
+        return;
+    }
+    if (*count >= *cap) {
+        int nc = *cap ? *cap * 2 : 64;
+        UidLabel *tmp = realloc(*arr, (size_t)nc * sizeof(UidLabel));
+        if (!tmp) return;
+        *arr = tmp; *cap = nc;
+    }
+    snprintf((*arr)[*count].uid, sizeof((*arr)[*count].uid), "%s", uid);
+    (*arr)[*count].labels = strdup(lbl);
+    (*count)++;
+}
+
+static UidLabel *ul_load(const char *path, int *count_out) {
+    *count_out = 0;
+    FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+    int cap = 64;
+    UidLabel *arr = malloc((size_t)cap * sizeof(UidLabel));
+    if (!arr) { fclose(fp); return NULL; }
+    char line[4096];
+    while (fgets(line, sizeof(line), fp)) {
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = '\0';
+        char *lbl = tab + 1;
+        char *nl = strchr(lbl, '\n');
+        if (nl) *nl = '\0';
+        if (*count_out >= cap) {
+            cap *= 2;
+            UidLabel *tmp = realloc(arr, (size_t)cap * sizeof(UidLabel));
+            if (!tmp) break;
+            arr = tmp;
+        }
+        snprintf(arr[*count_out].uid, 17, "%.16s", line);
+        arr[*count_out].labels = strdup(lbl);
+        (*count_out)++;
+    }
+    fclose(fp);
+    return arr;
+}
+
+static int ul_save(const char *path, const UidLabel *arr, int count) {
+    FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+    for (int i = 0; i < count; i++)
+        fprintf(fp, "%s\t%s\n", arr[i].uid, arr[i].labels ? arr[i].labels : "");
+    fclose(fp);
+    return 0;
+}
+
+/* Return 1 if label s is present in comma-separated labels_csv */
+static int csv_has_label(const char *csv, const char *s) {
+    if (!csv || !s || !*s) return 0;
+    size_t slen = strlen(s);
+    const char *p = csv;
+    while (*p) {
+        const char *comma = strchr(p, ',');
+        size_t len = comma ? (size_t)(comma - p) : strlen(p);
+        if (len == slen && strncasecmp(p, s, slen) == 0) return 1;
+        if (!comma) break;
+        p = comma + 1;
+    }
+    return 0;
+}
+
+/* Build updated labels CSV: existing + add - rm */
+static char *csv_update_labels(const char *existing,
+                                char **add, int add_n,
+                                char **rm,  int rm_n) {
+    char buf[4096] = "";
+    /* Keep existing labels that are not in rm */
+    if (existing && existing[0]) {
+        char *copy = strdup(existing);
+        char *tok = copy, *s;
+        while (tok && *tok) {
+            s = strchr(tok, ',');
+            if (s) *s = '\0';
+            int do_rm = 0;
+            for (int i = 0; i < rm_n; i++)
+                if (rm[i] && strcasecmp(tok, rm[i]) == 0) { do_rm = 1; break; }
+            if (!do_rm) {
+                if (buf[0]) strncat(buf, ",", sizeof(buf) - strlen(buf) - 1);
+                strncat(buf, tok, sizeof(buf) - strlen(buf) - 1);
+            }
+            tok = s ? s + 1 : NULL;
+        }
+        free(copy);
+    }
+    /* Append add labels (skip duplicates) */
+    for (int i = 0; i < add_n; i++) {
+        if (!add[i] || !add[i][0]) continue;
+        if (!csv_has_label(buf, add[i])) {
+            if (buf[0]) strncat(buf, ",", sizeof(buf) - strlen(buf) - 1);
+            strncat(buf, add[i], sizeof(buf) - strlen(buf) - 1);
+        }
+    }
+    return strdup(buf);
+}
+
+/* ── apply_rules: print rule match lines ─────────────────────────────── */
+static void print_rule_matches(const MailRules *rules,
+                                const char *from, const char *subject,
+                                const char *to, const char *labels,
+                                const char *uid, int dry_run) {
+    for (int r = 0; r < rules->count; r++) {
+        if (!mail_rule_matches(&rules->rules[r], from, subject, to, labels))
+            continue;
+        const MailRule *mr = &rules->rules[r];
+        printf("  %s \"%s\" \xe2\x86\x92 uid:%s",
+               dry_run ? "[dry-run]" : "[rule]",
+               mr->name ? mr->name : "?", uid);
+        for (int j = 0; j < mr->then_add_count; j++)
+            printf("  +%s", mr->then_add_label[j]);
+        for (int j = 0; j < mr->then_rm_count; j++)
+            printf("  -%s", mr->then_rm_label[j]);
+        if (mr->then_move_folder)
+            printf("  \xe2\x86\x92%s", mr->then_move_folder);
+        printf("\n");
+    }
+}
+
+int email_service_apply_rules(const char *only_account, int dry_run, int verbose) {
     int count = 0;
     AccountEntry *accounts = config_list_accounts(&count);
     if (!accounts || count == 0) {
@@ -5356,12 +5536,14 @@ int email_service_apply_rules(const char *only_account) {
     }
 
     int errors = 0, done = 0;
+    int total_fired = 0;
     for (int i = 0; i < count; i++) {
         if (only_account && only_account[0] &&
             strcmp(accounts[i].name, only_account) != 0)
             continue;
 
-        printf("=== Applying rules: %s ===\n", accounts[i].name);
+        printf("=== %s rules: %s ===\n",
+               dry_run ? "Dry-run" : "Applying", accounts[i].name);
         local_store_init(accounts[i].cfg->host, accounts[i].cfg->user);
 
         MailRules *rules = mail_rules_load(accounts[i].name);
@@ -5372,64 +5554,187 @@ int email_service_apply_rules(const char *only_account) {
             continue;
         }
 
-        /* List all UIDs in the account */
-        char (*uids)[17] = NULL;
-        int uid_count = 0;
-        local_hdr_list_all_uids("", &uids, &uid_count);
-
         int fired_total = 0;
-        for (int u = 0; u < uid_count; u++) {
-            const char *uid = uids[u];
 
-            /* Parse .hdr: from\tsubject\tdate\tlabels\tflags */
-            char *hdr = local_hdr_load("", uid);
-            if (!hdr) continue;
+        if (accounts[i].cfg->gmail_mode) {
+            /* ── Gmail path: .hdr files are tab-separated ── */
+            char (*uids)[17] = NULL;
+            int uid_count = 0;
+            local_hdr_list_all_uids("", &uids, &uid_count);
 
-            char *fields[5] = {NULL};
-            char *p = hdr;
-            for (int f = 0; f < 5; f++) {
-                fields[f] = p;
-                char *tab = strchr(p, '\t');
-                if (tab) { *tab = '\0'; p = tab + 1; }
-                else     { p += strlen(p); }
+            for (int u = 0; u < uid_count; u++) {
+                const char *uid = uids[u];
+                char *hdr = local_hdr_load("", uid);
+                if (!hdr) continue;
+
+                /* Parse: from\tsubject\tdate\tlabels\tflags */
+                char *fields[5] = {NULL};
+                char *p = hdr;
+                for (int f = 0; f < 5; f++) {
+                    fields[f] = p;
+                    char *tab = strchr(p, '\t');
+                    if (tab) { *tab = '\0'; p = tab + 1; }
+                    else     { p += strlen(p); }
+                }
+                for (int f = 0; f < 5; f++) {
+                    if (fields[f]) {
+                        char *nl = strchr(fields[f], '\n');
+                        if (nl) *nl = '\0';
+                    }
+                }
+
+                char **add_out = NULL; int add_count = 0;
+                char **rm_out  = NULL; int rm_count  = 0;
+                int fired = mail_rules_apply(rules,
+                                              fields[0], fields[1], NULL, fields[3],
+                                              &add_out, &add_count,
+                                              &rm_out,  &rm_count);
+                if (fired > 0) {
+                    /* Idempotency: skip if all changes already applied */
+                    int has_new = 0;
+                    for (int j = 0; j < add_count && !has_new; j++)
+                        if (!csv_has_label(fields[3], add_out[j])) has_new = 1;
+                    for (int j = 0; j < rm_count && !has_new; j++)
+                        if (csv_has_label(fields[3], rm_out[j])) has_new = 1;
+
+                    if (has_new) {
+                        if (verbose || dry_run)
+                            print_rule_matches(rules, fields[0], fields[1],
+                                               NULL, fields[3], uid, dry_run);
+                        fired_total++;
+                        if (!dry_run) {
+                            local_hdr_update_labels("", uid,
+                                                     (const char **)add_out, add_count,
+                                                     (const char **)rm_out,  rm_count);
+                            for (int j = 0; j < add_count; j++) label_idx_add(add_out[j], uid);
+                            for (int j = 0; j < rm_count;  j++) label_idx_remove(rm_out[j], uid);
+                        }
+                    }
+                    for (int j = 0; j < add_count; j++) free(add_out[j]);
+                    for (int j = 0; j < rm_count;  j++) free(rm_out[j]);
+                    free(add_out); free(rm_out);
+                }
+                free(hdr);
             }
-            /* Trim trailing newline from last field */
-            for (int f = 0; f < 5; f++) {
-                if (fields[f]) {
-                    char *nl = strchr(fields[f], '\n');
-                    if (nl) *nl = '\0';
+            free(uids);
+
+        } else {
+            /* ── IMAP path: use manifest + per-account applied_labels.tsv ── */
+            const char *imap_folder = (accounts[i].cfg->folder && accounts[i].cfg->folder[0])
+                                      ? accounts[i].cfg->folder : "INBOX";
+
+            /* Path to applied labels persistence file */
+            const char *data_dir = platform_data_dir();
+            char lpath[8192] = "";
+            if (data_dir && accounts[i].cfg->user && accounts[i].cfg->user[0])
+                snprintf(lpath, sizeof(lpath), "%s/email-cli/accounts/%s/applied_labels.tsv",
+                         data_dir, accounts[i].cfg->user);
+
+            /* Load existing custom labels */
+            int ul_count = 0, ul_cap = 0;
+            UidLabel *ul_arr = NULL;
+            if (lpath[0]) ul_arr = ul_load(lpath, &ul_count);
+            int ul_dirty = 0;
+
+            /* Iterate over manifest entries (decoded from/subject + flags) */
+            Manifest *mf = manifest_load(imap_folder);
+            if (!mf || mf->count == 0) {
+                printf("  No messages found in folder %s.\n", imap_folder);
+                manifest_free(mf);
+                if (ul_arr) ul_free_all(ul_arr, ul_count);
+                mail_rules_free(rules);
+                done++;
+                continue;
+            }
+
+            int mf_dirty = 0;
+            /* Standard label→flag mapping */
+            static const struct { const char *lbl; int flag; } lmap[] = {
+                { "_junk",     MSG_FLAG_JUNK     },
+                { "_spam",     MSG_FLAG_JUNK     },
+                { "_phishing", MSG_FLAG_PHISHING },
+                { "_done",     MSG_FLAG_DONE     },
+                { "_flagged",  MSG_FLAG_FLAGGED  },
+            };
+            const int lmap_n = (int)(sizeof(lmap) / sizeof(lmap[0]));
+
+            for (int u = 0; u < mf->count; u++) {
+                ManifestEntry *e = &mf->entries[u];
+
+                /* Existing labels: custom (from persistence file) */
+                const char *existing = ul_arr ? ul_get(ul_arr, ul_count, e->uid) : NULL;
+
+                char **add_out = NULL; int add_count = 0;
+                char **rm_out  = NULL; int rm_count  = 0;
+                int fired = mail_rules_apply(rules,
+                                              e->from    ? e->from    : "",
+                                              e->subject ? e->subject : "",
+                                              NULL, existing,
+                                              &add_out, &add_count,
+                                              &rm_out,  &rm_count);
+                if (fired > 0) {
+                    /* Check if any new custom labels would be added/removed */
+                    int has_new = 0;
+                    for (int j = 0; j < add_count && !has_new; j++)
+                        if (!csv_has_label(existing, add_out[j])) has_new = 1;
+                    for (int j = 0; j < rm_count && !has_new; j++)
+                        if (csv_has_label(existing, rm_out[j])) has_new = 1;
+
+                    /* Also check if any standard flag labels would change */
+                    int new_flags = e->flags;
+                    for (int j = 0; j < add_count; j++)
+                        for (int k = 0; k < lmap_n; k++)
+                            if (strcasecmp(add_out[j], lmap[k].lbl) == 0)
+                                new_flags |= lmap[k].flag;
+                    for (int j = 0; j < rm_count; j++)
+                        for (int k = 0; k < lmap_n; k++)
+                            if (strcasecmp(rm_out[j], lmap[k].lbl) == 0)
+                                new_flags &= ~lmap[k].flag;
+                    if (new_flags != e->flags) has_new = 1;
+
+                    if (has_new) {
+                        if (verbose || dry_run)
+                            print_rule_matches(rules,
+                                               e->from    ? e->from    : "",
+                                               e->subject ? e->subject : "",
+                                               NULL, existing, e->uid, dry_run);
+                        fired_total++;
+                        if (!dry_run) {
+                            /* Persist custom labels */
+                            char *new_lbl = csv_update_labels(existing,
+                                                               add_out, add_count,
+                                                               rm_out,  rm_count);
+                            ul_set(&ul_arr, &ul_count, &ul_cap, e->uid,
+                                   new_lbl ? new_lbl : "");
+                            free(new_lbl);
+                            ul_dirty = 1;
+
+                            /* Update manifest flags for standard labels */
+                            if (new_flags != e->flags) {
+                                e->flags = new_flags;
+                                local_hdr_update_flags(imap_folder, e->uid, new_flags);
+                                mf_dirty = 1;
+                            }
+                        }
+                    }
+                    for (int j = 0; j < add_count; j++) free(add_out[j]);
+                    for (int j = 0; j < rm_count;  j++) free(rm_out[j]);
+                    free(add_out); free(rm_out);
                 }
             }
 
-            char **add_out = NULL; int add_count = 0;
-            char **rm_out  = NULL; int rm_count  = 0;
-            int fired = mail_rules_apply(rules,
-                                          fields[0], fields[1], NULL, fields[3],
-                                          &add_out, &add_count,
-                                          &rm_out,  &rm_count);
-            free(hdr);
-
-            if (fired > 0) {
-                fired_total++;
-                local_hdr_update_labels("", uid,
-                                         (const char **)add_out, add_count,
-                                         (const char **)rm_out,  rm_count);
-                for (int j = 0; j < add_count; j++) {
-                    label_idx_add(add_out[j], uid);
-                    free(add_out[j]);
-                }
-                for (int j = 0; j < rm_count;  j++) {
-                    label_idx_remove(rm_out[j], uid);
-                    free(rm_out[j]);
-                }
-            }
-            free(add_out);
-            free(rm_out);
+            if (!dry_run && mf_dirty) manifest_save(imap_folder, mf);
+            if (!dry_run && ul_dirty && lpath[0]) ul_save(lpath, ul_arr, ul_count);
+            manifest_free(mf);
+            if (ul_arr) ul_free_all(ul_arr, ul_count);
         }
 
-        free(uids);
         mail_rules_free(rules);
-        printf("  Rules applied: %d message(s) modified.\n", fired_total);
+        if (dry_run)
+            printf("  Rules dry-run: %d message(s) would be modified.\n", fired_total);
+        else
+            printf("  Rules applied: %d message(s) modified.\n", fired_total);
+        total_fired += fired_total;
         done++;
     }
     config_free_account_list(accounts, count);
@@ -5439,7 +5744,7 @@ int email_service_apply_rules(const char *only_account) {
                 only_account ? only_account : "");
         return -1;
     }
-    return errors > 0 ? -1 : 0;
+    return errors > 0 ? -1 : total_fired;
 }
 
 int email_service_rebuild_contacts(const char *only_account) {

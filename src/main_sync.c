@@ -24,7 +24,7 @@
 static void help(void) {
     printf(
         "Usage: email-sync [--account <email>] [--rebuild-index] [--apply-rules]\n"
-        "                  [--rebuild-contacts] [--reconcile]\n"
+        "                  [--rebuild-contacts] [--reconcile] [--verbose]\n"
         "       email-sync cron <setup|remove|status>\n"
         "\n"
         "Downloads all messages from all accounts to the local store.\n"
@@ -49,6 +49,8 @@ static void help(void) {
         "  --reconcile         Force a full server reconcile for Gmail accounts\n"
         "                      (bypass the incremental fast path; use when the\n"
         "                      automatic sync seems stuck or out of sync)\n"
+        "  --verbose, -v       Print per-rule firing details during sync or\n"
+        "                      --apply-rules\n"
         "  --help, -h          Show this help message\n"
         "\n"
         "Exit Codes:\n"
@@ -167,6 +169,7 @@ int main(int argc, char *argv[]) {
     int do_apply_rules      = 0;
     int do_rebuild_contacts = 0;
     int do_force_reconcile  = 0;
+    int do_verbose          = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--account") == 0) {
             if (i + 1 >= argc) {
@@ -193,6 +196,10 @@ int main(int argc, char *argv[]) {
             do_force_reconcile = 1;
             continue;
         }
+        if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
+            do_verbose = 1;
+            continue;
+        }
         fprintf(stderr, "Unknown option '%s'.\nRun 'email-sync --help' for usage.\n",
                 argv[i]);
         logger_close();
@@ -207,9 +214,10 @@ int main(int argc, char *argv[]) {
     }
 
     if (do_apply_rules) {
-        int rc = email_service_apply_rules(account_filter);
+        email_service_set_verbose(do_verbose);
+        int rc = email_service_apply_rules(account_filter, 0, do_verbose);
         logger_close();
-        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        return rc >= 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     if (do_rebuild_contacts) {
@@ -219,6 +227,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Normal sync */
+    email_service_set_verbose(do_verbose);
     int result = email_service_sync_all(account_filter, do_force_reconcile);
 
     logger_log(LOG_INFO, "--- email-sync finished (result: %d) ---", result);

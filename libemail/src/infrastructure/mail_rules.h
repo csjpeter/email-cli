@@ -90,4 +90,18 @@ int mail_rules_apply(const MailRules *rules,
                      char ***add_out, int *add_count,
                      char ***rm_out,  int *rm_count);
 
+/**
+ * @brief Returns 1 if all conditions of the rule match the message, 0 otherwise.
+ *
+ * @param rule       Rule to test (NULL → returns 0).
+ * @param from       Decoded From string (may be NULL).
+ * @param subject    Decoded Subject string (may be NULL).
+ * @param to         Decoded To string (may be NULL).
+ * @param labels_csv Comma-separated label string (may be NULL).
+ * @return 1 if all conditions match, 0 otherwise.
+ */
+int mail_rule_matches(const MailRule *rule,
+                      const char *from, const char *subject,
+                      const char *to, const char *labels_csv);
+
 #endif /* MAIL_RULES_H */

@@ -199,6 +199,18 @@ static int str_array_add(char ***arr, int *count, const char *s) {
     return 0;
 }
 
+int mail_rule_matches(const MailRule *rule,
+                      const char *from, const char *subject,
+                      const char *to, const char *labels_csv)
+{
+    if (!rule) return 0;
+    if (!glob_match(rule->if_from,    from))    return 0;
+    if (!glob_match(rule->if_subject, subject)) return 0;
+    if (!glob_match(rule->if_to,      to))      return 0;
+    if (rule->if_label && !csv_label_match(rule->if_label, labels_csv)) return 0;
+    return 1;
+}
+
 int mail_rules_apply(const MailRules *rules,
                      const char *from, const char *subject,
                      const char *to, const char *labels_csv,

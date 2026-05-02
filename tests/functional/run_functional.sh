@@ -2091,6 +2091,241 @@ kill "$CS_D_PID" 2>/dev/null || true
 rm -rf "./build/tests/functional/homes/csd-$$"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 34 — US-01: rules list command
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 34: rules list (US-01) ---"
+
+H_RL="./build/tests/functional/homes/rl-$$"
+RL_ACCT="rules@test.local"
+make_home "$H_RL" "$RL_ACCT" 9993
+
+# Write a rules.ini for the account
+cat > "$H_RL/.config/email-cli/accounts/$RL_ACCT/rules.ini" <<'RINI'
+[rule "GitHub notifications"]
+if-from    = *@github.com
+then-add-label    = GitHub
+then-remove-label = INBOX
+
+[rule "Newsletters"]
+if-subject = *newsletter*
+then-add-label    = Newsletters
+then-move-folder  = INBOX.Newsletters
+
+[rule "Spam patterns"]
+if-from    = *@spammer.example
+if-subject = *prize*
+then-add-label    = _junk
+RINI
+
+RL_OUT=$( (export HOME="$H_RL"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+
+check "34.1 rules list: count line (3 rules)"    "3 rule"            "$RL_OUT"
+check "34.2 rules list: rule 1 name"             "GitHub"            "$RL_OUT"
+check "34.3 rules list: if-from shown"           "if-from"           "$RL_OUT"
+check "34.4 rules list: then-add-label shown"    "then-add-label"    "$RL_OUT"
+check "34.5 rules list: then-remove-label shown" "then-remove-label" "$RL_OUT"
+check "34.6 rules list: rule 2 move-folder"      "then-move-folder"  "$RL_OUT"
+check "34.7 rules list: multi-condition rule 3"  "Spam patterns"     "$RL_OUT"
+check "34.8 rules list: if-subject in rule 3"    "if-subject"        "$RL_OUT"
+
+# Without subcommand ('rules' alone) must also list
+RL_OUT2=$( (export HOME="$H_RL"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules 2>&1 || true) )
+check "34.9 rules (no subcmd): same output"      "GitHub"            "$RL_OUT2"
+
+# Empty case: no rules.ini
+H_RL_EMPTY="./build/tests/functional/homes/rl-empty-$$"
+make_home "$H_RL_EMPTY" "$RL_ACCT" 9993
+RL_EMPTY=$( (export HOME="$H_RL_EMPTY"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+check "34.10 rules list: no rules → helpful message" "No rules configured" "$RL_EMPTY"
+check "34.11 rules list: no rules → hints at rules.ini path" "rules.ini\|import-rules" "$RL_EMPTY"
+
+# Help pages
+RL_HELP=$( "$BIN_DIR/email-cli" help rules 2>&1 || true )
+check "34.12 help rules: usage line"   "rules list" "$RL_HELP"
+
+RL_HELP2=$( "$BIN_DIR/email-cli" rules --help 2>&1 || true )
+check "34.13 rules --help: usage line" "rules list" "$RL_HELP2"
+
+rm -rf "./build/tests/functional/homes/rl-$$"
+rm -rf "./build/tests/functional/homes/rl-empty-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 35 — US-02: email-sync --verbose rules firing log
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 35: email-sync --verbose rules log (US-02) ---"
+
+H_RV="./build/tests/functional/homes/rv-$$"
+RV_ACCT="rv@test.local"
+make_home "$H_RV" "$RV_ACCT" 9993
+
+# Rule that matches the mock server's from address "Sender N <senderN@example.com>"
+cat > "$H_RV/.config/email-cli/accounts/$RV_ACCT/rules.ini" <<'RVINI'
+[rule "Mock messages"]
+if-from = *@example.com*
+then-add-label = MockLabel
+RVINI
+
+# Sync without --verbose: no per-rule lines expected
+RV_QUIET=$( (export HOME="$H_RV"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) )
+check_not "35.1 sync quiet: no [rule] lines without --verbose" "\[rule\]" "$RV_QUIET"
+check     "35.2 sync quiet: fetched/stored summary present"    "fetched\|stored" "$RV_QUIET"
+
+# Wipe local store so sync re-downloads messages for verbose test
+rm -rf "$H_RV/.local/share/email-cli"
+
+# Sync with --verbose: per-rule lines expected
+RV_VERB=$( (export HOME="$H_RV"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" --verbose 2>&1 || true) )
+check "35.3 sync --verbose: [rule] line present"      "\[rule\]"      "$RV_VERB"
+check "35.4 sync --verbose: rule name in output"      "Mock messages" "$RV_VERB"
+check "35.5 sync --verbose: +label in rule log"       "+MockLabel"    "$RV_VERB"
+
+# --apply-rules --verbose (US-02 apply path)
+RV_ARULE=$( (export HOME="$H_RV"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" --apply-rules --verbose 2>&1 || true) )
+check "35.6 apply-rules --verbose: [rule] line"       "\[rule\]"      "$RV_ARULE"
+check "35.7 apply-rules --verbose: rule name"         "Mock messages" "$RV_ARULE"
+
+rm -rf "./build/tests/functional/homes/rv-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 36 — US-03/04: rules apply and rules apply --dry-run
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 36: rules apply / rules apply --dry-run (US-03/04) ---"
+
+H_RA="./build/tests/functional/homes/ra-$$"
+RA_ACCT="ra@test.local"
+make_home "$H_RA" "$RA_ACCT" 9993
+
+cat > "$H_RA/.config/email-cli/accounts/$RA_ACCT/rules.ini" <<'RAINI'
+[rule "Tag alpha"]
+if-from = *@example.com*
+then-add-label = AlphaTag
+RAINI
+
+# First sync to populate local store
+(export HOME="$H_RA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) > /dev/null
+
+# dry-run: must NOT modify anything, must show what would change
+RA_DRY=$( (export HOME="$H_RA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules apply --dry-run 2>&1 || true) )
+check "36.1 rules apply --dry-run: [dry-run] marker present" "\[dry-run\]" "$RA_DRY"
+check "36.2 rules apply --dry-run: rule name shown"          "Tag alpha"   "$RA_DRY"
+check "36.3 rules apply --dry-run: dry-run summary"          "dry.run\|would be" "$RA_DRY"
+
+# Apply for real: must show [rule] lines and summary
+RA_REAL=$( (export HOME="$H_RA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules apply --verbose 2>&1 || true) )
+check "36.4 rules apply --verbose: [rule] line present"   "\[rule\]"        "$RA_REAL"
+check "36.5 rules apply --verbose: rule name shown"       "Tag alpha"       "$RA_REAL"
+check "36.6 rules apply: summary shows modified count"    "modified\|applied" "$RA_REAL"
+
+# Second apply on same data: rules already applied → 0 changes
+RA_AGAIN=$( (export HOME="$H_RA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules apply 2>&1 || true) )
+check_not "36.7 rules apply again: no messages to modify" "\[rule\]" "$RA_AGAIN"
+
+# help page
+RA_HELP=$( "$BIN_DIR/email-cli" help rules 2>&1 || true )
+check "36.8 help rules: apply mentioned" "apply" "$RA_HELP"
+
+rm -rf "./build/tests/functional/homes/ra-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 37 — US-05: rules add and rules remove
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 37: rules add / rules remove (US-05) ---"
+
+H_RW="./build/tests/functional/homes/rw-$$"
+RW_ACCT="rw@test.local"
+make_home "$H_RW" "$RW_ACCT" 9993
+
+# 37.1 Add first rule
+ADD1=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules add \
+        --name "GitHub" \
+        --if-from "*@github.com" \
+        --add-label GitHub \
+        --remove-label INBOX \
+        2>&1 || true) )
+check "37.1 rules add: success message"  "added\|saved\|GitHub" "$ADD1"
+
+# Verify it's stored
+LIST1=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+check "37.2 rules list after add: rule present"        "GitHub"          "$LIST1"
+check "37.3 rules list after add: if-from condition"   "github.com"      "$LIST1"
+check "37.4 rules list after add: then-add-label"      "then-add-label"  "$LIST1"
+check "37.5 rules list after add: then-remove-label"   "then-remove-label" "$LIST1"
+
+# 37.2 Add second rule (multiple --add-label)
+(export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules add \
+        --name "Newsletters" \
+        --if-subject "*newsletter*" \
+        --add-label Newsletters \
+        --move-folder "INBOX.Newsletters" \
+        2>&1 || true) > /dev/null
+
+LIST2=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+check "37.6 rules list: both rules present"          "2 rule"            "$LIST2"
+check "37.7 rules list: second rule name"            "Newsletters"       "$LIST2"
+check "37.8 rules list: move-folder in second rule"  "then-move-folder"  "$LIST2"
+
+# 37.3 Duplicate name must fail
+ADD_DUP=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules add --name "GitHub" --if-from "*@github.com" \
+        2>&1 || true) )
+check "37.9 rules add duplicate name: error"   "already exists\|duplicate\|Error" "$ADD_DUP"
+
+# Verify count unchanged after duplicate attempt
+LIST3=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+check "37.10 rules list: still 2 rules after duplicate attempt" "2 rule" "$LIST3"
+
+# 37.4 rules add --name is required
+ADD_NONAME=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules add --if-from "*@test.com" 2>&1 || true) )
+check "37.11 rules add without --name: error" "name\|required\|Error" "$ADD_NONAME"
+
+# 37.5 rules remove
+RM1=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules remove --name "GitHub" 2>&1 || true) )
+check "37.12 rules remove: success message" "removed\|deleted\|GitHub" "$RM1"
+
+LIST4=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+check     "37.13 rules list after remove: only 1 rule left"       "1 rule"  "$LIST4"
+check_not "37.14 rules list after remove: removed rule gone"      "GitHub"  "$LIST4"
+check     "37.15 rules list after remove: remaining rule present" "Newsletters" "$LIST4"
+
+# 37.6 remove non-existent rule
+RM_MISS=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules remove --name "NoSuchRule" 2>&1 || true) )
+check "37.16 rules remove non-existent: error" "not found\|Error" "$RM_MISS"
+
+# 37.7 rules remove --name is required
+RM_NONAME=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules remove 2>&1 || true) )
+check "37.17 rules remove without --name: error" "name\|required\|Error" "$RM_NONAME"
+
+# help pages
+check "37.18 help rules add: usage"    "rules add"    "$( "$BIN_DIR/email-cli" help rules 2>&1 || true )"
+check "37.19 help rules remove: usage" "rules remove" "$( "$BIN_DIR/email-cli" help rules 2>&1 || true )"
+
+rm -rf "./build/tests/functional/homes/rw-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

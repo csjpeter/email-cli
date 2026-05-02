@@ -193,6 +193,16 @@ int email_service_sync_all(const char *only_account, int force_reconcile);
 int email_service_rebuild_indexes(const char *only_account);
 
 /**
+ * @brief Set verbose mode for sync and apply-rules operations.
+ *
+ * When verbose is non-zero, per-rule firing details are printed to stdout
+ * during email_service_sync() and email_service_apply_rules().
+ *
+ * @param verbose  Non-zero to enable verbose output, 0 to disable.
+ */
+void email_service_set_verbose(int verbose);
+
+/**
  * @brief Apply mail sorting rules retroactively to all locally cached messages.
  *
  * Loads the rules.ini for each configured account, iterates all cached
@@ -200,9 +210,11 @@ int email_service_rebuild_indexes(const char *only_account);
  * Does not re-download messages or contact the server.
  *
  * @param only_account  Email address to process, or NULL for all accounts.
- * @return 0 on success, -1 on error or account not found.
+ * @param dry_run       Non-zero to print changes without writing them.
+ * @param verbose       Non-zero to print per-rule firing details.
+ * @return Number of messages modified (or would be modified), or -1 on error.
  */
-int email_service_apply_rules(const char *only_account);
+int email_service_apply_rules(const char *only_account, int dry_run, int verbose);
 
 /**
  * @brief Rebuild the contact suggestion cache from all locally cached headers.

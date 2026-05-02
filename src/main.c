@@ -14,6 +14,7 @@
 #include "smtp_adapter.h"
 #include "compose_service.h"
 #include "help_gmail.h"
+#include "mail_rules.h"
 
 /* Default limit for batch output */
 #define BATCH_DEFAULT_LIMIT 100
@@ -61,6 +62,9 @@ static void help_general(void) {
         "  config                      View or update configuration (incl. SMTP)\n"
         "  migrate-credentials         Re-encrypt (or decrypt) all stored passwords\n"
         "\n"
+        "Rules:\n"
+        "  rules list                  List sorting rules for the account\n"
+        "\n"
         "Help:\n"
         "  help [command]              Show this help, or detailed help for a command\n"
         "  help gmail                  Step-by-step Gmail OAuth2 setup guide\n"
@@ -68,6 +72,28 @@ static void help_general(void) {
         "Run 'email-cli help <command>' for more information.\n"
         "For the interactive TUI use email-tui.\n"
         "For background sync and cron management use email-sync.\n"
+    );
+}
+
+static void help_rules_list(void) {
+    printf(
+        "Usage: email-cli [<account>] rules list\n"
+        "\n"
+        "List all sorting rules configured for the account.\n"
+        "\n"
+        "Rules are stored in:\n"
+        "  ~/.config/email-cli/accounts/<account>/rules.ini\n"
+        "\n"
+        "Each rule matches incoming messages by From / Subject / To / Label\n"
+        "(glob patterns) and applies label additions, removals, or folder moves.\n"
+        "\n"
+        "Options:\n"
+        "  --account <email>   Account to inspect (required if multiple configured)\n"
+        "  --help, -h          Show this help message\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli rules list\n"
+        "  email-cli user@example.com rules list\n"
     );
 }
 
@@ -521,6 +547,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
                 if (strcmp(cmd, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
+                if (strcmp(cmd, "rules")           == 0) { help_rules_list();      return EXIT_SUCCESS; }
             }
             /* email-cli --help  or  email-cli help --help */
             help_general();
@@ -560,6 +587,7 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
             if (strcmp(topic, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
             if (strcmp(topic, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
+            if (strcmp(topic, "rules")           == 0) { help_rules_list();      return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli help' for available commands.\n");
             return EXIT_FAILURE;
@@ -586,7 +614,8 @@ int main(int argc, char *argv[]) {
     int cmd_needs_cfg = !(cmd && (strcmp(cmd, "add-account")        == 0 ||
                                   strcmp(cmd, "list-accounts")      == 0 ||
                                   strcmp(cmd, "remove-account")     == 0 ||
-                                  strcmp(cmd, "migrate-credentials") == 0));
+                                  strcmp(cmd, "migrate-credentials") == 0 ||
+                                  strcmp(cmd, "rules")              == 0));
 
     /* 4. Load configuration */
     Config *cfg = NULL;
@@ -1121,6 +1150,82 @@ int main(int argc, char *argv[]) {
             result = 0;
         } else {
             fprintf(stderr, "Error: one or more accounts could not be migrated.\n");
+        }
+
+    } else if (strcmp(cmd, "rules") == 0) {
+        /* Determine subcommand: the first non-flag arg after "rules" */
+        const char *subcmd = NULL;
+        for (int i = cmd_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--help")  == 0 || strcmp(argv[i], "-h") == 0) {
+                help_rules_list();
+                return EXIT_SUCCESS;
+            }
+            subcmd = argv[i]; break;
+        }
+
+        if (!subcmd || strcmp(subcmd, "list") == 0) {
+            /* rules list: show rules for the configured account(s) */
+            int acc_count = 0;
+            AccountEntry *accounts = config_list_accounts(&acc_count);
+
+            int printed = 0;
+            for (int i = 0; i < acc_count; i++) {
+                if (account_arg && account_arg[0] &&
+                    strcmp(accounts[i].name, account_arg) != 0)
+                    continue;
+
+                MailRules *rules = mail_rules_load(accounts[i].name);
+
+                if (!rules || rules->count == 0) {
+                    printf("No rules configured for %s.\n", accounts[i].name);
+                    printf("  (Create ~/.config/email-cli/accounts/%s/rules.ini"
+                           " or use 'email-import-rules'.)\n", accounts[i].name);
+                    mail_rules_free(rules);
+                    printed++;
+                    continue;
+                }
+
+                printf("Rules for %s (%d rule%s):\n\n",
+                       accounts[i].name, rules->count,
+                       rules->count == 1 ? "" : "s");
+
+                for (int r = 0; r < rules->count; r++) {
+                    const MailRule *rule = &rules->rules[r];
+                    printf("  %d. %s\n", r + 1,
+                           rule->name && rule->name[0] ? rule->name : "(unnamed)");
+
+                    if (rule->if_from)    printf("       if-from      = %s\n", rule->if_from);
+                    if (rule->if_subject) printf("       if-subject   = %s\n", rule->if_subject);
+                    if (rule->if_to)      printf("       if-to        = %s\n", rule->if_to);
+                    if (rule->if_label)   printf("       if-label     = %s\n", rule->if_label);
+
+                    for (int j = 0; j < rule->then_add_count; j++)
+                        printf("       then-add-label    = %s\n", rule->then_add_label[j]);
+                    for (int j = 0; j < rule->then_rm_count; j++)
+                        printf("       then-remove-label = %s\n", rule->then_rm_label[j]);
+                    if (rule->then_move_folder)
+                        printf("       then-move-folder  = %s\n", rule->then_move_folder);
+                    printf("\n");
+                }
+
+                mail_rules_free(rules);
+                printed++;
+            }
+
+            config_free_account_list(accounts, acc_count);
+
+            if (!printed) {
+                fprintf(stderr, "Error: Account '%s' not found.\n",
+                        account_arg ? account_arg : "");
+                result = -1;
+            } else {
+                result = 0;
+            }
+        } else {
+            fprintf(stderr, "Unknown 'rules' subcommand '%s'.\n", subcmd);
+            fprintf(stderr, "Available: rules list\n");
+            result = -1;
         }
 
     } else {

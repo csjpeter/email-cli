@@ -11,7 +11,7 @@ BIN_DIR="./bin"
 BIN_PATH="$BIN_DIR/$PROJECT_NAME"
 
 INSTALL_DIR="${HOME}/.local/bin"
-INSTALL_BINS="email-cli email-cli-ro email-sync email-tui"
+INSTALL_BINS="email-cli email-cli-ro email-sync email-tui email-import-rules"
 
 show_help() {
     echo "Usage: ./manage.sh [command]"
@@ -92,6 +92,7 @@ cmake_build() {
     cp "$BUILD_DIR/${PROJECT_NAME}-ro" "$BIN_DIR/" 2>/dev/null || true
     cp "$BUILD_DIR/email-sync"         "$BIN_DIR/" 2>/dev/null || true
     cp "$BUILD_DIR/email-tui"          "$BIN_DIR/" 2>/dev/null || true
+    cp "$BUILD_DIR/email-import-rules" "$BIN_DIR/" 2>/dev/null || true
 }
 
 build_release() {

@@ -2326,6 +2326,85 @@ check "37.19 help rules remove: usage" "rules remove" "$( "$BIN_DIR/email-cli" h
 rm -rf "./build/tests/functional/homes/rw-$$"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 38 — email-import-rules: bin presence + unsupported rule warnings
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 38: email-import-rules (US-IR-01 / US-IR-02) ---"
+
+# US-IR-01: email-import-rules must be present in bin/
+check "38.1 email-import-rules binary exists in bin/" "." \
+    "$(test -x "$BIN_DIR/email-import-rules" && echo ok || echo missing)"
+
+# US-IR-02: unsupported Thunderbird rule elements produce [warn] lines on stderr
+
+# Create a synthetic Thunderbird profile with mixed supported/unsupported rules
+TB_DIR="./build/tests/functional/homes/tb-$$"
+mkdir -p "$TB_DIR/ImapMail/imap.test.local"
+cat > "$TB_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TBDAT'
+version="9"
+logging="no"
+name="Good rule"
+enabled="yes"
+condition="AND (from,contains,@github.com)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/GitHub"
+
+name="Bad body rule"
+enabled="yes"
+condition="AND (body,contains,newsletter)"
+action="Label"
+actionValue="$label1"
+
+name="Mixed conditions"
+enabled="yes"
+condition="AND (from,contains,@example.com) (age,greater than,7)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Archive"
+
+name="Unsupported match"
+enabled="yes"
+condition="AND (from,doesn't contain,spam)"
+action="Mark as read"
+
+TBDAT
+
+# We need an account for the importer; use a dummy config
+H_IR="./build/tests/functional/homes/ir-$$"
+mkdir -p "$H_IR/.config/email-cli/accounts/ir@test.local"
+cat > "$H_IR/.config/email-cli/accounts/ir@test.local/config.ini" <<'CFG'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=ir@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG
+
+IR_OUT=$( (export HOME="$H_IR"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB_DIR" \
+        --account ir@test.local --dry-run 2>&1 || true) )
+
+# Good rule should be converted successfully (visible in stdout output)
+check "38.2 good rule converted: rule name present"       "Good rule"         "$IR_OUT"
+check "38.3 good rule converted: if-from shown"           "github.com"        "$IR_OUT"
+check "38.4 good rule converted: move-folder shown"       "GitHub"            "$IR_OUT"
+
+# Unsupported conditions/actions emit [warn] lines
+check "38.5 warn for unsupported field (body)"            "\[warn\].*body"    "$IR_OUT"
+check "38.6 warn for unsupported action (Label)"          "\[warn\].*Label"   "$IR_OUT"
+check "38.7 warn for empty rule"                          "no conditions\|no.*actions\|could be converted\|will be empty" "$IR_OUT"
+check "38.8 warn for unsupported field (age)"             "\[warn\].*age"     "$IR_OUT"
+check "38.9 warn for unsupported match (doesn't contain)" "\[warn\].*doesn"   "$IR_OUT"
+
+# The --help output must mention the binary name
+IR_HELP=$( "$BIN_DIR/email-import-rules" --help 2>&1 || true )
+check "38.10 help: usage line"                            "email-import-rules" "$IR_HELP"
+check "38.11 help: --thunderbird-path option"             "thunderbird-path"   "$IR_HELP"
+
+rm -rf "./build/tests/functional/homes/ir-$$"
+case "$TB_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${TB_DIR##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

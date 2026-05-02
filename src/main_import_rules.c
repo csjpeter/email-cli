@@ -98,7 +98,9 @@ static char *trim_quotes(char *s) {
     return s;
 }
 
-/* Parse one Thunderbird filter file and append rules to *out. */
+/* Parse one Thunderbird filter file and append rules to *out.
+ * Prints warnings to stderr for any rule elements that could not be converted.
+ * Returns the number of rules added (may be 0 if none could be converted). */
 static int parse_tb_filter_file(const char *path, MailRules **out) {
     FILE *fp = fopen(path, "r");
     if (!fp) return 0;
@@ -111,6 +113,11 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
     char line[4096];
     MailRule *cur = NULL;
     int rules_added = 0;
+    /* Track per-rule conversion success for end-of-rule empty-rule warning */
+    int cur_converted_cond  = 0;
+    int cur_skipped_cond    = 0;
+    int cur_converted_act   = 0;
+    int cur_skipped_act     = 0;
 
     while (fgets(line, sizeof(line), fp)) {
         /* Strip trailing newline */
@@ -121,7 +128,15 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
 
         if (!*p) {
             /* blank line = end of current rule block */
+            if (cur && cur_converted_cond == 0 && cur_converted_act == 0
+                    && (cur_skipped_cond > 0 || cur_skipped_act > 0)) {
+                fprintf(stderr, "  [warn] Rule \"%s\": no conditions or actions could be "
+                        "converted — rule will be empty\n",
+                        cur->name ? cur->name : "(unnamed)");
+            }
             cur = NULL;
+            cur_converted_cond = cur_skipped_cond = 0;
+            cur_converted_act  = cur_skipped_act  = 0;
             continue;
         }
 
@@ -132,6 +147,16 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
         char *val = trim_quotes(eq + 1);
 
         if (strcmp(key, "name") == 0) {
+            /* End previous rule tracking before starting new one */
+            if (cur && cur_converted_cond == 0 && cur_converted_act == 0
+                    && (cur_skipped_cond > 0 || cur_skipped_act > 0)) {
+                fprintf(stderr, "  [warn] Rule \"%s\": no conditions or actions could be "
+                        "converted — rule will be empty\n",
+                        cur->name ? cur->name : "(unnamed)");
+            }
+            cur_converted_cond = cur_skipped_cond = 0;
+            cur_converted_act  = cur_skipped_act  = 0;
+
             /* Start new rule */
             cur = NULL;
             MailRule *nr = NULL;
@@ -169,10 +194,26 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
                 char *c2 = f2 ? strchr(f2, ',') : NULL;
                 if (c2) { *c2 = '\0'; f3 = c2 + 1; }
 
-                if (f1 && f3) {
-                    /* Convert Thunderbird "contains" to glob pattern */
-                    char glob[1024];
-                    if (strstr(f2, "contains") || strstr(f2, "is")) {
+                if (f1 && f2 && f3) {
+                    int supported_field = (strcmp(f1, "from") == 0 ||
+                                           strcmp(f1, "subject") == 0 ||
+                                           strcmp(f1, "to") == 0);
+                    int supported_match = (strstr(f2, "contains") != NULL ||
+                                           strstr(f2, "is") != NULL);
+
+                    if (!supported_field) {
+                        fprintf(stderr, "  [warn] Rule \"%s\": condition field \"%s\" "
+                                "is not supported (only from/subject/to), skipping term\n",
+                                cur->name ? cur->name : "(unnamed)", f1);
+                        cur_skipped_cond++;
+                    } else if (!supported_match) {
+                        fprintf(stderr, "  [warn] Rule \"%s\": match type \"%s\" "
+                                "is not supported (only contains/is), skipping term\n",
+                                cur->name ? cur->name : "(unnamed)", f2);
+                        cur_skipped_cond++;
+                    } else {
+                        /* Convert to glob pattern */
+                        char glob[1024];
                         if (strstr(f2, "contains"))
                             snprintf(glob, sizeof(glob), "*%s*", f3);
                         else
@@ -184,6 +225,7 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
                             cur->if_subject = strdup(glob);
                         else if (strcmp(f1, "to")      == 0 && !cur->if_to)
                             cur->if_to      = strdup(glob);
+                        cur_converted_cond++;
                     }
                 }
                 tok = strstr(end + 1, "(");
@@ -193,8 +235,16 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
         }
 
         if (strcmp(key, "action") == 0) {
-            if (strstr(val, "Move") && cur->then_move_folder == NULL)
-                cur->then_move_folder = strdup("(set by actionValue)");
+            if (strstr(val, "Move")) {
+                if (cur->then_move_folder == NULL)
+                    cur->then_move_folder = strdup("(set by actionValue)");
+                cur_converted_act++;
+            } else {
+                fprintf(stderr, "  [warn] Rule \"%s\": action \"%s\" "
+                        "is not supported, skipping\n",
+                        cur->name ? cur->name : "(unnamed)", val);
+                cur_skipped_act++;
+            }
             continue;
         }
 
@@ -208,6 +258,14 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
             }
             continue;
         }
+    }
+
+    /* Check final rule after EOF (no trailing blank line) */
+    if (cur && cur_converted_cond == 0 && cur_converted_act == 0
+            && (cur_skipped_cond > 0 || cur_skipped_act > 0)) {
+        fprintf(stderr, "  [warn] Rule \"%s\": no conditions or actions could be "
+                "converted — rule will be empty\n",
+                cur->name ? cur->name : "(unnamed)");
     }
 
     fclose(fp);

@@ -384,14 +384,60 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
     return rules_added;
 }
 
-/* Scan a Thunderbird server directory for msgFilterRules.dat files */
-static int scan_tb_server_dir(const char *dir, MailRules **out) {
+/* ── Hostname helpers ────────────────────────────────────────────── */
+
+/* Extract hostname from URL like "imaps://box.csaszar.email:993".
+ * Writes into buf[buflen]; returns buf on success, NULL on failure. */
+static const char *extract_hostname(const char *url, char *buf, size_t buflen) {
+    if (!url || !buf || buflen == 0) return NULL;
+    const char *p = strstr(url, "://");
+    p = p ? p + 3 : url;
+    size_t i = 0;
+    while (*p && *p != ':' && *p != '/' && i + 1 < buflen)
+        buf[i++] = *p++;
+    buf[i] = '\0';
+    return i > 0 ? buf : NULL;
+}
+
+/* Check if a Thunderbird server directory name corresponds to host.
+ * Thunderbird inserts -N into the second-to-last domain component for
+ * duplicate servers: "imap.gmail.com" → "imap.gmail-2.com". */
+static int host_matches_tb_dir(const char *host, const char *tbdir) {
+    if (!host || !tbdir) return 0;
+    if (strcasecmp(host, tbdir) == 0) return 1;
+
+    /* Find second-to-last dot in host */
+    const char *last_dot = strrchr(host, '.');
+    if (!last_dot) return 0;
+    const char *prev_dot = NULL;
+    for (const char *p = host; p < last_dot; p++)
+        if (*p == '.') prev_dot = p;
+    if (!prev_dot) return 0;
+
+    /* host  = <prefix> <mid>       <tld>       e.g. "imap." "gmail"  ".com"
+     * tbdir = <prefix> <mid> -N    <tld>       e.g. "imap." "gmail-2" ".com" */
+    size_t prefix_and_mid = (size_t)(last_dot - host); /* "imap.gmail" */
+    if (strncasecmp(tbdir, host, prefix_and_mid) != 0) return 0;
+    const char *rest = tbdir + prefix_and_mid;
+    if (rest[0] != '-') return 0;
+    rest++;
+    if (*rest < '0' || *rest > '9') return 0;
+    while (*rest >= '0' && *rest <= '9') rest++;
+    return strcasecmp(rest, last_dot) == 0; /* ".com" == ".com" */
+}
+
+/* ── Thunderbird scanner ─────────────────────────────────────────── */
+
+/* Scan one Thunderbird server parent dir (ImapMail/ or Mail/).
+ * Only includes subdirectories whose name matches host (NULL = all). */
+static int scan_tb_server_dir(const char *dir, const char *host, MailRules **out) {
     DIR *dp = opendir(dir);
     if (!dp) return 0;
     int total = 0;
     struct dirent *de;
     while ((de = readdir(dp)) != NULL) {
         if (de->d_name[0] == '.') continue;
+        if (host && !host_matches_tb_dir(host, de->d_name)) continue;
         char path[8300];
         snprintf(path, sizeof(path), "%s/%s/msgFilterRules.dat", dir, de->d_name);
         struct stat st;
@@ -405,6 +451,117 @@ static int scan_tb_server_dir(const char *dir, MailRules **out) {
     return total;
 }
 
+/* ── Per-rule output helpers ─────────────────────────────────────── */
+
+static void print_rule(const MailRule *r) {
+    printf("[rule \"%s\"]\n", r->name ? r->name : "(unnamed)");
+    if (r->if_from)        printf("  if-from        = %s\n", r->if_from);
+    if (r->if_not_from)    printf("  if-not-from    = %s\n", r->if_not_from);
+    if (r->if_subject)     printf("  if-subject     = %s\n", r->if_subject);
+    if (r->if_not_subject) printf("  if-not-subject = %s\n", r->if_not_subject);
+    if (r->if_to)          printf("  if-to          = %s\n", r->if_to);
+    if (r->if_not_to)      printf("  if-not-to      = %s\n", r->if_not_to);
+    if (r->if_body)        printf("  if-body        = %s\n", r->if_body);
+    if (r->if_age_gt > 0)  printf("  if-age-gt      = %d\n", r->if_age_gt);
+    if (r->if_age_lt > 0)  printf("  if-age-lt      = %d\n", r->if_age_lt);
+    for (int j = 0; j < r->then_add_count; j++)
+        printf("  then-add-label    = %s\n", r->then_add_label[j]);
+    for (int j = 0; j < r->then_rm_count; j++)
+        printf("  then-remove-label = %s\n", r->then_rm_label[j]);
+    if (r->then_move_folder)
+        printf("  then-move-folder  = %s\n", r->then_move_folder);
+    if (r->then_forward_to)
+        printf("  then-forward-to   = %s\n", r->then_forward_to);
+    printf("\n");
+}
+
+static int write_rules_to_file(const MailRules *rules, const char *path) {
+    char *slash = strrchr(path, '/');
+    if (slash) {
+        char dir[4096];
+        size_t dl = (size_t)(slash - path);
+        if (dl < sizeof(dir)) {
+            memcpy(dir, path, dl); dir[dl] = '\0';
+            fs_mkdir_p(dir, 0700);
+        }
+    }
+    FILE *fp = fopen(path, "w");
+    if (!fp) { fprintf(stderr, "Error: Cannot write to %s\n", path); return -1; }
+    for (int i = 0; i < rules->count; i++) {
+        const MailRule *r = &rules->rules[i];
+        fprintf(fp, "[rule \"%s\"]\n", r->name ? r->name : "");
+        if (r->if_from)        fprintf(fp, "if-from        = %s\n", r->if_from);
+        if (r->if_not_from)    fprintf(fp, "if-not-from    = %s\n", r->if_not_from);
+        if (r->if_subject)     fprintf(fp, "if-subject     = %s\n", r->if_subject);
+        if (r->if_not_subject) fprintf(fp, "if-not-subject = %s\n", r->if_not_subject);
+        if (r->if_to)          fprintf(fp, "if-to          = %s\n", r->if_to);
+        if (r->if_not_to)      fprintf(fp, "if-not-to      = %s\n", r->if_not_to);
+        if (r->if_body)        fprintf(fp, "if-body        = %s\n", r->if_body);
+        if (r->if_age_gt > 0)  fprintf(fp, "if-age-gt      = %d\n", r->if_age_gt);
+        if (r->if_age_lt > 0)  fprintf(fp, "if-age-lt      = %d\n", r->if_age_lt);
+        for (int j = 0; j < r->then_add_count; j++)
+            fprintf(fp, "then-add-label    = %s\n", r->then_add_label[j]);
+        for (int j = 0; j < r->then_rm_count; j++)
+            fprintf(fp, "then-remove-label = %s\n", r->then_rm_label[j]);
+        if (r->then_move_folder)
+            fprintf(fp, "then-move-folder  = %s\n", r->then_move_folder);
+        if (r->then_forward_to)
+            fprintf(fp, "then-forward-to   = %s\n", r->then_forward_to);
+        fprintf(fp, "\n");
+    }
+    fclose(fp);
+    return 0;
+}
+
+/* ── Per-account processing ──────────────────────────────────────── */
+
+/* Scan Thunderbird dirs matching host, print rules, optionally save.
+ * output: NULL → save to default rules.ini; non-NULL → write to that file.
+ * Returns EXIT_SUCCESS / EXIT_FAILURE. */
+static int process_account(const char *account_name, const char *host,
+                            const char *tb_path, int dry_run, const char *output) {
+    char imap_dir[8210], mail_dir[8210];
+    snprintf(imap_dir, sizeof(imap_dir), "%s/ImapMail", tb_path);
+    snprintf(mail_dir, sizeof(mail_dir), "%s/Mail",     tb_path);
+
+    MailRules *rules = NULL;
+    int total = 0;
+    total += scan_tb_server_dir(imap_dir, host, &rules);
+    total += scan_tb_server_dir(mail_dir, host, &rules);
+
+    if (total == 0 || !rules || rules->count == 0) {
+        printf("  No rules found.\n");
+        mail_rules_free(rules);
+        return EXIT_SUCCESS;
+    }
+
+    printf("Found %d rule(s):\n\n", rules->count);
+    for (int i = 0; i < rules->count; i++)
+        print_rule(&rules->rules[i]);
+
+    if (dry_run) {
+        printf("[dry-run] Rules NOT saved.\n");
+        mail_rules_free(rules);
+        return EXIT_SUCCESS;
+    }
+
+    int rc = 0;
+    if (output) {
+        rc = write_rules_to_file(rules, output);
+        if (rc == 0) printf("Rules saved to: %s\n", output);
+    } else {
+        rc = mail_rules_save(account_name, rules);
+        if (rc == 0)
+            printf("Rules saved to ~/.config/email-cli/accounts/%s/rules.ini\n",
+                   account_name);
+        else
+            fprintf(stderr, "Error: Failed to save rules for '%s'.\n", account_name);
+    }
+
+    mail_rules_free(rules);
+    return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
 /* ── Help ────────────────────────────────────────────────────────── */
 
 static void help(void) {
@@ -413,13 +570,14 @@ static void help(void) {
         "\n"
         "Import mail sorting rules from Thunderbird into email-cli rules.ini format.\n"
         "\n"
+        "Without --account: processes ALL configured email-cli accounts, importing\n"
+        "only the Thunderbird filters that belong to each account's IMAP server.\n"
+        "\n"
         "Options:\n"
         "  --thunderbird-path <dir>  Path to Thunderbird profile directory\n"
         "                            (auto-detected from ~/.thunderbird if omitted)\n"
-        "  --account <email>         Target account name in email-cli config\n"
-        "                            (uses first configured account if omitted)\n"
-        "  --output <path>           Write rules to this file instead of the\n"
-        "                            default account rules.ini\n"
+        "  --account <email>         Import rules for this account only\n"
+        "  --output <path>           Write rules to this file (requires --account)\n"
         "  --dry-run                 Print rules without saving\n"
         "  --version                 Show version\n"
         "  --help, -h                Show this help message\n"
@@ -434,15 +592,14 @@ static void help(void) {
 int main(int argc, char *argv[]) {
     setlocale(LC_ALL, "");
 
-    const char *tb_path    = NULL;
-    const char *account    = NULL;
-    const char *output     = NULL;
-    int         dry_run    = 0;
+    const char *tb_path = NULL;
+    const char *account = NULL;
+    const char *output  = NULL;
+    int         dry_run = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            help();
-            return EXIT_SUCCESS;
+            help(); return EXIT_SUCCESS;
         }
         if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-V") == 0) {
             printf("email-import-rules %s\n", EMAIL_CLI_VERSION);
@@ -453,37 +610,38 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Error: --thunderbird-path requires a path.\n");
                 return EXIT_FAILURE;
             }
-            tb_path = argv[++i];
-            continue;
+            tb_path = argv[++i]; continue;
         }
         if (strcmp(argv[i], "--account") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "Error: --account requires an email address.\n");
                 return EXIT_FAILURE;
             }
-            account = argv[++i];
-            continue;
+            account = argv[++i]; continue;
         }
         if (strcmp(argv[i], "--output") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "Error: --output requires a path.\n");
                 return EXIT_FAILURE;
             }
-            output = argv[++i];
-            continue;
+            output = argv[++i]; continue;
         }
-        if (strcmp(argv[i], "--dry-run") == 0) {
-            dry_run = 1;
-            continue;
-        }
+        if (strcmp(argv[i], "--dry-run") == 0) { dry_run = 1; continue; }
         fprintf(stderr, "Unknown option '%s'.\nRun 'email-import-rules --help'.\n",
                 argv[i]);
         return EXIT_FAILURE;
     }
 
+    /* --output without --account is ambiguous in multi-account mode */
+    if (output && !account) {
+        fprintf(stderr,
+                "Error: --output requires --account when multiple accounts exist.\n"
+                "Use: email-import-rules --account <email> --output <path>\n");
+        return EXIT_FAILURE;
+    }
+
     /* Auto-detect Thunderbird profile */
-    RAII_STRING char *tb_auto      = NULL;
-    RAII_STRING char *account_auto = NULL; /* owned copy when auto-detected */
+    RAII_STRING char *tb_auto = NULL;
     if (!tb_path) {
         tb_auto = find_thunderbird_profile();
         if (!tb_auto) {
@@ -495,123 +653,44 @@ int main(int argc, char *argv[]) {
         printf("Thunderbird profile: %s\n", tb_path);
     }
 
-    /* Determine target account name */
-    if (!account) {
-        int count = 0;
-        AccountEntry *accounts = config_list_accounts(&count);
-        if (accounts && count > 0) {
-            account_auto = strdup(accounts[0].name); /* own the name before free */
-            account = account_auto;
-            printf("Target account: %s\n", account);
-        }
-        config_free_account_list(accounts, count);
+    if (account) {
+        /* ── Single-account mode ── */
+        Config *cfg = config_load_account(account);
+        char host_buf[512] = "";
+        if (cfg && cfg->host)
+            extract_hostname(cfg->host, host_buf, sizeof(host_buf));
+        config_free(cfg);
+
+        printf("Account: %s (host: %s)\n", account,
+               host_buf[0] ? host_buf : "unknown");
+        printf("Scanning Thunderbird filters...\n");
+        return process_account(account, host_buf[0] ? host_buf : NULL,
+                               tb_path, dry_run, output);
     }
-    if (!account) {
+
+    /* ── Multi-account mode: process each account with its own host filter ── */
+    int count = 0;
+    AccountEntry *accounts = config_list_accounts(&count);
+    if (!accounts || count == 0) {
         fprintf(stderr, "Error: No account configured. Run the setup wizard first.\n");
         return EXIT_FAILURE;
     }
 
-    /* Scan Thunderbird filter files */
-    MailRules *rules = NULL;
-    int total = 0;
+    int any_error = 0;
+    for (int i = 0; i < count; i++) {
+        char host_buf[512] = "";
+        if (accounts[i].cfg && accounts[i].cfg->host)
+            extract_hostname(accounts[i].cfg->host, host_buf, sizeof(host_buf));
 
-    char imap_dir[8210], mail_dir[8210];
-    snprintf(imap_dir, sizeof(imap_dir), "%s/ImapMail", tb_path);
-    snprintf(mail_dir, sizeof(mail_dir), "%s/Mail",     tb_path);
+        printf("\n--- Account: %s (host: %s) ---\n",
+               accounts[i].name, host_buf[0] ? host_buf : "unknown");
+        printf("Scanning Thunderbird filters...\n");
 
-    printf("Scanning Thunderbird filters...\n");
-    total += scan_tb_server_dir(imap_dir, &rules);
-    total += scan_tb_server_dir(mail_dir, &rules);
-
-    if (total == 0 || !rules || rules->count == 0) {
-        printf("No rules found in Thunderbird profile.\n");
-        mail_rules_free(rules);
-        return EXIT_SUCCESS;
+        int rc = process_account(accounts[i].name,
+                                 host_buf[0] ? host_buf : NULL,
+                                 tb_path, dry_run, NULL);
+        if (rc != EXIT_SUCCESS) any_error = 1;
     }
-
-    printf("Found %d rule(s):\n\n", rules->count);
-
-    /* Print rules summary */
-    for (int i = 0; i < rules->count; i++) {
-        const MailRule *r = &rules->rules[i];
-        printf("[rule \"%s\"]\n", r->name ? r->name : "(unnamed)");
-        if (r->if_from)        printf("  if-from        = %s\n", r->if_from);
-        if (r->if_not_from)    printf("  if-not-from    = %s\n", r->if_not_from);
-        if (r->if_subject)     printf("  if-subject     = %s\n", r->if_subject);
-        if (r->if_not_subject) printf("  if-not-subject = %s\n", r->if_not_subject);
-        if (r->if_to)          printf("  if-to          = %s\n", r->if_to);
-        if (r->if_not_to)      printf("  if-not-to      = %s\n", r->if_not_to);
-        if (r->if_body)        printf("  if-body        = %s\n", r->if_body);
-        if (r->if_age_gt > 0)  printf("  if-age-gt      = %d\n", r->if_age_gt);
-        if (r->if_age_lt > 0)  printf("  if-age-lt      = %d\n", r->if_age_lt);
-        for (int j = 0; j < r->then_add_count; j++)
-            printf("  then-add-label    = %s\n", r->then_add_label[j]);
-        for (int j = 0; j < r->then_rm_count; j++)
-            printf("  then-remove-label = %s\n", r->then_rm_label[j]);
-        if (r->then_move_folder)
-            printf("  then-move-folder  = %s\n", r->then_move_folder);
-        if (r->then_forward_to)
-            printf("  then-forward-to   = %s\n", r->then_forward_to);
-        printf("\n");
-    }
-
-    if (dry_run) {
-        printf("[dry-run] Rules NOT saved.\n");
-        mail_rules_free(rules);
-        return EXIT_SUCCESS;
-    }
-
-    /* Save to output path or default account rules.ini */
-    int rc = 0;
-    if (output) {
-        /* Write directly to the specified path */
-        char *slash = strrchr(output, '/');
-        if (slash) {
-            char dir[4096];
-            size_t dl = (size_t)(slash - output);
-            if (dl < sizeof(dir)) {
-                memcpy(dir, output, dl); dir[dl] = '\0';
-                fs_mkdir_p(dir, 0700);
-            }
-        }
-        FILE *fp = fopen(output, "w");
-        if (!fp) {
-            fprintf(stderr, "Error: Cannot write to %s\n", output);
-            mail_rules_free(rules);
-            return EXIT_FAILURE;
-        }
-        for (int i = 0; i < rules->count; i++) {
-            const MailRule *r = &rules->rules[i];
-            fprintf(fp, "[rule \"%s\"]\n", r->name ? r->name : "");
-            if (r->if_from)        fprintf(fp, "if-from        = %s\n", r->if_from);
-            if (r->if_not_from)    fprintf(fp, "if-not-from    = %s\n", r->if_not_from);
-            if (r->if_subject)     fprintf(fp, "if-subject     = %s\n", r->if_subject);
-            if (r->if_not_subject) fprintf(fp, "if-not-subject = %s\n", r->if_not_subject);
-            if (r->if_to)          fprintf(fp, "if-to          = %s\n", r->if_to);
-            if (r->if_not_to)      fprintf(fp, "if-not-to      = %s\n", r->if_not_to);
-            if (r->if_body)        fprintf(fp, "if-body        = %s\n", r->if_body);
-            if (r->if_age_gt > 0)  fprintf(fp, "if-age-gt      = %d\n", r->if_age_gt);
-            if (r->if_age_lt > 0)  fprintf(fp, "if-age-lt      = %d\n", r->if_age_lt);
-            for (int j = 0; j < r->then_add_count; j++)
-                fprintf(fp, "then-add-label    = %s\n", r->then_add_label[j]);
-            for (int j = 0; j < r->then_rm_count; j++)
-                fprintf(fp, "then-remove-label = %s\n", r->then_rm_label[j]);
-            if (r->then_move_folder)
-                fprintf(fp, "then-move-folder  = %s\n", r->then_move_folder);
-            if (r->then_forward_to)
-                fprintf(fp, "then-forward-to   = %s\n", r->then_forward_to);
-            fprintf(fp, "\n");
-        }
-        fclose(fp);
-        printf("Rules saved to: %s\n", output);
-    } else {
-        rc = mail_rules_save(account, rules);
-        if (rc == 0)
-            printf("Rules saved to ~/.config/email-cli/accounts/%s/rules.ini\n", account);
-        else
-            fprintf(stderr, "Error: Failed to save rules for account '%s'.\n", account);
-    }
-
-    mail_rules_free(rules);
-    return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    config_free_account_list(accounts, count);
+    return any_error ? EXIT_FAILURE : EXIT_SUCCESS;
 }

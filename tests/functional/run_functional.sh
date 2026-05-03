@@ -2339,8 +2339,8 @@ check "38.1 email-import-rules binary exists in bin/" "." \
 
 # Create a synthetic Thunderbird profile with mixed supported/unsupported rules
 TB_DIR="./build/tests/functional/homes/tb-$$"
-mkdir -p "$TB_DIR/ImapMail/imap.test.local"
-cat > "$TB_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TBDAT'
+mkdir -p "$TB_DIR/ImapMail/localhost"
+cat > "$TB_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TBDAT'
 version="9"
 logging="no"
 name="Good rule"
@@ -2468,8 +2468,8 @@ echo "--- Phase 39: begins with / ends with match types (US-65) ---"
 
 TB39_DIR="./build/tests/functional/homes/tb39-$$"
 H_39="./build/tests/functional/homes/h39-$$"
-mkdir -p "$TB39_DIR/ImapMail/imap.test.local"
-cat > "$TB39_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB39DAT'
+mkdir -p "$TB39_DIR/ImapMail/localhost"
+cat > "$TB39_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB39DAT'
 name="Begins rule"
 enabled="yes"
 condition="AND (from,begins with,noreply@)"
@@ -2521,8 +2521,8 @@ echo "--- Phase 40: flag action conversion (US-66) ---"
 
 TB40_DIR="./build/tests/functional/homes/tb40-$$"
 H_40="./build/tests/functional/homes/h40-$$"
-mkdir -p "$TB40_DIR/ImapMail/imap.test.local"
-cat > "$TB40_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB40DAT'
+mkdir -p "$TB40_DIR/ImapMail/localhost"
+cat > "$TB40_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB40DAT'
 name="Read rule"
 enabled="yes"
 condition="AND (from,contains,@newsletter.com)"
@@ -2585,8 +2585,8 @@ echo "--- Phase 41: Label action -> custom label (US-67) ---"
 
 TB41_DIR="./build/tests/functional/homes/tb41-$$"
 H_41="./build/tests/functional/homes/h41-$$"
-mkdir -p "$TB41_DIR/ImapMail/imap.test.local"
-cat > "$TB41_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB41DAT'
+mkdir -p "$TB41_DIR/ImapMail/localhost"
+cat > "$TB41_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB41DAT'
 name="Important label"
 enabled="yes"
 condition="AND (subject,contains,URGENT)"
@@ -2658,8 +2658,8 @@ echo "--- Phase 42: negation conditions (US-68) ---"
 
 TB42_DIR="./build/tests/functional/homes/tb42-$$"
 H_42="./build/tests/functional/homes/h42-$$"
-mkdir -p "$TB42_DIR/ImapMail/imap.test.local"
-cat > "$TB42_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB42DAT'
+mkdir -p "$TB42_DIR/ImapMail/localhost"
+cat > "$TB42_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB42DAT'
 name="Not from spam"
 enabled="yes"
 condition="AND (from,doesn't contain,@spam.example.com)"
@@ -2706,8 +2706,8 @@ echo "--- Phase 43: body condition (US-69) ---"
 
 TB43_DIR="./build/tests/functional/homes/tb43-$$"
 H_43="./build/tests/functional/homes/h43-$$"
-mkdir -p "$TB43_DIR/ImapMail/imap.test.local"
-cat > "$TB43_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB43DAT'
+mkdir -p "$TB43_DIR/ImapMail/localhost"
+cat > "$TB43_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB43DAT'
 name="Body newsletter"
 enabled="yes"
 condition="AND (body,contains,unsubscribe)"
@@ -2751,8 +2751,8 @@ echo "--- Phase 44: age condition (US-70) ---"
 
 TB44_DIR="./build/tests/functional/homes/tb44-$$"
 H_44="./build/tests/functional/homes/h44-$$"
-mkdir -p "$TB44_DIR/ImapMail/imap.test.local"
-cat > "$TB44_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB44DAT'
+mkdir -p "$TB44_DIR/ImapMail/localhost"
+cat > "$TB44_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB44DAT'
 name="Old messages"
 enabled="yes"
 condition="AND (age,greater than,90)"
@@ -2802,8 +2802,8 @@ echo "--- Phase 45: email-import-rules additional actions ---"
 
 TB45_DIR="./build/tests/functional/homes/tb45-$$"
 H_45="./build/tests/functional/homes/h45-$$"
-mkdir -p "$TB45_DIR/ImapMail/imap.test.local"
-cat > "$TB45_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB45DAT'
+mkdir -p "$TB45_DIR/ImapMail/localhost"
+cat > "$TB45_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB45DAT'
 name="Mark read rule"
 enabled="yes"
 condition="AND (from,contains,@newsletter.example.com)"

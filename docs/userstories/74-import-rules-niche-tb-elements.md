@@ -28,7 +28,7 @@ cannot convert (beyond the already-covered body/age/negation/flag cases),
 | 15 | Action `Copy to folder` emits `[warn]` and is skipped. |
 | 16 | Action `Add tag` emits `[warn]` and is skipped. |
 | 17 | Action `Stop filter evaluation` emits `[warn]` and is skipped. |
-| 18 | Action `Forward to` emits `[warn]` and is skipped. |
+| 18 | ~~Action `Forward to` emits `[warn]` and is skipped.~~ **Superseded by US-75**: `"Forward"` is now converted to `then-forward-to`. |
 | 19 | Action `Reply with template` emits `[warn]` and is skipped. |
 | 20 | Action `Change Priority` emits `[warn]` and is skipped. |
 | 21 | All warnings follow the format already established in US-64. |
@@ -53,3 +53,4 @@ exact-match pattern — this is a bug, not a feature, and is tracked in BUG-001.
 * BUG-001: `isn't` silently converts to positive match
 * US-68: negation conditions (the proper fix for `isn't` and `doesn't contain`)
 * US-65–US-70: implementing support for the higher-priority unsupported features
+* US-75: additional action support (Forward, Mark read/unread, JunkScore) — supersedes AC18

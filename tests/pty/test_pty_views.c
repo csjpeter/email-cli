@@ -2064,7 +2064,7 @@ static void test_tui_folder_cursor_persisted(void) {
         pty_send_key(s, PTY_KEY_DOWN);   /* move to second folder */
         pty_settle(s, SETTLE_MS);
         pty_send_key(s, PTY_KEY_ENTER);  /* open it */
-        pty_settle(s, WAIT_MS);
+        pty_settle(s, SETTLE_MS);        /* wait for folder to load */
         pty_send_key(s, PTY_KEY_ESC);    /* quit */
         pty_close(s);
     }
@@ -2396,7 +2396,7 @@ static void test_tui_list_sync_and_refresh(void) {
     pty_settle(s, 3000);
     pty_send_key(s, PTY_KEY_DOWN);   /* re-render: bg_sync_done=1 → shows notification */
     ASSERT_WAIT_FOR(s, "New mail", WAIT_MS);
-    pty_send_str(s, "R");            /* refresh: bg_sync_done=0, re-enters list */
+    pty_send_str(s, "U");            /* refresh: bg_sync_done=0, re-enters list */
     int _ok = 0;
     for (int _ms = 0; _ms < WAIT_MS; _ms += 100) {
         pty_settle(s, 100);
@@ -3432,6 +3432,209 @@ static void test_mark_notjunk_blocked_in_ro(void) {
     snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_tui_bin);
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  TUI RULES EDITOR (US-62)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/*
+ * Rules editor operations are purely local (no network after list view opens).
+ * Use a shorter wait than the global WAIT_MS which is sized for IMAP latency.
+ */
+#define RULES_WAIT_MS 1500
+
+static void write_rules_ini(void) {
+    char path[512];
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/testuser/rules.ini",
+             g_test_home);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp,
+        "[rule \"SpamFilter\"]\n"
+        "if-from = *@spam.example.com\n"
+        "then-add-label    = _junk\n"
+        "\n"
+        "[rule \"WorkMail\"]\n"
+        "if-subject = *[work]*\n"
+        "then-add-label    = Work\n"
+        "\n");
+    fclose(fp);
+}
+
+static void remove_rules_ini(void) {
+    char path[512];
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/testuser/rules.ini",
+             g_test_home);
+    unlink(path);
+}
+
+static void test_tui_rules_editor_opens(void) {
+    /* US-62 AC1: 'l' from message list opens the rules editor screen */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rules editor opens: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "a=add");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_rules_editor_empty_message(void) {
+    /* US-62 AC2: empty rules list shows the "no rules" hint */
+    remove_rules_ini();
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rules editor empty: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "no rules", RULES_WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "a=add");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_rules_editor_lists_rules(void) {
+    /* US-62 AC3: pre-populated rules.ini → rule names visible in editor */
+    remove_rules_ini();
+    write_rules_ini();
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rules editor list: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "SpamFilter");
+    ASSERT_SCREEN_CONTAINS(s, "WorkMail");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    remove_rules_ini();
+}
+
+static void test_tui_rules_editor_add_rule(void) {
+    /* US-62 AC4: 'a' in rules editor → fill form → 'y' → rule appears */
+    remove_rules_ini();
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rules editor add: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "no rules", RULES_WAIT_MS);
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Rule name:", RULES_WAIT_MS);
+    /* Form is in cooked mode; buffer all field inputs then wait for Save? */
+    pty_send_str(s, "TestRule\n");   /* name */
+    pty_send_str(s, "*@test.com\n"); /* if-from */
+    pty_send_str(s, "\n");           /* if-subject (empty) */
+    pty_send_str(s, "\n");           /* if-to (empty) */
+    pty_send_str(s, "\n");           /* if-label (empty) */
+    pty_send_str(s, "IMPORTANT\n");  /* then-add-label first */
+    pty_send_str(s, "\n");           /* then-add-label done */
+    pty_send_str(s, "\n");           /* then-remove-label done */
+    pty_send_str(s, "\n");           /* then-move-folder (empty) */
+    ASSERT_WAIT_FOR(s, "Save?", RULES_WAIT_MS);
+    pty_send_str(s, "y");
+    /* After save, rules editor redraws with new rule */
+    ASSERT_WAIT_FOR(s, "TestRule", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    remove_rules_ini();
+}
+
+static void test_tui_rules_editor_cancel_add(void) {
+    /* US-62 AC5: 'a' → empty name → form cancelled → rules list redraws.
+     * The form reads ALL fields before checking the name (validation is last),
+     * so we must send \n for every field to let the form reach the check. */
+    remove_rules_ini();
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rules editor cancel add: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "no rules", RULES_WAIT_MS);
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Rule name:", RULES_WAIT_MS);
+    /* Buffer all fields with empty inputs; the form validates name AFTER all reads */
+    pty_send_str(s, "\n");  /* name: empty */
+    pty_send_str(s, "\n");  /* if-from: empty */
+    pty_send_str(s, "\n");  /* if-subject: empty */
+    pty_send_str(s, "\n");  /* if-to: empty */
+    pty_send_str(s, "\n");  /* if-label: empty */
+    pty_send_str(s, "\n");  /* then-add-label: empty = done */
+    pty_send_str(s, "\n");  /* then-remove-label: empty = done */
+    pty_send_str(s, "\n");  /* then-move-folder: empty */
+    /* Form now checks name, finds it empty, prints "required. Cancelled." and returns.
+     * That text is transient (screen immediately redrawn); wait for stable state. */
+    ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_rules_editor_delete_rule(void) {
+    /* US-62 AC6: 'd' → enter number → confirm 'y' → rule removed */
+    remove_rules_ini();
+    write_rules_ini();
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rules editor delete: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "SpamFilter", RULES_WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "Delete rule number", RULES_WAIT_MS);
+    pty_send_str(s, "1\n");
+    /* Wait for the (y/N) confirmation prompt specifically, not the earlier
+     * "Delete rule number" prompt which is still on screen. */
+    ASSERT_WAIT_FOR(s, "(y/N)", RULES_WAIT_MS);
+    pty_send_str(s, "y");
+    /* "Rule deleted." text is transient; wait for the stable redrawn rules list */
+    ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_screen_contains(s, "SpamFilter") == 0,
+           "rules editor delete: SpamFilter removed from list");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    remove_rules_ini();
+}
+
+static void test_tui_rules_editor_q_closes(void) {
+    /* US-62 AC7: 'q' also exits the rules editor (same as ESC) */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rules editor q closes: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+#undef RULES_WAIT_MS
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 #define RUN_TEST(fn) do { printf("  %s...\n", #fn); fn(); } while(0)
@@ -3746,6 +3949,18 @@ int main(int argc, char *argv[]) {
     printf("\n--- TLS enforcement (US-23) ---\n");
     RUN_TEST(test_tls_imap_rejected);
     RUN_TEST(test_tls_smtp_rejected);
+
+    /* ── TUI rules editor (US-62) ────────────────────────────────────── */
+    snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_tui_bin);
+    printf("\n--- email-tui: rules editor (US-62) ---\n");
+    restart_mock();
+    RUN_TEST(test_tui_rules_editor_opens);
+    RUN_TEST(test_tui_rules_editor_empty_message);
+    RUN_TEST(test_tui_rules_editor_lists_rules);
+    RUN_TEST(test_tui_rules_editor_add_rule);
+    RUN_TEST(test_tui_rules_editor_cancel_add);
+    RUN_TEST(test_tui_rules_editor_delete_rule);
+    RUN_TEST(test_tui_rules_editor_q_closes);
 
 done:
     stop_mock_server();

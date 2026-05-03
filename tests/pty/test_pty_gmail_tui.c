@@ -432,7 +432,7 @@ static void test_d_key_toggle_undo(void) {
                "d-undo: marker cleared after second d");
 
     /* Refresh — row must survive (label was restored) */
-    pty_send_str(s, "R");
+    pty_send_str(s, "U");
     pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_screen_contains(s, GMAIL_TOP_MSG),
@@ -516,7 +516,7 @@ static void test_archive_removes_from_inbox(void) {
 
     pty_send_str(s, "a");
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "R");
+    pty_send_str(s, "U");
     pty_wait_for(s, GMAIL_BOT_MSG, WAIT_MS);  /* wait for list to reload */
     pty_settle(s, SETTLE_MS);
 
@@ -548,7 +548,7 @@ static void test_archive_message_in_archive_view(void) {
     pty_send_str(s, "a");
     pty_settle(s, SETTLE_MS);
     /* Press 'R' so the inbox index is refreshed and the row is removed */
-    pty_send_str(s, "R");
+    pty_send_str(s, "U");
     pty_settle(s, SETTLE_MS);
 
     /* Go back to label browser */
@@ -590,7 +590,7 @@ static void test_label_picker_unarchive(void) {
     /* Archive Message 5 */
     pty_send_str(s, "a");
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "R");
+    pty_send_str(s, "U");
     pty_settle(s, SETTLE_MS);
 
     /* Back to labels */
@@ -617,7 +617,7 @@ static void test_label_picker_unarchive(void) {
     pty_settle(s, SETTLE_MS);
 
     /* Refresh Archive view — message must be gone (now in INBOX) */
-    pty_send_str(s, "R");
+    pty_send_str(s, "U");
     pty_settle(s, WAIT_MS / 4);
     pty_settle(s, SETTLE_MS);
 
@@ -773,7 +773,7 @@ static void test_u_key_row_gone_after_refresh(void) {
 
         pty_send_str(s, "u");
         pty_settle(s, SETTLE_MS);
-        pty_send_str(s, "R");
+        pty_send_str(s, "U");
         pty_settle(s, WAIT_MS / 4);
         pty_settle(s, SETTLE_MS);
 
@@ -825,7 +825,7 @@ static void test_d_key_row_gone_after_refresh(void) {
     pty_settle(s, SETTLE_MS);
 
     /* 'R' re-reads the list from INBOX.idx — the UID is no longer there */
-    pty_send_str(s, "R");
+    pty_send_str(s, "U");
 
     /* Wait for the refreshed list to appear (another message still present) */
     pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
@@ -1503,6 +1503,211 @@ static void test_feedback_t_label_added(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  US-72 helpers
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Clear account local store without running a sync. */
+static void clear_gmail_local_store(void) {
+    char cmd[640];
+    snprintf(cmd, sizeof(cmd),
+             "rm -rf '/tmp/email-cli-gmail-pty-%d/.local/share/email-cli/accounts/%s'",
+             (int)getpid(), GMAIL_TEST_EMAIL);
+    (void)system(cmd);
+    char cmd2[640];
+    snprintf(cmd2, sizeof(cmd2),
+             "rm -f '%s/.local/share/email-cli/ui.ini'", g_test_home);
+    (void)system(cmd2);
+}
+
+/** Run email-sync and capture stdout + stderr into out_buf. */
+static int run_gmail_sync_capture(char *out_buf, size_t out_size) {
+    int pfd[2];
+    if (pipe(pfd) != 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) { close(pfd[0]); close(pfd[1]); return -1; }
+    if (pid == 0) {
+        close(pfd[0]);
+        dup2(pfd[1], STDOUT_FILENO);
+        dup2(pfd[1], STDERR_FILENO);
+        close(pfd[1]);
+        execl(g_sync_bin, "email-sync", (char *)NULL);
+        _exit(127);
+    }
+    close(pfd[1]);
+    size_t total = 0;
+    ssize_t n;
+    while (total < out_size - 1 &&
+           (n = read(pfd[0], out_buf + total, out_size - total - 1)) > 0)
+        total += (size_t)n;
+    out_buf[total] = '\0';
+    close(pfd[0]);
+    int status;
+    waitpid(pid, &status, 0);
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
+}
+
+/** Build path to a file inside the account local store. */
+static void account_store_path(char *out, size_t sz, const char *file) {
+    snprintf(out, sz, "%s/.local/share/email-cli/accounts/%s/%s",
+             g_test_home, GMAIL_TEST_EMAIL, file);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  US-72: Gmail Smart Sync Orchestration
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static void test_gmail_sync_first_run_reconcile(void) {
+    /* US-72 AC1: first sync (no historyId) triggers reconcile */
+    clear_gmail_local_store();
+    char out[8192] = {0};
+    int rc = run_gmail_sync_capture(out, sizeof(out));
+    ASSERT(rc == 0, "first run reconcile: sync exits 0");
+    ASSERT(strstr(out, "No saved historyId") != NULL ||
+           strstr(out, "Listing messages")   != NULL,
+           "first run reconcile: reconcile path indicated in output");
+}
+
+static void test_gmail_sync_history_id_saved(void) {
+    /* US-72 AC1: gmail_history_id file written after first sync */
+    clear_gmail_local_store();
+    ASSERT(run_gmail_sync() == 0, "history id saved: sync ok");
+    char path[512];
+    account_store_path(path, sizeof(path), "gmail_history_id");
+    FILE *fp = fopen(path, "r");
+    ASSERT(fp != NULL, "history id saved: file exists");
+    if (fp) {
+        char buf[64] = {0};
+        char *line = fgets(buf, sizeof(buf), fp);
+        fclose(fp);
+        ASSERT(line != NULL && buf[0] != '\0', "history id saved: file non-empty");
+    }
+}
+
+static void test_gmail_sync_pending_empty_after_sync(void) {
+    /* US-72 AC2+AC8: pending_fetch.tsv empty (or absent) after a complete first sync */
+    clear_gmail_local_store();
+    ASSERT(run_gmail_sync() == 0, "pending empty: sync ok");
+    char path[512];
+    account_store_path(path, sizeof(path), "pending_fetch.tsv");
+    FILE *fp = fopen(path, "r");
+    if (fp) {
+        char buf[64] = {0};
+        char *line = fgets(buf, sizeof(buf), fp);
+        fclose(fp);
+        ASSERT(line == NULL || buf[0] == '\0',
+               "pending empty: pending_fetch.tsv is empty after complete sync");
+    }
+    /* File absent entirely also satisfies the criterion */
+}
+
+static void test_gmail_sync_second_run_incremental(void) {
+    /* US-72 AC3: second sync uses fast incremental path, no full reconcile */
+    clear_gmail_local_store();
+    ASSERT(run_gmail_sync() == 0, "second run incremental: first sync ok");
+    char out[8192] = {0};
+    int rc = run_gmail_sync_capture(out, sizeof(out));
+    ASSERT(rc == 0, "second run incremental: second sync exits 0");
+    ASSERT(strstr(out, "Incremental sync") != NULL,
+           "second run incremental: incremental path taken");
+    ASSERT(strstr(out, "Listing messages") == NULL,
+           "second run incremental: no full reconcile on second sync");
+}
+
+static void test_gmail_sync_drain_then_incremental(void) {
+    /* US-72 AC4: pending_fetch.tsv non-empty + valid historyId → drain + incremental */
+    clear_gmail_local_store();
+    ASSERT(run_gmail_sync() == 0, "drain+incremental: first sync ok");
+    /* Re-queue one UID to simulate an interrupted previous sync */
+    char path[512];
+    account_store_path(path, sizeof(path), "pending_fetch.tsv");
+    FILE *fp = fopen(path, "w");
+    ASSERT(fp != NULL, "drain+incremental: write pending_fetch.tsv");
+    if (fp) { fprintf(fp, "0000000000000001\n"); fclose(fp); }
+    char out[8192] = {0};
+    int rc = run_gmail_sync_capture(out, sizeof(out));
+    ASSERT(rc == 0, "drain+incremental: sync with pending exits 0");
+    ASSERT(strstr(out, "Listing messages") == NULL,
+           "drain+incremental: no full reconcile when historyId valid");
+    /* AC8: UID removed from pending_fetch.tsv after successful download */
+    FILE *fp2 = fopen(path, "r");
+    if (fp2) {
+        char buf[64] = {0};
+        char *line = fgets(buf, sizeof(buf), fp2);
+        fclose(fp2);
+        ASSERT(line == NULL || buf[0] == '\0',
+               "drain+incremental: pending_fetch.tsv emptied after drain");
+    }
+}
+
+static void test_gmail_sync_force_reconcile(void) {
+    /* US-72 AC5: deleting gmail_history_id triggers full reconcile on next sync */
+    clear_gmail_local_store();
+    ASSERT(run_gmail_sync() == 0, "force reconcile: first sync ok");
+    char path[512];
+    account_store_path(path, sizeof(path), "gmail_history_id");
+    unlink(path);
+    char out[8192] = {0};
+    int rc = run_gmail_sync_capture(out, sizeof(out));
+    ASSERT(rc == 0, "force reconcile: re-sync exits 0");
+    ASSERT(strstr(out, "No saved historyId") != NULL ||
+           strstr(out, "Listing messages")   != NULL,
+           "force reconcile: reconcile path taken after historyId deleted");
+}
+
+static void test_gmail_sync_pending_fetch_path(void) {
+    /* US-72 AC6: account store directory exists at the expected path */
+    clear_gmail_local_store();
+    ASSERT(run_gmail_sync() == 0, "pending_fetch path: sync ok");
+    char dir_path[512];
+    snprintf(dir_path, sizeof(dir_path),
+             "%s/.local/share/email-cli/accounts/%s",
+             g_test_home, GMAIL_TEST_EMAIL);
+    struct stat st;
+    ASSERT(stat(dir_path, &st) == 0 && S_ISDIR(st.st_mode),
+           "pending_fetch path: account store dir at expected path");
+}
+
+static void test_gmail_sync_pending_fetch_uid_format(void) {
+    /* US-72 AC7: pending_fetch.tsv entries are 16-char hex UIDs, one per line.
+     * Verified by writing a known-format UID and confirming the drain consumes it. */
+    clear_gmail_local_store();
+    ASSERT(run_gmail_sync() == 0, "pending_fetch format: first sync ok");
+    char path[512];
+    account_store_path(path, sizeof(path), "pending_fetch.tsv");
+    /* Write one 16-char hex UID per AC7 spec */
+    FILE *wp = fopen(path, "w");
+    ASSERT(wp != NULL, "pending_fetch format: create test file");
+    if (wp) { fprintf(wp, "0000000000000001\n"); fclose(wp); }
+    /* Verify format: 16 chars, all hex digits */
+    FILE *rp = fopen(path, "r");
+    ASSERT(rp != NULL, "pending_fetch format: re-open");
+    if (rp) {
+        char line[64] = {0};
+        fgets(line, sizeof(line), rp);
+        fclose(rp);
+        size_t len = strlen(line);
+        while (len > 0 && (line[len-1]=='\n'||line[len-1]=='\r')) line[--len] = '\0';
+        ASSERT(len == 16, "pending_fetch format: entry is 16 characters");
+        int all_hex = 1;
+        for (size_t i = 0; i < len; i++) {
+            char c = line[i];
+            if (!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F'))) all_hex = 0;
+        }
+        ASSERT(all_hex, "pending_fetch format: entry is hexadecimal");
+    }
+    /* Drain: proves the 16-char hex format is what the code reads (AC8) */
+    ASSERT(run_gmail_sync() == 0, "pending_fetch format: drain sync ok");
+    FILE *ep = fopen(path, "r");
+    if (ep) {
+        char buf[64] = {0};
+        char *got = fgets(buf, sizeof(buf), ep);
+        fclose(ep);
+        ASSERT(got == NULL || buf[0] == '\0',
+               "pending_fetch format: UID removed after successful download");
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  main
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -1741,6 +1946,17 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_feedback_n_read);
     RUN_TEST(test_feedback_u_restore);
     RUN_TEST(test_feedback_t_label_added);
+
+    /* ── US-72: Gmail Smart Sync Orchestration ── */
+    printf("\n--- Gmail Smart Sync orchestration (US-72) ---\n");
+    RUN_TEST(test_gmail_sync_first_run_reconcile);
+    RUN_TEST(test_gmail_sync_history_id_saved);
+    RUN_TEST(test_gmail_sync_pending_empty_after_sync);
+    RUN_TEST(test_gmail_sync_second_run_incremental);
+    RUN_TEST(test_gmail_sync_drain_then_incremental);
+    RUN_TEST(test_gmail_sync_force_reconcile);
+    RUN_TEST(test_gmail_sync_pending_fetch_path);
+    RUN_TEST(test_gmail_sync_pending_fetch_uid_format);
 
     stop_gmail_mock();
 

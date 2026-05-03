@@ -1,37 +1,25 @@
-# TASK-009 — PTY tests for US-62 (TUI rules editor, R key)
+# TASK-009 — PTY tests for US-62 (TUI rules editor, l key)
 
-**Type:** Test  
-**Related US:** US-62  
+**Type:** Test
+**Related US:** US-62
+**Status:** DONE
 
 ## Context
 
-US-62 specifies that pressing `R` in the TUI opens an inline rules editor.
-No PTY functional test exists for this feature.
+US-62 specifies that pressing `l` in the TUI opens an inline rules editor.
+PTY functional tests were added to `tests/pty/test_pty_views.c`.
 
-## Work items
+## Work items (completed)
 
-Add to `tests/pty/test_pty_views.c` (or a new file `test_pty_rules.c`):
+1. **l key opens rules panel** — `test_tui_rules_editor_opens`
+2. **Empty rules list shows hint** — `test_tui_rules_editor_empty_message`
+3. **Pre-populated rules appear** — `test_tui_rules_editor_lists_rules`
+4. **'a' key adds a rule** — `test_tui_rules_editor_add_rule`
+5. **Empty name cancels** — `test_tui_rules_editor_cancel_add`
+6. **'d' key deletes a rule** — `test_tui_rules_editor_delete_rule`
+7. **'q' also closes the editor** — `test_tui_rules_editor_q_closes`
 
-1. **R key opens rules panel**  
-   Launch `email-tui` with a seeded account; press `R`; verify a "Rules" or
-   "rules" heading appears in the terminal output.
+## Note
 
-2. **Rules panel displays existing rule**  
-   Pre-populate `rules.ini` with one rule; press `R`; verify the rule name
-   is displayed.
-
-3. **ESC closes rules panel**  
-   Press `R` then `ESC`; verify the panel is dismissed (message list
-   reappears).
-
-4. **'a' key in rules panel triggers add-rule prompt** (if implemented)
-
-## Prerequisite
-
-US-62 (TUI rules editor) must be implemented before these tests can be written.
-If the R-key handler is not yet present, this task's first sub-item is to
-implement the feature stub and then layer the tests on top.
-
-## Definition of done
-
-PTY tests pass in CI via `./manage.sh test`.
+The key was changed from `R` to `l` to resolve a conflict with the `U` (refresh)
+binding used by US-19 and several Gmail TUI tests.

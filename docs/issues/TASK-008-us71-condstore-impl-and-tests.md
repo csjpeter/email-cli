@@ -2,69 +2,65 @@
 
 **Type:** Feature + Test  
 **Related US:** US-71  
+**Status:** DONE
 
-## Implementation
+## Implementation (completed)
 
-### 1. `sync_state` file I/O helper
+### 1. `sync_state` file I/O
 
-New file: `libemail/src/infrastructure/imap_sync_state.c` (+ `.h`)
+Implemented in `libemail/src/infrastructure/local_store.c`:
 
 ```c
-typedef struct {
-    char    folder[256];
-    uint64_t highestmodseq;
-    uint32_t uidvalidity;
-} ImapSyncState;
+typedef struct { uint32_t uidvalidity; uint64_t highestmodseq; } FolderSyncState;
 
-int imap_sync_state_load(const char *account, const char *folder, ImapSyncState *out);
-int imap_sync_state_save(const char *account, const ImapSyncState *state);
-void imap_sync_state_clear(const char *account, const char *folder);
+int  local_sync_state_load (const char *folder, FolderSyncState *state);
+int  local_sync_state_save (const char *folder, const FolderSyncState *state);
+void local_sync_state_clear(const char *folder);
 ```
 
 File location: `~/.local/share/email-cli/accounts/<email>/sync_state/<folder>.tsv`  
-Format: `<folder>\t<highestmodseq>\t<uidvalidity>`
+Format: `<uidvalidity>\t<highestmodseq>\n`
 
 ### 2. `libemail/src/infrastructure/imap_client.c`
 
-Extend `imap_select_folder()` response parser to capture `HIGHESTMODSEQ` and
-`UIDVALIDITY` from the `SELECT` response.
+`imap_select_condstore()` parses `HIGHESTMODSEQ` and `UIDVALIDITY` from `SELECT`.  
+`imap_uid_fetch_flags_changedsince()` issues `UID FETCH 1:* (UID FLAGS) (CHANGEDSINCE n)`.
 
-Add `imap_search_changedsince(uint64_t modseq, uint32_t **uids, int *count)`.
-
-### 3. `libemail/src/infrastructure/imap_client.h`
-
-```c
-int imap_get_capabilities(ImapClient *ic, char ***caps, int *count);
-int imap_search_changedsince(ImapClient *ic, uint64_t modseq,
-                              uint32_t **uids, int *count);
-```
-
-### 4. `libemail/src/domain/email_service.c` / sync path
+### 3. `libemail/src/domain/email_service.c` — sync path
 
 In `email_service_sync()`:
-1. After `SELECT`, check if server advertised `CONDSTORE`.
-2. Load `sync_state` for the folder.
-3. If `UIDVALIDITY` changed → clear state, do full sync.
-4. If `HIGHESTMODSEQ` unchanged → log "up to date", skip fetch.
-5. Else → `UID SEARCH CHANGEDSINCE <saved_modseq>`, fetch only those UIDs.
-6. After successful sync → save new `sync_state`.
-7. If server does NOT advertise CONDSTORE → full scan, no state saved.
+1. After `SELECT`, loads saved `sync_state` for the folder.
+2. If `UIDVALIDITY` changed → clear state, do full sync (warns on stderr).
+3. If `HIGHESTMODSEQ` unchanged → prints "up to date", skips fetch.
+4. If `HIGHESTMODSEQ` advanced → `CHANGEDSINCE` fetch, applies flag updates.
+5. After successful sync → saves new `sync_state`.
+6. If server does NOT advertise `CONDSTORE` → full scan, no state saved.
 
-## Mock server extension
+### 4. Mock server extension (`tests/functional/mock_imap_server.c`)
 
-`tests/functional/mock_imap_server.c` must support:
-- Advertising `CONDSTORE` in `CAPABILITY` response (via env flag `MOCK_CONDSTORE=1`)
-- Returning `HIGHESTMODSEQ` in `SELECT` responses
-- Handling `UID SEARCH CHANGEDSINCE <modseq>`
+Env vars:
+- `MOCK_IMAP_CAPS=CONDSTORE` — advertises CONDSTORE capability
+- `MOCK_IMAP_MODSEQ=<n>` — HIGHESTMODSEQ in SELECT response
+- `MOCK_IMAP_UIDVAL=<n>` — UIDVALIDITY override
+- `MOCK_IMAP_CHANGED_COUNT=<n>` — UIDs 1..N returned for CHANGEDSINCE
 
-## Functional tests (Phase 45)
+## Functional tests (Phase 33)
 
-- `45.1` First sync saves `sync_state/<folder>.tsv`
-- `45.2` Second sync (modseq unchanged) reports "up to date", no FETCH
-- `45.3` Second sync (modseq advanced) uses `CHANGEDSINCE`, fetches new UIDs
-- `45.4` UIDVALIDITY change → full resync, old state discarded
-- `45.5` Server without CONDSTORE → full scan, no `sync_state` file created
+Originally planned as Phase 45; implemented as Phase 33 in
+`tests/functional/run_functional.sh`:
 
-## Definition of done
+| Check | Description |
+|-------|-------------|
+| 33.1  | First sync with CONDSTORE: message fetched |
+| 33.2  | `sync_state/INBOX.tsv` contains saved uidvalidity |
+| 33.2b | `sync_state/INBOX.tsv` contains saved modseq |
+| 33.3  | Same modseq → "up to date", no server traffic |
+| 33.4  | New modseq → not "up to date" |
+| 33.5  | Incremental: `CHANGEDSINCE` command sent to server |
+| 33.6  | `sync_state` updated to new modseq |
+| 33.7  | UIDVALIDITY changed → resync warning on stderr |
+| 33.8  | UIDVALIDITY changed → new uidval saved in sync_state |
+| 33.9  | No CONDSTORE → regular sync succeeds |
+| 33.10 | No CONDSTORE → no `sync_state` file created |
 
-All Phase 45 checks pass, no regression.
+All 11 checks pass. No regressions.

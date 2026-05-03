@@ -2041,7 +2041,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=%s  ESC=quit"
-                         "  s=sync  U=refresh  R=rules  [0/0]",
+                         "  s=sync  U=refresh  l=rules  [0/0]",
                          cfg->gmail_mode ? "labels" : "folders");
                 print_statusbar(trows, tcols, sb);
             }
@@ -2052,7 +2052,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int ch = terminal_last_printable();
                 if (ch == 's') { sync_start_background(); }
                 if (ch == 'U') return 4; /* refresh: re-list */
-                if (ch == 'R') return 7; /* rules editor */
+                if (ch == 'l') return 7; /* rules editor */
             }
         }
         show_count = manifest->count;
@@ -2212,13 +2212,13 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
-                             "  s=sync  U=refresh  R=rules  [0/0]");
+                             "  s=sync  U=refresh  l=rules  [0/0]");
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=folders  ESC=quit"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                             "  s=sync  U=refresh  R=rules  [0/0]");
+                             "  s=sync  U=refresh  l=rules  [0/0]");
                 }
                 print_statusbar(trows, tcols, sb);
             }
@@ -2230,7 +2230,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if (ch == 'c') return 2; /* compose */
                 if (ch == 's') { sync_start_background(); }
                 if (ch == 'U') return 4; /* refresh */
-                if (ch == 'R') return 7; /* rules editor */
+                if (ch == 'l') return 7; /* rules editor */
             }
         }
 
@@ -2299,20 +2299,20 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  u=restore  t=labels  n=unread  f=star"
-                             "  s=sync  U=refresh  R=rules  [0/0]");
+                             "  s=sync  U=refresh  l=rules  [0/0]");
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
-                             "  s=sync  U=refresh  R=rules  [0/0]");
+                             "  s=sync  U=refresh  l=rules  [0/0]");
                 }
             } else {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=folders  ESC=quit"
                          "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                         "  s=sync  U=refresh  R=rules  [0/0]");
+                         "  s=sync  U=refresh  l=rules  [0/0]");
             }
             print_statusbar(trows, tcols, sb);
         }
@@ -2324,7 +2324,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             if (ch == 'c') return 2; /* compose */
             if (ch == 's') { sync_start_background(); }
             if (ch == 'U') return 4; /* refresh */
-            if (ch == 'R') return 7; /* rules editor */
+            if (ch == 'l') return 7; /* rules editor */
         }
     }
 
@@ -2686,14 +2686,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  u=restore  t=labels  n=unread  f=star"
-                             "  s=sync  U=refresh  R=rules  [%d/%d]",
+                             "  s=sync  U=refresh  l=rules  [%d/%d]",
                              show_count > 0 ? cursor + 1 : 0, show_count);
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star  a=archive"
-                             "  d=rm-label  D=trash  t=labels  s=sync  U=refresh  R=rules  [%d/%d]",
+                             "  d=rm-label  D=trash  t=labels  s=sync  U=refresh  l=rules  [%d/%d]",
                              show_count > 0 ? cursor + 1 : 0, show_count);
                 }
             } else {
@@ -2701,7 +2701,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=folders  ESC=quit"
                          "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                         "  s=sync  U=refresh  R=rules  [%d/%d]",
+                         "  s=sync  U=refresh  l=rules  [%d/%d]",
                          cursor + 1, show_count);
             }
             print_statusbar(trows, tcols, sb);
@@ -2897,7 +2897,7 @@ read_key_again: ;
                 list_result = 4;
                 goto list_done;
             }
-            if (ch == 'R') {
+            if (ch == 'l') {
                 /* Rules editor */
                 list_result = 7;
                 goto list_done;
@@ -2921,7 +2921,7 @@ read_key_again: ;
                         { "t",                 "Toggle labels (picker)"          },
                         { "s",                 "Start background sync"           },
                         { "U",                 "Refresh after sync"              },
-                        { "R",                 "Open rules editor"               },
+                        { "l",                 "Open rules editor"               },
                         { "Backspace",         "Open label browser"              },
                         { "ESC / q",           "Quit"                            },
                         { "h / ?",             "Show this help"                  },
@@ -2946,7 +2946,7 @@ read_key_again: ;
                         { "d",                 "Toggle Done flag"                },
                         { "s",                 "Start background sync"           },
                         { "U",                 "Refresh after sync"              },
-                        { "R",                 "Open rules editor"               },
+                        { "l",                 "Open rules editor"               },
                         { "Backspace",         "Open folder browser"             },
                         { "ESC / q",           "Quit"                            },
                         { "h / ?",             "Show this help"                  },

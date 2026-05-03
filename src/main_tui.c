@@ -57,7 +57,7 @@ static void help(void) {
         "  Inside a message list:\n"
         "    c         Compose a new message\n"
         "    r         Reply to the selected message\n"
-        "    R         Open rules editor\n"
+        "    l         Open rules editor\n"
         "    U         Refresh after sync\n"
         "    Backspace Open the folder browser\n"
         "    ESC/q     Quit\n"
@@ -1765,7 +1765,7 @@ int main(int argc, char *argv[]) {
                 /* background sync finished → re-list to show new messages */
                 continue;
             } else if (ret == 7) {
-                /* 'R' → rules editor */
+                /* 'l' → rules editor */
                 tui_rules_editor(sel_cfg);
                 continue;
             } else if (ret == 5) {

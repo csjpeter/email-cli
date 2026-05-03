@@ -2361,10 +2361,49 @@ condition="AND (from,contains,@example.com) (age,greater than,7)"
 action="Move to folder"
 actionValue="imap://user@imap.test.local/Archive"
 
-name="Unsupported match"
+name="Doesnt contain rule"
 enabled="yes"
 condition="AND (from,doesn't contain,spam)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/NotSpam"
+
+name="Isnt rule"
+enabled="yes"
+condition="AND (subject,isn't,Unsubscribe)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Regular"
+
+name="All niche unsupported"
+enabled="yes"
+condition="AND (cc,contains,@example.com)"
+action="Copy to folder"
+actionValue="imap://user@imap.test.local/CC"
+
+name="Junk rule"
+enabled="yes"
+condition="AND (from,contains,@spam.example.com)"
+action="Mark as junk"
+
+name="Delete rule"
+enabled="yes"
+condition="AND (subject,contains,Virus)"
+action="Delete"
+
+name="Starred rule"
+enabled="yes"
+condition="AND (from,contains,@vip.example.com)"
+action="Mark as starred"
+
+name="Read rule"
+enabled="yes"
+condition="AND (from,contains,@newsletter.example.com)"
 action="Mark as read"
+
+name="Label work rule"
+enabled="yes"
+condition="AND (from,contains,@company.example.com)"
+action="Label"
+actionValue="$label2"
 
 TBDAT
 
@@ -2388,12 +2427,29 @@ check "38.2 good rule converted: rule name present"       "Good rule"         "$
 check "38.3 good rule converted: if-from shown"           "github.com"        "$IR_OUT"
 check "38.4 good rule converted: move-folder shown"       "GitHub"            "$IR_OUT"
 
-# Unsupported conditions/actions emit [warn] lines
-check "38.5 warn for unsupported field (body)"            "\[warn\].*body"    "$IR_OUT"
-check "38.6 warn for unsupported action (Label)"          "\[warn\].*Label"   "$IR_OUT"
-check "38.7 warn for empty rule"                          "no conditions\|no.*actions\|could be converted\|will be empty" "$IR_OUT"
-check "38.8 warn for unsupported field (age)"             "\[warn\].*age"     "$IR_OUT"
-check "38.9 warn for unsupported match (doesn't contain)" "\[warn\].*doesn"   "$IR_OUT"
+# Still-unsupported conditions/actions emit [warn] lines (US-64/US-74)
+check_not "38.5 no warn for body (US-69 implemented)"     "\[warn\].*body"    "$IR_OUT"
+check "38.6 warn for unsupported action (Copy to folder)" "\[warn\].*Copy"    "$IR_OUT"
+check "38.7 warn for empty rule (niche: cc + Copy)"       "no conditions\|no.*actions\|could be converted\|will be empty" "$IR_OUT"
+check_not "38.8 no warn for age (US-70 implemented)"      "\[warn\].*age"     "$IR_OUT"
+check_not "38.9 no warn for doesn't contain (US-68)"      "\[warn\].*doesn"   "$IR_OUT"
+
+# BUG-001 fix verified: "isn't" now converts (no warn) instead of silently becoming positive match
+check_not "38.12 no warn for isn't (BUG-001+US-68)"       "\[warn\].*isn"     "$IR_OUT"
+
+# US-66: flag actions converted (no warn emitted)
+check "38.13 Mark as junk → then-add-label = _junk"       "_junk"             "$IR_OUT"
+check "38.14 Delete → then-add-label = _trash"            "_trash"            "$IR_OUT"
+check "38.15 Mark as starred → then-add-label = _flagged" "_flagged"          "$IR_OUT"
+check "38.16 Mark as read → then-remove-label = UNREAD"   "UNREAD"            "$IR_OUT"
+check_not "38.17 no warn for Mark as junk (US-66)"        "\[warn\].*junk"    "$IR_OUT"
+check_not "38.18 no warn for Delete (US-66)"              "\[warn\].*Delete"  "$IR_OUT"
+check_not "38.19 no warn for Mark as starred (US-66)"     "\[warn\].*starred" "$IR_OUT"
+check_not "38.20 no warn for Mark as read (US-66)"        "\[warn\].*read"    "$IR_OUT"
+
+# US-67: Label action converted to named label (no warn emitted)
+check "38.21 Label \$label2 → then-add-label = Work"      "Work"              "$IR_OUT"
+check_not "38.22 no warn for Label action (US-67)"        "\[warn\].*Label"   "$IR_OUT"
 
 # The --help output must mention the binary name
 IR_HELP=$( "$BIN_DIR/email-import-rules" --help 2>&1 || true )
@@ -2403,6 +2459,335 @@ check "38.11 help: --thunderbird-path option"             "thunderbird-path"   "
 rm -rf "./build/tests/functional/homes/ir-$$"
 case "$TB_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB_DIR path" >&2; exit 1 ;; esac
 rm -rf "./build/tests/functional/homes/${TB_DIR##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 39 — US-65: begins with / ends with match type conversion
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 39: begins with / ends with match types (US-65) ---"
+
+TB39_DIR="./build/tests/functional/homes/tb39-$$"
+H_39="./build/tests/functional/homes/h39-$$"
+mkdir -p "$TB39_DIR/ImapMail/imap.test.local"
+cat > "$TB39_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB39DAT'
+name="Begins rule"
+enabled="yes"
+condition="AND (from,begins with,noreply@)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Noreply"
+
+name="Ends rule"
+enabled="yes"
+condition="AND (subject,ends with,[GitHub])"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/GitHub"
+
+name="Is exact rule"
+enabled="yes"
+condition="AND (from,is,admin@example.com)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Admin"
+
+TB39DAT
+
+mkdir -p "$H_39/.config/email-cli/accounts/t39@test.local"
+cat > "$H_39/.config/email-cli/accounts/t39@test.local/config.ini" <<'CFG39'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=t39@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG39
+
+IR39=$( (export HOME="$H_39"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB39_DIR" \
+        --account t39@test.local --dry-run 2>&1 || true) )
+
+check     "39.1 begins with: if-from = noreply@*"         'noreply@\*'        "$IR39"
+check     "39.2 ends with: if-subject = *[GitHub]"        '\*\[GitHub\]'      "$IR39"
+check     "39.3 is exact: if-from = admin@example.com"    "admin@example.com" "$IR39"
+check_not "39.4 no warn for begins with (US-65)"          "\[warn\].*begins"  "$IR39"
+check_not "39.5 no warn for ends with (US-65)"            "\[warn\].*ends"    "$IR39"
+
+rm -rf "./build/tests/functional/homes/h39-$$"
+case "$TB39_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB39_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${TB39_DIR##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 40 — US-66: flag action conversion
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 40: flag action conversion (US-66) ---"
+
+TB40_DIR="./build/tests/functional/homes/tb40-$$"
+H_40="./build/tests/functional/homes/h40-$$"
+mkdir -p "$TB40_DIR/ImapMail/imap.test.local"
+cat > "$TB40_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB40DAT'
+name="Read rule"
+enabled="yes"
+condition="AND (from,contains,@newsletter.com)"
+action="Mark as read"
+
+name="Junk rule"
+enabled="yes"
+condition="AND (from,contains,@spam.example.com)"
+action="Mark as junk"
+
+name="Delete rule"
+enabled="yes"
+condition="AND (subject,contains,Virus)"
+action="Delete"
+
+name="Starred rule"
+enabled="yes"
+condition="AND (from,contains,@vip.com)"
+action="Mark as starred"
+
+name="Flagged rule"
+enabled="yes"
+condition="AND (from,contains,@important.com)"
+action="Mark as flagged"
+
+TB40DAT
+
+mkdir -p "$H_40/.config/email-cli/accounts/t40@test.local"
+cat > "$H_40/.config/email-cli/accounts/t40@test.local/config.ini" <<'CFG40'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=t40@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG40
+
+IR40=$( (export HOME="$H_40"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB40_DIR" \
+        --account t40@test.local --dry-run 2>&1 || true) )
+
+check     "40.1 Mark as read → then-remove-label = UNREAD"    "UNREAD"     "$IR40"
+check     "40.2 Mark as junk → then-add-label = _junk"        "_junk"      "$IR40"
+check     "40.3 Delete → then-add-label = _trash"             "_trash"     "$IR40"
+check     "40.4 Mark as starred → then-add-label = _flagged"  "_flagged"   "$IR40"
+check     "40.5 Mark as flagged → then-add-label = _flagged"  "_flagged"   "$IR40"
+check_not "40.6 no warn for Mark as read"                     "\[warn\].*read"    "$IR40"
+check_not "40.7 no warn for Mark as junk"                     "\[warn\].*junk"    "$IR40"
+check_not "40.8 no warn for Delete"                           "\[warn\].*Delete"  "$IR40"
+check_not "40.9 no warn for Mark as starred"                  "\[warn\].*starred" "$IR40"
+
+rm -rf "./build/tests/functional/homes/h40-$$"
+case "$TB40_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB40_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${TB40_DIR##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 41 — US-67: Thunderbird Label action → custom label
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 41: Label action -> custom label (US-67) ---"
+
+TB41_DIR="./build/tests/functional/homes/tb41-$$"
+H_41="./build/tests/functional/homes/h41-$$"
+mkdir -p "$TB41_DIR/ImapMail/imap.test.local"
+cat > "$TB41_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB41DAT'
+name="Important label"
+enabled="yes"
+condition="AND (subject,contains,URGENT)"
+action="Label"
+actionValue="$label1"
+
+name="Work label"
+enabled="yes"
+condition="AND (from,contains,@company.com)"
+action="Label"
+actionValue="$label2"
+
+name="Personal label"
+enabled="yes"
+condition="AND (from,contains,@family.com)"
+action="Label"
+actionValue="$label3"
+
+name="TODO label"
+enabled="yes"
+condition="AND (subject,contains,Action required)"
+action="Label"
+actionValue="$label4"
+
+name="Later label"
+enabled="yes"
+condition="AND (from,contains,@news.com)"
+action="Label"
+actionValue="$label5"
+
+name="Unknown label9"
+enabled="yes"
+condition="AND (from,contains,@other.com)"
+action="Label"
+actionValue="$label9"
+
+TB41DAT
+
+mkdir -p "$H_41/.config/email-cli/accounts/t41@test.local"
+cat > "$H_41/.config/email-cli/accounts/t41@test.local/config.ini" <<'CFG41'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=t41@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG41
+
+IR41=$( (export HOME="$H_41"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB41_DIR" \
+        --account t41@test.local --dry-run 2>&1 || true) )
+
+check     "41.1 \$label1 -> Important"    "Important"  "$IR41"
+check     "41.2 \$label2 -> Work"         "Work"       "$IR41"
+check     "41.3 \$label3 -> Personal"     "Personal"   "$IR41"
+check     "41.4 \$label4 -> TODO"         "TODO"       "$IR41"
+check     "41.5 \$label5 -> Later"        "Later"      "$IR41"
+check     "41.6 \$label9 -> Label9"       "Label9"     "$IR41"
+check_not "41.7 no warn for Label action" "\[warn\].*Label" "$IR41"
+
+rm -rf "./build/tests/functional/homes/h41-$$"
+case "$TB41_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB41_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${TB41_DIR##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 42 — US-68: negation conditions (doesn't contain / isn't)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 42: negation conditions (US-68) ---"
+
+TB42_DIR="./build/tests/functional/homes/tb42-$$"
+H_42="./build/tests/functional/homes/h42-$$"
+mkdir -p "$TB42_DIR/ImapMail/imap.test.local"
+cat > "$TB42_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB42DAT'
+name="Not from spam"
+enabled="yes"
+condition="AND (from,doesn't contain,@spam.example.com)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/NotSpam"
+
+name="Subject isnt unsub"
+enabled="yes"
+condition="AND (subject,isn't,Unsubscribe)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Regular"
+
+TB42DAT
+
+mkdir -p "$H_42/.config/email-cli/accounts/t42@test.local"
+cat > "$H_42/.config/email-cli/accounts/t42@test.local/config.ini" <<'CFG42'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=t42@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG42
+
+IR42=$( (export HOME="$H_42"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB42_DIR" \
+        --account t42@test.local --dry-run 2>&1 || true) )
+
+check     "42.1 doesn't contain -> if-not-from"     "if-not-from"    "$IR42"
+check     "42.2 doesn't contain value preserved"    "spam.example"   "$IR42"
+check     "42.3 isn't -> if-not-subject"            "if-not-subject" "$IR42"
+check     "42.4 isn't value preserved"              "Unsubscribe"    "$IR42"
+check_not "42.5 no warn for doesn't contain"        "\[warn\].*doesn" "$IR42"
+check_not "42.6 no warn for isn't"                  "\[warn\].*isn"   "$IR42"
+
+rm -rf "./build/tests/functional/homes/h42-$$"
+case "$TB42_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB42_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${TB42_DIR##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 43 — US-69: body condition conversion
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 43: body condition (US-69) ---"
+
+TB43_DIR="./build/tests/functional/homes/tb43-$$"
+H_43="./build/tests/functional/homes/h43-$$"
+mkdir -p "$TB43_DIR/ImapMail/imap.test.local"
+cat > "$TB43_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB43DAT'
+name="Body newsletter"
+enabled="yes"
+condition="AND (body,contains,unsubscribe)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Newsletter"
+
+name="Body begins with"
+enabled="yes"
+condition="AND (body,begins with,URGENT)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Urgent"
+
+TB43DAT
+
+mkdir -p "$H_43/.config/email-cli/accounts/t43@test.local"
+cat > "$H_43/.config/email-cli/accounts/t43@test.local/config.ini" <<'CFG43'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=t43@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG43
+
+IR43=$( (export HOME="$H_43"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB43_DIR" \
+        --account t43@test.local --dry-run 2>&1 || true) )
+
+check     "43.1 body contains -> if-body = *unsubscribe*"  'if-body.*\*unsubscribe\*' "$IR43"
+check     "43.2 body begins with -> if-body = URGENT*"     'if-body.*URGENT\*'        "$IR43"
+check_not "43.3 no warn for body condition (US-69)"        "\[warn\].*body"            "$IR43"
+
+rm -rf "./build/tests/functional/homes/h43-$$"
+case "$TB43_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB43_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${TB43_DIR##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 44 — US-70: age condition conversion
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 44: age condition (US-70) ---"
+
+TB44_DIR="./build/tests/functional/homes/tb44-$$"
+H_44="./build/tests/functional/homes/h44-$$"
+mkdir -p "$TB44_DIR/ImapMail/imap.test.local"
+cat > "$TB44_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB44DAT'
+name="Old messages"
+enabled="yes"
+condition="AND (age,greater than,90)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Archive"
+
+name="Recent messages"
+enabled="yes"
+condition="AND (age,less than,7)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Recent"
+
+TB44DAT
+
+mkdir -p "$H_44/.config/email-cli/accounts/t44@test.local"
+cat > "$H_44/.config/email-cli/accounts/t44@test.local/config.ini" <<'CFG44'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=t44@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG44
+
+IR44=$( (export HOME="$H_44"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB44_DIR" \
+        --account t44@test.local --dry-run 2>&1 || true) )
+
+check     "44.1 age,greater than,90 -> if-age-gt = 90"  "if-age-gt.*90"  "$IR44"
+check     "44.2 age,less than,7 -> if-age-lt = 7"       "if-age-lt.*7"   "$IR44"
+check_not "44.3 no warn for age,greater than (US-70)"   "\[warn\].*age"  "$IR44"
+check_not "44.4 no warn for age,less than (US-70)"      "\[warn\].*age"  "$IR44"
+
+rm -rf "./build/tests/functional/homes/h44-$$"
+case "$TB44_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB44_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${TB44_DIR##./build/tests/functional/homes/}"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

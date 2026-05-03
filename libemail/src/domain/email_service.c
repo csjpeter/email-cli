@@ -5200,7 +5200,8 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
                                              fr_dec ? fr_dec : "",
                                              su_dec ? su_dec : "",
                                              to_r   ? to_r   : "",
-                                             NULL,  /* no label-based rules for IMAP */
+                                             NULL,  /* no label-based rules during sync */
+                                             NULL, (time_t)0, /* body/date unavailable */
                                              &add_labels, &add_count,
                                              &rm_labels,  &rm_count);
                         if (fired_count > 0) {
@@ -5211,7 +5212,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
                                                           fr_dec ? fr_dec : "",
                                                           su_dec ? su_dec : "",
                                                           to_r   ? to_r   : "",
-                                                          NULL)) {
+                                                          NULL, NULL, (time_t)0)) {
                                         printf("  [rule] \"%s\" \xe2\x86\x92 uid:%s",
                                                mr->name ? mr->name : "?", uid);
                                         for (int j = 0; j < mr->then_add_count; j++)
@@ -5510,7 +5511,8 @@ static void print_rule_matches(const MailRules *rules,
                                 const char *to, const char *labels,
                                 const char *uid, int dry_run) {
     for (int r = 0; r < rules->count; r++) {
-        if (!mail_rule_matches(&rules->rules[r], from, subject, to, labels))
+        if (!mail_rule_matches(&rules->rules[r], from, subject, to, labels,
+                               NULL, (time_t)0))
             continue;
         const MailRule *mr = &rules->rules[r];
         printf("  %s \"%s\" \xe2\x86\x92 uid:%s",
@@ -5587,6 +5589,7 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
                 char **rm_out  = NULL; int rm_count  = 0;
                 int fired = mail_rules_apply(rules,
                                               fields[0], fields[1], NULL, fields[3],
+                                              NULL, (time_t)0,
                                               &add_out, &add_count,
                                               &rm_out,  &rm_count);
                 if (fired > 0) {
@@ -5670,6 +5673,7 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
                                               e->from    ? e->from    : "",
                                               e->subject ? e->subject : "",
                                               NULL, existing,
+                                              NULL, (time_t)0,
                                               &add_out, &add_count,
                                               &rm_out,  &rm_count);
                 if (fired > 0) {

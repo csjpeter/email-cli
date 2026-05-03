@@ -134,6 +134,7 @@ static void apply_rules_to_new_message(const MailRules *rules, const char *uid,
     char **rm_out  = NULL; int rm_count  = 0;
     int fired = mail_rules_apply(rules,
                                   from_dec, subj_dec, to_dec, lcsv,
+                                  NULL, (time_t)0,   /* body/date unavailable during Gmail sync */
                                   &add_out, &add_count,
                                   &rm_out,  &rm_count);
     free(lcsv);

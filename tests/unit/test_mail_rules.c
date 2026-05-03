@@ -35,7 +35,7 @@ static void test_glob_match_basic(void) {
     int ac = 0, rc2 = 0;
     int fired = mail_rules_apply(r,
                                   "noreply@github.com", "PR review", NULL, "INBOX",
-                                  &add, &ac, &rm, &rc2);
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
     ASSERT(fired == 1, "rule should fire for *@github.com");
     ASSERT(ac == 1,    "should add 1 label");
     ASSERT(strcmp(add[0], "GitHub") == 0, "added label should be GitHub");
@@ -56,7 +56,7 @@ static void test_glob_no_match(void) {
     int ac = 0, rc2 = 0;
     int fired = mail_rules_apply(r,
                                   "user@example.com", "Hello", NULL, "INBOX",
-                                  &add, &ac, &rm, &rc2);
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
     ASSERT(fired == 0, "rule should NOT fire for non-github address");
     ASSERT(ac == 0,    "should add 0 labels");
 
@@ -73,7 +73,7 @@ static void test_subject_glob(void) {
     int ac = 0, rc2 = 0;
     int fired = mail_rules_apply(r,
                                   "billing@acme.com", "Invoice April 2026", NULL, "",
-                                  &add, &ac, &rm, &rc2);
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
     ASSERT(fired == 1, "subject glob should match 'Invoice April 2026'");
     ASSERT(ac == 1,    "should add Invoices label");
 
@@ -92,7 +92,7 @@ static void test_case_insensitive(void) {
     int ac = 0, rc2 = 0;
     int fired = mail_rules_apply(r,
                                   "noreply@github.com", "PR", NULL, "",
-                                  &add, &ac, &rm, &rc2);
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
     ASSERT(fired == 1, "glob match should be case-insensitive");
 
     for (int i = 0; i < ac; i++) free(add[i]);
@@ -112,7 +112,7 @@ static void test_remove_label(void) {
     int fired = mail_rules_apply(r,
                                   "promo@marketing.example.com", "Big Sale!", NULL,
                                   "INBOX,UNREAD",
-                                  &add, &ac, &rm, &rc2);
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
     ASSERT(fired == 1, "rule should fire");
     ASSERT(ac == 1 && strcmp(add[0], "_spam") == 0, "should add _spam");
     ASSERT(rc2 == 1 && strcmp(rm[0], "INBOX") == 0, "should remove INBOX");
@@ -141,7 +141,7 @@ static void test_multiple_rules_chained(void) {
     int ac = 0, rc2 = 0;
     int fired = mail_rules_apply(r,
                                   "ceo@acme.com", "Quarterly results", NULL, "INBOX",
-                                  &add, &ac, &rm, &rc2);
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
     ASSERT(fired == 2,   "both rules should fire");
     ASSERT(ac == 2,      "should add Client and Priority");
     ASSERT(rc2 == 1,     "should remove INBOX");
@@ -164,7 +164,7 @@ static void test_no_rules(void) {
     char **add = NULL, **rm = NULL;
     int ac = 0, rc2 = 0;
     int fired = mail_rules_apply(r, "x@y.com", "Hi", NULL, "",
-                                  &add, &ac, &rm, &rc2);
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
     ASSERT(fired == 0, "empty rule set fires 0 rules");
     mail_rules_free(r);
 }
@@ -178,12 +178,173 @@ static void test_no_condition_matches_all(void) {
     char **add = NULL, **rm = NULL;
     int ac = 0, rc2 = 0;
     int fired = mail_rules_apply(r, "any@example.com", "Whatever", NULL, "",
-                                  &add, &ac, &rm, &rc2);
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
     ASSERT(fired == 1, "rule with no conditions should always fire");
     ASSERT(ac == 1,    "should add Processed label");
 
     for (int i = 0; i < ac; i++) free(add[i]);
     free(add);
+    mail_rules_free(r);
+}
+
+static void test_body_condition(void) {
+    MailRules *r = make_rules();
+    MailRule  *rule = add_rule(r, "Newsletter");
+    rule->if_body = strdup("*unsubscribe*");
+    rule->then_add_label[rule->then_add_count++] = strdup("Newsletter");
+
+    char **add = NULL, **rm = NULL;
+    int ac = 0, rc2 = 0;
+
+    int fired = mail_rules_apply(r, "news@example.com", "Weekly", NULL, "",
+                                  "Please unsubscribe here if needed", (time_t)0,
+                                  &add, &ac, &rm, &rc2);
+    ASSERT(fired == 1, "if-body should match");
+    ASSERT(ac == 1,    "should add Newsletter label");
+    for (int i = 0; i < ac; i++) free(add[i]);
+    free(add); free(rm); add = NULL; rm = NULL; ac = 0; rc2 = 0;
+
+    fired = mail_rules_apply(r, "news@example.com", "Weekly", NULL, "",
+                              "Hello world", (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 0, "if-body should not match");
+
+    fired = mail_rules_apply(r, "news@example.com", "Weekly", NULL, "",
+                              NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 0, "if-body with NULL body should not fire");
+
+    mail_rules_free(r);
+}
+
+static void test_age_condition(void) {
+    MailRules *r = make_rules();
+    MailRule  *rule = add_rule(r, "Old");
+    rule->if_age_gt = 30;
+    rule->then_add_label[rule->then_add_count++] = strdup("Old");
+
+    char **add = NULL, **rm = NULL;
+    int ac = 0, rc2 = 0;
+
+    time_t now     = time(NULL);
+    time_t recent  = now - (1  * 86400);
+    time_t old_msg = now - (60 * 86400);
+
+    int fired = mail_rules_apply(r, "x@y.com", "Hi", NULL, "",
+                                  NULL, recent, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 0, "if-age-gt=30 should not fire for 1-day-old message");
+
+    fired = mail_rules_apply(r, "x@y.com", "Hi", NULL, "",
+                              NULL, old_msg, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 1, "if-age-gt=30 should fire for 60-day-old message");
+    for (int i = 0; i < ac; i++) free(add[i]);
+    free(add); free(rm); add = NULL; rm = NULL; ac = 0; rc2 = 0;
+
+    fired = mail_rules_apply(r, "x@y.com", "Hi", NULL, "",
+                              NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 1, "if-age-gt with unknown date should fire (age check skipped)");
+    for (int i = 0; i < ac; i++) free(add[i]);
+    free(add); free(rm);
+
+    mail_rules_free(r);
+}
+
+static void test_age_lt_condition(void) {
+    MailRules *r = make_rules();
+    MailRule  *rule = add_rule(r, "Recent");
+    rule->if_age_lt = 7;
+    rule->then_add_label[rule->then_add_count++] = strdup("Recent");
+
+    char **add = NULL, **rm = NULL;
+    int ac = 0, rc2 = 0;
+
+    time_t now     = time(NULL);
+    time_t new_msg = now - (1  * 86400);
+    time_t old_msg = now - (30 * 86400);
+
+    int fired = mail_rules_apply(r, "x@y.com", "Hi", NULL, "",
+                                  NULL, new_msg, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 1, "if-age-lt=7 should fire for 1-day-old message");
+    for (int i = 0; i < ac; i++) free(add[i]);
+    free(add); free(rm); add = NULL; rm = NULL; ac = 0; rc2 = 0;
+
+    fired = mail_rules_apply(r, "x@y.com", "Hi", NULL, "",
+                              NULL, old_msg, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 0, "if-age-lt=7 should not fire for 30-day-old message");
+
+    mail_rules_free(r);
+}
+
+static void test_negation_if_not_from(void) {
+    MailRules *r = make_rules();
+    MailRule  *rule = add_rule(r, "Not spam");
+    rule->if_not_from = strdup("*@spam.example.com*");
+    rule->then_add_label[rule->then_add_count++] = strdup("Legit");
+
+    char **add = NULL, **rm = NULL;
+    int ac = 0, rc2 = 0;
+
+    /* Should NOT match spam sender */
+    int fired = mail_rules_apply(r, "bad@spam.example.com", "Hi", NULL, "",
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 0, "if-not-from should reject matching sender");
+
+    /* Should match non-spam sender */
+    fired = mail_rules_apply(r, "good@legit.example.com", "Hi", NULL, "",
+                              NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 1, "if-not-from should pass non-matching sender");
+    ASSERT(ac == 1,    "should add Legit label");
+    for (int i = 0; i < ac; i++) free(add[i]);
+    free(add); free(rm);
+    mail_rules_free(r);
+}
+
+static void test_negation_if_not_subject(void) {
+    MailRules *r = make_rules();
+    MailRule  *rule = add_rule(r, "Not newsletter");
+    rule->if_not_subject = strdup("*newsletter*");
+    rule->then_add_label[rule->then_add_count++] = strdup("Regular");
+
+    char **add = NULL, **rm = NULL;
+    int ac = 0, rc2 = 0;
+
+    int fired = mail_rules_apply(r, "x@y.com", "Weekly newsletter digest", NULL, "",
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 0, "if-not-subject should reject matching subject");
+
+    fired = mail_rules_apply(r, "x@y.com", "Hello world", NULL, "",
+                              NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 1, "if-not-subject should pass non-matching subject");
+    for (int i = 0; i < ac; i++) free(add[i]);
+    free(add); free(rm);
+    mail_rules_free(r);
+}
+
+static void test_negation_combined_with_positive(void) {
+    /* if-from = *@legit.com AND if-not-subject = *spam* */
+    MailRules *r = make_rules();
+    MailRule  *rule = add_rule(r, "Legit non-spam");
+    rule->if_from        = strdup("*@legit.com*");
+    rule->if_not_subject = strdup("*spam*");
+    rule->then_add_label[rule->then_add_count++] = strdup("OK");
+
+    char **add = NULL, **rm = NULL;
+    int ac = 0, rc2 = 0;
+
+    /* Matches: legit domain, non-spam subject */
+    int fired = mail_rules_apply(r, "user@legit.com", "Hello", NULL, "",
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 1, "positive+negation: should match");
+    for (int i = 0; i < ac; i++) free(add[i]);
+    free(add); free(rm); add = NULL; rm = NULL; ac = 0; rc2 = 0;
+
+    /* Fails positive: wrong domain */
+    fired = mail_rules_apply(r, "user@other.com", "Hello", NULL, "",
+                              NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 0, "positive+negation: wrong domain should not match");
+
+    /* Fails negation: spam subject */
+    fired = mail_rules_apply(r, "user@legit.com", "Big spam offer", NULL, "",
+                              NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 0, "positive+negation: spam subject should not match");
     mail_rules_free(r);
 }
 
@@ -198,4 +359,10 @@ void test_mail_rules(void) {
     RUN_TEST(test_multiple_rules_chained);
     RUN_TEST(test_no_rules);
     RUN_TEST(test_no_condition_matches_all);
+    RUN_TEST(test_body_condition);
+    RUN_TEST(test_age_condition);
+    RUN_TEST(test_age_lt_condition);
+    RUN_TEST(test_negation_if_not_from);
+    RUN_TEST(test_negation_if_not_subject);
+    RUN_TEST(test_negation_combined_with_positive);
 }

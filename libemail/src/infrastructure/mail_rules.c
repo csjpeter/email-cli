@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define CONFIG_APP_DIR "email-cli"
 
@@ -87,10 +88,16 @@ MailRules *mail_rules_load(const char *account_name) {
         char *key = trim(p);
         char *val = trim(eq + 1);
 
-        if      (strcmp(key, "if-from")    == 0) { free(cur->if_from);    cur->if_from    = strdup(val); }
-        else if (strcmp(key, "if-subject") == 0) { free(cur->if_subject); cur->if_subject = strdup(val); }
-        else if (strcmp(key, "if-to")      == 0) { free(cur->if_to);      cur->if_to      = strdup(val); }
-        else if (strcmp(key, "if-label")   == 0) { free(cur->if_label);   cur->if_label   = strdup(val); }
+        if      (strcmp(key, "if-from")        == 0) { free(cur->if_from);        cur->if_from        = strdup(val); }
+        else if (strcmp(key, "if-subject")     == 0) { free(cur->if_subject);     cur->if_subject     = strdup(val); }
+        else if (strcmp(key, "if-to")          == 0) { free(cur->if_to);          cur->if_to          = strdup(val); }
+        else if (strcmp(key, "if-label")       == 0) { free(cur->if_label);       cur->if_label       = strdup(val); }
+        else if (strcmp(key, "if-not-from")    == 0) { free(cur->if_not_from);    cur->if_not_from    = strdup(val); }
+        else if (strcmp(key, "if-not-subject") == 0) { free(cur->if_not_subject); cur->if_not_subject = strdup(val); }
+        else if (strcmp(key, "if-not-to")      == 0) { free(cur->if_not_to);      cur->if_not_to      = strdup(val); }
+        else if (strcmp(key, "if-body")        == 0) { free(cur->if_body);        cur->if_body        = strdup(val); }
+        else if (strcmp(key, "if-age-gt")      == 0) { cur->if_age_gt = atoi(val); }
+        else if (strcmp(key, "if-age-lt")      == 0) { cur->if_age_lt = atoi(val); }
         else if (strcmp(key, "then-add-label") == 0) {
             if (cur->then_add_count < MAIL_RULE_MAX_LABELS)
                 cur->then_add_label[cur->then_add_count++] = strdup(val);
@@ -131,10 +138,16 @@ int mail_rules_save(const char *account_name, const MailRules *rules) {
     for (int i = 0; i < rules->count; i++) {
         const MailRule *r = &rules->rules[i];
         fprintf(fp, "[rule \"%s\"]\n", r->name ? r->name : "");
-        if (r->if_from)    fprintf(fp, "if-from    = %s\n", r->if_from);
-        if (r->if_subject) fprintf(fp, "if-subject = %s\n", r->if_subject);
-        if (r->if_to)      fprintf(fp, "if-to      = %s\n", r->if_to);
-        if (r->if_label)   fprintf(fp, "if-label   = %s\n", r->if_label);
+        if (r->if_from)        fprintf(fp, "if-from        = %s\n", r->if_from);
+        if (r->if_not_from)    fprintf(fp, "if-not-from    = %s\n", r->if_not_from);
+        if (r->if_subject)     fprintf(fp, "if-subject     = %s\n", r->if_subject);
+        if (r->if_not_subject) fprintf(fp, "if-not-subject = %s\n", r->if_not_subject);
+        if (r->if_to)          fprintf(fp, "if-to          = %s\n", r->if_to);
+        if (r->if_not_to)      fprintf(fp, "if-not-to      = %s\n", r->if_not_to);
+        if (r->if_label)       fprintf(fp, "if-label       = %s\n", r->if_label);
+        if (r->if_body)        fprintf(fp, "if-body        = %s\n", r->if_body);
+        if (r->if_age_gt > 0)  fprintf(fp, "if-age-gt      = %d\n", r->if_age_gt);
+        if (r->if_age_lt > 0)  fprintf(fp, "if-age-lt      = %d\n", r->if_age_lt);
         for (int j = 0; j < r->then_add_count; j++)
             fprintf(fp, "then-add-label    = %s\n", r->then_add_label[j]);
         for (int j = 0; j < r->then_rm_count; j++)
@@ -152,9 +165,13 @@ void mail_rules_free(MailRules *rules) {
         MailRule *r = &rules->rules[i];
         free(r->name);
         free(r->if_from);
+        free(r->if_not_from);
         free(r->if_subject);
+        free(r->if_not_subject);
         free(r->if_to);
+        free(r->if_not_to);
         free(r->if_label);
+        free(r->if_body);
         for (int j = 0; j < r->then_add_count; j++) free(r->then_add_label[j]);
         for (int j = 0; j < r->then_rm_count;  j++) free(r->then_rm_label[j]);
         free(r->then_move_folder);
@@ -201,19 +218,37 @@ static int str_array_add(char ***arr, int *count, const char *s) {
 
 int mail_rule_matches(const MailRule *rule,
                       const char *from, const char *subject,
-                      const char *to, const char *labels_csv)
+                      const char *to, const char *labels_csv,
+                      const char *body, time_t message_date)
 {
     if (!rule) return 0;
+    /* Positive conditions */
     if (!glob_match(rule->if_from,    from))    return 0;
     if (!glob_match(rule->if_subject, subject)) return 0;
     if (!glob_match(rule->if_to,      to))      return 0;
     if (rule->if_label && !csv_label_match(rule->if_label, labels_csv)) return 0;
+    /* Negated conditions: reject if the field MATCHES the pattern */
+    if (rule->if_not_from    && glob_match(rule->if_not_from,    from))    return 0;
+    if (rule->if_not_subject && glob_match(rule->if_not_subject, subject)) return 0;
+    if (rule->if_not_to      && glob_match(rule->if_not_to,      to))      return 0;
+    /* Body condition: skip if body is unavailable (NULL) */
+    if (rule->if_body) {
+        if (!body) return 0;
+        if (!glob_match(rule->if_body, body)) return 0;
+    }
+    /* Age conditions: skip if date is unknown (0) */
+    if (message_date > 0) {
+        int age = (int)((time(NULL) - message_date) / 86400);
+        if (rule->if_age_gt > 0 && age <= rule->if_age_gt) return 0;
+        if (rule->if_age_lt > 0 && age >= rule->if_age_lt) return 0;
+    }
     return 1;
 }
 
 int mail_rules_apply(const MailRules *rules,
                      const char *from, const char *subject,
                      const char *to, const char *labels_csv,
+                     const char *body, time_t message_date,
                      char ***add_out, int *add_count,
                      char ***rm_out,  int *rm_count)
 {
@@ -230,11 +265,8 @@ int mail_rules_apply(const MailRules *rules,
     for (int i = 0; i < rules->count; i++) {
         const MailRule *r = &rules->rules[i];
 
-        /* Evaluate conditions (all must match) */
-        if (!glob_match(r->if_from,    from))    continue;
-        if (!glob_match(r->if_subject, subject)) continue;
-        if (!glob_match(r->if_to,      to))      continue;
-        if (r->if_label && !csv_label_match(r->if_label, working_labels)) continue;
+        if (!mail_rule_matches(r, from, subject, to, working_labels, body, message_date))
+            continue;
 
         fired++;
 

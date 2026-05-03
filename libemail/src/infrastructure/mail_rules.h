@@ -1,6 +1,8 @@
 #ifndef MAIL_RULES_H
 #define MAIL_RULES_H
 
+#include <time.h>
+
 /**
  * @file mail_rules.h
  * @brief Per-account mail sorting rules engine.
@@ -15,6 +17,7 @@
  *   then-remove-label = INBOX
  *
  * Conditions: if-from, if-subject, if-to, if-label (glob patterns).
+ *             if-not-from, if-not-subject, if-not-to (negated glob patterns).
  * Actions:    then-add-label, then-remove-label, then-move-folder (IMAP only).
  *
  * Multiple then-add-label / then-remove-label lines are allowed per rule.
@@ -30,6 +33,12 @@ typedef struct {
     char  *if_subject;                        /**< Glob (NULL = any) */
     char  *if_to;                             /**< Glob (NULL = any) */
     char  *if_label;                          /**< Glob (NULL = any) */
+    char  *if_not_from;                       /**< Negated glob: match fails if field matches (NULL = disabled) */
+    char  *if_not_subject;                    /**< Negated glob (NULL = disabled) */
+    char  *if_not_to;                         /**< Negated glob (NULL = disabled) */
+    char  *if_body;                           /**< Glob against plain-text body (NULL = disabled) */
+    int    if_age_gt;                         /**< Minimum age in days (0 = disabled) */
+    int    if_age_lt;                         /**< Maximum age in days (0 = disabled) */
     char  *then_add_label[MAIL_RULE_MAX_LABELS];  /**< Labels to add */
     int    then_add_count;
     char  *then_rm_label[MAIL_RULE_MAX_LABELS];   /**< Labels to remove */
@@ -78,6 +87,8 @@ void mail_rules_free(MailRules *rules);
  * @param subject      Decoded Subject string (may be NULL).
  * @param to           Decoded To string (may be NULL).
  * @param labels_csv   Current comma-separated label string (may be NULL).
+ * @param body         Plain-text body (may be NULL — body conditions are skipped).
+ * @param message_date Unix timestamp of the message Date header (0 = unknown, age conditions skipped).
  * @param add_out      Heap-allocated array of label strings to add. Caller frees.
  * @param add_count    Number of entries in *add_out.
  * @param rm_out       Heap-allocated array of label strings to remove. Caller frees.
@@ -87,6 +98,7 @@ void mail_rules_free(MailRules *rules);
 int mail_rules_apply(const MailRules *rules,
                      const char *from, const char *subject,
                      const char *to, const char *labels_csv,
+                     const char *body, time_t message_date,
                      char ***add_out, int *add_count,
                      char ***rm_out,  int *rm_count);
 
@@ -98,10 +110,13 @@ int mail_rules_apply(const MailRules *rules,
  * @param subject    Decoded Subject string (may be NULL).
  * @param to         Decoded To string (may be NULL).
  * @param labels_csv Comma-separated label string (may be NULL).
+ * @param body       Plain-text body (may be NULL — if-body skipped).
+ * @param message_date Unix timestamp (0 = unknown — age conditions skipped).
  * @return 1 if all conditions match, 0 otherwise.
  */
 int mail_rule_matches(const MailRule *rule,
                       const char *from, const char *subject,
-                      const char *to, const char *labels_csv);
+                      const char *to, const char *labels_csv,
+                      const char *body, time_t message_date);
 
 #endif /* MAIL_RULES_H */

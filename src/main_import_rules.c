@@ -384,7 +384,15 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
     return rules_added;
 }
 
-/* ── Hostname helpers ────────────────────────────────────────────── */
+/* ── Thunderbird prefs.js account mapping ────────────────────────── */
+
+#define TB_PREFS_MAX 128
+
+typedef struct {
+    char hostname[256]; /* "imap.gmail.com" */
+    char username[256]; /* "csjpeter@gmail.com" */
+    char dir[256];      /* dirname under ImapMail/, e.g. "imap.gmail.com" */
+} TBAccountEntry;
 
 /* Extract hostname from URL like "imaps://box.csaszar.email:993".
  * Writes into buf[buflen]; returns buf on success, NULL on failure. */
@@ -399,56 +407,129 @@ static const char *extract_hostname(const char *url, char *buf, size_t buflen) {
     return i > 0 ? buf : NULL;
 }
 
-/* Check if a Thunderbird server directory name corresponds to host.
- * Thunderbird inserts -N into the second-to-last domain component for
- * duplicate servers: "imap.gmail.com" → "imap.gmail-2.com". */
-static int host_matches_tb_dir(const char *host, const char *tbdir) {
-    if (!host || !tbdir) return 0;
-    if (strcasecmp(host, tbdir) == 0) return 1;
+/* Parse Thunderbird prefs.js: build TBAccountEntry[] from mail.server.serverN.* lines.
+ * Returns number of entries filled, 0 if file not found or no entries. */
+static int parse_tb_prefs(const char *profile_path,
+                           TBAccountEntry *entries, int max_entries) {
+    char prefs_path[8300];
+    snprintf(prefs_path, sizeof(prefs_path), "%s/prefs.js", profile_path);
+    FILE *fp = fopen(prefs_path, "r");
+    if (!fp) return 0;
 
-    /* Find second-to-last dot in host */
-    const char *last_dot = strrchr(host, '.');
-    if (!last_dot) return 0;
-    const char *prev_dot = NULL;
-    for (const char *p = host; p < last_dot; p++)
-        if (*p == '.') prev_dot = p;
-    if (!prev_dot) return 0;
+    /* Temporary storage indexed by server number (1-based) */
+    static char h[TB_PREFS_MAX][256]; /* hostname */
+    static char u[TB_PREFS_MAX][256]; /* userName */
+    static char d[TB_PREFS_MAX][256]; /* dir name extracted from directory-rel */
+    static char used[TB_PREFS_MAX];
+    memset(used, 0, sizeof(used));
+    for (int i = 0; i < TB_PREFS_MAX; i++) { h[i][0]=u[i][0]=d[i][0]='\0'; }
 
-    /* host  = <prefix> <mid>       <tld>       e.g. "imap." "gmail"  ".com"
-     * tbdir = <prefix> <mid> -N    <tld>       e.g. "imap." "gmail-2" ".com" */
-    size_t prefix_and_mid = (size_t)(last_dot - host); /* "imap.gmail" */
-    if (strncasecmp(tbdir, host, prefix_and_mid) != 0) return 0;
-    const char *rest = tbdir + prefix_and_mid;
-    if (rest[0] != '-') return 0;
-    rest++;
-    if (*rest < '0' || *rest > '9') return 0;
-    while (*rest >= '0' && *rest <= '9') rest++;
-    return strcasecmp(rest, last_dot) == 0; /* ".com" == ".com" */
+    char line[4096];
+    while (fgets(line, sizeof(line), fp)) {
+        /* user_pref("mail.server.serverN.attr", "value"); */
+        const char *prefix = "user_pref(\"mail.server.server";
+        if (strncmp(line, prefix, strlen(prefix)) != 0) continue;
+        const char *p = line + strlen(prefix);
+
+        int n = 0;
+        while (*p >= '0' && *p <= '9') { n = n * 10 + (*p - '0'); p++; }
+        if (*p != '.' || n <= 0 || n >= TB_PREFS_MAX) continue;
+        p++;
+
+        /* Read attribute name up to ',' */
+        char attr[64] = ""; int ai = 0;
+        while (*p && *p != '"' && *p != ',' && ai + 1 < (int)sizeof(attr))
+            attr[ai++] = *p++;
+        attr[ai] = '\0';
+
+        /* Skip to first '"' after ',' to find value */
+        char *comma = strchr(p, ',');
+        if (!comma) continue;
+        char *vs = strchr(comma + 1, '"');
+        if (!vs) continue;
+        vs++;
+        char *ve = strchr(vs, '"');
+        if (!ve) continue;
+        size_t vl = (size_t)(ve - vs);
+
+        used[n] = 1;
+        if (strcmp(attr, "hostname") == 0 && vl < sizeof(h[n])) {
+            memcpy(h[n], vs, vl); h[n][vl] = '\0';
+        } else if (strcmp(attr, "userName") == 0 && vl < sizeof(u[n])) {
+            memcpy(u[n], vs, vl); u[n][vl] = '\0';
+        } else if (strcmp(attr, "directory-rel") == 0 && vl < sizeof(d[n])) {
+            /* "[ProfD]ImapMail/imap.gmail.com" → "imap.gmail.com"
+             * "[ProfD]Mail/Local Folders"      → "Local Folders"  */
+            char tmp[256]; memcpy(tmp, vs, vl); tmp[vl] = '\0';
+            char *slash = NULL;
+            char *im = strstr(tmp, "ImapMail/");
+            if (im) slash = im + 8; /* points to '/' before dir name */
+            else {
+                char *m = strstr(tmp, "Mail/");
+                if (m) slash = m + 4;
+            }
+            if (slash) {
+                slash++; /* skip '/' */
+                strncpy(d[n], slash, sizeof(d[n]) - 1);
+            }
+        }
+    }
+    fclose(fp);
+
+    int count = 0;
+    for (int n = 1; n < TB_PREFS_MAX && count < max_entries; n++) {
+        if (!used[n] || !h[n][0]) continue;
+        strncpy(entries[count].hostname, h[n], sizeof(entries[count].hostname) - 1);
+        strncpy(entries[count].username, u[n], sizeof(entries[count].username) - 1);
+        strncpy(entries[count].dir,      d[n], sizeof(entries[count].dir)      - 1);
+        entries[count].hostname[sizeof(entries[count].hostname)-1] = '\0';
+        entries[count].username[sizeof(entries[count].username)-1] = '\0';
+        entries[count].dir     [sizeof(entries[count].dir)     -1] = '\0';
+        count++;
+    }
+    return count;
+}
+
+/* Find the Thunderbird directory name for an email-cli account.
+ * Matches by (hostname, email address).  email is compared to TB userName both
+ * as full address and as local part (before '@'), case-insensitively.
+ * Returns 1 and fills dir_out on success; returns 0 if no match. */
+static int find_tb_dir_for_account(const TBAccountEntry *entries, int count,
+                                    const char *email, const char *host,
+                                    char *dir_out, size_t dir_out_size) {
+    if (!email || !host || !entries || count <= 0) return 0;
+
+    /* Local part of email (before '@') for fallback matching */
+    const char *at = strchr(email, '@');
+    size_t local_len = at ? (size_t)(at - email) : strlen(email);
+
+    for (int i = 0; i < count; i++) {
+        if (strcasecmp(entries[i].hostname, host) != 0) continue;
+        const char *uname = entries[i].username;
+        int match = (strcasecmp(uname, email) == 0) ||
+                    (strlen(uname) == local_len &&
+                     strncasecmp(uname, email, local_len) == 0);
+        if (!match) continue;
+        if (entries[i].dir[0]) {
+            strncpy(dir_out, entries[i].dir, dir_out_size - 1);
+            dir_out[dir_out_size - 1] = '\0';
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* ── Thunderbird scanner ─────────────────────────────────────────── */
 
-/* Scan one Thunderbird server parent dir (ImapMail/ or Mail/).
- * Only includes subdirectories whose name matches host (NULL = all). */
-static int scan_tb_server_dir(const char *dir, const char *host, MailRules **out) {
-    DIR *dp = opendir(dir);
-    if (!dp) return 0;
-    int total = 0;
-    struct dirent *de;
-    while ((de = readdir(dp)) != NULL) {
-        if (de->d_name[0] == '.') continue;
-        if (host && !host_matches_tb_dir(host, de->d_name)) continue;
-        char path[8300];
-        snprintf(path, sizeof(path), "%s/%s/msgFilterRules.dat", dir, de->d_name);
-        struct stat st;
-        if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
-            printf("  Found: %s\n", path);
-            int n = parse_tb_filter_file(path, out);
-            if (n > 0) total += n;
-        }
-    }
-    closedir(dp);
-    return total;
+/* Scan a single named subdirectory under ImapMail/ or Mail/ for rules. */
+static int scan_tb_named_dir(const char *parent, const char *dir_name, MailRules **out) {
+    char path[8300];
+    snprintf(path, sizeof(path), "%s/%s/msgFilterRules.dat", parent, dir_name);
+    struct stat st;
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) return 0;
+    printf("  Found: %s\n", path);
+    int n = parse_tb_filter_file(path, out);
+    return n > 0 ? n : 0;
 }
 
 /* ── Per-rule output helpers ─────────────────────────────────────── */
@@ -515,10 +596,11 @@ static int write_rules_to_file(const MailRules *rules, const char *path) {
 
 /* ── Per-account processing ──────────────────────────────────────── */
 
-/* Scan Thunderbird dirs matching host, print rules, optionally save.
- * output: NULL → save to default rules.ini; non-NULL → write to that file.
+/* Scan the Thunderbird directory for tb_dir_name (exact), print rules, save.
+ * tb_dir_name: specific subdirectory name under ImapMail/ (from prefs.js lookup).
+ * output: NULL → default rules.ini; non-NULL → write to that path.
  * Returns EXIT_SUCCESS / EXIT_FAILURE. */
-static int process_account(const char *account_name, const char *host,
+static int process_account(const char *account_name, const char *tb_dir_name,
                             const char *tb_path, int dry_run, const char *output) {
     char imap_dir[8210], mail_dir[8210];
     snprintf(imap_dir, sizeof(imap_dir), "%s/ImapMail", tb_path);
@@ -526,8 +608,8 @@ static int process_account(const char *account_name, const char *host,
 
     MailRules *rules = NULL;
     int total = 0;
-    total += scan_tb_server_dir(imap_dir, host, &rules);
-    total += scan_tb_server_dir(mail_dir, host, &rules);
+    total += scan_tb_named_dir(imap_dir, tb_dir_name, &rules);
+    total += scan_tb_named_dir(mail_dir, tb_dir_name, &rules);
 
     if (total == 0 || !rules || rules->count == 0) {
         printf("  No rules found.\n");
@@ -653,6 +735,10 @@ int main(int argc, char *argv[]) {
         printf("Thunderbird profile: %s\n", tb_path);
     }
 
+    /* Parse prefs.js once for account→directory mapping */
+    TBAccountEntry tb_entries[TB_PREFS_MAX];
+    int tb_count = parse_tb_prefs(tb_path, tb_entries, TB_PREFS_MAX);
+
     if (account) {
         /* ── Single-account mode ── */
         Config *cfg = config_load_account(account);
@@ -661,14 +747,26 @@ int main(int argc, char *argv[]) {
             extract_hostname(cfg->host, host_buf, sizeof(host_buf));
         config_free(cfg);
 
-        printf("Account: %s (host: %s)\n", account,
-               host_buf[0] ? host_buf : "unknown");
+        char dir_buf[256] = "";
+        if (tb_count > 0 && host_buf[0])
+            find_tb_dir_for_account(tb_entries, tb_count, account, host_buf,
+                                    dir_buf, sizeof(dir_buf));
+
+        if (!dir_buf[0] && host_buf[0]) {
+            /* prefs.js unavailable or no match: warn and skip */
+            fprintf(stderr,
+                    "Warning: No Thunderbird account found for '%s' (host: %s).\n"
+                    "Check that Thunderbird is configured with this account.\n",
+                    account, host_buf);
+            return EXIT_FAILURE;
+        }
+
+        printf("Account: %s → Thunderbird dir: %s\n", account, dir_buf);
         printf("Scanning Thunderbird filters...\n");
-        return process_account(account, host_buf[0] ? host_buf : NULL,
-                               tb_path, dry_run, output);
+        return process_account(account, dir_buf, tb_path, dry_run, output);
     }
 
-    /* ── Multi-account mode: process each account with its own host filter ── */
+    /* ── Multi-account mode ── */
     int count = 0;
     AccountEntry *accounts = config_list_accounts(&count);
     if (!accounts || count == 0) {
@@ -682,12 +780,19 @@ int main(int argc, char *argv[]) {
         if (accounts[i].cfg && accounts[i].cfg->host)
             extract_hostname(accounts[i].cfg->host, host_buf, sizeof(host_buf));
 
-        printf("\n--- Account: %s (host: %s) ---\n",
-               accounts[i].name, host_buf[0] ? host_buf : "unknown");
-        printf("Scanning Thunderbird filters...\n");
+        char dir_buf[256] = "";
+        if (tb_count > 0 && host_buf[0])
+            find_tb_dir_for_account(tb_entries, tb_count,
+                                    accounts[i].name, host_buf,
+                                    dir_buf, sizeof(dir_buf));
 
-        int rc = process_account(accounts[i].name,
-                                 host_buf[0] ? host_buf : NULL,
+        printf("\n--- Account: %s ---\n", accounts[i].name);
+        if (!dir_buf[0]) {
+            printf("  No matching Thunderbird account found — skipping.\n");
+            continue;
+        }
+        printf("Scanning Thunderbird filters (dir: %s)...\n", dir_buf);
+        int rc = process_account(accounts[i].name, dir_buf,
                                  tb_path, dry_run, NULL);
         if (rc != EXIT_SUCCESS) any_error = 1;
     }

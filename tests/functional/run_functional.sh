@@ -142,6 +142,16 @@ SSL_NO_VERIFY=1
 CONFIG
 }
 
+# Create a minimal Thunderbird prefs.js mapping one account to one IMAP directory.
+#   make_tb_prefs <tb_profile_dir> <host> <email> <imap_dir_name>
+make_tb_prefs() {
+    local profile="$1" host="$2" email="$3" dirname="$4"
+    printf 'user_pref("mail.server.server1.hostname", "%s");\n'       "$host"    >  "$profile/prefs.js"
+    printf 'user_pref("mail.server.server1.userName", "%s");\n'       "$email"   >> "$profile/prefs.js"
+    printf 'user_pref("mail.server.server1.directory-rel", "[ProfD]ImapMail/%s");\n' "$dirname" >> "$profile/prefs.js"
+    printf 'user_pref("mail.server.server1.type", "imap");\n'                    >> "$profile/prefs.js"
+}
+
 # Run `email-cli list --batch [--folder F]` with the given HOME and optional
 # shared XDG_DATA_HOME; returns stdout+stderr combined.
 run_list() {
@@ -2340,6 +2350,7 @@ check "38.1 email-import-rules binary exists in bin/" "." \
 # Create a synthetic Thunderbird profile with mixed supported/unsupported rules
 TB_DIR="./build/tests/functional/homes/tb-$$"
 mkdir -p "$TB_DIR/ImapMail/localhost"
+make_tb_prefs "$TB_DIR" "localhost" "ir@test.local" "localhost"
 cat > "$TB_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TBDAT'
 version="9"
 logging="no"
@@ -2469,6 +2480,7 @@ echo "--- Phase 39: begins with / ends with match types (US-65) ---"
 TB39_DIR="./build/tests/functional/homes/tb39-$$"
 H_39="./build/tests/functional/homes/h39-$$"
 mkdir -p "$TB39_DIR/ImapMail/localhost"
+make_tb_prefs "$TB39_DIR" "localhost" "t39@test.local" "localhost"
 cat > "$TB39_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB39DAT'
 name="Begins rule"
 enabled="yes"
@@ -2522,6 +2534,7 @@ echo "--- Phase 40: flag action conversion (US-66) ---"
 TB40_DIR="./build/tests/functional/homes/tb40-$$"
 H_40="./build/tests/functional/homes/h40-$$"
 mkdir -p "$TB40_DIR/ImapMail/localhost"
+make_tb_prefs "$TB40_DIR" "localhost" "t40@test.local" "localhost"
 cat > "$TB40_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB40DAT'
 name="Read rule"
 enabled="yes"
@@ -2586,6 +2599,7 @@ echo "--- Phase 41: Label action -> custom label (US-67) ---"
 TB41_DIR="./build/tests/functional/homes/tb41-$$"
 H_41="./build/tests/functional/homes/h41-$$"
 mkdir -p "$TB41_DIR/ImapMail/localhost"
+make_tb_prefs "$TB41_DIR" "localhost" "t41@test.local" "localhost"
 cat > "$TB41_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB41DAT'
 name="Important label"
 enabled="yes"
@@ -2659,6 +2673,7 @@ echo "--- Phase 42: negation conditions (US-68) ---"
 TB42_DIR="./build/tests/functional/homes/tb42-$$"
 H_42="./build/tests/functional/homes/h42-$$"
 mkdir -p "$TB42_DIR/ImapMail/localhost"
+make_tb_prefs "$TB42_DIR" "localhost" "t42@test.local" "localhost"
 cat > "$TB42_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB42DAT'
 name="Not from spam"
 enabled="yes"
@@ -2707,6 +2722,7 @@ echo "--- Phase 43: body condition (US-69) ---"
 TB43_DIR="./build/tests/functional/homes/tb43-$$"
 H_43="./build/tests/functional/homes/h43-$$"
 mkdir -p "$TB43_DIR/ImapMail/localhost"
+make_tb_prefs "$TB43_DIR" "localhost" "t43@test.local" "localhost"
 cat > "$TB43_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB43DAT'
 name="Body newsletter"
 enabled="yes"
@@ -2752,6 +2768,7 @@ echo "--- Phase 44: age condition (US-70) ---"
 TB44_DIR="./build/tests/functional/homes/tb44-$$"
 H_44="./build/tests/functional/homes/h44-$$"
 mkdir -p "$TB44_DIR/ImapMail/localhost"
+make_tb_prefs "$TB44_DIR" "localhost" "t44@test.local" "localhost"
 cat > "$TB44_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB44DAT'
 name="Old messages"
 enabled="yes"
@@ -2803,6 +2820,7 @@ echo "--- Phase 45: email-import-rules additional actions ---"
 TB45_DIR="./build/tests/functional/homes/tb45-$$"
 H_45="./build/tests/functional/homes/h45-$$"
 mkdir -p "$TB45_DIR/ImapMail/localhost"
+make_tb_prefs "$TB45_DIR" "localhost" "t45@test.local" "localhost"
 cat > "$TB45_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB45DAT'
 name="Mark read rule"
 enabled="yes"
@@ -2864,6 +2882,99 @@ check     "45.5b save message contains account (dangling ptr fix)" \
 rm -rf "./build/tests/functional/homes/h45-$$"
 case "$TB45_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB45_DIR path" >&2; exit 1 ;; esac
 rm -rf "./build/tests/functional/homes/${TB45_DIR##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 46 — Multi-account prefs.js isolation (US-76)
+#   46.1  ta46 account gets only AlphaRule (its own rules)
+#   46.2  ta46 does NOT get BetaRule (isolation)
+#   46.3  tb46 account gets only BetaRule (its own rules)
+#   46.4  tb46 does NOT get AlphaRule (isolation)
+#   46.5  tc46 (no matching TB entry) is reported as skipped
+#   46.6  tc46 rules.ini is not created
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 46: multi-account prefs.js isolation (US-76) ---"
+
+TB46_DIR="./build/tests/functional/homes/tb46-$$"
+H_46="./build/tests/functional/homes/h46-$$"
+
+mkdir -p "$TB46_DIR/ImapMail/ta-dir"
+mkdir -p "$TB46_DIR/ImapMail/tb-dir"
+
+# prefs.js: two IMAP servers mapped to different ImapMail subdirs
+cat > "$TB46_DIR/prefs.js" <<'PREFS46'
+user_pref("mail.server.server1.hostname", "localhost");
+user_pref("mail.server.server1.userName", "ta46@test.local");
+user_pref("mail.server.server1.directory-rel", "[ProfD]ImapMail/ta-dir");
+user_pref("mail.server.server1.type", "imap");
+user_pref("mail.server.server2.hostname", "localhost");
+user_pref("mail.server.server2.userName", "tb46@test.local");
+user_pref("mail.server.server2.directory-rel", "[ProfD]ImapMail/tb-dir");
+user_pref("mail.server.server2.type", "imap");
+PREFS46
+
+cat > "$TB46_DIR/ImapMail/ta-dir/msgFilterRules.dat" <<'DA46'
+name="AlphaRule"
+enabled="yes"
+condition="AND (from,contains,@alpha.example.com)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Alpha"
+
+DA46
+
+cat > "$TB46_DIR/ImapMail/tb-dir/msgFilterRules.dat" <<'DB46'
+name="BetaRule"
+enabled="yes"
+condition="AND (from,contains,@beta.example.com)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Beta"
+
+DB46
+
+# Three-account home: ta46/tb46 on localhost, tc46 on an unrelated host (no TB profile)
+mkdir -p "$H_46/.config/email-cli/accounts/ta46@test.local"
+cat > "$H_46/.config/email-cli/accounts/ta46@test.local/config.ini" <<'CFG46A'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=ta46@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG46A
+mkdir -p "$H_46/.config/email-cli/accounts/tb46@test.local"
+cat > "$H_46/.config/email-cli/accounts/tb46@test.local/config.ini" <<'CFG46B'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=tb46@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG46B
+mkdir -p "$H_46/.config/email-cli/accounts/tc46@test.local"
+cat > "$H_46/.config/email-cli/accounts/tc46@test.local/config.ini" <<'CFG46C'
+EMAIL_HOST=imaps://other.host:9993
+EMAIL_USER=tc46@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG46C
+
+# Multi-account import without --account → each account processed independently
+IR46=$( (export HOME="$H_46"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB46_DIR" 2>&1 || true) )
+
+RULES46A="$H_46/.config/email-cli/accounts/ta46@test.local/rules.ini"
+RULES46B="$H_46/.config/email-cli/accounts/tb46@test.local/rules.ini"
+RULES46C="$H_46/.config/email-cli/accounts/tc46@test.local/rules.ini"
+
+check     "46.1 ta46 rules saved (AlphaRule)"             "AlphaRule"  "$(cat "$RULES46A" 2>/dev/null || echo '')"
+check_not "46.2 ta46 has no BetaRule (isolation)"         "BetaRule"   "$(cat "$RULES46A" 2>/dev/null || echo '')"
+check     "46.3 tb46 rules saved (BetaRule)"              "BetaRule"   "$(cat "$RULES46B" 2>/dev/null || echo '')"
+check_not "46.4 tb46 has no AlphaRule (isolation)"        "AlphaRule"  "$(cat "$RULES46B" 2>/dev/null || echo '')"
+check     "46.5 tc46 skipped (no matching TB profile)"    "skipping"   "$IR46"
+check     "46.6 tc46 rules.ini not created"               "ok"         "$(test ! -f "$RULES46C" && echo ok || echo fail)"
+
+rm -rf "./build/tests/functional/homes/h46-$$"
+case "$TB46_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB46_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${TB46_DIR##./build/tests/functional/homes/}"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

@@ -119,6 +119,7 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
     int cur_converted_act   = 0;
     int cur_skipped_act     = 0;
     int cur_pending_label   = 0; /* set when action=Label seen, resolved by actionValue */
+    int cur_pending_forward = 0; /* set when action=Forward seen, resolved by actionValue */
 
     while (fgets(line, sizeof(line), fp)) {
         /* Strip trailing newline */
@@ -138,7 +139,8 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
             cur = NULL;
             cur_converted_cond = cur_skipped_cond = 0;
             cur_converted_act  = cur_skipped_act  = 0;
-            cur_pending_label  = 0;
+            cur_pending_label   = 0;
+            cur_pending_forward = 0;
             continue;
         }
 
@@ -158,7 +160,8 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
             }
             cur_converted_cond = cur_skipped_cond = 0;
             cur_converted_act  = cur_skipped_act  = 0;
-            cur_pending_label  = 0;
+            cur_pending_label   = 0;
+            cur_pending_forward = 0;
 
             /* Start new rule */
             cur = NULL;
@@ -276,15 +279,23 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
         }
 
         if (strcmp(key, "action") == 0) {
-            cur_pending_label = 0;
+            cur_pending_label   = 0;
+            cur_pending_forward = 0;
             if (strstr(val, "Move")) {
                 if (cur->then_move_folder == NULL)
                     cur->then_move_folder = strdup("(set by actionValue)");
                 cur_converted_act++;
-            } else if (strcmp(val, "Mark as read") == 0) {
-                /* US-66: Mark as read → remove UNREAD label */
+            } else if (strcmp(val, "Mark as read") == 0 ||
+                       strcmp(val, "Mark read") == 0) {
+                /* US-66 + TB shorthand: remove UNREAD label */
                 if (cur->then_rm_count < MAIL_RULE_MAX_LABELS)
                     cur->then_rm_label[cur->then_rm_count++] = strdup("UNREAD");
+                cur_converted_act++;
+            } else if (strcmp(val, "Mark as unread") == 0 ||
+                       strcmp(val, "Mark unread") == 0) {
+                /* add UNREAD label */
+                if (cur->then_add_count < MAIL_RULE_MAX_LABELS)
+                    cur->then_add_label[cur->then_add_count++] = strdup("UNREAD");
                 cur_converted_act++;
             } else if (strcmp(val, "Mark as starred") == 0 ||
                        strcmp(val, "Mark as flagged") == 0) {
@@ -292,8 +303,9 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
                 if (cur->then_add_count < MAIL_RULE_MAX_LABELS)
                     cur->then_add_label[cur->then_add_count++] = strdup("_flagged");
                 cur_converted_act++;
-            } else if (strcmp(val, "Mark as junk") == 0) {
-                /* US-66: junk → add _junk label */
+            } else if (strcmp(val, "Mark as junk") == 0 ||
+                       strcmp(val, "JunkScore") == 0) {
+                /* US-66 + TB internal junk scoring → add _junk label */
                 if (cur->then_add_count < MAIL_RULE_MAX_LABELS)
                     cur->then_add_label[cur->then_add_count++] = strdup("_junk");
                 cur_converted_act++;
@@ -301,6 +313,10 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
                 /* US-66: delete → add _trash label */
                 if (cur->then_add_count < MAIL_RULE_MAX_LABELS)
                     cur->then_add_label[cur->then_add_count++] = strdup("_trash");
+                cur_converted_act++;
+            } else if (strcmp(val, "Forward") == 0) {
+                /* Forward address resolved by actionValue */
+                cur_pending_forward = 1;
                 cur_converted_act++;
             } else if (strcmp(val, "Label") == 0) {
                 /* US-67: Thunderbird colour label → custom label (resolved by actionValue) */
@@ -323,6 +339,12 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
                 /* Extract last path component from IMAP URL */
                 const char *last_slash = strrchr(val, '/');
                 cur->then_move_folder = strdup(last_slash ? last_slash + 1 : val);
+            }
+            /* Forward: store target address */
+            if (cur_pending_forward) {
+                free(cur->then_forward_to);
+                cur->then_forward_to = strdup(val);
+                cur_pending_forward  = 0;
             }
             /* US-67: resolve Label action → map $labelN to name */
             if (cur_pending_label) {
@@ -460,7 +482,8 @@ int main(int argc, char *argv[]) {
     }
 
     /* Auto-detect Thunderbird profile */
-    RAII_STRING char *tb_auto = NULL;
+    RAII_STRING char *tb_auto      = NULL;
+    RAII_STRING char *account_auto = NULL; /* owned copy when auto-detected */
     if (!tb_path) {
         tb_auto = find_thunderbird_profile();
         if (!tb_auto) {
@@ -477,7 +500,8 @@ int main(int argc, char *argv[]) {
         int count = 0;
         AccountEntry *accounts = config_list_accounts(&count);
         if (accounts && count > 0) {
-            account = accounts[0].name;   /* Use first account as default */
+            account_auto = strdup(accounts[0].name); /* own the name before free */
+            account = account_auto;
             printf("Target account: %s\n", account);
         }
         config_free_account_list(accounts, count);
@@ -526,6 +550,8 @@ int main(int argc, char *argv[]) {
             printf("  then-remove-label = %s\n", r->then_rm_label[j]);
         if (r->then_move_folder)
             printf("  then-move-folder  = %s\n", r->then_move_folder);
+        if (r->then_forward_to)
+            printf("  then-forward-to   = %s\n", r->then_forward_to);
         printf("\n");
     }
 
@@ -572,6 +598,8 @@ int main(int argc, char *argv[]) {
                 fprintf(fp, "then-remove-label = %s\n", r->then_rm_label[j]);
             if (r->then_move_folder)
                 fprintf(fp, "then-move-folder  = %s\n", r->then_move_folder);
+            if (r->then_forward_to)
+                fprintf(fp, "then-forward-to   = %s\n", r->then_forward_to);
             fprintf(fp, "\n");
         }
         fclose(fp);

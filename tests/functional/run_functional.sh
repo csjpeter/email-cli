@@ -2790,6 +2790,82 @@ case "$TB44_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe 
 rm -rf "./build/tests/functional/homes/${TB44_DIR##./build/tests/functional/homes/}"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 45 — email-import-rules: additional action support
+#   45.1  "Mark read" (TB shorthand) → then-remove-label = UNREAD
+#   45.2  "Mark unread" → then-add-label = UNREAD
+#   45.3  "JunkScore" (TB internal) → then-add-label = _junk
+#   45.4  "Forward" → then-forward-to saved; no warn
+#   45.5  Auto-detected account name correct in save message (dangling ptr fix)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 45: email-import-rules additional actions ---"
+
+TB45_DIR="./build/tests/functional/homes/tb45-$$"
+H_45="./build/tests/functional/homes/h45-$$"
+mkdir -p "$TB45_DIR/ImapMail/imap.test.local"
+cat > "$TB45_DIR/ImapMail/imap.test.local/msgFilterRules.dat" <<'TB45DAT'
+name="Mark read rule"
+enabled="yes"
+condition="AND (from,contains,@newsletter.example.com)"
+action="Mark read"
+
+name="Mark unread rule"
+enabled="yes"
+condition="AND (from,contains,@vip.example.com)"
+action="Mark unread"
+
+name="JunkScore rule"
+enabled="yes"
+condition="AND (from,contains,@spam.example.com)"
+action="JunkScore"
+actionValue="100"
+
+name="Forward rule"
+enabled="yes"
+condition="AND (from,contains,@boss.example.com)"
+action="Forward"
+actionValue="assistant@example.com"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Boss"
+
+TB45DAT
+
+mkdir -p "$H_45/.config/email-cli/accounts/t45@test.local"
+cat > "$H_45/.config/email-cli/accounts/t45@test.local/config.ini" <<'CFG45'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=t45@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG45
+
+IR45=$( (export HOME="$H_45"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB45_DIR" \
+        --account t45@test.local --dry-run 2>&1 || true) )
+
+check     "45.1 Mark read → then-remove-label = UNREAD"     "then-remove-label.*UNREAD"   "$IR45"
+check_not "45.1b no warn for Mark read"                     "\[warn\].*Mark read"          "$IR45"
+check     "45.2 Mark unread → then-add-label = UNREAD"      "then-add-label.*UNREAD"       "$IR45"
+check_not "45.2b no warn for Mark unread"                   "\[warn\].*Mark unread"        "$IR45"
+check     "45.3 JunkScore → then-add-label = _junk"         "then-add-label.*_junk"        "$IR45"
+check_not "45.3b no warn for JunkScore"                     "\[warn\].*JunkScore"          "$IR45"
+check     "45.4 Forward → then-forward-to saved"            "then-forward-to.*assistant"   "$IR45"
+check_not "45.4b no warn for Forward"                       "\[warn\].*Forward"            "$IR45"
+check     "45.4c Forward rule: move-folder also preserved"  "then-move-folder.*Boss"        "$IR45"
+
+# Test auto-detection path: run WITHOUT --account to trigger dangling ptr code path
+IR45_AUTO=$( (export HOME="$H_45"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB45_DIR" 2>&1 || true) )
+
+check     "45.5 auto-detected account shown correctly"      "t45@test.local"               "$IR45_AUTO"
+check     "45.5b save message contains account (dangling ptr fix)" \
+    "saved.*t45@test.local" "$(echo "$IR45_AUTO" | grep -i "saved")"
+
+rm -rf "./build/tests/functional/homes/h45-$$"
+case "$TB45_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB45_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${TB45_DIR##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

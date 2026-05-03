@@ -18,7 +18,8 @@
  *
  * Conditions: if-from, if-subject, if-to, if-label (glob patterns).
  *             if-not-from, if-not-subject, if-not-to (negated glob patterns).
- * Actions:    then-add-label, then-remove-label, then-move-folder (IMAP only).
+ * Actions:    then-add-label, then-remove-label, then-move-folder (IMAP only),
+ *             then-forward-to (stored; forwarding execution is future work).
  *
  * Multiple then-add-label / then-remove-label lines are allowed per rule.
  * Conditions are ANDed; any omitted condition matches everything.
@@ -44,6 +45,7 @@ typedef struct {
     char  *then_rm_label[MAIL_RULE_MAX_LABELS];   /**< Labels to remove */
     int    then_rm_count;
     char  *then_move_folder;                  /**< Destination folder (IMAP only; may be NULL) */
+    char  *then_forward_to;                   /**< Forward target address (stored; not yet executed) */
 } MailRule;
 
 typedef struct {

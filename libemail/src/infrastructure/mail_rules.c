@@ -110,6 +110,10 @@ MailRules *mail_rules_load(const char *account_name) {
             free(cur->then_move_folder);
             cur->then_move_folder = strdup(val);
         }
+        else if (strcmp(key, "then-forward-to") == 0) {
+            free(cur->then_forward_to);
+            cur->then_forward_to = strdup(val);
+        }
     }
 
     logger_log(LOG_INFO, "mail_rules_load: loaded %d rule(s) from %s", r->count, path);
@@ -154,6 +158,8 @@ int mail_rules_save(const char *account_name, const MailRules *rules) {
             fprintf(fp, "then-remove-label = %s\n", r->then_rm_label[j]);
         if (r->then_move_folder)
             fprintf(fp, "then-move-folder  = %s\n", r->then_move_folder);
+        if (r->then_forward_to)
+            fprintf(fp, "then-forward-to   = %s\n", r->then_forward_to);
         fprintf(fp, "\n");
     }
     return 0;
@@ -175,6 +181,7 @@ void mail_rules_free(MailRules *rules) {
         for (int j = 0; j < r->then_add_count; j++) free(r->then_add_label[j]);
         for (int j = 0; j < r->then_rm_count;  j++) free(r->then_rm_label[j]);
         free(r->then_move_folder);
+        free(r->then_forward_to);
     }
     free(rules->rules);
     free(rules);

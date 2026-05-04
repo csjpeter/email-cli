@@ -1,5 +1,6 @@
 #include "mail_rules.h"
 #include "fs_util.h"
+#include "imap_util.h"
 #include "platform/path.h"
 #include "raii.h"
 #include "logger.h"
@@ -49,8 +50,7 @@ static MailRule *rules_grow(MailRules *r) {
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
-MailRules *mail_rules_load(const char *account_name) {
-    RAII_STRING char *path = rules_path(account_name);
+MailRules *mail_rules_load_path(const char *path) {
     if (!path) return NULL;
 
     RAII_FILE FILE *fp = fopen(path, "r");
@@ -68,7 +68,6 @@ MailRules *mail_rules_load(const char *account_name) {
 
         /* Section header: [rule "name"] */
         if (*p == '[') {
-            /* Commit previous rule; start new one */
             cur = rules_grow(r);
             if (!cur) { mail_rules_free(r); return NULL; }
             char *qs = strchr(p, '"');
@@ -108,7 +107,8 @@ MailRules *mail_rules_load(const char *account_name) {
         }
         else if (strcmp(key, "then-move-folder") == 0) {
             free(cur->then_move_folder);
-            cur->then_move_folder = strdup(val);
+            cur->then_move_folder = imap_utf7_decode(val);
+            if (!cur->then_move_folder) cur->then_move_folder = strdup(val);
         }
         else if (strcmp(key, "then-forward-to") == 0) {
             free(cur->then_forward_to);
@@ -118,6 +118,11 @@ MailRules *mail_rules_load(const char *account_name) {
 
     logger_log(LOG_INFO, "mail_rules_load: loaded %d rule(s) from %s", r->count, path);
     return r;
+}
+
+MailRules *mail_rules_load(const char *account_name) {
+    RAII_STRING char *path = rules_path(account_name);
+    return mail_rules_load_path(path);
 }
 
 int mail_rules_save(const char *account_name, const MailRules *rules) {

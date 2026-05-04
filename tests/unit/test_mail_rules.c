@@ -1,7 +1,9 @@
 #include "test_helpers.h"
 #include "mail_rules.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -348,6 +350,32 @@ static void test_negation_combined_with_positive(void) {
     mail_rules_free(r);
 }
 
+static void test_load_utf7_folder_name(void) {
+    /* Write a temp rules.ini with a then-move-folder in IMAP modified UTF-7 */
+    char tmppath[] = "/tmp/test-mail-rules-XXXXXX";
+    int fd = mkstemp(tmppath);
+    ASSERT(fd >= 0, "utf7 load: mkstemp failed");
+    const char *ini =
+        "[rule \"hivataos\"]\n"
+        "if-from = *@gov.hu*\n"
+        /* "hivatalos és pénzügy" in IMAP modified UTF-7 */
+        "then-move-folder = hivatalos &AOk-s p&AOk-nz&APw-gy\n";
+    ssize_t written = write(fd, ini, strlen(ini));
+    (void)written;
+    close(fd);
+
+    MailRules *r = mail_rules_load_path(tmppath);
+    unlink(tmppath);
+    ASSERT(r != NULL, "utf7 load: load_path returned NULL");
+    ASSERT(r->count == 1, "utf7 load: expected 1 rule");
+    ASSERT(r->rules[0].then_move_folder != NULL, "utf7 load: then_move_folder is NULL");
+    /* é = U+00E9 = C3 A9; ü = U+00FC = C3 BC */
+    ASSERT(strcmp(r->rules[0].then_move_folder,
+                  "hivatalos \xC3\xA9s p\xC3\xA9nz\xC3\xBCgy") == 0,
+           "utf7 load: then_move_folder not decoded to UTF-8");
+    mail_rules_free(r);
+}
+
 /* ── Registration ────────────────────────────────────────────────── */
 
 void test_mail_rules(void) {
@@ -365,4 +393,5 @@ void test_mail_rules(void) {
     RUN_TEST(test_negation_if_not_from);
     RUN_TEST(test_negation_if_not_subject);
     RUN_TEST(test_negation_combined_with_positive);
+    RUN_TEST(test_load_utf7_folder_name);
 }

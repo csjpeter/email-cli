@@ -55,6 +55,15 @@ typedef struct {
 } MailRules;
 
 /**
+ * @brief Load rules from an arbitrary ini file path.
+ *
+ * @param path  Absolute path to a rules.ini file.
+ * @return Heap-allocated MailRules, or NULL on allocation error or missing file.
+ *         Caller must free with mail_rules_free().
+ */
+MailRules *mail_rules_load_path(const char *path);
+
+/**
  * @brief Load rules from the account's rules.ini file.
  *
  * @param account_name  Account directory name under accounts/ (e.g. "user@example.com").

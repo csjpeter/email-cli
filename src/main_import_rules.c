@@ -20,6 +20,7 @@
 #include "mail_rules.h"
 #include "config_store.h"
 #include "fs_util.h"
+#include "imap_util.h"
 #include "platform/path.h"
 #include "logger.h"
 #include "raii.h"
@@ -336,9 +337,11 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
             if (cur->then_move_folder &&
                 strcmp(cur->then_move_folder, "(set by actionValue)") == 0) {
                 free(cur->then_move_folder);
-                /* Extract last path component from IMAP URL */
+                /* Extract last path component from IMAP URL and decode modified UTF-7 */
                 const char *last_slash = strrchr(val, '/');
-                cur->then_move_folder = strdup(last_slash ? last_slash + 1 : val);
+                const char *raw = last_slash ? last_slash + 1 : val;
+                cur->then_move_folder = imap_utf7_decode(raw);
+                if (!cur->then_move_folder) cur->then_move_folder = strdup(raw);
             }
             /* Forward: store target address */
             if (cur_pending_forward) {

@@ -1100,250 +1100,384 @@ static int cmd_reply_all(Config *cfg, const char *uid, const char *folder) {
 
 /* ── Rules editor ────────────────────────────────────────────────────── */
 
+/* Number of then-add/rm-label slots shown in the edit form. */
+#define RULES_FORM_LABEL_SLOTS 3
+
 /**
- * Read one line from stdin in cooked mode. Prints the prompt, then
- * reads up to (bufsz-1) bytes. Strips the trailing newline.
- * If prefill is non-empty, displays it and uses it as the default if
- * the user presses Enter without typing anything.
+ * Full-screen form to create (prefill=NULL) or edit an existing rule.
+ * Uses input_line_run for every field — proper UTF-8 and cursor movement.
+ * All prefill strings are copied into local buffers immediately, so the
+ * caller may free the source MailRules at any time after this returns.
  */
-static void rules_form_read_field(const char *prompt,
-                                   char *buf, size_t bufsz,
-                                   const char *prefill)
+static void tui_rules_add_form(const char *account, const MailRule *prefill)
 {
-    if (prefill && prefill[0])
-        printf("%s[%s] ", prompt, prefill);
-    else
-        printf("%s", prompt);
-    fflush(stdout);
-    char line[512] = {0};
-    if (fgets(line, sizeof(line), stdin)) {
-        /* Strip trailing newline */
-        size_t l = strlen(line);
-        while (l > 0 && (line[l-1] == '\n' || line[l-1] == '\r')) { line[--l] = '\0'; }
-        if (l > 0) {
-            strncpy(buf, line, bufsz - 1);
-            buf[bufsz - 1] = '\0';
-        } else if (prefill && prefill[0]) {
-            /* Empty input → keep prefill */
-            strncpy(buf, prefill, bufsz - 1);
-            buf[bufsz - 1] = '\0';
-        } else {
-            buf[0] = '\0';
-        }
-    }
-}
+    char name_buf[256]  = {0};
+    char from_buf[256]  = {0};
+    char subj_buf[256]  = {0};
+    char to_buf[256]    = {0};
+    char lbl_buf[256]   = {0};
+    char nfrom_buf[256] = {0};
+    char nsubj_buf[256] = {0};
+    char nto_buf[256]   = {0};
+    char body_buf[256]  = {0};
+    char agegt_buf[16]  = {0};
+    char agelt_buf[16]  = {0};
+    char add_bufs[RULES_FORM_LABEL_SLOTS][256];
+    char rm_bufs[RULES_FORM_LABEL_SLOTS][256];
+    char folder_buf[256] = {0};
+    char fwd_buf[256]    = {0};
+    memset(add_bufs, 0, sizeof(add_bufs));
+    memset(rm_bufs,  0, sizeof(rm_bufs));
 
-/**
- * Interactive form to add a new rule (prefill=NULL) or edit an existing rule.
- * Runs in cooked (normal) terminal mode for simple sequential line input.
- */
-static void tui_rules_add_form(const char *account, const MailRule *prefill) {
-    /* Clear screen */
+    if (prefill) {
+        if (prefill->name)
+            snprintf(name_buf,  sizeof(name_buf),  "%s", prefill->name);
+        if (prefill->if_from)
+            snprintf(from_buf,  sizeof(from_buf),  "%s", prefill->if_from);
+        if (prefill->if_subject)
+            snprintf(subj_buf,  sizeof(subj_buf),  "%s", prefill->if_subject);
+        if (prefill->if_to)
+            snprintf(to_buf,    sizeof(to_buf),    "%s", prefill->if_to);
+        if (prefill->if_label)
+            snprintf(lbl_buf,   sizeof(lbl_buf),   "%s", prefill->if_label);
+        if (prefill->if_not_from)
+            snprintf(nfrom_buf, sizeof(nfrom_buf), "%s", prefill->if_not_from);
+        if (prefill->if_not_subject)
+            snprintf(nsubj_buf, sizeof(nsubj_buf), "%s", prefill->if_not_subject);
+        if (prefill->if_not_to)
+            snprintf(nto_buf,   sizeof(nto_buf),   "%s", prefill->if_not_to);
+        if (prefill->if_body)
+            snprintf(body_buf,  sizeof(body_buf),  "%s", prefill->if_body);
+        if (prefill->if_age_gt)
+            snprintf(agegt_buf, sizeof(agegt_buf), "%d", prefill->if_age_gt);
+        if (prefill->if_age_lt)
+            snprintf(agelt_buf, sizeof(agelt_buf), "%d", prefill->if_age_lt);
+        for (int j = 0; j < prefill->then_add_count && j < RULES_FORM_LABEL_SLOTS; j++)
+            if (prefill->then_add_label[j])
+                snprintf(add_bufs[j], 256, "%s", prefill->then_add_label[j]);
+        for (int j = 0; j < prefill->then_rm_count && j < RULES_FORM_LABEL_SLOTS; j++)
+            if (prefill->then_rm_label[j])
+                snprintf(rm_bufs[j], 256, "%s", prefill->then_rm_label[j]);
+        if (prefill->then_move_folder)
+            snprintf(folder_buf, sizeof(folder_buf), "%s", prefill->then_move_folder);
+        if (prefill->then_forward_to)
+            snprintf(fwd_buf, sizeof(fwd_buf), "%s", prefill->then_forward_to);
+    }
+
+    struct { const char *prompt; char *buf; size_t bufsz; int row; } fields[] = {
+        { "Name:             ", name_buf,   sizeof(name_buf),  3  },
+        { "if-from:          ", from_buf,   sizeof(from_buf),  4  },
+        { "if-subject:       ", subj_buf,   sizeof(subj_buf),  5  },
+        { "if-to:            ", to_buf,     sizeof(to_buf),    6  },
+        { "if-label:         ", lbl_buf,    sizeof(lbl_buf),   7  },
+        { "if-not-from:      ", nfrom_buf,  sizeof(nfrom_buf), 8  },
+        { "if-not-subject:   ", nsubj_buf,  sizeof(nsubj_buf), 9  },
+        { "if-not-to:        ", nto_buf,    sizeof(nto_buf),   10 },
+        { "if-body:          ", body_buf,   sizeof(body_buf),  11 },
+        { "if-age-gt (days): ", agegt_buf,  sizeof(agegt_buf), 12 },
+        { "if-age-lt (days): ", agelt_buf,  sizeof(agelt_buf), 13 },
+        { "add-label [1]:    ", add_bufs[0], 256,              14 },
+        { "add-label [2]:    ", add_bufs[1], 256,              15 },
+        { "add-label [3]:    ", add_bufs[2], 256,              16 },
+        { "rm-label  [1]:    ", rm_bufs[0],  256,              17 },
+        { "rm-label  [2]:    ", rm_bufs[1],  256,              18 },
+        { "rm-label  [3]:    ", rm_bufs[2],  256,              19 },
+        { "then-move-folder: ", folder_buf, sizeof(folder_buf), 20 },
+        { "then-forward-to:  ", fwd_buf,    sizeof(fwd_buf),   21 },
+    };
+    int nfields = (int)(sizeof(fields) / sizeof(fields[0]));
+
     printf("\033[2J\033[H");
-    printf("%s rule for %s\n\n",
-           prefill ? "Edit" : "Add new", account ? account : "?");
-
-    char name_buf[256]    = {0};
-    char from_buf[256]    = {0};
-    char subj_buf[256]    = {0};
-    char to_buf[256]      = {0};
-    char label_buf[256]   = {0};
-    char folder_buf[256]  = {0};
-    char add_bufs[MAIL_RULE_MAX_LABELS][256];
-    char rm_bufs[MAIL_RULE_MAX_LABELS][256];
-    int  add_count = 0, rm_count = 0;
-
-    /* Zero all label arrays */
-    for (int j = 0; j < MAIL_RULE_MAX_LABELS; j++) {
-        memset(add_bufs[j], 0, sizeof(add_bufs[j]));
-        memset(rm_bufs[j],  0, sizeof(rm_bufs[j]));
-    }
-
-    rules_form_read_field("Rule name: ", name_buf, sizeof(name_buf),
-                          prefill && prefill->name ? prefill->name : "");
-    rules_form_read_field("if-from    (glob, empty=any): ", from_buf, sizeof(from_buf),
-                          prefill && prefill->if_from ? prefill->if_from : "");
-    rules_form_read_field("if-subject (glob, empty=any): ", subj_buf, sizeof(subj_buf),
-                          prefill && prefill->if_subject ? prefill->if_subject : "");
-    rules_form_read_field("if-to      (glob, empty=any): ", to_buf, sizeof(to_buf),
-                          prefill && prefill->if_to ? prefill->if_to : "");
-    rules_form_read_field("if-label   (glob, empty=any): ", label_buf, sizeof(label_buf),
-                          prefill && prefill->if_label ? prefill->if_label : "");
-
-    /* then-add-label: show existing (prefill), then loop for new ones */
-    printf("then-add-label (empty=done):\n");
-    add_count = 0;
-    if (prefill) {
-        for (int j = 0; j < prefill->then_add_count && j < MAIL_RULE_MAX_LABELS; j++) {
-            rules_form_read_field("  + ", add_bufs[add_count], sizeof(add_bufs[add_count]),
-                                  prefill->then_add_label[j] ? prefill->then_add_label[j] : "");
-            if (add_bufs[add_count][0]) add_count++;
-        }
-    }
-    for (;;) {
-        if (add_count >= MAIL_RULE_MAX_LABELS) break;
-        rules_form_read_field("  + ", add_bufs[add_count], sizeof(add_bufs[add_count]), "");
-        if (!add_bufs[add_count][0]) break;
-        add_count++;
-    }
-
-    /* then-remove-label: same approach */
-    printf("then-remove-label (empty=done):\n");
-    rm_count = 0;
-    if (prefill) {
-        for (int j = 0; j < prefill->then_rm_count && j < MAIL_RULE_MAX_LABELS; j++) {
-            rules_form_read_field("  - ", rm_bufs[rm_count], sizeof(rm_bufs[rm_count]),
-                                  prefill->then_rm_label[j] ? prefill->then_rm_label[j] : "");
-            if (rm_bufs[rm_count][0]) rm_count++;
-        }
-    }
-    for (;;) {
-        if (rm_count >= MAIL_RULE_MAX_LABELS) break;
-        rules_form_read_field("  - ", rm_bufs[rm_count], sizeof(rm_bufs[rm_count]), "");
-        if (!rm_bufs[rm_count][0]) break;
-        rm_count++;
-    }
-
-    rules_form_read_field("then-move-folder (IMAP only, empty=none): ",
-                          folder_buf, sizeof(folder_buf),
-                          prefill && prefill->then_move_folder ? prefill->then_move_folder : "");
-
-    /* Validate */
-    if (!name_buf[0]) {
-        printf("\nRule name is required. Cancelled.\n");
-        fflush(stdout);
-        return;
-    }
-
-    /* Confirm */
-    printf("\nSave? (y/N) ");
+    printf("%s rule for %s\n", prefill ? "Edit" : "Add new", account ? account : "?");
+    printf("Enter=next field  ESC=cancel\n");
+    for (int i = 0; i < nfields; i++)
+        printf("\033[%d;1H\033[2K%s%s", fields[i].row, fields[i].prompt, fields[i].buf);
     fflush(stdout);
-    TermRawState *_raw6 = terminal_raw_enter();
-    char cc; ssize_t cn = read(STDIN_FILENO, &cc, 1); (void)cn;
-    terminal_raw_exit(&_raw6);
-    printf("\n");
-    if (cc != 'y' && cc != 'Y') {
-        printf("Cancelled.\n");
-        fflush(stdout);
-        return;
+
+    int cancelled = 0;
+    char confirm_char = 0;
+    {
+        RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
+
+        for (int i = 0; i < nfields && !cancelled; i++) {
+            InputLine il = {0};
+            input_line_init(&il, fields[i].buf, fields[i].bufsz, fields[i].buf);
+            if (!input_line_run(&il, fields[i].row, fields[i].prompt))
+                cancelled = 1;
+        }
+
+        if (!cancelled && !name_buf[0]) {
+            printf("\033[23;1H\033[2KRule name is required. Press any key...");
+            fflush(stdout);
+            char c; ssize_t _nc = read(STDIN_FILENO, &c, 1); (void)_nc; (void)c;
+            cancelled = 1;
+        }
+
+        if (!cancelled) {
+            printf("\033[23;1H\033[2KSave? (y/N) ");
+            fflush(stdout);
+            ssize_t cn = read(STDIN_FILENO, &confirm_char, 1); (void)cn;
+            if (confirm_char != 'y' && confirm_char != 'Y') cancelled = 1;
+        }
     }
 
-    /* Load existing rules and save */
+    if (cancelled) return;
+
     MailRules *rules = mail_rules_load(account);
     if (!rules) {
         rules = calloc(1, sizeof(MailRules));
         if (!rules) { fprintf(stderr, "Error: out of memory.\n"); return; }
     }
 
-    if (prefill) {
-        /* Find existing rule by old name and update it in place */
-        int found = -1;
+    MailRule *mr = NULL;
+    if (prefill && prefill->name) {
         for (int r = 0; r < rules->count; r++) {
             if (rules->rules[r].name &&
-                strcmp(rules->rules[r].name, prefill->name ? prefill->name : "") == 0) {
-                found = r; break;
+                strcmp(rules->rules[r].name, prefill->name) == 0) {
+                mr = &rules->rules[r]; break;
             }
         }
-        if (found >= 0) {
-            MailRule *mr = &rules->rules[found];
-            free(mr->name); free(mr->if_from); free(mr->if_subject);
-            free(mr->if_to); free(mr->if_label); free(mr->then_move_folder);
-            for (int j = 0; j < mr->then_add_count; j++) free(mr->then_add_label[j]);
-            for (int j = 0; j < mr->then_rm_count;  j++) free(mr->then_rm_label[j]);
-            memset(mr, 0, sizeof(*mr));
-            mr->name       = strdup(name_buf);
-            mr->if_from    = from_buf[0]   ? strdup(from_buf)   : NULL;
-            mr->if_subject = subj_buf[0]   ? strdup(subj_buf)   : NULL;
-            mr->if_to      = to_buf[0]     ? strdup(to_buf)     : NULL;
-            mr->if_label   = label_buf[0]  ? strdup(label_buf)  : NULL;
-            mr->then_move_folder = folder_buf[0] ? strdup(folder_buf) : NULL;
-            for (int j = 0; j < add_count; j++)
-                mr->then_add_label[mr->then_add_count++] = strdup(add_bufs[j]);
-            for (int j = 0; j < rm_count; j++)
-                mr->then_rm_label[mr->then_rm_count++] = strdup(rm_bufs[j]);
-        }
-    } else {
-        /* Append new rule */
+    }
+    if (!mr) {
         if (rules->count >= rules->cap) {
             int nc = rules->cap ? rules->cap * 2 : 8;
             MailRule *tmp = realloc(rules->rules, (size_t)nc * sizeof(MailRule));
-            if (!tmp) { mail_rules_free(rules); fprintf(stderr, "Error: out of memory.\n"); return; }
+            if (!tmp) {
+                mail_rules_free(rules);
+                fprintf(stderr, "Error: out of memory.\n");
+                return;
+            }
             rules->rules = tmp;
             rules->cap   = nc;
         }
-        MailRule *mr = &rules->rules[rules->count++];
+        mr = &rules->rules[rules->count++];
         memset(mr, 0, sizeof(*mr));
-        mr->name       = strdup(name_buf);
-        mr->if_from    = from_buf[0]   ? strdup(from_buf)   : NULL;
-        mr->if_subject = subj_buf[0]   ? strdup(subj_buf)   : NULL;
-        mr->if_to      = to_buf[0]     ? strdup(to_buf)     : NULL;
-        mr->if_label   = label_buf[0]  ? strdup(label_buf)  : NULL;
-        mr->then_move_folder = folder_buf[0] ? strdup(folder_buf) : NULL;
-        for (int j = 0; j < add_count; j++)
-            mr->then_add_label[mr->then_add_count++] = strdup(add_bufs[j]);
-        for (int j = 0; j < rm_count; j++)
-            mr->then_rm_label[mr->then_rm_count++] = strdup(rm_bufs[j]);
+    } else {
+        free(mr->name);    free(mr->if_from);    free(mr->if_subject);
+        free(mr->if_to);   free(mr->if_label);
+        free(mr->if_not_from); free(mr->if_not_subject); free(mr->if_not_to);
+        free(mr->if_body); free(mr->then_move_folder);   free(mr->then_forward_to);
+        for (int j = 0; j < mr->then_add_count; j++) free(mr->then_add_label[j]);
+        for (int j = 0; j < mr->then_rm_count;  j++) free(mr->then_rm_label[j]);
+        memset(mr, 0, sizeof(*mr));
     }
 
-    if (mail_rules_save(account, rules) == 0)
-        printf("Rule saved.\n");
-    else
+    mr->name           = strdup(name_buf);
+    mr->if_from        = from_buf[0]   ? strdup(from_buf)   : NULL;
+    mr->if_subject     = subj_buf[0]   ? strdup(subj_buf)   : NULL;
+    mr->if_to          = to_buf[0]     ? strdup(to_buf)     : NULL;
+    mr->if_label       = lbl_buf[0]    ? strdup(lbl_buf)    : NULL;
+    mr->if_not_from    = nfrom_buf[0]  ? strdup(nfrom_buf)  : NULL;
+    mr->if_not_subject = nsubj_buf[0]  ? strdup(nsubj_buf)  : NULL;
+    mr->if_not_to      = nto_buf[0]    ? strdup(nto_buf)    : NULL;
+    mr->if_body        = body_buf[0]   ? strdup(body_buf)   : NULL;
+    mr->if_age_gt      = agegt_buf[0]  ? atoi(agegt_buf)    : 0;
+    mr->if_age_lt      = agelt_buf[0]  ? atoi(agelt_buf)    : 0;
+    mr->then_move_folder = folder_buf[0] ? strdup(folder_buf) : NULL;
+    mr->then_forward_to  = fwd_buf[0]    ? strdup(fwd_buf)    : NULL;
+    for (int j = 0; j < RULES_FORM_LABEL_SLOTS && add_bufs[j][0]; j++)
+        mr->then_add_label[mr->then_add_count++] = strdup(add_bufs[j]);
+    for (int j = 0; j < RULES_FORM_LABEL_SLOTS && rm_bufs[j][0]; j++)
+        mr->then_rm_label[mr->then_rm_count++]   = strdup(rm_bufs[j]);
+
+    if (mail_rules_save(account, rules) != 0)
         fprintf(stderr, "Error: failed to save rules.\n");
-    fflush(stdout);
     mail_rules_free(rules);
 }
 
+static void rules_free_at(MailRules *rules, int idx)
+{
+    MailRule *rr = &rules->rules[idx];
+    free(rr->name);    free(rr->if_from);    free(rr->if_subject);
+    free(rr->if_to);   free(rr->if_label);
+    free(rr->if_not_from); free(rr->if_not_subject); free(rr->if_not_to);
+    free(rr->if_body); free(rr->then_move_folder);   free(rr->then_forward_to);
+    for (int j = 0; j < rr->then_add_count; j++) free(rr->then_add_label[j]);
+    for (int j = 0; j < rr->then_rm_count;  j++) free(rr->then_rm_label[j]);
+    for (int r = idx; r < rules->count - 1; r++)
+        rules->rules[r] = rules->rules[r + 1];
+    rules->count--;
+}
+
 /**
- * Full-screen interactive rules editor.
- * Keys: a=add  d=delete <N>  e=edit <N>  ESC/q=back
+ * Detail view for a single rule.
+ * Keys: e=edit  d=delete  ESC/q=back
  */
-static void tui_rules_editor(const Config *cfg) {
+static void tui_rules_detail(const char *account, int idx)
+{
+    for (;;) {
+        MailRules *rules = mail_rules_load(account);
+        if (!rules || idx < 0 || idx >= rules->count) {
+            mail_rules_free(rules);
+            break;
+        }
+        const MailRule *r = &rules->rules[idx];
+
+        printf("\033[2J\033[H");
+        printf("Rule: %s\n", r->name ? r->name : "(unnamed)");
+        printf("Account: %s\n\n", account ? account : "?");
+
+        int row = 4;
+#define DSHOW(lbl, val) \
+        if (val) { printf("\033[%d;1H  " lbl "%s", row, val); row++; }
+#define DSHOW_ANY(lbl, val) \
+        do { printf("\033[%d;1H  " lbl "%s", row, (val) ? (val) : "(any)"); row++; } while(0)
+        DSHOW_ANY("if-from:          ", r->if_from);
+        DSHOW_ANY("if-subject:       ", r->if_subject);
+        DSHOW_ANY("if-to:            ", r->if_to);
+        DSHOW_ANY("if-label:         ", r->if_label);
+        DSHOW("if-not-from:      ", r->if_not_from);
+        DSHOW("if-not-subject:   ", r->if_not_subject);
+        DSHOW("if-not-to:        ", r->if_not_to);
+        DSHOW("if-body:          ", r->if_body);
+        if (r->if_age_gt) { printf("\033[%d;1H  if-age-gt:        %d days", row++, r->if_age_gt); }
+        if (r->if_age_lt) { printf("\033[%d;1H  if-age-lt:        %d days", row++, r->if_age_lt); }
+        row++;
+        for (int j = 0; j < r->then_add_count; j++)
+            if (r->then_add_label[j])
+                { printf("\033[%d;1H  then-add-label:   %s", row++, r->then_add_label[j]); }
+        for (int j = 0; j < r->then_rm_count; j++)
+            if (r->then_rm_label[j])
+                { printf("\033[%d;1H  then-rm-label:    %s", row++, r->then_rm_label[j]); }
+        DSHOW("then-move-folder: ", r->then_move_folder);
+        DSHOW("then-forward-to:  ", r->then_forward_to);
+#undef DSHOW
+#undef DSHOW_ANY
+
+        int trows = terminal_rows();
+        int footer = (trows > row + 1) ? trows : row + 1;
+        printf("\033[%d;1H  e=edit  d=delete  ESC/q=back", footer);
+        fflush(stdout);
+
+        TermKey key;
+        int ch;
+        char del_confirm = 0;
+        {
+            RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
+            key = terminal_read_key();
+            ch  = terminal_last_printable();
+            if (ch == 'd') {
+                printf("\033[%d;1H\033[2K  Delete \"%s\"? (y/N) ",
+                       footer, r->name ? r->name : "?");
+                fflush(stdout);
+                ssize_t _nd = read(STDIN_FILENO, &del_confirm, 1); (void)_nd;
+            }
+        }
+
+        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || ch == 'q') {
+            mail_rules_free(rules);
+            break;
+        }
+
+        if (ch == 'e') {
+            tui_rules_add_form(account, r);
+            mail_rules_free(rules);
+            continue;
+        }
+
+        if (ch == 'd') {
+            if (del_confirm == 'y' || del_confirm == 'Y') {
+                rules_free_at(rules, idx);
+                mail_rules_save(account, rules);
+            }
+            mail_rules_free(rules);
+            break;
+        }
+
+        mail_rules_free(rules);
+    }
+}
+
+/**
+ * Full-screen rules list with cursor navigation.
+ * Keys: j/k/↑/↓=navigate  Enter=open detail  a=add  d=delete  ESC/q=back
+ */
+static void tui_rules_editor(const Config *cfg)
+{
     if (!cfg || !cfg->user) return;
     const char *account = cfg->user;
+    int cursor = 0;
+    int scroll = 0;
 
     for (;;) {
-        /* Load rules (reload after each modification) */
         MailRules *rules = mail_rules_load(account);
         int count = rules ? rules->count : 0;
 
-        /* Draw rules list */
+        if (cursor >= count) cursor = count > 0 ? count - 1 : 0;
+        if (cursor < 0) cursor = 0;
+
+        int rows = terminal_rows();
+        if (rows < 5) rows = 24;
+        int list_start = 3;
+        int list_rows  = rows - 3;
+        if (list_rows < 1) list_rows = 1;
+
+        if (cursor < scroll) scroll = cursor;
+        if (cursor >= scroll + list_rows) scroll = cursor - list_rows + 1;
+
         printf("\033[2J\033[H");
         printf("Rules for %s (%d rule%s)\n\n",
                account, count, count == 1 ? "" : "s");
-        for (int i = 0; i < count; i++) {
-            const MailRule *r = &rules->rules[i];
-            printf("  %d. %s\n", i + 1, r->name ? r->name : "(unnamed)");
-            if (r->if_from)    printf("       if-from    = %s\n", r->if_from);
-            if (r->if_subject) printf("       if-subject = %s\n", r->if_subject);
-            if (r->if_to)      printf("       if-to      = %s\n", r->if_to);
-            if (r->if_label)   printf("       if-label   = %s\n", r->if_label);
-            for (int j = 0; j < r->then_add_count; j++)
-                printf("       then-add-label    = %s\n", r->then_add_label[j]);
-            for (int j = 0; j < r->then_rm_count; j++)
-                printf("       then-remove-label = %s\n", r->then_rm_label[j]);
-            if (r->then_move_folder)
-                printf("       then-move-folder  = %s\n", r->then_move_folder);
-            printf("\n");
+
+        for (int i = 0; i < list_rows; i++) {
+            int ri = scroll + i;
+            printf("\033[%d;1H\033[2K", list_start + i);
+            if (ri < count) {
+                const char *name = rules->rules[ri].name
+                                 ? rules->rules[ri].name : "(unnamed)";
+                if (ri == cursor)
+                    printf("  \033[7m %-56s \033[m", name);
+                else
+                    printf("    %-56s", name);
+            }
         }
         if (count == 0)
-            printf("  (no rules -- press 'a' to add one)\n\n");
+            printf("\033[3;1H\033[2K  (no rules -- press 'a' to add one)");
 
-        printf("  a=add  d=delete <N>  e=edit <N>  ESC/q=back\n");
+        printf("\033[%d;1H\033[2K"
+               "  j/k=navigate  Enter=open  a=add  d=delete  ESC/q=back",
+               rows);
         fflush(stdout);
 
-        /* Read a single command key */
-        char ch = 0;
+        TermKey key;
+        int ch;
+        char del_confirm = 0;
         {
-            TermRawState *_r = terminal_raw_enter();
-            char buf[4] = {0};
-            ssize_t n = read(STDIN_FILENO, buf, 1);
-            if (n > 0) ch = buf[0];
-            terminal_raw_exit(&_r);
+            RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
+            key = terminal_read_key();
+            ch  = terminal_last_printable();
+            if (ch == 'd' && count > 0) {
+                const char *rname = rules->rules[cursor].name
+                                  ? rules->rules[cursor].name : "?";
+                printf("\033[%d;1H\033[2K  Delete \"%s\"? (y/N) ", rows, rname);
+                fflush(stdout);
+                ssize_t _nd = read(STDIN_FILENO, &del_confirm, 1); (void)_nd;
+            }
         }
 
-        if (ch == 'q' || ch == 27 /* ESC */ || ch == 3 /* Ctrl-C */) {
+        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || ch == 'q') {
             mail_rules_free(rules);
             break;
+        }
+
+        if (key == TERM_KEY_NEXT_LINE || ch == 'j') {
+            if (cursor < count - 1) cursor++;
+            mail_rules_free(rules);
+            continue;
+        }
+
+        if (key == TERM_KEY_PREV_LINE || ch == 'k') {
+            if (cursor > 0) cursor--;
+            mail_rules_free(rules);
+            continue;
+        }
+
+        if (key == TERM_KEY_ENTER && count > 0) {
+            int saved = cursor;
+            mail_rules_free(rules);
+            tui_rules_detail(account, saved);
+            cursor = saved;
+            continue;
         }
 
         if (ch == 'a') {
@@ -1353,82 +1487,12 @@ static void tui_rules_editor(const Config *cfg) {
         }
 
         if (ch == 'd' && count > 0) {
-            /* Delete: ask for rule number */
-            printf("Delete rule number (1-%d, or Enter to cancel): ", count);
-            fflush(stdout);
-            char nbuf[16] = {0};
-            int ni = 0;
-            {
-                TermRawState *_r2 = terminal_raw_enter();
-                for (;;) {
-                    char c2; ssize_t n = read(STDIN_FILENO, &c2, 1);
-                    if (n <= 0 || c2 == '\r' || c2 == '\n') break;
-                    if (c2 == 27) { ni = 0; break; }
-                    if (c2 >= '0' && c2 <= '9' && ni < 15) {
-                        nbuf[ni++] = c2; putchar(c2); fflush(stdout);
-                    }
-                }
-                terminal_raw_exit(&_r2);
-            }
-            printf("\n");
-            int idx = atoi(nbuf) - 1;
-            if (idx >= 0 && idx < count) {
-                printf("Delete \"%s\"? (y/N) ",
-                       rules->rules[idx].name ? rules->rules[idx].name : "?");
-                fflush(stdout);
-                char cc; ssize_t nn;
-                {
-                    TermRawState *_r3 = terminal_raw_enter();
-                    nn = read(STDIN_FILENO, &cc, 1); (void)nn;
-                    terminal_raw_exit(&_r3);
-                }
-                printf("\n");
-                if (cc == 'y' || cc == 'Y') {
-                    MailRule *rr = &rules->rules[idx];
-                    free(rr->name); free(rr->if_from); free(rr->if_subject);
-                    free(rr->if_to); free(rr->if_label); free(rr->then_move_folder);
-                    for (int j = 0; j < rr->then_add_count; j++) free(rr->then_add_label[j]);
-                    for (int j = 0; j < rr->then_rm_count;  j++) free(rr->then_rm_label[j]);
-                    for (int r = idx; r < rules->count - 1; r++)
-                        rules->rules[r] = rules->rules[r + 1];
-                    rules->count--;
-                    mail_rules_save(account, rules);
-                    printf("Rule deleted.\n");
-                    fflush(stdout);
-                }
+            if (del_confirm == 'y' || del_confirm == 'Y') {
+                rules_free_at(rules, cursor);
+                mail_rules_save(account, rules);
+                if (cursor >= rules->count && cursor > 0) cursor--;
             }
             mail_rules_free(rules);
-            continue;
-        }
-
-        if (ch == 'e' && count > 0) {
-            /* Edit: ask for rule number */
-            printf("Edit rule number (1-%d, or Enter to cancel): ", count);
-            fflush(stdout);
-            char nbuf[16] = {0};
-            int ni = 0;
-            {
-                TermRawState *_r2 = terminal_raw_enter();
-                for (;;) {
-                    char c2; ssize_t n = read(STDIN_FILENO, &c2, 1);
-                    if (n <= 0 || c2 == '\r' || c2 == '\n') break;
-                    if (c2 == 27) { ni = 0; break; }
-                    if (c2 >= '0' && c2 <= '9' && ni < 15) {
-                        nbuf[ni++] = c2; putchar(c2); fflush(stdout);
-                    }
-                }
-                terminal_raw_exit(&_r2);
-            }
-            printf("\n");
-            int idx = atoi(nbuf) - 1;
-            if (idx >= 0 && idx < count) {
-                /* Make a copy of the rule to pass as prefill */
-                MailRule copy = rules->rules[idx];
-                mail_rules_free(rules);
-                tui_rules_add_form(account, &copy);
-            } else {
-                mail_rules_free(rules);
-            }
             continue;
         }
 

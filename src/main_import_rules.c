@@ -99,8 +99,56 @@ static char *trim_quotes(char *s) {
     return s;
 }
 
+/* Maximum number of conditions in one Thunderbird filter rule */
+#define TB_MAX_CONDS 256
+
+typedef struct {
+    char field[32];    /* "from", "to", "subject", "body", "age" */
+    char glob[1024];   /* glob pattern (empty for age) */
+    int  is_negated;
+    int  is_age_gt;    /* 1 = age-gt, 0 = age-lt */
+    int  age_val;
+} TBCond;
+
+/* Grow MailRules array by one; return pointer to new zero-initialised entry. */
+static MailRule *rules_append(MailRules *r) {
+    if (r->count >= r->cap) {
+        int nc = r->cap ? r->cap * 2 : 8;
+        MailRule *tmp = realloc(r->rules, (size_t)nc * sizeof(MailRule));
+        if (!tmp) return NULL;
+        r->rules = tmp;
+        r->cap   = nc;
+    }
+    MailRule *nr = &r->rules[r->count++];
+    memset(nr, 0, sizeof(*nr));
+    return nr;
+}
+
+/* Apply a single TBCond to a MailRule (AND logic: first occurrence wins). */
+static void apply_cond(MailRule *r, const TBCond *c) {
+    if (strcmp(c->field, "age") == 0) {
+        if (c->is_age_gt) { if (!r->if_age_gt) r->if_age_gt = c->age_val; }
+        else              { if (!r->if_age_lt) r->if_age_lt = c->age_val; }
+        return;
+    }
+    if (strcmp(c->field, "body") == 0) {
+        if (!r->if_body) r->if_body = strdup(c->glob);
+        return;
+    }
+    if (!c->is_negated) {
+        if      (strcmp(c->field, "from")    == 0 && !r->if_from)    r->if_from    = strdup(c->glob);
+        else if (strcmp(c->field, "subject") == 0 && !r->if_subject) r->if_subject = strdup(c->glob);
+        else if (strcmp(c->field, "to")      == 0 && !r->if_to)      r->if_to      = strdup(c->glob);
+    } else {
+        if      (strcmp(c->field, "from")    == 0 && !r->if_not_from)    r->if_not_from    = strdup(c->glob);
+        else if (strcmp(c->field, "subject") == 0 && !r->if_not_subject) r->if_not_subject = strdup(c->glob);
+        else if (strcmp(c->field, "to")      == 0 && !r->if_not_to)      r->if_not_to      = strdup(c->glob);
+    }
+}
+
 /* Parse one Thunderbird filter file and append rules to *out.
  * Prints warnings to stderr for any rule elements that could not be converted.
+ * OR-logic filters with multiple conditions are expanded into one rule each.
  * Returns the number of rules added (may be 0 if none could be converted). */
 static int parse_tb_filter_file(const char *path, MailRules **out) {
     FILE *fp = fopen(path, "r");
@@ -111,37 +159,79 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
         if (!*out) { fclose(fp); return -1; }
     }
 
-    char line[4096];
-    MailRule *cur = NULL;
-    int rules_added = 0;
-    /* Track per-rule conversion success for end-of-rule empty-rule warning */
-    int cur_converted_cond  = 0;
-    int cur_skipped_cond    = 0;
-    int cur_converted_act   = 0;
-    int cur_skipped_act     = 0;
-    int cur_pending_label   = 0; /* set when action=Label seen, resolved by actionValue */
-    int cur_pending_forward = 0; /* set when action=Forward seen, resolved by actionValue */
+    /* ── Per-filter state (accumulated until blank line or next name=) ── */
+    char cur_name[512]          = {0};
+    int  is_or                  = 0;
+    TBCond conds[TB_MAX_CONDS];
+    int nconds                  = 0;
+    int cur_converted_cond      = 0;
+    int cur_skipped_cond        = 0;
 
+    /* Actions (all shared across OR-expanded rules) */
+    char then_move_folder[1024] = {0};  /* decoded UTF-8; empty = no move */
+    int  pending_move           = 0;    /* waiting for actionValue to resolve folder */
+    char then_add_labels[MAIL_RULE_MAX_LABELS][256];
+    int  then_add_count         = 0;
+    char then_rm_labels[MAIL_RULE_MAX_LABELS][256];
+    int  then_rm_count          = 0;
+    char then_forward_to[512]   = {0};
+    int  pending_forward        = 0;
+    int  pending_label          = 0;
+    int  cur_converted_act      = 0;
+    int  cur_skipped_act        = 0;
+
+    int rules_added = 0;
+
+    /* ── Flush: write accumulated state to MailRules ── */
+#define FLUSH_RULE() do { \
+    if (!cur_name[0]) break; \
+    if (cur_converted_cond == 0 && cur_converted_act == 0 \
+            && (cur_skipped_cond > 0 || cur_skipped_act > 0)) { \
+        fprintf(stderr, "  [warn] Rule \"%s\": no conditions or actions could be " \
+                "converted — rule will be empty\n", cur_name); \
+    } \
+    /* Determine how many rules to emit: OR → one per cond; AND/empty → one */ \
+    int emit = (is_or && nconds > 1) ? nconds : 1; \
+    for (int _ei = 0; _ei < emit; _ei++) { \
+        MailRule *_r = rules_append(*out); \
+        if (!_r) break; \
+        _r->name = strdup(cur_name); \
+        if (is_or && nconds > 1) { \
+            apply_cond(_r, &conds[_ei]); \
+        } else { \
+            for (int _ci = 0; _ci < nconds; _ci++) apply_cond(_r, &conds[_ci]); \
+        } \
+        if (then_move_folder[0]) \
+            _r->then_move_folder = strdup(then_move_folder); \
+        for (int _li = 0; _li < then_add_count; _li++) \
+            _r->then_add_label[_r->then_add_count++] = strdup(then_add_labels[_li]); \
+        for (int _li = 0; _li < then_rm_count; _li++) \
+            _r->then_rm_label[_r->then_rm_count++]   = strdup(then_rm_labels[_li]); \
+        if (then_forward_to[0]) \
+            _r->then_forward_to = strdup(then_forward_to); \
+        rules_added++; \
+    } \
+} while (0)
+
+#define RESET_RULE() do { \
+    cur_name[0] = '\0'; is_or = 0; nconds = 0; \
+    cur_converted_cond = cur_skipped_cond = 0; \
+    then_move_folder[0] = '\0'; pending_move = 0; \
+    then_add_count = then_rm_count = 0; \
+    then_forward_to[0] = '\0'; pending_forward = pending_label = 0; \
+    cur_converted_act = cur_skipped_act = 0; \
+} while (0)
+
+    char line[4096];
     while (fgets(line, sizeof(line), fp)) {
-        /* Strip trailing newline */
         char *nl = strchr(line, '\n');
         if (nl) *nl = '\0';
         char *p = line;
         while (*p == ' ' || *p == '\t') p++;
 
         if (!*p) {
-            /* blank line = end of current rule block */
-            if (cur && cur_converted_cond == 0 && cur_converted_act == 0
-                    && (cur_skipped_cond > 0 || cur_skipped_act > 0)) {
-                fprintf(stderr, "  [warn] Rule \"%s\": no conditions or actions could be "
-                        "converted — rule will be empty\n",
-                        cur->name ? cur->name : "(unnamed)");
-            }
-            cur = NULL;
-            cur_converted_cond = cur_skipped_cond = 0;
-            cur_converted_act  = cur_skipped_act  = 0;
-            cur_pending_label   = 0;
-            cur_pending_forward = 0;
+            FLUSH_RULE();
+            RESET_RULE();
             continue;
         }
 
@@ -152,49 +242,24 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
         char *val = trim_quotes(eq + 1);
 
         if (strcmp(key, "name") == 0) {
-            /* End previous rule tracking before starting new one */
-            if (cur && cur_converted_cond == 0 && cur_converted_act == 0
-                    && (cur_skipped_cond > 0 || cur_skipped_act > 0)) {
-                fprintf(stderr, "  [warn] Rule \"%s\": no conditions or actions could be "
-                        "converted — rule will be empty\n",
-                        cur->name ? cur->name : "(unnamed)");
-            }
-            cur_converted_cond = cur_skipped_cond = 0;
-            cur_converted_act  = cur_skipped_act  = 0;
-            cur_pending_label   = 0;
-            cur_pending_forward = 0;
-
-            /* Start new rule */
-            cur = NULL;
-            MailRule *nr = NULL;
-            if ((*out)->count >= (*out)->cap) {
-                int nc = (*out)->cap ? (*out)->cap * 2 : 8;
-                MailRule *tmp = realloc((*out)->rules, (size_t)nc * sizeof(MailRule));
-                if (!tmp) continue;
-                (*out)->rules = tmp;
-                (*out)->cap   = nc;
-            }
-            nr = &(*out)->rules[(*out)->count++];
-            memset(nr, 0, sizeof(*nr));
-            nr->name = strdup(val);
-            cur = nr;
-            rules_added++;
+            FLUSH_RULE();
+            RESET_RULE();
+            snprintf(cur_name, sizeof(cur_name), "%s", val);
             continue;
         }
 
-        if (!cur) continue;
+        if (!cur_name[0]) continue;
 
         if (strcmp(key, "condition") == 0) {
-            /* Parse: AND (from,contains,pattern) (subject,contains,pattern) ... */
+            is_or = (strncmp(val, "OR", 2) == 0);
             char *v = strdup(val);
             if (!v) continue;
             char *tok = strstr(v, "(");
-            while (tok) {
+            while (tok && nconds < TB_MAX_CONDS) {
                 tok++;
                 char *end = strchr(tok, ')');
                 if (!end) break;
                 *end = '\0';
-                /* tok is now: "from,contains,pattern" or "subject,contains,*@github.com" */
                 char *f1 = tok, *f2 = NULL, *f3 = NULL;
                 char *c1 = strchr(f1, ',');
                 if (c1) { *c1 = '\0'; f2 = c1 + 1; }
@@ -202,73 +267,46 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
                 if (c2) { *c2 = '\0'; f3 = c2 + 1; }
 
                 if (f1 && f2 && f3) {
-                    int is_body_field = (strcmp(f1, "body") == 0);
-                    int is_age_field  = (strcmp(f1, "age")  == 0);
-                    int supported_field = (strcmp(f1, "from") == 0 ||
-                                           strcmp(f1, "subject") == 0 ||
-                                           strcmp(f1, "to") == 0 ||
-                                           is_body_field || is_age_field);
-                    int is_negated = (strcmp(f2, "doesn't contain") == 0 ||
-                                      strcmp(f2, "isn't") == 0);
+                    int is_body  = (strcmp(f1, "body") == 0);
+                    int is_age   = (strcmp(f1, "age")  == 0);
+                    int ok_field = (strcmp(f1, "from") == 0 || strcmp(f1, "subject") == 0 ||
+                                    strcmp(f1, "to")   == 0 || is_body || is_age);
+                    int negated  = (strcmp(f2, "doesn't contain") == 0 ||
+                                    strcmp(f2, "isn't")            == 0);
                     /* BUG-001: exact comparisons prevent "isn't"/"doesn't contain"
                      * being treated as positive "is"/"contains". */
-                    int supported_match = (strcmp(f2, "contains")      == 0 ||
-                                           strcmp(f2, "is")            == 0 ||
-                                           strcmp(f2, "begins with")   == 0 ||
-                                           strcmp(f2, "ends with")     == 0 ||
-                                           strcmp(f2, "greater than")  == 0 ||
-                                           strcmp(f2, "less than")     == 0 ||
-                                           is_negated);
+                    int ok_match = (strcmp(f2, "contains")     == 0 ||
+                                    strcmp(f2, "is")            == 0 ||
+                                    strcmp(f2, "begins with")   == 0 ||
+                                    strcmp(f2, "ends with")     == 0 ||
+                                    strcmp(f2, "greater than")  == 0 ||
+                                    strcmp(f2, "less than")     == 0 || negated);
 
-                    if (!supported_field) {
+                    if (!ok_field) {
                         fprintf(stderr, "  [warn] Rule \"%s\": condition field \"%s\" "
-                                "is not supported, skipping term\n",
-                                cur->name ? cur->name : "(unnamed)", f1);
+                                "is not supported, skipping term\n", cur_name, f1);
                         cur_skipped_cond++;
-                    } else if (!supported_match) {
+                    } else if (!ok_match) {
                         fprintf(stderr, "  [warn] Rule \"%s\": match type \"%s\" "
-                                "is not supported, skipping term\n",
-                                cur->name ? cur->name : "(unnamed)", f2);
+                                "is not supported, skipping term\n", cur_name, f2);
                         cur_skipped_cond++;
-                    } else if (is_age_field) {
-                        /* US-70: age condition */
-                        int n = atoi(f3);
-                        if (strcmp(f2, "greater than") == 0 && n > 0)
-                            cur->if_age_gt = n;
-                        else if (strcmp(f2, "less than") == 0 && n > 0)
-                            cur->if_age_lt = n;
-                        cur_converted_cond++;
                     } else {
-                        /* Convert to glob pattern for header fields */
-                        char glob[1024];
-                        if (strcmp(f2, "contains") == 0 || strcmp(f2, "doesn't contain") == 0)
-                            snprintf(glob, sizeof(glob), "*%s*", f3);
-                        else if (strcmp(f2, "begins with") == 0)
-                            snprintf(glob, sizeof(glob), "%s*", f3);
-                        else if (strcmp(f2, "ends with") == 0)
-                            snprintf(glob, sizeof(glob), "*%s", f3);
-                        else /* is / isn't */
-                            snprintf(glob, sizeof(glob), "%s", f3);
-
-                        if (is_body_field) {
-                            /* US-69: body condition */
-                            if (!cur->if_body)
-                                cur->if_body = strdup(glob);
-                        } else if (!is_negated) {
-                            if (strcmp(f1, "from")    == 0 && !cur->if_from)
-                                cur->if_from    = strdup(glob);
-                            else if (strcmp(f1, "subject") == 0 && !cur->if_subject)
-                                cur->if_subject = strdup(glob);
-                            else if (strcmp(f1, "to")      == 0 && !cur->if_to)
-                                cur->if_to      = strdup(glob);
+                        TBCond *c = &conds[nconds++];
+                        memset(c, 0, sizeof(*c));
+                        snprintf(c->field, sizeof(c->field), "%s", f1);
+                        c->is_negated = negated;
+                        if (is_age) {
+                            c->age_val   = atoi(f3);
+                            c->is_age_gt = (strcmp(f2, "greater than") == 0);
                         } else {
-                            /* US-68: negated condition */
-                            if (strcmp(f1, "from")    == 0 && !cur->if_not_from)
-                                cur->if_not_from    = strdup(glob);
-                            else if (strcmp(f1, "subject") == 0 && !cur->if_not_subject)
-                                cur->if_not_subject = strdup(glob);
-                            else if (strcmp(f1, "to")      == 0 && !cur->if_not_to)
-                                cur->if_not_to      = strdup(glob);
+                            if (strcmp(f2, "contains") == 0 || negated)
+                                snprintf(c->glob, sizeof(c->glob), "*%s*", f3);
+                            else if (strcmp(f2, "begins with") == 0)
+                                snprintf(c->glob, sizeof(c->glob), "%s*", f3);
+                            else if (strcmp(f2, "ends with") == 0)
+                                snprintf(c->glob, sizeof(c->glob), "*%s", f3);
+                            else
+                                snprintf(c->glob, sizeof(c->glob), "%s", f3);
                         }
                         cur_converted_cond++;
                     }
@@ -280,108 +318,82 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
         }
 
         if (strcmp(key, "action") == 0) {
-            cur_pending_label   = 0;
-            cur_pending_forward = 0;
+            pending_label = pending_forward = 0;
             if (strstr(val, "Move")) {
-                if (cur->then_move_folder == NULL)
-                    cur->then_move_folder = strdup("(set by actionValue)");
+                pending_move = 1;
                 cur_converted_act++;
-            } else if (strcmp(val, "Mark as read") == 0 ||
-                       strcmp(val, "Mark read") == 0) {
-                /* US-66 + TB shorthand: remove UNREAD label */
-                if (cur->then_rm_count < MAIL_RULE_MAX_LABELS)
-                    cur->then_rm_label[cur->then_rm_count++] = strdup("UNREAD");
+            } else if (strcmp(val, "Mark as read") == 0 || strcmp(val, "Mark read") == 0) {
+                if (then_rm_count < MAIL_RULE_MAX_LABELS)
+                    snprintf(then_rm_labels[then_rm_count++], 256, "UNREAD");
                 cur_converted_act++;
-            } else if (strcmp(val, "Mark as unread") == 0 ||
-                       strcmp(val, "Mark unread") == 0) {
-                /* add UNREAD label */
-                if (cur->then_add_count < MAIL_RULE_MAX_LABELS)
-                    cur->then_add_label[cur->then_add_count++] = strdup("UNREAD");
+            } else if (strcmp(val, "Mark as unread") == 0 || strcmp(val, "Mark unread") == 0) {
+                if (then_add_count < MAIL_RULE_MAX_LABELS)
+                    snprintf(then_add_labels[then_add_count++], 256, "UNREAD");
                 cur_converted_act++;
-            } else if (strcmp(val, "Mark as starred") == 0 ||
-                       strcmp(val, "Mark as flagged") == 0) {
-                /* US-66: starred/flagged → add _flagged label */
-                if (cur->then_add_count < MAIL_RULE_MAX_LABELS)
-                    cur->then_add_label[cur->then_add_count++] = strdup("_flagged");
+            } else if (strcmp(val, "Mark as starred") == 0 || strcmp(val, "Mark as flagged") == 0) {
+                if (then_add_count < MAIL_RULE_MAX_LABELS)
+                    snprintf(then_add_labels[then_add_count++], 256, "_flagged");
                 cur_converted_act++;
-            } else if (strcmp(val, "Mark as junk") == 0 ||
-                       strcmp(val, "JunkScore") == 0) {
-                /* US-66 + TB internal junk scoring → add _junk label */
-                if (cur->then_add_count < MAIL_RULE_MAX_LABELS)
-                    cur->then_add_label[cur->then_add_count++] = strdup("_junk");
+            } else if (strcmp(val, "Mark as junk") == 0 || strcmp(val, "JunkScore") == 0) {
+                if (then_add_count < MAIL_RULE_MAX_LABELS)
+                    snprintf(then_add_labels[then_add_count++], 256, "_junk");
                 cur_converted_act++;
             } else if (strcmp(val, "Delete") == 0) {
-                /* US-66: delete → add _trash label */
-                if (cur->then_add_count < MAIL_RULE_MAX_LABELS)
-                    cur->then_add_label[cur->then_add_count++] = strdup("_trash");
+                if (then_add_count < MAIL_RULE_MAX_LABELS)
+                    snprintf(then_add_labels[then_add_count++], 256, "_trash");
                 cur_converted_act++;
             } else if (strcmp(val, "Forward") == 0) {
-                /* Forward address resolved by actionValue */
-                cur_pending_forward = 1;
+                pending_forward = 1;
                 cur_converted_act++;
             } else if (strcmp(val, "Label") == 0) {
-                /* US-67: Thunderbird colour label → custom label (resolved by actionValue) */
-                cur_pending_label = 1;
+                pending_label = 1;
                 cur_converted_act++;
             } else {
                 fprintf(stderr, "  [warn] Rule \"%s\": action \"%s\" "
-                        "is not supported, skipping\n",
-                        cur->name ? cur->name : "(unnamed)", val);
+                        "is not supported, skipping\n", cur_name, val);
                 cur_skipped_act++;
             }
             continue;
         }
 
         if (strcmp(key, "actionValue") == 0) {
-            /* For move actions: extract folder name from IMAP URL */
-            if (cur->then_move_folder &&
-                strcmp(cur->then_move_folder, "(set by actionValue)") == 0) {
-                free(cur->then_move_folder);
-                /* Extract last path component from IMAP URL and decode modified UTF-7 */
+            if (pending_move) {
                 const char *last_slash = strrchr(val, '/');
                 const char *raw = last_slash ? last_slash + 1 : val;
-                cur->then_move_folder = imap_utf7_decode(raw);
-                if (!cur->then_move_folder) cur->then_move_folder = strdup(raw);
+                char *decoded = imap_utf7_decode(raw);
+                snprintf(then_move_folder, sizeof(then_move_folder),
+                         "%s", decoded ? decoded : raw);
+                free(decoded);
+                pending_move = 0;
             }
-            /* Forward: store target address */
-            if (cur_pending_forward) {
-                free(cur->then_forward_to);
-                cur->then_forward_to = strdup(val);
-                cur_pending_forward  = 0;
+            if (pending_forward) {
+                snprintf(then_forward_to, sizeof(then_forward_to), "%s", val);
+                pending_forward = 0;
             }
-            /* US-67: resolve Label action → map $labelN to name */
-            if (cur_pending_label) {
+            if (pending_label) {
                 static const char *tb_labels[] = {
                     NULL, "Important", "Work", "Personal", "TODO", "Later"
                 };
                 const char *lname = NULL;
                 if (strncmp(val, "$label", 6) == 0) {
                     int n = atoi(val + 6);
-                    if (n >= 1 && n <= 5)
-                        lname = tb_labels[n];
-                    else {
-                        static char lbuf[32];
-                        snprintf(lbuf, sizeof(lbuf), "Label%d", n);
-                        lname = lbuf;
-                    }
+                    lname = (n >= 1 && n <= 5) ? tb_labels[n] : val;
                 } else {
-                    lname = val; /* fallback: use raw value */
+                    lname = val;
                 }
-                if (lname && cur->then_add_count < MAIL_RULE_MAX_LABELS)
-                    cur->then_add_label[cur->then_add_count++] = strdup(lname);
-                cur_pending_label = 0;
+                if (lname && then_add_count < MAIL_RULE_MAX_LABELS)
+                    snprintf(then_add_labels[then_add_count++], 256, "%s", lname);
+                pending_label = 0;
             }
             continue;
         }
     }
 
-    /* Check final rule after EOF (no trailing blank line) */
-    if (cur && cur_converted_cond == 0 && cur_converted_act == 0
-            && (cur_skipped_cond > 0 || cur_skipped_act > 0)) {
-        fprintf(stderr, "  [warn] Rule \"%s\": no conditions or actions could be "
-                "converted — rule will be empty\n",
-                cur->name ? cur->name : "(unnamed)");
-    }
+    /* EOF without trailing blank line */
+    FLUSH_RULE();
+
+#undef FLUSH_RULE
+#undef RESET_RULE
 
     fclose(fp);
     return rules_added;

@@ -127,6 +127,12 @@ int mail_client_mark_notjunk(MailClient *c, const char *uid);
 int mail_client_trash(MailClient *c, const char *uid);
 
 /**
+ * @brief Move a message to a different IMAP folder (UID COPY + STORE \Deleted + EXPUNGE).
+ *  For Gmail accounts this is a no-op (label-based; use mail_client_modify_label instead).
+ */
+int mail_client_move_to_folder(MailClient *c, const char *uid, const char *target_folder);
+
+/**
  * @brief Append/send a message.
  *
  * IMAP: APPEND to the specified folder.

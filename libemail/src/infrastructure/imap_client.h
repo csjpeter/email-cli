@@ -165,6 +165,13 @@ int imap_uid_fetch_flags(ImapClient *c, const char *uid);
  */
 int imap_uid_set_flag(ImapClient *c, const char *uid, const char *flag_name, int add);
 
+/** @brief Copy a message to target folder (UID COPY). */
+int imap_uid_copy(ImapClient *c, const char *uid, const char *target_folder);
+
+/** @brief Move a message to target folder.
+ *  Uses UID COPY + UID STORE +FLAGS \\Deleted + EXPUNGE. */
+int imap_uid_move(ImapClient *c, const char *uid, const char *target_folder);
+
 /**
  * @brief Append a message to an IMAP folder (IMAP APPEND command).
  *

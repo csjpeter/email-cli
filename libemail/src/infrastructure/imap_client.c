@@ -865,6 +865,30 @@ int imap_uid_set_flag(ImapClient *c, const char *uid, const char *flag_name, int
     return rc;
 }
 
+int imap_uid_copy(ImapClient *c, const char *uid, const char *target_folder) {
+    /* Ensure target folder exists first */
+    imap_create_folder(c, target_folder);
+    char tag[16];
+    if (send_cmd(c, tag, "UID COPY %s \"%s\"", uid, target_folder) != 0)
+        return -1;
+    Response resp = {0};
+    int rc = read_response(c, tag, &resp);
+    response_free(&resp);
+    return rc;
+}
+
+int imap_uid_move(ImapClient *c, const char *uid, const char *target_folder) {
+    if (imap_uid_copy(c, uid, target_folder) != 0) return -1;
+    if (imap_uid_set_flag(c, uid, "\\Deleted", 1) != 0) return -1;
+    /* EXPUNGE */
+    char tag[16];
+    if (send_cmd(c, tag, "EXPUNGE") != 0) return -1;
+    Response resp = {0};
+    int rc = read_response(c, tag, &resp);
+    response_free(&resp);
+    return rc;
+}
+
 int imap_append(ImapClient *c, const char *folder,
                 const char *msg, size_t msg_len) {
     /* Strategy: ensure the target folder exists BEFORE sending the literal,

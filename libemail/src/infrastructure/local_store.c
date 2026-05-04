@@ -1186,6 +1186,65 @@ void local_pending_flag_clear(const char *folder) {
     if (path) remove(path);
 }
 
+/* ── Pending folder moves ─────────────────────────────────────────────── */
+
+static char *pending_move_path(const char *folder) {
+    if (!g_account_base[0]) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/pending_moves/%s.tsv", g_account_base, folder) == -1)
+        return NULL;
+    return path;
+}
+
+int local_pending_move_add(const char *folder, const char *uid,
+                            const char *target_folder) {
+    RAII_STRING char *path = pending_move_path(folder);
+    if (!path) return -1;
+    char *dir_end = strrchr(path, '/');
+    if (dir_end) {
+        char saved = *dir_end; *dir_end = '\0';
+        fs_mkdir_p(path, 0700);
+        *dir_end = saved;
+    }
+    RAII_FILE FILE *fp = fopen(path, "a");
+    if (!fp) return -1;
+    fprintf(fp, "%s\t%s\n", uid, target_folder);
+    return 0;
+}
+
+PendingMove *local_pending_move_load(const char *folder, int *count_out) {
+    *count_out = 0;
+    RAII_STRING char *path = pending_move_path(folder);
+    if (!path) return NULL;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+    int cap = 16, count = 0;
+    PendingMove *arr = malloc((size_t)cap * sizeof(PendingMove));
+    if (!arr) return NULL;
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        char uid_str[17], tgt[256];
+        if (sscanf(line, "%16[^\t]\t%255[^\n]", uid_str, tgt) != 2)
+            continue;
+        if (count == cap) {
+            cap *= 2;
+            PendingMove *tmp = realloc(arr, (size_t)cap * sizeof(PendingMove));
+            if (!tmp) break;
+            arr = tmp;
+        }
+        snprintf(arr[count].uid, sizeof(arr[count].uid), "%s", uid_str);
+        snprintf(arr[count].target_folder, sizeof(arr[count].target_folder), "%s", tgt);
+        count++;
+    }
+    *count_out = count;
+    return arr;
+}
+
+void local_pending_move_clear(const char *folder) {
+    RAII_STRING char *path = pending_move_path(folder);
+    if (path) remove(path);
+}
+
 /* ── Gmail label index files (.idx) ──────────────────────────────────── */
 
 #define IDX_RECORD_SIZE 17  /* 16 char UID + '\n' */

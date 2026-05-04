@@ -252,15 +252,17 @@ int mail_rule_matches(const MailRule *rule,
     return 1;
 }
 
-int mail_rules_apply(const MailRules *rules,
-                     const char *from, const char *subject,
-                     const char *to, const char *labels_csv,
-                     const char *body, time_t message_date,
-                     char ***add_out, int *add_count,
-                     char ***rm_out,  int *rm_count)
+int mail_rules_apply_ex(const MailRules *rules,
+                        const char *from, const char *subject,
+                        const char *to, const char *labels_csv,
+                        const char *body, time_t message_date,
+                        char ***add_out, int *add_count,
+                        char ***rm_out,  int *rm_count,
+                        char **move_folder_out)
 {
     *add_out = NULL; *add_count = 0;
     *rm_out  = NULL; *rm_count  = 0;
+    if (move_folder_out) *move_folder_out = NULL;
     if (!rules || rules->count == 0) return 0;
 
     /* Working copy of labels for incremental if-label checks */
@@ -276,6 +278,10 @@ int mail_rules_apply(const MailRules *rules,
             continue;
 
         fired++;
+
+        /* Capture first fired rule's then_move_folder */
+        if (move_folder_out && !*move_folder_out && r->then_move_folder)
+            *move_folder_out = strdup(r->then_move_folder);
 
         /* Accumulate add/remove actions */
         for (int j = 0; j < r->then_add_count; j++)
@@ -322,4 +328,16 @@ int mail_rules_apply(const MailRules *rules,
 
     free(working_labels);
     return fired;
+}
+
+int mail_rules_apply(const MailRules *rules,
+                     const char *from, const char *subject,
+                     const char *to, const char *labels_csv,
+                     const char *body, time_t message_date,
+                     char ***add_out, int *add_count,
+                     char ***rm_out,  int *rm_count)
+{
+    return mail_rules_apply_ex(rules, from, subject, to, labels_csv, body,
+                               message_date, add_out, add_count, rm_out, rm_count,
+                               NULL);
 }

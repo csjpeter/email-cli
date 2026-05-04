@@ -300,6 +300,24 @@ PendingFlag *local_pending_flag_load(const char *folder, int *count_out);
 /** @brief Removes the pending flag queue file for a folder. */
 void local_pending_flag_clear(const char *folder);
 
+/* ── Pending folder moves (server sync queue) ────────────────────────── */
+
+typedef struct {
+    char uid[17];           /**< 16-char UID string + NUL */
+    char target_folder[256]; /**< Destination IMAP folder name */
+} PendingMove;
+
+/** @brief Appends a folder-move to the pending queue for a source folder. */
+int local_pending_move_add(const char *folder, const char *uid,
+                            const char *target_folder);
+
+/** @brief Loads all pending moves for a source folder.
+ *  Returns heap-allocated array (caller must free), or NULL if none. */
+PendingMove *local_pending_move_load(const char *folder, int *count_out);
+
+/** @brief Removes the pending move queue file for a source folder. */
+void local_pending_move_clear(const char *folder);
+
 /* ── Pending Gmail fetch queue (missing .eml/.hdr to download) ───────── */
 
 /**

@@ -2977,6 +2977,49 @@ case "$TB46_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe 
 rm -rf "./build/tests/functional/homes/${TB46_DIR##./build/tests/functional/homes/}"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 47 — US-77: email-sync --apply-rules pushes changes to IMAP server
+#   47.1  apply-rules produces summary line "Rules applied:"
+#   47.2  sync-back output present ("Syncing rule changes to server")
+#   47.3  no "Error:" in output (server accepted COPY/EXPUNGE)
+#   47.4  pending_moves file is cleaned up after sync
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 47: email-sync --apply-rules server push (US-77) ---"
+
+H_77="./build/tests/functional/homes/h77-$$"
+ACCT_77="t77@test.local"
+make_home "$H_77" "$ACCT_77" 9993
+
+# Write a rule that matches the mock server's single-message From address
+# and requests a folder move so both pending_flags and pending_moves are exercised.
+cat > "$H_77/.config/email-cli/accounts/$ACCT_77/rules.ini" <<'RULES77'
+[rule "Archive test messages"]
+if-from = *@example.com
+then-add-label = Archived
+then-move-folder = Archive
+RULES77
+
+# First sync to populate local manifest
+(export HOME="$H_77"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) > /dev/null
+
+# Run email-sync --apply-rules (should apply rules + sync back to server)
+OUT_77=$( (export HOME="$H_77"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" --apply-rules 2>&1 || true) )
+
+check     "47.1 apply-rules: summary line present"            "Rules applied"              "$OUT_77"
+check     "47.2 apply-rules: sync-back triggered"             "Syncing rule changes"       "$OUT_77"
+check_not "47.3 apply-rules: no Error in output"              "Error:"                     "$OUT_77"
+
+# Check pending_moves file is gone after sync
+PENDING_MOVES_DIR="$H_77/.local/share/email-cli/accounts"
+PENDING_MOVES_COUNT=$(find "$PENDING_MOVES_DIR" -name "*.tsv" -path "*/pending_moves/*" 2>/dev/null | wc -l)
+check "47.4 apply-rules: pending_moves cleaned up after sync"  "ok" \
+    "$([ "$PENDING_MOVES_COUNT" -eq 0 ] && echo ok || echo fail)"
+
+rm -rf "./build/tests/functional/homes/h77-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

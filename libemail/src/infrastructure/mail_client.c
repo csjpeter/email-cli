@@ -206,6 +206,14 @@ int mail_client_trash(MailClient *c, const char *uid) {
     return imap_uid_set_flag(c->imap, uid, "\\Deleted", 1);
 }
 
+int mail_client_move_to_folder(MailClient *c, const char *uid, const char *target_folder) {
+    if (c->is_gmail) {
+        logger_log(LOG_DEBUG, "mail_client: Gmail ignoring move to '%s'", target_folder);
+        return 0;
+    }
+    return imap_uid_move(c->imap, uid, target_folder);
+}
+
 int mail_client_mark_junk(MailClient *c, const char *uid) {
     if (c->is_gmail) {
         const char *add[] = { "SPAM" };

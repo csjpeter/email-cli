@@ -105,6 +105,19 @@ int mail_rules_apply(const MailRules *rules,
                      char ***rm_out,  int *rm_count);
 
 /**
+ * Like mail_rules_apply() but also returns the first fired rule's then_move_folder.
+ * @param move_folder_out  Set to a strdup'd copy of then_move_folder (caller frees),
+ *                         or NULL if no fired rule has then_move_folder.
+ */
+int mail_rules_apply_ex(const MailRules *rules,
+                        const char *from, const char *subject,
+                        const char *to, const char *labels_csv,
+                        const char *body, time_t message_date,
+                        char ***add_out, int *add_count,
+                        char ***rm_out,  int *rm_count,
+                        char **move_folder_out);
+
+/**
  * @brief Returns 1 if all conditions of the rule match the message, 0 otherwise.
  *
  * @param rule       Rule to test (NULL → returns 0).

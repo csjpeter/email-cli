@@ -216,6 +216,11 @@ int main(int argc, char *argv[]) {
     if (do_apply_rules) {
         email_service_set_verbose(do_verbose);
         int rc = email_service_apply_rules(account_filter, 0, do_verbose);
+        if (rc >= 0) {
+            /* Immediately sync back to push rule-fired changes to the server */
+            printf("\nSyncing rule changes to server...\n");
+            email_service_sync_all(account_filter, 0);
+        }
         logger_close();
         return rc >= 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }

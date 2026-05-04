@@ -5081,6 +5081,20 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
             }
         }
 
+        /* Flush pending folder moves before reading server state */
+        {
+            int mcount = 0;
+            PendingMove *moves = local_pending_move_load(folder, &mcount);
+            if (moves && mcount > 0) {
+                for (int mi = 0; mi < mcount; mi++)
+                    mail_client_move_to_folder(sync_mc,
+                                               moves[mi].uid,
+                                               moves[mi].target_folder);
+                local_pending_move_clear(folder);
+            }
+            free(moves);
+        }
+
         /* Flush pending local flag changes before reading server state */
         {
             int pcount = 0;
@@ -5661,6 +5675,23 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
             };
             const int lmap_n = (int)(sizeof(lmap) / sizeof(lmap[0]));
 
+            /* Label→IMAP flag mapping for pending_flags queue */
+            static const struct {
+                const char *lbl;
+                const char *imap_flag;
+                int add;
+            } fmap[] = {
+                { "UNREAD",    "\\Seen",     0 },
+                { "_flagged",  "\\Flagged",  1 },
+                { "_junk",     "$Junk",      1 },
+                { "_spam",     "$Junk",      1 },
+                { "_done",     "$Done",      1 },
+                { "_trash",    "\\Deleted",  1 },
+            };
+            const int fmap_n = (int)(sizeof(fmap) / sizeof(fmap[0]));
+
+            char *move_folder = NULL;
+
             for (int u = 0; u < mf->count; u++) {
                 ManifestEntry *e = &mf->entries[u];
 
@@ -5669,13 +5700,14 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
 
                 char **add_out = NULL; int add_count = 0;
                 char **rm_out  = NULL; int rm_count  = 0;
-                int fired = mail_rules_apply(rules,
-                                              e->from    ? e->from    : "",
-                                              e->subject ? e->subject : "",
-                                              NULL, existing,
-                                              NULL, (time_t)0,
-                                              &add_out, &add_count,
-                                              &rm_out,  &rm_count);
+                int fired = mail_rules_apply_ex(rules,
+                                                e->from    ? e->from    : "",
+                                                e->subject ? e->subject : "",
+                                                NULL, existing,
+                                                NULL, (time_t)0,
+                                                &add_out, &add_count,
+                                                &rm_out,  &rm_count,
+                                                &move_folder);
                 if (fired > 0) {
                     /* Check if any new custom labels would be added/removed */
                     int has_new = 0;
@@ -5695,6 +5727,9 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
                             if (strcasecmp(rm_out[j], lmap[k].lbl) == 0)
                                 new_flags &= ~lmap[k].flag;
                     if (new_flags != e->flags) has_new = 1;
+
+                    /* Also fire if a folder move is requested */
+                    if (move_folder) has_new = 1;
 
                     if (has_new) {
                         if (verbose || dry_run)
@@ -5719,12 +5754,31 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
                                 local_hdr_update_flags(imap_folder, e->uid, new_flags);
                                 mf_dirty = 1;
                             }
+
+                            /* Queue pending IMAP operations for server push */
+                            for (int j = 0; j < add_count; j++) {
+                                if (strcmp(add_out[j], "UNREAD") == 0)
+                                    local_pending_flag_add(imap_folder, e->uid, "\\Seen", 0);
+                                for (int k = 1; k < fmap_n; k++)
+                                    if (strcasecmp(add_out[j], fmap[k].lbl) == 0)
+                                        local_pending_flag_add(imap_folder, e->uid,
+                                                               fmap[k].imap_flag, 1);
+                            }
+                            for (int j = 0; j < rm_count; j++) {
+                                if (strcmp(rm_out[j], "UNREAD") == 0)
+                                    local_pending_flag_add(imap_folder, e->uid, "\\Seen", 1);
+                                if (strcasecmp(rm_out[j], "_flagged") == 0)
+                                    local_pending_flag_add(imap_folder, e->uid, "\\Flagged", 0);
+                            }
+                            if (move_folder)
+                                local_pending_move_add(imap_folder, e->uid, move_folder);
                         }
                     }
                     for (int j = 0; j < add_count; j++) free(add_out[j]);
                     for (int j = 0; j < rm_count;  j++) free(rm_out[j]);
                     free(add_out); free(rm_out);
                 }
+                free(move_folder); move_folder = NULL;
             }
 
             if (!dry_run && mf_dirty) manifest_save(imap_folder, mf);

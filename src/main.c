@@ -15,6 +15,7 @@
 #include "compose_service.h"
 #include "help_gmail.h"
 #include "mail_rules.h"
+#include "when_expr.h"
 
 /* Default limit for batch output */
 #define BATCH_DEFAULT_LIMIT 100
@@ -1315,10 +1316,14 @@ int main(int argc, char *argv[]) {
                     printf("  %d. %s\n", r + 1,
                            rule->name && rule->name[0] ? rule->name : "(unnamed)");
 
-                    if (rule->if_from)    printf("       if-from      = %s\n", rule->if_from);
-                    if (rule->if_subject) printf("       if-subject   = %s\n", rule->if_subject);
-                    if (rule->if_to)      printf("       if-to        = %s\n", rule->if_to);
-                    if (rule->if_label)   printf("       if-label     = %s\n", rule->if_label);
+                    if (rule->when && rule->when[0])
+                        printf("       when         = %s\n", rule->when);
+                    else {
+                        if (rule->if_from)    printf("       if-from      = %s\n", rule->if_from);
+                        if (rule->if_subject) printf("       if-subject   = %s\n", rule->if_subject);
+                        if (rule->if_to)      printf("       if-to        = %s\n", rule->if_to);
+                        if (rule->if_label)   printf("       if-label     = %s\n", rule->if_label);
+                    }
 
                     for (int j = 0; j < rule->then_add_count; j++)
                         printf("       then-add-label    = %s\n", rule->then_add_label[j]);
@@ -1473,6 +1478,8 @@ int main(int argc, char *argv[]) {
                 nr->if_subject = if_subject ? strdup(if_subject) : NULL;
                 nr->if_to      = if_to      ? strdup(if_to)      : NULL;
                 nr->if_label   = if_label   ? strdup(if_label)   : NULL;
+                nr->when = when_from_flat(if_from, if_subject, if_to, if_label,
+                                          NULL, NULL, NULL, NULL, 0, 0);
                 nr->then_move_folder = move_folder ? strdup(move_folder) : NULL;
                 for (int j = 0; j < add_label_count; j++)
                     nr->then_add_label[nr->then_add_count++] = strdup(add_labels[j]);

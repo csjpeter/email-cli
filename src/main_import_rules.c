@@ -545,15 +545,8 @@ static int scan_tb_named_dir(const char *parent, const char *dir_name, MailRules
 
 static void print_rule(const MailRule *r) {
     printf("[rule \"%s\"]\n", r->name ? r->name : "(unnamed)");
-    if (r->if_from)        printf("  if-from        = %s\n", r->if_from);
-    if (r->if_not_from)    printf("  if-not-from    = %s\n", r->if_not_from);
-    if (r->if_subject)     printf("  if-subject     = %s\n", r->if_subject);
-    if (r->if_not_subject) printf("  if-not-subject = %s\n", r->if_not_subject);
-    if (r->if_to)          printf("  if-to          = %s\n", r->if_to);
-    if (r->if_not_to)      printf("  if-not-to      = %s\n", r->if_not_to);
-    if (r->if_body)        printf("  if-body        = %s\n", r->if_body);
-    if (r->if_age_gt > 0)  printf("  if-age-gt      = %d\n", r->if_age_gt);
-    if (r->if_age_lt > 0)  printf("  if-age-lt      = %d\n", r->if_age_lt);
+    if (r->when && r->when[0])
+        printf("  when             = %s\n", r->when);
     for (int j = 0; j < r->then_add_count; j++)
         printf("  then-add-label    = %s\n", r->then_add_label[j]);
     for (int j = 0; j < r->then_rm_count; j++)
@@ -580,15 +573,8 @@ static int write_rules_to_file(const MailRules *rules, const char *path) {
     for (int i = 0; i < rules->count; i++) {
         const MailRule *r = &rules->rules[i];
         fprintf(fp, "[rule \"%s\"]\n", r->name ? r->name : "");
-        if (r->if_from)        fprintf(fp, "if-from        = %s\n", r->if_from);
-        if (r->if_not_from)    fprintf(fp, "if-not-from    = %s\n", r->if_not_from);
-        if (r->if_subject)     fprintf(fp, "if-subject     = %s\n", r->if_subject);
-        if (r->if_not_subject) fprintf(fp, "if-not-subject = %s\n", r->if_not_subject);
-        if (r->if_to)          fprintf(fp, "if-to          = %s\n", r->if_to);
-        if (r->if_not_to)      fprintf(fp, "if-not-to      = %s\n", r->if_not_to);
-        if (r->if_body)        fprintf(fp, "if-body        = %s\n", r->if_body);
-        if (r->if_age_gt > 0)  fprintf(fp, "if-age-gt      = %d\n", r->if_age_gt);
-        if (r->if_age_lt > 0)  fprintf(fp, "if-age-lt      = %d\n", r->if_age_lt);
+        if (r->when && r->when[0])
+            fprintf(fp, "when = %s\n", r->when);
         for (int j = 0; j < r->then_add_count; j++)
             fprintf(fp, "then-add-label    = %s\n", r->then_add_label[j]);
         for (int j = 0; j < r->then_rm_count; j++)

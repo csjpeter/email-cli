@@ -2133,12 +2133,12 @@ RL_OUT=$( (export HOME="$H_RL"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HO
 
 check "34.1 rules list: count line (3 rules)"    "3 rule"            "$RL_OUT"
 check "34.2 rules list: rule 1 name"             "GitHub"            "$RL_OUT"
-check "34.3 rules list: if-from shown"           "if-from"           "$RL_OUT"
+check "34.3 rules list: from pattern shown"       "github.com"        "$RL_OUT"
 check "34.4 rules list: then-add-label shown"    "then-add-label"    "$RL_OUT"
 check "34.5 rules list: then-remove-label shown" "then-remove-label" "$RL_OUT"
 check "34.6 rules list: rule 2 move-folder"      "then-move-folder"  "$RL_OUT"
 check "34.7 rules list: multi-condition rule 3"  "Spam patterns"     "$RL_OUT"
-check "34.8 rules list: if-subject in rule 3"    "if-subject"        "$RL_OUT"
+check "34.8 rules list: subject pattern in rule 3" "newsletter\|prize" "$RL_OUT"
 
 # Without subcommand ('rules' alone) must also list
 RL_OUT2=$( (export HOME="$H_RL"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
@@ -2702,9 +2702,9 @@ IR42=$( (export HOME="$H_42"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-import-rules" --thunderbird-path "$TB42_DIR" \
         --account t42@test.local --dry-run 2>&1 || true) )
 
-check     "42.1 doesn't contain -> if-not-from"     "if-not-from"    "$IR42"
+check     "42.1 doesn't contain -> negated from"     "!from:"         "$IR42"
 check     "42.2 doesn't contain value preserved"    "spam.example"   "$IR42"
-check     "42.3 isn't -> if-not-subject"            "if-not-subject" "$IR42"
+check     "42.3 isn't -> negated subject"           "!subject:"      "$IR42"
 check     "42.4 isn't value preserved"              "Unsubscribe"    "$IR42"
 check_not "42.5 no warn for doesn't contain"        "\[warn\].*doesn" "$IR42"
 check_not "42.6 no warn for isn't"                  "\[warn\].*isn"   "$IR42"
@@ -2751,8 +2751,8 @@ IR43=$( (export HOME="$H_43"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-import-rules" --thunderbird-path "$TB43_DIR" \
         --account t43@test.local --dry-run 2>&1 || true) )
 
-check     "43.1 body contains -> if-body = *unsubscribe*"  'if-body.*\*unsubscribe\*' "$IR43"
-check     "43.2 body begins with -> if-body = URGENT*"     'if-body.*URGENT\*'        "$IR43"
+check     "43.1 body contains -> body:*unsubscribe*"     'body:.*unsubscribe'     "$IR43"
+check     "43.2 body begins with -> body:URGENT*"         'body:.*URGENT'          "$IR43"
 check_not "43.3 no warn for body condition (US-69)"        "\[warn\].*body"            "$IR43"
 
 rm -rf "./build/tests/functional/homes/h43-$$"
@@ -2797,8 +2797,8 @@ IR44=$( (export HOME="$H_44"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-import-rules" --thunderbird-path "$TB44_DIR" \
         --account t44@test.local --dry-run 2>&1 || true) )
 
-check     "44.1 age,greater than,90 -> if-age-gt = 90"  "if-age-gt.*90"  "$IR44"
-check     "44.2 age,less than,7 -> if-age-lt = 7"       "if-age-lt.*7"   "$IR44"
+check     "44.1 age,greater than,90 -> age-gt:90"       "age-gt:90"      "$IR44"
+check     "44.2 age,less than,7 -> age-lt:7"            "age-lt:7"       "$IR44"
 check_not "44.3 no warn for age,greater than (US-70)"   "\[warn\].*age"  "$IR44"
 check_not "44.4 no warn for age,less than (US-70)"      "\[warn\].*age"  "$IR44"
 
@@ -3018,6 +3018,116 @@ check "47.4 apply-rules: pending_moves cleaned up after sync"  "ok" \
     "$([ "$PENDING_MOVES_COUNT" -eq 0 ] && echo ok || echo fail)"
 
 rm -rf "./build/tests/functional/homes/h77-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 48 — US-81: when expression in rules list output
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 48: when expression in rules list (US-81) ---"
+
+H_48="./build/tests/functional/homes/h48-$$"
+ACCT_48="w81@test.local"
+make_home "$H_48" "$ACCT_48" 9993
+
+cat > "$H_48/.config/email-cli/accounts/$ACCT_48/rules.ini" <<'RINI48'
+[rule "OR filter"]
+when = from:*@a.example.com or from:*@b.example.com or from:*@c.example.com
+then-add-label = MultiSender
+
+[rule "Negated"]
+when = !from:*@spam.com and subject:*[work]*
+then-add-label = Work
+RINI48
+
+OUT_48=$( (export HOME="$H_48"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+
+check "48.1 rules list: when field shown for OR filter"    "when"               "$OUT_48"
+check "48.2 rules list: OR pattern preserved"             "a.example.com"      "$OUT_48"
+check "48.3 rules list: or keyword present"               " or "               "$OUT_48"
+check "48.4 rules list: negated rule when shown"          "!from:"             "$OUT_48"
+check "48.5 rules list: and keyword in negated rule"      " and "              "$OUT_48"
+check "48.6 rules list: then-add-label shown"             "then-add-label"     "$OUT_48"
+
+rm -rf "./build/tests/functional/homes/h48-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 49 — US-81: backward compat: old if-from shown as when in rules list
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 49: legacy flat fields auto-migrated to when (US-81) ---"
+
+H_49="./build/tests/functional/homes/h49-$$"
+ACCT_49="w81b@test.local"
+make_home "$H_49" "$ACCT_49" 9993
+
+cat > "$H_49/.config/email-cli/accounts/$ACCT_49/rules.ini" <<'RINI49'
+[rule "Legacy AND"]
+if-from    = *@github.com
+if-subject = *[GitHub]*
+then-add-label = GitHub
+RINI49
+
+OUT_49=$( (export HOME="$H_49"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+
+check "49.1 legacy rules list: when field shown"        "when"        "$OUT_49"
+check "49.2 legacy rules list: from pattern preserved"  "github.com"  "$OUT_49"
+check "49.3 legacy rules list: subject pattern shown"   "GitHub"      "$OUT_49"
+
+# Adding a new rule triggers mail_rules_save which writes new when= format
+(export HOME="$H_49"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules add --name "New" --if-from "*@new.com" \
+        --add-label NewLabel 2>&1 || true) > /dev/null
+
+SAVED_49=$(cat "$H_49/.config/email-cli/accounts/$ACCT_49/rules.ini" 2>/dev/null || echo "")
+check     "49.4 saved file: when field present after re-save"    "when ="       "$SAVED_49"
+check_not "49.5 saved file: no bare if-from in new format"       "^if-from"    "$SAVED_49"
+
+rm -rf "./build/tests/functional/homes/h49-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 50 — US-81: Thunderbird OR conditions → single when expression
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 50: Thunderbird OR conditions → when expression (US-81) ---"
+
+TB50_DIR="./build/tests/functional/homes/tb50-$$"
+H_50="./build/tests/functional/homes/h50-$$"
+mkdir -p "$TB50_DIR/ImapMail/localhost"
+make_tb_prefs "$TB50_DIR" "localhost" "t50@test.local" "localhost"
+cat > "$TB50_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB50DAT'
+name="Multi sender"
+enabled="yes"
+condition="OR (from,contains,@ads.com) (from,contains,@promo.net) (from,contains,@offers.io)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Reklam"
+
+TB50DAT
+
+mkdir -p "$H_50/.config/email-cli/accounts/t50@test.local"
+cat > "$H_50/.config/email-cli/accounts/t50@test.local/config.ini" <<'CFG50'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=t50@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG50
+
+IR50=$( (export HOME="$H_50"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" --thunderbird-path "$TB50_DIR" \
+        --account t50@test.local --dry-run 2>&1 || true) )
+
+check     "50.1 TB OR: single rule produced"              "1 rule\|Found 1"      "$IR50"
+check     "50.2 TB OR: first from pattern present"        "ads.com"              "$IR50"
+check     "50.3 TB OR: second from pattern present"       "promo.net"            "$IR50"
+check     "50.4 TB OR: third from pattern present"        "offers.io"            "$IR50"
+check     "50.5 TB OR: or keyword present in when"        " or "                 "$IR50"
+check     "50.6 TB OR: move-folder preserved"             "Reklam"               "$IR50"
+
+rm -rf "./build/tests/functional/homes/h50-$$"
+case "$TB50_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB50_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${TB50_DIR##./build/tests/functional/homes/}"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

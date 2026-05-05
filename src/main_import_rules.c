@@ -161,7 +161,6 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
 
     /* ── Per-filter state (accumulated until blank line or next name=) ── */
     char cur_name[512]          = {0};
-    int  is_or                  = 0;
     TBCond conds[TB_MAX_CONDS];
     int nconds                  = 0;
     int cur_converted_cond      = 0;
@@ -182,7 +181,10 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
 
     int rules_added = 0;
 
-    /* ── Flush: write accumulated state to MailRules ── */
+    /* ── Flush: write accumulated state as one MailRule ── */
+    /* NOTE: OR-logic filters with multiple same-field conditions import only the
+     * first occurrence of each field (AND semantics).  Full OR support requires
+     * the boolean 'when' expression (US-81/82), not yet implemented. */
 #define FLUSH_RULE() do { \
     if (!cur_name[0]) break; \
     if (cur_converted_cond == 0 && cur_converted_act == 0 \
@@ -190,31 +192,23 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
         fprintf(stderr, "  [warn] Rule \"%s\": no conditions or actions could be " \
                 "converted — rule will be empty\n", cur_name); \
     } \
-    /* Determine how many rules to emit: OR → one per cond; AND/empty → one */ \
-    int emit = (is_or && nconds > 1) ? nconds : 1; \
-    for (int _ei = 0; _ei < emit; _ei++) { \
-        MailRule *_r = rules_append(*out); \
-        if (!_r) break; \
-        _r->name = strdup(cur_name); \
-        if (is_or && nconds > 1) { \
-            apply_cond(_r, &conds[_ei]); \
-        } else { \
-            for (int _ci = 0; _ci < nconds; _ci++) apply_cond(_r, &conds[_ci]); \
-        } \
-        if (then_move_folder[0]) \
-            _r->then_move_folder = strdup(then_move_folder); \
-        for (int _li = 0; _li < then_add_count; _li++) \
-            _r->then_add_label[_r->then_add_count++] = strdup(then_add_labels[_li]); \
-        for (int _li = 0; _li < then_rm_count; _li++) \
-            _r->then_rm_label[_r->then_rm_count++]   = strdup(then_rm_labels[_li]); \
-        if (then_forward_to[0]) \
-            _r->then_forward_to = strdup(then_forward_to); \
-        rules_added++; \
-    } \
+    MailRule *_r = rules_append(*out); \
+    if (!_r) break; \
+    _r->name = strdup(cur_name); \
+    for (int _ci = 0; _ci < nconds; _ci++) apply_cond(_r, &conds[_ci]); \
+    if (then_move_folder[0]) \
+        _r->then_move_folder = strdup(then_move_folder); \
+    for (int _li = 0; _li < then_add_count; _li++) \
+        _r->then_add_label[_r->then_add_count++] = strdup(then_add_labels[_li]); \
+    for (int _li = 0; _li < then_rm_count; _li++) \
+        _r->then_rm_label[_r->then_rm_count++]   = strdup(then_rm_labels[_li]); \
+    if (then_forward_to[0]) \
+        _r->then_forward_to = strdup(then_forward_to); \
+    rules_added++; \
 } while (0)
 
 #define RESET_RULE() do { \
-    cur_name[0] = '\0'; is_or = 0; nconds = 0; \
+    cur_name[0] = '\0'; nconds = 0; \
     cur_converted_cond = cur_skipped_cond = 0; \
     then_move_folder[0] = '\0'; pending_move = 0; \
     then_add_count = then_rm_count = 0; \
@@ -251,7 +245,6 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
         if (!cur_name[0]) continue;
 
         if (strcmp(key, "condition") == 0) {
-            is_or = (strncmp(val, "OR", 2) == 0);
             char *v = strdup(val);
             if (!v) continue;
             char *tok = strstr(v, "(");

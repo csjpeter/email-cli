@@ -3130,6 +3130,182 @@ case "$TB50_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe 
 rm -rf "./build/tests/functional/homes/${TB50_DIR##./build/tests/functional/homes/}"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 51 — create-folder and delete-folder IMAP commands
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 51: create-folder / delete-folder (IMAP) ---"
+
+CF_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch create-folder INBOX.TestFolder51 2>&1 || true) )
+check     "51.1 create-folder: success"       "created"          "$CF_OUT"
+check_not "51.2 create-folder: no error"      "Error"            "$CF_OUT"
+
+DF_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch delete-folder INBOX.TestFolder51 2>&1 || true) )
+check     "51.3 delete-folder: success"       "deleted"          "$DF_OUT"
+check_not "51.4 delete-folder: no error"      "Error"            "$DF_OUT"
+
+CF_NOARG=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" create-folder 2>&1 || true) )
+check     "51.5 create-folder no arg: error"  "Error\|requires"  "$CF_NOARG"
+
+DF_NOARG=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" delete-folder 2>&1 || true) )
+check     "51.6 delete-folder no arg: error"  "Error\|requires"  "$DF_NOARG"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 52 — mark-junk and mark-notjunk
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 52: mark-junk / mark-notjunk ---"
+
+JUNK_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch mark-junk 1 2>&1 || true) )
+check     "52.1 mark-junk: success"           "junk"             "$JUNK_OUT"
+check_not "52.2 mark-junk: no error"          "Error"            "$JUNK_OUT"
+
+NOTJUNK_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch mark-notjunk 1 2>&1 || true) )
+check     "52.3 mark-notjunk: success"        "not-junk"         "$NOTJUNK_OUT"
+check_not "52.4 mark-notjunk: no error"       "Error"            "$NOTJUNK_OUT"
+
+JUNK_NOARG=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" mark-junk 2>&1 || true) )
+check     "52.5 mark-junk no uid: error"      "Error\|requires"  "$JUNK_NOARG"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 53 — remove-account
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 53: remove-account ---"
+
+H_RM53="./build/tests/functional/homes/rm53-$$"
+ACCT_RM53="rm53@test.local"
+make_home "$H_RM53" "$ACCT_RM53" 9993
+
+RM_OUT=$( (export HOME="$H_RM53"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" remove-account "$ACCT_RM53" 2>&1 || true) )
+check     "53.1 remove-account: success"      "removed"          "$RM_OUT"
+
+RM_NOTFOUND=$( (export HOME="$H_RM53"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" remove-account "nobody@nowhere.invalid" 2>&1 || true) )
+check     "53.2 remove-account unknown: error" "not found\|Error" "$RM_NOTFOUND"
+
+RM_NOARG=$( (export HOME="$H_RM53"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" remove-account 2>&1 || true) )
+check     "53.3 remove-account no arg: error"  "Error\|requires"  "$RM_NOARG"
+
+rm -rf "./build/tests/functional/homes/rm53-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 54 — email-sync cron status / remove
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 54: email-sync cron status/remove ---"
+
+CRON_STATUS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" cron status 2>&1 || true) )
+check     "54.1 cron status: exits cleanly"   "not installed\|installed\|cron" "$CRON_STATUS"
+
+CRON_REMOVE=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" cron remove 2>&1 || true) )
+check_not "54.2 cron remove: no fatal error"  "Segmentation\|Abort"            "$CRON_REMOVE"
+
+CRON_HELP=$( "$BIN_DIR/email-sync" cron --help 2>&1 || true )
+check     "54.3 cron help: usage shown"       "setup\|remove\|status"          "$CRON_HELP"
+
+SYNC_HELP=$( "$BIN_DIR/email-sync" --help 2>&1 || true )
+check     "54.4 email-sync --help: shown"     "Usage"                          "$SYNC_HELP"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 55 — email-sync --rebuild-contacts
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 55: email-sync --rebuild-contacts ---"
+
+RC_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" --rebuild-contacts 2>&1 || true) )
+check_not "55.1 rebuild-contacts: no crash"   "Segmentation\|Abort"  "$RC_OUT"
+check_not "55.2 rebuild-contacts: no error"   "Error:"               "$RC_OUT"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 56 — rules apply with when= expression
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 56: rules apply with when= expression ---"
+
+H_56="./build/tests/functional/homes/h56-$$"
+ACCT_56="w56@test.local"
+make_home "$H_56" "$ACCT_56" 9993
+
+# Pre-populate rules.ini with a when= expression rule
+mkdir -p "$H_56/.config/email-cli/accounts/$ACCT_56"
+cat > "$H_56/.config/email-cli/accounts/$ACCT_56/rules.ini" <<'RINI56'
+[rule "WhenTest"]
+when = from:*@test.local or subject:*Alpha*
+then-add-label = WhenMatched
+RINI56
+
+# Sync first to populate local store
+(export HOME="$H_56"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) >/dev/null 2>&1
+
+# Apply rules — the when= expression should match test messages
+RA_OUT=$( (export HOME="$H_56"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules apply 2>&1 || true) )
+check_not "56.1 rules apply with when=: no crash"  "Segmentation\|Abort"  "$RA_OUT"
+check_not "56.2 rules apply with when=: no error"  "Error:"               "$RA_OUT"
+
+# rules list should show the when= field
+RL56=$( (export HOME="$H_56"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+check "56.3 rules list shows when field"  "when"  "$RL56"
+
+rm -rf "./build/tests/functional/homes/h56-$$"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 57 — email-cli-ro extra commands: list-folders, list-attachments
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 57: email-cli-ro list-folders and list-attachments ---"
+
+RO_FOLD=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list-folders 2>&1 || true) )
+check "57.1 email-cli-ro list-folders: INBOX"      "INBOX"     "$RO_FOLD"
+
+RO_ATT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list-attachments 1 2>&1 || true) )
+check_not "57.2 email-cli-ro list-attachments: no crash" "Segmentation\|Abort" "$RO_ATT"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 58 — virtual flag views (__unread__, __flagged__)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 58: virtual flag views ---"
+
+VF_UNREAD=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder __unread__ 2>&1 || true) )
+check_not "58.1 list --folder __unread__: no crash" "Segmentation\|Abort" "$VF_UNREAD"
+
+VF_FLAGGED=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder __flagged__ 2>&1 || true) )
+check_not "58.2 list --folder __flagged__: no crash" "Segmentation\|Abort" "$VF_FLAGGED"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 59 — cross-folder content search (__search__: prefix)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 59: content search ---"
+
+SRCH_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder "__search__:0:Alpha" 2>&1 || true) )
+check_not "59.1 search by keyword: no crash"  "Segmentation\|Abort"  "$SRCH_OUT"
+
+SRCH_EMPTY=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder "__search__:0:ZZZNOMATCH99" 2>&1 || true) )
+check_not "59.2 search no result: no crash"   "Segmentation\|Abort"  "$SRCH_EMPTY"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

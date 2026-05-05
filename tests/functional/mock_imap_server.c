@@ -529,6 +529,10 @@ static void handle_client(SSL *ssl) {
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK CREATE completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
+        } else if (strstr(buffer, "DELETE")) {
+            char ok[64];
+            snprintf(ok, sizeof(ok), "%s OK DELETE completed\r\n", tag);
+            SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "COPY")) {
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK COPY completed\r\n", tag);

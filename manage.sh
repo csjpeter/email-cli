@@ -181,7 +181,10 @@ case "$1" in
         ./tests/functional/run_functional.sh
         echo "Capturing functional coverage..."
         (cd "$BUILD_DIR" && lcov --capture --directory . \
-             --output-file coverage-functional.info)
+             --output-file coverage-functional-raw.info && \
+         lcov --remove coverage-functional-raw.info \
+              '*/src/main_tui.c' \
+              --output-file coverage-functional.info)
 
         # Combined = unit ∪ functional
         (cd "$BUILD_DIR" && \

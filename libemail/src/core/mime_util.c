@@ -86,7 +86,7 @@ static int b64val(unsigned char c) {
     return -1;
 }
 
-static char *decode_base64(const char *in, size_t inlen) {
+static char *decode_base64(const char *in, size_t inlen, size_t *out_len) {
     size_t max = (inlen / 4 + 1) * 3 + 4;
     char *out = malloc(max);
     if (!out) return NULL;
@@ -103,6 +103,7 @@ static char *decode_base64(const char *in, size_t inlen) {
         }
     }
     out[n] = '\0';
+    if (out_len) *out_len = n;
     return out;
 }
 
@@ -145,7 +146,7 @@ static const char *body_start(const char *msg) {
 
 static char *decode_transfer(const char *body, size_t len, const char *enc) {
     if (enc && strcasecmp(enc, "base64") == 0)
-        return decode_base64(body, len);
+        return decode_base64(body, len, NULL);
     if (enc && strcasecmp(enc, "quoted-printable") == 0)
         return decode_qp(body, len);
     return strndup(body, len);
@@ -320,7 +321,7 @@ static char *decode_encoded_word(const char *charset, char enc,
         raw[j] = '\0';
     } else {
         /* B encoding */
-        raw = decode_base64(text, text_len);
+        raw = decode_base64(text, text_len, NULL);
         if (!raw) return NULL;
     }
 
@@ -725,18 +726,14 @@ static void collect_parts(const char *msg, AttachList *al, int *unnamed_idx) {
         return;
     }
 
-    /* Decode body content */
-    unsigned char *data = (unsigned char *)decode_transfer(body, strlen(body), enc);
-    size_t data_size = data ? strlen((char *)data) : 0;
-    /* For binary (base64-decoded) content the length may contain NUL bytes —
-     * use the decoded output length from decode_base64, which null-terminates
-     * but the real size is the base64-decoded byte count. */
-    if (enc && strcasecmp(enc, "base64") == 0 && data) {
-        /* decode_base64 returns the decoded bytes; count excludes the trailing NUL */
-        /* we need actual binary size — recount via the decoded buffer length */
-        size_t raw_enc_len = strlen(body);
-        data_size = (raw_enc_len / 4) * 3;  /* upper bound */
-        /* trim padding: accurate enough for display; file write uses full buffer */
+    /* Decode body content; for base64 capture exact decoded byte count. */
+    size_t data_size = 0;
+    unsigned char *data;
+    if (enc && strcasecmp(enc, "base64") == 0)
+        data = (unsigned char *)decode_base64(body, strlen(body), &data_size);
+    else {
+        data = (unsigned char *)decode_transfer(body, strlen(body), enc);
+        data_size = data ? strlen((char *)data) : 0;
     }
 
     /* Sanitise / generate filename */

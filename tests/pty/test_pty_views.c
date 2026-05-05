@@ -3524,7 +3524,9 @@ static void test_tui_rules_editor_lists_rules(void) {
 }
 
 static void test_tui_rules_editor_add_rule(void) {
-    /* US-62 AC4 / US-80: 'a' → raw-mode form (10 fields) → 'y' → rule saved */
+    /* US-62 AC4 / US-80: 'a' → two-step wizard → 'y' → rule saved
+     * Step 1: when list editor (a=add, enter text, q=confirm)
+     * Step 2: name + 8 action fields */
     remove_rules_ini();
     restart_mock();
     PtySession *s = tui_open_to_list();
@@ -3535,17 +3537,21 @@ static void test_tui_rules_editor_add_rule(void) {
     ASSERT_WAIT_FOR(s, "no rules", RULES_WAIT_MS);
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add new rule", RULES_WAIT_MS);
-    /* Form uses input_line_run — each \n confirms a field (raw mode) */
-    pty_send_str(s, "TestRule\n");          /* field 1: Name */
-    pty_send_str(s, "from:*@test.com\n");   /* field 2: when */
-    pty_send_str(s, "IMPORTANT\n");         /* field 3: add-label[1] */
-    pty_send_str(s, "\n");                  /* field 4: add-label[2] (empty) */
-    pty_send_str(s, "\n");                  /* field 5: add-label[3] (empty) */
-    pty_send_str(s, "\n");                  /* field 6: rm-label[1] (empty) */
-    pty_send_str(s, "\n");                  /* field 7: rm-label[2] (empty) */
-    pty_send_str(s, "\n");                  /* field 8: rm-label[3] (empty) */
-    pty_send_str(s, "\n");                  /* field 9: then-move-folder (empty) */
-    pty_send_str(s, "\n");                  /* field 10: then-forward-to (empty) */
+    /* Step 1: when list editor */
+    pty_send_str(s, "a");                   /* open "new:" input */
+    pty_send_str(s, "from:*@test.com\n");   /* type atom, confirm with Enter */
+    pty_send_str(s, "q");                   /* confirm when list, proceed to step 2 */
+    ASSERT_WAIT_FOR(s, "step 2", RULES_WAIT_MS);
+    /* Step 2: name + action fields */
+    pty_send_str(s, "TestRule\n");          /* Name */
+    pty_send_str(s, "IMPORTANT\n");         /* add-label[1] */
+    pty_send_str(s, "\n");                  /* add-label[2] (empty) */
+    pty_send_str(s, "\n");                  /* add-label[3] (empty) */
+    pty_send_str(s, "\n");                  /* rm-label[1] (empty) */
+    pty_send_str(s, "\n");                  /* rm-label[2] (empty) */
+    pty_send_str(s, "\n");                  /* rm-label[3] (empty) */
+    pty_send_str(s, "\n");                  /* then-move-folder (empty) */
+    pty_send_str(s, "\n");                  /* then-forward-to (empty) */
     ASSERT_WAIT_FOR(s, "Save?", RULES_WAIT_MS);
     pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "TestRule", RULES_WAIT_MS);
@@ -3568,8 +3574,11 @@ static void test_tui_rules_editor_cancel_add(void) {
     ASSERT_WAIT_FOR(s, "no rules", RULES_WAIT_MS);
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add new rule", RULES_WAIT_MS);
-    /* All 10 fields empty — name check fires after the last field */
-    pty_send_str(s, "\n\n\n\n\n\n\n\n\n\n");
+    /* Step 1: when list editor — confirm immediately with q (empty list) */
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "step 2", RULES_WAIT_MS);
+    /* Step 2: 9 fields all empty — name check fires after last field */
+    pty_send_str(s, "\n\n\n\n\n\n\n\n\n");
     ASSERT_WAIT_FOR(s, "required", RULES_WAIT_MS);
     pty_send_str(s, "\n"); /* dismiss "press any key" */
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);

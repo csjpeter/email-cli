@@ -1103,6 +1103,157 @@ static int cmd_reply_all(Config *cfg, const char *uid, const char *folder) {
 /* Number of then-add/rm-label slots shown in the edit form. */
 #define RULES_FORM_LABEL_SLOTS 3
 
+/* ── when expression list editor ─────────────────────────────────────── */
+
+#define WHEN_MAX_ATOMS 128
+#define WHEN_ATOM_MAX  512
+
+typedef struct {
+    char atoms[WHEN_MAX_ATOMS][WHEN_ATOM_MAX];
+    int  count;
+    int  cursor;
+    int  scroll;
+} WhenAtomList;
+
+static void when_list_split(WhenAtomList *wl, const char *expr) {
+    wl->count = 0; wl->cursor = 0; wl->scroll = 0;
+    if (!expr || !expr[0]) return;
+    const char *p = expr;
+    while (*p) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        const char *next = strstr(p, " or ");
+        size_t len = next ? (size_t)(next - p) : strlen(p);
+        while (len > 0 && p[len-1] == ' ') len--;
+        if (len > 0 && wl->count < WHEN_MAX_ATOMS) {
+            if (len >= WHEN_ATOM_MAX) len = WHEN_ATOM_MAX - 1;
+            memcpy(wl->atoms[wl->count], p, len);
+            wl->atoms[wl->count][len] = '\0';
+            wl->count++;
+        }
+        if (!next) break;
+        p = next + 4;
+    }
+}
+
+static void when_list_join(const WhenAtomList *wl, char *buf, size_t bufsz) {
+    buf[0] = '\0';
+    for (int i = 0; i < wl->count; i++) {
+        if (i > 0) {
+            size_t sl = strlen(buf);
+            if (sl + 4 < bufsz) { memcpy(buf + sl, " or ", 4); buf[sl+4] = '\0'; }
+        }
+        size_t sl = strlen(buf), al = strlen(wl->atoms[i]);
+        if (sl + al < bufsz) { memcpy(buf + sl, wl->atoms[i], al); buf[sl+al] = '\0'; }
+    }
+}
+
+static void when_list_render(const WhenAtomList *wl, int vis_rows, const char *title) {
+    printf("\033[2J\033[H");
+    printf("%s\n", title);
+    printf("j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  ESC=cancel\n");
+    if (wl->count == 0) {
+        printf("\n  (empty — press 'a' to add a condition)\n");
+        fflush(stdout);
+        return;
+    }
+    for (int i = wl->scroll; i < wl->count && i < wl->scroll + vis_rows; i++) {
+        if (i == wl->cursor)
+            printf("  \033[7m%3d. %s\033[m\n", i + 1, wl->atoms[i]);
+        else
+            printf("       %3d. %s\n", i + 1, wl->atoms[i]);
+    }
+    fflush(stdout);
+}
+
+static void when_list_do_add(WhenAtomList *wl, int vis_rows, const char *title) {
+    if (wl->count >= WHEN_MAX_ATOMS) return;
+    char tmp[WHEN_ATOM_MAX] = {0};
+    InputLine il = {0};
+    input_line_init(&il, tmp, sizeof(tmp), NULL);
+    int nrow = 3 + (wl->count - wl->scroll) + 1;
+    int maxrow = terminal_rows() - 2;
+    if (nrow > maxrow) nrow = maxrow;
+    when_list_render(wl, vis_rows, title);
+    if (!input_line_run(&il, nrow, "new:  ")) return;
+    char *s = tmp;
+    while (*s == ' ') s++;
+    size_t sl = strlen(s);
+    while (sl > 0 && s[sl-1] == ' ') sl--;
+    s[sl] = '\0';
+    if (sl == 0) return;
+    snprintf(wl->atoms[wl->count], WHEN_ATOM_MAX, "%s", s);
+    wl->cursor = wl->count;
+    wl->count++;
+    while (wl->cursor >= wl->scroll + vis_rows) wl->scroll++;
+}
+
+/* Returns 1 if confirmed (proceed to next form step), 0 if cancelled (abort form).
+ * Called while the terminal is already in raw mode.
+ * title: shown in header line (e.g. "Add new rule for user@host — conditions"). */
+static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
+    WhenAtomList wl;
+    when_list_split(&wl, buf);
+
+    int vis_rows = terminal_rows() - 4;
+    if (vis_rows < 3) vis_rows = 3;
+
+    for (;;) {
+        when_list_render(&wl, vis_rows, title);
+
+        TermKey key = terminal_read_key();
+        int ch = (key == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
+
+        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT) {
+            when_list_join(&wl, buf, bufsz);
+            return 0;
+        }
+        if (ch == 'q') {
+            when_list_join(&wl, buf, bufsz);
+            return 1;
+        }
+
+        if (key == TERM_KEY_NEXT_LINE || ch == 'j') {
+            if (wl.cursor < wl.count - 1) {
+                wl.cursor++;
+                if (wl.cursor >= wl.scroll + vis_rows) wl.scroll++;
+            }
+        } else if (key == TERM_KEY_PREV_LINE || ch == 'k') {
+            if (wl.cursor > 0) {
+                wl.cursor--;
+                if (wl.cursor < wl.scroll) wl.scroll--;
+            }
+        } else if (key == TERM_KEY_ENTER || ch == 'e') {
+            if (wl.count == 0) {
+                when_list_do_add(&wl, vis_rows, title);
+            } else {
+                char tmp[WHEN_ATOM_MAX];
+                snprintf(tmp, sizeof(tmp), "%s", wl.atoms[wl.cursor]);
+                InputLine il = {0};
+                input_line_init(&il, tmp, sizeof(tmp), tmp);
+                int erow = 3 + (wl.cursor - wl.scroll) + 1;
+                when_list_render(&wl, vis_rows, title);
+                if (input_line_run(&il, erow, "edit: ")) {
+                    char *s = tmp;
+                    while (*s == ' ') s++;
+                    size_t sl = strlen(s);
+                    while (sl > 0 && s[sl-1] == ' ') sl--;
+                    s[sl] = '\0';
+                    if (sl > 0) snprintf(wl.atoms[wl.cursor], WHEN_ATOM_MAX, "%s", s);
+                }
+            }
+        } else if (ch == 'a') {
+            when_list_do_add(&wl, vis_rows, title);
+        } else if (ch == 'd' && wl.count > 0) {
+            for (int i = wl.cursor; i < wl.count - 1; i++)
+                memcpy(wl.atoms[i], wl.atoms[i+1], WHEN_ATOM_MAX);
+            wl.count--;
+            if (wl.cursor >= wl.count && wl.cursor > 0) wl.cursor--;
+            if (wl.scroll > wl.cursor) wl.scroll = wl.cursor;
+        }
+    }
+}
+
 /**
  * Full-screen form to create (prefill=NULL) or edit an existing rule.
  * Uses input_line_run for every field — proper UTF-8 and cursor movement.
@@ -1147,29 +1298,48 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
 
     struct { const char *prompt; char *buf; size_t bufsz; int row; } fields[] = {
         { "Name:             ", name_buf,    sizeof(name_buf),   3 },
-        { "when:             ", when_buf,    sizeof(when_buf),   4 },
-        { "add-label [1]:    ", add_bufs[0], 256,                5 },
-        { "add-label [2]:    ", add_bufs[1], 256,                6 },
-        { "add-label [3]:    ", add_bufs[2], 256,                7 },
-        { "rm-label  [1]:    ", rm_bufs[0],  256,                8 },
-        { "rm-label  [2]:    ", rm_bufs[1],  256,                9 },
-        { "rm-label  [3]:    ", rm_bufs[2],  256,               10 },
-        { "then-move-folder: ", folder_buf,  sizeof(folder_buf), 11 },
-        { "then-forward-to:  ", fwd_buf,     sizeof(fwd_buf),    12 },
+        { "add-label [1]:    ", add_bufs[0], 256,                4 },
+        { "add-label [2]:    ", add_bufs[1], 256,                5 },
+        { "add-label [3]:    ", add_bufs[2], 256,                6 },
+        { "rm-label  [1]:    ", rm_bufs[0],  256,                7 },
+        { "rm-label  [2]:    ", rm_bufs[1],  256,                8 },
+        { "rm-label  [3]:    ", rm_bufs[2],  256,                9 },
+        { "then-move-folder: ", folder_buf,  sizeof(folder_buf), 10 },
+        { "then-forward-to:  ", fwd_buf,     sizeof(fwd_buf),    11 },
     };
     int nfields = (int)(sizeof(fields) / sizeof(fields[0]));
 
-    printf("\033[2J\033[H");
-    printf("%s rule for %s\n", prefill ? "Edit" : "Add new", account ? account : "?");
-    printf("Enter=next field  ESC=cancel\n");
-    for (int i = 0; i < nfields; i++)
-        printf("\033[%d;1H\033[2K%s%s", fields[i].row, fields[i].prompt, fields[i].buf);
-    fflush(stdout);
-
+    /* Step 1: when expression list editor (full-screen, raw mode) */
+    char when_title[320];
+    if (prefill && prefill->name)
+        snprintf(when_title, sizeof(when_title),
+                 "%s rule \"%s\" for %s — conditions (step 1/2)",
+                 "Edit", prefill->name, account ? account : "?");
+    else
+        snprintf(when_title, sizeof(when_title),
+                 "Add new rule for %s — conditions (step 1/2)",
+                 account ? account : "?");
     int cancelled = 0;
+    {
+        RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
+        if (!tui_when_list_edit(when_buf, sizeof(when_buf), when_title))
+            cancelled = 1;
+    }
+
+    if (cancelled) return;
+
+    /* Step 1: remaining fields */
     char confirm_char = 0;
     {
         RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
+
+        printf("\033[2J\033[H");
+        printf("%s rule for %s — step 2/2: actions\n",
+               prefill ? "Edit" : "Add new", account ? account : "?");
+        printf("Enter=next field  ESC=cancel\n");
+        for (int i = 0; i < nfields; i++)
+            printf("\033[%d;1H\033[2K%s%s", fields[i].row, fields[i].prompt, fields[i].buf);
+        fflush(stdout);
 
         for (int i = 0; i < nfields && !cancelled; i++) {
             InputLine il = {0};

@@ -260,4 +260,103 @@ void test_imap_util(void) {
         ASSERT(r != NULL, "imap_utf7_encode: space+tilde must not be NULL");
         ASSERT(strcmp(r, " ~") == 0, "imap_utf7_encode: space+tilde passthrough");
     }
+
+    /* ── imap_uid_set_expand tests ──────────────────────────────────── */
+
+    /* NULL input → count 0, NULL array */
+    {
+        char (*uids)[17] = NULL;
+        int cnt = 0;
+        int rc = imap_uid_set_expand(NULL, &uids, &cnt);
+        ASSERT(rc == 0,     "uid_set_expand: NULL set rc=0");
+        ASSERT(cnt == 0,    "uid_set_expand: NULL set count=0");
+        ASSERT(uids == NULL, "uid_set_expand: NULL set array=NULL");
+    }
+
+    /* Empty string → count 0 */
+    {
+        char (*uids)[17] = NULL;
+        int cnt = 0;
+        int rc = imap_uid_set_expand("", &uids, &cnt);
+        ASSERT(rc == 0,  "uid_set_expand: empty set rc=0");
+        ASSERT(cnt == 0, "uid_set_expand: empty set count=0");
+        free(uids);
+    }
+
+    /* Single UID */
+    {
+        char (*uids)[17] = NULL;
+        int cnt = 0;
+        int rc = imap_uid_set_expand("5", &uids, &cnt);
+        ASSERT(rc == 0,   "uid_set_expand: single UID rc=0");
+        ASSERT(cnt == 1,  "uid_set_expand: single UID count=1");
+        ASSERT(strcmp(uids[0], "0000000000000005") == 0,
+               "uid_set_expand: single UID value");
+        free(uids);
+    }
+
+    /* Contiguous range 1:3 → 3 entries */
+    {
+        char (*uids)[17] = NULL;
+        int cnt = 0;
+        int rc = imap_uid_set_expand("1:3", &uids, &cnt);
+        ASSERT(rc == 0,   "uid_set_expand: range rc=0");
+        ASSERT(cnt == 3,  "uid_set_expand: range count=3");
+        ASSERT(strcmp(uids[0], "0000000000000001") == 0, "uid_set_expand: range[0]");
+        ASSERT(strcmp(uids[2], "0000000000000003") == 0, "uid_set_expand: range[2]");
+        free(uids);
+    }
+
+    /* Multiple comma-separated UIDs */
+    {
+        char (*uids)[17] = NULL;
+        int cnt = 0;
+        int rc = imap_uid_set_expand("1,3,7", &uids, &cnt);
+        ASSERT(rc == 0,   "uid_set_expand: multi-uid rc=0");
+        ASSERT(cnt == 3,  "uid_set_expand: multi-uid count=3");
+        ASSERT(strcmp(uids[1], "0000000000000003") == 0, "uid_set_expand: multi-uid[1]");
+        free(uids);
+    }
+
+    /* Mix of single and range: "2,5:7" → 4 entries */
+    {
+        char (*uids)[17] = NULL;
+        int cnt = 0;
+        int rc = imap_uid_set_expand("2,5:7", &uids, &cnt);
+        ASSERT(rc == 0,  "uid_set_expand: mixed rc=0");
+        ASSERT(cnt == 4, "uid_set_expand: mixed count=4");
+        free(uids);
+    }
+
+    /* Large range that triggers realloc (initial cap=32) */
+    {
+        char (*uids)[17] = NULL;
+        int cnt = 0;
+        int rc = imap_uid_set_expand("1:40", &uids, &cnt);
+        ASSERT(rc == 0,   "uid_set_expand: large range rc=0");
+        ASSERT(cnt == 40, "uid_set_expand: large range count=40");
+        free(uids);
+    }
+
+    /* Non-numeric input → parser stops immediately → 0 UIDs */
+    {
+        char (*uids)[17] = NULL;
+        int cnt = 0;
+        int rc = imap_uid_set_expand("abc", &uids, &cnt);
+        ASSERT(rc == 0,  "uid_set_expand: non-numeric rc=0");
+        ASSERT(cnt == 0, "uid_set_expand: non-numeric count=0");
+        free(uids);
+    }
+
+    /* Malformed range "5:" → treats hi=lo */
+    {
+        char (*uids)[17] = NULL;
+        int cnt = 0;
+        int rc = imap_uid_set_expand("5:", &uids, &cnt);
+        ASSERT(rc == 0,  "uid_set_expand: malformed range rc=0");
+        ASSERT(cnt == 1, "uid_set_expand: malformed range count=1");
+        ASSERT(strcmp(uids[0], "0000000000000005") == 0,
+               "uid_set_expand: malformed range value");
+        free(uids);
+    }
 }

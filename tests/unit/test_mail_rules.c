@@ -1,5 +1,6 @@
 #include "test_helpers.h"
 #include "mail_rules.h"
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -376,6 +377,131 @@ static void test_load_utf7_folder_name(void) {
     mail_rules_free(r);
 }
 
+static void test_rules_parse_file_features(void) {
+    /* Rules file with unnamed rule, when=, then-add/remove-label, then-forward-to */
+    char tmppath[] = "/tmp/test-mail-rules-features-XXXXXX";
+    int fd = mkstemp(tmppath);
+    ASSERT(fd >= 0, "parse features: mkstemp failed");
+
+    const char *ini =
+        "[rule]\n"
+        "when = from:*@test.com\n"
+        "then-add-label    = TestLabel\n"
+        "then-remove-label = INBOX\n"
+        "then-forward-to   = fwd@example.com\n";
+    ssize_t w = write(fd, ini, strlen(ini)); (void)w;
+    close(fd);
+
+    MailRules *r = mail_rules_load_path(tmppath);
+    unlink(tmppath);
+
+    ASSERT(r != NULL, "parse features: load returned non-NULL");
+    ASSERT(r->count == 1, "parse features: 1 rule loaded");
+    ASSERT(r->rules[0].name != NULL, "parse features: name not NULL");
+    ASSERT(strcmp(r->rules[0].name, "(unnamed)") == 0, "parse features: unnamed rule name");
+    ASSERT(r->rules[0].when != NULL, "parse features: when set");
+    ASSERT(strcmp(r->rules[0].when, "from:*@test.com") == 0, "parse features: when value");
+    ASSERT(r->rules[0].then_add_count == 1, "parse features: then_add_count=1");
+    ASSERT(strcmp(r->rules[0].then_add_label[0], "TestLabel") == 0, "parse features: then_add_label");
+    ASSERT(r->rules[0].then_rm_count == 1, "parse features: then_rm_count=1");
+    ASSERT(strcmp(r->rules[0].then_rm_label[0], "INBOX") == 0, "parse features: then_rm_label");
+    ASSERT(r->rules[0].then_forward_to != NULL, "parse features: then_forward_to set");
+    ASSERT(strcmp(r->rules[0].then_forward_to, "fwd@example.com") == 0,
+           "parse features: then_forward_to value");
+    mail_rules_free(r);
+}
+
+static void test_rules_when_expression(void) {
+    MailRules *r = make_rules();
+    MailRule  *rule = add_rule(r, "When test");
+    rule->when = strdup("from:*@corp.com");
+    rule->then_add_label[rule->then_add_count++] = strdup("Corp");
+
+    char **add = NULL, **rm = NULL;
+    int ac = 0, rc2 = 0;
+
+    int fired = mail_rules_apply(r, "boss@corp.com", "Hello", NULL, "",
+                                  NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 1, "when expr: fires for matching from");
+    ASSERT(ac == 1, "when expr: adds 1 label");
+    for (int i = 0; i < ac; i++) free(add[i]);
+    free(add); free(rm); add = NULL; rm = NULL; ac = 0; rc2 = 0;
+
+    fired = mail_rules_apply(r, "other@example.com", "Hi", NULL, "",
+                              NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 0, "when expr: does not fire for non-matching from");
+
+    /* Invalid when expression → rule skipped */
+    free(rule->when);
+    rule->when = strdup("!!!invalid!!!");
+    fired = mail_rules_apply(r, "boss@corp.com", "Hello", NULL, "",
+                              NULL, (time_t)0, &add, &ac, &rm, &rc2);
+    ASSERT(fired == 0, "when expr: invalid expr → rule skipped");
+
+    mail_rules_free(r);
+}
+
+static void test_rules_then_move_folder(void) {
+    MailRules *r = make_rules();
+    MailRule  *rule = add_rule(r, "Move Rule");
+    rule->if_from = strdup("*@move.test");
+    rule->then_move_folder = strdup("Processed");
+
+    char **add = NULL, **rm = NULL;
+    char *move_folder = NULL;
+    int ac = 0, rc2 = 0;
+
+    int fired = mail_rules_apply_ex(r, "x@move.test", "Msg", NULL, "",
+                                     NULL, (time_t)0, &add, &ac, &rm, &rc2,
+                                     &move_folder);
+    ASSERT(fired == 1, "move_folder rule: fired");
+    ASSERT(move_folder != NULL, "move_folder rule: move_folder set");
+    if (move_folder)
+        ASSERT(strcmp(move_folder, "Processed") == 0, "move_folder rule: value");
+    free(move_folder);
+    mail_rules_free(r);
+}
+
+static void test_rules_save_load_account(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    setenv("HOME", "/tmp/email-cli-rules-acct-test", 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    MailRules *r = make_rules();
+    MailRule  *rule = add_rule(r, "Save Rule");
+    rule->if_from = strdup("*@save.test");
+    rule->when    = strdup("from:*@save.test");
+    rule->then_add_label[rule->then_add_count++] = strdup("Saved");
+    rule->then_rm_label[rule->then_rm_count++]   = strdup("INBOX");
+    rule->then_move_folder = strdup("Archive");
+
+    int rc = mail_rules_save("save-test@save.test", r);
+    ASSERT(rc == 0, "rules_save: returns 0");
+    mail_rules_free(r);
+
+    MailRules *loaded = mail_rules_load("save-test@save.test");
+    ASSERT(loaded != NULL, "rules_load: not NULL");
+    if (loaded) {
+        ASSERT(loaded->count == 1, "rules_load: count=1");
+        ASSERT(loaded->rules[0].when != NULL, "rules_load: when set");
+        if (loaded->rules[0].when)
+            ASSERT(strcmp(loaded->rules[0].when, "from:*@save.test") == 0,
+                   "rules_load: when value");
+        ASSERT(loaded->rules[0].then_add_count == 1, "rules_load: then_add_count");
+        ASSERT(loaded->rules[0].then_rm_count  == 1, "rules_load: then_rm_count");
+        ASSERT(loaded->rules[0].then_move_folder != NULL, "rules_load: move_folder");
+        mail_rules_free(loaded);
+    }
+
+    /* Load non-existent account → NULL */
+    MailRules *miss = mail_rules_load("nobody@nowhere.invalid");
+    ASSERT(miss == NULL, "rules_load: missing account returns NULL");
+
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
+}
+
 /* ── Registration ────────────────────────────────────────────────── */
 
 void test_mail_rules(void) {
@@ -394,4 +520,8 @@ void test_mail_rules(void) {
     RUN_TEST(test_negation_if_not_subject);
     RUN_TEST(test_negation_combined_with_positive);
     RUN_TEST(test_load_utf7_folder_name);
+    RUN_TEST(test_rules_parse_file_features);
+    RUN_TEST(test_rules_when_expression);
+    RUN_TEST(test_rules_then_move_folder);
+    RUN_TEST(test_rules_save_load_account);
 }

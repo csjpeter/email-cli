@@ -432,3 +432,89 @@ void test_config_store(void) {
     else unsetenv("HOME");
     if (old_xdg) setenv("XDG_CONFIG_HOME", old_xdg, 1);
 }
+
+/* ── app_settings_set_obfuscation ────────────────────────────────────── */
+
+void test_config_settings(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    setenv("HOME", "/tmp/email-cli-settings-test", 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    int rc = app_settings_set_obfuscation(0);
+    ASSERT(rc == 0, "settings: set_obfuscation(0) returns 0");
+
+    int val = app_settings_get_obfuscation();
+    ASSERT(val == 0, "settings: get_obfuscation returns 0 after set");
+
+    rc = app_settings_set_obfuscation(1);
+    ASSERT(rc == 0, "settings: set_obfuscation(1) returns 0");
+
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
+}
+
+/* ── config_load_account ─────────────────────────────────────────────── */
+
+void test_config_load_account(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    setenv("HOME", "/tmp/email-cli-load-acct-test", 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    Config cfg = {0};
+    cfg.host   = strdup("imaps://imap.load-test.com");
+    cfg.user   = strdup("load-acct@load-test.com");
+    cfg.pass   = strdup("testpass");
+    cfg.folder = strdup("INBOX");
+    config_save_account(&cfg);
+    free(cfg.host); free(cfg.user); free(cfg.pass); free(cfg.folder);
+
+    Config *loaded = config_load_account("load-acct@load-test.com");
+    ASSERT(loaded != NULL, "config_load_account: found by user");
+    if (loaded) {
+        ASSERT(strcmp(loaded->user, "load-acct@load-test.com") == 0,
+               "config_load_account: user matches");
+        config_free(loaded);
+    }
+
+    Config *miss = config_load_account("nobody@nowhere.invalid");
+    ASSERT(miss == NULL, "config_load_account: missing returns NULL");
+
+    Config *null_r = config_load_account(NULL);
+    ASSERT(null_r == NULL, "config_load_account: NULL arg returns NULL");
+
+    Config *empty_r = config_load_account("");
+    ASSERT(empty_r == NULL, "config_load_account: empty arg returns NULL");
+
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
+}
+
+/* ── config_migrate_credentials ──────────────────────────────────────── */
+
+void test_config_migrate(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    setenv("HOME", "/tmp/email-cli-migrate-test", 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    Config cfg = {0};
+    cfg.host   = strdup("imaps://imap.mig.com");
+    cfg.user   = strdup("migrate@mig.com");
+    cfg.pass   = strdup("pass");
+    cfg.folder = strdup("INBOX");
+    config_save_account(&cfg);
+    free(cfg.host); free(cfg.user); free(cfg.pass); free(cfg.folder);
+
+    int rc = config_migrate_credentials();
+    ASSERT(rc == 0, "config_migrate_credentials: returns 0");
+
+    /* No accounts → also returns 0 */
+    setenv("HOME", "/tmp/email-cli-migrate-empty-test", 1);
+    rc = config_migrate_credentials();
+    ASSERT(rc == 0, "config_migrate_credentials: empty home returns 0");
+
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
+}

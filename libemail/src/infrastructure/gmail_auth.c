@@ -273,8 +273,11 @@ int gmail_auth_device_flow(Config *cfg) {
     curl_free(escaped_code);
     free(auth_code);
 
+    const char *url_override2 = getenv("GMAIL_TEST_TOKEN_URL");
+    const char *token_url2 = (url_override2 && url_override2[0]) ? url_override2 : TOKEN_URL;
+
     long tcode = 0;
-    RAII_STRING char *tresp = http_post(TOKEN_URL, post, &tcode);
+    RAII_STRING char *tresp = http_post(token_url2, post, &tcode);
     if (!tresp || tcode != 200) {
         fprintf(stderr, "Error: Token exchange failed (HTTP %ld).\n", tcode);
         if (tresp) {
@@ -328,8 +331,12 @@ char *gmail_auth_refresh(const Config *cfg) {
                  client_id, client_secret, cfg->gmail_refresh_token) == -1)
         return NULL;
 
+    /* Test hook: GMAIL_TEST_TOKEN_URL overrides the token endpoint for unit tests */
+    const char *url_override = getenv("GMAIL_TEST_TOKEN_URL");
+    const char *token_url = (url_override && url_override[0]) ? url_override : TOKEN_URL;
+
     long code = 0;
-    RAII_STRING char *resp = http_post(TOKEN_URL, post, &code);
+    RAII_STRING char *resp = http_post(token_url, post, &code);
     if (!resp) return NULL;
 
     if (code == 200) {

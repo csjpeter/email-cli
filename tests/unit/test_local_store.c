@@ -866,3 +866,196 @@ void test_local_contacts_update(void) {
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
 }
+
+/* ── local_search (text/subject/from search) ──────────────────────────── */
+
+void test_local_search(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-search-test");
+
+    /* Build a manifest with two messages */
+    Manifest *m = calloc(1, sizeof(Manifest));
+    manifest_upsert(m, "0000000000000001", strdup("alice@example.com"),
+                    strdup("Hello World subject"), strdup("2024-01-01 10:00"), 0);
+    manifest_upsert(m, "0000000000000002", strdup("bob@other.org"),
+                    strdup("Different topic"), strdup("2024-01-02 11:00"), MSG_FLAG_UNSEEN);
+    manifest_save("INBOX", m);
+    manifest_free(m);
+
+    SearchResult *res = NULL;
+    int cnt = 0;
+
+    /* scope=0: subject search — "Hello" matches UID1 */
+    int rc = local_search("Hello", 0, &res, &cnt);
+    ASSERT(rc == 0,  "local_search subject: returns 0");
+    ASSERT(cnt == 1, "local_search subject: 1 result");
+    if (cnt == 1) {
+        ASSERT(strcmp(res[0].uid, "0000000000000001") == 0, "local_search subject: UID1");
+        ASSERT(strcmp(res[0].folder, "INBOX") == 0, "local_search subject: INBOX");
+    }
+    local_search_free(res, cnt);
+
+    /* scope=0: case-insensitive */
+    res = NULL; cnt = 0;
+    local_search("hello", 0, &res, &cnt);
+    ASSERT(cnt == 1, "local_search case-insensitive: 1 result");
+    local_search_free(res, cnt);
+
+    /* scope=1: from search — "alice" matches UID1 */
+    res = NULL; cnt = 0;
+    local_search("alice", 1, &res, &cnt);
+    ASSERT(cnt == 1, "local_search from: 1 result");
+    if (cnt == 1)
+        ASSERT(strcmp(res[0].uid, "0000000000000001") == 0, "local_search from: UID1");
+    local_search_free(res, cnt);
+
+    /* scope=0: no match → 0 results */
+    res = NULL; cnt = 0;
+    local_search("ZZZNOMATCH99", 0, &res, &cnt);
+    ASSERT(cnt == 0, "local_search no match: 0 results");
+    local_search_free(res, cnt);
+
+    /* NULL / empty query → 0 results, no crash */
+    res = NULL; cnt = 0;
+    local_search(NULL, 0, &res, &cnt);
+    ASSERT(cnt == 0, "local_search NULL query: safe");
+    res = NULL; cnt = 0;
+    local_search("", 0, &res, &cnt);
+    ASSERT(cnt == 0, "local_search empty query: safe");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+/* ── local_contacts_rebuild ───────────────────────────────────────────── */
+
+void test_local_contacts_rebuild(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-rebuild-test");
+
+    /* Save a message header with From/To so rebuild can extract contacts */
+    const char *hdr = "From: Carol <carol@rebuild.test>\r\nTo: dave@rebuild.test\r\n"
+                      "Subject: Test\r\nDate: Mon, 1 Jan 2024 10:00:00 +0000\r\n";
+    local_hdr_save("INBOX", "0000000000000001", hdr, strlen(hdr));
+
+    /* Save folder list so local_contacts_rebuild can find INBOX */
+    const char *flist[] = { "INBOX", NULL };
+    local_folder_list_save(flist, 1, '/');
+
+    /* Run rebuild — should not crash, creates contacts file */
+    local_contacts_rebuild();
+
+    /* Check the contacts file at the correct path for this test (not CONTACTS_PATH
+     * which is hardcoded to the contacts-update test directory). */
+    const char *ctacts_file =
+        "/tmp/email-cli-rebuild-test/.local/share/email-cli/accounts/testuser/contacts.tsv";
+    FILE *cf = fopen(ctacts_file, "r");
+    ASSERT(cf != NULL, "contacts_rebuild: contacts file created");
+    int found = 0;
+    char cline[256];
+    while (fgets(cline, sizeof(cline), cf)) {
+        if (strstr(cline, "carol@rebuild.test")) { found = 1; break; }
+    }
+    fclose(cf);
+    ASSERT(found, "contacts_rebuild: From addr present");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+/* ── local_pending_append_* ───────────────────────────────────────────── */
+
+void test_local_pending_append(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-pending-append-test");
+    /* Remove leftover from previous test runs */
+    unlink("/tmp/email-cli-pending-append-test/.local/share/email-cli/accounts/testuser/pending_appends.tsv");
+
+    int rc1 = local_pending_append_add("Sent",   "0000000000000042");
+    int rc2 = local_pending_append_add("Drafts", "0000000000000043");
+    ASSERT(rc1 == 0, "pending_append_add: first entry ok");
+    ASSERT(rc2 == 0, "pending_append_add: second entry ok");
+
+    int cnt = 0;
+    PendingAppend *pa = local_pending_append_load(&cnt);
+    ASSERT(cnt == 2, "pending_append_load: 2 entries");
+    if (cnt >= 2) {
+        ASSERT(strcmp(pa[0].folder, "Sent")   == 0, "pending_append: first folder");
+        ASSERT(strcmp(pa[0].uid, "0000000000000042") == 0, "pending_append: first uid");
+        ASSERT(strcmp(pa[1].folder, "Drafts") == 0, "pending_append: second folder");
+    }
+    free(pa);
+
+    local_pending_append_remove("Sent", "0000000000000042");
+    cnt = 0;
+    pa = local_pending_append_load(&cnt);
+    ASSERT(cnt == 1, "pending_append_remove: 1 entry left");
+    if (cnt == 1)
+        ASSERT(strcmp(pa[0].folder, "Drafts") == 0, "pending_append_remove: Drafts left");
+    free(pa);
+
+    /* no crash on removing non-existent entry */
+    local_pending_append_remove("INBOX", "0000000000000099");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+/* ── local_pending_fetch_* ────────────────────────────────────────────── */
+
+void test_local_pending_fetch(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-pending-fetch-test");
+
+    ASSERT(local_pending_fetch_count() == 0, "pending_fetch: initially 0");
+
+    local_pending_fetch_add("0000000000000010");
+    local_pending_fetch_add("0000000000000011");
+    ASSERT(local_pending_fetch_count() == 2, "pending_fetch_add: count 2");
+
+    int cnt = 0;
+    char (*uids)[17] = local_pending_fetch_load(&cnt);
+    ASSERT(cnt == 2, "pending_fetch_load: 2 entries");
+    free(uids);
+
+    local_pending_fetch_remove("0000000000000010");
+    ASSERT(local_pending_fetch_count() == 1, "pending_fetch_remove: count 1");
+
+    local_pending_fetch_clear();
+    ASSERT(local_pending_fetch_count() == 0, "pending_fetch_clear: count 0");
+
+    local_pending_fetch_add(NULL);
+    ASSERT(local_pending_fetch_count() == 0, "pending_fetch_add NULL: safe");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
+/* ── local_save_outgoing ──────────────────────────────────────────────── */
+
+void test_local_save_outgoing(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-outgoing-test");
+    /* Remove leftover from previous test runs */
+    unlink("/tmp/email-cli-outgoing-test/.local/share/email-cli/accounts/testuser/pending_appends.tsv");
+
+    const char *msg = "From: me@test.local\r\nTo: you@test.local\r\n"
+                      "Subject: test outgoing\r\n\r\nHello!\r\n";
+    size_t mlen = strlen(msg);
+
+    int rc = local_save_outgoing("Sent", msg, mlen);
+    ASSERT(rc == 0, "local_save_outgoing: returns 0");
+
+    int cnt = 0;
+    PendingAppend *pa = local_pending_append_load(&cnt);
+    ASSERT(cnt == 1, "local_save_outgoing: pending append queued");
+    if (cnt == 1)
+        ASSERT(strcmp(pa[0].folder, "Sent") == 0, "local_save_outgoing: Sent folder");
+    free(pa);
+
+    /* NULL folder should not crash */
+    local_save_outgoing(NULL, msg, mlen);
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}

@@ -50,6 +50,14 @@ void test_compose_service(void);
 void test_smtp_adapter(void);
 void test_mail_rules(void);
 void test_when_expr(void);
+void test_local_search(void);
+void test_local_contacts_rebuild(void);
+void test_local_pending_append(void);
+void test_local_pending_fetch(void);
+void test_local_save_outgoing(void);
+void test_config_settings(void);
+void test_config_load_account(void);
+void test_config_migrate(void);
 
 int main() {
     printf("--- email-cli Unit Test Suite ---\n\n");
@@ -77,6 +85,11 @@ int main() {
     RUN_TEST(test_manifest_count_after_flag_update);
     RUN_TEST(test_flag_search_folder_isolation);
     RUN_TEST(test_local_contacts_update);
+    RUN_TEST(test_local_search);
+    RUN_TEST(test_local_contacts_rebuild);
+    RUN_TEST(test_local_pending_append);
+    RUN_TEST(test_local_pending_fetch);
+    RUN_TEST(test_local_save_outgoing);
     RUN_TEST(test_imap_util);
     RUN_TEST(test_platform);
     RUN_TEST(test_email_service);
@@ -99,6 +112,9 @@ int main() {
     RUN_TEST(test_smtp_adapter);
     RUN_TEST(test_mail_rules);
     RUN_TEST(test_when_expr);
+    RUN_TEST(test_config_settings);
+    RUN_TEST(test_config_load_account);
+    RUN_TEST(test_config_migrate);
 
     printf("\n--- Test Results ---\n");
     printf("Tests Run:    %d\n", g_tests_run);

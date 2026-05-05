@@ -18,6 +18,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include "mail_rules.h"
+#include "when_expr.h"
 #include "config_store.h"
 #include "fs_util.h"
 #include "imap_util.h"
@@ -124,27 +125,6 @@ static MailRule *rules_append(MailRules *r) {
     return nr;
 }
 
-/* Apply a single TBCond to a MailRule (AND logic: first occurrence wins). */
-static void apply_cond(MailRule *r, const TBCond *c) {
-    if (strcmp(c->field, "age") == 0) {
-        if (c->is_age_gt) { if (!r->if_age_gt) r->if_age_gt = c->age_val; }
-        else              { if (!r->if_age_lt) r->if_age_lt = c->age_val; }
-        return;
-    }
-    if (strcmp(c->field, "body") == 0) {
-        if (!r->if_body) r->if_body = strdup(c->glob);
-        return;
-    }
-    if (!c->is_negated) {
-        if      (strcmp(c->field, "from")    == 0 && !r->if_from)    r->if_from    = strdup(c->glob);
-        else if (strcmp(c->field, "subject") == 0 && !r->if_subject) r->if_subject = strdup(c->glob);
-        else if (strcmp(c->field, "to")      == 0 && !r->if_to)      r->if_to      = strdup(c->glob);
-    } else {
-        if      (strcmp(c->field, "from")    == 0 && !r->if_not_from)    r->if_not_from    = strdup(c->glob);
-        else if (strcmp(c->field, "subject") == 0 && !r->if_not_subject) r->if_not_subject = strdup(c->glob);
-        else if (strcmp(c->field, "to")      == 0 && !r->if_not_to)      r->if_not_to      = strdup(c->glob);
-    }
-}
 
 /* Parse one Thunderbird filter file and append rules to *out.
  * Prints warnings to stderr for any rule elements that could not be converted.
@@ -163,12 +143,13 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
     char cur_name[512]          = {0};
     TBCond conds[TB_MAX_CONDS];
     int nconds                  = 0;
+    int cur_is_or               = 0;  /* 1 = OR-logic filter */
     int cur_converted_cond      = 0;
     int cur_skipped_cond        = 0;
 
-    /* Actions (all shared across OR-expanded rules) */
-    char then_move_folder[1024] = {0};  /* decoded UTF-8; empty = no move */
-    int  pending_move           = 0;    /* waiting for actionValue to resolve folder */
+    /* Actions */
+    char then_move_folder[1024] = {0};
+    int  pending_move           = 0;
     char then_add_labels[MAIL_RULE_MAX_LABELS][256];
     int  then_add_count         = 0;
     char then_rm_labels[MAIL_RULE_MAX_LABELS][256];
@@ -181,10 +162,7 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
 
     int rules_added = 0;
 
-    /* ── Flush: write accumulated state as one MailRule ── */
-    /* NOTE: OR-logic filters with multiple same-field conditions import only the
-     * first occurrence of each field (AND semantics).  Full OR support requires
-     * the boolean 'when' expression (US-81/82), not yet implemented. */
+    /* ── Flush: convert TB filter to MailRule with when expression ── */
 #define FLUSH_RULE() do { \
     if (!cur_name[0]) break; \
     if (cur_converted_cond == 0 && cur_converted_act == 0 \
@@ -195,7 +173,29 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
     MailRule *_r = rules_append(*out); \
     if (!_r) break; \
     _r->name = strdup(cur_name); \
-    for (int _ci = 0; _ci < nconds; _ci++) apply_cond(_r, &conds[_ci]); \
+    /* Build when expression from collected conditions (US-81) */ \
+    if (nconds > 0) { \
+        WhenCond _wc[TB_MAX_CONDS]; \
+        int _nwc = 0; \
+        for (int _ci = 0; _ci < nconds; _ci++) { \
+            _wc[_nwc].negated = conds[_ci].is_negated; \
+            if (strcmp(conds[_ci].field, "age") == 0) { \
+                _wc[_nwc].field   = conds[_ci].is_age_gt ? "age-gt" : "age-lt"; \
+                char _abuf[16]; \
+                snprintf(_abuf, sizeof(_abuf), "%d", conds[_ci].age_val); \
+                _wc[_nwc].pattern = strdup(_abuf); \
+            } else { \
+                _wc[_nwc].field   = conds[_ci].field; \
+                _wc[_nwc].pattern = conds[_ci].glob; \
+            } \
+            _nwc++; \
+        } \
+        _r->when = when_from_conds(_wc, _nwc, cur_is_or); \
+        /* Free age pattern copies */ \
+        for (int _ci = 0; _ci < nconds; _ci++) \
+            if (strcmp(conds[_ci].field, "age") == 0) \
+                free((char *)_wc[_ci].pattern); \
+    } \
     if (then_move_folder[0]) \
         _r->then_move_folder = strdup(then_move_folder); \
     for (int _li = 0; _li < then_add_count; _li++) \
@@ -208,7 +208,7 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
 } while (0)
 
 #define RESET_RULE() do { \
-    cur_name[0] = '\0'; nconds = 0; \
+    cur_name[0] = '\0'; nconds = 0; cur_is_or = 0; \
     cur_converted_cond = cur_skipped_cond = 0; \
     then_move_folder[0] = '\0'; pending_move = 0; \
     then_add_count = then_rm_count = 0; \
@@ -245,6 +245,7 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
         if (!cur_name[0]) continue;
 
         if (strcmp(key, "condition") == 0) {
+            cur_is_or = (strncmp(val, "OR", 2) == 0);
             char *v = strdup(val);
             if (!v) continue;
             char *tok = strstr(v, "(");

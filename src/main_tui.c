@@ -1111,17 +1111,8 @@ static int cmd_reply_all(Config *cfg, const char *uid, const char *folder) {
  */
 static void tui_rules_add_form(const char *account, const MailRule *prefill)
 {
-    char name_buf[256]  = {0};
-    char from_buf[256]  = {0};
-    char subj_buf[256]  = {0};
-    char to_buf[256]    = {0};
-    char lbl_buf[256]   = {0};
-    char nfrom_buf[256] = {0};
-    char nsubj_buf[256] = {0};
-    char nto_buf[256]   = {0};
-    char body_buf[256]  = {0};
-    char agegt_buf[16]  = {0};
-    char agelt_buf[16]  = {0};
+    char name_buf[256]   = {0};
+    char when_buf[2048]  = {0};
     char add_bufs[RULES_FORM_LABEL_SLOTS][256];
     char rm_bufs[RULES_FORM_LABEL_SLOTS][256];
     char folder_buf[256] = {0};
@@ -1131,27 +1122,17 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
 
     if (prefill) {
         if (prefill->name)
-            snprintf(name_buf,  sizeof(name_buf),  "%s", prefill->name);
-        if (prefill->if_from)
-            snprintf(from_buf,  sizeof(from_buf),  "%s", prefill->if_from);
-        if (prefill->if_subject)
-            snprintf(subj_buf,  sizeof(subj_buf),  "%s", prefill->if_subject);
-        if (prefill->if_to)
-            snprintf(to_buf,    sizeof(to_buf),    "%s", prefill->if_to);
-        if (prefill->if_label)
-            snprintf(lbl_buf,   sizeof(lbl_buf),   "%s", prefill->if_label);
-        if (prefill->if_not_from)
-            snprintf(nfrom_buf, sizeof(nfrom_buf), "%s", prefill->if_not_from);
-        if (prefill->if_not_subject)
-            snprintf(nsubj_buf, sizeof(nsubj_buf), "%s", prefill->if_not_subject);
-        if (prefill->if_not_to)
-            snprintf(nto_buf,   sizeof(nto_buf),   "%s", prefill->if_not_to);
-        if (prefill->if_body)
-            snprintf(body_buf,  sizeof(body_buf),  "%s", prefill->if_body);
-        if (prefill->if_age_gt)
-            snprintf(agegt_buf, sizeof(agegt_buf), "%d", prefill->if_age_gt);
-        if (prefill->if_age_lt)
-            snprintf(agelt_buf, sizeof(agelt_buf), "%d", prefill->if_age_lt);
+            snprintf(name_buf, sizeof(name_buf), "%s", prefill->name);
+        /* Prefill when: use existing when expression, or convert from flat fields */
+        if (prefill->when && prefill->when[0]) {
+            snprintf(when_buf, sizeof(when_buf), "%s", prefill->when);
+        } else {
+            char *w = when_from_flat(
+                prefill->if_from, prefill->if_subject, prefill->if_to, prefill->if_label,
+                prefill->if_not_from, prefill->if_not_subject, prefill->if_not_to,
+                prefill->if_body, prefill->if_age_gt, prefill->if_age_lt);
+            if (w) { snprintf(when_buf, sizeof(when_buf), "%s", w); free(w); }
+        }
         for (int j = 0; j < prefill->then_add_count && j < RULES_FORM_LABEL_SLOTS; j++)
             if (prefill->then_add_label[j])
                 snprintf(add_bufs[j], 256, "%s", prefill->then_add_label[j]);
@@ -1165,25 +1146,16 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
     }
 
     struct { const char *prompt; char *buf; size_t bufsz; int row; } fields[] = {
-        { "Name:             ", name_buf,   sizeof(name_buf),  3  },
-        { "if-from:          ", from_buf,   sizeof(from_buf),  4  },
-        { "if-subject:       ", subj_buf,   sizeof(subj_buf),  5  },
-        { "if-to:            ", to_buf,     sizeof(to_buf),    6  },
-        { "if-label:         ", lbl_buf,    sizeof(lbl_buf),   7  },
-        { "if-not-from:      ", nfrom_buf,  sizeof(nfrom_buf), 8  },
-        { "if-not-subject:   ", nsubj_buf,  sizeof(nsubj_buf), 9  },
-        { "if-not-to:        ", nto_buf,    sizeof(nto_buf),   10 },
-        { "if-body:          ", body_buf,   sizeof(body_buf),  11 },
-        { "if-age-gt (days): ", agegt_buf,  sizeof(agegt_buf), 12 },
-        { "if-age-lt (days): ", agelt_buf,  sizeof(agelt_buf), 13 },
-        { "add-label [1]:    ", add_bufs[0], 256,              14 },
-        { "add-label [2]:    ", add_bufs[1], 256,              15 },
-        { "add-label [3]:    ", add_bufs[2], 256,              16 },
-        { "rm-label  [1]:    ", rm_bufs[0],  256,              17 },
-        { "rm-label  [2]:    ", rm_bufs[1],  256,              18 },
-        { "rm-label  [3]:    ", rm_bufs[2],  256,              19 },
-        { "then-move-folder: ", folder_buf, sizeof(folder_buf), 20 },
-        { "then-forward-to:  ", fwd_buf,    sizeof(fwd_buf),   21 },
+        { "Name:             ", name_buf,    sizeof(name_buf),   3 },
+        { "when:             ", when_buf,    sizeof(when_buf),   4 },
+        { "add-label [1]:    ", add_bufs[0], 256,                5 },
+        { "add-label [2]:    ", add_bufs[1], 256,                6 },
+        { "add-label [3]:    ", add_bufs[2], 256,                7 },
+        { "rm-label  [1]:    ", rm_bufs[0],  256,                8 },
+        { "rm-label  [2]:    ", rm_bufs[1],  256,                9 },
+        { "rm-label  [3]:    ", rm_bufs[2],  256,               10 },
+        { "then-move-folder: ", folder_buf,  sizeof(folder_buf), 11 },
+        { "then-forward-to:  ", fwd_buf,     sizeof(fwd_buf),    12 },
     };
     int nfields = (int)(sizeof(fields) / sizeof(fields[0]));
 
@@ -1253,26 +1225,17 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
         mr = &rules->rules[rules->count++];
         memset(mr, 0, sizeof(*mr));
     } else {
-        free(mr->name);    free(mr->if_from);    free(mr->if_subject);
-        free(mr->if_to);   free(mr->if_label);
+        free(mr->name); free(mr->when);
+        free(mr->if_from); free(mr->if_subject); free(mr->if_to); free(mr->if_label);
         free(mr->if_not_from); free(mr->if_not_subject); free(mr->if_not_to);
-        free(mr->if_body); free(mr->then_move_folder);   free(mr->then_forward_to);
+        free(mr->if_body); free(mr->then_move_folder); free(mr->then_forward_to);
         for (int j = 0; j < mr->then_add_count; j++) free(mr->then_add_label[j]);
         for (int j = 0; j < mr->then_rm_count;  j++) free(mr->then_rm_label[j]);
         memset(mr, 0, sizeof(*mr));
     }
 
-    mr->name           = strdup(name_buf);
-    mr->if_from        = from_buf[0]   ? strdup(from_buf)   : NULL;
-    mr->if_subject     = subj_buf[0]   ? strdup(subj_buf)   : NULL;
-    mr->if_to          = to_buf[0]     ? strdup(to_buf)     : NULL;
-    mr->if_label       = lbl_buf[0]    ? strdup(lbl_buf)    : NULL;
-    mr->if_not_from    = nfrom_buf[0]  ? strdup(nfrom_buf)  : NULL;
-    mr->if_not_subject = nsubj_buf[0]  ? strdup(nsubj_buf)  : NULL;
-    mr->if_not_to      = nto_buf[0]    ? strdup(nto_buf)    : NULL;
-    mr->if_body        = body_buf[0]   ? strdup(body_buf)   : NULL;
-    mr->if_age_gt      = agegt_buf[0]  ? atoi(agegt_buf)    : 0;
-    mr->if_age_lt      = agelt_buf[0]  ? atoi(agelt_buf)    : 0;
+    mr->name             = strdup(name_buf);
+    mr->when             = when_buf[0] ? strdup(when_buf) : NULL;
     mr->then_move_folder = folder_buf[0] ? strdup(folder_buf) : NULL;
     mr->then_forward_to  = fwd_buf[0]    ? strdup(fwd_buf)    : NULL;
     for (int j = 0; j < RULES_FORM_LABEL_SLOTS && add_bufs[j][0]; j++)
@@ -1288,10 +1251,10 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
 static void rules_free_at(MailRules *rules, int idx)
 {
     MailRule *rr = &rules->rules[idx];
-    free(rr->name);    free(rr->if_from);    free(rr->if_subject);
-    free(rr->if_to);   free(rr->if_label);
+    free(rr->name); free(rr->when);
+    free(rr->if_from); free(rr->if_subject); free(rr->if_to); free(rr->if_label);
     free(rr->if_not_from); free(rr->if_not_subject); free(rr->if_not_to);
-    free(rr->if_body); free(rr->then_move_folder);   free(rr->then_forward_to);
+    free(rr->if_body); free(rr->then_move_folder); free(rr->then_forward_to);
     for (int j = 0; j < rr->then_add_count; j++) free(rr->then_add_label[j]);
     for (int j = 0; j < rr->then_rm_count;  j++) free(rr->then_rm_label[j]);
     for (int r = idx; r < rules->count - 1; r++)
@@ -1318,20 +1281,10 @@ static void tui_rules_detail(const char *account, int idx)
         printf("Account: %s\n\n", account ? account : "?");
 
         int row = 4;
-#define DSHOW(lbl, val) \
-        if (val) { printf("\033[%d;1H  " lbl "%s", row, val); row++; }
-#define DSHOW_ANY(lbl, val) \
-        do { printf("\033[%d;1H  " lbl "%s", row, (val) ? (val) : "(any)"); row++; } while(0)
-        DSHOW_ANY("if-from:          ", r->if_from);
-        DSHOW_ANY("if-subject:       ", r->if_subject);
-        DSHOW_ANY("if-to:            ", r->if_to);
-        DSHOW_ANY("if-label:         ", r->if_label);
-        DSHOW("if-not-from:      ", r->if_not_from);
-        DSHOW("if-not-subject:   ", r->if_not_subject);
-        DSHOW("if-not-to:        ", r->if_not_to);
-        DSHOW("if-body:          ", r->if_body);
-        if (r->if_age_gt) { printf("\033[%d;1H  if-age-gt:        %d days", row++, r->if_age_gt); }
-        if (r->if_age_lt) { printf("\033[%d;1H  if-age-lt:        %d days", row++, r->if_age_lt); }
+        if (r->when && r->when[0])
+            { printf("\033[%d;1H  when: %s", row, r->when); row++; }
+        else
+            { printf("\033[%d;1H  when: (no condition — matches all)", row); row++; }
         row++;
         for (int j = 0; j < r->then_add_count; j++)
             if (r->then_add_label[j])
@@ -1339,10 +1292,10 @@ static void tui_rules_detail(const char *account, int idx)
         for (int j = 0; j < r->then_rm_count; j++)
             if (r->then_rm_label[j])
                 { printf("\033[%d;1H  then-rm-label:    %s", row++, r->then_rm_label[j]); }
-        DSHOW("then-move-folder: ", r->then_move_folder);
-        DSHOW("then-forward-to:  ", r->then_forward_to);
-#undef DSHOW
-#undef DSHOW_ANY
+        if (r->then_move_folder)
+            { printf("\033[%d;1H  then-move-folder: %s", row++, r->then_move_folder); }
+        if (r->then_forward_to)
+            { printf("\033[%d;1H  then-forward-to:  %s", row++, r->then_forward_to); }
 
         int trows = terminal_rows();
         int footer = (trows > row + 1) ? trows : row + 1;

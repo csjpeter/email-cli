@@ -3524,7 +3524,7 @@ static void test_tui_rules_editor_lists_rules(void) {
 }
 
 static void test_tui_rules_editor_add_rule(void) {
-    /* US-62 AC4 / US-80: 'a' → raw-mode form (19 fields) → 'y' → rule saved */
+    /* US-62 AC4 / US-80: 'a' → raw-mode form (10 fields) → 'y' → rule saved */
     remove_rules_ini();
     restart_mock();
     PtySession *s = tui_open_to_list();
@@ -3536,25 +3536,16 @@ static void test_tui_rules_editor_add_rule(void) {
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add new rule", RULES_WAIT_MS);
     /* Form uses input_line_run — each \n confirms a field (raw mode) */
-    pty_send_str(s, "TestRule\n");   /* field 1: Name */
-    pty_send_str(s, "*@test.com\n"); /* field 2: if-from */
-    pty_send_str(s, "\n");           /* field 3: if-subject (empty) */
-    pty_send_str(s, "\n");           /* field 4: if-to (empty) */
-    pty_send_str(s, "\n");           /* field 5: if-label (empty) */
-    pty_send_str(s, "\n");           /* field 6: if-not-from (empty) */
-    pty_send_str(s, "\n");           /* field 7: if-not-subject (empty) */
-    pty_send_str(s, "\n");           /* field 8: if-not-to (empty) */
-    pty_send_str(s, "\n");           /* field 9: if-body (empty) */
-    pty_send_str(s, "\n");           /* field 10: if-age-gt (empty) */
-    pty_send_str(s, "\n");           /* field 11: if-age-lt (empty) */
-    pty_send_str(s, "IMPORTANT\n");  /* field 12: add-label[1] */
-    pty_send_str(s, "\n");           /* field 13: add-label[2] (empty) */
-    pty_send_str(s, "\n");           /* field 14: add-label[3] (empty) */
-    pty_send_str(s, "\n");           /* field 15: rm-label[1] (empty) */
-    pty_send_str(s, "\n");           /* field 16: rm-label[2] (empty) */
-    pty_send_str(s, "\n");           /* field 17: rm-label[3] (empty) */
-    pty_send_str(s, "\n");           /* field 18: then-move-folder (empty) */
-    pty_send_str(s, "\n");           /* field 19: then-forward-to (empty) */
+    pty_send_str(s, "TestRule\n");          /* field 1: Name */
+    pty_send_str(s, "from:*@test.com\n");   /* field 2: when */
+    pty_send_str(s, "IMPORTANT\n");         /* field 3: add-label[1] */
+    pty_send_str(s, "\n");                  /* field 4: add-label[2] (empty) */
+    pty_send_str(s, "\n");                  /* field 5: add-label[3] (empty) */
+    pty_send_str(s, "\n");                  /* field 6: rm-label[1] (empty) */
+    pty_send_str(s, "\n");                  /* field 7: rm-label[2] (empty) */
+    pty_send_str(s, "\n");                  /* field 8: rm-label[3] (empty) */
+    pty_send_str(s, "\n");                  /* field 9: then-move-folder (empty) */
+    pty_send_str(s, "\n");                  /* field 10: then-forward-to (empty) */
     ASSERT_WAIT_FOR(s, "Save?", RULES_WAIT_MS);
     pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "TestRule", RULES_WAIT_MS);
@@ -3577,8 +3568,8 @@ static void test_tui_rules_editor_cancel_add(void) {
     ASSERT_WAIT_FOR(s, "no rules", RULES_WAIT_MS);
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add new rule", RULES_WAIT_MS);
-    /* All 19 fields empty — name check fires after the last field */
-    pty_send_str(s, "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+    /* All 10 fields empty — name check fires after the last field */
+    pty_send_str(s, "\n\n\n\n\n\n\n\n\n\n");
     ASSERT_WAIT_FOR(s, "required", RULES_WAIT_MS);
     pty_send_str(s, "\n"); /* dismiss "press any key" */
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
@@ -3831,7 +3822,7 @@ static void test_tui_rules_edit_form_prefill(void) {
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
     pty_send_str(s, "e");
     ASSERT_WAIT_FOR(s, "Edit rule for", RULES_WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "*@spam.example.com"); /* if-from prefill */
+    ASSERT_SCREEN_CONTAINS(s, "*@spam.example.com"); /* when: prefill contains if-from pattern */
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);

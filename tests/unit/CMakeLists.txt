@@ -50,7 +50,9 @@ set(TEST_SOURCES
     test_gmail_sync.c
     test_compose_service.c
     test_smtp_adapter.c
+    test_when_expr.c
     test_mail_rules.c
+    ../../libemail/src/infrastructure/when_expr.c
     ../../libwrite/src/compose_service.c
     ../../libwrite/src/smtp_adapter.c
     ../../libemail/src/core/fs_util.c

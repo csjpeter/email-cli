@@ -1,4 +1,5 @@
 #include "mail_rules.h"
+#include "when_expr.h"
 #include "fs_util.h"
 #include "imap_util.h"
 #include "platform/path.h"
@@ -66,7 +67,7 @@ MailRules *mail_rules_load_path(const char *path) {
         char *p = trim(line);
         if (!*p || *p == '#' || *p == ';') continue;
 
-        /* Section header: [rule "name"] */
+        /* Section header: [rule "name"] or [rule "name" action N] */
         if (*p == '[') {
             cur = rules_grow(r);
             if (!cur) { mail_rules_free(r); return NULL; }
@@ -76,6 +77,9 @@ MailRules *mail_rules_load_path(const char *path) {
                 cur->name = strndup(qs + 1, (size_t)(qe - qs - 1));
             else
                 cur->name = strdup("(unnamed)");
+            /* Parse optional "action N" suffix */
+            char *act = qe ? strstr(qe + 1, "action ") : NULL;
+            cur->action_index = act ? atoi(act + 7) : 0;
             continue;
         }
 
@@ -87,7 +91,13 @@ MailRules *mail_rules_load_path(const char *path) {
         char *key = trim(p);
         char *val = trim(eq + 1);
 
-        if      (strcmp(key, "if-from")        == 0) { free(cur->if_from);        cur->if_from        = strdup(val); }
+        /* New boolean expression field (US-81) */
+        if (strcmp(key, "when") == 0) {
+            free(cur->when);
+            cur->when = strdup(val);
+        }
+        /* Legacy flat fields — still loaded for in-memory backward compat */
+        else if (strcmp(key, "if-from")        == 0) { free(cur->if_from);        cur->if_from        = strdup(val); }
         else if (strcmp(key, "if-subject")     == 0) { free(cur->if_subject);     cur->if_subject     = strdup(val); }
         else if (strcmp(key, "if-to")          == 0) { free(cur->if_to);          cur->if_to          = strdup(val); }
         else if (strcmp(key, "if-label")       == 0) { free(cur->if_label);       cur->if_label       = strdup(val); }
@@ -113,6 +123,17 @@ MailRules *mail_rules_load_path(const char *path) {
         else if (strcmp(key, "then-forward-to") == 0) {
             free(cur->then_forward_to);
             cur->then_forward_to = strdup(val);
+        }
+    }
+
+    /* Convert legacy flat fields → when expression for rules that have no when yet */
+    for (int i = 0; i < r->count; i++) {
+        MailRule *rule = &r->rules[i];
+        if (!rule->when) {
+            rule->when = when_from_flat(
+                rule->if_from, rule->if_subject, rule->if_to, rule->if_label,
+                rule->if_not_from, rule->if_not_subject, rule->if_not_to,
+                rule->if_body, rule->if_age_gt, rule->if_age_lt);
         }
     }
 
@@ -146,17 +167,14 @@ int mail_rules_save(const char *account_name, const MailRules *rules) {
 
     for (int i = 0; i < rules->count; i++) {
         const MailRule *r = &rules->rules[i];
-        fprintf(fp, "[rule \"%s\"]\n", r->name ? r->name : "");
-        if (r->if_from)        fprintf(fp, "if-from        = %s\n", r->if_from);
-        if (r->if_not_from)    fprintf(fp, "if-not-from    = %s\n", r->if_not_from);
-        if (r->if_subject)     fprintf(fp, "if-subject     = %s\n", r->if_subject);
-        if (r->if_not_subject) fprintf(fp, "if-not-subject = %s\n", r->if_not_subject);
-        if (r->if_to)          fprintf(fp, "if-to          = %s\n", r->if_to);
-        if (r->if_not_to)      fprintf(fp, "if-not-to      = %s\n", r->if_not_to);
-        if (r->if_label)       fprintf(fp, "if-label       = %s\n", r->if_label);
-        if (r->if_body)        fprintf(fp, "if-body        = %s\n", r->if_body);
-        if (r->if_age_gt > 0)  fprintf(fp, "if-age-gt      = %d\n", r->if_age_gt);
-        if (r->if_age_lt > 0)  fprintf(fp, "if-age-lt      = %d\n", r->if_age_lt);
+        /* US-82: write [rule "name" action N] header for N >= 2 */
+        if (r->action_index >= 2)
+            fprintf(fp, "[rule \"%s\" action %d]\n", r->name ? r->name : "", r->action_index);
+        else
+            fprintf(fp, "[rule \"%s\"]\n", r->name ? r->name : "");
+        /* US-81: write when expression; skip old flat if-* fields */
+        if (r->when && r->when[0])
+            fprintf(fp, "when = %s\n", r->when);
         for (int j = 0; j < r->then_add_count; j++)
             fprintf(fp, "then-add-label    = %s\n", r->then_add_label[j]);
         for (int j = 0; j < r->then_rm_count; j++)
@@ -175,6 +193,7 @@ void mail_rules_free(MailRules *rules) {
     for (int i = 0; i < rules->count; i++) {
         MailRule *r = &rules->rules[i];
         free(r->name);
+        free(r->when);
         free(r->if_from);
         free(r->if_not_from);
         free(r->if_subject);
@@ -234,21 +253,28 @@ int mail_rule_matches(const MailRule *rule,
                       const char *body, time_t message_date)
 {
     if (!rule) return 0;
-    /* Positive conditions */
+
+    /* US-81: evaluate boolean when expression when present */
+    if (rule->when && rule->when[0]) {
+        WhenNode *tree = when_parse(rule->when);
+        if (!tree) return 0;   /* syntax error → rule skipped */
+        int result = when_eval(tree, from, subject, to, labels_csv, body, message_date);
+        when_node_free(tree);
+        return result;
+    }
+
+    /* Fallback: legacy flat-field AND chain (for in-memory-only rules) */
     if (!glob_match(rule->if_from,    from))    return 0;
     if (!glob_match(rule->if_subject, subject)) return 0;
     if (!glob_match(rule->if_to,      to))      return 0;
     if (rule->if_label && !csv_label_match(rule->if_label, labels_csv)) return 0;
-    /* Negated conditions: reject if the field MATCHES the pattern */
     if (rule->if_not_from    && glob_match(rule->if_not_from,    from))    return 0;
     if (rule->if_not_subject && glob_match(rule->if_not_subject, subject)) return 0;
     if (rule->if_not_to      && glob_match(rule->if_not_to,      to))      return 0;
-    /* Body condition: skip if body is unavailable (NULL) */
     if (rule->if_body) {
         if (!body) return 0;
         if (!glob_match(rule->if_body, body)) return 0;
     }
-    /* Age conditions: skip if date is unknown (0) */
     if (message_date > 0) {
         int age = (int)((time(NULL) - message_date) / 86400);
         if (rule->if_age_gt > 0 && age <= rule->if_age_gt) return 0;

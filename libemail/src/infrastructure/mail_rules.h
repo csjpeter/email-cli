@@ -2,6 +2,7 @@
 #define MAIL_RULES_H
 
 #include <time.h>
+#include "when_expr.h"
 
 /**
  * @file mail_rules.h
@@ -30,6 +31,8 @@
 
 typedef struct {
     char  *name;                              /**< Display name from [rule "..."] header */
+    int    action_index;                      /**< US-82: action group number (0=default/1) */
+    char  *when;                              /**< US-81: boolean condition expression (NULL = always true) */
     char  *if_from;                           /**< Glob (NULL = any) */
     char  *if_subject;                        /**< Glob (NULL = any) */
     char  *if_to;                             /**< Glob (NULL = any) */

@@ -1564,8 +1564,12 @@ int main(int argc, char *argv[]) {
                 }
                 {
                     MailRule *r = &rules->rules[found];
-                    free(r->name); free(r->if_from); free(r->if_subject);
-                    free(r->if_to); free(r->if_label); free(r->then_move_folder);
+                    free(r->name); free(r->when);
+                    free(r->if_from); free(r->if_not_from);
+                    free(r->if_subject); free(r->if_not_subject);
+                    free(r->if_to); free(r->if_not_to);
+                    free(r->if_label); free(r->if_body);
+                    free(r->then_move_folder); free(r->then_forward_to);
                     for (int j = 0; j < r->then_add_count; j++) free(r->then_add_label[j]);
                     for (int j = 0; j < r->then_rm_count;  j++) free(r->then_rm_label[j]);
                 }

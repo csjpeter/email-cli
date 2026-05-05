@@ -843,7 +843,9 @@ void test_local_contacts_update(void) {
         FILE *cf = fopen(CONTACTS_PATH, "r");
         ASSERT(cf != NULL, "contacts: file exists after updates");
         if (cf) {
-            char fline[256]; fgets(fline, sizeof(fline), cf); fclose(cf);
+            char fline[256]; fline[0] = '\0';
+            if (fgets(fline, sizeof(fline), cf) == NULL) fline[0] = '\0';
+            fclose(cf);
             char *tab = strchr(fline, '\t'); if (tab) *tab = '\0';
             ASSERT(strcasecmp(fline, "alice@example.com") == 0,
                    "contacts: most frequent addr is first");

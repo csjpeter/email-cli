@@ -368,15 +368,20 @@ static int parse_tb_filter_file(const char *path, MailRules **out) {
                 static const char *tb_labels[] = {
                     NULL, "Important", "Work", "Personal", "TODO", "Later"
                 };
-                const char *lname = NULL;
                 if (strncmp(val, "$label", 6) == 0) {
                     int n = atoi(val + 6);
-                    lname = (n >= 1 && n <= 5) ? tb_labels[n] : val;
+                    const char *lname = (n >= 1 && n <= 5) ? tb_labels[n] : NULL;
+                    if (lname) {
+                        if (then_add_count < MAIL_RULE_MAX_LABELS)
+                            snprintf(then_add_labels[then_add_count++], 256, "%s", lname);
+                    } else {
+                        if (then_add_count < MAIL_RULE_MAX_LABELS)
+                            snprintf(then_add_labels[then_add_count++], 256, "Label%d", n);
+                    }
                 } else {
-                    lname = val;
+                    if (then_add_count < MAIL_RULE_MAX_LABELS)
+                        snprintf(then_add_labels[then_add_count++], 256, "%s", val);
                 }
-                if (lname && then_add_count < MAIL_RULE_MAX_LABELS)
-                    snprintf(then_add_labels[then_add_count++], 256, "%s", lname);
                 pending_label = 0;
             }
             continue;

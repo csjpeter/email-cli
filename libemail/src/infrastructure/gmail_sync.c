@@ -723,6 +723,11 @@ static void process_labels_removed(const char *obj, int index, void *ctx) {
         label_idx_remove(idx_name, id);
     }
 
+    /* Keep .hdr labels field in sync so rebuild_label_indexes stays accurate.
+     * Must be done BEFORE freeing rm_labels (used-after-free guard). */
+    local_hdr_update_labels("", id,
+                            NULL, 0, (const char **)rm_labels, rm_count);
+
     for (int i = 0; i < rm_count; i++) free(rm_labels[i]);
     free(rm_labels);
 
@@ -756,10 +761,6 @@ static void process_labels_removed(const char *obj, int index, void *ctx) {
             free(cur_hdr);
         }
     }
-
-    /* Keep .hdr labels field in sync so rebuild_label_indexes stays accurate. */
-    local_hdr_update_labels("", id,
-                            NULL, 0, (const char **)rm_labels, rm_count);
 
     free(id);
     hc->label_changes++;

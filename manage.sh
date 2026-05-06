@@ -169,27 +169,27 @@ case "$1" in
         cmake_build
         build_test_runner
 
-        # Pass 1 — unit suite only
-        find "$BUILD_DIR" -name "*.gcda" -delete
-        (cd "$BUILD_DIR" && ./tests/unit/test-runner)
-        echo "Capturing unit coverage..."
-        (cd "$BUILD_DIR" && lcov --capture --directory . \
-             --output-file coverage-unit.info)
-
-        # Pass 2 — functional suite only (fresh .gcda)
+        # Pass 1 — functional suite only (fresh .gcda) → functional badge
         find "$BUILD_DIR" -name "*.gcda" -delete
         ./tests/functional/run_functional.sh
         echo "Capturing functional coverage..."
         (cd "$BUILD_DIR" && lcov --capture --directory . \
              --output-file coverage-functional-raw.info && \
          lcov --remove coverage-functional-raw.info \
+              --ignore-errors unused \
               '*/src/main_tui.c' \
               --output-file coverage-functional.info)
 
-        # Combined = unit ∪ functional
-        (cd "$BUILD_DIR" && \
-         lcov --add-tracefile coverage-unit.info \
-              --add-tracefile coverage-functional.info \
+        # Pass 2 — run unit suite ON TOP of existing functional .gcda → combined badge
+        # (LCOV 2.x --add-tracefile intersects lines instead of unioning; running both
+        # test suites in sequence and capturing once gives the correct union.)
+        (cd "$BUILD_DIR" && ./tests/unit/test-runner)
+        echo "Capturing combined (unit + functional) coverage..."
+        (cd "$BUILD_DIR" && lcov --capture --directory . \
+             --output-file coverage-raw.info && \
+         lcov --remove coverage-raw.info \
+              --ignore-errors unused \
+              '*/src/main_tui.c' \
               --output-file coverage.info)
 
         echo "Generating coverage reports..."

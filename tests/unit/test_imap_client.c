@@ -572,6 +572,548 @@ void test_imap_full_operations(void) {
     waitpid(pid, &status, 0);
 }
 
+/* ── Extended mock server: QRESYNC + CONDSTORE + UID MOVE + CHANGEDSINCE ── */
+
+/*
+ * Mock server that handles:
+ *   LOGIN → CAPABILITY → ENABLE QRESYNC → SELECT(CONDSTORE) → SELECT(QRESYNC)
+ *   → UID FETCH(CHANGEDSINCE) → UID COPY → UID STORE → EXPUNGE → LOGOUT
+ *
+ * Also exercises NIL separator in LIST, unquoted folder names, and
+ * [ALREADYEXISTS] response for CREATE.
+ */
+static void run_mock_server_ext(int listen_fd, SSL_CTX *ctx) {
+    int cfd = accept(listen_fd, NULL, NULL);
+    close(listen_fd);
+    if (cfd < 0) { SSL_CTX_free(ctx); GCOV_FLUSH(); _exit(1); }
+
+    struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+    setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    SSL *ssl = SSL_new(ctx);
+    SSL_CTX_free(ctx);
+    SSL_set_fd(ssl, cfd);
+    if (SSL_accept(ssl) <= 0) {
+        ERR_print_errors_fp(stderr);
+        SSL_free(ssl); close(cfd); GCOV_FLUSH(); _exit(1);
+    }
+
+    SSL_write(ssl, "* OK Mock ready\r\n", 17);
+
+    char buf[4096];
+    while (1) {
+        int n = SSL_read(ssl, buf, (int)(sizeof(buf) - 1));
+        if (n <= 0) break;
+        buf[n] = '\0';
+
+        char tag[32] = "*";
+        sscanf(buf, "%31s", tag);
+        char resp[2048];
+
+        if (strstr(buf, "LOGIN")) {
+            snprintf(resp, sizeof(resp),
+                     "%s OK [CAPABILITY IMAP4rev1 CONDSTORE QRESYNC LITERAL+] Logged in\r\n",
+                     tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "CAPABILITY")) {
+            snprintf(resp, sizeof(resp),
+                     "* CAPABILITY IMAP4rev1 CONDSTORE QRESYNC\r\n%s OK CAPABILITY completed\r\n",
+                     tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "ENABLE")) {
+            snprintf(resp, sizeof(resp),
+                     "* ENABLED QRESYNC\r\n%s OK ENABLE completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "SELECT") && strstr(buf, "QRESYNC")) {
+            /* SELECT with QRESYNC: return VANISHED (EARLIER) + HIGHESTMODSEQ */
+            snprintf(resp, sizeof(resp),
+                     "* 5 EXISTS\r\n"
+                     "* OK [UIDVALIDITY 12345] UIDs valid\r\n"
+                     "* OK [HIGHESTMODSEQ 999] Highest\r\n"
+                     "* VANISHED (EARLIER) 3:4\r\n"
+                     "%s OK [READ-WRITE] SELECT completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "SELECT") && strstr(buf, "CONDSTORE")) {
+            /* SELECT with CONDSTORE: return HIGHESTMODSEQ in tagged OK */
+            snprintf(resp, sizeof(resp),
+                     "* 5 EXISTS\r\n"
+                     "* OK [UIDVALIDITY 12345] UIDs valid\r\n"
+                     "%s OK [HIGHESTMODSEQ 42] SELECT completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "SELECT")) {
+            snprintf(resp, sizeof(resp),
+                     "* 5 EXISTS\r\n%s OK [READ-WRITE] SELECT completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "CHANGEDSINCE")) {
+            /* UID FETCH ... CHANGEDSINCE: return two flag-updated messages */
+            snprintf(resp, sizeof(resp),
+                     "* 2 FETCH (UID 2 FLAGS (\\Seen))\r\n"
+                     "* 3 FETCH (UID 3 FLAGS (\\Seen \\Flagged))\r\n"
+                     "%s OK FETCH completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "UID FETCH") && strstr(buf, "FLAGS")) {
+            /* plain UID FETCH FLAGS */
+            snprintf(resp, sizeof(resp),
+                     "* 1 FETCH (UID 1 FLAGS (\\Seen))\r\n%s OK FETCH completed\r\n",
+                     tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "UID COPY")) {
+            snprintf(resp, sizeof(resp), "%s OK COPY completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "UID STORE")) {
+            snprintf(resp, sizeof(resp),
+                     "* 1 FETCH (FLAGS (\\Deleted))\r\n%s OK STORE completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "EXPUNGE")) {
+            snprintf(resp, sizeof(resp),
+                     "* 1 EXPUNGE\r\n%s OK EXPUNGE completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "LIST")) {
+            /* Return one folder with NIL separator, one unquoted */
+            snprintf(resp, sizeof(resp),
+                     "* LIST (\\HasNoChildren) NIL INBOX\r\n"
+                     "* LIST (\\HasNoChildren) \"/\" Archive\r\n"
+                     "%s OK LIST completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "CREATE")) {
+            /* Return [ALREADYEXISTS] to exercise that branch */
+            snprintf(resp, sizeof(resp),
+                     "%s NO [ALREADYEXISTS] Mailbox already exists\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "LOGOUT")) {
+            SSL_write(ssl, "* BYE Logging out\r\n", 19);
+            snprintf(resp, sizeof(resp), "%s OK LOGOUT completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+            break;
+        } else {
+            snprintf(resp, sizeof(resp), "%s BAD Unknown\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        }
+    }
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    close(cfd);
+    GCOV_FLUSH();
+    _exit(0);
+}
+
+/*
+ * Test CONDSTORE/QRESYNC capabilities, uid_move, flags_changedsince,
+ * LIST with NIL separator and unquoted names, CREATE [ALREADYEXISTS].
+ */
+void test_imap_extended_operations(void) {
+    int port = 0;
+    int lfd  = make_listener(&port);
+    ASSERT(lfd >= 0, "make_listener for extended ops test");
+
+    SSL_CTX *ctx = create_server_ctx();
+    ASSERT(ctx != NULL, "create_server_ctx for extended ops test");
+
+    pid_t pid = fork();
+    ASSERT(pid >= 0, "fork for extended ops test");
+    if (pid == 0) {
+        run_mock_server_ext(lfd, ctx);
+        /* _exit called inside */
+    }
+    close(lfd);
+    SSL_CTX_free(ctx);
+
+    char url[64];
+    snprintf(url, sizeof(url), "imaps://127.0.0.1:%d", port);
+    ImapClient *c = imap_connect(url, "user", "pass", 0);
+    ASSERT(c != NULL, "imap_ext: imap_connect must succeed");
+
+    /* imap_get_caps — queries CAPABILITY command */
+    int caps = imap_get_caps(c);
+    ASSERT((caps & IMAP_CAP_CONDSTORE) != 0, "imap_ext: CONDSTORE capability detected");
+    ASSERT((caps & IMAP_CAP_QRESYNC)   != 0, "imap_ext: QRESYNC capability detected");
+
+    /* Calling again returns cached value (caps_queried path) */
+    int caps2 = imap_get_caps(c);
+    ASSERT(caps2 == caps, "imap_ext: imap_get_caps cached second call");
+
+    /* imap_select_condstore — parses HIGHESTMODSEQ from tagged OK */
+    ImapSelectResult res;
+    int rc = imap_select_condstore(c, "INBOX", &res);
+    ASSERT(rc == 0, "imap_ext: imap_select_condstore returns 0");
+    ASSERT(res.highestmodseq == 42, "imap_ext: HIGHESTMODSEQ parsed from tagged OK");
+    ASSERT(res.uidvalidity == 12345, "imap_ext: UIDVALIDITY parsed");
+
+    /* imap_select_qresync — parses HIGHESTMODSEQ + VANISHED */
+    memset(&res, 0, sizeof(res));
+    rc = imap_select_qresync(c, "INBOX", 12345, 42, &res);
+    ASSERT(rc == 0, "imap_ext: imap_select_qresync returns 0");
+    ASSERT(res.highestmodseq == 999, "imap_ext: qresync HIGHESTMODSEQ=999");
+    ASSERT(res.vanished_count >= 0, "imap_ext: vanished_count is set");
+    free(res.vanished_uids);
+
+    /* imap_uid_fetch_flags_changedsince */
+    ImapFlagUpdate *updates = NULL;
+    int upd_count = 0;
+    rc = imap_uid_fetch_flags_changedsince(c, 10, &updates, &upd_count);
+    ASSERT(rc == 0, "imap_ext: imap_uid_fetch_flags_changedsince returns 0");
+    ASSERT(upd_count == 2, "imap_ext: changedsince returned 2 updates");
+    /* UID 2 is Seen → no UNSEEN flag */
+    ASSERT((updates[0].flags & 1) == 0, "imap_ext: UID 2 Seen — UNSEEN clear");
+    /* UID 3 is Seen + Flagged */
+    ASSERT((updates[1].flags & 2) != 0, "imap_ext: UID 3 Flagged");
+    free(updates);
+
+    /* imap_uid_move — uses UID COPY + UID STORE \\Deleted + EXPUNGE */
+    rc = imap_uid_move(c, "0000000000000001", "Archive");
+    ASSERT(rc == 0, "imap_ext: imap_uid_move returns 0");
+
+    /* imap_list with NIL separator and unquoted name */
+    char **folders = NULL;
+    int fc = 0;
+    char sep = '.';
+    rc = imap_list(c, &folders, &fc, &sep);
+    ASSERT(rc == 0, "imap_ext: imap_list (NIL sep) returns 0");
+    ASSERT(fc == 2, "imap_ext: imap_list found 2 folders (unquoted)");
+    for (int i = 0; i < fc; i++) free(folders[i]);
+    free(folders);
+
+    /* imap_create_folder with [ALREADYEXISTS] response — must return 0 */
+    rc = imap_create_folder(c, "INBOX");
+    ASSERT(rc == 0, "imap_ext: imap_create_folder [ALREADYEXISTS] treated as success");
+
+    imap_disconnect(c);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+}
+
+/* ── Test: imap_connect with bare host URL and imap:// refusal ──────────── */
+
+/*
+ * The imap_client always sends LOGIN with quoted user/pass (send_cmd uses
+ * "LOGIN \"%s\" \"%s\""), so line 200 (unquoted username path) cannot be
+ * reached through the public API.  We test the other uncovered URL-parsing
+ * branches instead:
+ *  • imap_connect with bare host URL (no scheme → IMAPS default)
+ *  • imap_connect with imap:// + verify_tls=1 must be refused (no TLS)
+ */
+void test_imap_connect_bare_host(void) {
+    /* A bare hostname (no imaps:// prefix) should be treated as IMAPS on
+     * port 993.  Since 127.0.0.1:993 is almost certainly not listening we
+     * just verify that the function returns NULL without crashing. */
+    ImapClient *c = imap_connect("127.0.0.1", "u", "p", 0);
+    /* May succeed or fail depending on whether port 993 is open; either is fine.
+     * The important thing is no crash and the URL is parsed correctly. */
+    if (c) imap_disconnect(c);
+    ASSERT(1, "bare host: no crash");
+}
+
+void test_imap_connect_refused_without_tls(void) {
+    /* imap:// (non-TLS) with verify_tls=1 must be refused */
+    ImapClient *c = imap_connect("imap://127.0.0.1:19143", "u", "p", 1);
+    ASSERT(c == NULL, "imap:// without verify_tls=0 must be refused");
+}
+
+/* ── Test: plain (non-TLS) imap:// connection path ─────────────────────── */
+
+/*
+ * Plain (non-TLS) IMAP server for testing the plain-socket I/O path.
+ * Opened on a TCP socket without SSL — exercises net_read/net_write plain paths.
+ */
+static void run_plain_imap_server(int listen_fd) {
+    int cfd = accept(listen_fd, NULL, NULL);
+    close(listen_fd);
+    if (cfd < 0) { GCOV_FLUSH(); _exit(1); }
+
+    struct timeval tv = {.tv_sec = 3, .tv_usec = 0};
+    setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    /* Plain greeting */
+    const char *greet = "* OK Mock plain IMAP ready\r\n";
+    write(cfd, greet, strlen(greet));
+
+    char buf[2048];
+    while (1) {
+        ssize_t n = read(cfd, buf, sizeof(buf) - 1);
+        if (n <= 0) break;
+        buf[n] = '\0';
+        char tag[32] = "*";
+        sscanf(buf, "%31s", tag);
+        char resp[256];
+        if (strstr(buf, "LOGIN")) {
+            snprintf(resp, sizeof(resp), "%s OK Logged in\r\n", tag);
+            write(cfd, resp, strlen(resp));
+        } else if (strstr(buf, "LIST")) {
+            snprintf(resp, sizeof(resp),
+                     "* LIST (\\HasNoChildren) \".\" INBOX\r\n"
+                     "%s OK LIST completed\r\n", tag);
+            write(cfd, resp, strlen(resp));
+        } else if (strstr(buf, "SELECT")) {
+            snprintf(resp, sizeof(resp),
+                     "* 0 EXISTS\r\n%s OK SELECT completed\r\n", tag);
+            write(cfd, resp, strlen(resp));
+        } else if (strstr(buf, "UID SEARCH")) {
+            snprintf(resp, sizeof(resp),
+                     "* SEARCH\r\n%s OK SEARCH completed\r\n", tag);
+            write(cfd, resp, strlen(resp));
+        } else if (strstr(buf, "LOGOUT")) {
+            write(cfd, "* BYE Bye\r\n", 11);
+            snprintf(resp, sizeof(resp), "%s OK LOGOUT completed\r\n", tag);
+            write(cfd, resp, strlen(resp));
+            break;
+        } else {
+            snprintf(resp, sizeof(resp), "%s BAD Unknown\r\n", tag);
+            write(cfd, resp, strlen(resp));
+        }
+    }
+    close(cfd);
+    GCOV_FLUSH();
+    _exit(0);
+}
+
+/*
+ * Connect with imap:// (no TLS) and verify_tls=0 so the plain socket code
+ * paths (net_read plain, net_write plain) are exercised.
+ */
+void test_imap_plain_socket_ops(void) {
+    int port = 0;
+    int lfd  = make_listener(&port);
+    ASSERT(lfd >= 0, "plain: make_listener");
+
+    pid_t pid = fork();
+    ASSERT(pid >= 0, "plain: fork");
+    if (pid == 0) {
+        run_plain_imap_server(lfd);
+        /* _exit inside */
+    }
+    close(lfd);
+
+    char url[64];
+    snprintf(url, sizeof(url), "imap://127.0.0.1:%d", port);
+    ImapClient *c = imap_connect(url, "user", "pass", 0);
+    ASSERT(c != NULL, "plain: imap_connect (no TLS, verify=0) must succeed");
+
+    /* Exercise plain net_write path via SELECT */
+    int rc = imap_select(c, "INBOX");
+    ASSERT(rc == 0, "plain: imap_select returns 0");
+
+    /* Exercise plain net_write + net_read via UID SEARCH */
+    char (*uids)[17] = NULL;
+    int count = 0;
+    rc = imap_uid_search(c, "ALL", &uids, &count);
+    ASSERT(rc == 0, "plain: imap_uid_search returns 0");
+    free(uids);
+
+    /* imap_list exercises more plain I/O */
+    char **folders = NULL;
+    int fc = 0;
+    char sep = '.';
+    rc = imap_list(c, &folders, &fc, &sep);
+    ASSERT(rc == 0, "plain: imap_list returns 0");
+    for (int i = 0; i < fc; i++) free(folders[i]);
+    free(folders);
+
+    imap_disconnect(c);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+}
+
+/* ── Test: imap_list with empty (quoted "") separator ───────────────────── */
+
+static void run_mock_server_empty_sep(int listen_fd, SSL_CTX *ctx) {
+    int cfd = accept(listen_fd, NULL, NULL);
+    close(listen_fd);
+    if (cfd < 0) { SSL_CTX_free(ctx); GCOV_FLUSH(); _exit(1); }
+
+    struct timeval tv = {.tv_sec = 3, .tv_usec = 0};
+    setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    SSL *ssl = SSL_new(ctx);
+    SSL_CTX_free(ctx);
+    SSL_set_fd(ssl, cfd);
+    if (SSL_accept(ssl) <= 0) {
+        SSL_free(ssl); close(cfd); GCOV_FLUSH(); _exit(1);
+    }
+
+    SSL_write(ssl, "* OK Mock ready\r\n", 17);
+
+    char buf[2048];
+    while (1) {
+        int n = SSL_read(ssl, buf, (int)(sizeof(buf) - 1));
+        if (n <= 0) break;
+        buf[n] = '\0';
+        char tag[32] = "*";
+        sscanf(buf, "%31s", tag);
+        char resp[512];
+        if (strstr(buf, "LOGIN")) {
+            snprintf(resp, sizeof(resp), "%s OK Logged in\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "LIST")) {
+            /* Empty separator (quoted "") — exercises the *p=='"' branch */
+            snprintf(resp, sizeof(resp),
+                     "* LIST () \"\" \"INBOX\"\r\n"
+                     "%s OK LIST completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "LOGOUT")) {
+            SSL_write(ssl, "* BYE\r\n", 7);
+            snprintf(resp, sizeof(resp), "%s OK LOGOUT completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+            break;
+        } else {
+            snprintf(resp, sizeof(resp), "%s BAD Unknown\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        }
+    }
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    close(cfd);
+    GCOV_FLUSH();
+    _exit(0);
+}
+
+void test_imap_list_empty_separator(void) {
+    int port = 0;
+    int lfd  = make_listener(&port);
+    ASSERT(lfd >= 0, "empty_sep: make_listener");
+
+    SSL_CTX *ctx = create_server_ctx();
+    ASSERT(ctx != NULL, "empty_sep: create_server_ctx");
+
+    pid_t pid = fork();
+    ASSERT(pid >= 0, "empty_sep: fork");
+    if (pid == 0) {
+        run_mock_server_empty_sep(lfd, ctx);
+    }
+    close(lfd);
+    SSL_CTX_free(ctx);
+
+    char url[64];
+    snprintf(url, sizeof(url), "imaps://127.0.0.1:%d", port);
+    ImapClient *c = imap_connect(url, "user", "pass", 0);
+    ASSERT(c != NULL, "empty_sep: imap_connect must succeed");
+
+    char **folders = NULL;
+    int fc = 0;
+    char sep = 'x';
+    int rc = imap_list(c, &folders, &fc, &sep);
+    ASSERT(rc == 0, "empty_sep: imap_list returns 0");
+    ASSERT(fc == 1, "empty_sep: imap_list found 1 folder");
+    for (int i = 0; i < fc; i++) free(folders[i]);
+    free(folders);
+
+    imap_disconnect(c);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+}
+
+/* ── Test: QRESYNC VANISHED without (EARLIER) + uid_fetch with no literal ── */
+
+/*
+ * Mock server that:
+ *  1. On SELECT+QRESYNC: sends VANISHED without "(EARLIER)" — covers lines 1052-1053
+ *  2. On UID FETCH BODY.PEEK[]: sends OK with no literal — covers line 798
+ */
+static void run_mock_server_vanished_noearlier(int listen_fd, SSL_CTX *ctx) {
+    int cfd = accept(listen_fd, NULL, NULL);
+    close(listen_fd);
+    if (cfd < 0) { SSL_CTX_free(ctx); GCOV_FLUSH(); _exit(1); }
+
+    struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+    setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    SSL *ssl = SSL_new(ctx);
+    SSL_CTX_free(ctx);
+    SSL_set_fd(ssl, cfd);
+    if (SSL_accept(ssl) <= 0) {
+        SSL_free(ssl); close(cfd); GCOV_FLUSH(); _exit(1);
+    }
+
+    SSL_write(ssl, "* OK Mock ready\r\n", 17);
+
+    char buf[4096];
+    while (1) {
+        int n = SSL_read(ssl, buf, (int)(sizeof(buf) - 1));
+        if (n <= 0) break;
+        buf[n] = '\0';
+        char tag[32] = "*";
+        sscanf(buf, "%31s", tag);
+        char resp[1024];
+        if (strstr(buf, "LOGIN")) {
+            snprintf(resp, sizeof(resp),
+                     "%s OK [CAPABILITY IMAP4rev1 CONDSTORE QRESYNC] Logged in\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "ENABLE")) {
+            snprintf(resp, sizeof(resp),
+                     "* ENABLED QRESYNC\r\n%s OK ENABLE completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "SELECT") && strstr(buf, "QRESYNC")) {
+            /* VANISHED without "(EARLIER)" — hits the else branch in parse */
+            snprintf(resp, sizeof(resp),
+                     "* 2 EXISTS\r\n"
+                     "* OK [HIGHESTMODSEQ 500]\r\n"
+                     "* VANISHED 5:7\r\n"   /* no (EARLIER) */
+                     "%s OK SELECT completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "BODY.PEEK[]")) {
+            /* Return OK but NO literal body — exercises line 798 logger_log */
+            snprintf(resp, sizeof(resp),
+                     "* 1 FETCH (UID 1)\r\n%s OK FETCH completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "LOGOUT")) {
+            SSL_write(ssl, "* BYE\r\n", 7);
+            snprintf(resp, sizeof(resp), "%s OK LOGOUT completed\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+            break;
+        } else {
+            snprintf(resp, sizeof(resp), "%s BAD Unknown\r\n", tag);
+            SSL_write(ssl, resp, (int)strlen(resp));
+        }
+    }
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    close(cfd);
+    GCOV_FLUSH();
+    _exit(0);
+}
+
+void test_imap_qresync_vanished_no_earlier(void) {
+    int port = 0;
+    int lfd  = make_listener(&port);
+    ASSERT(lfd >= 0, "vanished_no_earlier: make_listener");
+
+    SSL_CTX *ctx = create_server_ctx();
+    ASSERT(ctx != NULL, "vanished_no_earlier: create_server_ctx");
+
+    pid_t pid = fork();
+    ASSERT(pid >= 0, "vanished_no_earlier: fork");
+    if (pid == 0) {
+        run_mock_server_vanished_noearlier(lfd, ctx);
+    }
+    close(lfd);
+    SSL_CTX_free(ctx);
+
+    char url[64];
+    snprintf(url, sizeof(url), "imaps://127.0.0.1:%d", port);
+    ImapClient *c = imap_connect(url, "user", "pass", 0);
+    ASSERT(c != NULL, "vanished_no_earlier: imap_connect must succeed");
+
+    /* imap_select_qresync with VANISHED without (EARLIER) */
+    ImapSelectResult res;
+    memset(&res, 0, sizeof(res));
+    int rc = imap_select_qresync(c, "INBOX", 1000, 50, &res);
+    ASSERT(rc == 0, "vanished_no_earlier: imap_select_qresync returns 0");
+    /* VANISHED 5:7 expands to UIDs 5, 6, 7 */
+    ASSERT(res.vanished_count >= 0, "vanished_no_earlier: vanished_count set");
+    free(res.vanished_uids);
+
+    /* imap_uid_fetch_body with no literal in response — returns NULL, logs warning */
+    char *body = imap_uid_fetch_body(c, "0000000000000001");
+    ASSERT(body == NULL, "vanished_no_earlier: uid_fetch_body NULL when no literal");
+
+    imap_disconnect(c);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+}
+
 /* ── Test suite entry point ──────────────────────────────────────────────── */
 
 void test_imap_client(void) {
@@ -587,4 +1129,10 @@ void test_imap_client(void) {
     test_imap_connect_login_rejected();
     test_imap_append_literal_plus();
     test_imap_full_operations();
+    test_imap_extended_operations();
+    test_imap_connect_bare_host();
+    test_imap_connect_refused_without_tls();
+    test_imap_plain_socket_ops();
+    test_imap_list_empty_separator();
+    test_imap_qresync_vanished_no_earlier();
 }

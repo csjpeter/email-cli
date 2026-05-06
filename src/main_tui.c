@@ -731,7 +731,7 @@ static int cmd_compose_interactive(Config *cfg,
                     printf("  Message sent.\n");
                     fflush(stdout);
                     if (email_service_save_sent(cfg, msg, msg_len) == 0)
-                        printf("  Saving to Sent folder...\n");
+                        printf("  Saved locally.\n");
                     else
                         fprintf(stderr, "  Warning: could not save to Sent folder.\n");
                 } else {

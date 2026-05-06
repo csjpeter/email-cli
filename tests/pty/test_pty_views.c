@@ -3485,6 +3485,7 @@ static void test_tui_rules_editor_opens(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "l");
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS); /* status bar rendered after title fflush */
     ASSERT_SCREEN_CONTAINS(s, "a=add");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
@@ -3729,6 +3730,7 @@ static void test_tui_rules_detail_shows_fields(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS); /* wait for when/labels flushed after title */
     ASSERT_SCREEN_CONTAINS(s, "*@spam.example.com");
     ASSERT_SCREEN_CONTAINS(s, "_junk");
     ASSERT_SCREEN_CONTAINS(s, "e=edit");

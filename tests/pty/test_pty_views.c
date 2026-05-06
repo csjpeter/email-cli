@@ -1710,6 +1710,11 @@ static PtySession *tui_open_to_list(void) {
     }
     pty_send_key(s, PTY_KEY_HOME);
     for (int _i = 0; _i < 6; _i++) pty_send_key(s, PTY_KEY_DOWN);
+    /* Wait for INBOX to be visible before pressing Enter — IMAP LIST may be in flight */
+    if (pty_wait_for(s, "INBOX", WAIT_MS) != 0) {
+        pty_close(s);
+        return NULL;
+    }
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     return s;
@@ -2104,8 +2109,10 @@ static void test_tui_folder_cursor_persisted(void) {
 static void test_tui_accounts_help_panel(void) {
     /* US-22 AC7: 'h' in accounts screen shows help overlay */
     restart_mock();
-    PtySession *s = cli_run(NULL);
-    ASSERT(s != NULL, "accounts help: opens");
+    const char *args[] = {g_tui_bin, NULL};
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "accounts help: pty_open");
+    if (pty_run(s, args) != 0) { pty_close(s); return; }
     ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "h");
@@ -3788,7 +3795,7 @@ static void test_tui_rules_detail_delete(void) {
 /* ── US-80: rule edit form with inline editing ───────────────────────── */
 
 static void test_tui_rules_edit_form_opens(void) {
-    /* US-80 AC1: 'e' from detail view opens the edit form */
+    /* US-80 AC1: 'e' from detail view opens the two-step edit form; step 2 shows "Edit rule for" */
     remove_rules_ini();
     write_rules_ini();
     restart_mock();
@@ -3801,11 +3808,14 @@ static void test_tui_rules_edit_form_opens(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     pty_send_str(s, "e");
-    ASSERT_WAIT_FOR(s, "Edit rule for", RULES_WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "SpamFilter"); /* prefill name visible */
-    pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);  /* back to detail */
+    ASSERT_WAIT_FOR(s, "conditions (step 1/2)", WAIT_MS); /* step 1: when-list editor */
+    pty_send_str(s, "q");                                  /* confirm conditions, advance to step 2 */
+    ASSERT_WAIT_FOR(s, "Edit rule for", WAIT_MS);          /* step 2: actions form */
+    ASSERT_SCREEN_CONTAINS(s, "SpamFilter");               /* name prefill visible */
+    pty_send_key(s, PTY_KEY_ESC);                          /* cancel step 2 */
+    ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);            /* back to detail */
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
@@ -3816,7 +3826,7 @@ static void test_tui_rules_edit_form_opens(void) {
 }
 
 static void test_tui_rules_edit_form_prefill(void) {
-    /* US-80 AC2: prefill values from existing rule are shown in the edit form */
+    /* US-80 AC2: when conditions from existing rule are shown in step 1 of the edit form */
     remove_rules_ini();
     write_rules_ini();
     restart_mock();
@@ -3829,10 +3839,11 @@ static void test_tui_rules_edit_form_prefill(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     pty_send_str(s, "e");
-    ASSERT_WAIT_FOR(s, "Edit rule for", RULES_WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "*@spam.example.com"); /* when: prefill contains if-from pattern */
-    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "conditions (step 1/2)", WAIT_MS); /* step 1 */
+    ASSERT_SCREEN_CONTAINS(s, "*@spam.example.com");       /* if-from condition prefilled */
+    pty_send_key(s, PTY_KEY_ESC);                          /* cancel edit */
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
@@ -3844,7 +3855,7 @@ static void test_tui_rules_edit_form_prefill(void) {
 }
 
 static void test_tui_rules_edit_form_esc_cancel(void) {
-    /* US-80 AC3: ESC in edit form cancels without modifying the rule */
+    /* US-80 AC3: ESC in step 1 of the edit form cancels without modifying the rule */
     remove_rules_ini();
     write_rules_ini();
     restart_mock();
@@ -3857,11 +3868,12 @@ static void test_tui_rules_edit_form_esc_cancel(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     pty_send_str(s, "e");
-    ASSERT_WAIT_FOR(s, "Edit rule for", RULES_WAIT_MS);
-    pty_send_key(s, PTY_KEY_ESC);       /* cancel */
-    ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);   /* still in detail */
-    ASSERT_SCREEN_CONTAINS(s, "SpamFilter");      /* rule unchanged */
+    ASSERT_WAIT_FOR(s, "conditions (step 1/2)", WAIT_MS); /* step 1 opens */
+    pty_send_key(s, PTY_KEY_ESC);                          /* cancel — no change */
+    ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);            /* still in detail view */
+    ASSERT_SCREEN_CONTAINS(s, "SpamFilter");               /* rule unchanged */
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "SpamFilter");

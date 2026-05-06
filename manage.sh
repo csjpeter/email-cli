@@ -211,6 +211,7 @@ case "$1" in
          lcov --remove coverage-functional-raw.info \
               --ignore-errors unused \
               '*/src/main_tui.c' \
+              '*/tests/unit/*' \
               --output-file coverage-functional.info)
 
         # Pass 2 — run unit suite ON TOP of existing functional .gcda → combined badge

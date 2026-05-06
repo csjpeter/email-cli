@@ -169,6 +169,11 @@ case "$1" in
         cmake_configure Debug "-DENABLE_COVERAGE=ON"
         cmake_build
         build_test_runner
+        echo "Building PTY test binaries..."
+        cmake --build "$BUILD_DIR" \
+            --target test-pty-views --target mock-imap-server \
+            --target mock-smtp-server --target test-pty-compose \
+            --target test-pty-send-local -- -j"$JOBS"
 
         # Pass 1 — functional suite + PTY tests (fresh .gcda) → functional badge
         find "$BUILD_DIR" -name "*.gcda" -delete

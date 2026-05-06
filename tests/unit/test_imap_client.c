@@ -826,7 +826,7 @@ static void run_plain_imap_server(int listen_fd) {
 
     /* Plain greeting */
     const char *greet = "* OK Mock plain IMAP ready\r\n";
-    write(cfd, greet, strlen(greet));
+    ssize_t _wr; _wr = write(cfd, greet, strlen(greet)); (void)_wr;
 
     char buf[2048];
     while (1) {
@@ -838,28 +838,28 @@ static void run_plain_imap_server(int listen_fd) {
         char resp[256];
         if (strstr(buf, "LOGIN")) {
             snprintf(resp, sizeof(resp), "%s OK Logged in\r\n", tag);
-            write(cfd, resp, strlen(resp));
+            _wr = write(cfd, resp, strlen(resp)); (void)_wr;
         } else if (strstr(buf, "LIST")) {
             snprintf(resp, sizeof(resp),
                      "* LIST (\\HasNoChildren) \".\" INBOX\r\n"
                      "%s OK LIST completed\r\n", tag);
-            write(cfd, resp, strlen(resp));
+            _wr = write(cfd, resp, strlen(resp)); (void)_wr;
         } else if (strstr(buf, "SELECT")) {
             snprintf(resp, sizeof(resp),
                      "* 0 EXISTS\r\n%s OK SELECT completed\r\n", tag);
-            write(cfd, resp, strlen(resp));
+            _wr = write(cfd, resp, strlen(resp)); (void)_wr;
         } else if (strstr(buf, "UID SEARCH")) {
             snprintf(resp, sizeof(resp),
                      "* SEARCH\r\n%s OK SEARCH completed\r\n", tag);
-            write(cfd, resp, strlen(resp));
+            _wr = write(cfd, resp, strlen(resp)); (void)_wr;
         } else if (strstr(buf, "LOGOUT")) {
-            write(cfd, "* BYE Bye\r\n", 11);
+            _wr = write(cfd, "* BYE Bye\r\n", 11); (void)_wr;
             snprintf(resp, sizeof(resp), "%s OK LOGOUT completed\r\n", tag);
-            write(cfd, resp, strlen(resp));
+            _wr = write(cfd, resp, strlen(resp)); (void)_wr;
             break;
         } else {
             snprintf(resp, sizeof(resp), "%s BAD Unknown\r\n", tag);
-            write(cfd, resp, strlen(resp));
+            _wr = write(cfd, resp, strlen(resp)); (void)_wr;
         }
     }
     close(cfd);

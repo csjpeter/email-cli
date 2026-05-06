@@ -271,7 +271,7 @@ static void setup_gmail_test_env(const char *home) {
  * Used by network-based tests that need a clean message store to avoid
  * interference from messages written by earlier tests. */
 static void reset_gmail_test_env(void) {
-    system("rm -rf '/tmp/email-cli-gmail-sync-test'");
+    int _sr = system("rm -rf '/tmp/email-cli-gmail-sync-test'"); (void)_sr;
     setup_gmail_test_env("/tmp/email-cli-gmail-sync-test");
 }
 
@@ -953,7 +953,7 @@ static void test_fetch_pending_with_rules(void) {
     snprintf(rules_dir, sizeof(rules_dir),
              "/tmp/email-cli-gmail-sync-test/.config/email-cli/accounts/csjpeterjaket@gmail.com");
     /* Use system() with literal paths — no variable in rm -rf */
-    system("mkdir -p '/tmp/email-cli-gmail-sync-test/.config/email-cli/accounts/csjpeterjaket@gmail.com'");
+    int _sr2 = system("mkdir -p '/tmp/email-cli-gmail-sync-test/.config/email-cli/accounts/csjpeterjaket@gmail.com'"); (void)_sr2;
 
     char rules_path[600];
     snprintf(rules_path, sizeof(rules_path), "%s/rules.ini", rules_dir);

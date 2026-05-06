@@ -414,7 +414,7 @@ static void test_compose_sent_folder(void) {
     ASSERT(s != NULL, "compose sent folder: opens");
     ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
     pty_send_str(s, "y");
-    ASSERT_WAIT_FOR(s, "Saving to Sent folder", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
     pty_close(s);
     cleanup_editor_mock();
 }

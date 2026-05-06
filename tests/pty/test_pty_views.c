@@ -3815,6 +3815,7 @@ static void test_tui_rules_edit_form_opens(void) {
     ASSERT_WAIT_FOR(s, "conditions (step 1/2)", WAIT_MS); /* step 1: when-list editor */
     pty_send_str(s, "q");                                  /* confirm conditions, advance to step 2 */
     ASSERT_WAIT_FOR(s, "Edit rule for", WAIT_MS);          /* step 2: actions form */
+    pty_settle(s, SETTLE_MS);                              /* wait for name field to render */
     ASSERT_SCREEN_CONTAINS(s, "SpamFilter");               /* name prefill visible */
     pty_send_key(s, PTY_KEY_ESC);                          /* cancel step 2 */
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);            /* back to detail */

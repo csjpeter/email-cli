@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
+#include <time.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
@@ -17,6 +19,19 @@ extern void __gcov_dump(void);
 #endif
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
+
+/* Poll with WNOHANG for up to 10 s, then SIGKILL — prevents Valgrind hang. */
+static void wait_child(pid_t pid) {
+    for (int i = 0; i < 100; i++) {
+        int st;
+        pid_t r = waitpid(pid, &st, WNOHANG);
+        if (r > 0 || r < 0) return;
+        struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000000L}; /* 100 ms */
+        nanosleep(&ts, NULL);
+    }
+    kill(pid, SIGKILL);
+    int st; waitpid(pid, &st, 0);
+}
 
 /*
  * Create a listening TCP socket bound to a random loopback port.
@@ -255,8 +270,7 @@ void test_imap_connect_login_ok(void) {
 
     imap_disconnect(c);
 
-    int status = 0;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 /*
@@ -289,8 +303,7 @@ void test_imap_connect_login_rejected(void) {
 
     ASSERT(c == NULL, "imap_connect must return NULL when server says NO");
 
-    int status = 0;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 /*
@@ -329,8 +342,7 @@ void test_imap_append_literal_plus(void) {
 
     imap_disconnect(c);
 
-    int status = 0;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 /* ── Extended mock server: SELECT, SEARCH, FETCH, STORE, LIST, etc. ──── */
@@ -572,8 +584,7 @@ void test_imap_full_operations(void) {
 
     imap_disconnect(c);
 
-    int status = 0;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 /* ── Extended mock server: QRESYNC + CONDSTORE + UID MOVE + CHANGEDSINCE ── */
@@ -783,8 +794,7 @@ void test_imap_extended_operations(void) {
 
     imap_disconnect(c);
 
-    int status = 0;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 /* ── Test: imap_connect with bare host URL and imap:// refusal ──────────── */
@@ -915,8 +925,7 @@ void test_imap_plain_socket_ops(void) {
 
     imap_disconnect(c);
 
-    int status = 0;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 /* ── Test: imap_list with empty (quoted "") separator ───────────────────── */
@@ -1004,8 +1013,7 @@ void test_imap_list_empty_separator(void) {
 
     imap_disconnect(c);
 
-    int status = 0;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 /* ── Test: QRESYNC VANISHED without (EARLIER) + uid_fetch with no literal ── */
@@ -1114,8 +1122,7 @@ void test_imap_qresync_vanished_no_earlier(void) {
 
     imap_disconnect(c);
 
-    int status = 0;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 /* ── Test suite entry point ──────────────────────────────────────────────── */

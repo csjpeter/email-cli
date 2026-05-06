@@ -162,7 +162,8 @@ case "$1" in
         echo "Running unit tests with Valgrind..."
         build_release
         build_test_runner
-        (cd "$BUILD_DIR" && valgrind --leak-check=full --error-exitcode=1 ./tests/unit/test-runner)
+        (cd "$BUILD_DIR" && valgrind --leak-check=full --error-exitcode=1 \
+            --child-silent-after-fork=yes ./tests/unit/test-runner)
         ;;
     coverage)
         cmake_configure Debug "-DENABLE_COVERAGE=ON"

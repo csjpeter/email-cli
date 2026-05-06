@@ -212,6 +212,9 @@ int gmail_auth_device_flow(Config *cfg) {
                 LOOPBACK_PORT_START, LOOPBACK_PORT_END);
         return -1;
     }
+    /* 5-minute timeout so wait_for_auth_code() can't block forever. */
+    struct timeval _tv = {300, 0};
+    setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &_tv, sizeof(_tv));
 
     char redirect_uri[64];
     snprintf(redirect_uri, sizeof(redirect_uri), "http://localhost:%d/callback", port);
@@ -240,11 +243,11 @@ int gmail_auth_device_flow(Config *cfg) {
         "  Waiting for authorization... (^C to cancel)\n\n",
         auth_url);
 
-    /* Try to open the browser */
+    /* Try to open the browser — run in background so system() returns immediately.
+     * On headless CI/servers this exits quickly; on desktops the browser opens. */
     RAII_STRING char *browser_cmd = NULL;
-    if (asprintf(&browser_cmd, "xdg-open '%s' 2>/dev/null || "
-                 "open '%s' 2>/dev/null || "
-                 "start '%s' 2>/dev/null",
+    if (asprintf(&browser_cmd,
+                 "(xdg-open '%s' || open '%s' || start '%s') >/dev/null 2>&1 &",
                  auth_url, auth_url, auth_url) != -1) {
         int rc = system(browser_cmd);
         (void)rc;

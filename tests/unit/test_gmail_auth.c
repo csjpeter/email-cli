@@ -2,19 +2,29 @@
 #include "gmail_auth.h"
 #include "config.h"
 #include <fcntl.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-/* ── gmail_auth_device_flow ──────────────────────────────────────── */
-/* gmail_auth_device_flow() opens a TCP listener and launches a browser,
- * so it MUST NOT be called from unit tests.  The localhost listener +
- * code extraction logic is tested separately via test_auth_code_extraction
- * and test_auth_code_denied below. */
+/* Wait for child with 5-second timeout, then SIGKILL. */
+static void wait_child(pid_t pid) {
+    if (pid <= 0) return;
+    for (int i = 0; i < 50; i++) {
+        int st;
+        if (waitpid(pid, &st, WNOHANG) != 0) return;
+        struct timespec ts = {0, 100000000L};
+        nanosleep(&ts, NULL);
+    }
+    kill(pid, SIGKILL);
+    int st; waitpid(pid, &st, 0);
+}
 
 /* ── gmail_auth_refresh — error paths (no network needed) ─────────── */
 
@@ -42,6 +52,8 @@ static void test_auth_code_extraction(void) {
     ASSERT(listen_fd >= 0, "auth_code: socket created");
     int opt = 1;
     setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    struct timeval tv = {5, 0};
+    setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
@@ -96,8 +108,7 @@ static void test_auth_code_extraction(void) {
     ssize_t wr = write(conn, html, strlen(html)); (void)wr;
     close(conn);
     close(listen_fd);
-    int status;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 static void test_auth_code_denied(void) {
@@ -105,6 +116,8 @@ static void test_auth_code_denied(void) {
     ASSERT(listen_fd >= 0, "denied: socket created");
     int opt = 1;
     setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    struct timeval tv = {5, 0};
+    setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
@@ -149,8 +162,7 @@ static void test_auth_code_denied(void) {
     ssize_t wr = write(conn, html, strlen(html)); (void)wr;
     close(conn);
     close(listen_fd);
-    int status;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 /* ── Gmail IMAP rejection in wizard ──────────────────────────────────── */
@@ -244,8 +256,7 @@ static void test_device_flow_access_denied(void) {
 
     ASSERT(rc == -1, "device_flow: access_denied returns -1");
 
-    int status;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 
     free(cfg.gmail_client_id);
     free(cfg.gmail_client_secret);
@@ -271,6 +282,8 @@ static void run_mock_token_server(int port, const char *response) {
     if (srv < 0) _exit(1);
     int opt = 1;
     setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    struct timeval tv = {5, 0};
+    setsockopt(srv, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     struct sockaddr_in addr = {0};
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -320,8 +333,7 @@ static void test_refresh_via_mock_server_200(void) {
     free(cfg.gmail_refresh_token);
 
     unsetenv("GMAIL_TEST_TOKEN_URL");
-    int status;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 static void test_refresh_via_mock_server_200_no_token(void) {
@@ -348,8 +360,7 @@ static void test_refresh_via_mock_server_200_no_token(void) {
     free(cfg.gmail_refresh_token);
 
     unsetenv("GMAIL_TEST_TOKEN_URL");
-    int status;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 static void test_refresh_via_mock_server_400_unknown_error(void) {
@@ -382,8 +393,7 @@ static void test_refresh_via_mock_server_400_unknown_error(void) {
     free(cfg.gmail_refresh_token);
 
     unsetenv("GMAIL_TEST_TOKEN_URL");
-    int status;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 }
 
 static void test_refresh_via_mock_server_curl_error(void) {
@@ -469,9 +479,8 @@ static void test_device_flow_full_mock(void) {
     free(cfg.gmail_client_secret);
     free(cfg.gmail_refresh_token);
 
-    int status;
-    waitpid(br_pid,  &status, 0);
-    waitpid(srv_pid, &status, 0);
+    wait_child(br_pid);
+    wait_child(srv_pid);
 
     unsetenv("GMAIL_TEST_TOKEN_URL");
 }
@@ -520,8 +529,7 @@ static void test_device_flow_with_code(void) {
     /* Token exchange fails with invalid test credentials → returns -1 */
     ASSERT(rc == -1, "device_flow: invalid credentials returns -1");
 
-    int status;
-    waitpid(pid, &status, 0);
+    wait_child(pid);
 
     free(cfg.gmail_client_id);
     free(cfg.gmail_client_secret);

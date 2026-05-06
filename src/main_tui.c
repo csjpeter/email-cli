@@ -15,6 +15,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <locale.h>
+#include <signal.h>
 #include "config_store.h"
 #include "setup_wizard.h"
 #include "email_service.h"
@@ -1714,6 +1715,9 @@ int main(int argc, char *argv[]) {
     /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
     setlocale(LC_ALL, "");
+
+    /* Ensure SIGTERM causes a clean exit so atexit() handlers run (e.g. gcov). */
+    signal(SIGTERM, exit);
 
     /* Parse command line: handle --help/--version and detect subcommands */
     const char *subcmd = NULL;  /* "compose" | "send" | "reply" | NULL */

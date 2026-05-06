@@ -282,9 +282,10 @@ static void test_successful_send_saves_locally(void) {
     pty_send_key(s, PTY_KEY_TAB); /* Bcc → Subject */
     pty_send_str(s, "TC-SL-01 Test Subject");
     pty_send_key(s, PTY_KEY_ENTER); /* open editor */
-    pty_settle(s, SETTLE_MS);
 
-    /* Wait for send result */
+    /* Wait for send confirmation prompt, confirm, then check result */
+    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Message sent.", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
@@ -318,9 +319,10 @@ static void test_failed_send_saves_to_drafts(void) {
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_str(s, "TC-SL-02 Test Draft");
     pty_send_key(s, PTY_KEY_ENTER);
-    pty_settle(s, SETTLE_MS);
 
-    /* Send should fail → Drafts path */
+    /* Wait for send confirmation, confirm, then check failure path */
+    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Saved to Drafts", WAIT_MS);
 
@@ -351,6 +353,8 @@ static void test_sync_uploads_pending_and_clears_queue(void) {
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_str(s, "TC-SL-03 Sync Test");
     pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
     pty_close(s);
 
@@ -387,6 +391,8 @@ static void test_pending_queue_survives_restart(void) {
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_str(s, "TC-SL-04 Persist Test");
     pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
     pty_close(s);
 

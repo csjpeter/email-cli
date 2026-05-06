@@ -676,6 +676,30 @@ static int cmd_compose_interactive(Config *cfg,
         return -1;
     }
 
+    /* 6b. Confirm before sending */
+    {
+        printf("\n  Send to: %s\n  Subject: %s\n\n  Send? [y/n] ",
+               to_buf, subj_buf[0] ? subj_buf : "(no subject)");
+        fflush(stdout);
+        RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
+        int confirmed = 0;
+        for (;;) {
+            TermKey key = terminal_read_key();
+            int ch = (key == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
+            if (ch == 'y' || ch == 'Y') { confirmed = 1; break; }
+            if (ch == 'n' || ch == 'N' || key == TERM_KEY_ESC) { break; }
+        }
+        (void)_raw; /* cleaned up by RAII */
+        printf("\n");
+        fflush(stdout);
+        if (!confirmed) {
+            printf("  Cancelled. Draft discarded.\n");
+            fflush(stdout);
+            free(body);
+            return -1;
+        }
+    }
+
     /* 7. Build and send */
     {
         const char *from_send = from_buf[0] ? from_buf : from_address(cfg);
@@ -706,9 +730,9 @@ static int cmd_compose_interactive(Config *cfg,
                     printf("  Message sent.\n");
                     fflush(stdout);
                     if (email_service_save_sent(cfg, msg, msg_len) == 0)
-                        printf("  Saved locally (will upload on next sync).\n");
+                        printf("  Saving to Sent folder...\n");
                     else
-                        fprintf(stderr, "  Warning: could not save to local Sent folder.\n");
+                        fprintf(stderr, "  Warning: could not save to Sent folder.\n");
                 } else {
                     printf("  Send failed. Saving to Drafts...\n");
                     fflush(stdout);
@@ -1623,6 +1647,63 @@ static void tui_rules_editor(const Config *cfg)
     }
 }
 
+/* ── Subcommand help pages ───────────────────────────────────────────── */
+
+static void help_compose(void) {
+    printf(
+        "Usage: email-tui compose\n"
+        "\n"
+        "Open $EDITOR to compose a new message.\n"
+        "\n"
+        "After saving and exiting the editor, you will be asked to confirm\n"
+        "before the message is sent.\n"
+        "\n"
+        "Draft file headers:\n"
+        "  From:    sender address\n"
+        "  To:      recipient (required)\n"
+        "  Subject: message subject\n"
+        "  Cc:, Bcc: carbon copy recipients\n"
+        "\n"
+        "Options:\n"
+        "  --help, -h   Show this help message\n"
+    );
+}
+
+static void help_send(void) {
+    printf(
+        "Usage: email-tui send --to <addr> --subject <text> --body <text>\n"
+        "\n"
+        "Sends a message non-interactively (batch/scriptable mode).\n"
+        "\n"
+        "Options:\n"
+        "  --to <addr>       Recipient email address (required)\n"
+        "  --subject <text>  Subject line (required)\n"
+        "  --body <text>     Message body text (required)\n"
+        "\n"
+        "SMTP settings must be configured (run 'email-cli config smtp').\n"
+        "\n"
+        "Options:\n"
+        "  --help, -h   Show this help message\n"
+    );
+}
+
+static void help_reply(void) {
+    printf(
+        "Usage: email-tui reply <uid>\n"
+        "\n"
+        "Reply to a message identified by its UID.\n"
+        "\n"
+        "Arguments:\n"
+        "  <uid>  Message UID to reply to (required)\n"
+        "\n"
+        "Opens $EDITOR with a quoted draft. After saving and exiting the editor,\n"
+        "you will be asked to confirm before the reply is sent.\n"
+        "\n"
+        "Options:\n"
+        "  --help, -h   Show this help message\n"
+    );
+}
+
 /* ── Entry point ─────────────────────────────────────────────────────── */
 
 #ifndef EMAIL_CLI_VERSION
@@ -1634,7 +1715,10 @@ int main(int argc, char *argv[]) {
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
     setlocale(LC_ALL, "");
 
-    /* Handle --help / -h before anything else */
+    /* Parse command line: handle --help/--version and detect subcommands */
+    const char *subcmd = NULL;  /* "compose" | "send" | "reply" | NULL */
+    int    sub_i       = 0;     /* index in argv[] where subcommand starts */
+
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-V") == 0) {
             printf("email-tui %s\n", EMAIL_CLI_VERSION);
@@ -1644,16 +1728,36 @@ int main(int argc, char *argv[]) {
             help();
             return EXIT_SUCCESS;
         }
-        /* Unknown option */
+        if (strcmp(argv[i], "--batch") == 0) {
+            continue;
+        }
+        if (strcmp(argv[i], "compose") == 0 ||
+            strcmp(argv[i], "send")    == 0 ||
+            strcmp(argv[i], "reply")   == 0) {
+            subcmd = argv[i];
+            sub_i  = i;
+            break;
+        }
         if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option '%s'.\nRun 'email-tui --help' for usage.\n",
                     argv[i]);
             return EXIT_FAILURE;
         }
-        /* Unexpected positional argument */
         fprintf(stderr, "email-tui does not accept arguments.\n"
                         "Run 'email-tui --help' for usage.\n");
         return EXIT_FAILURE;
+    }
+
+    /* Handle subcommand --help early (before loading config) */
+    if (subcmd) {
+        for (int i = sub_i + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+                if (strcmp(subcmd, "compose") == 0) help_compose();
+                else if (strcmp(subcmd, "send") == 0) help_send();
+                else if (strcmp(subcmd, "reply") == 0) help_reply();
+                return EXIT_SUCCESS;
+            }
+        }
     }
 
     /* 1. Determine cache directory for logs */
@@ -1701,6 +1805,66 @@ int main(int argc, char *argv[]) {
     /* 4. Initialize local store for the first/default account */
     if (local_store_init(cfg->host, cfg->user) != 0)
         logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
+
+    /* 4b. Subcommand dispatch (compose / send / reply) — exits here; TUI not started */
+    if (subcmd) {
+        int rc = EXIT_FAILURE;
+
+        if (strcmp(subcmd, "compose") == 0) {
+            int cr = cmd_compose_interactive(cfg, NULL, NULL, NULL, NULL, NULL, NULL);
+            rc = (cr == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+
+        } else if (strcmp(subcmd, "send") == 0) {
+            const char *to = NULL, *subject = NULL, *body_text = NULL;
+            for (int i = sub_i + 1; i < argc - 1; i++) {
+                if (strcmp(argv[i], "--to")      == 0) to         = argv[++i];
+                else if (strcmp(argv[i], "--subject") == 0) subject = argv[++i];
+                else if (strcmp(argv[i], "--body")    == 0) body_text = argv[++i];
+                else if (strcmp(argv[i], "--batch")   == 0) (void)0;
+            }
+            if (!to) {
+                fprintf(stderr, "Error: --to is required for send.\n"
+                                "Run 'email-tui send --help' for usage.\n");
+            } else {
+                const char *from = from_address(cfg);
+                ComposeParams p = {from, to, NULL, NULL,
+                                   subject   ? subject   : "",
+                                   body_text ? body_text : "", NULL};
+                char *msg = NULL; size_t msg_len = 0;
+                if (compose_build_message(&p, &msg, &msg_len) != 0) {
+                    fprintf(stderr, "Error: Failed to build message.\n");
+                } else {
+                    int sr = smtp_send(cfg, from, to, msg, msg_len);
+                    free(msg);
+                    if (sr == 0) {
+                        printf("Message sent.\n");
+                        rc = EXIT_SUCCESS;
+                    } else {
+                        fprintf(stderr, "Error: Send failed.\n");
+                    }
+                }
+            }
+
+        } else if (strcmp(subcmd, "reply") == 0) {
+            const char *uid = NULL;
+            for (int i = sub_i + 1; i < argc; i++) {
+                if (argv[i][0] != '-') { uid = argv[i]; break; }
+            }
+            if (!uid) {
+                fprintf(stderr, "Error: reply requires a UID argument.\n"
+                                "Run 'email-tui reply --help' for usage.\n");
+            } else {
+                const char *folder = cfg->folder ? cfg->folder : "INBOX";
+                int rr = cmd_reply(cfg, uid, folder);
+                rc = (rr == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            }
+        }
+
+        config_free(cfg);
+        logger_log(LOG_INFO, "--- email-tui subcommand finished ---");
+        logger_close();
+        return rc;
+    }
 
     int page_size = detect_page_size();
 

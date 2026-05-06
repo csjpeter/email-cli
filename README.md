@@ -36,7 +36,7 @@ interactive TUI, and a background sync daemon.
 |--------|------|-----------|--------------|
 | `email-cli` | Batch | Yes | CLI scripting: list, show, send, flag, label management |
 | `email-cli-ro` | Batch | No | Read-only CLI; safe for AI agents and automation |
-| `email-tui` | Interactive | Yes | Full-featured TUI: compose, reply, send, flag, labels |
+| `email-tui` | Interactive + subcommands | Yes | Full TUI navigator; also `compose`, `reply`, `send` subcommands |
 | `email-sync` | Batch | Sync only | Background sync daemon / cron helper |
 
 All four binaries share the same configuration and local message cache.
@@ -153,8 +153,35 @@ SMTP credentials are saved in the account's `config.ini` (mode `0600`).
 
 ## Interactive Mode (email-tui)
 
-The interactive TUI is provided exclusively by `email-tui`. The other binaries
-(`email-cli`, `email-cli-ro`, `email-sync`) are batch-only.
+`email-tui` is the full-featured interactive client. It can be launched in two ways:
+
+**Full TUI** (default, no arguments):
+```bash
+email-tui          # Opens the accounts screen; navigate with keyboard
+```
+
+**Subcommands** (direct command-line invocation):
+```bash
+email-tui compose                     # Open $EDITOR to compose a new message
+email-tui reply <uid>                 # Open $EDITOR to reply to a message by UID
+email-tui send --to <addr> \          # Send a message non-interactively
+               --subject <text> \
+               --body <text>
+```
+
+When composing or replying, `email-tui` writes a draft to a temp file, opens `$EDITOR`,
+and after you save and quit asks:
+
+```
+  Send to: alice@example.com
+  Subject: Re: Meeting
+
+  Send? [y/n]
+```
+
+Press `y` to send, `n` (or `ESC`) to discard the draft without sending.
+
+The other binaries (`email-cli`, `email-cli-ro`, `email-sync`) are batch-only.
 
 ### Accounts Screen
 
@@ -267,6 +294,10 @@ Labels (8)
 |-----|--------|
 | `c` | Open compose window for a new message |
 | `r` | Open reply window for the selected message |
+
+Both actions open `$EDITOR` (falls back to `vim`) with a pre-filled draft file containing
+editable `From:`, `To:`, `Subject:`, and body fields. After saving and quitting the editor,
+a send confirmation prompt appears. Press `y` to send, `n` or `ESC` to discard the draft.
 
 #### Background sync
 

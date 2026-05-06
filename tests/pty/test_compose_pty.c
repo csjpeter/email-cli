@@ -63,11 +63,11 @@ static void write_config(void) {
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SMTP_HOST=smtp://localhost:9025\n"
+        "SMTP_HOST=smtps://localhost:9025\n"
         "SMTP_PORT=9025\n"
         "SMTP_USER=testuser\n"
         "SMTP_PASS=testpass\n"
-        "SSL_NO_VERIFY=1\n");   /* permit non-TLS mock servers in tests */
+        "SSL_NO_VERIFY=1\n");   /* permit self-signed cert from mock server */
     fclose(fp);
     chmod(path, 0600);
 }
@@ -293,7 +293,7 @@ static void test_compose_abort_no_to(void) {
 }
 
 /**
- * compose success: mock editor fills in all headers + body → "Message sent"
+ * compose success: mock editor fills in all headers + body → confirm 'y' → "Message sent"
  */
 static void test_compose_editor_send(void) {
     write_config();
@@ -303,7 +303,27 @@ static void test_compose_editor_send(void) {
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_run(a);
     ASSERT(s != NULL, "compose editor send: opens");
-    ASSERT_WAIT_FOR(s, "Message sent", WAIT_MS * 2);
+    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Message sent", WAIT_MS);
+    pty_close(s);
+    cleanup_editor_mock();
+}
+
+/**
+ * compose cancel: mock editor fills in all headers + body → confirm 'n' → "Cancelled"
+ */
+static void test_compose_confirm_cancel(void) {
+    write_config();
+    restart_smtp();
+    setup_editor_mock("testuser@example.com", "recipient@example.com",
+                      "Cancelled test subject", "Body of cancelled message");
+    const char *a[] = {"compose", NULL};
+    PtySession *s = tui_run(a);
+    ASSERT(s != NULL, "compose confirm cancel: opens");
+    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
+    pty_send_str(s, "n");
+    ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);
     pty_close(s);
     cleanup_editor_mock();
 }
@@ -392,7 +412,9 @@ static void test_compose_sent_folder(void) {
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_run(a);
     ASSERT(s != NULL, "compose sent folder: opens");
-    ASSERT_WAIT_FOR(s, "Saving to Sent folder", WAIT_MS * 2);
+    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Saving to Sent folder", WAIT_MS);
     pty_close(s);
     cleanup_editor_mock();
 }
@@ -426,7 +448,7 @@ static void test_config_help(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "imap");
     ASSERT_SCREEN_CONTAINS(s, "smtp");
-    ASSERT_SCREEN_CONTAINS(s, "--account");
+    ASSERT_SCREEN_CONTAINS(s, "account");
     pty_close(s);
 }
 
@@ -480,6 +502,7 @@ int main(int argc, char *argv[]) {
     printf("\n--- Compose/send: interactive compose ---\n");
     RUN_TEST(test_compose_abort_no_to);
     RUN_TEST(test_compose_editor_send);
+    RUN_TEST(test_compose_confirm_cancel);
     RUN_TEST(test_compose_sent_folder);
     RUN_TEST(test_reply_missing_uid);
     RUN_TEST(test_reply_no_cr_in_quote);

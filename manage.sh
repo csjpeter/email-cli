@@ -169,9 +169,36 @@ case "$1" in
         cmake_build
         build_test_runner
 
-        # Pass 1 — functional suite only (fresh .gcda) → functional badge
+        # Pass 1 — functional suite + PTY tests (fresh .gcda) → functional badge
         find "$BUILD_DIR" -name "*.gcda" -delete
+        # Kill any lingering mock server processes by process name (not by -f to avoid self-kill)
+        pkill "mock_imap_server" 2>/dev/null || true
+        pkill "mock-imap-server" 2>/dev/null || true
+        sleep 0.3
         ./tests/functional/run_functional.sh
+        echo "Running PTY tests for coverage..."
+        ABS_BUILD="$(realpath "$BUILD_DIR")"
+        ABS_BIN="$(realpath "$BIN_DIR")"
+        # PTY tests must run from the build directory so mock-imap-server finds
+        # tests/certs/test.crt relative to cwd.
+        (cd "$ABS_BUILD" && ./tests/pty/test-pty-views \
+            "$ABS_BIN/email-cli" \
+            ./tests/pty/mock-imap-server \
+            "$ABS_BIN/email-cli-ro" \
+            "$ABS_BIN/email-sync" \
+            "$ABS_BIN/email-tui" \
+            2>/dev/null) || true
+        (cd "$ABS_BUILD" && ./tests/pty/test-pty-compose \
+            "$ABS_BIN/email-tui" \
+            ./tests/pty/mock-smtp-server \
+            "$ABS_BIN/email-cli" \
+            2>/dev/null) || true
+        (cd "$ABS_BUILD" && ./tests/pty/test-pty-send-local \
+            "$ABS_BIN/email-tui" \
+            "$ABS_BIN/email-sync" \
+            ./tests/pty/mock-imap-server \
+            ./tests/pty/mock-smtp-server \
+            2>/dev/null) || true
         echo "Capturing functional coverage..."
         (cd "$BUILD_DIR" && lcov --capture --directory . \
              --output-file coverage-functional-raw.info && \

@@ -33,8 +33,8 @@ endif()
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Werror -pedantic -D_GNU_SOURCE")
 
-# ASAN Support in Debug builds
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+# ASAN Support in Debug builds (disabled when coverage is requested — ASAN+gcov slows PTY tests)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ENABLE_COVERAGE)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
 endif()

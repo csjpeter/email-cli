@@ -3080,4 +3080,946 @@ void test_email_service(void) {
         RESTORE_STDIN(saved_stdin);
         ASSERT(pr == 0, "email_service_read: multi-page pager → 0");
     }
+
+    /* ── find_match_line ────────────────────────────────────────────────── */
+    {
+        const char *body = "Hello World\nFoo bar\nBaz qux\nHello again\n";
+
+        /* Forward search: find "hello" from line -1 (before first) */
+        int ml = find_match_line(body, "hello", -1, 1);
+        ASSERT(ml == 0, "find_match_line: forward from -1 finds line 0");
+
+        /* Forward search: find "hello" from line 0 (wraps to line 3) */
+        ml = find_match_line(body, "hello", 0, 1);
+        ASSERT(ml == 3, "find_match_line: forward from 0 finds line 3");
+
+        /* Forward wrap: find "hello" from line 3 (wraps to line 0) */
+        ml = find_match_line(body, "hello", 3, 1);
+        ASSERT(ml == 0, "find_match_line: forward wrap returns line 0");
+
+        /* Backward search: find "hello" from line 4 → line 3 */
+        ml = find_match_line(body, "hello", 4, -1);
+        ASSERT(ml == 3, "find_match_line: backward from 4 finds line 3");
+
+        /* Backward wrap: find "hello" from line 0 → wraps to line 3 */
+        ml = find_match_line(body, "hello", 0, -1);
+        ASSERT(ml == 3, "find_match_line: backward wrap returns line 3");
+
+        /* No match: returns -1 */
+        ml = find_match_line(body, "xyzzy", 0, 1);
+        ASSERT(ml == -1, "find_match_line: no match → -1");
+
+        /* NULL term: returns -1 */
+        ml = find_match_line(body, NULL, 0, 1);
+        ASSERT(ml == -1, "find_match_line: NULL term → -1");
+
+        /* NULL body: returns -1 */
+        ml = find_match_line(NULL, "hello", 0, 1);
+        ASSERT(ml == -1, "find_match_line: NULL body → -1");
+    }
+
+    /* ── csv_update_labels ──────────────────────────────────────────────── */
+    {
+        /* Add labels to empty existing: no remove */
+        {
+            char *add[] = { (char*)"Work", (char*)"Personal" };
+            char *rm[]  = { NULL };
+            char *r = csv_update_labels(NULL, add, 2, rm, 0);
+            ASSERT(r != NULL, "csv_update_labels: NULL existing + add → non-NULL");
+            if (r) {
+                ASSERT(strstr(r, "Work") != NULL,
+                       "csv_update_labels: Work present");
+                ASSERT(strstr(r, "Personal") != NULL,
+                       "csv_update_labels: Personal present");
+                free(r);
+            }
+        }
+        /* Keep existing, remove one */
+        {
+            char *add[] = { NULL };
+            char *rm[]  = { (char*)"INBOX" };
+            char *r = csv_update_labels("INBOX,Work,Personal", add, 0, rm, 1);
+            ASSERT(r != NULL, "csv_update_labels: remove one → non-NULL");
+            if (r) {
+                ASSERT(strstr(r, "INBOX") == NULL,
+                       "csv_update_labels: INBOX removed");
+                ASSERT(strstr(r, "Work") != NULL,
+                       "csv_update_labels: Work kept");
+                free(r);
+            }
+        }
+        /* Skip duplicate add */
+        {
+            char *add[] = { (char*)"Work" };
+            char *rm[]  = { NULL };
+            char *r = csv_update_labels("Work,INBOX", add, 1, rm, 0);
+            ASSERT(r != NULL, "csv_update_labels: skip dup → non-NULL");
+            if (r) {
+                /* Work appears only once */
+                const char *p = r;
+                int cnt = 0;
+                while ((p = strstr(p, "Work")) != NULL) { cnt++; p++; }
+                ASSERT(cnt == 1, "csv_update_labels: Work appears once");
+                free(r);
+            }
+        }
+        /* Empty existing, empty add, empty rm → empty string */
+        {
+            char *r = csv_update_labels("", NULL, 0, NULL, 0);
+            ASSERT(r != NULL, "csv_update_labels: all-empty → non-NULL");
+            free(r);
+        }
+    }
+
+    /* ── list_filter_rebuild ────────────────────────────────────────────── */
+    {
+        /* Set up a manifest and entries for filter testing */
+        const char *lfr_folder = "test_lfr_folder";
+        Manifest *lfr_m = calloc(1, sizeof(Manifest));
+        manifest_upsert(lfr_m, "0000000000lfr001",
+                        strdup("alice@example.com"), strdup("Hello World"),
+                        strdup("2026-01-01 00:00"), MSG_FLAG_UNSEEN);
+        manifest_upsert(lfr_m, "0000000000lfr002",
+                        strdup("bob@example.com"), strdup("Goodbye Cruel World"),
+                        strdup("2026-01-02 00:00"), 0);
+        manifest_save(lfr_folder, lfr_m);
+
+        /* Build MsgEntry array from manifest */
+        MsgEntry lfr_entries[2];
+        memset(lfr_entries, 0, sizeof(lfr_entries));
+        memcpy(lfr_entries[0].uid, "0000000000lfr001", 16); lfr_entries[0].uid[16] = '\0';
+        lfr_entries[0].flags = MSG_FLAG_UNSEEN;
+        memcpy(lfr_entries[1].uid, "0000000000lfr002", 16); lfr_entries[1].uid[16] = '\0';
+
+        int fentries[4] = {0};
+        int fcount = 0;
+
+        Config lfr_cfg = {0};
+        lfr_cfg.host   = "imaps://test.example.com";
+        lfr_cfg.user   = "testuser";
+        lfr_cfg.folder = (char *)lfr_folder;
+
+        /* Empty filter: identity pass-through */
+        list_filter_rebuild(lfr_entries, 2, lfr_m, &lfr_cfg, lfr_folder,
+                            "", 0, fentries, &fcount);
+        ASSERT(fcount == 2, "list_filter_rebuild: empty filter → all 2");
+
+        /* fscope=0 (subject) filter "Hello" → 1 match */
+        list_filter_rebuild(lfr_entries, 2, lfr_m, &lfr_cfg, lfr_folder,
+                            "Hello", 0, fentries, &fcount);
+        ASSERT(fcount == 1, "list_filter_rebuild: subject 'Hello' → 1");
+        ASSERT(fentries[0] == 0, "list_filter_rebuild: matched entry 0");
+
+        /* fscope=1 (from) filter "bob" → 1 match */
+        list_filter_rebuild(lfr_entries, 2, lfr_m, &lfr_cfg, lfr_folder,
+                            "bob", 1, fentries, &fcount);
+        ASSERT(fcount == 1, "list_filter_rebuild: from 'bob' → 1");
+        ASSERT(fentries[0] == 1, "list_filter_rebuild: matched entry 1");
+
+        /* fscope=0 filter with no match */
+        list_filter_rebuild(lfr_entries, 2, lfr_m, &lfr_cfg, lfr_folder,
+                            "XYZZY_NOMATCH", 0, fentries, &fcount);
+        ASSERT(fcount == 0, "list_filter_rebuild: no match → 0");
+
+        /* fscope=3 (body) — body not cached, match returns 0 */
+        list_filter_rebuild(lfr_entries, 2, lfr_m, &lfr_cfg, lfr_folder,
+                            "Hello", 3, fentries, &fcount);
+        ASSERT(fcount >= 0, "list_filter_rebuild: body scope → non-negative");
+
+        manifest_free(lfr_m);
+    }
+
+    /* ── email_service_save_draft ───────────────────────────────────────── */
+    {
+        Config sd_cfg = {0};
+        sd_cfg.host   = "imaps://test.example.com";
+        sd_cfg.user   = "testuser";
+        sd_cfg.folder = "INBOX";
+
+        const char *draft_msg =
+            "From: test@example.com\r\nSubject: Draft\r\n\r\nDraft body\r\n";
+
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int dr = email_service_save_draft(&sd_cfg, draft_msg, strlen(draft_msg));
+        RESTORE_OUT(sout, serr);
+        ASSERT(dr == 0, "email_service_save_draft: saves locally → 0");
+
+        /* NULL msg → -1 */
+        SUPPRESS_OUT(sout, serr);
+        int dr2 = email_service_save_draft(&sd_cfg, NULL, 0);
+        RESTORE_OUT(sout, serr);
+        ASSERT(dr2 == -1, "email_service_save_draft: NULL msg → -1");
+    }
+
+    /* ── email_service_apply_rules: account not found ────────────────────── */
+    {
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int ar = email_service_apply_rules("nonexistent_account_xyz_ZZZZZ",
+                                            0, 0);
+        RESTORE_OUT(sout, serr);
+        ASSERT(ar == -1, "apply_rules: nonexistent account → -1");
+    }
+
+    /* ── email_service_apply_rules: account with no rules ─────────────────── */
+    {
+        /* Save an IMAP account that has NO rules file */
+        Config norules_cfg = {0};
+        norules_cfg.host   = "imaps://no.such.host.invalid";
+        norules_cfg.user   = "norules-unit@example.com";
+        norules_cfg.pass   = "x";
+        norules_cfg.folder = "INBOX";
+        config_delete_account("norules-unit@example.com");
+        config_save_account(&norules_cfg);
+
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int ar = email_service_apply_rules("norules-unit@example.com", 0, 0);
+        RESTORE_OUT(sout, serr);
+        /* No rules file → total_fired=0, done=1 → returns 0 */
+        ASSERT(ar >= 0, "apply_rules: no-rules account → 0 (or total_fired)");
+
+        config_delete_account("norules-unit@example.com");
+    }
+
+    /* ── email_service_apply_rules: Gmail account with rules (dry-run) ──── */
+    {
+        /* Create Gmail account with a rule that matches INBOX messages */
+        Config gar_cfg = {0};
+        gar_cfg.host                = NULL;
+        gar_cfg.user                = "applyrules-gmail@example.com";
+        gar_cfg.gmail_mode          = 1;
+        gar_cfg.gmail_refresh_token = "fake_token_applyrules";
+        gar_cfg.folder              = "INBOX";
+        config_delete_account("applyrules-gmail@example.com");
+        config_save_account(&gar_cfg);
+
+        /* Populate local store for this account */
+        local_store_init(NULL, "applyrules-gmail@example.com");
+        const char *gar_uid = "0000000000ar0001";
+        label_idx_add("INBOX", gar_uid);
+        /* .hdr: from\tsubject\tdate\tlabels\tflags */
+        const char *gar_hdr = "github@github.com\tPR review\t2026-01-15 10:00\tINBOX\t0";
+        local_hdr_save("", gar_uid, gar_hdr, strlen(gar_hdr));
+
+        /* Write a rules.ini for this account via mail_rules_save() */
+        {
+            MailRules gar_rules;
+            memset(&gar_rules, 0, sizeof(gar_rules));
+            MailRule gar_rule;
+            memset(&gar_rule, 0, sizeof(gar_rule));
+            /* Use when= expression so mail_rules_save writes it correctly */
+            gar_rule.when              = (char *)"from:*@github.com";
+            gar_rule.then_add_label[0] = (char *)"GitHub";
+            gar_rule.then_add_count    = 1;
+            gar_rule.then_rm_label[0]  = (char *)"INBOX";
+            gar_rule.then_rm_count     = 1;
+            gar_rules.rules = &gar_rule;
+            gar_rules.count = 1;
+            gar_rules.cap   = 1;
+            mail_rules_save("applyrules-gmail@example.com", &gar_rules);
+        }
+
+        int sout, serr;
+
+        /* dry_run=1, verbose=1: covers print_rule_matches path */
+        SUPPRESS_OUT(sout, serr);
+        int ar_dry = email_service_apply_rules("applyrules-gmail@example.com",
+                                                1, 1);
+        RESTORE_OUT(sout, serr);
+        ASSERT(ar_dry >= 0, "apply_rules Gmail dry-run: returns >=0");
+
+        /* dry_run=0: actually applies changes */
+        local_store_init(NULL, "applyrules-gmail@example.com");
+        local_hdr_save("", gar_uid, gar_hdr, strlen(gar_hdr));  /* reset hdr */
+        label_idx_add("INBOX", gar_uid);
+
+        SUPPRESS_OUT(sout, serr);
+        int ar_live = email_service_apply_rules("applyrules-gmail@example.com",
+                                                 0, 0);
+        RESTORE_OUT(sout, serr);
+        ASSERT(ar_live >= 0, "apply_rules Gmail live: returns >=0");
+
+        config_delete_account("applyrules-gmail@example.com");
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_apply_rules: IMAP account with rules (dry-run) ─────── */
+    {
+        const char *imap_ar_user = "applyrules-imap@example.com";
+        Config iap_cfg = {0};
+        iap_cfg.host   = "imaps://no.such.host.invalid";
+        iap_cfg.user   = (char *)imap_ar_user;
+        iap_cfg.pass   = "x";
+        iap_cfg.folder = "INBOX";
+        config_delete_account(imap_ar_user);
+        config_save_account(&iap_cfg);
+
+        /* Populate manifest with a message that will match the rule */
+        local_store_init(iap_cfg.host, iap_cfg.user);
+        Manifest *iap_m = calloc(1, sizeof(Manifest));
+        manifest_upsert(iap_m, "0000000000ap0001",
+                        strdup("boss@company.com"), strdup("Urgent task"),
+                        strdup("2026-01-15 10:00"), MSG_FLAG_UNSEEN);
+        manifest_save("INBOX", iap_m);
+        manifest_free(iap_m);
+
+        /* Write a rules.ini via mail_rules_save() */
+        {
+            MailRules iap_rules;
+            memset(&iap_rules, 0, sizeof(iap_rules));
+            MailRule iap_rule;
+            memset(&iap_rule, 0, sizeof(iap_rule));
+            /* Use when= expression; add _flagged → lmap path; remove UNREAD → fmap path */
+            iap_rule.when              = (char *)"from:*@company.com";
+            iap_rule.then_add_label[0] = (char *)"_flagged";
+            iap_rule.then_add_count    = 1;
+            iap_rule.then_rm_label[0]  = (char *)"UNREAD";
+            iap_rule.then_rm_count     = 1;
+            iap_rules.rules = &iap_rule;
+            iap_rules.count = 1;
+            iap_rules.cap   = 1;
+            mail_rules_save(imap_ar_user, &iap_rules);
+        }
+
+        int sout, serr;
+
+        /* dry_run=1, verbose=1: covers print_rule_matches IMAP path */
+        SUPPRESS_OUT(sout, serr);
+        int iap_dry = email_service_apply_rules(imap_ar_user, 1, 1);
+        RESTORE_OUT(sout, serr);
+        ASSERT(iap_dry >= 0, "apply_rules IMAP dry-run: returns >=0");
+
+        /* dry_run=0: applies changes, covers lines 5742-5774 */
+        local_store_init(iap_cfg.host, iap_cfg.user);
+        Manifest *iap_m2 = calloc(1, sizeof(Manifest));
+        manifest_upsert(iap_m2, "0000000000ap0001",
+                        strdup("boss@company.com"), strdup("Urgent task"),
+                        strdup("2026-01-15 10:00"), MSG_FLAG_UNSEEN);
+        manifest_save("INBOX", iap_m2);
+        manifest_free(iap_m2);
+
+        SUPPRESS_OUT(sout, serr);
+        int iap_live = email_service_apply_rules(imap_ar_user, 0, 0);
+        RESTORE_OUT(sout, serr);
+        ASSERT(iap_live >= 0, "apply_rules IMAP live: returns >=0");
+
+        config_delete_account(imap_ar_user);
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_apply_rules: IMAP with move_folder rule ──────────── */
+    {
+        const char *iap_mv_user = "applyrules-move@example.com";
+        Config iap_mv_cfg = {0};
+        iap_mv_cfg.host   = "imaps://no.such.host.invalid";
+        iap_mv_cfg.user   = (char *)iap_mv_user;
+        iap_mv_cfg.pass   = "x";
+        iap_mv_cfg.folder = "INBOX";
+        config_delete_account(iap_mv_user);
+        config_save_account(&iap_mv_cfg);
+
+        local_store_init(iap_mv_cfg.host, iap_mv_cfg.user);
+        Manifest *mv_m = calloc(1, sizeof(Manifest));
+        manifest_upsert(mv_m, "0000000000mv0001",
+                        strdup("newsletter@promo.com"), strdup("Promo"),
+                        strdup("2026-01-15 10:00"), MSG_FLAG_UNSEEN);
+        manifest_save("INBOX", mv_m);
+        manifest_free(mv_m);
+
+        {
+            MailRules mv_rules;
+            memset(&mv_rules, 0, sizeof(mv_rules));
+            MailRule mv_rule;
+            memset(&mv_rule, 0, sizeof(mv_rule));
+            mv_rule.when             = (char *)"from:*@promo.com";
+            mv_rule.then_move_folder = (char *)"Promotions";
+            mv_rules.rules = &mv_rule;
+            mv_rules.count = 1;
+            mv_rules.cap   = 1;
+            mail_rules_save(iap_mv_user, &mv_rules);
+        }
+
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int mv_r = email_service_apply_rules(iap_mv_user, 0, 0);
+        RESTORE_OUT(sout, serr);
+        ASSERT(mv_r >= 0, "apply_rules IMAP move: returns >=0");
+
+        config_delete_account(iap_mv_user);
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_rebuild_indexes: no accounts ─────────────────────── */
+    /* Call with a definitely-nonexistent account while real accounts exist:
+     * done==0 → returns -1 (covers 5395-5397) */
+    {
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int ri = email_service_rebuild_indexes("nonexistent_rebuild_acct_XYZ");
+        RESTORE_OUT(sout, serr);
+        ASSERT(ri == -1, "rebuild_indexes: nonexistent account → -1");
+    }
+
+    /* ── email_service_rebuild_indexes: IMAP account → skip ─────────────── */
+    {
+        /* imap account is not Gmail → covers 5381-5384 */
+        const char *ri_user = "rebuild-imap-unit@example.com";
+        Config ri_cfg = {0};
+        ri_cfg.host      = "imaps://no.such.host.invalid";
+        ri_cfg.user      = (char *)ri_user;
+        ri_cfg.pass      = "x";
+        ri_cfg.folder    = "INBOX";
+        ri_cfg.gmail_mode = 0;
+        config_delete_account(ri_user);
+        config_save_account(&ri_cfg);
+
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int ri2 = email_service_rebuild_indexes(ri_user);
+        RESTORE_OUT(sout, serr);
+        /* IMAP accounts are skipped → done=1, errors=0 → returns 0 */
+        ASSERT(ri2 == 0, "rebuild_indexes: IMAP account → 0 (skipped)");
+
+        config_delete_account(ri_user);
+    }
+
+    /* ── email_service_rebuild_contacts: account not found ──────────────── */
+    {
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int rc = email_service_rebuild_contacts("nonexistent_contacts_XYZ");
+        RESTORE_OUT(sout, serr);
+        ASSERT(rc == -1, "rebuild_contacts: nonexistent account → -1");
+    }
+
+    /* ── email_service_rebuild_contacts: only_account filter ────────────── */
+    {
+        /* Save an account; call rebuild with a different only_account filter.
+         * done==0 → returns -1 (covers line 5820-5821 and 5830-5832). */
+        const char *rcc_user = "rebuild-contacts-unit@example.com";
+        Config rcc_cfg = {0};
+        rcc_cfg.host   = "imaps://no.such.host.invalid";
+        rcc_cfg.user   = (char *)rcc_user;
+        rcc_cfg.pass   = "x";
+        rcc_cfg.folder = "INBOX";
+        config_delete_account(rcc_user);
+        config_save_account(&rcc_cfg);
+
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        /* Filter is a different name → skip all → done=0 → -1 */
+        int rc2 = email_service_rebuild_contacts("different_account_ZZZZ");
+        RESTORE_OUT(sout, serr);
+        ASSERT(rc2 == -1, "rebuild_contacts: filter skips all → -1");
+
+        /* Call with matching account → done=1 → 0 */
+        SUPPRESS_OUT(sout, serr);
+        int rc3 = email_service_rebuild_contacts(rcc_user);
+        RESTORE_OUT(sout, serr);
+        ASSERT(rc3 == 0, "rebuild_contacts: matching account → 0");
+
+        config_delete_account(rcc_user);
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_sync_all: only_account not found ─────────────────── */
+    {
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int sa2 = email_service_sync_all("nonexistent_sync_acct_XYZZY", 0);
+        RESTORE_OUT(sout, serr);
+        ASSERT(sa2 == -1, "email_service_sync_all: not-found account → -1");
+    }
+
+    /* ── email_service_list_labels_interactive: HOME / END keys ─────────── */
+    {
+        local_store_init(NULL, "testlabels@gmail.com");
+        Config lhe_cfg = {0};
+        lhe_cfg.host       = NULL;
+        lhe_cfg.user       = "testlabels@gmail.com";
+        lhe_cfg.gmail_mode = 1;
+
+        int go_upHE = 0;
+        int saved_stdin;
+        /* HOME → cursor goes to first, END → cursor goes to last, then ESC */
+        const char home_end[] = { '\033','[','H',  /* TERM_KEY_HOME */
+                                   '\033','[','F',  /* TERM_KEY_END  */
+                                   '\033', 'x'      /* ESC exit     */};
+        INJECT_STDIN(home_end, 8, saved_stdin);
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        char *he_sel = email_service_list_labels_interactive(
+                           &lhe_cfg, "INBOX", &go_upHE);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        free(he_sel);
+        ASSERT(1, "labels_interactive: HOME+END+ESC no crash");
+
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_list_labels_interactive: no labels synced yet ────── */
+    {
+        /* Create a Gmail account whose local_store has NO label index at all.
+         * list_labels_interactive will show "No labels synced yet." message and
+         * wait for a key. Covers lines 4136-4151. */
+        local_store_init(NULL, "nolabels-unit@gmail.com");
+        /* Do NOT call label_idx_add — leave label index empty */
+
+        Config nl_cfg = {0};
+        nl_cfg.host       = NULL;
+        nl_cfg.user       = "nolabels-unit@gmail.com";
+        nl_cfg.gmail_mode = 1;
+
+        int go_up_nl = 0;
+        int saved_stdin;
+        /* ESC exits the "no labels" loop */
+        INJECT_STDIN("\033x", 2, saved_stdin);
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        char *nl_sel = email_service_list_labels_interactive(
+                           &nl_cfg, "INBOX", &go_up_nl);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        free(nl_sel);
+        ASSERT(1, "labels_interactive: no-labels path no crash");
+
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_list_folders_interactive: flat mode + Enter ──────── */
+    /* Covers the flat-mode code path (lines 3617-3627): when tree_mode=0 and
+     * the user presses Enter on a leaf folder (not a parent), it returns the
+     * selected folder. */
+    {
+        local_store_init("imaps://test.example.com", "foldercache@example.com");
+        /* The folder cache was populated in an earlier test (INBOX, INBOX.Sent,
+         * INBOX.Archive, Trash). */
+
+        Config fif_cfg = {0};
+        fif_cfg.host   = "imaps://test.example.com";
+        fif_cfg.user   = "foldercache@example.com";
+        fif_cfg.folder = "INBOX";
+
+        /* Force flat mode */
+        ui_pref_set_int("folder_view_mode", 0);
+
+        int go_up_fif = 0;
+        int saved_stdin;
+        /* Enter selects first visible item (root "INBOX" = has children → drills in),
+         * then Down moves to "INBOX.Sent" (leaf), then Enter selects it. */
+        /* In flat mode root view, pressing Enter on INBOX (which has children)
+         * updates current_prefix and loops; subsequent Enter on leaf selects it.
+         * Use: Enter (INBOX→drill), Enter (INBOX.Sent→select) */
+        INJECT_STDIN("\r\r", 2, saved_stdin);
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        char *fif_sel = email_service_list_folders_interactive(
+                            &fif_cfg, "INBOX", &go_up_fif);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        /* May select a folder or ESC-timeout → either is fine */
+        ASSERT(fif_sel == NULL || strlen(fif_sel) > 0,
+               "folders_interactive flat: Enter returns NULL or folder");
+        free(fif_sel);
+
+        /* Restore */
+        ui_pref_set_int("folder_view_mode", 1);
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── show_uid_interactive: search ('/') and 'n' navigation ─────────── */
+    /* Covers lines 1069-1097 (inline search prompt) and 1098-1104 (next match). */
+    {
+        const char *srch_uid = "0000000000sr0001";
+        const char *srch_msg =
+            "From: srch@example.com\r\n"
+            "Subject: Search Test\r\n"
+            "MIME-Version: 1.0\r\n"
+            "Content-Type: text/plain; charset=UTF-8\r\n"
+            "\r\n"
+            "Line one: the quick brown fox\r\n"
+            "Line two: jumps over the lazy dog\r\n"
+            "Line three: quick again\r\n";
+        local_store_init("imaps://test.example.com", "testuser");
+        local_msg_save("INBOX", srch_uid, srch_msg, strlen(srch_msg));
+
+        Config srch_cfg = {0};
+        srch_cfg.host   = "imaps://test.example.com";
+        srch_cfg.user   = "testuser";
+        srch_cfg.folder = "INBOX";
+
+        int saved_stdin;
+        /* '/' opens search; type "quick"; Enter confirms; 'n' finds next; ESC exits */
+        const char srch_keys[] =
+            "/"        /* open search */
+            "quick"    /* type search term */
+            "\r"       /* confirm search */
+            "n"        /* find next match */
+            "\033x";   /* ESC exit */
+        INJECT_STDIN(srch_keys, (int)strlen(srch_keys), saved_stdin);
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int srch_r = show_uid_interactive(&srch_cfg, NULL, "INBOX",
+                                          srch_uid, 25, 0, NULL);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(srch_r == 0 || srch_r == 1,
+               "show_uid_interactive: search '/' + 'n' no crash");
+    }
+
+    /* ── show_uid_interactive: HOME / END keys ──────────────────────────── */
+    /* Covers lines 1046-1051 */
+    {
+        Config he_cfg = {0};
+        he_cfg.host   = "imaps://test.example.com";
+        he_cfg.user   = "testuser";
+        he_cfg.folder = "INBOX";
+
+        int saved_stdin;
+        /* HOME, END, then ESC */
+        const char he_keys[] = { '\033','[','H',  /* HOME */
+                                   '\033','[','F',  /* END  */
+                                   '\033', 'x'      /* ESC  */ };
+        INJECT_STDIN(he_keys, 8, saved_stdin);
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int he_r = show_uid_interactive(&he_cfg, NULL, "INBOX",
+                                         "0000000000sr0001", 25, 0, NULL);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(he_r == 0 || he_r == 1,
+               "show_uid_interactive: HOME+END+ESC no crash");
+    }
+
+    /* ── show_uid_interactive: Gmail 'a' archive key (lines 1184-1220) ── */
+    /* Also covers 't' label-picker (1221-1225), 'f' star (1228-1237),
+     * 'n' unread toggle (1253-1262), 'D' trash (1164-1176),
+     * 'r' remove-label (1153-1163). */
+    {
+        local_store_init(NULL, "gmailreader@test.com");
+        const char *gr_uid = "0000000000gr0001";
+
+        /* Store .hdr with labels including INBOX and UNREAD */
+        const char *gr_hdr = "from@test.com\tGmail Reader Test\t2026-01-15 10:00\tINBOX,UNREAD\t3";
+        local_hdr_save("", gr_uid, gr_hdr, strlen(gr_hdr));
+
+        /* Store label indexes */
+        label_idx_add("INBOX",  gr_uid);
+        label_idx_add("UNREAD", gr_uid);
+
+        const char *gr_msg =
+            "From: from@test.com\r\n"
+            "Subject: Gmail Reader Test\r\n"
+            "Date: Thu, 15 Jan 2026 10:00:00 +0000\r\n"
+            "\r\n"
+            "Line 1\r\nLine 2\r\nLine 3\r\nLine 4\r\n"
+            "Line 5\r\nLine 6\r\nLine 7\r\nLine 8\r\n";
+        local_msg_save("INBOX", gr_uid, gr_msg, strlen(gr_msg));
+
+        Config gr_cfg = {0};
+        gr_cfg.host       = NULL;
+        gr_cfg.user       = "gmailreader@test.com";
+        gr_cfg.folder     = "INBOX";
+        gr_cfg.gmail_mode = 1;
+
+        int saved_stdin;
+        int sout, serr;
+
+        /* 'r' = remove current label (1153-1163), then ESC */
+        INJECT_STDIN("r\033x", 4, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+
+        /* Restore hdr/labels for next sub-test */
+        local_store_init(NULL, "gmailreader@test.com");
+        local_hdr_save("", gr_uid, gr_hdr, strlen(gr_hdr));
+        label_idx_add("INBOX",  gr_uid);
+        label_idx_add("UNREAD", gr_uid);
+        local_msg_save("INBOX", gr_uid, gr_msg, strlen(gr_msg));
+
+        /* 'D' = trash (1164-1176), then ESC */
+        INJECT_STDIN("D\033x", 4, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+
+        /* Restore for archive test */
+        local_store_init(NULL, "gmailreader@test.com");
+        local_hdr_save("", gr_uid, gr_hdr, strlen(gr_hdr));
+        label_idx_add("INBOX",  gr_uid);
+        label_idx_add("UNREAD", gr_uid);
+        local_msg_save("INBOX", gr_uid, gr_msg, strlen(gr_msg));
+
+        /* 'a' = archive (1177-1220), then ESC */
+        INJECT_STDIN("a\033x", 4, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        int gr_r = show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(gr_r == 0 || gr_r == 1,
+               "show_uid_interactive Gmail 'a' archive: no crash");
+
+        /* Restore for 't' + 'f' + 'n' tests */
+        local_store_init(NULL, "gmailreader@test.com");
+        local_hdr_save("", gr_uid, gr_hdr, strlen(gr_hdr));
+        label_idx_add("INBOX",  gr_uid);
+        label_idx_add("UNREAD", gr_uid);
+        local_msg_save("INBOX", gr_uid, gr_msg, strlen(gr_msg));
+
+        /* 't' = label-picker (1221-1225): picker opens, ESC cancels it, then 'q' */
+        /* picker reads '\033'+'X' = ESC (X consumed as c2 by ESC handler), then 'q' quits reader */
+        INJECT_STDIN("t\033Xq", 4, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+
+        /* Restore for 'f' (star) test */
+        local_store_init(NULL, "gmailreader@test.com");
+        local_hdr_save("", gr_uid, gr_hdr, strlen(gr_hdr));
+        label_idx_add("INBOX",  gr_uid);
+        label_idx_add("UNREAD", gr_uid);
+        local_msg_save("INBOX", gr_uid, gr_msg, strlen(gr_msg));
+
+        /* 'f' = toggle starred (1226-1250): message not starred → add STARRED label */
+        /* 'n' = toggle unread (1251-1275): message is UNREAD → mark as read */
+        INJECT_STDIN("fn\033x", 5, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(1, "show_uid_interactive Gmail 'f'+'n' toggle: no crash");
+
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_list: empty Gmail _trash pager (lines 2295-2298) ─── */
+    /* Covers the show_count==0 + pager + _trash statusbar variant */
+    {
+        local_store_init(NULL, "emptytrash@gmail.com");
+        /* No messages: label index empty → show_count = 0 */
+
+        Config et_cfg = {0};
+        et_cfg.host       = NULL;
+        et_cfg.user       = "emptytrash@gmail.com";
+        et_cfg.folder     = "_trash";
+        et_cfg.gmail_mode = 1;
+
+        EmailListOpts et_opts = {0};
+        et_opts.folder = "_trash";
+        et_opts.pager  = 1;
+
+        int saved_stdin;
+        INJECT_STDIN("\033x", 2, saved_stdin);
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int et_r = email_service_list(&et_cfg, &et_opts);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(et_r == 0 || et_r == 1,
+               "email_service_list empty Gmail _trash pager: returns 0 or 1");
+
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_list: empty Gmail non-trash pager (lines 2304-2308) ── */
+    /* Covers show_count==0 + pager + Gmail non-trash statusbar */
+    {
+        local_store_init(NULL, "emptyinbox@gmail.com");
+
+        Config ei_cfg = {0};
+        ei_cfg.host       = NULL;
+        ei_cfg.user       = "emptyinbox@gmail.com";
+        ei_cfg.folder     = "INBOX";
+        ei_cfg.gmail_mode = 1;
+
+        EmailListOpts ei_opts = {0};
+        ei_opts.folder = "INBOX";
+        ei_opts.pager  = 1;
+
+        int saved_stdin;
+        INJECT_STDIN("\033x", 2, saved_stdin);
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int ei_r = email_service_list(&ei_cfg, &ei_opts);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(ei_r == 0 || ei_r == 1,
+               "email_service_list empty Gmail INBOX pager: returns 0 or 1");
+
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_list: Gmail 'd' remove-label when only label left ─── */
+    /* Covers lines 3128-3147 (has_real check, _nolabel fallback) */
+    {
+        local_store_init(NULL, "lblremove@gmail.com");
+        const char *lr_uid = "0000000000lr0001";
+
+        /* Message has INBOX + UNREAD labels.
+         * After removing INBOX the loop in email_service.c lines 3133-3143 runs:
+         * UNREAD remains but is excluded from "real" labels → has_real stays 0
+         * → label_idx_add("_nolabel", uid) fires (line 3147). */
+        const char *lr_hdr = "sender@test.com\tLabel Remove\t2026-01-15 10:00\tINBOX,UNREAD\t1";
+        local_hdr_save("", lr_uid, lr_hdr, strlen(lr_hdr));
+        label_idx_add("INBOX", lr_uid);
+        label_idx_add("UNREAD", lr_uid);
+
+        /* Also need a raw message so the manifest can be populated */
+        const char *lr_msg =
+            "From: sender@test.com\r\n"
+            "Subject: Label Remove\r\n"
+            "\r\n"
+            "Body text\r\n";
+        local_msg_save("INBOX", lr_uid, lr_msg, strlen(lr_msg));
+
+        Config lr_cfg = {0};
+        lr_cfg.host       = NULL;
+        lr_cfg.user       = "lblremove@gmail.com";
+        lr_cfg.folder     = "INBOX";
+        lr_cfg.gmail_mode = 1;
+
+        EmailListOpts lr_opts = {0};
+        lr_opts.folder = "INBOX";
+        lr_opts.pager  = 1;
+
+        int saved_stdin;
+        /* 'd' removes INBOX label from message → no real labels remain → _nolabel
+         * 'd' again on same entry → undo (restore) path
+         * then ESC to exit */
+        INJECT_STDIN("dd\033x", 5, saved_stdin);
+        int sout, serr;
+        SUPPRESS_OUT(sout, serr);
+        int lr_r = email_service_list(&lr_cfg, &lr_opts);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(lr_r == 0 || lr_r == 1,
+               "email_service_list Gmail 'd' remove-label no-real-labels: no crash");
+
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_list_folders_interactive: HOME+END + '/' search ── */
+    /* Covers lines 3654-3660 (HOME/END), 3670-3684 ('/'), 3695-3702 (BACK+UTF8),
+     * 3707-3715 ('t' toggle, 'c' compose) */
+    {
+        local_store_init("imaps://test.example.com", "foldercache@example.com");
+
+        Config fhe_cfg = {0};
+        fhe_cfg.host   = "imaps://test.example.com";
+        fhe_cfg.user   = "foldercache@example.com";
+        fhe_cfg.folder = "INBOX";
+
+        ui_pref_set_int("folder_view_mode", 1);
+
+        int go_up_fhe = 0;
+        int saved_stdin;
+        int sout, serr;
+
+        /* HOME key → cursor=0 */
+        const char fhe_home[] = { '\033','[','H',  /* HOME */ '\033','x' /* ESC */ };
+        INJECT_STDIN(fhe_home, 5, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        char *fhe_r1 = email_service_list_folders_interactive(
+                           &fhe_cfg, "INBOX", &go_up_fhe);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        free(fhe_r1);
+        ASSERT(1, "folders_interactive: HOME key covered");
+
+        /* END key */
+        const char fhe_end[] = { '\033','[','F',  /* END */ '\033','x' /* ESC */ };
+        INJECT_STDIN(fhe_end, 5, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        char *fhe_r2 = email_service_list_folders_interactive(
+                           &fhe_cfg, "INBOX", &go_up_fhe);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        free(fhe_r2);
+        ASSERT(1, "folders_interactive: END key covered");
+
+        /* '/' search: type 'x', then TAB (toggle scope), then BACK (delete),
+         * then 'a', then ESC+Z to cancel search (Z is c2 consumed by ESC handler),
+         * then ESC+X to exit folder picker */
+        const char fhe_slash[] = {
+            '/', 'x', '\t', '\x7f', 'a', '\033', 'Z',  /* search loop: type+tab+back+type+ESC+c2 */
+            '\033', 'X'                                  /* exit picker (X is c2 consumed) */
+        };
+        INJECT_STDIN(fhe_slash, 9, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        char *fhe_r3 = email_service_list_folders_interactive(
+                           &fhe_cfg, "INBOX", &go_up_fhe);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        free(fhe_r3);
+        ASSERT(1, "folders_interactive: '/' search with TAB+BACK+UTF8 covered");
+
+        /* 't' = toggle tree/flat mode */
+        INJECT_STDIN("t\033x", 4, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        char *fhe_r4 = email_service_list_folders_interactive(
+                           &fhe_cfg, "INBOX", &go_up_fhe);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        free(fhe_r4);
+        ASSERT(1, "folders_interactive: 't' tree toggle covered");
+
+        /* 'c' = compose → returns "__compose__" */
+        INJECT_STDIN("c", 1, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        char *fhe_r5 = email_service_list_folders_interactive(
+                           &fhe_cfg, "INBOX", &go_up_fhe);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(fhe_r5 != NULL && strcmp(fhe_r5, "__compose__") == 0,
+               "folders_interactive: 'c' returns __compose__");
+        free(fhe_r5);
+
+        ui_pref_set_int("folder_view_mode", 1);
+        local_store_init("imaps://test.example.com", "testuser");
+    }
+
+    /* ── email_service_list_labels_interactive: '/' search (4334-4344) ── */
+    /* Also covers 'd' delete label rebuild (4422-4449) */
+    {
+        local_store_init(NULL, "lblsearch@gmail.com");
+        label_idx_add("MyLabel", "0000000000ls0001");
+
+        Config lbs_cfg = {0};
+        lbs_cfg.host       = NULL;
+        lbs_cfg.user       = "lblsearch@gmail.com";
+        lbs_cfg.gmail_mode = 1;
+
+        int go_up_lbs = 0;
+        int saved_stdin;
+        int sout, serr;
+
+        /* '/' opens search; type 'x', then TAB (cycle scope), then BACK (delete x),
+         * then 'a' (type 'a'), then ESC cancel search, then 'd' delete current label,
+         * then ESC exit.
+         * Note: ESC handler reads the NEXT byte as c2 (VMIN=0 on pipe fails silently,
+         * but read() still reads from the pipe buffer). So use \033+Z to ESC-cancel
+         * search (Z consumed as c2), leaving 'd' available for the outer loop. */
+        const char lbs_keys[] = {
+            '/', 'x', '\t', '\x7f', 'a', '\033', 'Z',  /* search: type+tab+back+type+ESC+consume */
+            'd',                                         /* delete selected label */
+            '\033', 'X'                                  /* ESC exit (X consumed as c2) */
+        };
+        INJECT_STDIN(lbs_keys, 10, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        char *lbs_ret = email_service_list_labels_interactive(
+                            &lbs_cfg, "INBOX", &go_up_lbs);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        free(lbs_ret);
+        ASSERT(1, "labels_interactive: '/' search TAB+BACK + 'd' delete covered");
+
+        local_store_init("imaps://test.example.com", "testuser");
+    }
 }

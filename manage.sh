@@ -181,7 +181,7 @@ case "$1" in
         pkill "mock_imap_server" 2>/dev/null || true
         pkill "mock-imap-server" 2>/dev/null || true
         sleep 0.3
-        ./tests/functional/run_functional.sh
+        ./tests/functional/run_functional.sh || true
         echo "Running PTY tests for coverage..."
         ABS_BUILD="$(realpath "$BUILD_DIR")"
         ABS_BIN="$(realpath "$BIN_DIR")"

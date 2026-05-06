@@ -55,7 +55,7 @@ set(TEST_KEY  ${TEST_CERT_DIR}/test.key)
 add_custom_command(
     OUTPUT ${TEST_CERT} ${TEST_KEY}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${TEST_CERT_DIR}
-    COMMAND ${OPENSSL_EXECUTABLE} req -x509 -newkey rsa:2048
+    COMMAND ${OPENSSL_EXECUTABLE} req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256
             -keyout ${TEST_KEY}
             -out ${TEST_CERT}
             -days 3650 -nodes

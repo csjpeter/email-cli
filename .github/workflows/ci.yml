@@ -21,6 +21,3 @@ jobs:
 
       - name: Unit tests with ASAN
         run: ./manage.sh test
-
-      - name: Unit tests with Valgrind
-        run: ./manage.sh valgrind

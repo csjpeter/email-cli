@@ -241,6 +241,8 @@ static PtySession *tui_open_to_inbox(void) {
     if (pty_wait_for(s, "Folders", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_send_key(s, PTY_KEY_HOME);
     for (int i = 0; i < 6; i++) { pty_send_key(s, PTY_KEY_DOWN); pty_settle(s, 50); }
+    if (pty_wait_for(s, "INBOX", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     if (pty_wait_for(s, "message(s) in", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);

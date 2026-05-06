@@ -3632,7 +3632,7 @@ static void test_tui_rules_editor_q_closes(void) {
     pty_send_str(s, "l");
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
     pty_send_str(s, "q");
-    ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -3842,6 +3842,7 @@ static void test_tui_rules_edit_form_prefill(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "e");
     ASSERT_WAIT_FOR(s, "conditions (step 1/2)", WAIT_MS); /* step 1 */
+    pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "*@spam.example.com");       /* if-from condition prefilled */
     pty_send_key(s, PTY_KEY_ESC);                          /* cancel edit */
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);

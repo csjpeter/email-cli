@@ -5,6 +5,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <time.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
@@ -119,6 +121,10 @@ static int mc_make_listener(int *port_out) {
     if (fd < 0) return -1;
     int one = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    /* 3-second accept() timeout: server child exits cleanly if the test
+     * returns early (ASSERT failure) without ever connecting. */
+    struct timeval acc_tv = {.tv_sec = 3, .tv_usec = 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &acc_tv, sizeof(acc_tv));
     struct sockaddr_in addr = {0};
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -307,7 +313,18 @@ static pid_t mc_start_server(int *port_out, int count) {
 }
 
 static void mc_wait(pid_t pid) {
-    if (pid > 0) { int st; waitpid(pid, &st, 0); }
+    if (pid <= 0) return;
+    /* Poll with timeout: if server child doesn't exit within 5s, kill it.
+     * This prevents infinite hangs when a test fails before connecting. */
+    for (int i = 0; i < 50; i++) {
+        int st;
+        pid_t r = waitpid(pid, &st, WNOHANG);
+        if (r != 0) return;
+        struct timespec ts = {0, 100000000L}; /* 100ms */
+        nanosleep(&ts, NULL);
+    }
+    kill(pid, SIGKILL);
+    int st; waitpid(pid, &st, 0);
 }
 
 /* Build a connected Gmail MailClient pointing to our mock server */

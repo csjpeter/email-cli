@@ -5,6 +5,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <time.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
@@ -120,6 +122,10 @@ static int make_mock_listener(int *port_out) {
     if (fd < 0) return -1;
     int one = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    /* 3-second accept() timeout so server children don't hang when the test
+     * returns early due to an ASSERT failure before connecting. */
+    struct timeval acc_tv = {.tv_sec = 3, .tv_usec = 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &acc_tv, sizeof(acc_tv));
     struct sockaddr_in addr = {0};
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -368,10 +374,17 @@ static GmailClient *make_test_client(int port) {
 }
 
 static void wait_child(pid_t pid) {
-    if (pid > 0) {
-        int status;
-        waitpid(pid, &status, 0);
+    if (pid <= 0) return;
+    /* Poll with timeout: kill child if it doesn't exit within 5s. */
+    for (int i = 0; i < 50; i++) {
+        int st;
+        pid_t r = waitpid(pid, &st, WNOHANG);
+        if (r != 0) return;
+        struct timespec ts = {0, 100000000L}; /* 100ms */
+        nanosleep(&ts, NULL);
     }
+    kill(pid, SIGKILL);
+    int st; waitpid(pid, &st, 0);
 }
 
 /* ── Tests using the mock HTTP server ─────────────────────────────── */

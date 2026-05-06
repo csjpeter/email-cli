@@ -71,7 +71,9 @@ SMTP_LOG="$PROJECT_ROOT/build/tests/functional/mock_smtp.log"
 SMTP_PID=$!
 
 trap "kill $SERVER1_PID $SERVER2_PID $SERVER3_PID $SMTP_PID \
-          \${SERVER200_PID:-} \${GMAIL_SERVER_PID:-} 2>/dev/null || true" EXIT
+          \${SERVER200_PID:-} \${GMAIL_SERVER_PID:-} \
+          \${GMAIL60_PID:-} \${GMAIL_RECONC_PID:-} \${GMAIL_LABEL_PID:-} \
+          \${QRESYNC_PID:-} \${GMAIL_EXPIRED_PID:-} 2>/dev/null || true" EXIT
 
 sleep 1
 
@@ -3304,6 +3306,515 @@ check_not "59.1 search by keyword: no crash"  "Segmentation\|Abort"  "$SRCH_OUT"
 SRCH_EMPTY=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-cli" --batch list --folder "__search__:0:ZZZNOMATCH99" 2>&1 || true) )
 check_not "59.2 search no result: no crash"   "Segmentation\|Abort"  "$SRCH_EMPTY"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 60 — Gmail label write operations
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 60: Gmail label write operations ---"
+
+# Phase 60–66 use a dedicated Gmail mock + home (H_GMAIL was cleaned up in Phase 30).
+GMAIL60_PORT=10005
+GMAIL60_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail60.log"
+echo "Starting mock Gmail server for Phase 60-66 (port $GMAIL60_PORT)..."
+(MOCK_GMAIL_PORT=$GMAIL60_PORT MOCK_GMAIL_COUNT=20 \
+    MOCK_GMAIL_EMAIL="gwrite60@gmail.com" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL60_LOG" 2>&1 &
+GMAIL60_PID=$!
+
+H_GMAIL60="./build/tests/functional/homes/gmail60-$$"
+ACCT_GMAIL60="gwrite60@gmail.com"
+mkdir -p "$H_GMAIL60/config/email-cli/accounts/$ACCT_GMAIL60"
+mkdir -p "$H_GMAIL60/data"
+cat > "$H_GMAIL60/config/email-cli/accounts/$ACCT_GMAIL60/config.ini" <<'GCFG60'
+EMAIL_HOST=
+EMAIL_USER=gwrite60@gmail.com
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=faketoken60
+GCFG60
+
+sleep 0.5
+
+# Initial sync to populate local message store
+(export XDG_CONFIG_HOME="$H_GMAIL60/config"
+ export XDG_DATA_HOME="$H_GMAIL60/data"
+ export XDG_CACHE_HOME="$H_GMAIL60/cache"
+ export HOME="$H_GMAIL60"
+ export GMAIL_TEST_TOKEN=testtoken60
+ export GMAIL_API_BASE_URL="http://localhost:$GMAIL60_PORT/gmail/v1/users/me"
+ "$BIN_DIR/email-sync" 2>&1 || true) >/dev/null 2>&1
+
+# Helpers for Phase 60-66
+run_gmail60_cli() {
+    (export XDG_CONFIG_HOME="$H_GMAIL60/config"
+     export XDG_DATA_HOME="$H_GMAIL60/data"
+     export XDG_CACHE_HOME="$H_GMAIL60/cache"
+     export HOME="$H_GMAIL60"
+     export GMAIL_TEST_TOKEN=testtoken60
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL60_PORT/gmail/v1/users/me"
+     "$BIN_DIR/email-cli" "$ACCT_GMAIL60" --batch "$@" 2>&1 || true)
+}
+
+run_gmail60_ro() {
+    (export XDG_CONFIG_HOME="$H_GMAIL60/config"
+     export XDG_DATA_HOME="$H_GMAIL60/data"
+     export XDG_CACHE_HOME="$H_GMAIL60/cache"
+     export HOME="$H_GMAIL60"
+     export GMAIL_TEST_TOKEN=testtoken60
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL60_PORT/gmail/v1/users/me"
+     "$BIN_DIR/email-cli-ro" "$ACCT_GMAIL60" "$@" 2>&1 || true)
+}
+
+# 60.1-60.2: add-label to message 1
+AL60=$( run_gmail60_cli add-label 0000000000000001 Work )
+check_not "60.1 add-label Gmail: no crash"  "Segmentation\|Abort" "$AL60"
+check_not "60.2 add-label Gmail: no error"  "Error:"              "$AL60"
+
+# 60.3-60.4: remove-label from message 1
+RL60=$( run_gmail60_cli remove-label 0000000000000001 Work )
+check_not "60.3 remove-label Gmail: no crash" "Segmentation\|Abort" "$RL60"
+check_not "60.4 remove-label Gmail: no error" "Error:"              "$RL60"
+
+# 60.5-60.6: list-labels via write CLI
+LL60=$( run_gmail60_cli list-labels )
+check "60.5 list-labels CLI: INBOX present" "INBOX" "$LL60"
+check "60.6 list-labels CLI: Work present"  "Work"  "$LL60"
+
+# 60.7-60.8: mark-read / mark-unread on Gmail
+MR60=$( run_gmail60_cli mark-read 0000000000000001 )
+check_not "60.7 mark-read Gmail: no crash"   "Segmentation\|Abort" "$MR60"
+MU60=$( run_gmail60_cli mark-unread 0000000000000001 )
+check_not "60.8 mark-unread Gmail: no crash" "Segmentation\|Abort" "$MU60"
+
+# 60.9-60.10: mark-starred / remove-starred on Gmail
+MS60=$( run_gmail60_cli mark-starred 0000000000000001 )
+check_not "60.9 mark-starred Gmail: no crash"    "Segmentation\|Abort" "$MS60"
+RS60=$( run_gmail60_cli remove-starred 0000000000000001 )
+check_not "60.10 remove-starred Gmail: no crash" "Segmentation\|Abort" "$RS60"
+
+# 60.11: add-label on IMAP account → Gmail-mode error
+AL_IMAP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch add-label 1 Work 2>&1 || true) )
+check "60.11 add-label on IMAP: Gmail-mode error" "Gmail\|label" "$AL_IMAP"
+
+# 60.12: list-labels on IMAP account → Gmail-only error
+LL_IMAP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list-labels 2>&1 || true) )
+check "60.12 list-labels on IMAP: Gmail-only error" "Gmail\|folder" "$LL_IMAP"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 61 — Gmail vs IMAP mode mismatch errors
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 61: Gmail/IMAP mode mismatch errors ---"
+
+# 61.1: create-folder on Gmail → IMAP-only error
+CF_GMAIL=$( run_gmail60_cli create-folder TestFolder61 )
+check "61.1 create-folder on Gmail: IMAP-only error" "IMAP\|create-label" "$CF_GMAIL"
+
+# 61.2: delete-folder on Gmail → IMAP-only error
+DF_GMAIL=$( run_gmail60_cli delete-folder TestFolder61 )
+check "61.2 delete-folder on Gmail: IMAP-only error" "IMAP\|delete-label" "$DF_GMAIL"
+
+# 61.3: create-label on IMAP account → Gmail-only error
+CL_IMAP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch create-label TestLabel 2>&1 || true) )
+check "61.3 create-label on IMAP: Gmail-only error" "Gmail\|label" "$CL_IMAP"
+
+# 61.4: delete-label on IMAP account → Gmail-only error
+DL_IMAP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch delete-label TestLabel 2>&1 || true) )
+check "61.4 delete-label on IMAP: Gmail-only error" "Gmail\|label" "$DL_IMAP"
+
+# 61.5: add-label without args → error
+AL_NOARGS=$( run_gmail60_cli add-label )
+check "61.5 add-label no args: error" "Error\|requires" "$AL_NOARGS"
+
+# 61.6: remove-label without args → error
+RL_NOARGS=$( run_gmail60_cli remove-label )
+check "61.6 remove-label no args: error" "Error\|requires" "$RL_NOARGS"
+
+# 61.7: create-label without args → error
+CL_NOARGS=$( run_gmail60_cli create-label )
+check "61.7 create-label no args: error" "Error\|requires" "$CL_NOARGS"
+
+# 61.8: delete-label without args → error
+DL_NOARGS=$( run_gmail60_cli delete-label )
+check "61.8 delete-label no args: error" "Error\|requires" "$DL_NOARGS"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 62 — email-sync --reconcile (Gmail mock)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 62: email-sync --reconcile (Gmail) ---"
+
+GMAIL_RECONC_PORT=10001
+GMAIL_RECONC_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail_reconc.log"
+echo "Starting mock Gmail server for reconcile test (port $GMAIL_RECONC_PORT)..."
+(MOCK_GMAIL_PORT=$GMAIL_RECONC_PORT MOCK_GMAIL_COUNT=10 \
+    MOCK_GMAIL_EMAIL="reconc62@gmail.com" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL_RECONC_LOG" 2>&1 &
+GMAIL_RECONC_PID=$!
+
+H_RECONC="./build/tests/functional/homes/reconc62-$$"
+ACCT_RECONC="reconc62@gmail.com"
+mkdir -p "$H_RECONC/config/email-cli/accounts/$ACCT_RECONC"
+mkdir -p "$H_RECONC/data"
+cat > "$H_RECONC/config/email-cli/accounts/$ACCT_RECONC/config.ini" <<'GCFG_RECONC'
+EMAIL_HOST=
+EMAIL_USER=reconc62@gmail.com
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=faketoken62
+GCFG_RECONC
+
+run_reconc_sync() {
+    (export XDG_CONFIG_HOME="$H_RECONC/config"
+     export XDG_DATA_HOME="$H_RECONC/data"
+     export XDG_CACHE_HOME="$H_RECONC/cache"
+     export HOME="$H_RECONC"
+     export GMAIL_TEST_TOKEN=testtoken62
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL_RECONC_PORT/gmail/v1/users/me"
+     "$BIN_DIR/email-sync" "$@" 2>&1 || true)
+}
+
+sleep 0.5
+
+# Initial sync to populate local store
+SYNC62_INIT=$(run_reconc_sync)
+check "62.1 reconcile: initial sync completes" "fetched\|stored\|cached\|downloaded" "$SYNC62_INIT"
+
+# Force reconcile
+SYNC62_RECONC=$(run_reconc_sync --reconcile)
+check_not "62.2 reconcile: --reconcile no crash" "Segmentation\|Abort" "$SYNC62_RECONC"
+check_not "62.3 reconcile: --reconcile no error" "Error:"              "$SYNC62_RECONC"
+
+# List messages after reconcile
+LIST62=$( (export XDG_CONFIG_HOME="$H_RECONC/config"
+    export XDG_DATA_HOME="$H_RECONC/data"
+    export XDG_CACHE_HOME="$H_RECONC/cache"
+    export HOME="$H_RECONC"
+    export GMAIL_TEST_TOKEN=testtoken62
+    export GMAIL_API_BASE_URL="http://localhost:$GMAIL_RECONC_PORT/gmail/v1/users/me"
+    "$BIN_DIR/email-cli-ro" "$ACCT_RECONC" --batch list 2>&1 || true) )
+check "62.4 reconcile: messages present after reconcile" "Message" "$LIST62"
+
+kill "$GMAIL_RECONC_PID" 2>/dev/null || true
+case "$H_RECONC" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_RECONC path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_RECONC##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 63 — Gmail create-label + delete-label
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 63: Gmail create-label / delete-label ---"
+
+# Use a separate Gmail mock on port 10002 so POST /labels and DELETE /labels/{id}
+# are handled independently of the Phase 26 server.
+GMAIL_LABEL_PORT=10002
+GMAIL_LABEL_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail_label.log"
+echo "Starting mock Gmail server for label CRUD (port $GMAIL_LABEL_PORT)..."
+(MOCK_GMAIL_PORT=$GMAIL_LABEL_PORT MOCK_GMAIL_COUNT=5 \
+    MOCK_GMAIL_EMAIL="labeltest63@gmail.com" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL_LABEL_LOG" 2>&1 &
+GMAIL_LABEL_PID=$!
+
+H_LABEL="./build/tests/functional/homes/label63-$$"
+ACCT_LABEL="labeltest63@gmail.com"
+mkdir -p "$H_LABEL/config/email-cli/accounts/$ACCT_LABEL"
+mkdir -p "$H_LABEL/data"
+cat > "$H_LABEL/config/email-cli/accounts/$ACCT_LABEL/config.ini" <<'GCFG_LABEL'
+EMAIL_HOST=
+EMAIL_USER=labeltest63@gmail.com
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=faketoken63
+GCFG_LABEL
+
+run_label_cli() {
+    (export XDG_CONFIG_HOME="$H_LABEL/config"
+     export XDG_DATA_HOME="$H_LABEL/data"
+     export XDG_CACHE_HOME="$H_LABEL/cache"
+     export HOME="$H_LABEL"
+     export GMAIL_TEST_TOKEN=testtoken63
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL_LABEL_PORT/gmail/v1/users/me"
+     "$BIN_DIR/email-cli" "$ACCT_LABEL" --batch "$@" 2>&1 || true)
+}
+
+sleep 0.5
+
+# 63.1-63.2: create-label
+CL63=$( run_label_cli create-label MyNewLabel )
+check_not "63.1 create-label: no crash" "Segmentation\|Abort" "$CL63"
+check     "63.2 create-label: success"  "created\|Label\|label" "$CL63"
+
+# 63.3-63.4: delete-label
+DL63=$( run_label_cli delete-label Label_Test001 )
+check_not "63.3 delete-label: no crash" "Segmentation\|Abort" "$DL63"
+check_not "63.4 delete-label: no error" "Error:"              "$DL63"
+
+kill "$GMAIL_LABEL_PID" 2>/dev/null || true
+case "$H_LABEL" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_LABEL path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_LABEL##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 64 — IMAP CONDSTORE / QRESYNC sync
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 64: IMAP CONDSTORE/QRESYNC ---"
+
+QRESYNC_PORT=10003
+QRESYNC_LOG="$PROJECT_ROOT/build/tests/functional/mock_qresync.log"
+echo "Starting QRESYNC mock IMAP server (port $QRESYNC_PORT)..."
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$QRESYNC_PORT \
+    MOCK_IMAP_SUBJECT="QresyncMsg" \
+    MOCK_IMAP_CAPS="QRESYNC" \
+    MOCK_IMAP_MODSEQ="5000" \
+    MOCK_IMAP_COUNT=8 \
+    "$MOCK_SERVER_BIN") >"$QRESYNC_LOG" 2>&1 &
+QRESYNC_PID=$!
+
+H_QRESYNC="./build/tests/functional/homes/qresync64-$$"
+ACCT_QRESYNC="qresync64@test.local"
+make_home "$H_QRESYNC" "$ACCT_QRESYNC" "$QRESYNC_PORT"
+
+sleep 0.5
+
+# First sync: establishes UIDVALIDITY + HIGHESTMODSEQ baseline
+QR64_SYNC1=$( (export HOME="$H_QRESYNC"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) )
+check "64.1 QRESYNC first sync: completes" "fetch\|stor\|cach\|download\|already" "$QR64_SYNC1"
+
+# Second sync: triggers QRESYNC SELECT (QRESYNC uidvalidity modseq)
+QR64_SYNC2=$( (export HOME="$H_QRESYNC"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) )
+check_not "64.2 QRESYNC second sync: no crash" "Segmentation\|Abort" "$QR64_SYNC2"
+check_not "64.3 QRESYNC second sync: no error" "Error:"              "$QR64_SYNC2"
+
+# List after QRESYNC sync
+QR64_LIST=$( (export HOME="$H_QRESYNC"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list 2>&1 || true) )
+check "64.4 QRESYNC list: messages present" "QresyncMsg" "$QR64_LIST"
+
+kill "$QRESYNC_PID" 2>/dev/null || true
+case "$H_QRESYNC" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_QRESYNC path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_QRESYNC##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 65 — Gmail list-folders + mark-junk/notjunk on Gmail
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 65: Gmail list-folders / mark-junk / mark-notjunk ---"
+
+# list-folders on Gmail: should return labels not IMAP folders
+LF65=$( run_gmail60_cli list-folders )
+check_not "65.1 list-folders Gmail: no crash" "Segmentation\|Abort" "$LF65"
+
+# mark-junk on Gmail account
+MJ65=$( run_gmail60_cli mark-junk 0000000000000001 )
+check_not "65.2 mark-junk Gmail: no crash" "Segmentation\|Abort" "$MJ65"
+
+# mark-notjunk on Gmail account
+MNJ65=$( run_gmail60_cli mark-notjunk 0000000000000001 )
+check_not "65.3 mark-notjunk Gmail: no crash" "Segmentation\|Abort" "$MNJ65"
+
+# list-folders on IMAP already tested; also verify --batch form
+LF65_IMAP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list-folders 2>&1 || true) )
+check "65.4 list-folders IMAP --batch: INBOX present" "INBOX" "$LF65_IMAP"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 66 — email-cli-ro show with content check + Gmail list-labels via ro
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 66: email-cli-ro show content + Gmail ro commands ---"
+
+# show message 1 via email-cli-ro on IMAP (checks body is returned)
+SHOW66=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" show 1 2>&1 || true) )
+check "66.1 email-cli-ro show 1: subject present"  "AlphaAccountMsg"       "$SHOW66"
+check "66.2 email-cli-ro show 1: sender present"   "Test User\|Sender\|sender" "$SHOW66"
+check_not "66.3 email-cli-ro show 1: no crash"     "Segmentation\|Abort"   "$SHOW66"
+
+# show message 10 (has attachment)
+SHOW66_10=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" show 10 2>&1 || true) )
+check_not "66.4 email-cli-ro show 10: no crash"  "Segmentation\|Abort" "$SHOW66_10"
+
+# Gmail ro: list-labels
+GRL66=$( run_gmail60_ro --batch list-labels )
+check "66.5 Gmail ro list-labels: Work present" "Work" "$GRL66"
+
+# Gmail ro: show message 1
+GRS66=$( run_gmail60_ro show 0000000000000001 )
+check "66.6 Gmail ro show 1: no crash" "Message" "$GRS66"
+
+# email-cli-ro list-accounts
+LA66=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list-accounts 2>&1 || true) )
+check "66.7 email-cli-ro list-accounts: account present" "alpha\|test" "$LA66"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 67 — IMAP advanced: mark-read --folder, mark-starred with folder
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 67: IMAP mark-read/starred with --folder ---"
+
+# mark-read with explicit --folder option
+MR67=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch mark-read 1 --folder INBOX 2>&1 || true) )
+check_not "67.1 mark-read --folder: no crash" "Segmentation\|Abort" "$MR67"
+
+# mark-starred with explicit --folder option
+MS67=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch mark-starred 1 --folder INBOX 2>&1 || true) )
+check_not "67.2 mark-starred --folder: no crash" "Segmentation\|Abort" "$MS67"
+
+# remove-starred with explicit --folder option
+RS67=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch remove-starred 1 --folder INBOX 2>&1 || true) )
+check_not "67.3 remove-starred --folder: no crash" "Segmentation\|Abort" "$RS67"
+
+# mark-read with invalid UID → parse error
+MR67_BAD=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch mark-read not-a-uid 2>&1 || true) )
+check "67.4 mark-read invalid UID: error" "Error\|invalid\|UID" "$MR67_BAD"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 68 — Gmail incremental sync with history expired (full re-fetch)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 68: Gmail history expired → full re-fetch ---"
+
+GMAIL_EXPIRED_PORT=10004
+GMAIL_EXPIRED_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail_expired.log"
+echo "Starting Gmail mock with expired history (port $GMAIL_EXPIRED_PORT)..."
+(MOCK_GMAIL_PORT=$GMAIL_EXPIRED_PORT MOCK_GMAIL_COUNT=6 \
+    MOCK_GMAIL_EMAIL="expired68@gmail.com" \
+    MOCK_GMAIL_HISTORY_EXPIRED=1 \
+    "$MOCK_GMAIL_BIN") >"$GMAIL_EXPIRED_LOG" 2>&1 &
+GMAIL_EXPIRED_PID=$!
+
+H_EXPIRED="./build/tests/functional/homes/expired68-$$"
+ACCT_EXPIRED="expired68@gmail.com"
+mkdir -p "$H_EXPIRED/config/email-cli/accounts/$ACCT_EXPIRED"
+mkdir -p "$H_EXPIRED/data"
+cat > "$H_EXPIRED/config/email-cli/accounts/$ACCT_EXPIRED/config.ini" <<'GCFG_EXP'
+EMAIL_HOST=
+EMAIL_USER=expired68@gmail.com
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=faketoken68
+GCFG_EXP
+
+run_expired_sync() {
+    (export XDG_CONFIG_HOME="$H_EXPIRED/config"
+     export XDG_DATA_HOME="$H_EXPIRED/data"
+     export XDG_CACHE_HOME="$H_EXPIRED/cache"
+     export HOME="$H_EXPIRED"
+     export GMAIL_TEST_TOKEN=testtoken68
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL_EXPIRED_PORT/gmail/v1/users/me"
+     "$BIN_DIR/email-sync" 2>&1 || true)
+}
+
+sleep 0.5
+
+# First sync
+SYNC68_1=$(run_expired_sync)
+check "68.1 expired history: first sync completes" "fetched\|stored\|cached\|downloaded" "$SYNC68_1"
+
+# Second sync: history endpoint returns 404 → falls back to full fetch
+SYNC68_2=$(run_expired_sync)
+check_not "68.2 expired history: second sync no crash" "Segmentation\|Abort" "$SYNC68_2"
+check_not "68.3 expired history: second sync no fatal" "Abort\|assert"       "$SYNC68_2"
+
+LIST68=$( (export XDG_CONFIG_HOME="$H_EXPIRED/config"
+    export XDG_DATA_HOME="$H_EXPIRED/data"
+    export XDG_CACHE_HOME="$H_EXPIRED/cache"
+    export HOME="$H_EXPIRED"
+    export GMAIL_TEST_TOKEN=testtoken68
+    export GMAIL_API_BASE_URL="http://localhost:$GMAIL_EXPIRED_PORT/gmail/v1/users/me"
+    "$BIN_DIR/email-cli-ro" "$ACCT_EXPIRED" --batch list 2>&1 || true) )
+check "68.4 expired history: messages present in list" "Message" "$LIST68"
+
+kill "$GMAIL_EXPIRED_PID" 2>/dev/null || true
+case "$H_EXPIRED" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_EXPIRED path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_EXPIRED##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 69 — email-import-rules Thunderbird import
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 69: email-import-rules ---"
+
+# Build a minimal Thunderbird msgFilterRules.dat to test import
+H_IMPRT="./build/tests/functional/homes/imprt69-$$"
+ACCT_IMPRT="imprt69@test.local"
+make_home "$H_IMPRT" "$ACCT_IMPRT" 9993
+
+TB_PROFILE="$H_IMPRT/.thunderbird/default-profile"
+TB_IMAP_DIR="$TB_PROFILE/ImapMail/imap.test.local"
+mkdir -p "$TB_IMAP_DIR"
+
+cat > "$TB_IMAP_DIR/msgFilterRules.dat" <<'TBFILTER'
+version="9"
+logging="no"
+name="Move newsletters"
+enabled="yes"
+type="17"
+action="Move to folder"
+actionValue="imap://imap.test.local/Newsletters"
+condition="AND (from,contains,newsletter@)"
+TBFILTER
+
+# Import without --dry-run: should write rules.ini
+IMPRT69=$( (export HOME="$H_IMPRT"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" \
+        --thunderbird-path "$TB_PROFILE" \
+        --account "$ACCT_IMPRT" 2>&1 || true) )
+check_not "69.1 import-rules: no crash"  "Segmentation\|Abort"  "$IMPRT69"
+
+# Import with --dry-run
+DRYRUN69=$( (export HOME="$H_IMPRT"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" \
+        --thunderbird-path "$TB_PROFILE" \
+        --account "$ACCT_IMPRT" \
+        --dry-run 2>&1 || true) )
+check_not "69.2 import-rules --dry-run: no crash"   "Segmentation\|Abort" "$DRYRUN69"
+
+# Import --help
+HELP69=$( "$BIN_DIR/email-import-rules" --help 2>&1 || true )
+check "69.3 import-rules --help: usage shown" "thunderbird\|Usage\|import" "$HELP69"
+
+case "$H_IMPRT" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_IMPRT path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_IMPRT##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 70 — Additional send and help coverage
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 70: send edge cases + help coverage ---"
+
+# 70.1: send with missing args → error
+SEND70_NOARGS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch send 2>&1 || true) )
+check "70.1 send no args: error"  "Error\|required\|Usage" "$SEND70_NOARGS"
+
+# 70.2: send with only --to → missing subject+body error
+SEND70_TONLY=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch send --to "x@example.com" 2>&1 || true) )
+check "70.2 send --to only: missing subject/body error" "Error\|required" "$SEND70_TONLY"
+
+# 70.3: send a second message (tests code path after first send in Phase 11)
+SEND70_OK=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch send \
+        --to "beta@test.local" \
+        --subject "Phase70 second send" \
+        --body "Second test message body." 2>&1 || true) )
+check_not "70.3 second send: no crash" "Segmentation\|Abort" "$SEND70_OK"
+check "70.4 second send: confirmation"  "sent\|Sent\|Message\|Saved" "$SEND70_OK"
+
+# Cleanup Phase 60-65 Gmail server and home
+kill "${GMAIL60_PID:-}" 2>/dev/null || true
+case "$H_GMAIL60" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_GMAIL60 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_GMAIL60##./build/tests/functional/homes/}"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

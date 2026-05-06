@@ -517,8 +517,24 @@ static void handle_connection(int fd) {
         return;
     }
 
-    /* /gmail/v1/users/me/labels */
+    /* /gmail/v1/users/me/labels or /gmail/v1/users/me/labels/{id} */
     if (strstr(path, "/labels")) {
+        /* DELETE /labels/{id} — delete a specific label */
+        if (strstr(path, "/labels/") && strcmp(method, "DELETE") == 0) {
+            send_json(fd, "{}");
+            return;
+        }
+        /* POST /labels — create a new label */
+        if (strcmp(method, "POST") == 0) {
+            send_json(fd,
+                "{\"id\":\"Label_Test001\","
+                "\"name\":\"TestLabel\","
+                "\"type\":\"user\","
+                "\"messageListVisibility\":\"show\","
+                "\"labelListVisibility\":\"labelShow\"}");
+            return;
+        }
+        /* GET /labels — list all labels */
         handle_labels(fd);
         return;
     }

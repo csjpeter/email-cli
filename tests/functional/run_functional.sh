@@ -73,7 +73,7 @@ SMTP_PID=$!
 trap "kill $SERVER1_PID $SERVER2_PID $SERVER3_PID $SMTP_PID \
           \${SERVER200_PID:-} \${GMAIL_SERVER_PID:-} \
           \${GMAIL60_PID:-} \${GMAIL_RECONC_PID:-} \${GMAIL_LABEL_PID:-} \
-          \${QRESYNC_PID:-} \${GMAIL_EXPIRED_PID:-} 2>/dev/null || true" EXIT
+          \${QRESYNC_PID:-} \${GMAIL_EXPIRED_PID:-} \${VANISHED_PID:-} 2>/dev/null || true" EXIT
 
 sleep 1
 
@@ -3815,6 +3815,45 @@ check "70.4 second send: confirmation"  "sent\|Sent\|Message\|Saved" "$SEND70_OK
 kill "${GMAIL60_PID:-}" 2>/dev/null || true
 case "$H_GMAIL60" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_GMAIL60 path" >&2; exit 1 ;; esac
 rm -rf "./build/tests/functional/homes/${H_GMAIL60##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 71 — QRESYNC VANISHED: exercises imap_uid_set_expand()
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 71: QRESYNC VANISHED (imap_uid_set_expand) ---"
+
+VANISHED_PORT=10004
+VANISHED_LOG="$PROJECT_ROOT/build/tests/functional/mock_vanished.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$VANISHED_PORT \
+    MOCK_IMAP_SUBJECT="VanishedMsg" \
+    MOCK_IMAP_CAPS="QRESYNC" \
+    MOCK_IMAP_MODSEQ="7000" \
+    MOCK_IMAP_COUNT=5 \
+    MOCK_IMAP_VANISHED="1:3,5" \
+    "$MOCK_SERVER_BIN") >"$VANISHED_LOG" 2>&1 &
+VANISHED_PID=$!
+
+H_VANISHED="./build/tests/functional/homes/vanished71-$$"
+ACCT_VANISHED="vanished71@test.local"
+make_home "$H_VANISHED" "$ACCT_VANISHED" "$VANISHED_PORT"
+
+sleep 0.5
+
+# First sync: establishes UIDVALIDITY + HIGHESTMODSEQ baseline (no QRESYNC yet)
+VAN71_SYNC1=$( (export HOME="$H_VANISHED"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) )
+check_not "71.1 VANISHED first sync: no crash" "Segmentation\|Abort" "$VAN71_SYNC1"
+
+# Second sync: sends QRESYNC SELECT with cached modseq → server returns VANISHED
+# → imap_uid_set_expand("1:3,5", ...) is called to expand the UID set
+VAN71_SYNC2=$( (export HOME="$H_VANISHED"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) )
+check_not "71.2 VANISHED second sync: no crash" "Segmentation\|Abort" "$VAN71_SYNC2"
+check_not "71.3 VANISHED second sync: no error" "Error:" "$VAN71_SYNC2"
+
+kill "$VANISHED_PID" 2>/dev/null || true
+case "$H_VANISHED" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_VANISHED path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_VANISHED##./build/tests/functional/homes/}"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

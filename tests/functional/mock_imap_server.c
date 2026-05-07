@@ -292,10 +292,11 @@ static char *build_legacy_content(int is_header, const char **section_out) {
         return full_msg;
     }
 
-    /* Folded Subject header exercises mime_get_header() continuation-line path. */
+    /* Folded Subject header exercises mime_get_header() continuation-line path.
+     * RFC 2047 encoded-word in From exercises decode_encoded_word/try_decode_encoded_word. */
     char headers[600];
     snprintf(headers, sizeof(headers),
-             "From: Test User <test@example.com>\r\n"
+             "From: =?UTF-8?Q?Test_User?= <test@example.com>\r\n"
              "Subject: %s\r\n"
              " (folded continuation)\r\n"
              "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
@@ -304,7 +305,7 @@ static char *build_legacy_content(int is_header, const char **section_out) {
 
     char *full_msg = NULL;
     if (asprintf(&full_msg,
-                 "From: Test User <test@example.com>\r\n"
+                 "From: =?UTF-8?Q?Test_User?= <test@example.com>\r\n"
                  "Subject: %s\r\n"
                  " (folded continuation)\r\n"
                  "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
@@ -327,7 +328,7 @@ static char *build_legacy_content(int is_header, const char **section_out) {
                  "<body>"
                  /* h2 kept recognisable so PTY tests can match "Hello from Mock Server" */
                  "<h2>Hello from Mock Server!</h2>"
-                 "<p style=\"color: red; font-weight: bold\">Bold &lt;styled&gt; &bull; text</p>"
+                 "<p style=\"color: red; font-weight: bold\">Bold &lt;styled&gt; &bull; <em>em</em> text</p>"
                  "<p style=\"color: #333; font-style: italic\">Dark italic &auml; text 3 <3 html</p>"
                  "<div style=\"text-decoration: underline; background-color: yellow\">"
                  "<u>Underline</u> <s>strike</s> <del>deleted</del>"

@@ -1993,7 +1993,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         local_search(search_query, search_scope, &sr, &sr_count);
         show_count = sr_count;
         entries = calloc((size_t)(sr_count > 0 ? sr_count : 1), sizeof(MsgEntry));
-        if (!entries) { if (sr) free(sr); manifest_free(manifest); return -1; }
+        if (!entries) { local_search_free(sr, sr_count); manifest_free(manifest); return -1; }
         for (int i = 0; i < sr_count; i++) {
             memcpy(entries[i].uid, sr[i].uid, 17);
             snprintf(entries[i].folder, sizeof(entries[i].folder), "%s", sr[i].folder);
@@ -2005,7 +2005,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             sr[i].from = sr[i].subject = sr[i].date = NULL;
             if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
         }
-        free(sr);
+        local_search_free(sr, sr_count);
     } else if (cfg->sync_interval > 0) {
         /* ── Cron / cache-only mode: serve entirely from manifest ──────── */
         if (manifest->count == 0) {

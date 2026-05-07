@@ -336,6 +336,21 @@ static void test_batch_sync(void) {
     pty_close(s);
 }
 
+static void write_rules_ini(void);
+static void remove_rules_ini(void);
+
+static void test_batch_rules_apply(void) {
+    /* "AlwaysTag" has no conditions → when_from_flat returns NULL → when=NULL
+     * → mail_rule_matches takes the legacy flat-field path → glob_match covered. */
+    write_rules_ini();
+    const char *a[] = {"rules", "apply", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "rules apply: opens");
+    ASSERT_WAIT_FOR(s, "Rules applied:", WAIT_MS);
+    pty_close(s);
+    remove_rules_ini();
+}
+
 static void test_batch_cron_status(void) {
     const char *a[] = {g_sync_bin, "cron", "status", NULL};
     PtySession *s = pty_open(COLS, ROWS);
@@ -3645,6 +3660,11 @@ static void write_rules_ini(void) {
         "[rule \"WorkMail\"]\n"
         "if-subject = *[work]*\n"
         "then-add-label    = Work\n"
+        "\n"
+        /* No-condition rule: when_from_flat returns NULL → rule->when = NULL
+         * → mail_rule_matches takes the legacy flat-field path → glob_match covered. */
+        "[rule \"AlwaysTag\"]\n"
+        "then-add-label    = AutoTagged\n"
         "\n");
     fclose(fp);
 }
@@ -4125,6 +4145,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_batch_folders_flat);
     RUN_TEST(test_batch_folders_tree);
     RUN_TEST(test_batch_sync);
+    RUN_TEST(test_batch_rules_apply);
     RUN_TEST(test_batch_cron_status);
 
     printf("\n--- Command separation: labels vs folders ---\n");

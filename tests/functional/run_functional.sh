@@ -3856,6 +3856,63 @@ case "$H_VANISHED" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsaf
 rm -rf "./build/tests/functional/homes/${H_VANISHED##./build/tests/functional/homes/}"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 72 — when_expr.c: AND/NOT, label, body, age condition coverage
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 72: when_expr AND/NOT/label/body/age coverage ---"
+
+H_WE="./build/tests/functional/homes/we72-$$"
+WE_ACCT="we72@test.local"
+make_home "$H_WE" "$WE_ACCT" 9993
+
+# Rules with various condition types to exercise when_eval() branches
+# Rule 1: AND + NOT — exercises parse_and(), parse_not(), WN_AND, WN_NOT
+# Rule 2: if-label  — exercises WN_LABEL (labels_csv=NULL → returns 0 safely)
+# Rule 3: if-to     — exercises WN_TO (to=NULL → returns 0 safely)
+# Rule 4: if-body   — exercises WN_BODY (body=NULL → returns 0 safely)
+# Rule 5: if-age-gt — exercises WN_AGE_GT + when_from_flat age lines
+# Rule 6: if-age-lt — exercises WN_AGE_LT + when_from_flat age lines
+cat > "$H_WE/.config/email-cli/accounts/$WE_ACCT/rules.ini" <<'WEINI'
+[rule "AND-NOT coverage"]
+if-from = *@example.com*
+if-not-from = nobody@nowhere.invalid
+then-add-label = CovAndNot
+
+[rule "Label condition"]
+if-label = ExistingLabel
+then-add-label = CovLabel
+
+[rule "To condition"]
+if-to = *@*
+then-add-label = CovTo
+
+[rule "Body condition"]
+if-body = *
+then-add-label = CovBody
+
+[rule "Age-gt condition"]
+if-age-gt = 1
+then-add-label = CovAgeGt
+
+[rule "Age-lt condition"]
+if-age-lt = 36500
+then-add-label = CovAgeLt
+WEINI
+
+# First sync: populate local store with messages
+(export HOME="$H_WE"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) > /dev/null
+
+# Apply rules: exercises when_eval() for all condition types
+WE72_OUT=$( (export HOME="$H_WE"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules apply --verbose 2>&1 || true) )
+check_not "72.1 when_expr rules apply: no crash"   "Segmentation\|Abort" "$WE72_OUT"
+check     "72.2 when_expr AND-NOT rule fires"       "\[rule\]\|AND-NOT"   "$WE72_OUT"
+
+case "$H_WE" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_WE path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_WE##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

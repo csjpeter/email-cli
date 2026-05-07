@@ -325,7 +325,8 @@ static char *build_legacy_content(int is_header, const char **section_out) {
                  "<!-- a -- b -->"
                  "<head><style>body { color: #222; font-size: 14px; }</style></head>"
                  "<body>"
-                 "<h2>Hello &amp; Welcome &#169; &#x2022;</h2>"
+                 /* h2 kept recognisable so PTY tests can match "Hello from Mock Server" */
+                 "<h2>Hello from Mock Server!</h2>"
                  "<p style=\"color: red; font-weight: bold\">Bold &lt;styled&gt; &bull; text</p>"
                  "<p style=\"color: #333; font-style: italic\">Dark italic &auml; text 3 <3 html</p>"
                  "<div style=\"text-decoration: underline; background-color: yellow\">"
@@ -338,21 +339,18 @@ static char *build_legacy_content(int is_header, const char **section_out) {
                  "<pre>Code sample here</pre>"
                  "<table><tr><td>Cell A</td><td>Cell B</td></tr></table>"
                  "<img alt=\"Test image\" width=100>"
-                 "</xyz>"
-                 "Line 2<br>Line 3<br>Line 4<br>Line 5<br>"
-                 "Line 6<br>Line 7<br>Line 8<br>Line 9<br>"
+                 /* Line N<br> entries removed — total rendered output ≤23 rows
+                  * so headers stay visible in a 24-row PTY (24th '\n' scrolls). */
                  "<a href=\"https://click.example.com/test\">Click here</a>"
                  "</body>"
                  "</html>\r\n"
                  "--B001\r\n"
-                 /* Quoted-Printable attachment — exercises decode_qp(): hex escape,
-                  * soft line break (=CRLF), and literal-character paths. */
+                 /* base64 attachment — exercises decode_transfer() base64 path */
                  "Content-Type: text/plain; name=\"notes.txt\"\r\n"
                  "Content-Disposition: attachment; filename=\"notes.txt\"\r\n"
-                 "Content-Transfer-Encoding: quoted-printable\r\n"
+                 "Content-Transfer-Encoding: base64\r\n"
                  "\r\n"
-                 "Test=3DNote=\r\n"
-                 "continuation=0A\r\n"
+                 "SGVsbG8gV29ybGQ=\r\n"
                  "--B001\r\n"
                  "Content-Type: application/octet-stream; name=\"data.bin\"\r\n"
                  "Content-Disposition: attachment; filename=\"data.bin\"\r\n"
@@ -488,7 +486,7 @@ static void handle_client(SSL *ssl) {
                 /* IMAP modified UTF-7: "INBOX.Träger" (U+00E4, 2-byte UTF-8) */
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Tr&AOQ-ger\"\r\n"
                 /* Literal '&' via "&-" — exercises imap_utf7_decode lines 65-67 */
-                "* LIST (\\HasNoChildren) \".\" \"INBOX.AT&-T\"\r\n"
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.F&-T\"\r\n"
                 /* U+4E2D (中, CJK 3-byte UTF-8); mod64 lowercase 'i', digit '0' */
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.&Ti0-\"\r\n"
                 /* U+1F600 (emoji, 4-byte UTF-8); surrogate pair + digit '2','3', lowercase 'e' */

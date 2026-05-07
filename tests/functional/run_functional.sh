@@ -261,7 +261,7 @@ check "1.8 list: table separator"           "═══"            "$L1"
 S1=$(run_show "$H_ALPHA" "")
 check "1.9  show: From header"              "From:"          "$S1"
 check "1.10 show: Subject header"           "Subject:"       "$S1"
-check "1.11 show: body text present"        "Hello from Mock" "$S1"
+check "1.11 show: body text present"        "Hello.*Welcome\|Welcome.*Hello" "$S1"
 check_not "1.12 show: no raw CSS (color)"   "color"          "$S1"
 check_not "1.13 show: no raw CSS (font)"    "font-size"      "$S1"
 
@@ -455,7 +455,7 @@ rm -rf "./build/tests/functional/homes/shared"
 SA=$(run_show "$H_ALPHA" "$SHARED")
 check "7.1 alpha show: own subject in body" "AlphaAccountMsg"  "$SA"
 check "7.2 alpha show: From header"         "From:"            "$SA"
-check "7.3 alpha show: body present"        "Hello from Mock"  "$SA"
+check "7.3 alpha show: body present"        "Hello.*Welcome\|Welcome.*Hello"  "$SA"
 check_not "7.4 alpha show: no beta"         "BetaAccountMsg"   "$SA"
 
 # 7.2 Warm alpha, fresh beta
@@ -3905,6 +3905,7 @@ cat > "$H_WE/.config/email-cli/accounts/$WE_ACCT/rules.ini" <<'WEINI'
 if-from = *@example.com*
 if-not-from = nobody@nowhere.invalid
 then-add-label = CovAndNot
+then-forward-to = fwdtest@example.com
 
 [rule "Label condition"]
 if-label = ExistingLabel
@@ -3937,8 +3938,599 @@ WE72_OUT=$( (export HOME="$H_WE"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_
 check_not "72.1 when_expr rules apply: no crash"   "Segmentation\|Abort" "$WE72_OUT"
 check     "72.2 when_expr AND-NOT rule fires"       "\[rule\]\|AND-NOT"   "$WE72_OUT"
 
+# 72.3: rules list — also exercises mail_rules_load_path() with then-forward-to (lines 123-125)
+WE72_LIST=$( (export HOME="$H_WE"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+check_not "72.3 rules list: no crash"           "Segmentation\|Abort"   "$WE72_LIST"
+check     "72.4 rules list: AND-NOT rule shown" "AND-NOT\|CovAndNot"    "$WE72_LIST"
+
 case "$H_WE" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_WE path" >&2; exit 1 ;; esac
 rm -rf "./build/tests/functional/homes/${H_WE##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 73 — config show / config imap / config smtp
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 73: config show / config imap / config smtp ---"
+
+H_CFG73="./build/tests/functional/homes/cfg73-$$"
+ACCT_CFG73="cfg73@test.local"
+
+# Create a home with IMAP-only config (no SMTP) — SSL_NO_VERIFY not needed
+# because config imap/smtp/show don't connect to the server.
+case "$H_CFG73" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_CFG73 path" >&2; exit 1 ;; esac
+mkdir -p "$H_CFG73/.config/email-cli/accounts/$ACCT_CFG73"
+cat > "$H_CFG73/.config/email-cli/accounts/$ACCT_CFG73/config.ini" <<CONFIG
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=$ACCT_CFG73
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CONFIG
+
+# 73.1: config show — outputs IMAP host, password masked; no SMTP yet
+CFG73_SHOW=$( (export HOME="$H_CFG73"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" config show 2>&1 || true) )
+check     "73.1 config show: IMAP host shown"  "imaps://"  "$CFG73_SHOW"
+check     "73.1 config show: pass masked"       "\*\*\*\*"  "$CFG73_SHOW"
+check_not "73.1 config show: no crash"          "Segmentation\|Abort" "$CFG73_SHOW"
+
+# 73.2: config imap run 1 — bad protocol rejected, then plain hostname accepted
+#   Input lines: "imap://bad", "localhost", "" (user), "" (pass), "" (folder)
+CFG73_IMAP1=$( (export HOME="$H_CFG73"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "imap://bad\nlocalhost\n\n\n\n" | \
+    "$BIN_DIR/email-cli" config imap 2>&1 || true) )
+check_not "73.2 config imap: no crash"           "Segmentation\|Abort"  "$CFG73_IMAP1"
+check     "73.2 config imap: bad proto rejected"  "unsupported protocol" "$CFG73_IMAP1"
+check     "73.2 config imap: saved"               "IMAP configuration saved" "$CFG73_IMAP1"
+
+# 73.3: config imap run 2 — imaps:// prefix accepted as-is; update folder only
+#   Input: "imaps://newhost.example.com", "" (keep user), "" (pass), "Sent"
+#   NOTE: we do NOT change the username to avoid creating a second account directory,
+#   which would cause "multiple accounts" errors in subsequent phases.
+CFG73_IMAP2=$( (export HOME="$H_CFG73"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "imaps://newhost.example.com\n\n\nSent\n" | \
+    "$BIN_DIR/email-cli" config imap 2>&1 || true) )
+check "73.3 config imap run2: saved" "IMAP configuration saved" "$CFG73_IMAP2"
+
+# 73.4: config imap run 3 — empty input keeps everything (keep-current path)
+CFG73_IMAP3=$( (export HOME="$H_CFG73"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "\n\n\n\n" | \
+    "$BIN_DIR/email-cli" config imap 2>&1 || true) )
+check "73.4 config imap run3: saved" "IMAP configuration saved" "$CFG73_IMAP3"
+
+# 73.5: config smtp run 1 — empty host → use derived smtps:// default
+#   cfg->smtp_host is NULL; derive_smtp_url produces smtps://newhost.example.com
+#   Input: "" (use derived), "" (port), "" (user), "" (pass)
+CFG73_SMTP1=$( (export HOME="$H_CFG73"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "\n\n\n\n" | \
+    "$BIN_DIR/email-cli" config smtp 2>&1 || true) )
+check_not "73.5 config smtp run1: no crash" "Segmentation\|Abort"     "$CFG73_SMTP1"
+check     "73.5 config smtp run1: saved"    "SMTP configuration saved" "$CFG73_SMTP1"
+
+# 73.6: config smtp run 2 — bad protocol rejected, then valid hostname
+#   Input: "smtp://bad", "smtphost.example.com", "465", "smtpuser", ""
+CFG73_SMTP2=$( (export HOME="$H_CFG73"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "smtp://bad\nsmtphost.example.com\n465\nsmtpuser\n\n" | \
+    "$BIN_DIR/email-cli" config smtp 2>&1 || true) )
+check "73.6 config smtp run2: bad proto rejected" "unsupported protocol"   "$CFG73_SMTP2"
+check "73.6 config smtp run2: saved"              "SMTP configuration saved" "$CFG73_SMTP2"
+
+# 73.7: config smtp run 3 — keep-current path (smtp_user is set → shows "current" prompt)
+CFG73_SMTP3=$( (export HOME="$H_CFG73"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "\n\n\n\n" | \
+    "$BIN_DIR/email-cli" config smtp 2>&1 || true) )
+check "73.7 config smtp run3: saved" "SMTP configuration saved" "$CFG73_SMTP3"
+
+# 73.8: config (no subcommand) — shows help_config
+CFG73_NOSUB=$( (export HOME="$H_CFG73"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" config 2>&1 || true) )
+check "73.8 config no-subcmd: help shown" "imap\|smtp\|show" "$CFG73_NOSUB"
+
+# 73.9: config smtp — input starts with "smtps://" → normalize_smtp_host returns strdup(input)
+#   Covers normalize_smtp_host line 87 (return strdup when already "smtps://").
+CFG73_SMTP9=$( (export HOME="$H_CFG73"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "smtps://smtp9.example.com\n\n\nnewsmtppass9\n" | \
+    "$BIN_DIR/email-cli" config smtp 2>&1 || true) )
+check "73.9 config smtp smtps-prefix: saved" "SMTP configuration saved" "$CFG73_SMTP9"
+
+# 73.10: config imap — provide non-empty user (same account) and pass
+#   Covers setup_wizard_imap lines 433-434 (user update) and 445-446 (pass update).
+CFG73_IMAP10=$( (export HOME="$H_CFG73"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "\n$ACCT_CFG73\nnewpass73\n\n" | \
+    "$BIN_DIR/email-cli" config imap 2>&1 || true) )
+check "73.10 config imap user+pass update: saved" "IMAP configuration saved" "$CFG73_IMAP10"
+
+# 73.11: test with a config that has no smtp_host and no imaps:// IMAP host
+#   Covers setup_wizard_smtp line 310 (plain-hostname prompt when no derived URL).
+H_CFG73B="./build/tests/functional/homes/cfg73b-$$"
+ACCT_CFG73B="cfg73b@test.local"
+case "$H_CFG73B" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_CFG73B path" >&2; exit 1 ;; esac
+mkdir -p "$H_CFG73B/.config/email-cli/accounts/$ACCT_CFG73B"
+cat > "$H_CFG73B/.config/email-cli/accounts/$ACCT_CFG73B/config.ini" <<CONFIG73B
+EMAIL_USER=$ACCT_CFG73B
+EMAIL_PASS=testpass73b
+EMAIL_FOLDER=INBOX
+CONFIG73B
+CFG73_SMTP11=$( (export HOME="$H_CFG73B"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "\n\n\n\n" | \
+    "$BIN_DIR/email-cli" config smtp 2>&1 || true) )
+check_not "73.11 config smtp no-host: no crash" "Segmentation\|Abort" "$CFG73_SMTP11"
+case "$H_CFG73B" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_CFG73B path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_CFG73B##./build/tests/functional/homes/}"
+
+case "$H_CFG73" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_CFG73 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_CFG73##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 74 — Help functions: main.c, main_ro.c, email-sync
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 74: help functions and error paths ---"
+
+# ── email-cli --version ─────────────────────────────────────────────────────
+VER_CLI=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --version 2>&1 || true) )
+check "74.1 email-cli --version" "email-cli" "$VER_CLI"
+
+# ── email-cli help <subcmd> — rules sub-commands ───────────────────────────
+HLP_RL=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help rules list 2>&1 || true) )
+check "74.2 help rules list" "rules list" "$HLP_RL"
+
+HLP_RA=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help rules apply 2>&1 || true) )
+check "74.3 help rules apply" "rules apply" "$HLP_RA"
+
+HLP_RAD=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help rules add 2>&1 || true) )
+check "74.4 help rules add" "rules add" "$HLP_RAD"
+
+HLP_RRM=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help rules remove 2>&1 || true) )
+check "74.5 help rules remove" "rules remove" "$HLP_RRM"
+
+# ── email-cli help <subcmd> — other commands ───────────────────────────────
+HLP_MR=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help mark-read 2>&1 || true) )
+check "74.6 help mark-read" "mark-read\|mark-unread" "$HLP_MR"
+
+HLP_MS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help mark-starred 2>&1 || true) )
+check "74.7 help mark-starred" "mark-starred" "$HLP_MS"
+
+HLP_AL=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help add-label 2>&1 || true) )
+check "74.8 help add-label" "add-label\|remove-label" "$HLP_AL"
+
+HLP_LL=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help list-labels 2>&1 || true) )
+check "74.9 help list-labels" "list-labels" "$HLP_LL"
+
+HLP_LA=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help list-accounts 2>&1 || true) )
+check "74.10 help list-accounts" "list-accounts" "$HLP_LA"
+
+HLP_AA=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help add-account 2>&1 || true) )
+check "74.11 help add-account" "add-account" "$HLP_AA"
+
+HLP_RA2=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help remove-account 2>&1 || true) )
+check "74.12 help remove-account" "remove-account" "$HLP_RA2"
+
+# ── email-cli error paths ───────────────────────────────────────────────────
+# show without UID → help_show()
+SHOW_NOUID=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" show 2>&1 || true) )
+check "74.13 show without UID: help shown" "show.*uid\|UID" "$SHOW_NOUID"
+
+# list with bad option → unknown_option()
+LIST_BADOPT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --zzzbadopt 2>&1 || true) )
+check "74.14 list --zzzbadopt: error shown" "Unknown option" "$LIST_BADOPT"
+
+# list --folder (missing value) → error path
+LIST_NOFOLDER=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --folder 2>&1 || true) )
+check "74.15 list --folder no-value: error" "Error" "$LIST_NOFOLDER"
+
+# list --limit (missing value)
+LIST_NOLIM=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --limit 2>&1 || true) )
+check "74.16 list --limit no-value: error" "Error" "$LIST_NOLIM"
+
+# list --limit abc (non-numeric)
+LIST_BADLIM=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --limit abc 2>&1 || true) )
+check "74.17 list --limit non-numeric: error" "Error" "$LIST_BADLIM"
+
+# list --offset (missing value)
+LIST_NOOFF=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --offset 2>&1 || true) )
+check "74.18 list --offset no-value: error" "Error" "$LIST_NOOFF"
+
+# list --offset 0 (invalid — must be >= 1)
+LIST_OFFZERO=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --offset 0 2>&1 || true) )
+check "74.19 list --offset 0: error" "Error" "$LIST_OFFZERO"
+
+# ── email-cli-ro help + error paths ────────────────────────────────────────
+# --version
+VER_RO=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" --version 2>&1 || true) )
+check "74.20 email-cli-ro --version" "email-cli-ro" "$VER_RO"
+
+# help show (via 'help' subcommand)
+HLP_RO_SHOW=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" help show 2>&1 || true) )
+check "74.21 email-cli-ro help show" "email-cli-ro show" "$HLP_RO_SHOW"
+
+# help list-attachments
+HLP_RO_ATT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" help list-attachments 2>&1 || true) )
+check "74.22 email-cli-ro help list-attachments" "list-attachments" "$HLP_RO_ATT"
+
+# help save-attachment
+HLP_RO_SAVE=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" help save-attachment 2>&1 || true) )
+check "74.23 email-cli-ro help save-attachment" "save-attachment" "$HLP_RO_SAVE"
+
+# help list-labels
+HLP_RO_LABS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" help list-labels 2>&1 || true) )
+check "74.24 email-cli-ro help list-labels" "list-labels" "$HLP_RO_LABS"
+
+# help list-accounts
+HLP_RO_ACCT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" help list-accounts 2>&1 || true) )
+check "74.25 email-cli-ro help list-accounts" "list-accounts" "$HLP_RO_ACCT"
+
+# show --help (via --help flag) → help_show()
+HLP_RO_SH2=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" show --help 2>&1 || true) )
+check "74.26 email-cli-ro show --help" "email-cli-ro show" "$HLP_RO_SH2"
+
+# list-attachments --help
+HLP_RO_AT2=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list-attachments --help 2>&1 || true) )
+check "74.27 email-cli-ro list-attachments --help" "list-attachments" "$HLP_RO_AT2"
+
+# save-attachment --help
+HLP_RO_SV2=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" save-attachment --help 2>&1 || true) )
+check "74.28 email-cli-ro save-attachment --help" "save-attachment" "$HLP_RO_SV2"
+
+# list-labels --help
+HLP_RO_LB2=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list-labels --help 2>&1 || true) )
+check "74.29 email-cli-ro list-labels --help" "list-labels" "$HLP_RO_LB2"
+
+# list-accounts --help
+HLP_RO_AC2=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list-accounts --help 2>&1 || true) )
+check "74.30 email-cli-ro list-accounts --help" "list-accounts" "$HLP_RO_AC2"
+
+# show without UID → help_show()
+RO_SHOW_NU=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" show 2>&1 || true) )
+check "74.31 email-cli-ro show no-uid: help" "show\|UID" "$RO_SHOW_NU"
+
+# save-attachment without args → help_save_attachment()
+RO_SAVE_NA=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" save-attachment 2>&1 || true) )
+check "74.32 email-cli-ro save-attachment no-args: help" "save-attachment" "$RO_SAVE_NA"
+
+# list --badopt → unknown_option()
+RO_BADOPT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list --zzzbadopt 2>&1 || true) )
+check "74.33 email-cli-ro list --zzzbadopt: error" "Unknown option" "$RO_BADOPT"
+
+# help unknown topic → error
+HLP_RO_UNK=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" help unknowntopic 2>&1 || true) )
+check "74.34 email-cli-ro help unknowntopic: error" "Unknown command" "$HLP_RO_UNK"
+
+# ── email-sync --version and bad cron subcommand ───────────────────────────
+VER_SYNC=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" --version 2>&1 || true) )
+check "74.35 email-sync --version" "email-sync" "$VER_SYNC"
+
+SYNC_BADCRON=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" cron badsubcmd 2>&1 || true) )
+check "74.36 email-sync cron badsubcmd: usage error" "Usage\|setup\|remove\|status" "$SYNC_BADCRON"
+
+# email-sync --account (no value) → error (main_sync.c lines 176-178)
+SYNC_NOACCT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" --account 2>&1 || true) )
+check "74.37 email-sync --account no-value: error" "Error\|--account\|requires" "$SYNC_NOACCT"
+
+# email-sync --zzzbadopt → unknown option (main_sync.c lines 203-206)
+SYNC_BADOPT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" --zzzbadopt 2>&1 || true) )
+check "74.38 email-sync --zzzbadopt: unknown option" "Unknown option" "$SYNC_BADOPT"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 75 — imap_utf7 decode (new folder names) és encode (nem-ASCII folder argumentumok)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 75: imap_utf7 decode/encode coverage ---"
+
+# 75.1–75.2: list-folders exercises imap_utf7_decode for all new UTF-7 folder names
+FOLDERS75=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list-folders 2>&1 || true) )
+check_not "75.1 list-folders: no crash"         "Segmentation\|Abort"   "$FOLDERS75"
+check     "75.2 list-folders: literal & shown"  "AT.T\|AT&T\|AT&-T"    "$FOLDERS75"
+
+# 75.3: list --folder with literal '&' → exercises imap_utf7_encode lines 185-187
+UTF7_AMP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --folder "INBOX.AT&T" 2>&1 || true) )
+check_not "75.3 list --folder literal-& encode: no crash" "Segmentation\|Abort" "$UTF7_AMP"
+
+# 75.4: list --folder with CJK character → exercises imap_utf7_encode 3-byte UTF-8 (line 201)
+UTF7_CJK=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --folder "INBOX.中" 2>&1 || true) )
+check_not "75.4 list --folder CJK encode: no crash"       "Segmentation\|Abort" "$UTF7_CJK"
+
+# 75.5: list --folder with emoji → exercises imap_utf7_encode 4-byte UTF-8 + surrogate pairs
+#        (lines 202, 215-219)
+UTF7_EMOJI=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list --folder "INBOX.😀" 2>&1 || true) )
+check_not "75.5 list --folder emoji encode: no crash"     "Segmentation\|Abort" "$UTF7_EMOJI"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 76 — initial setup wizard via add-account (piped stdin, non-TTY)
+#   PTY tests exercise the wizard in TTY mode but may not cover all paths.
+#   These tests cover the non-TTY IMAP+SMTP initial wizard code paths
+#   (setup_wizard_run_internal lines 215-272).
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 76: initial wizard via add-account (piped stdin) ---"
+
+H_WIZARD76="./build/tests/functional/homes/wizard76-$$"
+case "$H_WIZARD76" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_WIZARD76 path" >&2; exit 1 ;; esac
+mkdir -p "$H_WIZARD76/.config/email-cli/accounts/base76@test.local"
+cat > "$H_WIZARD76/.config/email-cli/accounts/base76@test.local/config.ini" <<CONFIG76
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=base76@test.local
+EMAIL_PASS=testpass76
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CONFIG76
+
+# 76.1: IMAP account type (account_type=1) with SMTP
+#   Input: "1" (IMAP), "localhost.example" (host), "" (port=993), "wiz76@test.local"
+#          "wizpass" (password), "" (folder→INBOX), "smtp.example.test" (smtp host),
+#          "" (smtp port→587), "" (smtp user→same), "" (smtp pass→same)
+#   Covers: lines 215-216 (pass), 218-221 (folder→INBOX), 228-244 (smtp host loop),
+#            246-266 (smtp sub-fields with empty inputs), 272 (return cfg)
+WIZARD76_IMAP=$( (export HOME="$H_WIZARD76"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "1\nlocalhost.example\n\nwiz76@test.local\nwizpass76\n\nsmtp.example.test\n\n\n\n" | \
+    "$BIN_DIR/email-cli" add-account 2>&1 || true) )
+check_not "76.1 add-account IMAP+SMTP: no crash"   "Segmentation\|Abort"        "$WIZARD76_IMAP"
+check     "76.2 add-account IMAP+SMTP: account added" "added\|saved\|wiz76"     "$WIZARD76_IMAP"
+
+# 76.3: Gmail account type (account_type=2) non-TTY path
+#   Input: "2" (Gmail), "gmailtest76@gmail.com" (email)
+#   Covers: lines 115-119 (gmail block), 121 (is_tty check, FALSE), 156 (return cfg)
+WIZARD76_GMAIL=$( (export HOME="$H_WIZARD76"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "2\ngmailtest76@gmail.com\n" | \
+    "$BIN_DIR/email-cli" add-account 2>&1 || true) )
+check_not "76.3 add-account Gmail type: no crash"   "Segmentation\|Abort"       "$WIZARD76_GMAIL"
+
+# 76.4: Gmail domain rejected in IMAP wizard (lines 170-176)
+#   Run as account_type=1 but provide "gmail.com" as IMAP host → rejected
+WIZARD76_GMAIL_IMAP=$( (export HOME="$H_WIZARD76"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "1\ngmail.com\n" | \
+    "$BIN_DIR/email-cli" add-account 2>&1 || true) )
+check "76.4 add-account Gmail-domain IMAP rejection: error shown" \
+    "Gmail is not supported\|not supported.*IMAP\|please.*Gmail\|account type" "$WIZARD76_GMAIL_IMAP"
+
+# 76.5: IMAP port non-993 (lines 197-205)
+#   Input: IMAP, "localhost.example", "8993" (non-default port), user, pass, folder, "" (no smtp)
+WIZARD76_PORT=$( (export HOME="$H_WIZARD76"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "1\nlocalhost.example\n8993\nwiz76port@test.local\nwizpass76\nINBOX\n\n" | \
+    "$BIN_DIR/email-cli" add-account 2>&1 || true) )
+check_not "76.5 add-account non-993 port: no crash"  "Segmentation\|Abort"      "$WIZARD76_PORT"
+
+# 76.6: IMAP + SMTP with non-default port, user, pass filled
+#   Covers setup_wizard.c lines 251 (smtp_port), 258 (smtp_user), 264 (smtp_pass)
+WIZARD76_FULL=$( (export HOME="$H_WIZARD76"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "1\nlocalhost.example\n\nwiz76f@test.local\npassf\nINBOX\nsmtp.test.local\n465\nsmtpuser\nsmtppass\n" | \
+    "$BIN_DIR/email-cli" add-account 2>&1 || true) )
+check_not "76.6 add-account full SMTP fields: no crash" "Segmentation\|Abort" "$WIZARD76_FULL"
+
+# 76.7: Invalid SMTP protocol (ftp://) → rejected, then empty → skip SMTP
+#   Covers setup_wizard.c lines 234 (error), 237-238 (free+continue)
+WIZARD76_BADSMTP=$( (export HOME="$H_WIZARD76"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf "1\nlocalhost.example\n\nwiz76g@test.local\npassg\nINBOX\nftp://bad.host\n\n" | \
+    "$BIN_DIR/email-cli" add-account 2>&1 || true) )
+check_not "76.7 add-account invalid SMTP proto: no crash"  "Segmentation\|Abort"     "$WIZARD76_BADSMTP"
+check     "76.7 add-account invalid SMTP proto: error shown" "unsupported protocol\|smtps://" "$WIZARD76_BADSMTP"
+
+case "$H_WIZARD76" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_WIZARD76 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_WIZARD76##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 77 — email-cli-ro error/edge paths (main_ro.c coverage)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 77: email-cli-ro error and edge paths ---"
+
+# 77.1: help with no topic → help_general() (lines 307-308)
+RO77_HELP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" help 2>&1 || true) )
+check "77.1 email-cli-ro help: general help shown" "list\|show\|Usage" "$RO77_HELP"
+
+# 77.2: no command → help_general() (lines 311-313)
+RO77_NOCMD=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" 2>&1 || true) )
+check_not "77.2 email-cli-ro no-cmd: no crash" "Segmentation\|Abort" "$RO77_NOCMD"
+
+# 77.3: --account nonexistent → error (lines 329, 333-334)
+RO77_NOACCT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" --account nonexistent@test.local list 2>&1 || true) )
+check "77.3 email-cli-ro --account nonexistent: error" "not found\|Account\|Error" "$RO77_NOACCT"
+
+# 77.4: list --folder (no arg) → error (lines 380-381)
+RO77_NOFOLDER=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list --folder 2>&1 || true) )
+check "77.4 email-cli-ro list --folder no-arg: error" "Error" "$RO77_NOFOLDER"
+
+# 77.5: list --limit (no arg) → error (lines 387-388)
+RO77_NOLIM=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list --limit 2>&1 || true) )
+check "77.5 email-cli-ro list --limit no-arg: error" "Error" "$RO77_NOLIM"
+
+# 77.6: list --limit abc → non-numeric, error (lines 393-394)
+RO77_BADLIM=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list --limit abc 2>&1 || true) )
+check "77.6 email-cli-ro list --limit abc: error" "Error" "$RO77_BADLIM"
+
+# 77.7: list --offset (no arg) → error (lines 400-402)
+RO77_NOOFF=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list --offset 2>&1 || true) )
+check "77.7 email-cli-ro list --offset no-arg: error" "Error" "$RO77_NOOFF"
+
+# 77.8: list --offset 0 → invalid (lines 405-408)
+RO77_OFFZERO=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list --offset 0 2>&1 || true) )
+check "77.8 email-cli-ro list --offset 0: error" "Error" "$RO77_OFFZERO"
+
+# 77.9: list --offset 5 → valid, sets opts.offset (line 410)
+RO77_OFFOK=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list --offset 5 2>&1 || true) )
+check_not "77.9 email-cli-ro list --offset 5: no crash" "Segmentation\|Abort" "$RO77_OFFOK"
+
+# 77.10: show 0 → bad UID (line 432)
+RO77_BADUID=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" show 0 2>&1 || true) )
+check "77.10 email-cli-ro show 0: bad UID error" "UID\|Error\|integer" "$RO77_BADUID"
+
+# 77.11: list-folders --invalid → unknown option (line 445)
+RO77_BADFOLD=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list-folders --invalid 2>&1 || true) )
+check "77.11 email-cli-ro list-folders --invalid: unknown option" "Unknown option" "$RO77_BADFOLD"
+
+# 77.12: list-attachments (no uid) → help (lines 456-457)
+RO77_NOUID=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list-attachments 2>&1 || true) )
+check "77.12 email-cli-ro list-attachments no-uid: help" "list-attachments\|UID\|requires" "$RO77_NOUID"
+
+# 77.13: save-attachment 0 → bad UID (line 486)
+RO77_SAVEBAD=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" save-attachment 0 myfile.txt 2>&1 || true) )
+check "77.13 email-cli-ro save-attachment 0: bad UID" "UID\|Error\|integer" "$RO77_SAVEBAD"
+
+# 77.14: mark-read → write-only blocked in ro mode (lines 528-536)
+RO77_MKRD=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" mark-read 1 2>&1 || true) )
+check "77.14 email-cli-ro mark-read: blocked in ro mode" "not available\|read-only\|write" "$RO77_MKRD"
+
+# 77.15: totally unknown command → unknown command message (lines 539-541)
+RO77_UNK=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" some-unknown-cmd 2>&1 || true) )
+check "77.15 email-cli-ro some-unknown-cmd: unknown command" "Unknown command" "$RO77_UNK"
+
+# 77.16: list-attachments with bad UID "0" → main_ro.c line 461
+RO77_BADATA=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list-attachments 0 2>&1 || true) )
+check "77.16 email-cli-ro list-attachments 0: bad UID error" "UID\|Error\|integer" "$RO77_BADATA"
+
+# 77.17: list-accounts with empty home → "No accounts configured" (lines 500-501)
+H_EMPTY77=$(mktemp -d "/tmp/email-cli-ft77-XXXXXX")
+RO77_NOACCTS=$( (export HOME="$H_EMPTY77"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" list-accounts 2>&1 || true) )
+check "77.17 email-cli-ro list-accounts empty home: no accounts" "No accounts\|configured" "$RO77_NOACCTS"
+case "$H_EMPTY77" in /tmp/email-cli-ft77-*) rm -rf "$H_EMPTY77" ;; esac
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 78 — email-cli error and help paths (main.c coverage)
+# ════════════════════════════════════════════════════════════════════════════
+echo "--- Phase 78: email-cli error and help edge paths ---"
+
+# 78.1: help mark-notjunk → help_mark_notjunk() (lines 469-470, 482)
+CLI78_HMN=$( (unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help mark-notjunk 2>&1 || true) )
+check_not "78.1 email-cli help mark-notjunk: no crash" "Segmentation\|Abort" "$CLI78_HMN"
+check     "78.1 email-cli help mark-notjunk: content shown" "mark-notjunk\|ham\|junk" "$CLI78_HMN"
+
+# 78.2: help mark-starred → help_mark_starred() (lines 691-692)
+CLI78_HMS=$( (unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help mark-starred 2>&1 || true) )
+check_not "78.2 email-cli help mark-starred: no crash" "Segmentation\|Abort" "$CLI78_HMS"
+check     "78.2 email-cli help mark-starred: content shown" "mark-starred\|star" "$CLI78_HMS"
+
+# 78.3: help with unknown topic → error message (lines 706-708)
+CLI78_HUNK=$( (unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help zzz-no-such-cmd 2>&1 || true) )
+check "78.3 email-cli help unknown-topic: error shown" "Unknown command\|zzz-no-such-cmd" "$CLI78_HUNK"
+
+# 78.4: bare "email-cli help" (no topic) → help_general() lines 710-711
+CLI78_HBARE=$( (unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" help 2>&1 || true) )
+check_not "78.4 email-cli help (bare): no crash" "Segmentation\|Abort" "$CLI78_HBARE"
+check     "78.4 email-cli help (bare): usage shown" "Usage\|list\|show" "$CLI78_HBARE"
+
+# 78.5: list-attachments with no UID → error (lines 882-883) — uses H_ALPHA config
+CLI78_LANU=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list-attachments 2>&1 || true) )
+check "78.5 email-cli list-attachments no-uid: error" "requires a UID\|list-attachments" "$CLI78_LANU"
+
+# 78.6: show with bad UID "0" → parse error (line 858)
+CLI78_SH0=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" show 0 2>&1 || true) )
+check "78.6 email-cli show 0: bad UID error" "UID\|Error\|integer\|invalid" "$CLI78_SH0"
+
+# 78.7: list-attachments with bad UID "0" → parse error (line 887)
+CLI78_LA0=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list-attachments 0 2>&1 || true) )
+check "78.7 email-cli list-attachments 0: bad UID error" "UID\|Error\|integer\|invalid" "$CLI78_LA0"
+
+# 78.8: save-attachment with no UID → error (lines 906-908)
+CLI78_SANU=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" save-attachment 2>&1 || true) )
+check "78.8 email-cli save-attachment no-uid: error" "requires a UID\|save-attachment" "$CLI78_SANU"
+
+# 78.9: save-attachment with bad UID "0" → parse error (line 912)
+CLI78_SA0=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" save-attachment 0 file.txt 2>&1 || true) )
+check "78.9 email-cli save-attachment 0 file.txt: bad UID error" "UID\|Error\|integer\|invalid" "$CLI78_SA0"
+
+# 78.10: list-folders --badopt → unknown option (line 871)
+CLI78_LFB=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" list-folders --badopt 2>&1 || true) )
+check "78.10 email-cli list-folders --badopt: unknown option" "Unknown option\|--badopt" "$CLI78_LFB"
+
+# 78.11: config with unknown subcommand → error (line 966)
+CLI78_CFG=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" config zzzbadsubcmd 2>&1 || true) )
+check "78.11 email-cli config zzzbadsubcmd: unknown subcommand error" "Unknown config\|zzzbadsubcmd" "$CLI78_CFG"
+
+# 78.12: send --to (no value after flag) → error (line 978)
+CLI78_STO=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" send --to 2>&1 || true) )
+check "78.12 email-cli send --to (no value): error" "requires an address\|Error" "$CLI78_STO"
+
+# 78.13: send --subject (no value) → error (line 982)
+CLI78_SSU=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" send --subject 2>&1 || true) )
+check "78.13 email-cli send --subject (no value): error" "requires text\|Error" "$CLI78_SSU"
+
+# 78.14: send --body (no value) → error (line 986)
+CLI78_SBO=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" send --body 2>&1 || true) )
+check "78.14 email-cli send --body (no value): error" "requires text\|Error" "$CLI78_SBO"
+
+# 78.15: send with unknown option → error (line 989)
+CLI78_SUNK=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" send --zzbadopt 2>&1 || true) )
+check "78.15 email-cli send --zzbadopt: unknown option" "Unknown option\|--zzbadopt" "$CLI78_SUNK"
+
+# 78.16: send missing required fields → error (lines 993-994)
+CLI78_SMISS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" send --to test@example.com --subject hi 2>&1 || true) )
+check "78.16 email-cli send missing --body: required fields error" "required\|--body\|Error" "$CLI78_SMISS"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

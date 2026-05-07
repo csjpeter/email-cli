@@ -292,10 +292,12 @@ static char *build_legacy_content(int is_header, const char **section_out) {
         return full_msg;
     }
 
-    char headers[512];
+    /* Folded Subject header exercises mime_get_header() continuation-line path. */
+    char headers[600];
     snprintf(headers, sizeof(headers),
              "From: Test User <test@example.com>\r\n"
              "Subject: %s\r\n"
+             " (folded continuation)\r\n"
              "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
              "\r\n",
              g_subject);
@@ -304,10 +306,17 @@ static char *build_legacy_content(int is_header, const char **section_out) {
     if (asprintf(&full_msg,
                  "From: Test User <test@example.com>\r\n"
                  "Subject: %s\r\n"
+                 " (folded continuation)\r\n"
                  "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
                  "MIME-Version: 1.0\r\n"
                  "Content-Type: multipart/mixed; boundary=\"B001\"\r\n"
                  "\r\n"
+                 /* text/plain body with base64 — exercises decode_transfer() base64 path */
+                 "--B001\r\n"
+                 "Content-Type: text/plain; charset=UTF-8\r\n"
+                 "Content-Transfer-Encoding: base64\r\n"
+                 "\r\n"
+                 "SGVsbG8gV29ybGQ=\r\n"
                  "--B001\r\n"
                  "Content-Type: text/html; charset=UTF-8\r\n"
                  "\r\n"
@@ -336,11 +345,14 @@ static char *build_legacy_content(int is_header, const char **section_out) {
                  "</body>"
                  "</html>\r\n"
                  "--B001\r\n"
+                 /* Quoted-Printable attachment — exercises decode_qp(): hex escape,
+                  * soft line break (=CRLF), and literal-character paths. */
                  "Content-Type: text/plain; name=\"notes.txt\"\r\n"
                  "Content-Disposition: attachment; filename=\"notes.txt\"\r\n"
-                 "Content-Transfer-Encoding: base64\r\n"
+                 "Content-Transfer-Encoding: quoted-printable\r\n"
                  "\r\n"
-                 "SGVsbG8gV29ybGQ=\r\n"
+                 "Test=3DNote=\r\n"
+                 "continuation=0A\r\n"
                  "--B001\r\n"
                  "Content-Type: application/octet-stream; name=\"data.bin\"\r\n"
                  "Content-Disposition: attachment; filename=\"data.bin\"\r\n"
@@ -473,8 +485,14 @@ static void handle_client(SSL *ssl) {
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Sent\"\r\n"
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Trash\"\r\n"
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Empty\"\r\n"
-                /* IMAP modified UTF-7: "INBOX.Träger" — exercises imap_utf7_decode */
-                "* LIST (\\HasNoChildren) \".\" \"INBOX.Tr&AOQ-ger\"\r\n";
+                /* IMAP modified UTF-7: "INBOX.Träger" (U+00E4, 2-byte UTF-8) */
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.Tr&AOQ-ger\"\r\n"
+                /* Literal '&' via "&-" — exercises imap_utf7_decode lines 65-67 */
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.AT&-T\"\r\n"
+                /* U+4E2D (中, CJK 3-byte UTF-8); mod64 lowercase 'i', digit '0' */
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.&Ti0-\"\r\n"
+                /* U+1F600 (emoji, 4-byte UTF-8); surrogate pair + digit '2','3', lowercase 'e' */
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.&2D3eAA-\"\r\n";
             SSL_write(ssl, list_resp, (int)strlen(list_resp));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK LIST completed\r\n", tag);

@@ -3293,6 +3293,22 @@ VF_FLAGGED=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_C
     "$BIN_DIR/email-cli" --batch list --folder __flagged__ 2>&1 || true) )
 check_not "58.2 list --folder __flagged__: no crash" "Segmentation\|Abort" "$VF_FLAGGED"
 
+VF_JUNK=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder __junk__ 2>&1 || true) )
+check_not "58.3 list --folder __junk__: no crash" "Segmentation\|Abort" "$VF_JUNK"
+
+VF_PHISHING=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder __phishing__ 2>&1 || true) )
+check_not "58.4 list --folder __phishing__: no crash" "Segmentation\|Abort" "$VF_PHISHING"
+
+VF_ANSWERED=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder __answered__ 2>&1 || true) )
+check_not "58.5 list --folder __answered__: no crash" "Segmentation\|Abort" "$VF_ANSWERED"
+
+VF_FORWARDED=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder __forwarded__ 2>&1 || true) )
+check_not "58.6 list --folder __forwarded__: no crash" "Segmentation\|Abort" "$VF_FORWARDED"
+
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 59 — cross-folder content search (__search__: prefix)
 # ════════════════════════════════════════════════════════════════════════════
@@ -3301,11 +3317,23 @@ echo "--- Phase 59: content search ---"
 
 SRCH_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-cli" --batch list --folder "__search__:0:Alpha" 2>&1 || true) )
-check_not "59.1 search by keyword: no crash"  "Segmentation\|Abort"  "$SRCH_OUT"
+check_not "59.1 search by subject: no crash"   "Segmentation\|Abort"  "$SRCH_OUT"
+
+SRCH_FROM=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder "__search__:1:sender" 2>&1 || true) )
+check_not "59.2 search by from: no crash"      "Segmentation\|Abort"  "$SRCH_FROM"
+
+SRCH_TO=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder "__search__:2:testuser" 2>&1 || true) )
+check_not "59.3 search by to: no crash"        "Segmentation\|Abort"  "$SRCH_TO"
+
+SRCH_BODY=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --folder "__search__:3:Body" 2>&1 || true) )
+check_not "59.4 search by body: no crash"      "Segmentation\|Abort"  "$SRCH_BODY"
 
 SRCH_EMPTY=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-cli" --batch list --folder "__search__:0:ZZZNOMATCH99" 2>&1 || true) )
-check_not "59.2 search no result: no crash"   "Segmentation\|Abort"  "$SRCH_EMPTY"
+check_not "59.5 search no result: no crash"    "Segmentation\|Abort"  "$SRCH_EMPTY"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 60 — Gmail label write operations

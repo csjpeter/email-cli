@@ -1245,6 +1245,75 @@ static void test_show_save_all_confirm(void) {
     pty_close(s);
 }
 
+/** Exercises HOME/END/LEFT/RIGHT/BACK/DELETE cursor keys inside input_line_run. */
+static void test_show_save_input_line_cursor(void) {
+    PtySession *s = open_show_view();
+    ASSERT(s != NULL, "input cursor: opens show view");
+
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Attachments", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_key(s, PTY_KEY_ENTER);           /* select first attachment */
+    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Exercise cursor movement keys while input_line_run is active */
+    pty_send_key(s, PTY_KEY_HOME);            /* TERM_KEY_HOME  → cursor = 0 */
+    pty_send_key(s, PTY_KEY_END);             /* TERM_KEY_END   → cursor = len */
+    pty_send_key(s, PTY_KEY_LEFT);            /* TERM_KEY_LEFT  → il_move_left */
+    pty_send_key(s, PTY_KEY_RIGHT);           /* TERM_KEY_RIGHT → il_move_right */
+    pty_send_key(s, PTY_KEY_BACK);            /* TERM_KEY_BACK  → il_backspace */
+    pty_send_key(s, PTY_KEY_HOME);            /* back to start so DELETE acts on a char */
+    pty_send_str(s, "\033[3~");               /* TERM_KEY_DELETE → il_delete_fwd */
+
+    pty_send_key(s, PTY_KEY_ESC);             /* cancel — no file written */
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** Exercises TAB/Shift+Tab path completion inside the Save-all dialog. */
+static void test_show_save_tab_completion(void) {
+    /* Ensure two known files exist in the test home for completion to find. */
+    char tab1[512], tab2[512];
+    snprintf(tab1, sizeof(tab1), "%s/zztab1.txt", g_test_home);
+    snprintf(tab2, sizeof(tab2), "%s/zztab2.txt", g_test_home);
+    { FILE *f = fopen(tab1, "w"); if (f) fclose(f); }
+    { FILE *f = fopen(tab2, "w"); if (f) fclose(f); }
+
+    PtySession *s = open_show_view();
+    ASSERT(s != NULL, "tab complete: opens show view");
+
+    pty_send_str(s, "A");                     /* "Save all to:" dialog */
+    ASSERT_WAIT_FOR(s, "Save all to:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Pre-filled: $HOME.  Append "/zz" so TAB prefix is "zz". */
+    pty_send_key(s, PTY_KEY_END);
+    pty_send_str(s, "/zz");
+
+    /* First TAB: scans dir, finds zztab1/zztab2, completes to zztab1 */
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "zztab1", WAIT_MS);
+
+    /* Second TAB: cycles to zztab2 */
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "zztab2", WAIT_MS);
+
+    /* Shift+Tab: cycles back to zztab1 */
+    pty_send_str(s, "\033[Z");
+    ASSERT_WAIT_FOR(s, "zztab1", WAIT_MS);
+
+    pty_send_key(s, PTY_KEY_ESC);             /* cancel — no file written */
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    remove(tab1);
+    remove(tab2);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  email-cli-ro EXCLUSIVE TESTS
  * ══════════════════════════════════════════════════════════════════════ */
@@ -3998,6 +4067,8 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_show_save_single);
     RUN_TEST(test_show_save_all_cancel);
     RUN_TEST(test_show_save_all_confirm);
+    RUN_TEST(test_show_save_input_line_cursor);
+    RUN_TEST(test_show_save_tab_completion);
 
     printf("\n--- Empty folder ---\n");
     RUN_TEST(test_interactive_empty_folder);

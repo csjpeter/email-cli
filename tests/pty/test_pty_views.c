@@ -540,6 +540,45 @@ static void test_interactive_list_flags(void) {
     pty_close(s);
 }
 
+/** '/' in the message list activates the inline subject/body filter. */
+static void test_tui_list_search_filter(void) {
+    /* Exercises list_filter_rebuild and filter input handling in email_service.c */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "list search: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* Activate filter mode */
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Filter", WAIT_MS);  /* filter bar appears */
+    pty_settle(s, SETTLE_MS);
+
+    /* Type search term — filter bar rebuilds on each character */
+    pty_send_str(s, "Test");
+    pty_settle(s, SETTLE_MS);
+
+    /* TAB: cycle scope (Subject → From → …) */
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_settle(s, SETTLE_MS / 2);
+
+    /* BACK: remove last typed character */
+    pty_send_key(s, PTY_KEY_BACK);
+    pty_settle(s, SETTLE_MS / 2);
+
+    /* Enter: commit filter (stay in filter mode but stop typing) */
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS / 2);
+
+    /* First ESC: clear filter, remain in list */
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+
+    /* Second ESC: exit list view */
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  INTERACTIVE SHOW VIEW
  * ══════════════════════════════════════════════════════════════════════ */
@@ -1033,6 +1072,36 @@ static void test_interactive_folders_esc_quit(void) {
     /* ESC exits the application from the folder browser */
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
+    pty_close(s);
+}
+
+static void test_tui_folder_browser_search(void) {
+    /* '/' in the folder browser opens an inline search bar */
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "folder search: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Activate search */
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* Type a search term */
+    pty_send_str(s, "Inbox");
+    pty_settle(s, SETTLE_MS);
+    /* TAB cycles scope: Subject → From → To → Body */
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_settle(s, SETTLE_MS / 2);
+    /* BACK removes last character */
+    pty_send_key(s, PTY_KEY_BACK);
+    pty_settle(s, SETTLE_MS / 2);
+    /* ESC cancels search, returns to folder browser */
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
 
@@ -4035,6 +4104,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_list_esc_quit);
     RUN_TEST(test_interactive_list_nav);
     RUN_TEST(test_interactive_list_flags);
+    RUN_TEST(test_tui_list_search_filter);
 
     printf("\n--- Interactive show ---\n");
     RUN_TEST(test_interactive_show_content);
@@ -4060,6 +4130,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_folders_back_to_list);
     RUN_TEST(test_interactive_folders_flat_navigate_up);
     RUN_TEST(test_interactive_folders_esc_quit);
+    RUN_TEST(test_tui_folder_browser_search);
 
     printf("\n--- Attachment save ---\n");
     RUN_TEST(test_show_attachment_statusbar);

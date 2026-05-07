@@ -455,7 +455,9 @@ static void handle_client(SSL *ssl) {
                 "* LIST (\\HasNoChildren) \".\" \"INBOX\"\r\n"
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Sent\"\r\n"
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Trash\"\r\n"
-                "* LIST (\\HasNoChildren) \".\" \"INBOX.Empty\"\r\n";
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.Empty\"\r\n"
+                /* IMAP modified UTF-7: "INBOX.Träger" — exercises imap_utf7_decode */
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.Tr&AOQ-ger\"\r\n";
             SSL_write(ssl, list_resp, (int)strlen(list_resp));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK LIST completed\r\n", tag);

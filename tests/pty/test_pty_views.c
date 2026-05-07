@@ -1643,6 +1643,49 @@ static void test_wizard_bad_protocol_rejected(void) {
     setenv("HOME", g_test_home, 1);
 }
 
+/* Wizard: enter SMTP host (plain name, no protocol) to cover normalize_smtp_host */
+static void test_wizard_with_smtp(void) {
+    char wiz_home[300];
+    snprintf(wiz_home, sizeof(wiz_home), "%s/wizard_smtp", g_test_home);
+    mkdir(wiz_home, 0700);
+    setenv("HOME", wiz_home, 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    restart_mock();
+    const char *wiz[] = {"add-account", NULL};
+    PtySession *s = cli_run(wiz);
+    ASSERT(s != NULL, "wizard smtp: opens");
+    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    pty_send_str(s, "1\n");                           /* IMAP */
+    ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
+    pty_send_str(s, "localhost:9993\n");               /* plain name → imaps:// prepended */
+    ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
+    pty_send_str(s, "\n");                            /* accept default 993 */
+    ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
+    pty_send_str(s, "testuser\n");
+    ASSERT_WAIT_FOR(s, "assword", WAIT_MS);
+    pty_send_str(s, "testpass\n");
+    ASSERT_WAIT_FOR(s, "older", WAIT_MS);
+    pty_send_str(s, "INBOX\n");
+    ASSERT_WAIT_FOR(s, "SMTP Host", WAIT_MS);
+    /* Enter a bad SMTP protocol first → error → re-prompt */
+    pty_send_str(s, "smtp://localhost\n");             /* bad protocol */
+    ASSERT_WAIT_FOR(s, "unsupported protocol", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "SMTP Host", WAIT_MS);          /* re-prompted */
+    /* Now enter plain hostname → normalize_smtp_host prepends smtps:// */
+    pty_send_str(s, "localhost\n");
+    ASSERT_WAIT_FOR(s, "SMTP Port", WAIT_MS);
+    pty_send_str(s, "\n");                            /* accept default 587 */
+    ASSERT_WAIT_FOR(s, "SMTP Username", WAIT_MS);
+    pty_send_str(s, "\n");                            /* same as IMAP */
+    ASSERT_WAIT_FOR(s, "SMTP Password", WAIT_MS);
+    pty_send_str(s, "\n");                            /* same as IMAP */
+    ASSERT_WAIT_FOR(s, "added.", WAIT_MS);
+    pty_close(s);
+
+    setenv("HOME", g_test_home, 1);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  CRON MANAGEMENT (US 06, 07, 08)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -4195,6 +4238,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_wizard_complete);
     RUN_TEST(test_wizard_host_autocomplete);
     RUN_TEST(test_wizard_bad_protocol_rejected);
+    RUN_TEST(test_wizard_with_smtp);
 
     /* ── Non-TTY fallback ────────────────────────────────────────────── */
     printf("\n--- Non-TTY fallback ---\n");

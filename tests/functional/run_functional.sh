@@ -4533,6 +4533,81 @@ CLI78_SMISS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_
 check "78.16 email-cli send missing --body: required fields error" "required\|--body\|Error" "$CLI78_SMISS"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 79 — Compose: file attachment via --attach flag (US-84)
+# NOTE: These tests will FAIL until US-84 (--attach) is implemented.
+#       Uncomment when the feature lands.
+# ════════════════════════════════════════════════════════════════════════════
+# --- Phase 79: email-cli send --attach (US-84) ---
+#
+# H_ATTACH=$(mktemp -d "/tmp/email-ft-attach-$$-XXXXXX")
+# trap 'rm -rf "/tmp/email-ft-attach-$$-"*' EXIT
+# export HOME="$H_ATTACH"
+# unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+# ATTACH_CFG="$H_ATTACH/.config/email-cli/accounts/testuser"
+# mkdir -p "$ATTACH_CFG"
+# cat > "$ATTACH_CFG/config.ini" <<'INI'
+# EMAIL_HOST=imaps://localhost:9993
+# EMAIL_USER=testuser@example.com
+# EMAIL_PASS=testpass
+# EMAIL_FOLDER=INBOX
+# SMTP_HOST=smtps://localhost:9025
+# SMTP_PORT=9025
+# SMTP_USER=testuser@example.com
+# SMTP_PASS=testpass
+# SSL_NO_VERIFY=1
+# INI
+# chmod 0600 "$ATTACH_CFG/config.ini"
+# ATTACH_TXT=$(mktemp "/tmp/email-ft-attach-$$-file-XXXXXX.txt")
+# echo "Attachment content" > "$ATTACH_TXT"
+# ATTACH_PDF=$(mktemp "/tmp/email-ft-attach-$$-file-XXXXXX.pdf")
+# printf '%%PDF-1.4 stub\n' > "$ATTACH_PDF"
+#
+# # 79.1: send with --attach → succeeds (mock SMTP accepts)
+# OUT79_1=$("$BIN_DIR/email-cli" send \
+#     --to alice@example.com \
+#     --subject "Attach test" \
+#     --body "See attached" \
+#     --attach "$ATTACH_TXT" 2>&1 || true)
+# check "79.1 send --attach: success" "sent\|Sent\|queued" "$OUT79_1"
+#
+# # 79.2: send with multiple --attach flags
+# OUT79_2=$("$BIN_DIR/email-cli" send \
+#     --to alice@example.com \
+#     --subject "Multi-attach test" \
+#     --body "Two files" \
+#     --attach "$ATTACH_TXT" \
+#     --attach "$ATTACH_PDF" 2>&1 || true)
+# check "79.2 send --attach --attach: success" "sent\|Sent\|queued" "$OUT79_2"
+#
+# # 79.3: --attach with non-existent file → error
+# OUT79_3=$("$BIN_DIR/email-cli" send \
+#     --to alice@example.com \
+#     --subject "Bad attach" \
+#     --body "body" \
+#     --attach "/tmp/no-such-file-xyz-404.pdf" 2>&1 || true)
+# check "79.3 send --attach non-existent: error" "not found\|No such file\|Error" "$OUT79_3"
+#
+# # 79.4: --attach with directory path → error
+# OUT79_4=$("$BIN_DIR/email-cli" send \
+#     --to alice@example.com \
+#     --subject "Dir attach" \
+#     --body "body" \
+#     --attach "/tmp/" 2>&1 || true)
+# check "79.4 send --attach directory: error" "Not a file\|directory\|Error" "$OUT79_4"
+#
+# # 79.5: --attach exceeding 25 MB limit → error
+# BIGFILE=$(mktemp "/tmp/email-ft-attach-$$-big-XXXXXX.bin")
+# dd if=/dev/zero of="$BIGFILE" bs=1M count=26 2>/dev/null
+# OUT79_5=$("$BIN_DIR/email-cli" send \
+#     --to alice@example.com \
+#     --subject "Big attach" \
+#     --body "body" \
+#     --attach "$BIGFILE" 2>&1 || true)
+# check "79.5 send --attach >25MB: size error" "too large\|exceeds\|25\|Error" "$OUT79_5"
+# rm -f "$BIGFILE" "$ATTACH_TXT" "$ATTACH_PDF"
+# export HOME="$H_ALPHA"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

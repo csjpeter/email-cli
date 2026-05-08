@@ -196,3 +196,27 @@ add_custom_target(run-pty-send-local
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running PTY local-first send tests"
 )
+
+# ── Attachment + post-compose review PTY tests (US-84, US-85) ─────────
+# NOTE: These tests FAIL until US-84 and US-85 are implemented (TDD spec).
+add_executable(test-pty-attachment EXCLUDE_FROM_ALL
+    test_pty_attachment.c
+)
+target_include_directories(test-pty-attachment PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-attachment ptytest)
+if(NOT APPLE)
+    target_link_libraries(test-pty-attachment util)
+endif()
+add_dependencies(test-pty-attachment email-tui mock-imap-server mock-smtp-server)
+
+add_custom_target(run-pty-attachment
+    COMMAND test-pty-attachment
+        $<TARGET_FILE:email-tui>
+        $<TARGET_FILE:mock-imap-server>
+        $<TARGET_FILE:mock-smtp-server>
+    DEPENDS test-pty-attachment email-tui mock-imap-server mock-smtp-server
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running PTY attachment + post-compose review tests (US-84, US-85)"
+)

@@ -35,15 +35,34 @@ jobs:
       - name: Generate coverage badges
         run: |
           pip install genbadge[coverage] lcov_cobertura --quiet
-          lcov_cobertura build/coverage.info \
-              -o build/coverage.xml
-          lcov_cobertura build/coverage-functional.info \
-              -o build/coverage-functional.xml
+
+          # Combined badge: line coverage
+          lcov_cobertura build/coverage.info -o build/coverage.xml
           genbadge coverage -i build/coverage.xml \
               -o build/coverage_report/coverage-badge.svg
-          genbadge coverage -i build/coverage-functional.xml \
+
+          # Functional badge: FUNCTION coverage (not line coverage)
+          # genbadge reads Cobertura line-rate, so we build a synthetic XML
+          # that exposes function hit/total as the line-rate metric.
+          FUNC_SUMMARY=$(lcov --summary build/coverage-functional.info 2>&1 | grep 'functions')
+          FUNC_PCT=$(echo "$FUNC_SUMMARY" | grep -oP '[0-9]+\.[0-9]+(?=%)')
+          FUNC_HIT=$(echo "$FUNC_SUMMARY" | grep -oP '(?<=\()\d+')
+          FUNC_TOTAL=$(echo "$FUNC_SUMMARY" | grep -oP '\d+(?= functions)')
+          python3 - "$FUNC_PCT" "$FUNC_HIT" "$FUNC_TOTAL" <<'PYEOF'
+          import sys, pathlib
+          pct, hit, total = float(sys.argv[1])/100, sys.argv[2], sys.argv[3]
+          xml = (
+              '<?xml version="1.0" ?>\n'
+              f'<coverage line-rate="{pct:.4f}" branch-rate="{pct:.4f}"'
+              f' lines-covered="{hit}" lines-valid="{total}"'
+              ' version="" timestamp=""><packages/></coverage>\n'
+          )
+          pathlib.Path('build/coverage-functional-func.xml').write_text(xml)
+          PYEOF
+          genbadge coverage -i build/coverage-functional-func.xml \
               --name "functional coverage" \
               -o build/coverage_report/coverage-functional-badge.svg
+
           cp build/coverage_report/coverage-functional-badge.svg \
              build/coverage_functional_report/coverage-badge.svg
           mv build/coverage_functional_report build/coverage_report/functional

@@ -230,6 +230,12 @@ case "$1" in
         (cd "$BUILD_DIR" && \
          genhtml coverage.info --output-directory coverage_report && \
          genhtml coverage-functional.info --output-directory coverage_functional_report)
+        FUNC_SUMMARY=$(lcov --summary "$BUILD_DIR/coverage-functional.info" 2>&1 | grep 'functions')
+        FUNC_PCT=$(echo "$FUNC_SUMMARY" | grep -oP '[0-9]+\.[0-9]+(?=%)')
+        LINE_SUMMARY=$(lcov --summary "$BUILD_DIR/coverage.info" 2>&1 | grep 'functions')
+        LINE_PCT=$(echo "$LINE_SUMMARY" | grep -oP '[0-9]+\.[0-9]+(?=%)')
+        echo "Functional badge: ${FUNC_PCT}%  (function coverage)"
+        echo "Combined badge:   ${LINE_PCT}%  (function coverage, unit+functional)"
         echo "Combined coverage:    $BUILD_DIR/coverage_report/index.html"
         echo "Functional coverage:  $BUILD_DIR/coverage_functional_report/index.html"
         ;;

@@ -1,7 +1,11 @@
 #include "test_helpers.h"
 #include "compose_service.h"
+#include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /* ── compose_build_message ───────────────────────────────────────────── */
 
@@ -261,6 +265,175 @@ static void test_build_empty_cc_omitted(void) {
     free(out);
 }
 
+/* ── compose_build_message with attachments (US-84) ─────────────────── */
+
+/* Write a small temp file and return a heap-allocated path, or NULL. */
+static char *make_tmp_attach(const char *content)
+{
+    char *path = strdup("/tmp/test-compose-attach-XXXXXX");
+    int fd = mkstemp(path);
+    if (fd < 0) { free(path); return NULL; }
+    write(fd, content, strlen(content));
+    close(fd);
+    return path;
+}
+
+static void test_build_no_attach_is_text_plain(void)
+{
+    /* Zero attachments → must still produce text/plain (backward compat) */
+    ComposeParams p = {
+        .from = "a@b.com", .to = "c@d.com",
+        .subject = "X", .body = "Hi",
+        .attachments = NULL, .attach_count = 0
+    };
+    char *out = NULL; size_t len = 0;
+    ASSERT(compose_build_message(&p, &out, &len) == 0,
+           "attach: no attach → success");
+    ASSERT(strstr(out, "Content-Type: text/plain") != NULL,
+           "attach: no attach → text/plain Content-Type");
+    ASSERT(strstr(out, "multipart/mixed") == NULL,
+           "attach: no attach → no multipart/mixed");
+    free(out);
+}
+
+static void test_build_one_attachment_multipart(void)
+{
+    /* One attachment → multipart/mixed with text part + attachment part */
+    char *path = make_tmp_attach("attachment data\n");
+    ASSERT(path != NULL, "attach one: tmp file created");
+
+    const char *attachments[] = { path, NULL };
+    ComposeParams p = {
+        .from = "a@b.com", .to = "c@d.com",
+        .subject = "With attach", .body = "See attached.",
+        .attachments = attachments, .attach_count = 1
+    };
+    char *out = NULL; size_t len = 0;
+    int rc = compose_build_message(&p, &out, &len);
+    ASSERT(rc == 0, "attach one: success");
+    ASSERT(strstr(out, "multipart/mixed") != NULL,
+           "attach one: Content-Type is multipart/mixed");
+    ASSERT(strstr(out, "boundary=") != NULL,
+           "attach one: boundary present");
+    ASSERT(strstr(out, "Content-Type: text/plain") != NULL,
+           "attach one: text part present");
+    ASSERT(strstr(out, "Content-Disposition: attachment") != NULL,
+           "attach one: attachment part has Content-Disposition");
+    ASSERT(strstr(out, "Content-Transfer-Encoding: base64") != NULL,
+           "attach one: attachment encoded as base64");
+    ASSERT(strstr(out, "See attached.") != NULL,
+           "attach one: body text present");
+    free(out);
+    unlink(path);
+    free(path);
+}
+
+static void test_build_attachment_filename_in_disposition(void)
+{
+    /* Content-Disposition must include filename="<basename>" */
+    char *path = make_tmp_attach("pdf stub");
+    ASSERT(path != NULL, "attach filename: tmp file created");
+
+    /* Rename to something with a meaningful extension */
+    char named[256];
+    snprintf(named, sizeof(named), "/tmp/report-%d.pdf", (int)getpid());
+    rename(path, named);
+    free(path);
+
+    const char *attachments[] = { named, NULL };
+    ComposeParams p = {
+        .from = "a@b.com", .to = "c@d.com",
+        .subject = "PDF", .body = "Attached.",
+        .attachments = attachments, .attach_count = 1
+    };
+    char *out = NULL; size_t len = 0;
+    ASSERT(compose_build_message(&p, &out, &len) == 0,
+           "attach filename: success");
+    ASSERT(strstr(out, "filename=") != NULL,
+           "attach filename: filename= in Content-Disposition");
+    /* Should contain just the basename, not the full path */
+    char basename_check[64];
+    snprintf(basename_check, sizeof(basename_check), "report-%d.pdf", (int)getpid());
+    ASSERT(strstr(out, basename_check) != NULL,
+           "attach filename: basename in Content-Disposition");
+    free(out);
+    unlink(named);
+}
+
+static void test_build_two_attachments(void)
+{
+    /* Two attachments → two MIME attachment parts */
+    char *path1 = make_tmp_attach("file one");
+    char *path2 = make_tmp_attach("file two");
+    ASSERT(path1 && path2, "attach two: tmp files created");
+
+    const char *attachments[] = { path1, path2, NULL };
+    ComposeParams p = {
+        .from = "a@b.com", .to = "c@d.com",
+        .subject = "Two", .body = "Both attached.",
+        .attachments = attachments, .attach_count = 2
+    };
+    char *out = NULL; size_t len = 0;
+    ASSERT(compose_build_message(&p, &out, &len) == 0,
+           "attach two: success");
+    ASSERT(strstr(out, "multipart/mixed") != NULL,
+           "attach two: multipart/mixed");
+    /* Count Content-Disposition: attachment occurrences — must be 2 */
+    int count = 0;
+    const char *p2 = out;
+    while ((p2 = strstr(p2, "Content-Disposition: attachment")) != NULL) {
+        count++;
+        p2++;
+    }
+    ASSERT(count == 2, "attach two: exactly 2 attachment parts");
+    free(out);
+    unlink(path1); free(path1);
+    unlink(path2); free(path2);
+}
+
+static void test_build_attachment_boundary_unique(void)
+{
+    /* Two separate messages must have different MIME boundaries */
+    char *path = make_tmp_attach("data");
+    ASSERT(path != NULL, "attach boundary: tmp file created");
+
+    const char *attachments[] = { path, NULL };
+    ComposeParams p = {
+        .from = "a@b.com", .to = "c@d.com",
+        .subject = "B", .body = ".",
+        .attachments = attachments, .attach_count = 1
+    };
+    char *out1 = NULL, *out2 = NULL;
+    size_t len1 = 0, len2 = 0;
+    ASSERT(compose_build_message(&p, &out1, &len1) == 0, "boundary: msg1 ok");
+    ASSERT(compose_build_message(&p, &out2, &len2) == 0, "boundary: msg2 ok");
+
+    /* Extract boundary values — they must differ (include pid/time/random) */
+    const char *b1 = strstr(out1, "boundary=\"");
+    const char *b2 = strstr(out2, "boundary=\"");
+    ASSERT(b1 && b2, "boundary: both have boundary");
+    /* At minimum the two messages should not be byte-identical */
+    ASSERT(strcmp(out1, out2) != 0 || len1 != len2,
+           "boundary: two messages differ (unique boundary or Message-ID)");
+    free(out1); free(out2);
+    unlink(path); free(path);
+}
+
+static void test_build_attachment_nonexistent_file(void)
+{
+    /* Non-existent file path → compose_build_message returns -1 */
+    const char *attachments[] = { "/tmp/no-such-file-xyz-404.bin", NULL };
+    ComposeParams p = {
+        .from = "a@b.com", .to = "c@d.com",
+        .subject = "Bad", .body = ".",
+        .attachments = attachments, .attach_count = 1
+    };
+    char *out = NULL; size_t len = 0;
+    ASSERT(compose_build_message(&p, &out, &len) == -1,
+           "attach nonexistent: returns -1");
+    ASSERT(out == NULL, "attach nonexistent: out is NULL");
+}
+
 void test_compose_service(void) {
     RUN_TEST(test_build_null_params);
     RUN_TEST(test_build_missing_fields);
@@ -277,4 +450,11 @@ void test_compose_service(void) {
     RUN_TEST(test_extract_basic);
     RUN_TEST(test_extract_re_dedup);
     RUN_TEST(test_extract_reply_to_header);
+    /* US-84: attachment tests — fail until compose_build_message handles them */
+    RUN_TEST(test_build_no_attach_is_text_plain);
+    RUN_TEST(test_build_one_attachment_multipart);
+    RUN_TEST(test_build_attachment_filename_in_disposition);
+    RUN_TEST(test_build_two_attachments);
+    RUN_TEST(test_build_attachment_boundary_unique);
+    RUN_TEST(test_build_attachment_nonexistent_file);
 }

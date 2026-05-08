@@ -709,7 +709,8 @@ static int cmd_compose_interactive(Config *cfg,
         ComposeParams p = {from_send, to_buf,
                            cc_buf[0]  ? cc_buf  : NULL,
                            bcc_buf[0] ? bcc_buf : NULL,
-                           subj_buf, body_str, reply_id};
+                           subj_buf, body_str, reply_id,
+                           NULL, 0};
         char *msg = NULL;
         size_t msg_len = 0;
         int rc = -1;
@@ -1833,7 +1834,8 @@ int main(int argc, char *argv[]) {
                 const char *from = from_address(cfg);
                 ComposeParams p = {from, to, NULL, NULL,
                                    subject   ? subject   : "",
-                                   body_text ? body_text : "", NULL};
+                                   body_text ? body_text : "", NULL,
+                                   NULL, 0};
                 char *msg = NULL; size_t msg_len = 0;
                 if (compose_build_message(&p, &msg, &msg_len) != 0) {
                     fprintf(stderr, "Error: Failed to build message.\n");

@@ -20,6 +20,10 @@ typedef struct {
     const char *body;           /**< Plain-text body (UTF-8, may use LF or CRLF). */
     const char *reply_to_msg_id; /**< Message-ID of the original message, for In-Reply-To.
                                       NULL for new (non-reply) messages. */
+    /* US-84: outgoing attachments ---------------------------------------- */
+    const char **attachments;   /**< NULL-terminated array of absolute file paths to attach.
+                                     NULL or empty array → plain text/plain message. */
+    int attach_count;           /**< Number of entries in attachments[]; 0 if none. */
 } ComposeParams;
 
 /**

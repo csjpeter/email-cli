@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <locale.h>
 #include <signal.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include "config_store.h"
 #include "setup_wizard.h"
 #include "email_service.h"
@@ -75,12 +77,16 @@ static void help(void) {
 
 #define CD_MAX_CONTACTS   512
 #define CD_MAX_MATCH        5
-#define CD_NFIELDS          4
+#define CD_NFIELDS          5
 #define CD_FIELD_TO         0
 #define CD_FIELD_CC         1
 #define CD_FIELD_BCC        2
 #define CD_FIELD_SUBJ       3
+#define CD_FIELD_ATTACH     4
 #define CD_FIELD_BUFSZ    512
+#define CD_MAX_ATTACH       8
+#define CD_ATTACH_PATH_SZ 4096
+#define CD_MAX_FILE_MATCH   8
 
 typedef struct { char addr[256]; char name[128]; } CDContact;
 typedef struct {
@@ -88,7 +94,60 @@ typedef struct {
     char cc[CD_FIELD_BUFSZ];
     char bcc[CD_FIELD_BUFSZ];
     char subj[CD_FIELD_BUFSZ];
+    char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_SZ];
+    int  attach_count;
 } CDResult;
+
+typedef struct {
+    char paths[CD_MAX_ATTACH][CD_ATTACH_PATH_SZ];
+    int  count;
+    char matches[CD_MAX_FILE_MATCH][CD_ATTACH_PATH_SZ];
+    int  match_count;
+    char error[256];
+} CDAttachState;
+
+/** List filesystem entries matching a typed path prefix for Attach tab-completion.
+ *  If path_so_far ends with '/', list all entries in that directory.
+ *  Otherwise splits at last '/' to get dir + prefix and lists matching entries.
+ *  Returns number of matches (up to max_matches). */
+static int cd_files_match(const char *path_so_far,
+                           char matches[CD_MAX_FILE_MATCH][CD_ATTACH_PATH_SZ],
+                           int max_matches)
+{
+    if (!path_so_far || !path_so_far[0] || max_matches <= 0) return 0;
+    char dir[CD_ATTACH_PATH_SZ];
+    char prefix[CD_ATTACH_PATH_SZ];
+    const char *last_slash = strrchr(path_so_far, '/');
+    if (last_slash) {
+        size_t dir_len = (size_t)(last_slash - path_so_far) + 1;
+        if (dir_len >= CD_ATTACH_PATH_SZ) return 0;
+        memcpy(dir, path_so_far, dir_len);
+        dir[dir_len] = '\0';
+        strncpy(prefix, last_slash + 1, CD_ATTACH_PATH_SZ - 1);
+        prefix[CD_ATTACH_PATH_SZ - 1] = '\0';
+    } else {
+        strncpy(dir, "./", CD_ATTACH_PATH_SZ - 1);
+        strncpy(prefix, path_so_far, CD_ATTACH_PATH_SZ - 1);
+        prefix[CD_ATTACH_PATH_SZ - 1] = '\0';
+    }
+    DIR *d = opendir(dir);
+    if (!d) return 0;
+    int found = 0;
+    size_t prefix_len = strlen(prefix);
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL && found < max_matches) {
+        if (de->d_name[0] == '.') continue;
+        if (prefix_len > 0 && strncmp(de->d_name, prefix, prefix_len) != 0) continue;
+        size_t dlen = strlen(dir);
+        size_t nlen = strlen(de->d_name);
+        if (dlen + nlen >= CD_ATTACH_PATH_SZ) continue;
+        memcpy(matches[found], dir, dlen);
+        memcpy(matches[found] + dlen, de->d_name, nlen + 1);
+        found++;
+    }
+    closedir(d);
+    return found;
+}
 
 /** Load contacts from accounts/<user>/contacts.tsv into pre-allocated array.
  *  Format per line: address\tdisplay_name\tfrequency
@@ -214,13 +273,13 @@ static int cd_render(const char *title,
                      int active,
                      const CDContact *contacts,
                      const int *match_idx,
-                     int match_count) {
+                     int match_count,
+                     const CDAttachState *attach) {
     int tcols = terminal_cols();
     if (tcols < 20) tcols = 80;
 
-    /* Row 1: title bar */
-    printf("\033[H");  /* cursor to top-left */
-    printf("\033[7m");  /* reverse video */
+    printf("\033[H");
+    printf("\033[7m");
     char title_line[256];
     snprintf(title_line, sizeof(title_line), "  %s", title);
     int tlen = (int)strlen(title_line);
@@ -228,7 +287,6 @@ static int cd_render(const char *title,
     for (int i = tlen; i < tcols; i++) putchar(' ');
     printf("\033[0m");
 
-    /* Row 2: blank */
     printf("\033[2;1H\033[K");
 
     int row = 3;
@@ -238,28 +296,26 @@ static int cd_render(const char *title,
         "To:      ",
         "Cc:      ",
         "Bcc:     ",
-        "Subject: "
+        "Subject: ",
+        "Attach:  "
     };
 
     for (int f = 0; f < CD_NFIELDS; f++) {
         printf("\033[%d;1H\033[K", row);
         if (f == active) {
-            printf("\033[1m");  /* bold for active */
+            printf("\033[1m");
             active_row = row;
         } else {
-            printf("\033[2m");  /* dim for inactive */
+            printf("\033[2m");
         }
-        /* indent + label (9 chars) + space = 2 + 9 + 2 = 13 chars before value */
         printf("  %s  ", labels[f]);
         printf("\033[0m");
 
-        /* Print field value — truncate to fit terminal width */
         const char *val = bufs[f];
         int val_len = (int)strlen(val);
         int avail = tcols - 13;
         if (avail < 1) avail = 1;
 
-        /* Compute display start for scrolling: keep cursor visible */
         int disp_start = 0;
         if (cursors[f] > avail - 1)
             disp_start = cursors[f] - (avail - 1);
@@ -270,8 +326,8 @@ static int cd_render(const char *title,
             fwrite(val + disp_start, 1, (size_t)print_len, stdout);
         row++;
 
-        /* Suggestions for address fields */
         if (f == active && f < CD_FIELD_SUBJ && match_count > 0) {
+            /* Contact autocomplete dropdown */
             for (int m = 0; m < match_count; m++) {
                 printf("\033[%d;1H\033[K", row);
                 printf("             \033[36m\xe2\x96\xb6 %-40s  %s\033[0m",
@@ -279,59 +335,90 @@ static int cd_render(const char *title,
                        contacts[match_idx[m]].name);
                 row++;
             }
+        } else if (f == active && f == CD_FIELD_ATTACH && attach && attach->match_count > 0) {
+            /* File browser dropdown */
+            for (int m = 0; m < attach->match_count; m++) {
+                const char *fname = strrchr(attach->matches[m], '/');
+                fname = fname ? fname + 1 : attach->matches[m];
+                printf("\033[%d;1H\033[K", row);
+                printf("             \033[36m\xe2\x96\xb6 %s\033[0m", fname);
+                row++;
+            }
         }
     }
 
-    /* Blank row after fields */
+    /* List of already-added attachments */
+    if (attach && attach->count > 0) {
+        printf("\033[%d;1H\033[K", row);
+        printf("  \033[2mAdded:\033[0m");
+        row++;
+        for (int i = 0; i < attach->count; i++) {
+            const char *fname = strrchr(attach->paths[i], '/');
+            fname = fname ? fname + 1 : attach->paths[i];
+            printf("\033[%d;1H\033[K", row);
+            printf("    \033[32m[%d] %s\033[0m", i + 1, fname);
+            row++;
+        }
+    }
+
+    /* Inline error message */
+    if (attach && attach->error[0]) {
+        printf("\033[%d;1H\033[K", row);
+        printf("  \033[31m%s\033[0m", attach->error);
+        row++;
+    }
+
     printf("\033[%d;1H\033[K", row);
     row++;
 
-    /* Help row */
     printf("\033[%d;1H\033[K", row);
-    printf("\033[2m  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel\033[0m");
+    if (active == CD_FIELD_ATTACH) {
+        printf("\033[2m  Tab=complete  Shift-Tab=prev  Enter=add  d=remove last  Enter(empty)=OK  ESC=cancel\033[0m");
+    } else {
+        printf("\033[2m  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel\033[0m");
+    }
     row++;
 
-    /* Clear any stale rows below */
     printf("\033[%d;1H\033[J", row);
-
     fflush(stdout);
     return active_row;
 }
 
-/** Pre-compose dialog: collect To, Cc, Bcc, Subject before opening editor.
- *  Returns 1 if confirmed (Enter on Subject), 0 if cancelled (ESC). */
+/** Pre-compose dialog: collect To, Cc, Bcc, Subject, and optional Attach paths.
+ *  Returns 1 if confirmed, 0 if cancelled (ESC).
+ *  out->attach_paths/attach_count on entry are used to pre-populate the attach list. */
 static int compose_dialog(const Config *cfg,
                            const char *title,
                            const char *prefill_to,
                            const char *prefill_cc,
                            const char *prefill_subject,
                            CDResult *out) {
-    /* Clear screen */
     printf("\033[2J\033[H");
     fflush(stdout);
 
-    /* Load contacts */
     CDContact *contacts = calloc((size_t)CD_MAX_CONTACTS, sizeof(CDContact));
     if (!contacts) return 0;
     int ncontacts = cd_contacts_load(cfg, contacts, CD_MAX_CONTACTS);
 
-    /* Initialize field buffers */
     char bufs[CD_NFIELDS][CD_FIELD_BUFSZ];
     memset(bufs, 0, sizeof(bufs));
-    if (prefill_to && prefill_to[0])
-        strncpy(bufs[CD_FIELD_TO], prefill_to, CD_FIELD_BUFSZ - 1);
-    if (prefill_cc && prefill_cc[0])
-        strncpy(bufs[CD_FIELD_CC], prefill_cc, CD_FIELD_BUFSZ - 1);
-    if (prefill_subject && prefill_subject[0])
-        strncpy(bufs[CD_FIELD_SUBJ], prefill_subject, CD_FIELD_BUFSZ - 1);
+    if (prefill_to      && prefill_to[0])      strncpy(bufs[CD_FIELD_TO],   prefill_to,      CD_FIELD_BUFSZ - 1);
+    if (prefill_cc      && prefill_cc[0])      strncpy(bufs[CD_FIELD_CC],   prefill_cc,      CD_FIELD_BUFSZ - 1);
+    if (prefill_subject && prefill_subject[0]) strncpy(bufs[CD_FIELD_SUBJ], prefill_subject, CD_FIELD_BUFSZ - 1);
 
-    /* Set cursors to end of pre-filled text */
     int cursors[CD_NFIELDS];
     for (int i = 0; i < CD_NFIELDS; i++)
         cursors[i] = (int)strlen(bufs[i]);
 
-    /* If To is pre-filled, start on CC; otherwise start on TO */
     int active = (prefill_to && prefill_to[0]) ? CD_FIELD_CC : CD_FIELD_TO;
+
+    /* Attachment state — pre-populate from out if caller passed existing attachments */
+    CDAttachState attach_state;
+    memset(&attach_state, 0, sizeof(attach_state));
+    if (out && out->attach_count > 0 && out->attach_count <= CD_MAX_ATTACH) {
+        memcpy(attach_state.paths, out->attach_paths, sizeof(attach_state.paths));
+        attach_state.count = out->attach_count;
+    }
 
     int result = 0;
 
@@ -339,25 +426,29 @@ static int compose_dialog(const Config *cfg,
         RAII_TERM_RAW TermRawState *raw = terminal_raw_enter();
         if (!raw) { free(contacts); return 0; }
 
-        /* Autocomplete state */
         int match_idx[CD_MAX_MATCH];
         int match_count = 0;
 
         for (;;) {
-            /* Recompute autocomplete for active address field */
+            /* Autocomplete: contacts for address fields, files for Attach */
             match_count = 0;
+            attach_state.match_count = 0;
             if (active < CD_FIELD_SUBJ) {
                 char tok[256];
                 cd_current_token(bufs[active], cursors[active], tok, sizeof(tok));
                 if (tok[0])
                     match_count = cd_contacts_match(contacts, ncontacts, tok,
                                                     match_idx, CD_MAX_MATCH);
+            } else if (active == CD_FIELD_ATTACH && bufs[CD_FIELD_ATTACH][0]) {
+                attach_state.match_count = cd_files_match(bufs[CD_FIELD_ATTACH],
+                                                           attach_state.matches,
+                                                           CD_MAX_FILE_MATCH);
             }
 
             int active_row = cd_render(title, bufs, cursors, active,
-                                       contacts, match_idx, match_count);
+                                       contacts, match_idx, match_count,
+                                       &attach_state);
 
-            /* Position cursor on active field */
             int tcols = terminal_cols();
             if (tcols < 20) tcols = 80;
             int avail = tcols - 13;
@@ -365,7 +456,7 @@ static int compose_dialog(const Config *cfg,
             int disp_start = 0;
             if (cursors[active] > avail - 1)
                 disp_start = cursors[active] - (avail - 1);
-            int cursor_col = 13 + (cursors[active] - disp_start) + 1; /* 1-based */
+            int cursor_col = 13 + (cursors[active] - disp_start) + 1;
             printf("\033[%d;%dH", active_row, cursor_col);
             fflush(stdout);
 
@@ -377,12 +468,39 @@ static int compose_dialog(const Config *cfg,
             }
 
             if (key == TERM_KEY_ENTER) {
-                if (active == CD_FIELD_SUBJ) {
+                if (active == CD_FIELD_ATTACH) {
+                    if (bufs[CD_FIELD_ATTACH][0]) {
+                        /* Validate and add the typed path */
+                        struct stat st;
+                        if (stat(bufs[CD_FIELD_ATTACH], &st) != 0) {
+                            snprintf(attach_state.error, sizeof(attach_state.error),
+                                     "File not found: %.200s", bufs[CD_FIELD_ATTACH]);
+                        } else if (!S_ISREG(st.st_mode)) {
+                            snprintf(attach_state.error, sizeof(attach_state.error),
+                                     "Not a file: %.220s", bufs[CD_FIELD_ATTACH]);
+                        } else if (attach_state.count >= CD_MAX_ATTACH) {
+                            snprintf(attach_state.error, sizeof(attach_state.error),
+                                     "Max attachments (%d) reached", CD_MAX_ATTACH);
+                        } else {
+                            strncpy(attach_state.paths[attach_state.count],
+                                    bufs[CD_FIELD_ATTACH], CD_ATTACH_PATH_SZ - 1);
+                            attach_state.count++;
+                            bufs[CD_FIELD_ATTACH][0] = '\0';
+                            cursors[CD_FIELD_ATTACH] = 0;
+                            attach_state.match_count = 0;
+                            attach_state.error[0] = '\0';
+                        }
+                    } else {
+                        /* Empty Attach field + Enter → confirm dialog */
+                        result = 1;
+                        goto dialog_done;
+                    }
+                } else if (active == CD_FIELD_SUBJ) {
                     result = 1;
                     goto dialog_done;
+                } else {
+                    active = (active + 1) % CD_NFIELDS;
                 }
-                /* Move to next field */
-                active = (active + 1) % CD_NFIELDS;
                 continue;
             }
 
@@ -390,6 +508,13 @@ static int compose_dialog(const Config *cfg,
                 if (match_count > 0 && active < CD_FIELD_SUBJ) {
                     cd_complete(bufs[active], &cursors[active],
                                 contacts[match_idx[0]].addr);
+                } else if (active == CD_FIELD_ATTACH && attach_state.match_count > 0) {
+                    size_t _ml = strlen(attach_state.matches[0]);
+                    if (_ml >= CD_FIELD_BUFSZ) _ml = CD_FIELD_BUFSZ - 1;
+                    memcpy(bufs[CD_FIELD_ATTACH], attach_state.matches[0], _ml);
+                    bufs[CD_FIELD_ATTACH][_ml] = '\0';
+                    cursors[CD_FIELD_ATTACH] = (int)strlen(bufs[CD_FIELD_ATTACH]);
+                    attach_state.error[0] = '\0';
                 } else {
                     active = (active + 1) % CD_NFIELDS;
                 }
@@ -402,22 +527,20 @@ static int compose_dialog(const Config *cfg,
             }
 
             if (key == TERM_KEY_BACK) {
-                /* Delete UTF-8 char before cursor */
                 if (cursors[active] > 0) {
                     int i = cursors[active] - 1;
-                    /* skip UTF-8 continuation bytes */
                     while (i > 0 && ((unsigned char)bufs[active][i] & 0xC0) == 0x80)
                         i--;
                     int rest = (int)strlen(bufs[active]) - cursors[active];
                     memmove(bufs[active] + i, bufs[active] + cursors[active],
                             (size_t)(rest + 1));
                     cursors[active] = i;
+                    if (active == CD_FIELD_ATTACH) attach_state.error[0] = '\0';
                 }
                 continue;
             }
 
             if (key == TERM_KEY_DELETE) {
-                /* Delete UTF-8 char at cursor */
                 int len = (int)strlen(bufs[active]);
                 if (cursors[active] < len) {
                     int i = cursors[active] + 1;
@@ -451,20 +574,20 @@ static int compose_dialog(const Config *cfg,
                 continue;
             }
 
-            if (key == TERM_KEY_HOME) {
-                cursors[active] = 0;
-                continue;
-            }
-
-            if (key == TERM_KEY_END) {
-                cursors[active] = (int)strlen(bufs[active]);
-                continue;
-            }
+            if (key == TERM_KEY_HOME) { cursors[active] = 0; continue; }
+            if (key == TERM_KEY_END)  { cursors[active] = (int)strlen(bufs[active]); continue; }
 
             if (key == TERM_KEY_IGNORE) {
                 int ch = terminal_last_printable();
-                if (ch == ';' && active < CD_FIELD_SUBJ) {
-                    /* Trim trailing spaces then append "; " */
+                if (ch == 'd' && active == CD_FIELD_ATTACH &&
+                    bufs[CD_FIELD_ATTACH][0] == '\0') {
+                    /* Remove last attachment (only when input field is empty) */
+                    if (attach_state.count > 0) {
+                        attach_state.count--;
+                        attach_state.paths[attach_state.count][0] = '\0';
+                        attach_state.error[0] = '\0';
+                    }
+                } else if (ch == ';' && active < CD_FIELD_SUBJ) {
                     int len = (int)strlen(bufs[active]);
                     while (len > 0 && bufs[active][len-1] == ' ')
                         bufs[active][--len] = '\0';
@@ -475,7 +598,6 @@ static int compose_dialog(const Config *cfg,
                         cursors[active] = len + 2;
                     }
                 } else {
-                    /* Insert UTF-8 sequence at cursor */
                     const char *seq = terminal_last_utf8();
                     if (seq && seq[0]) {
                         int slen = (int)strlen(seq);
@@ -486,6 +608,7 @@ static int compose_dialog(const Config *cfg,
                                     (size_t)(cur_len - cursors[active] + 1));
                             memcpy(bufs[active] + cursors[active], seq, (size_t)slen);
                             cursors[active] += slen;
+                            if (active == CD_FIELD_ATTACH) attach_state.error[0] = '\0';
                         }
                     }
                 }
@@ -496,7 +619,6 @@ static int compose_dialog(const Config *cfg,
 dialog_done:;
     } /* RAII_TERM_RAW scope ends */
 
-    /* Clear screen */
     printf("\033[2J\033[H");
     fflush(stdout);
 
@@ -505,10 +627,228 @@ dialog_done:;
         memcpy(out->cc,   bufs[CD_FIELD_CC],   CD_FIELD_BUFSZ);
         memcpy(out->bcc,  bufs[CD_FIELD_BCC],  CD_FIELD_BUFSZ);
         memcpy(out->subj, bufs[CD_FIELD_SUBJ], CD_FIELD_BUFSZ);
+        memcpy(out->attach_paths, attach_state.paths, sizeof(out->attach_paths));
+        out->attach_count = attach_state.count;
     }
 
     free(contacts);
     return result;
+}
+
+/* ── Post-compose review screen ─────────────────────────────────────── */
+
+#define PCR_SEND         0
+#define PCR_CANCEL       (-1)
+#define PCR_EDIT_BODY    1
+#define PCR_EDIT_HEADERS 2
+
+/* Render the review screen — called in a loop from post_compose_review. */
+static void pcr_render(const char *from, const char *to, const char *cc,
+                        const char *bcc, const char *subject,
+                        const char *body,
+                        char attach_paths[][CD_ATTACH_PATH_SZ],
+                        int attach_count, const char *status_msg)
+{
+    int tcols = terminal_cols();
+    if (tcols < 20) tcols = 80;
+
+    printf("\033[2J\033[H");
+    printf("\033[7m");
+    const char *ttl = "  Review: Message";
+    printf("%s", ttl);
+    int tlen = (int)strlen(ttl);
+    for (int i = tlen; i < tcols; i++) putchar(' ');
+    printf("\033[0m\n\n");
+
+    printf("  \033[2mFrom:\033[0m    %s\n", from   ? from    : "");
+    printf("  \033[2mTo:\033[0m      %s\n", to     ? to      : "");
+    if (cc  && cc[0])  printf("  \033[2mCc:\033[0m      %s\n", cc);
+    if (bcc && bcc[0]) printf("  \033[2mBcc:\033[0m     %s\n", bcc);
+    printf("  \033[2mSubject:\033[0m %s\n", subject ? subject : "(no subject)");
+
+    int body_lines = 0;
+    if (body && body[0]) {
+        for (const char *p = body; *p; p++)
+            if (*p == '\n') body_lines++;
+        if (body[strlen(body) - 1] != '\n') body_lines++;
+    }
+    printf("  \033[2mBody:\033[0m    %d line%s\n", body_lines, body_lines != 1 ? "s" : "");
+
+    if (attach_count == 0) {
+        printf("  \033[2mAttach:\033[0m  (none)\n");
+    } else {
+        for (int i = 0; i < attach_count; i++) {
+            const char *fname = strrchr(attach_paths[i], '/');
+            fname = fname ? fname + 1 : attach_paths[i];
+            if (i == 0) printf("  \033[2mAttach:\033[0m  %s\n", fname);
+            else        printf("           %s\n", fname);
+        }
+    }
+
+    printf("\n");
+    if (status_msg && status_msg[0])
+        printf("  \033[31m%s\033[0m\n\n", status_msg);
+
+    printf("  \033[2m[s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Cancel\033[0m\n");
+    fflush(stdout);
+}
+
+/* Inline single-field attachment picker used by [a] key in review.
+ * Assumes terminal is already in raw mode.
+ * Returns 1 if a file was added, 0 if cancelled. */
+static int pcr_pick_attach_raw(char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_SZ],
+                                int *attach_count)
+{
+    char input[CD_FIELD_BUFSZ] = "";
+    int cursor = 0;
+    char file_matches[CD_MAX_FILE_MATCH][CD_ATTACH_PATH_SZ];
+    int file_match_count = 0;
+    char error[256] = "";
+
+    for (;;) {
+        file_match_count = 0;
+        if (input[0])
+            file_match_count = cd_files_match(input, file_matches, CD_MAX_FILE_MATCH);
+
+        int tcols = terminal_cols();
+        if (tcols < 20) tcols = 80;
+
+        printf("\033[2J\033[H");
+        printf("\033[7m  Add Attachment\033[0m\n\n");
+        printf("  \033[1mPath:\033[0m  %s\n", input);
+
+        int row = 4;
+        for (int m = 0; m < file_match_count; m++) {
+            const char *fn = strrchr(file_matches[m], '/');
+            fn = fn ? fn + 1 : file_matches[m];
+            printf("\033[%d;1H\033[K  \033[36m\xe2\x96\xb6 %s\033[0m", row++, fn);
+        }
+        if (error[0]) {
+            printf("\033[%d;1H\033[K  \033[31m%s\033[0m", row++, error);
+        }
+        printf("\033[%d;1H\033[K", row);
+        printf("\033[%d;1H\033[2m  Tab=complete  Enter=add  ESC=cancel\033[0m", row + 1);
+        printf("\033[3;%dH", 9 + cursor);   /* position cursor on input field */
+        (void)tcols;
+        fflush(stdout);
+
+        TermKey key = terminal_read_key();
+
+        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT) return 0;
+
+        if (key == TERM_KEY_ENTER) {
+            if (!input[0]) return 0;
+            struct stat st;
+            if (stat(input, &st) != 0) {
+                snprintf(error, sizeof(error), "File not found: %.200s", input);
+                continue;
+            }
+            if (!S_ISREG(st.st_mode)) {
+                snprintf(error, sizeof(error), "Not a file: %.220s", input);
+                continue;
+            }
+            if (*attach_count >= CD_MAX_ATTACH) {
+                snprintf(error, sizeof(error), "Max attachments (%d) reached", CD_MAX_ATTACH);
+                continue;
+            }
+            strncpy(attach_paths[*attach_count], input, CD_ATTACH_PATH_SZ - 1);
+            attach_paths[*attach_count][CD_ATTACH_PATH_SZ - 1] = '\0';
+            (*attach_count)++;
+            return 1;
+        }
+
+        if (key == TERM_KEY_TAB && file_match_count > 0) {
+            strncpy(input, file_matches[0], CD_FIELD_BUFSZ - 1);
+            input[CD_FIELD_BUFSZ - 1] = '\0';
+            cursor = (int)strlen(input);
+            error[0] = '\0';
+            continue;
+        }
+
+        if (key == TERM_KEY_BACK && cursor > 0) {
+            int i = cursor - 1;
+            while (i > 0 && ((unsigned char)input[i] & 0xC0) == 0x80) i--;
+            int rest = (int)strlen(input) - cursor;
+            memmove(input + i, input + cursor, (size_t)(rest + 1));
+            cursor = i;
+            error[0] = '\0';
+            continue;
+        }
+
+        if (key == TERM_KEY_IGNORE) {
+            const char *seq = terminal_last_utf8();
+            if (seq && seq[0]) {
+                int slen = (int)strlen(seq);
+                int cur_len = (int)strlen(input);
+                if (cur_len + slen < CD_FIELD_BUFSZ - 1) {
+                    memmove(input + cursor + slen, input + cursor,
+                            (size_t)(cur_len - cursor + 1));
+                    memcpy(input + cursor, seq, (size_t)slen);
+                    cursor += slen;
+                    error[0] = '\0';
+                }
+            }
+        }
+    }
+}
+
+/* Post-compose review screen.
+ * Runs its own key loop; attach_paths/attach_count are modified in place.
+ * Returns PCR_SEND, PCR_CANCEL, PCR_EDIT_BODY, or PCR_EDIT_HEADERS. */
+static int post_compose_review(const char *from, const char *to,
+                                const char *cc, const char *bcc,
+                                const char *subject, const char *body,
+                                char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_SZ],
+                                int *attach_count)
+{
+    char status_msg[256] = "";
+
+    RAII_TERM_RAW TermRawState *raw = terminal_raw_enter();
+    if (!raw) return PCR_CANCEL;
+
+    for (;;) {
+        pcr_render(from, to, cc, bcc, subject, body,
+                   attach_paths, *attach_count, status_msg);
+        status_msg[0] = '\0';
+
+        TermKey key = terminal_read_key();
+        int ch = (key == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
+
+        if (ch == 's') {
+            if (!to || !to[0]) {
+                snprintf(status_msg, sizeof(status_msg),
+                         "To: is empty — fill in recipient before sending.");
+                continue;
+            }
+            return PCR_SEND;
+        }
+
+        if (ch == 'e') return PCR_EDIT_HEADERS;
+        if (ch == 'b') return PCR_EDIT_BODY;
+
+        if (ch == 'a') {
+            pcr_pick_attach_raw(attach_paths, attach_count);
+            continue;
+        }
+
+        if (ch == 'd') {
+            if (*attach_count > 0) {
+                (*attach_count)--;
+                attach_paths[*attach_count][0] = '\0';
+            }
+            continue;
+        }
+
+        if (ch == 'q' || key == TERM_KEY_ESC || key == TERM_KEY_QUIT) {
+            printf("\033[2J\033[H");
+            printf("  Discard draft? [y/n] ");
+            fflush(stdout);
+            TermKey k2 = terminal_read_key();
+            int ch2 = (k2 == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
+            if (ch2 == 'y' || ch2 == 'Y') return PCR_CANCEL;
+            /* 'n' or anything else → stay in review */
+        }
+    }
 }
 
 /* ── Compose / send helpers ──────────────────────────────────────────── */
@@ -555,17 +895,13 @@ static const char *from_address(const Config *cfg) {
 }
 
 /**
- * @brief Interactive compose form — opens $EDITOR on a draft temp file.
+ * @brief Interactive compose form — opens $EDITOR on a draft temp file,
+ *        then shows a post-compose review screen (US-85).
  *
- * Writes a RFC 2822–style draft (editable headers + body) to a temp file,
- * launches $EDITOR (fallback: vim → vi), then reads the result back and sends.
+ * Supports iterative editing: 's' sends, 'b' reopens editor, 'e' reopens
+ * header dialog, 'a'/'d' manage attachments, 'q' discards.
  *
- * All header fields (From, To, Subject, In-Reply-To) are editable inside the
- * editor.  Abort if the user leaves To: empty or quits without saving.
- *
- * If @p prefill_body is non-NULL it is written into the draft (top-post
- * convention: user types above the quoted text).
- *
+ * @param init_cd   Optional initial CDResult for attachments (may be NULL).
  * Returns 0 on successful send, -1 on abort or SMTP error.
  */
 static int cmd_compose_interactive(Config *cfg,
@@ -574,161 +910,171 @@ static int cmd_compose_interactive(Config *cfg,
                                    const char *prefill_bcc,
                                    const char *prefill_subject,
                                    const char *reply_to_msg_id,
-                                   const char *prefill_body) {
+                                   const char *prefill_body,
+                                   const CDResult *init_cd) {
     ensure_smtp_configured(cfg);
 
-    /* 1. Create temp file */
+    /* Mutable header state */
+    char from_buf[512]  = "";
+    char to_buf[512]    = "";
+    char cc_buf[512]    = "";
+    char bcc_buf[512]   = "";
+    char subj_buf[512]  = "";
+    char msgid_buf[512] = "";
+
+    const char *from = from_address(cfg);
+    if (from) strncpy(from_buf, from, sizeof(from_buf) - 1);
+    if (prefill_to)      strncpy(to_buf,    prefill_to,      sizeof(to_buf)    - 1);
+    if (prefill_cc)      strncpy(cc_buf,    prefill_cc,      sizeof(cc_buf)    - 1);
+    if (prefill_bcc)     strncpy(bcc_buf,   prefill_bcc,     sizeof(bcc_buf)   - 1);
+    if (prefill_subject) strncpy(subj_buf,  prefill_subject, sizeof(subj_buf)  - 1);
+    if (reply_to_msg_id) strncpy(msgid_buf, reply_to_msg_id, sizeof(msgid_buf) - 1);
+
+    /* Attachment list from initial compose dialog */
+    char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_SZ];
+    memset(attach_paths, 0, sizeof(attach_paths));
+    int attach_count = 0;
+    if (init_cd && init_cd->attach_count > 0 && init_cd->attach_count <= CD_MAX_ATTACH) {
+        memcpy(attach_paths, init_cd->attach_paths, sizeof(attach_paths));
+        attach_count = init_cd->attach_count;
+    }
+
+    /* Create temp file for body editing */
     char tmppath[] = "/tmp/email-tui-XXXXXX";
     int fd = mkstemp(tmppath);
-    if (fd < 0) {
-        perror("email-tui: mkstemp");
-        return -1;
-    }
-
-    /* 2. Write draft (editable headers + body) */
-    {
-        FILE *f = fdopen(fd, "w");
-        if (!f) { close(fd); unlink(tmppath); return -1; }
-        const char *from = from_address(cfg);
-        fprintf(f, "From: %s\n",    from ? from : "");
-        fprintf(f, "To: %s\n",      prefill_to      ? prefill_to      : "");
-        if (prefill_cc && prefill_cc[0])
-            fprintf(f, "Cc: %s\n", prefill_cc);
-        if (prefill_bcc && prefill_bcc[0])
-            fprintf(f, "Bcc: %s\n", prefill_bcc);
-        fprintf(f, "Subject: %s\n", prefill_subject ? prefill_subject : "");
-        if (reply_to_msg_id && reply_to_msg_id[0])
-            fprintf(f, "In-Reply-To: %s\n", reply_to_msg_id);
-        fprintf(f, "\n");
-        if (prefill_body && prefill_body[0])
-            fprintf(f, "%s", prefill_body);
-        fclose(f);
-    }
-
-    /* 3. Restore cursor, then launch $EDITOR */
-    printf("\033[?25h");
-    fflush(stdout);
-    fflush(stderr);
+    if (fd < 0) { perror("email-tui: mkstemp"); return -1; }
+    close(fd);
 
     const char *editor = getenv("EDITOR");
     if (!editor || !editor[0]) editor = "vim";
 
-    /* Build: EDITOR tmppath  (shell handles EDITOR with args, e.g. "nvim -u NONE") */
-    {
-        char cmd_buf[1024];
-        snprintf(cmd_buf, sizeof(cmd_buf), "%s %s", editor, tmppath);
-        int rc = system(cmd_buf);
-        (void)rc; /* editor exit status not reliable across editors */
-    }
-
-    /* 4. Read back edited file */
-    FILE *rf = fopen(tmppath, "r");
-    unlink(tmppath);
-    if (!rf) {
-        fprintf(stderr, "Error: Could not read draft after editing.\n");
-        return -1;
-    }
-
-    /* 5. Parse headers then body */
-    char from_buf[512]   = "";
-    char to_buf[512]     = "";
-    char cc_buf[512]     = "";
-    char bcc_buf[512]    = "";
-    char subj_buf[512]   = "";
-    char msgid_buf[512]  = "";
     char *body = NULL;
     size_t body_len = 0;
+    int first_write = 1;
+    int need_edit = 1;
+    int send_rc = -1;
 
-    {
-        char line[4096];
-        int in_body = 0;
-        while (fgets(line, sizeof(line), rf)) {
-            /* strip trailing CRLF */
-            size_t ll = strlen(line);
-            while (ll > 0 && (line[ll-1] == '\n' || line[ll-1] == '\r'))
-                line[--ll] = '\0';
-
-            if (!in_body) {
-                if (ll == 0) { in_body = 1; continue; } /* blank → body starts */
-                if (strncasecmp(line, "From: ",       6)  == 0) { strncpy(from_buf,  line + 6,  sizeof(from_buf)  - 1); from_buf[sizeof(from_buf)-1]  = '\0'; }
-                else if (strncasecmp(line, "To: ",    4)  == 0) { strncpy(to_buf,    line + 4,  sizeof(to_buf)    - 1); to_buf[sizeof(to_buf)-1]      = '\0'; }
-                else if (strncasecmp(line, "Cc: ",    4)  == 0) { strncpy(cc_buf,    line + 4,  sizeof(cc_buf)    - 1); cc_buf[sizeof(cc_buf)-1]      = '\0'; }
-                else if (strncasecmp(line, "Bcc: ",   5)  == 0) { strncpy(bcc_buf,   line + 5,  sizeof(bcc_buf)   - 1); bcc_buf[sizeof(bcc_buf)-1]    = '\0'; }
-                else if (strncasecmp(line, "Subject: ",9) == 0) { strncpy(subj_buf,  line + 9,  sizeof(subj_buf)  - 1); subj_buf[sizeof(subj_buf)-1]  = '\0'; }
-                else if (strncasecmp(line, "In-Reply-To: ", 13) == 0) { strncpy(msgid_buf, line + 13, sizeof(msgid_buf) - 1); msgid_buf[sizeof(msgid_buf)-1] = '\0'; }
-            } else {
-                size_t add = ll + 1; /* line + \n */
-                char *nb = realloc(body, body_len + add + 1);
-                if (!nb) break;
-                body = nb;
-                memcpy(body + body_len, line, ll);
-                body_len += ll;
-                body[body_len++] = '\n';
-                body[body_len]   = '\0';
+    for (;;) {
+        if (need_edit) {
+            /* Write draft to tmppath */
+            {
+                FILE *f = fopen(tmppath, "w");
+                if (!f) { free(body); unlink(tmppath); return -1; }
+                const char *fb = from_buf[0] ? from_buf : (from ? from : "");
+                fprintf(f, "From: %s\n",    fb);
+                fprintf(f, "To: %s\n",      to_buf);
+                if (cc_buf[0])    fprintf(f, "Cc: %s\n",          cc_buf);
+                if (bcc_buf[0])   fprintf(f, "Bcc: %s\n",         bcc_buf);
+                fprintf(f, "Subject: %s\n", subj_buf);
+                if (msgid_buf[0]) fprintf(f, "In-Reply-To: %s\n", msgid_buf);
+                fprintf(f, "\n");
+                if (body && body_len > 0) {
+                    fprintf(f, "%s", body);
+                } else if (first_write && prefill_body && prefill_body[0]) {
+                    fprintf(f, "%s", prefill_body);
+                }
+                first_write = 0;
+                fclose(f);
             }
-        }
-        fclose(rf);
-    }
 
-    /* 6. Validate — abort if To: is empty */
-    if (!to_buf[0]) {
-        printf("  Aborted (To: is empty).\n");
-        free(body);
-        return -1;
-    }
-
-    /* 6b. Confirm before sending */
-    {
-        printf("\n  Send to: %s\n  Subject: %s\n\n  Send? [y/n] ",
-               to_buf, subj_buf[0] ? subj_buf : "(no subject)");
-        fflush(stdout);
-        RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
-        int confirmed = 0;
-        for (;;) {
-            TermKey key = terminal_read_key();
-            int ch = (key == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
-            if (ch == 'y' || ch == 'Y') { confirmed = 1; break; }
-            if (ch == 'n' || ch == 'N' || key == TERM_KEY_ESC) { break; }
-        }
-        (void)_raw; /* cleaned up by RAII */
-        printf("\n");
-        fflush(stdout);
-        if (!confirmed) {
-            printf("  Cancelled. Draft discarded.\n");
+            /* Restore cursor, then launch $EDITOR */
+            printf("\033[?25h");
             fflush(stdout);
-            free(body);
-            return -1;
-        }
-    }
+            fflush(stderr);
+            {
+                char cmd_buf[1024];
+                snprintf(cmd_buf, sizeof(cmd_buf), "%s %s", editor, tmppath);
+                int rc = system(cmd_buf);
+                (void)rc;
+            }
 
-    /* 7. Build and send */
-    {
-        const char *from_send = from_buf[0] ? from_buf : from_address(cfg);
-        const char *reply_id  = msgid_buf[0] ? msgid_buf : reply_to_msg_id;
-        const char *body_str  = body ? body : "";
-        ComposeParams p = {from_send, to_buf,
-                           cc_buf[0]  ? cc_buf  : NULL,
-                           bcc_buf[0] ? bcc_buf : NULL,
-                           subj_buf, body_str, reply_id,
-                           NULL, 0};
-        char *msg = NULL;
-        size_t msg_len = 0;
-        int rc = -1;
-        if (compose_build_message(&p, &msg, &msg_len) != 0) {
-            fprintf(stderr, "Error: Failed to build message.\n");
-        } else {
+            /* Read back edited draft */
+            free(body); body = NULL; body_len = 0;
+            {
+                FILE *rf = fopen(tmppath, "r");
+                if (!rf) {
+                    fprintf(stderr, "Error: Could not read draft after editing.\n");
+                    unlink(tmppath);
+                    return -1;
+                }
+                /* Reset headers — re-parse from what editor saved */
+                from_buf[0] = to_buf[0] = cc_buf[0] = bcc_buf[0] = subj_buf[0] = '\0';
+                char line[4096];
+                int in_body = 0;
+                while (fgets(line, sizeof(line), rf)) {
+                    size_t ll = strlen(line);
+                    while (ll > 0 && (line[ll-1] == '\n' || line[ll-1] == '\r'))
+                        line[--ll] = '\0';
+                    if (!in_body) {
+                        if (ll == 0) { in_body = 1; continue; }
+#define HCOPY(dst, src) do { \
+    size_t _hl = strlen(src); \
+    if (_hl >= sizeof(dst)) _hl = sizeof(dst) - 1; \
+    memcpy((dst), (src), _hl); (dst)[_hl] = '\0'; } while (0)
+                        if      (strncasecmp(line, "From: ",        6) == 0) { HCOPY(from_buf,  line+6);  }
+                        else if (strncasecmp(line, "To: ",          4) == 0) { HCOPY(to_buf,    line+4);  }
+                        else if (strncasecmp(line, "Cc: ",          4) == 0) { HCOPY(cc_buf,    line+4);  }
+                        else if (strncasecmp(line, "Bcc: ",         5) == 0) { HCOPY(bcc_buf,   line+5);  }
+                        else if (strncasecmp(line, "Subject: ",     9) == 0) { HCOPY(subj_buf,  line+9);  }
+                        else if (strncasecmp(line, "In-Reply-To: ",13) == 0) { HCOPY(msgid_buf, line+13); }
+#undef HCOPY
+                    } else {
+                        size_t add = ll + 1;
+                        char *nb = realloc(body, body_len + add + 1);
+                        if (!nb) break;
+                        body = nb;
+                        memcpy(body + body_len, line, ll);
+                        body_len += ll;
+                        body[body_len++] = '\n';
+                        body[body_len]   = '\0';
+                    }
+                }
+                fclose(rf);
+            }
+            need_edit = 0;
+        }
+
+        /* Show post-compose review screen */
+        int action = post_compose_review(
+            from_buf[0] ? from_buf : (from ? from : ""),
+            to_buf, cc_buf, bcc_buf, subj_buf,
+            body ? body : "",
+            attach_paths, &attach_count);
+
+        if (action == PCR_SEND) {
+            if (!to_buf[0]) { send_rc = -1; break; }
+
+            const char *from_send = from_buf[0] ? from_buf : from_address(cfg);
+            const char *reply_id  = msgid_buf[0] ? msgid_buf : reply_to_msg_id;
+            const char *body_str  = body ? body : "";
+
+            const char *attach_ptrs[CD_MAX_ATTACH + 1];
+            for (int i = 0; i < attach_count; i++)
+                attach_ptrs[i] = attach_paths[i];
+            attach_ptrs[attach_count] = NULL;
+
+            ComposeParams p = {from_send, to_buf,
+                               cc_buf[0]  ? cc_buf  : NULL,
+                               bcc_buf[0] ? bcc_buf : NULL,
+                               subj_buf, body_str, reply_id,
+                               attach_count > 0 ? attach_ptrs : NULL,
+                               attach_count};
+            char *msg = NULL;
+            size_t msg_len = 0;
+            if (compose_build_message(&p, &msg, &msg_len) != 0) {
+                fprintf(stderr, "Error: Failed to build message.\n");
+                send_rc = -1;
+                break;
+            }
             printf("  Sending...\n");
             fflush(stdout);
             if (cfg->gmail_mode) {
-                /* Gmail: send via REST API; SENT label auto-added */
                 RAII_MAIL MailClient *mc = mail_client_connect((Config *)cfg);
-                rc = mc ? mail_client_append(mc, NULL, msg, msg_len) : -1;
-                if (rc == 0)
-                    printf("  Message sent.\n");
+                send_rc = mc ? mail_client_append(mc, NULL, msg, msg_len) : -1;
+                if (send_rc == 0) printf("  Message sent.\n");
             } else {
-                /* IMAP: send via SMTP, save locally (sync will upload) */
-                rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
-                if (rc == 0) {
+                send_rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
+                if (send_rc == 0) {
                     printf("  Message sent.\n");
                     fflush(stdout);
                     if (email_service_save_sent(cfg, msg, msg_len) == 0)
@@ -746,10 +1092,46 @@ static int cmd_compose_interactive(Config *cfg,
             }
             fflush(stdout);
             free(msg);
+            break;
         }
-        free(body);
-        return rc;
+
+        if (action == PCR_CANCEL) {
+            printf("  Cancelled. Draft discarded.\n");
+            fflush(stdout);
+            send_rc = -1;
+            break;
+        }
+
+        if (action == PCR_EDIT_BODY) {
+            need_edit = 1;
+            continue;
+        }
+
+        if (action == PCR_EDIT_HEADERS) {
+            /* Reopen compose dialog pre-filled with current values + attachments */
+            CDResult cdresult;
+            memset(&cdresult, 0, sizeof(cdresult));
+            memcpy(cdresult.to,   to_buf,   sizeof(cdresult.to));
+            memcpy(cdresult.cc,   cc_buf,   sizeof(cdresult.cc));
+            memcpy(cdresult.bcc,  bcc_buf,  sizeof(cdresult.bcc));
+            memcpy(cdresult.subj, subj_buf, sizeof(cdresult.subj));
+            memcpy(cdresult.attach_paths, attach_paths, sizeof(cdresult.attach_paths));
+            cdresult.attach_count = attach_count;
+            if (compose_dialog(cfg, "Edit Message", to_buf, cc_buf, subj_buf, &cdresult)) {
+                memcpy(to_buf,   cdresult.to,   sizeof(to_buf));
+                memcpy(cc_buf,   cdresult.cc,   sizeof(cc_buf));
+                memcpy(bcc_buf,  cdresult.bcc,  sizeof(bcc_buf));
+                memcpy(subj_buf, cdresult.subj, sizeof(subj_buf));
+                memcpy(attach_paths, cdresult.attach_paths, sizeof(attach_paths));
+                attach_count = cdresult.attach_count;
+            }
+            continue;
+        }
     }
+
+    unlink(tmppath);
+    free(body);
+    return send_rc;
 }
 
 /**
@@ -843,7 +1225,7 @@ static int cmd_reply(Config *cfg, const char *uid, const char *folder) {
     if (!compose_dialog(cfg, "Reply", reply_to, NULL, subject, &dlg)) {
         rc = -1;
     } else {
-        rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, msg_id, quoted);
+        rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, msg_id, quoted, &dlg);
         if (rc == 0) {
             /* Mark original message as Replied */
             Manifest *mf = manifest_load(folder);
@@ -944,7 +1326,7 @@ static int cmd_forward(Config *cfg, const char *uid, const char *folder) {
         free(quoted);
         return -1;
     }
-    int rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, NULL, quoted);
+    int rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, NULL, quoted, &dlg);
     if (rc == 0) {
         /* Mark original message as Forwarded */
         Manifest *mf = manifest_load(folder);
@@ -1103,7 +1485,7 @@ static int cmd_reply_all(Config *cfg, const char *uid, const char *folder) {
     if (!compose_dialog(cfg, "Reply All", reply_to, cc_buf[0] ? cc_buf : NULL, subject, &dlg)) {
         rc = -1;
     } else {
-        rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, msg_id, quoted);
+        rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, msg_id, quoted, &dlg);
         if (rc == 0) {
             /* Mark original message as Replied */
             Manifest *mf = manifest_load(folder);
@@ -1816,16 +2198,20 @@ int main(int argc, char *argv[]) {
         int rc = EXIT_FAILURE;
 
         if (strcmp(subcmd, "compose") == 0) {
-            int cr = cmd_compose_interactive(cfg, NULL, NULL, NULL, NULL, NULL, NULL);
+            int cr = cmd_compose_interactive(cfg, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
             rc = (cr == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
         } else if (strcmp(subcmd, "send") == 0) {
             const char *to = NULL, *subject = NULL, *body_text = NULL;
+            const char *attach_arr[8];
+            int attach_count = 0;
             for (int i = sub_i + 1; i < argc - 1; i++) {
                 if (strcmp(argv[i], "--to")      == 0) to         = argv[++i];
                 else if (strcmp(argv[i], "--subject") == 0) subject = argv[++i];
                 else if (strcmp(argv[i], "--body")    == 0) body_text = argv[++i];
                 else if (strcmp(argv[i], "--batch")   == 0) (void)0;
+                else if (strcmp(argv[i], "--attach")  == 0 && i + 1 < argc - 1 &&
+                         attach_count < 8) attach_arr[attach_count++] = argv[++i];
             }
             if (!to) {
                 fprintf(stderr, "Error: --to is required for send.\n"
@@ -1835,7 +2221,8 @@ int main(int argc, char *argv[]) {
                 ComposeParams p = {from, to, NULL, NULL,
                                    subject   ? subject   : "",
                                    body_text ? body_text : "", NULL,
-                                   NULL, 0};
+                                   attach_count > 0 ? attach_arr : NULL,
+                                   attach_count};
                 char *msg = NULL; size_t msg_len = 0;
                 if (compose_build_message(&p, &msg, &msg_len) != 0) {
                     fprintf(stderr, "Error: Failed to build message.\n");
@@ -1996,7 +2383,7 @@ int main(int argc, char *argv[]) {
             CDResult dlg = {0};
             if (compose_dialog(sel_cfg, "New Message", NULL, NULL, NULL, &dlg)) {
                 cmd_compose_interactive(sel_cfg, dlg.to, dlg.cc, dlg.bcc,
-                                        dlg.subj, NULL, NULL);
+                                        dlg.subj, NULL, NULL, &dlg);
                 printf("\n  [Press any key to return to inbox]\n");
                 fflush(stdout);
                 TermRawState *_r = terminal_raw_enter();
@@ -2070,7 +2457,7 @@ int main(int argc, char *argv[]) {
                     CDResult dlg = {0};
                     if (compose_dialog(sel_cfg, "New Message", NULL, NULL, NULL, &dlg)) {
                         cmd_compose_interactive(sel_cfg, dlg.to, dlg.cc, dlg.bcc,
-                                                dlg.subj, NULL, NULL);
+                                                dlg.subj, NULL, NULL, &dlg);
                         printf("\n  [Press any key to return to inbox]\n");
                         fflush(stdout);
                         TermRawState *_r = terminal_raw_enter();
@@ -2095,7 +2482,7 @@ int main(int argc, char *argv[]) {
                     CDResult dlg = {0};
                     if (compose_dialog(sel_cfg, "New Message", NULL, NULL, NULL, &dlg)) {
                         cmd_compose_interactive(sel_cfg, dlg.to, dlg.cc, dlg.bcc,
-                                                dlg.subj, NULL, NULL);
+                                                dlg.subj, NULL, NULL, &dlg);
                     }
                 }
                 /* Pause so the user can read the send result before the

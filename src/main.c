@@ -970,6 +970,9 @@ int main(int argc, char *argv[]) {
 
     } else if (strcmp(cmd, "send") == 0) {
         const char *to = NULL, *subject = NULL, *body = NULL;
+        /* US-84: --attach <path> (may appear multiple times) */
+        const char *attach_arr[8];
+        int attach_count = 0;
         int ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) continue;
@@ -985,6 +988,14 @@ int main(int argc, char *argv[]) {
                 if (i + 1 >= argc) {
                     fprintf(stderr, "Error: --body requires text.\n"); ok = 0;
                 } else body = argv[++i];
+            } else if (strcmp(argv[i], "--attach") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --attach requires a file path.\n"); ok = 0;
+                } else if (attach_count < 8) {
+                    attach_arr[attach_count++] = argv[++i];
+                } else {
+                    fprintf(stderr, "Error: maximum 8 attachments allowed.\n"); ok = 0;
+                }
             } else {
                 unknown_option("send", argv[i]); ok = 0;
             }
@@ -996,7 +1007,8 @@ int main(int argc, char *argv[]) {
             } else {
                 const char *from = cfg->smtp_user ? cfg->smtp_user : cfg->user;
                 ComposeParams p = {from, to, NULL, NULL, subject, body, NULL,
-                                   NULL, 0};
+                                   attach_count > 0 ? attach_arr : NULL,
+                                   attach_count};
                 char *msg = NULL;
                 size_t msg_len = 0;
                 if (compose_build_message(&p, &msg, &msg_len) != 0) {

@@ -323,12 +323,13 @@ static char *build_legacy_content(int is_header, const char **section_out) {
                  "MIME-Version: 1.0\r\n"
                  "Content-Type: multipart/mixed; boundary=\"B001\"\r\n"
                  "\r\n"
-                 /* text/plain body with base64 — exercises decode_transfer() base64 path */
+                 /* text/plain body with base64 — exercises decode_transfer() base64 path.
+                  * Decodes to "Hello, Welcome to the test!" so show-body checks pass. */
                  "--B001\r\n"
                  "Content-Type: text/plain; charset=UTF-8\r\n"
                  "Content-Transfer-Encoding: base64\r\n"
                  "\r\n"
-                 "SGVsbG8gV29ybGQ=\r\n"
+                 "SGVsbG8sIFdlbGNvbWUgdG8gdGhlIHRlc3Qh\r\n"
                  "--B001\r\n"
                  "Content-Type: text/html; charset=UTF-8\r\n"
                  "\r\n"
@@ -337,8 +338,9 @@ static char *build_legacy_content(int is_header, const char **section_out) {
                  "<!-- a -- b -->"
                  "<head><style>body { color: #222; font-size: 14px; }</style></head>"
                  "<body>"
-                 /* h2 kept recognisable so PTY tests can match "Hello from Mock Server" */
-                 "<h2>Hello from Mock Server!</h2>"
+                 /* h2 kept recognisable so PTY/functional tests can match
+                  * "Hello from Mock Server" and "Hello.*Welcome" patterns. */
+                 "<h2>Hello, Welcome from Mock Server!</h2>"
                  "<p style=\"color: red; font-weight: bold\">Bold &lt;styled&gt; &bull; <em>em</em> text</p>"
                  "<p style=\"color: #333; font-style: italic\">Dark italic &auml; text 3 <3 html</p>"
                  "<div style=\"text-decoration: underline; background-color: yellow\">"
@@ -497,8 +499,9 @@ static void handle_client(SSL *ssl) {
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Empty\"\r\n"
                 /* IMAP modified UTF-7: "INBOX.Träger" (U+00E4, 2-byte UTF-8) */
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.Tr&AOQ-ger\"\r\n"
-                /* Literal '&' via "&-" — exercises imap_utf7_decode lines 65-67 */
-                "* LIST (\\HasNoChildren) \".\" \"INBOX.F&-T\"\r\n"
+                /* Literal '&' via "&-" — exercises imap_utf7_decode lines 65-67.
+                 * "INBOX.AT&-T" decodes to "INBOX.AT&T" (ampersand via IMAP UTF-7). */
+                "* LIST (\\HasNoChildren) \".\" \"INBOX.AT&-T\"\r\n"
                 /* U+4E2D (中, CJK 3-byte UTF-8); mod64 lowercase 'i', digit '0' */
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.&Ti0-\"\r\n"
                 /* U+1F600 (emoji, 4-byte UTF-8); surrogate pair + digit '2','3', lowercase 'e' */
@@ -513,11 +516,22 @@ static void handle_client(SSL *ssl) {
                 const char *sr = "* SEARCH\r\n";
                 SSL_write(ssl, sr, (int)strlen(sr));
             } else if (g_count > 1) {
-                /* Multi-message mode: build UID list */
-                int is_unseen = (strstr(buffer, "UNSEEN") != NULL);
-                int limit = is_unseen ? 20 : g_count;
+                /* Multi-message mode: build UID list.
+                 * FLAGGED / KEYWORD ($Done, $Forwarded, $Answered) searches
+                 * return empty — test messages carry only the \Unseen flag. */
+                int is_unseen  = (strstr(buffer, "UNSEEN")   != NULL);
+                int is_flagged = (strstr(buffer, "FLAGGED")  != NULL);
+                int is_keyword = (strstr(buffer, "KEYWORD")  != NULL);
+                int is_answered= (strstr(buffer, "ANSWERED") != NULL);
+                int limit;
+                if (is_flagged || is_keyword || is_answered)
+                    limit = 0;                         /* no flagged/done msgs */
+                else if (is_unseen)
+                    limit = (g_count < 20) ? g_count : 20;
+                else
+                    limit = g_count;                   /* ALL */
                 /* Allocate buffer: each UID up to 6 digits + space */
-                char *sr_buf = malloc((size_t)limit * 8 + 16);
+                char *sr_buf = malloc((size_t)(limit + 1) * 8 + 16);
                 if (!sr_buf) break;
                 int off = sprintf(sr_buf, "* SEARCH");
                 for (int i = 1; i <= limit; i++) {

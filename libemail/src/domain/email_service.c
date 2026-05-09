@@ -2030,10 +2030,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
                 printf("\033[0m\n\n");
-                printf("  %-16s  %-5s  %-*s  %s\n",
+                printf("  %-16s  %-6s  %-*s  %s\n",
                        "Date", "Sts", subj_w, "Subject", "From");
                 printf("  ");
-                print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
                 printf("\n  \033[2m(empty)\033[0m\n");
                 fflush(stdout);
@@ -2199,10 +2199,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
                 printf("\033[0m\n\n");
-                printf("  %-16s  %-5s  %-*s  %s\n",
+                printf("  %-16s  %-6s  %-*s  %s\n",
                        "Date", "Sts", subj_w, "Subject", "From");
                 printf("  ");
-                print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550  ");
+                print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
                 printf("\n  \033[2m(empty)\033[0m\n");
                 fflush(stdout);
@@ -2284,10 +2284,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
             printf("\033[0m\n\n");
-            printf("  %-16s  %-5s  %-*s  %s\n",
+            printf("  %-16s  %-6s  %-*s  %s\n",
                    "Date", "Sts", subj_w, "Subject", "From");
             printf("  ");
-            print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550  ");
+            print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
             print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
             printf("\n  \033[2m(empty)\033[0m\n");
             fflush(stdout);
@@ -2402,7 +2402,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         int tcols    = is_tty ? terminal_cols() : 0;
         int is_gmail = cfg->gmail_mode;
         int show_uid = !opts->pager;   /* UID column in CLI/RO mode, not TUI */
-        int overhead = show_uid ? 47 : 29;  /* 47 = 29 + uid(16) + sep(2) */
+        int overhead = show_uid ? 48 : 30;  /* 48 = 30 + uid(16) + sep(2) */
         int subj_w, from_w;
         if (is_tty) {
             int avail = tcols - overhead;
@@ -2437,6 +2437,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if (ct_raw && strcasestr(ct_raw, "multipart/mixed"))
                     entries[i].flags |= MSG_FLAG_ATTACH;
                 free(ct_raw);
+                char *ar_raw = hdrs ? mime_get_header(hdrs, "Authentication-Results") : NULL;
+                int dmarc_st = mime_get_dmarc_status(ar_raw);
+                free(ar_raw);
+                if      (dmarc_st > 0) entries[i].flags |= MSG_FLAG_DMARC_PASS;
+                else if (dmarc_st < 0) entries[i].flags |= MSG_FLAG_DMARC_FAIL;
                 free(hdrs);
                 manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].flags);
                 manifest_dirty = 1;
@@ -2490,15 +2495,15 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             }
         }
         if (show_uid)
-            printf("  %-16s  %-16s  %-5s  %-*s  %s\n",
+            printf("  %-16s  %-16s  %-6s  %-*s  %s\n",
                    "UID", "Date", "Sts", subj_w, "Subject", "From");
         else
-            printf("  %-16s  %-5s  %-*s  %s\n",
+            printf("  %-16s  %-6s  %-*s  %s\n",
                    "Date", "Sts", subj_w, "Subject", "From");
         printf("  ");
         if (show_uid) { print_dbar(16); printf("  "); }
         print_dbar(16); printf("  ");
-        printf("\u2550\u2550\u2550\u2550\u2550  ");
+        printf("\u2550\u2550\u2550\u2550\u2550\u2550  ");
         print_dbar(subj_w > 0 ? subj_w : 30); printf("  ");
         print_dbar(from_w > 0 ? from_w : 40); printf("\n");
 
@@ -2536,11 +2541,16 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 char *dt_raw   = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
                 char *dt       = dt_raw ? mime_format_date(dt_raw)       : strdup("");
                 free(dt_raw);
-                /* Detect attachment: Content-Type: multipart/mixed */
+                /* Detect attachment and DMARC result from headers */
                 char *ct_raw = hdrs ? mime_get_header(hdrs, "Content-Type") : NULL;
                 if (ct_raw && strcasestr(ct_raw, "multipart/mixed"))
                     entries[ei].flags |= MSG_FLAG_ATTACH;
                 free(ct_raw);
+                char *ar_raw2 = hdrs ? mime_get_header(hdrs, "Authentication-Results") : NULL;
+                int dmarc_st2 = mime_get_dmarc_status(ar_raw2);
+                free(ar_raw2);
+                if      (dmarc_st2 > 0) entries[ei].flags |= MSG_FLAG_DMARC_PASS;
+                else if (dmarc_st2 < 0) entries[ei].flags |= MSG_FLAG_DMARC_FAIL;
                 free(hdrs);
                 manifest_upsert(manifest, entries[ei].uid, fr, su, dt, entries[ei].flags);
                 manifest_dirty = 1;
@@ -2584,15 +2594,16 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if (sel) printf("\033[7m");
             }
 
-            /* Status column (5 chars): [P/J/N/-][star/-][D/-][A/-][R/F/-]
+            /* Status column (6 chars): [P/J/N/-][star/-][D/-][A/-][R/F/-][✓/✗/-]
              * Position 1: P=phishing(red) > J=junk(yellow) > N=unread(green) > -
              * Position 2: star = flagged (yellow)
              * Position 3: D = done
              * Position 4: A = attachment
              * Position 5: R=answered(cyan), F=forwarded(cyan), - = neither
+             * Position 6: ✓=dmarc pass(green), ✗=dmarc fail(red), - = unknown
              *
              * TUI: ANSI colours; sel rows exit/re-enter reverse-video around colour. */
-            char sts[96];
+            char sts[128];
             int eflags = entries[ei].flags;
             if (opts->pager && !remove_pending && !label_pending && !restore_pending) {
                 const char *n_s;
@@ -2615,10 +2626,19 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     rf_s = sel ? "\033[0m\033[36mF\033[7m" : "\033[36mF\033[0m";
                 else
                     rf_s = "-";
-                snprintf(sts, sizeof(sts), "%s%s%c%c%s", n_s, f_s,
+                const char *dm_s;
+                if      (eflags & MSG_FLAG_DMARC_PASS)
+                    dm_s = sel ? "\033[0m\033[32m\xe2\x9c\x93\033[7m"
+                               : "\033[32m\xe2\x9c\x93\033[0m";
+                else if (eflags & MSG_FLAG_DMARC_FAIL)
+                    dm_s = sel ? "\033[0m\033[1;31m\xe2\x9c\x97\033[7m"
+                               : "\033[1;31m\xe2\x9c\x97\033[0m";
+                else
+                    dm_s = "-";
+                snprintf(sts, sizeof(sts), "%s%s%c%c%s%s", n_s, f_s,
                     (eflags & MSG_FLAG_DONE)   ? 'D' : '-',
                     (eflags & MSG_FLAG_ATTACH) ? 'A' : '-',
-                    rf_s);
+                    rf_s, dm_s);
             } else {
                 sts[0] = (eflags & MSG_FLAG_PHISHING)  ? 'P'
                        : (eflags & MSG_FLAG_JUNK)       ? 'J'
@@ -2628,7 +2648,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 sts[3] = (eflags & MSG_FLAG_ATTACH)    ? 'A' : '-';
                 sts[4] = (eflags & MSG_FLAG_ANSWERED)  ? 'R'
                        : (eflags & MSG_FLAG_FORWARDED) ? 'F' : '-';
-                sts[5] = '\0';
+                sts[5] = (eflags & MSG_FLAG_DMARC_PASS) ? 'v'
+                       : (eflags & MSG_FLAG_DMARC_FAIL)  ? 'x' : '-';
+                sts[6] = '\0';
             }
             if (show_uid)
                 printf("%s%-16.16s  %-16.16s  %s  ", row_pfx, entries[ei].uid, date, sts);

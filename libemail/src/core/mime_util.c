@@ -815,3 +815,14 @@ char *mime_extract_imap_literal(const char *response) {
 
     return strndup(content, (size_t)size);
 }
+
+int mime_get_dmarc_status(const char *auth_results) {
+    if (!auth_results) return 0;
+    const char *p = auth_results;
+    while ((p = strcasestr(p, "dmarc=")) != NULL) {
+        p += 6;
+        if (strncasecmp(p, "pass", 4) == 0) return  1;
+        if (strncasecmp(p, "fail", 4) == 0) return -1;
+    }
+    return 0;
+}

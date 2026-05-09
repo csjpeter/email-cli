@@ -123,4 +123,12 @@ void mime_free_attachments(MimeAttachment *list, int count);
  */
 int mime_save_attachment(const MimeAttachment *att, const char *dest_path);
 
+/**
+ * @brief Parses DMARC authentication result from an Authentication-Results header value.
+ *
+ * @param auth_results  Value of the Authentication-Results header (may be NULL).
+ * @return 1 = dmarc=pass, -1 = dmarc=fail, 0 = not present or unknown.
+ */
+int mime_get_dmarc_status(const char *auth_results);
+
 #endif /* MIME_UTIL_H */

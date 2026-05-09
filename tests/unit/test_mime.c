@@ -898,4 +898,38 @@ void test_mime_util(void) {
         ASSERT(strlen(r) == 1800,
                "mime_decode_words realloc: total length = 1800");
     }
+
+    /* ── mime_get_dmarc_status ──────────────────────────────────────── */
+    ASSERT(mime_get_dmarc_status(NULL) == 0,
+           "dmarc_status: NULL → 0");
+    ASSERT(mime_get_dmarc_status("") == 0,
+           "dmarc_status: empty → 0");
+    ASSERT(mime_get_dmarc_status("spf=pass smtp.mailfrom=example.com") == 0,
+           "dmarc_status: no dmarc token → 0");
+    ASSERT(mime_get_dmarc_status("dmarc=pass") == 1,
+           "dmarc_status: dmarc=pass → 1");
+    ASSERT(mime_get_dmarc_status("DMARC=PASS") == 1,
+           "dmarc_status: DMARC=PASS case-insensitive → 1");
+    ASSERT(mime_get_dmarc_status("dmarc=fail") == -1,
+           "dmarc_status: dmarc=fail → -1");
+    ASSERT(mime_get_dmarc_status("spf=pass dmarc=pass dkim=pass") == 1,
+           "dmarc_status: embedded dmarc=pass → 1");
+    ASSERT(mime_get_dmarc_status("spf=pass dmarc=fail dkim=none") == -1,
+           "dmarc_status: embedded dmarc=fail → -1");
+    {
+        /* Full realistic Authentication-Results header value */
+        const char *ar = "mx.google.com;\n"
+                         "       dkim=pass header.i=@example.com;\n"
+                         "       spf=pass smtp.mailfrom=example.com;\n"
+                         "       dmarc=pass (p=REJECT sp=REJECT dis=NONE)"
+                         " header.from=example.com";
+        ASSERT(mime_get_dmarc_status(ar) == 1,
+               "dmarc_status: realistic AR header with dmarc=pass → 1");
+    }
+    {
+        const char *ar = "mx.example.net;\n"
+                         "       dmarc=fail (p=REJECT) header.from=spoofed.com";
+        ASSERT(mime_get_dmarc_status(ar) == -1,
+               "dmarc_status: realistic AR header with dmarc=fail → -1");
+    }
 }

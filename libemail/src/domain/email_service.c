@@ -2420,30 +2420,46 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         int manifest_dirty = 0;
         if (!opts->pager && !is_tty) {
             for (int i = wstart; i < wend; i++) {
-                if (manifest_find(manifest, entries[i].uid)) continue;
+                ManifestEntry *cme = manifest_find(manifest, entries[i].uid);
+                int need_dmarc = cme && !(cme->flags & MSG_FLAG_DMARC_CHECKED);
+                if (cme && !need_dmarc) continue;
                 char *hdrs   = list_mc
                                ? fetch_uid_headers_via(list_mc, folder, entries[i].uid)
                                : fetch_uid_headers_cached(cfg, folder, entries[i].uid);
-                char *fr_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
-                char *fr     = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
-                free(fr_raw);
-                char *su_raw = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
-                char *su     = su_raw ? mime_decode_words(su_raw)      : strdup("");
-                free(su_raw);
-                char *dt_raw = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
-                char *dt     = dt_raw ? mime_format_date(dt_raw)       : strdup("");
-                free(dt_raw);
-                char *ct_raw = hdrs ? mime_get_header(hdrs, "Content-Type") : NULL;
-                if (ct_raw && strcasestr(ct_raw, "multipart/mixed"))
-                    entries[i].flags |= MSG_FLAG_ATTACH;
-                free(ct_raw);
-                char *ar_raw = hdrs ? mime_get_header(hdrs, "Authentication-Results") : NULL;
-                int dmarc_st = mime_get_dmarc_status(ar_raw);
-                free(ar_raw);
-                if      (dmarc_st > 0) entries[i].flags |= MSG_FLAG_DMARC_PASS;
-                else if (dmarc_st < 0) entries[i].flags |= MSG_FLAG_DMARC_FAIL;
-                free(hdrs);
-                manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].flags);
+                if (!cme) {
+                    /* New entry: full header parse */
+                    char *fr_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
+                    char *fr     = fr_raw ? mime_decode_words(fr_raw)      : strdup("");
+                    free(fr_raw);
+                    char *su_raw = hdrs ? mime_get_header(hdrs, "Subject") : NULL;
+                    char *su     = su_raw ? mime_decode_words(su_raw)      : strdup("");
+                    free(su_raw);
+                    char *dt_raw = hdrs ? mime_get_header(hdrs, "Date")    : NULL;
+                    char *dt     = dt_raw ? mime_format_date(dt_raw)       : strdup("");
+                    free(dt_raw);
+                    char *ct_raw = hdrs ? mime_get_header(hdrs, "Content-Type") : NULL;
+                    if (ct_raw && strcasestr(ct_raw, "multipart/mixed"))
+                        entries[i].flags |= MSG_FLAG_ATTACH;
+                    free(ct_raw);
+                    char *ar_raw = hdrs ? mime_get_header(hdrs, "Authentication-Results") : NULL;
+                    int dmarc_st = mime_get_dmarc_status(ar_raw);
+                    free(ar_raw);
+                    if      (dmarc_st > 0) entries[i].flags |= MSG_FLAG_DMARC_PASS;
+                    else if (dmarc_st < 0) entries[i].flags |= MSG_FLAG_DMARC_FAIL;
+                    entries[i].flags |= MSG_FLAG_DMARC_CHECKED;
+                    free(hdrs);
+                    manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].flags);
+                } else {
+                    /* Existing entry: update DMARC bits only from local cache */
+                    char *ar_raw = hdrs ? mime_get_header(hdrs, "Authentication-Results") : NULL;
+                    int dmarc_st = mime_get_dmarc_status(ar_raw);
+                    free(ar_raw);
+                    free(hdrs);
+                    if      (dmarc_st > 0) cme->flags |= MSG_FLAG_DMARC_PASS;
+                    else if (dmarc_st < 0) cme->flags |= MSG_FLAG_DMARC_FAIL;
+                    cme->flags |= MSG_FLAG_DMARC_CHECKED;
+                    entries[i].flags = cme->flags;
+                }
                 manifest_dirty = 1;
             }
             /* Compute max Subject display width across all visible entries */
@@ -2551,13 +2567,31 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 free(ar_raw2);
                 if      (dmarc_st2 > 0) entries[ei].flags |= MSG_FLAG_DMARC_PASS;
                 else if (dmarc_st2 < 0) entries[ei].flags |= MSG_FLAG_DMARC_FAIL;
+                entries[ei].flags |= MSG_FLAG_DMARC_CHECKED;
                 free(hdrs);
                 manifest_upsert(manifest, entries[ei].uid, fr, su, dt, entries[ei].flags);
                 manifest_dirty = 1;
-            } else if (cached_me->flags != entries[ei].flags) {
-                /* Keep manifest flags in sync (relevant in online mode) */
-                cached_me->flags = entries[ei].flags;
+            } else if (!(cached_me->flags & MSG_FLAG_DMARC_CHECKED)) {
+                /* Cached entry without DMARC check — read from local .hdr only */
+                const char *hf2 = entries[ei].folder[0] ? entries[ei].folder : folder;
+                char *hdrs2 = fetch_uid_headers_cached(cfg, hf2, entries[ei].uid);
+                char *ar_raw3 = hdrs2 ? mime_get_header(hdrs2, "Authentication-Results") : NULL;
+                int dmarc_st3 = mime_get_dmarc_status(ar_raw3);
+                free(ar_raw3);
+                free(hdrs2);
+                if      (dmarc_st3 > 0) cached_me->flags |= MSG_FLAG_DMARC_PASS;
+                else if (dmarc_st3 < 0) cached_me->flags |= MSG_FLAG_DMARC_FAIL;
+                cached_me->flags |= MSG_FLAG_DMARC_CHECKED;
                 manifest_dirty = 1;
+            } else {
+                /* Sync server-controlled bits; preserve locally-computed bits */
+                int computed = MSG_FLAG_ATTACH | MSG_FLAG_DMARC_PASS |
+                               MSG_FLAG_DMARC_FAIL | MSG_FLAG_DMARC_CHECKED;
+                int merged = entries[ei].flags | (cached_me->flags & computed);
+                if (merged != cached_me->flags) {
+                    cached_me->flags = merged;
+                    manifest_dirty = 1;
+                }
             }
 
             /* Render this row immediately */
@@ -2604,7 +2638,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
              *
              * TUI: ANSI colours; sel rows exit/re-enter reverse-video around colour. */
             char sts[128];
-            int eflags = entries[ei].flags;
+            /* Merge server bits (entries[]) with computed bits (manifest) */
+            ManifestEntry *me_sts = manifest_find(manifest, entries[ei].uid);
+            int computed_mask = MSG_FLAG_ATTACH | MSG_FLAG_DMARC_PASS | MSG_FLAG_DMARC_FAIL;
+            int eflags = entries[ei].flags | (me_sts ? (me_sts->flags & computed_mask) : 0);
             if (opts->pager && !remove_pending && !label_pending && !restore_pending) {
                 const char *n_s;
                 if      (eflags & MSG_FLAG_PHISHING)

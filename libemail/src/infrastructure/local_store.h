@@ -14,8 +14,9 @@
 #define MSG_FLAG_FORWARDED (1 << 5)  /* $Forwarded — forwarded */
 #define MSG_FLAG_JUNK      (1 << 6)  /* $Junk / SPAM — spam-filtered */
 #define MSG_FLAG_PHISHING  (1 << 7)  /* $Phishing — phishing warning */
-#define MSG_FLAG_DMARC_PASS (1 << 8) /* Authentication-Results: dmarc=pass */
-#define MSG_FLAG_DMARC_FAIL (1 << 9) /* Authentication-Results: dmarc=fail */
+#define MSG_FLAG_DMARC_PASS    (1 << 8)  /* Authentication-Results: dmarc=pass */
+#define MSG_FLAG_DMARC_FAIL    (1 << 9)  /* Authentication-Results: dmarc=fail */
+#define MSG_FLAG_DMARC_CHECKED (1 << 10) /* Authentication-Results header was parsed */
 
 /**
  * @file local_store.h

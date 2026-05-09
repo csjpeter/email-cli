@@ -821,8 +821,9 @@ int mime_get_dmarc_status(const char *auth_results) {
     const char *p = auth_results;
     while ((p = strcasestr(p, "dmarc=")) != NULL) {
         p += 6;
-        if (strncasecmp(p, "pass", 4) == 0) return  1;
-        if (strncasecmp(p, "fail", 4) == 0) return -1;
+        if (strncasecmp(p, "pass",       4) == 0) return  1;
+        if (strncasecmp(p, "fail",       4) == 0) return -1;
+        if (strncasecmp(p, "temperror",  9) == 0) return -2;
     }
     return 0;
 }

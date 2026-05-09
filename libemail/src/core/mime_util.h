@@ -127,7 +127,10 @@ int mime_save_attachment(const MimeAttachment *att, const char *dest_path);
  * @brief Parses DMARC authentication result from an Authentication-Results header value.
  *
  * @param auth_results  Value of the Authentication-Results header (may be NULL).
- * @return 1 = dmarc=pass, -1 = dmarc=fail, 0 = not present or unknown.
+ * @return  1 = dmarc=pass,
+ *         -1 = dmarc=fail,
+ *         -2 = dmarc=temperror (transient — do not cache, retry on next access),
+ *          0 = not present, dmarc=none, dmarc=permerror, or any other permanent result.
  */
 int mime_get_dmarc_status(const char *auth_results);
 

@@ -932,6 +932,18 @@ void test_mime_util(void) {
         ASSERT(mime_get_dmarc_status(ar) == -1,
                "dmarc_status: realistic AR header with dmarc=fail → -1");
     }
+    /* temperror returns -2 (transient — must not be cached as checked) */
+    ASSERT(mime_get_dmarc_status("dmarc=temperror") == -2,
+           "dmarc_status: dmarc=temperror → -2");
+    ASSERT(mime_get_dmarc_status("DMARC=TEMPERROR") == -2,
+           "dmarc_status: DMARC=TEMPERROR case-insensitive → -2");
+    ASSERT(mime_get_dmarc_status("spf=pass dmarc=temperror dkim=fail") == -2,
+           "dmarc_status: embedded dmarc=temperror → -2");
+    /* permerror and none are permanent → 0, not -2 */
+    ASSERT(mime_get_dmarc_status("dmarc=permerror") == 0,
+           "dmarc_status: dmarc=permerror → 0 (permanent, cached)");
+    ASSERT(mime_get_dmarc_status("dmarc=none") == 0,
+           "dmarc_status: dmarc=none → 0 (permanent, cached)");
 
     /* ── mime_describe_dmarc ────────────────────────────────────────── */
     {

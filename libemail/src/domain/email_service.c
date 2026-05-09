@@ -2457,9 +2457,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     char *ar_raw = hdrs ? mime_get_header(hdrs, "Authentication-Results") : NULL;
                     int dmarc_st = mime_get_dmarc_status(ar_raw);
                     free(ar_raw);
-                    if      (dmarc_st > 0) entries[i].flags |= MSG_FLAG_DMARC_PASS;
-                    else if (dmarc_st < 0) entries[i].flags |= MSG_FLAG_DMARC_FAIL;
-                    entries[i].flags |= MSG_FLAG_DMARC_CHECKED;
+                    if      (dmarc_st ==  1) entries[i].flags |= MSG_FLAG_DMARC_PASS;
+                    else if (dmarc_st == -1) entries[i].flags |= MSG_FLAG_DMARC_FAIL;
+                    if (dmarc_st != -2) entries[i].flags |= MSG_FLAG_DMARC_CHECKED;
                     free(hdrs);
                     manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].flags);
                 } else {
@@ -2468,9 +2468,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     int dmarc_st = mime_get_dmarc_status(ar_raw);
                     free(ar_raw);
                     free(hdrs);
-                    if      (dmarc_st > 0) cme->flags |= MSG_FLAG_DMARC_PASS;
-                    else if (dmarc_st < 0) cme->flags |= MSG_FLAG_DMARC_FAIL;
-                    cme->flags |= MSG_FLAG_DMARC_CHECKED;
+                    if      (dmarc_st ==  1) cme->flags |= MSG_FLAG_DMARC_PASS;
+                    else if (dmarc_st == -1) cme->flags |= MSG_FLAG_DMARC_FAIL;
+                    if (dmarc_st != -2) cme->flags |= MSG_FLAG_DMARC_CHECKED;
                     entries[i].flags = cme->flags;
                 }
                 manifest_dirty = 1;
@@ -2578,9 +2578,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 char *ar_raw2 = hdrs ? mime_get_header(hdrs, "Authentication-Results") : NULL;
                 int dmarc_st2 = mime_get_dmarc_status(ar_raw2);
                 free(ar_raw2);
-                if      (dmarc_st2 > 0) entries[ei].flags |= MSG_FLAG_DMARC_PASS;
-                else if (dmarc_st2 < 0) entries[ei].flags |= MSG_FLAG_DMARC_FAIL;
-                entries[ei].flags |= MSG_FLAG_DMARC_CHECKED;
+                if      (dmarc_st2 ==  1) entries[ei].flags |= MSG_FLAG_DMARC_PASS;
+                else if (dmarc_st2 == -1) entries[ei].flags |= MSG_FLAG_DMARC_FAIL;
+                if (dmarc_st2 != -2) entries[ei].flags |= MSG_FLAG_DMARC_CHECKED;
                 free(hdrs);
                 manifest_upsert(manifest, entries[ei].uid, fr, su, dt, entries[ei].flags);
                 manifest_dirty = 1;
@@ -2592,9 +2592,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int dmarc_st3 = mime_get_dmarc_status(ar_raw3);
                 free(ar_raw3);
                 free(hdrs2);
-                if      (dmarc_st3 > 0) cached_me->flags |= MSG_FLAG_DMARC_PASS;
-                else if (dmarc_st3 < 0) cached_me->flags |= MSG_FLAG_DMARC_FAIL;
-                cached_me->flags |= MSG_FLAG_DMARC_CHECKED;
+                if      (dmarc_st3 ==  1) cached_me->flags |= MSG_FLAG_DMARC_PASS;
+                else if (dmarc_st3 == -1) cached_me->flags |= MSG_FLAG_DMARC_FAIL;
+                if (dmarc_st3 != -2) cached_me->flags |= MSG_FLAG_DMARC_CHECKED;
                 manifest_dirty = 1;
             } else {
                 /* Sync server-controlled bits; preserve locally-computed bits */

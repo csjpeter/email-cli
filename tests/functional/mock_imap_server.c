@@ -33,6 +33,7 @@ static const char *g_subject    = "Test Message";
 static int         g_count      = 1;
 static const char *g_msg_prefix = "Message"; /* MOCK_IMAP_MSG_PREFIX */
 static const char *g_long_url   = NULL;      /* MOCK_IMAP_LONG_URL */
+static const char *g_dmarc      = NULL;  /* MOCK_IMAP_DMARC: "pass" / "fail" / NULL */
 
 /*
  * CONDSTORE / QRESYNC support (RFC 4551 / RFC 5162):
@@ -177,13 +178,18 @@ static char *build_message_content(int uid, int is_header, int is_flags_only,
 
     if (is_header) {
         *section_out = "BODY[HEADER]";
+        char ar_hdr[96] = "";
+        if (g_dmarc)
+            snprintf(ar_hdr, sizeof(ar_hdr),
+                     "Authentication-Results: localhost; dmarc=%s\r\n", g_dmarc);
         char *hdr = NULL;
         if (asprintf(&hdr,
                      "From: %s <%s>\r\n"
                      "Subject: %s\r\n"
                      "Date: %s\r\n"
+                     "%s"
                      "\r\n",
-                     from_name, from_addr, subject, date_str) == -1)
+                     from_name, from_addr, subject, date_str, ar_hdr) == -1)
             return NULL;
         return hdr;
     }
@@ -294,14 +300,19 @@ static char *build_legacy_content(int is_header, const char **section_out) {
 
     /* Folded Subject header exercises mime_get_header() continuation-line path.
      * RFC 2047 encoded-word in From exercises decode_encoded_word/try_decode_encoded_word. */
-    char headers[600];
+    char ar_hdr[96] = "";
+    if (g_dmarc)
+        snprintf(ar_hdr, sizeof(ar_hdr),
+                 "Authentication-Results: localhost; dmarc=%s\r\n", g_dmarc);
+    char headers[700];
     snprintf(headers, sizeof(headers),
              "From: =?UTF-8?Q?Test_User?= <test@example.com>\r\n"
              "Subject: %s\r\n"
              " (folded continuation)\r\n"
              "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+             "%s"
              "\r\n",
-             g_subject);
+             g_subject, ar_hdr);
 
     char *full_msg = NULL;
     if (asprintf(&full_msg,
@@ -698,6 +709,8 @@ int main(void) {
     if (prefix_env && prefix_env[0]) g_msg_prefix = prefix_env;
     const char *long_url_env = getenv("MOCK_IMAP_LONG_URL");
     if (long_url_env && long_url_env[0]) g_long_url = long_url_env;
+    const char *dmarc_env = getenv("MOCK_IMAP_DMARC");
+    if (dmarc_env && dmarc_env[0]) g_dmarc = dmarc_env;
 
     /* CONDSTORE / QRESYNC */
     const char *caps_env = getenv("MOCK_IMAP_CAPS");

@@ -1059,3 +1059,77 @@ void test_local_save_outgoing(void) {
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
 }
+
+void test_manifest_dmarc_flags(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env("/tmp/email-cli-dmarc-manifest-test");
+
+    unlink("/tmp/email-cli-dmarc-manifest-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/INBOX.tsv");
+
+    Manifest *m = calloc(1, sizeof(Manifest));
+    ASSERT(m != NULL, "dmarc manifest: calloc");
+
+    /* 1. DMARC pass + checked */
+    manifest_upsert(m, "0000000000000001", strdup("Alice"), strdup("Pass msg"),
+                    strdup("2025-01-01 10:00"),
+                    MSG_FLAG_DMARC_PASS | MSG_FLAG_DMARC_CHECKED);
+    /* 2. DMARC fail + checked */
+    manifest_upsert(m, "0000000000000002", strdup("Bob"), strdup("Fail msg"),
+                    strdup("2025-01-02 10:00"),
+                    MSG_FLAG_DMARC_FAIL | MSG_FLAG_DMARC_CHECKED);
+    /* 3. Checked but no pass/fail (no Authentication-Results in header) */
+    manifest_upsert(m, "0000000000000003", strdup("Carol"), strdup("No AR msg"),
+                    strdup("2025-01-03 10:00"),
+                    MSG_FLAG_DMARC_CHECKED);
+    /* 4. Combined: UNSEEN + DMARC_PASS + DMARC_CHECKED */
+    manifest_upsert(m, "0000000000000004", strdup("Dave"), strdup("Unread pass"),
+                    strdup("2025-01-04 10:00"),
+                    MSG_FLAG_UNSEEN | MSG_FLAG_DMARC_PASS | MSG_FLAG_DMARC_CHECKED);
+    /* 5. PASS and FAIL not set simultaneously: only PASS wins */
+    manifest_upsert(m, "0000000000000005", strdup("Eve"), strdup("Pass checked"),
+                    strdup("2025-01-05 10:00"),
+                    MSG_FLAG_DMARC_PASS | MSG_FLAG_DMARC_CHECKED | MSG_FLAG_FLAGGED);
+
+    ASSERT(manifest_save("INBOX", m) == 0, "dmarc manifest: save succeeds");
+    manifest_free(m);
+
+    m = manifest_load("INBOX");
+    ASSERT(m != NULL, "dmarc manifest: load not NULL");
+    ASSERT(m->count == 5, "dmarc manifest: 5 entries");
+
+    ManifestEntry *e1 = manifest_find(m, "0000000000000001");
+    ASSERT(e1 != NULL, "dmarc manifest: UID1 found");
+    ASSERT( (e1->flags & MSG_FLAG_DMARC_PASS),    "dmarc manifest: UID1 DMARC_PASS set");
+    ASSERT( (e1->flags & MSG_FLAG_DMARC_CHECKED), "dmarc manifest: UID1 DMARC_CHECKED set");
+    ASSERT(!(e1->flags & MSG_FLAG_DMARC_FAIL),    "dmarc manifest: UID1 DMARC_FAIL clear");
+
+    ManifestEntry *e2 = manifest_find(m, "0000000000000002");
+    ASSERT(e2 != NULL, "dmarc manifest: UID2 found");
+    ASSERT( (e2->flags & MSG_FLAG_DMARC_FAIL),    "dmarc manifest: UID2 DMARC_FAIL set");
+    ASSERT( (e2->flags & MSG_FLAG_DMARC_CHECKED), "dmarc manifest: UID2 DMARC_CHECKED set");
+    ASSERT(!(e2->flags & MSG_FLAG_DMARC_PASS),    "dmarc manifest: UID2 DMARC_PASS clear");
+
+    ManifestEntry *e3 = manifest_find(m, "0000000000000003");
+    ASSERT(e3 != NULL, "dmarc manifest: UID3 found");
+    ASSERT( (e3->flags & MSG_FLAG_DMARC_CHECKED), "dmarc manifest: UID3 DMARC_CHECKED set");
+    ASSERT(!(e3->flags & MSG_FLAG_DMARC_PASS),    "dmarc manifest: UID3 DMARC_PASS clear");
+    ASSERT(!(e3->flags & MSG_FLAG_DMARC_FAIL),    "dmarc manifest: UID3 DMARC_FAIL clear");
+
+    ManifestEntry *e4 = manifest_find(m, "0000000000000004");
+    ASSERT(e4 != NULL, "dmarc manifest: UID4 found");
+    ASSERT( (e4->flags & MSG_FLAG_UNSEEN),        "dmarc manifest: UID4 UNSEEN set");
+    ASSERT( (e4->flags & MSG_FLAG_DMARC_PASS),    "dmarc manifest: UID4 DMARC_PASS set");
+    ASSERT( (e4->flags & MSG_FLAG_DMARC_CHECKED), "dmarc manifest: UID4 DMARC_CHECKED set");
+
+    ManifestEntry *e5 = manifest_find(m, "0000000000000005");
+    ASSERT(e5 != NULL, "dmarc manifest: UID5 found");
+    ASSERT( (e5->flags & MSG_FLAG_FLAGGED),       "dmarc manifest: UID5 FLAGGED set");
+    ASSERT( (e5->flags & MSG_FLAG_DMARC_PASS),    "dmarc manifest: UID5 DMARC_PASS set");
+    ASSERT( (e5->flags & MSG_FLAG_DMARC_CHECKED), "dmarc manifest: UID5 DMARC_CHECKED set");
+
+    manifest_free(m);
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}

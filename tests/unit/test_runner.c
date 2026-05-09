@@ -58,6 +58,7 @@ void test_local_save_outgoing(void);
 void test_config_settings(void);
 void test_config_load_account(void);
 void test_config_migrate(void);
+void test_manifest_dmarc_flags(void);
 
 int main() {
     printf("--- email-cli Unit Test Suite ---\n\n");
@@ -115,6 +116,7 @@ int main() {
     RUN_TEST(test_config_settings);
     RUN_TEST(test_config_load_account);
     RUN_TEST(test_config_migrate);
+    RUN_TEST(test_manifest_dmarc_flags);
 
     printf("\n--- Test Results ---\n");
     printf("Tests Run:    %d\n", g_tests_run);

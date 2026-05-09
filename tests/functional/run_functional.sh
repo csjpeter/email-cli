@@ -4608,6 +4608,63 @@ check "78.16 email-cli send missing --body: required fields error" "required\|--
 # export HOME="$H_ALPHA"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 80: DMARC status in message list
+# ════════════════════════════════════════════════════════════════════════════
+echo "--- Phase 80: DMARC status in message list ---"
+DMARC_PORT=10080
+H_DMARC="./build/tests/functional/homes/dmarc"
+
+# 80.1: dmarc=pass — status column shows 'v'
+echo "Starting mock IMAP for Phase 80.1 (dmarc=pass, port $DMARC_PORT)..."
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$DMARC_PORT \
+    MOCK_IMAP_COUNT=3 MOCK_IMAP_DMARC=pass \
+    "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
+DMARC_PID=$!
+sleep 0.3
+make_home "$H_DMARC" "dmarc@example.com" "$DMARC_PORT"
+export HOME="$H_DMARC"
+OUT80_1=$(HOME="$H_DMARC" "$BIN_DIR/email-cli" list 2>&1 || true)
+check "80.1 dmarc=pass: status shows v" "N----v" "$OUT80_1"
+
+# 80.2: second run from same HOME — DMARC_CHECKED cached, still shows 'v'
+OUT80_2=$(HOME="$H_DMARC" "$BIN_DIR/email-cli" list 2>&1 || true)
+check "80.2 dmarc=pass cached: status still shows v" "N----v" "$OUT80_2"
+
+kill "$DMARC_PID" 2>/dev/null; wait "$DMARC_PID" 2>/dev/null || true
+sleep 0.2
+
+# 80.3: dmarc=fail — status column shows 'x'
+echo "Starting mock IMAP for Phase 80.3 (dmarc=fail, port $DMARC_PORT)..."
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$DMARC_PORT \
+    MOCK_IMAP_COUNT=3 MOCK_IMAP_DMARC=fail \
+    "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
+DMARC_PID=$!
+sleep 0.3
+make_home "$H_DMARC" "dmarc@example.com" "$DMARC_PORT"
+export HOME="$H_DMARC"
+OUT80_3=$(HOME="$H_DMARC" "$BIN_DIR/email-cli" list 2>&1 || true)
+check "80.3 dmarc=fail: status shows x" "N----x" "$OUT80_3"
+kill "$DMARC_PID" 2>/dev/null; wait "$DMARC_PID" 2>/dev/null || true
+sleep 0.2
+
+# 80.4: no Authentication-Results — last status char is '-'
+echo "Starting mock IMAP for Phase 80.4 (no DMARC, port $DMARC_PORT)..."
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$DMARC_PORT \
+    MOCK_IMAP_COUNT=3 \
+    "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
+DMARC_PID=$!
+sleep 0.3
+make_home "$H_DMARC" "dmarc@example.com" "$DMARC_PORT"
+export HOME="$H_DMARC"
+OUT80_4=$(HOME="$H_DMARC" "$BIN_DIR/email-cli" list 2>&1 || true)
+check     "80.4 no DMARC: status shows N-----" "N-----" "$OUT80_4"
+check_not "80.4 no DMARC: no v in status"      "N----v" "$OUT80_4"
+check_not "80.4 no DMARC: no x in status"      "N----x" "$OUT80_4"
+kill "$DMARC_PID" 2>/dev/null; wait "$DMARC_PID" 2>/dev/null || true
+
+export HOME="$H_ALPHA"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

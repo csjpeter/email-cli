@@ -59,6 +59,10 @@ int local_msg_save(const char *folder, const char *uid, const char *content, siz
 /** @brief Reads a locally stored message. Caller must free. */
 char *local_msg_load(const char *folder, const char *uid);
 
+/** @brief Returns the absolute filesystem path of the cached .eml file.
+ *  The file may not exist yet. Caller must free. Returns NULL on error. */
+char *local_msg_path(const char *folder, const char *uid);
+
 /** @brief Deletes a locally stored message and its index entries. */
 int local_msg_delete(const char *folder, const char *uid);
 

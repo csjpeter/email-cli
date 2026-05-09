@@ -826,3 +826,82 @@ int mime_get_dmarc_status(const char *auth_results) {
     }
     return 0;
 }
+
+char *mime_describe_dmarc(const char *auth_results) {
+    if (!auth_results)
+        return strdup("Not evaluated (no Authentication-Results header)");
+
+    const char *dpos = strcasestr(auth_results, "dmarc=");
+    if (!dpos)
+        return strdup("Not evaluated (no dmarc entry in Authentication-Results)");
+
+    const char *r = dpos + 6;
+
+    /* Extract result token */
+    char result[32];
+    size_t ri = 0;
+    while (*r && *r != ' ' && *r != ';' && *r != '\t' && *r != '\r' && *r != '\n'
+           && ri < sizeof(result) - 1)
+        result[ri++] = *r++;
+    result[ri] = '\0';
+
+    if (strcasecmp(result, "pass") == 0) {
+        /* Optionally include header.from= for clarity */
+        const char *hf = strcasestr(dpos, "header.from=");
+        if (hf) {
+            hf += 12;
+            char hfrom[64];
+            size_t hfi = 0;
+            while (*hf && *hf != ' ' && *hf != ';' && *hf != '\t' &&
+                   *hf != '\r' && *hf != '\n' && hfi < sizeof(hfrom) - 1)
+                hfrom[hfi++] = *hf++;
+            hfrom[hfi] = '\0';
+            if (hfi > 0) {
+                char *out = NULL;
+                if (asprintf(&out, "Pass (header.from=%s)", hfrom) >= 0)
+                    return out;
+            }
+        }
+        return strdup("Pass");
+    }
+
+    if (strcasecmp(result, "fail") == 0) {
+        /* Policy is in "(p=REJECT sp=... dis=...)" after the dmarc= token */
+        char policy[32] = "";
+        const char *pp = strcasestr(dpos, "(p=");
+        if (pp) {
+            pp += 3;
+            size_t pi = 0;
+            while (*pp && *pp != ')' && *pp != ' ' && *pp != ';' &&
+                   pi < sizeof(policy) - 1)
+                policy[pi++] = *pp++;
+            policy[pi] = '\0';
+        }
+        char *out = NULL;
+        if (strcasecmp(policy, "reject") == 0)
+            out = strdup("Fail — policy: reject (message rejected, likely spoofed)");
+        else if (strcasecmp(policy, "quarantine") == 0)
+            out = strdup("Fail — policy: quarantine (message may be spoofed or spam)");
+        else if (strcasecmp(policy, "none") == 0)
+            out = strdup("Fail — policy: none (monitoring only, no enforcement)");
+        else if (policy[0]) {
+            if (asprintf(&out, "Fail — policy: %s", policy) < 0) out = NULL;
+        } else
+            out = strdup("Fail (no policy information)");
+        return out ? out : strdup("Fail");
+    }
+
+    if (strcasecmp(result, "none") == 0)
+        return strdup("No record (domain has no DMARC policy)");
+    if (strcasecmp(result, "bestguesspass") == 0)
+        return strdup("Best-guess pass (no formal DMARC record, implicit pass)");
+    if (strcasecmp(result, "temperror") == 0)
+        return strdup("Temporary error (DNS lookup may have failed during evaluation)");
+    if (strcasecmp(result, "permerror") == 0)
+        return strdup("Permanent error (malformed or invalid DMARC record)");
+
+    char *out = NULL;
+    if (asprintf(&out, "Unknown result: %s", result) >= 0)
+        return out;
+    return strdup("Unknown");
+}

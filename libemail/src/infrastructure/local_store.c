@@ -109,6 +109,10 @@ static char *msg_path(const char *folder, const char *uid) {
     return path;
 }
 
+char *local_msg_path(const char *folder, const char *uid) {
+    return msg_path(folder, uid);
+}
+
 int local_msg_exists(const char *folder, const char *uid) {
     RAII_STRING char *path = msg_path(folder, uid);
     if (!path) return 0;

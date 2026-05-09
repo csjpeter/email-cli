@@ -932,4 +932,74 @@ void test_mime_util(void) {
         ASSERT(mime_get_dmarc_status(ar) == -1,
                "dmarc_status: realistic AR header with dmarc=fail → -1");
     }
+
+    /* ── mime_describe_dmarc ────────────────────────────────────────── */
+    {
+        RAII_STRING char *d = mime_describe_dmarc(NULL);
+        ASSERT(d && strstr(d, "no Authentication-Results"),
+               "describe_dmarc: NULL → mentions no Authentication-Results");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("spf=pass smtp.mailfrom=x.com");
+        ASSERT(d && strstr(d, "no dmarc entry"),
+               "describe_dmarc: no dmarc token → no dmarc entry");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("dmarc=pass header.from=good.com");
+        ASSERT(d && strncmp(d, "Pass", 4) == 0,
+               "describe_dmarc: dmarc=pass starts with Pass");
+        ASSERT(d && strstr(d, "good.com"),
+               "describe_dmarc: dmarc=pass includes header.from domain");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("dmarc=pass");
+        ASSERT(d && strcmp(d, "Pass") == 0,
+               "describe_dmarc: dmarc=pass no header.from → exactly Pass");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc(
+            "mx.google.com; dmarc=fail (p=REJECT sp=REJECT dis=NONE) header.from=evil.com");
+        ASSERT(d && strstr(d, "reject"),
+               "describe_dmarc: dmarc=fail p=REJECT → mentions reject");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("dmarc=fail (p=QUARANTINE)");
+        ASSERT(d && strstr(d, "quarantine"),
+               "describe_dmarc: dmarc=fail p=QUARANTINE → mentions quarantine");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("dmarc=fail (p=NONE)");
+        ASSERT(d && strstr(d, "none"),
+               "describe_dmarc: dmarc=fail p=NONE → mentions none");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("dmarc=fail");
+        ASSERT(d && strncmp(d, "Fail", 4) == 0,
+               "describe_dmarc: dmarc=fail no policy → starts with Fail");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("dmarc=none");
+        ASSERT(d && strstr(d, "no DMARC policy"),
+               "describe_dmarc: dmarc=none → no DMARC policy");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("dmarc=bestguesspass");
+        ASSERT(d && strstr(d, "Best-guess"),
+               "describe_dmarc: dmarc=bestguesspass → Best-guess");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("dmarc=temperror");
+        ASSERT(d && strstr(d, "Temporary error"),
+               "describe_dmarc: dmarc=temperror → Temporary error");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("dmarc=permerror");
+        ASSERT(d && strstr(d, "Permanent error"),
+               "describe_dmarc: dmarc=permerror → Permanent error");
+    }
+    {
+        RAII_STRING char *d = mime_describe_dmarc("dmarc=unknown42");
+        ASSERT(d && strstr(d, "Unknown"),
+               "describe_dmarc: unknown result → Unknown");
+    }
 }

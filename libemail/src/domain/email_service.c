@@ -746,7 +746,9 @@ static void print_clean(const char *s, const char *fallback, int max_cols) {
 
 static void print_show_headers(const char *from, const char *subject,
                                 const char *date, const char *uid,
-                                const char *labels) {
+                                const char *labels,
+                                const char *file_path,
+                                const char *dmarc_desc) {
     /* label = 9 chars ("From:    "), remaining = SHOW_WIDTH - 9 = 71 */
     printf("From:    "); print_clean(from,    "(none)", SHOW_WIDTH - 9); putchar('\n');
     printf("Subject: "); print_clean(subject, "(none)", SHOW_WIDTH - 9); putchar('\n');
@@ -754,6 +756,11 @@ static void print_show_headers(const char *from, const char *subject,
     printf("UID:     %s\n", uid ? uid : "(none)");
     if (labels && labels[0])
         printf("Labels:  %s\n", labels);
+    if (file_path && file_path[0])
+        printf("File:    %s\n", file_path);
+    if (dmarc_desc && dmarc_desc[0]) {
+        printf("DMARC:   "); print_clean(dmarc_desc, "", SHOW_WIDTH - 9); putchar('\n');
+    }
     printf(SHOW_SEPARATOR);
 }
 
@@ -907,6 +914,11 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
     free(date_raw);
     /* Gmail: load labels from .hdr cache for display in reader header */
     char *show_labels = cfg->gmail_mode ? local_hdr_get_labels("", uid) : NULL;
+    /* Local .eml file path and DMARC description for the reader header */
+    char *show_path = local_msg_path(folder, uid);
+    char *ar_hdr    = mime_get_header(raw, "Authentication-Results");
+    char *show_dmarc = mime_describe_dmarc(ar_hdr);
+    free(ar_hdr);
     /* Load current flags for 'f' / 'n' / 'd' toggle operations.
      * For Gmail: .hdr contains a flags field — use it if available.
      * For IMAP:  .hdr contains raw RFC 2822 headers without flags — use
@@ -947,8 +959,8 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
 
 /* Header: From+Subject+Date+separator = 4 rows; +1 if Labels line present.
  * Footer: info line (trows-1) + statusbar (trows) = 2 rows. */
-#define SHOW_HDR_LINES_INT 6  /* kept for #undef below */
-    int hdr_rows    = (show_labels && show_labels[0]) ? 6 : 5;
+#define SHOW_HDR_LINES_INT 8  /* kept for #undef below */
+    int hdr_rows    = (show_labels && show_labels[0]) ? 8 : 7;
     int rows_avail  = (term_rows > hdr_rows + 2) ? term_rows - hdr_rows - 2 : 1;
     int view_raw    = 0; /* 0=rendered, 1=raw source */
     int body_vrows  = count_visual_rows(body_text, term_cols);
@@ -969,7 +981,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
         if (total_pages < 1) total_pages = 1;
 
         printf("\033[0m\033[H\033[2J");     /* reset attrs + clear screen */
-        print_show_headers(from, subject, date, uid, show_labels);
+        print_show_headers(from, subject, date, uid, show_labels, show_path, show_dmarc);
         print_body_page(body_text, cur_line, rows_avail, term_cols);
         printf("\033[0m");                  /* close any open ANSI from body */
         fflush(stdout);
@@ -1365,6 +1377,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
 show_int_done:
 #undef SHOW_HDR_LINES_INT
     mime_free_attachments(atts, att_count);
+    free(show_path); free(show_dmarc);
     free(body); free(body_wrapped); free(from); free(subject); free(date); free(show_labels); free(raw);
     if (flags_out) *flags_out = reader_flags;
     return result;
@@ -4824,9 +4837,13 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
     char *date_raw = mime_get_header(raw, "Date");
     char *date     = date_raw ? mime_format_date(date_raw) : NULL;
     free(date_raw);
-    char *ro_labels = cfg->gmail_mode ? local_hdr_get_labels("", uid) : NULL;
+    char *ro_labels  = cfg->gmail_mode ? local_hdr_get_labels("", uid) : NULL;
+    char *ro_path    = local_msg_path(cfg->folder, uid);
+    char *ro_ar      = mime_get_header(raw, "Authentication-Results");
+    char *ro_dmarc   = mime_describe_dmarc(ro_ar);
+    free(ro_ar);
 
-    print_show_headers(from, subject, date, uid, ro_labels);
+    print_show_headers(from, subject, date, uid, ro_labels, ro_path, ro_dmarc);
 
     int term_cols_show = pager ? terminal_cols() : SHOW_WIDTH;
     int wrap_cols = term_cols_show > SHOW_WIDTH ? SHOW_WIDTH : term_cols_show;
@@ -4847,7 +4864,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
     }
     const char *body_text = body ? body : "(no readable text body)";
 
-#define SHOW_HDR_LINES 6
+#define SHOW_HDR_LINES 8
     if (!pager || page_size <= SHOW_HDR_LINES) {
         printf("%s\n", body_text);
     } else {
@@ -4863,7 +4880,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
         for (int cur_line = 0, show_displayed = 0; ; ) {
             if (show_displayed) {
                 printf("\033[0m\033[H\033[2J");   /* reset attrs + clear screen */
-                print_show_headers(from, subject, date, uid, ro_labels);
+                print_show_headers(from, subject, date, uid, ro_labels, ro_path, ro_dmarc);
             }
             show_displayed = 1;
             print_body_page(body_text, cur_line, rows_avail, term_cols_show);
@@ -4883,6 +4900,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
     }
 #undef SHOW_HDR_LINES
 
+    free(ro_path); free(ro_dmarc);
     free(body); free(from); free(subject); free(date); free(ro_labels); free(raw);
     return 0;
 }

@@ -131,4 +131,16 @@ int mime_save_attachment(const MimeAttachment *att, const char *dest_path);
  */
 int mime_get_dmarc_status(const char *auth_results);
 
+/**
+ * @brief Produces a human-readable DMARC evaluation description.
+ *
+ * Parses the dmarc= result and optional p= policy from auth_results and
+ * returns a concise English sentence explaining the outcome, including why
+ * it passed, failed, or was not evaluated.
+ *
+ * @param auth_results  Value of the Authentication-Results header (may be NULL).
+ * @return Heap-allocated description string. Caller must free.
+ */
+char *mime_describe_dmarc(const char *auth_results);
+
 #endif /* MIME_UTIL_H */

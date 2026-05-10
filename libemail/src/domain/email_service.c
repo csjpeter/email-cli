@@ -3479,10 +3479,16 @@ char *email_service_list_folders_interactive(const Config *cfg,
     char current_prefix[512] = "";   /* flat mode: current navigation level */
 
     /* Pre-position cursor on current_folder (offset by VPREFIX).
-     * INBOX is case-insensitive per RFC 3501 — use strcasecmp so that a
-     * config value of "inbox" still matches the server's "INBOX". */
+     * Virtual folders (__unread__, __flagged__, …) map to their prefix row.
+     * Real folders: INBOX is case-insensitive per RFC 3501. */
     if (current_folder && *current_folder) {
-        if (tree_mode) {
+        if      (strcmp(current_folder, "__unread__")    == 0) cursor = VP_UNREAD;
+        else if (strcmp(current_folder, "__flagged__")   == 0) cursor = VP_FLAGGED;
+        else if (strcmp(current_folder, "__junk__")      == 0) cursor = VP_JUNK;
+        else if (strcmp(current_folder, "__phishing__")  == 0) cursor = VP_PHISHING;
+        else if (strcmp(current_folder, "__answered__")  == 0) cursor = VP_ANSWERED;
+        else if (strcmp(current_folder, "__forwarded__") == 0) cursor = VP_FORWARDED;
+        else if (tree_mode) {
             for (int i = 0; i < count; i++) {
                 if (strcasecmp(folders[i], current_folder) == 0) {
                     cursor = VPREFIX + i; break;

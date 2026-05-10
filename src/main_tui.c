@@ -2367,7 +2367,7 @@ int main(int argc, char *argv[]) {
 
         const char *init_folder = (saved_folder && saved_folder[0])
                                   ? saved_folder
-                                  : (sel_cfg->folder ? sel_cfg->folder : "INBOX");
+                                  : "__unread__";
 
         /* Open folder/label browser — user picks which folder/label to enter.
          * Loop so that 'c' (compose) re-enters the browser after the dialog. */

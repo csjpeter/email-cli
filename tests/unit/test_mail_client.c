@@ -252,6 +252,12 @@ static void mc_handle_one(int fd) {
         return;
     }
 
+    /* DELETE /messages/{id} — permanent delete */
+    if (strstr(path, "/messages/") && strcmp(method, "DELETE") == 0) {
+        mc_send_json(fd, 204, NULL);
+        return;
+    }
+
     /* GET /messages/{id}?format=raw */
     if (strstr(path, "/messages/") && strcmp(method, "GET") == 0) {
         const char *raw =
@@ -1275,6 +1281,40 @@ static void test_mc_imap_move_to_folder(void) {
     mc_wait(pid);
 }
 
+static void test_mc_imap_delete(void) {
+    int port = 0;
+    pid_t pid = mc_start_imap_server(&port);
+    if (pid < 0) { ASSERT(0, "imap_delete: start server failed"); return; }
+
+    usleep(20000);
+    MailClient *mc = mc_make_imap_client(port);
+    ASSERT(mc != NULL, "imap_delete: client connected");
+
+    mail_client_select(mc, "INBOX");
+    int rc = mail_client_delete(mc, "1");
+    ASSERT(rc == 0, "imap_delete: returns 0");
+
+    mail_client_free(mc);
+    mc_wait(pid);
+}
+
+static void test_mc_gmail_delete(void) {
+    int port = 0;
+    pid_t pid = mc_start_server(&port, 1);
+    if (pid < 0) { ASSERT(0, "gmail_delete: could not start server"); return; }
+
+    usleep(20000);
+
+    MailClient *mc = mc_make_gmail_client(port);
+    ASSERT(mc != NULL, "gmail_delete: client connected");
+
+    int rc = mail_client_delete(mc, "msg001");
+    ASSERT(rc == 0, "gmail_delete: returns 0");
+
+    mail_client_free(mc);
+    mc_wait(pid);
+}
+
 static void test_mc_imap_create_label_fails_connected(void) {
     int port = 0;
     pid_t pid = mc_start_imap_server(&port);
@@ -1363,6 +1403,8 @@ void test_mail_client(void) {
     RUN_TEST(test_mc_imap_fetch_flags);
     RUN_TEST(test_mc_imap_trash);
     RUN_TEST(test_mc_imap_move_to_folder);
+    RUN_TEST(test_mc_imap_delete);
+    RUN_TEST(test_mc_gmail_delete);
     RUN_TEST(test_mc_imap_create_label_fails_connected);
     RUN_TEST(test_mc_imap_delete_label_fails_connected);
 }

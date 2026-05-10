@@ -428,6 +428,29 @@ void test_config_store(void) {
         }
     }
 
+    // 18. TRASH_FOLDER round-trip (covers TRASH_FOLDER save/load paths)
+    {
+        setenv("HOME", "/tmp/email-cli-test-home", 1);
+        const char *acct_path =
+            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+        FILE *fp = fopen(acct_path, "w");
+        if (fp) {
+            fprintf(fp, "EMAIL_HOST=imaps://imap.test.com\n");
+            fprintf(fp, "EMAIL_USER=test@test.com\n");
+            fprintf(fp, "EMAIL_PASS=password123\n");
+            fprintf(fp, "TRASH_FOLDER=MyTrash\n");
+            fclose(fp);
+        }
+        RAII_WITH_CLEANUP(config_cleanup) Config *loaded = config_load_from_store();
+        ASSERT(loaded != NULL, "trash_folder: should load");
+        if (loaded) {
+            ASSERT(loaded->trash_folder &&
+                   strcmp(loaded->trash_folder, "MyTrash") == 0,
+                   "trash_folder: value matches");
+        }
+        unlink(acct_path);
+    }
+
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
     if (old_xdg) setenv("XDG_CONFIG_HOME", old_xdg, 1);

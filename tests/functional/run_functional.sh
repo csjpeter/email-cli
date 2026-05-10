@@ -4739,6 +4739,59 @@ check     "82.6 dedup flagged: DupSubj1 appears only once" "^1$" "$DUP82_CNT"
 export HOME="$H_ALPHA"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 83 — Trash: TRASH_FOLDER config field and Trash folder listing
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 83: trash folder listing ---"
+
+TRASH83_PORT=10083
+echo "Starting mock IMAP for Phase 83 (port $TRASH83_PORT)..."
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$TRASH83_PORT MOCK_IMAP_COUNT=2 \
+    "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
+TRASH83_PID=$!
+sleep 0.3
+
+# 83.1-83.3: TRASH_FOLDER=Trash config loaded → list Trash folder via mock IMAP
+H_TRASH83="./build/tests/functional/homes/trash83"
+rm -rf "./build/tests/functional/homes/trash83"
+mkdir -p "$H_TRASH83/.config/email-cli/accounts/trash83@test.local"
+cat > "$H_TRASH83/.config/email-cli/accounts/trash83@test.local/config.ini" <<CFG83
+EMAIL_HOST=imaps://localhost:$TRASH83_PORT
+EMAIL_USER=trash83@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+TRASH_FOLDER=Trash
+CFG83
+
+OUT83_1=$(HOME="$H_TRASH83" "$BIN_DIR/email-cli" --batch list --folder Trash 2>&1 || true)
+check_not "83.1 trash folder list: no crash"          "Segmentation\|Abort" "$OUT83_1"
+check_not "83.2 trash folder list: no connect error"  "Failed to connect"   "$OUT83_1"
+check     "83.3 trash folder list: messages listed"   "message"             "$OUT83_1"
+
+# 83.4-83.6: custom TRASH_FOLDER=CustomTrash in config loads and lists without crash
+H_TRASH83B="./build/tests/functional/homes/trash83b"
+rm -rf "./build/tests/functional/homes/trash83b"
+mkdir -p "$H_TRASH83B/.config/email-cli/accounts/trash83b@test.local"
+cat > "$H_TRASH83B/.config/email-cli/accounts/trash83b@test.local/config.ini" <<CFG83B
+EMAIL_HOST=imaps://localhost:$TRASH83_PORT
+EMAIL_USER=trash83b@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+TRASH_FOLDER=CustomTrash
+CFG83B
+
+OUT83_4=$(HOME="$H_TRASH83B" "$BIN_DIR/email-cli" --batch list --folder CustomTrash 2>&1 || true)
+check_not "83.4 custom trash folder: no crash"         "Segmentation\|Abort" "$OUT83_4"
+check_not "83.5 custom trash folder: no connect error" "Failed to connect"   "$OUT83_4"
+check     "83.6 custom trash folder: messages listed"  "message"             "$OUT83_4"
+
+kill "$TRASH83_PID" 2>/dev/null; wait "$TRASH83_PID" 2>/dev/null || true
+
+export HOME="$H_ALPHA"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

@@ -778,6 +778,10 @@ void test_imap_extended_operations(void) {
     rc = imap_uid_move(c, "0000000000000001", "Archive");
     ASSERT(rc == 0, "imap_ext: imap_uid_move returns 0");
 
+    /* imap_uid_delete — UID STORE \\Deleted + EXPUNGE */
+    rc = imap_uid_delete(c, "0000000000000001");
+    ASSERT(rc == 0, "imap_ext: imap_uid_delete returns 0");
+
     /* imap_list with NIL separator and unquoted name */
     char **folders = NULL;
     int fc = 0;

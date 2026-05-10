@@ -871,7 +871,7 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
 
 /**
  * Show a message in interactive pager mode.
- * Returns 0 = back to list (Backspace/ESC/q), 2 = reply, -1 = error.
+ * Returns 0 = back to list (Backspace/ESC/q), 2 = reply, 5 = forward, -1 = error.
  * mc may be NULL (operations then queue for background sync).
  * initial_flags: caller-supplied MSG_FLAG_* bitmask (used for IMAP where .hdr
  *   does not carry a flags field).
@@ -882,8 +882,14 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                                 const char *uid, int page_size,
                                 int initial_flags, int *flags_out) {
     char *raw = NULL;
-    if (local_msg_exists(folder, uid)) {
-        raw = local_msg_load(folder, uid);
+    /* For Gmail (and virtual flag views) the .eml is stored under the empty
+     * folder regardless of which label manifest the entry came from. */
+    const char *load_folder = folder;
+    if (!local_msg_exists(folder, uid) && cfg->gmail_mode
+            && local_msg_exists("", uid))
+        load_folder = "";
+    if (local_msg_exists(load_folder, uid)) {
+        raw = local_msg_load(load_folder, uid);
     } else if (mc) {
         if (mail_client_select(mc, folder) == 0)
             raw = mail_client_fetch_body(mc, uid);
@@ -999,26 +1005,26 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
             if (is_gmail) {
                 if (att_count > 0) {
                     snprintf(sb, sizeof(sb),
-                             "-- [%d/%d] \u2191\u2193=scroll  r=rm-label  d=rm  D=trash"
+                             "-- [%d/%d] \u2191\u2193=scroll  F=fwd  r=rm-label  d=rm  D=trash"
                              "  f=star  n=unread  a=arch  t=labels  A=save(%d)"
                              "  /=search  %s  q=back  ESC=quit --",
                              cur_page, total_pages, att_count, vtog);
                 } else {
                     snprintf(sb, sizeof(sb),
-                             "-- [%d/%d] \u2191\u2193=scroll  r=rm-label  d=rm  D=trash"
+                             "-- [%d/%d] \u2191\u2193=scroll  F=fwd  r=rm-label  d=rm  D=trash"
                              "  f=star  n=unread  a=arch  t=labels"
                              "  /=search  %s  q=back  ESC=quit --",
                              cur_page, total_pages, vtog);
                 }
             } else if (att_count > 0) {
                 snprintf(sb, sizeof(sb),
-                         "-- [%d/%d] \u2191\u2193=scroll  r=reply  f=star  n=unread"
+                         "-- [%d/%d] \u2191\u2193=scroll  r=reply  F=fwd  f=star  n=unread"
                          "  d=done  a=save  A=save-all(%d)"
                          "  /=search  %s  BS=list  ESC=quit --",
                          cur_page, total_pages, att_count, vtog);
             } else {
                 snprintf(sb, sizeof(sb),
-                         "-- [%d/%d] \u2191\u2193=scroll  r=reply  f=star  n=unread"
+                         "-- [%d/%d] \u2191\u2193=scroll  r=reply  F=fwd  f=star  n=unread"
                          "  d=done  /=search  %s  BS=list  ESC=quit --",
                          cur_page, total_pages, vtog);
             }
@@ -1123,6 +1129,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                         { "PgDn / \u2193",   "Scroll down one page / one line"          },
                         { "PgUp / \u2191",   "Scroll up one page / one line"            },
                         { "Home / End",      "Jump to top / bottom of message"          },
+                        { "F",              "Forward this message"                      },
                         { "r",              "Remove current label"                      },
                         { "d",              "Remove current label"                      },
                         { "D",              "Move to Trash"                             },
@@ -1146,6 +1153,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                         { "PgUp / \u2191",   "Scroll up one page / one line"            },
                         { "Home / End",      "Jump to top / bottom of message"          },
                         { "r",              "Reply to this message"                     },
+                        { "F",              "Forward this message"                      },
                         { "f",              "Toggle Flagged (starred)"                  },
                         { "n",              "Toggle Unread flag"                        },
                         { "d",              "Toggle Done flag"                          },
@@ -1302,6 +1310,13 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 if (!local_msg_exists(folder, uid))
                     local_msg_save(folder, uid, raw, strlen(raw));
                 result = 2;      /* reply to this message */
+                goto show_int_done;
+            } else if (ch == 'F') {
+                /* Forward: cache the raw message so cmd_forward can read it
+                 * without a live connection, then signal the list loop. */
+                if (!local_msg_exists(folder, uid))
+                    local_msg_save(folder, uid, raw, strlen(raw));
+                result = 5;      /* forward this message */
                 goto show_int_done;
             } else if (att_count > 0 && ((is_gmail && ch == 'A') || (!is_gmail && ch == 'a'))) {
                 int sel = 0;
@@ -2887,6 +2902,13 @@ read_key_again: ;
                     memcpy(opts->action_uid, entries[ei_cur].uid, 17);
                     snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
                     list_result = 3;
+                    goto list_done;
+                }
+                if (ret == 5) {
+                    /* 'F' pressed in reader → forward this message */
+                    memcpy(opts->action_uid, entries[ei_cur].uid, 17);
+                    snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
+                    list_result = 5;
                     goto list_done;
                 }
                 /* ret == 0: Backspace → back to list; ret == -1: error → stay */

@@ -959,30 +959,22 @@ void manifest_count_all_flags(int *unread_out, int *flagged_out,
     if (answered_out) *answered_out = 0;
     if (forwarded_out)*forwarded_out= 0;
     if (!g_account_base[0]) return;
-    char dir_path[8300];
-    snprintf(dir_path, sizeof(dir_path), "%s/manifests", g_account_base);
-    RAII_DIR DIR *dp = opendir(dir_path);
-    if (!dp) return;
-    struct dirent *ent;
-    while ((ent = readdir(dp)) != NULL) {
-        const char *name = ent->d_name;
-        size_t nlen = strlen(name);
-        if (nlen <= 4 || strcmp(name + nlen - 4, ".tsv") != 0) continue;
-        RAII_STRING char *folder = strndup(name, nlen - 4);
-        if (!folder) continue;
-        Manifest *m = manifest_load(folder);
-        if (!m) continue;
-        for (int i = 0; i < m->count; i++) {
-            int f = m->entries[i].flags;
-            if (unread_out   && (f & MSG_FLAG_UNSEEN))    (*unread_out)++;
-            if (flagged_out  && (f & MSG_FLAG_FLAGGED))   (*flagged_out)++;
-            if (junk_out     && (f & MSG_FLAG_JUNK))      (*junk_out)++;
-            if (phishing_out && (f & MSG_FLAG_PHISHING))  (*phishing_out)++;
-            if (answered_out && (f & MSG_FLAG_ANSWERED))  (*answered_out)++;
-            if (forwarded_out&& (f & MSG_FLAG_FORWARDED)) (*forwarded_out)++;
-        }
-        manifest_free(m);
+    /* Use the deduplicated aggregate manifest so that Gmail messages appearing
+     * in multiple label manifests are counted only once. */
+    int combined = MSG_FLAG_UNSEEN | MSG_FLAG_FLAGGED | MSG_FLAG_JUNK |
+                   MSG_FLAG_PHISHING | MSG_FLAG_ANSWERED | MSG_FLAG_FORWARDED;
+    Manifest *m = manifest_load_all_with_flag(combined);
+    if (!m) return;
+    for (int i = 0; i < m->count; i++) {
+        int f = m->entries[i].flags;
+        if (unread_out   && (f & MSG_FLAG_UNSEEN))    (*unread_out)++;
+        if (flagged_out  && (f & MSG_FLAG_FLAGGED))   (*flagged_out)++;
+        if (junk_out     && (f & MSG_FLAG_JUNK))      (*junk_out)++;
+        if (phishing_out && (f & MSG_FLAG_PHISHING))  (*phishing_out)++;
+        if (answered_out && (f & MSG_FLAG_ANSWERED))  (*answered_out)++;
+        if (forwarded_out&& (f & MSG_FLAG_FORWARDED)) (*forwarded_out)++;
     }
+    manifest_free(m);
 }
 
 /* ── Cross-folder flag search ────────────────────────────────────────── */
@@ -1014,6 +1006,24 @@ int local_flag_search(int flag_mask,
         if (!m) continue;
         for (int i = 0; i < m->count; i++) {
             if (!(m->entries[i].flags & flag_mask)) continue;
+            /* Deduplicate by UID.  For Gmail a message appears in multiple label
+             * manifests; prefer the empty-folder entry (where .eml is stored).
+             * If the UID is already present with a non-empty folder, replace it
+             * with the current empty-folder entry.  Otherwise skip duplicates. */
+            int dup_idx = -1;
+            for (int j = 0; j < cnt; j++) {
+                if (strcmp(res[j].uid, m->entries[i].uid) == 0) {
+                    dup_idx = j; break;
+                }
+            }
+            if (dup_idx >= 0) {
+                if (folder[0] == '\0' && res[dup_idx].folder[0] != '\0') {
+                    /* Upgrade to empty-folder entry (better for file operations) */
+                    res[dup_idx].folder[0] = '\0';
+                    res[dup_idx].flags = m->entries[i].flags;
+                }
+                continue;   /* skip duplicate regardless */
+            }
             if (cnt == cap) {
                 int nc = cap * 2;
                 SearchResult *tmp = realloc(res, (size_t)nc * sizeof(SearchResult));

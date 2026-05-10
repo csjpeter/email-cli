@@ -4665,6 +4665,80 @@ kill "$DMARC_PID" 2>/dev/null; wait "$DMARC_PID" 2>/dev/null || true
 export HOME="$H_ALPHA"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 81 — Forward: __forwarded__ virtual folder with pre-seeded manifests
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 81: forward virtual folder ---"
+
+H_FWD81="./build/tests/functional/homes/fwd81"
+rm -rf "./build/tests/functional/homes/fwd81"
+mkdir -p "$H_FWD81/.config/email-cli/accounts/fwd81@test.local"
+cat > "$H_FWD81/.config/email-cli/accounts/fwd81@test.local/config.ini" <<CFG81
+EMAIL_HOST=imaps://localhost:19981
+EMAIL_USER=fwd81@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG81
+mkdir -p "$H_FWD81/.local/share/email-cli/accounts/fwd81@test.local/manifests"
+# MSG_FLAG_FORWARDED = 32 (1 << 5); MSG_FLAG_UNSEEN = 1
+printf "0000000000000001\tSender1 <s1@fwd.test>\tFwdSubjA\t2024-01-01 10:00\t32\n" \
+    > "$H_FWD81/.local/share/email-cli/accounts/fwd81@test.local/manifests/INBOX.tsv"
+printf "0000000000000002\tSender2 <s2@fwd.test>\tUnreadOnlySubj\t2024-01-02 10:00\t1\n" \
+    >> "$H_FWD81/.local/share/email-cli/accounts/fwd81@test.local/manifests/INBOX.tsv"
+printf "0000000000000003\tSender3 <s3@fwd.test>\tFwdSubjB\t2024-01-03 10:00\t32\n" \
+    > "$H_FWD81/.local/share/email-cli/accounts/fwd81@test.local/manifests/INBOX.Sent.tsv"
+
+OUT81_1=$(HOME="$H_FWD81" "$BIN_DIR/email-cli" --batch list --folder __forwarded__ 2>&1 || true)
+check_not "81.1 forwarded folder: no crash"              "Segmentation\|Abort" "$OUT81_1"
+check     "81.2 forwarded folder: 2 forwarded messages"  "2 message"           "$OUT81_1"
+check     "81.3 forwarded folder: FwdSubjA shown"        "FwdSubjA"            "$OUT81_1"
+check     "81.4 forwarded folder: FwdSubjB shown"        "FwdSubjB"            "$OUT81_1"
+check_not "81.5 forwarded folder: unread-only not shown" "UnreadOnlySubj"      "$OUT81_1"
+
+export HOME="$H_ALPHA"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 82 — Dedup: same UID in multiple manifests appears only once
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 82: virtual folder dedup ---"
+
+H_DUP82="./build/tests/functional/homes/dup82"
+rm -rf "./build/tests/functional/homes/dup82"
+mkdir -p "$H_DUP82/.config/email-cli/accounts/dup82@test.local"
+cat > "$H_DUP82/.config/email-cli/accounts/dup82@test.local/config.ini" <<CFG82
+EMAIL_HOST=imaps://localhost:19982
+EMAIL_USER=dup82@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CFG82
+mkdir -p "$H_DUP82/.local/share/email-cli/accounts/dup82@test.local/manifests"
+# MSG_FLAG_FLAGGED = 2 (1 << 1)
+# INBOX.tsv: UID 1 (flagged), UID 2 (flagged)
+printf "0000000000000001\tDupSend1 <d1@dup.test>\tDupSubj1\t2024-01-01 10:00\t2\n" \
+    > "$H_DUP82/.local/share/email-cli/accounts/dup82@test.local/manifests/INBOX.tsv"
+printf "0000000000000002\tDupSend2 <d2@dup.test>\tDupSubj2\t2024-01-02 10:00\t2\n" \
+    >> "$H_DUP82/.local/share/email-cli/accounts/dup82@test.local/manifests/INBOX.tsv"
+# INBOX.Sent.tsv: UID 1 (DUPLICATE of INBOX UID 1), UID 3 (unique)
+printf "0000000000000001\tDupSend1 <d1@dup.test>\tDupSubj1\t2024-01-01 10:00\t2\n" \
+    > "$H_DUP82/.local/share/email-cli/accounts/dup82@test.local/manifests/INBOX.Sent.tsv"
+printf "0000000000000003\tDupSend3 <d3@dup.test>\tDupSubj3\t2024-01-03 10:00\t2\n" \
+    >> "$H_DUP82/.local/share/email-cli/accounts/dup82@test.local/manifests/INBOX.Sent.tsv"
+
+OUT82_1=$(HOME="$H_DUP82" "$BIN_DIR/email-cli" --batch list --folder __flagged__ 2>&1 || true)
+check_not "82.1 dedup flagged: no crash"                  "Segmentation\|Abort" "$OUT82_1"
+check     "82.2 dedup flagged: 3 unique messages (not 4)" "3 message"           "$OUT82_1"
+check     "82.3 dedup flagged: DupSubj1 shown"            "DupSubj1"            "$OUT82_1"
+check     "82.4 dedup flagged: DupSubj2 shown"            "DupSubj2"            "$OUT82_1"
+check     "82.5 dedup flagged: DupSubj3 shown"            "DupSubj3"            "$OUT82_1"
+DUP82_CNT=$(echo "$OUT82_1" | grep -c "DupSubj1" || true)
+check     "82.6 dedup flagged: DupSubj1 appears only once" "^1$" "$DUP82_CNT"
+
+export HOME="$H_ALPHA"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

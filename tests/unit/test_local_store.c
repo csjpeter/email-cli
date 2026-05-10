@@ -675,14 +675,12 @@ void test_flag_search_folder_isolation(void) {
     char *old_home = getenv("HOME");
     setup_test_env("/tmp/email-cli-flag-iso-test");
 
-    /* Pre-clean */
-    unlink("/tmp/email-cli-flag-iso-test/.local/share/email-cli/"
-           "accounts/testuser/manifests/INBOX.tsv");
-    unlink("/tmp/email-cli-flag-iso-test/.local/share/email-cli/"
-           "accounts/testuser/manifests/Spam.tsv");
+    /* Pre-clean: remove all TSV files (stale files from other test runs
+     * would otherwise inflate cnt and make the count assertion fragile) */
+    system("find '/tmp/email-cli-flag-iso-test/.local/share/email-cli/"
+           "accounts/testuser/manifests' -name '*.tsv' -delete 2>/dev/null");
 
-    /* Same UID in two different folders (shouldn't happen in practice but verify
-     * that flag_search reports the correct folder for each) */
+    /* Same UID in two different folders: verify that dedup returns it only once */
     Manifest *inbox = calloc(1, sizeof(Manifest));
     manifest_upsert(inbox, "0000000000000099", strdup("X"), strdup("INBOX copy"),
                     strdup("2024-06-01 00:00"), MSG_FLAG_UNSEEN);
@@ -697,14 +695,18 @@ void test_flag_search_folder_isolation(void) {
 
     SearchResult *res = NULL; int cnt = 0;
     local_flag_search(MSG_FLAG_UNSEEN, &res, &cnt);
-    ASSERT(cnt == 2, "flag_search isolation: 2 results (same UID in 2 folders)");
-    int found_inbox = 0, found_spam = 0;
+    /* Dedup: same UID across two non-empty folders → only one entry kept */
+    int found99 = 0;
+    const char *folder99 = NULL;
     for (int i = 0; i < cnt; i++) {
-        if (strcmp(res[i].folder, "INBOX") == 0) found_inbox = 1;
-        if (strcmp(res[i].folder, "Spam")  == 0) found_spam  = 1;
+        if (strcmp(res[i].uid, "0000000000000099") == 0) {
+            found99++;
+            folder99 = res[i].folder;
+        }
     }
-    ASSERT(found_inbox, "flag_search isolation: INBOX result present");
-    ASSERT(found_spam,  "flag_search isolation: Spam result present");
+    ASSERT(found99 == 1, "flag_search dedup: UID 99 appears exactly once");
+    ASSERT(folder99 && (strcmp(folder99, "INBOX") == 0 || strcmp(folder99, "Spam") == 0),
+           "flag_search dedup: UID 99 folder is INBOX or Spam");
     local_search_free(res, cnt);
 
     if (old_home) setenv("HOME", old_home, 1);

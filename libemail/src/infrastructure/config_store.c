@@ -299,7 +299,8 @@ static void write_config_to_fp(FILE *fp, const Config *cfg) {
     }
 
     fprintf(fp, "EMAIL_FOLDER=%s\n", cfg->folder ? cfg->folder : "INBOX");
-    if (cfg->sent_folder) fprintf(fp, "EMAIL_SENT_FOLDER=%s\n", cfg->sent_folder);
+    if (cfg->sent_folder)  fprintf(fp, "EMAIL_SENT_FOLDER=%s\n", cfg->sent_folder);
+    if (cfg->trash_folder) fprintf(fp, "TRASH_FOLDER=%s\n",      cfg->trash_folder);
     if (cfg->ssl_no_verify) fprintf(fp, "SSL_NO_VERIFY=1\n");
     fprintf(fp, "SYNC_INTERVAL=%d\n", cfg->sync_interval);
     if (cfg->smtp_host) fprintf(fp, "SMTP_HOST=%s\n", cfg->smtp_host);
@@ -354,6 +355,7 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
         }
         else if (strcmp(key, "EMAIL_FOLDER")        == 0) cfg->folder             = strdup(val);
         else if (strcmp(key, "EMAIL_SENT_FOLDER")   == 0) cfg->sent_folder        = strdup(val);
+        else if (strcmp(key, "TRASH_FOLDER")        == 0) cfg->trash_folder       = strdup(val);
         else if (strcmp(key, "SSL_NO_VERIFY")       == 0) cfg->ssl_no_verify      = atoi(val);
         else if (strcmp(key, "SYNC_INTERVAL")       == 0) cfg->sync_interval      = atoi(val);
         else if (strcmp(key, "SMTP_HOST")           == 0) cfg->smtp_host          = strdup(val);

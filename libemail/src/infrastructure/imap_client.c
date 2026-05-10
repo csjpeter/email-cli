@@ -889,6 +889,16 @@ int imap_uid_move(ImapClient *c, const char *uid, const char *target_folder) {
     return rc;
 }
 
+int imap_uid_delete(ImapClient *c, const char *uid) {
+    if (imap_uid_set_flag(c, uid, "\\Deleted", 1) != 0) return -1;
+    char tag[16];
+    if (send_cmd(c, tag, "EXPUNGE") != 0) return -1;
+    Response resp = {0};
+    int rc = read_response(c, tag, &resp);
+    response_free(&resp);
+    return rc;
+}
+
 int imap_append(ImapClient *c, const char *folder,
                 const char *msg, size_t msg_len) {
     /* Strategy: ensure the target folder exists BEFORE sending the literal,

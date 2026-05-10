@@ -172,6 +172,9 @@ int imap_uid_copy(ImapClient *c, const char *uid, const char *target_folder);
  *  Uses UID COPY + UID STORE +FLAGS \\Deleted + EXPUNGE. */
 int imap_uid_move(ImapClient *c, const char *uid, const char *target_folder);
 
+/** @brief Permanently delete a message (UID STORE +FLAGS \\Deleted + EXPUNGE). */
+int imap_uid_delete(ImapClient *c, const char *uid);
+
 /**
  * @brief Append a message to an IMAP folder (IMAP APPEND command).
  *

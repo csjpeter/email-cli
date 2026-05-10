@@ -126,6 +126,9 @@ int mail_client_mark_notjunk(MailClient *c, const char *uid);
  */
 int mail_client_trash(MailClient *c, const char *uid);
 
+/** @brief Permanently delete a message (IMAP: \\Deleted + EXPUNGE; Gmail: messages.delete). */
+int mail_client_delete(MailClient *c, const char *uid);
+
 /**
  * @brief Move a message to a different IMAP folder (UID COPY + STORE \Deleted + EXPUNGE).
  *  For Gmail accounts this is a no-op (label-based; use mail_client_modify_label instead).

@@ -134,6 +134,9 @@ int gmail_trash(GmailClient *c, const char *uid);
  */
 int gmail_untrash(GmailClient *c, const char *uid);
 
+/** @brief Permanently delete a message via Gmail API DELETE /messages/{id}. */
+int gmail_delete_permanently(GmailClient *c, const char *uid);
+
 /**
  * @brief Send a message via the Gmail API.
  *

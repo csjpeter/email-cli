@@ -206,6 +206,12 @@ int mail_client_trash(MailClient *c, const char *uid) {
     return imap_uid_set_flag(c->imap, uid, "\\Deleted", 1);
 }
 
+int mail_client_delete(MailClient *c, const char *uid) {
+    if (c->is_gmail)
+        return gmail_delete_permanently(c->gmail, uid);
+    return imap_uid_delete(c->imap, uid);
+}
+
 int mail_client_move_to_folder(MailClient *c, const char *uid, const char *target_folder) {
     if (c->is_gmail) {
         logger_log(LOG_DEBUG, "mail_client: Gmail ignoring move to '%s'", target_folder);

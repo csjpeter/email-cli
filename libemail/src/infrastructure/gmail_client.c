@@ -667,6 +667,20 @@ int gmail_untrash(GmailClient *c, const char *uid) {
     return 0;
 }
 
+int gmail_delete_permanently(GmailClient *c, const char *uid) {
+    RAII_STRING char *url = NULL;
+    if (asprintf(&url, "%s/messages/%s", gmail_api_base(), uid) == -1)
+        return -1;
+
+    long code = 0;
+    RAII_STRING char *resp = api_delete(c, url, &code);
+    if (code != 204) {
+        logger_log(LOG_ERROR, "gmail_delete_permanently %s: HTTP %ld", uid, code);
+        return -1;
+    }
+    return 0;
+}
+
 /* ── Send ─────────────────────────────────────────────────────────── */
 
 int gmail_send(GmailClient *c, const char *raw_msg, size_t len) {

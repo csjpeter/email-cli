@@ -1019,13 +1019,13 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
             } else if (att_count > 0) {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] \u2191\u2193=scroll  r=reply  F=fwd  f=star  n=unread"
-                         "  d=done  a=save  A=save-all(%d)"
+                         "  d=done  D=trash  a=save  A=save-all(%d)"
                          "  /=search  %s  BS=list  ESC=quit --",
                          cur_page, total_pages, att_count, vtog);
             } else {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] \u2191\u2193=scroll  r=reply  F=fwd  f=star  n=unread"
-                         "  d=done  /=search  %s  BS=list  ESC=quit --",
+                         "  d=done  D=trash  /=search  %s  BS=list  ESC=quit --",
                          cur_page, total_pages, vtog);
             }
             print_statusbar(term_rows, term_cols, sb);
@@ -1157,6 +1157,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                         { "f",              "Toggle Flagged (starred)"                  },
                         { "n",              "Toggle Unread flag"                        },
                         { "d",              "Toggle Done flag"                          },
+                        { "D",              "Move to Trash (del if in Trash)"           },
                         { "a",              "Save an attachment"                        },
                         { "A",              "Save all attachments"                      },
                         { "v",              "Toggle rendered / raw source view"         },
@@ -1182,6 +1183,13 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 show_labels = local_hdr_get_labels("", uid);
                 break;
             } else if (is_gmail && ch == 'D') {
+                if (strcmp(folder, "_trash") == 0) {
+                    /* In Trash: permanently delete */
+                    if (mc) mail_client_delete(mc, uid);
+                    label_idx_remove("_trash", uid);
+                    result = 6;   /* signal list loop to mark entry removed */
+                    goto show_int_done;
+                }
                 /* Trash: Gmail compound trash operation */
                 if (mc) mail_client_trash(mc, uid);
                 char **all_labels = NULL; int all_count = 0;
@@ -1192,8 +1200,8 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 }
                 free(all_labels);
                 label_idx_add("_trash", uid);
-                snprintf(info_msg, sizeof(info_msg), "Moved to Trash");
-                break;
+                result = 6;   /* go back to list; entry will be marked removed */
+                goto show_int_done;
             } else if (is_gmail && ch == 'a') {
                 /* Archive: remove all labels from this message */
                 if (strcmp(folder, "_nolabel") == 0) {
@@ -1304,6 +1312,16 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Marked not done" : "Marked done");
                 break;
+            } else if (!is_gmail && ch == 'D') {
+                /* IMAP trash / permanent delete from reader */
+                const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
+                if (strcmp(folder, trf) == 0) {
+                    if (mc) mail_client_delete(mc, uid);
+                } else {
+                    if (mc) mail_client_move_to_folder(mc, uid, trf);
+                }
+                result = 6;   /* signal list loop to mark entry removed */
+                goto show_int_done;
             } else if (!is_gmail && ch == 'r') {
                 /* Ensure the raw message is in the local cache so cmd_reply
                  * can reload it without requiring a live IMAP connection. */
@@ -2246,7 +2264,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=folders  ESC=quit"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                             "  s=sync  U=refresh  l=rules  [0/0]");
+                             "  D=trash  s=sync  U=refresh  l=rules  [0/0]");
                 }
                 print_statusbar(trows, tcols, sb);
             }
@@ -2326,21 +2344,21 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
-                             "  u=restore  t=labels  n=unread  f=star"
+                             "  D=del  u=restore  t=labels  n=unread  f=star"
                              "  s=sync  U=refresh  l=rules  [0/0]");
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
-                             "  s=sync  U=refresh  l=rules  [0/0]");
+                             "  D=trash  s=sync  U=refresh  l=rules  [0/0]");
                 }
             } else {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=folders  ESC=quit"
                          "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                         "  s=sync  U=refresh  l=rules  [0/0]");
+                         "  D=trash  s=sync  U=refresh  l=rules  [0/0]");
             }
             print_statusbar(trows, tcols, sb);
         }
@@ -2772,7 +2790,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Backspace=labels  ESC=quit"
-                             "  u=restore  t=labels  n=unread  f=star"
+                             "  D=del  u=restore  t=labels  n=unread  f=star"
                              "  s=sync  U=refresh  l=rules  [%d/%d]",
                              show_count > 0 ? cursor + 1 : 0, show_count);
                 } else {
@@ -2784,11 +2802,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              show_count > 0 ? cursor + 1 : 0, show_count);
                 }
             } else {
+                const char *imap_trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
+                int imap_in_trash = (strcmp(folder, imap_trf) == 0);
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Backspace=folders  ESC=quit"
                          "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                         "  s=sync  U=refresh  l=rules  [%d/%d]",
+                         "  %s  s=sync  U=refresh  l=rules  [%d/%d]",
+                         imap_in_trash ? "D=del" : "D=trash",
                          cursor + 1, show_count);
             }
             print_statusbar(trows, tcols, sb);
@@ -2910,6 +2931,13 @@ read_key_again: ;
                     snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
                     list_result = 5;
                     goto list_done;
+                }
+                if (ret == 6) {
+                    /* 'D' in reader → trash or permanent delete; mark entry removed */
+                    const char *del_uid = entries[ei_cur].uid;
+                    manifest_remove(manifest, del_uid);
+                    if (pending_remove) pending_remove[ei_cur] = 1;
+                    if (!is_virtual_flags && !is_virtual_search) manifest_save(efolder, manifest);
                 }
                 /* ret == 0: Backspace → back to list; ret == -1: error → stay */
             }
@@ -3038,6 +3066,7 @@ read_key_again: ;
                         { "f",                 "Toggle Flagged (starred) flag"   },
                         { "j",                 "Toggle Junk (spam) flag"         },
                         { "d",                 "Toggle Done flag"                },
+                        { "D",                 "Move to Trash (del if in Trash)" },
                         { "s",                 "Start background sync"           },
                         { "U",                 "Refresh after sync"              },
                         { "l",                 "Open rules editor"               },
@@ -3113,13 +3142,17 @@ read_key_again: ;
                 break;
             }
             if (ch == 'D' && is_gmail) {
-                /* No-op in Trash view: message is already in Trash */
+                const char *uid = entries[ei_cur].uid;
+                /* In Trash: permanently delete */
                 if (strcmp(folder, "_trash") == 0) {
-                    snprintf(feedback_msg, sizeof(feedback_msg),
-                             "Already in Trash \xe2\x80\x94 no change");
+                    if (list_mc) mail_client_delete(list_mc, uid);
+                    label_idx_remove("_trash", uid);
+                    manifest_remove(manifest, uid);
+                    if (pending_remove) pending_remove[ei_cur] = 1;
+                    if (!is_virtual_flags && !is_virtual_search) manifest_save(efolder, manifest);
+                    snprintf(feedback_msg, sizeof(feedback_msg), "Permanently deleted");
                     break;
                 }
-                const char *uid = entries[ei_cur].uid;
                 if (pending_remove && pending_remove[ei_cur]) {
                     /* Undo: second 'D' restores from Trash back to current folder */
                     label_idx_remove("_trash", uid);
@@ -3158,6 +3191,24 @@ read_key_again: ;
                     if (pending_remove) pending_remove[ei_cur] = 1;
                     snprintf(feedback_msg, sizeof(feedback_msg), "Moved to Trash");
                 }
+                break;
+            }
+            if (ch == 'D' && !is_gmail) {
+                /* IMAP trash / permanent delete */
+                const char *uid = entries[ei_cur].uid;
+                const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
+                if (strcmp(efolder, trf) == 0) {
+                    /* Already in Trash: permanently delete */
+                    if (list_mc) mail_client_delete(list_mc, uid);
+                } else {
+                    /* Move to Trash folder */
+                    if (list_mc) mail_client_move_to_folder(list_mc, uid, trf);
+                }
+                manifest_remove(manifest, uid);
+                if (pending_remove) pending_remove[ei_cur] = 1;
+                if (!is_virtual_flags && !is_virtual_search) manifest_save(efolder, manifest);
+                snprintf(feedback_msg, sizeof(feedback_msg),
+                         strcmp(efolder, trf) == 0 ? "Permanently deleted" : "Moved to Trash");
                 break;
             }
             if (ch == 'u' && is_gmail) {

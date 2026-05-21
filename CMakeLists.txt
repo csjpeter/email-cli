@@ -87,3 +87,38 @@ target_link_libraries(email-import-rules libemail)
 enable_testing()
 add_subdirectory(tests/unit EXCLUDE_FROM_ALL)
 add_subdirectory(tests/pty EXCLUDE_FROM_ALL)
+
+# ── Install targets ────────────────────────────────────────────────────────────
+install(TARGETS email-cli email-cli-ro email-sync email-tui email-import-rules
+        RUNTIME DESTINATION bin)
+
+# ── CPack packaging (DEB + RPM) ────────────────────────────────────────────────
+set(CPACK_PACKAGE_NAME        "email-cli")
+set(CPACK_PACKAGE_VERSION     "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_CONTACT     "Peter Csaszar <peter@csaszar.email>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "Terminal-based email client suite (IMAP + Gmail REST API)")
+set(CPACK_PACKAGE_DESCRIPTION
+"email-cli is a terminal-based email client suite written in C.
+It supports standard IMAP servers and the native Gmail REST API (OAuth2).
+Provides five binaries: email-cli (full read-write CLI),
+email-cli-ro (read-only / scripting), email-tui (interactive TUI),
+email-sync (background sync daemon), and email-import-rules.")
+set(CPACK_RESOURCE_FILE_LICENSE    "${CMAKE_SOURCE_DIR}/LICENSE")
+set(CPACK_STRIP_FILES              TRUE)
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+
+# Debian-specific
+set(CPACK_DEBIAN_PACKAGE_SECTION       "mail")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY      "optional")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS       "libssl3 (>= 3.0.0), libcurl4 (>= 7.68.0)")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER    "${CPACK_PACKAGE_CONTACT}")
+set(CPACK_DEBIAN_FILE_NAME             "DEB-DEFAULT")
+
+# RPM-specific
+set(CPACK_RPM_PACKAGE_LICENSE          "GPL-3.0-or-later")
+set(CPACK_RPM_PACKAGE_GROUP            "Applications/Internet")
+set(CPACK_RPM_PACKAGE_REQUIRES         "openssl-libs >= 3.0.0, libcurl >= 7.68.0")
+set(CPACK_RPM_FILE_NAME                "RPM-DEFAULT")
+
+include(CPack)

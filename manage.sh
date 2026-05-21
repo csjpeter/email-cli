@@ -30,6 +30,7 @@ show_help() {
     echo "  imap-clean     Remove integration test container and volume"
     echo "  install        Build (release) and install binaries to ~/.local/bin"
     echo "  uninstall      Remove installed binaries from ~/.local/bin"
+    echo "  package [deb|rpm|all]  Build release and create distribution package(s)"
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
@@ -43,7 +44,7 @@ install_deps() {
                 if [[ "$VERSION_ID" == "24.04" ]]; then
                     echo "Detected Ubuntu 24.04. Installing dependencies..."
                     sudo apt-get update
-                    sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev lcov valgrind
+                    sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev lcov valgrind dpkg-dev
                 else
                     echo "Unsupported Ubuntu version: $VERSION_ID. Only 24.04 is explicitly supported."
                     exit 1
@@ -54,7 +55,7 @@ install_deps() {
                     echo "Detected Rocky Linux 9. Installing dependencies..."
                     sudo dnf install -y epel-release
                     sudo dnf groupinstall -y "Development Tools"
-                    sudo dnf install -y cmake libcurl-devel openssl-devel lcov valgrind
+                    sudo dnf install -y cmake libcurl-devel openssl-devel lcov valgrind rpm-build
                 else
                     echo "Unsupported Rocky version: $VERSION_ID. Only 9.x is explicitly supported."
                     exit 1
@@ -255,6 +256,23 @@ case "$1" in
         ;;
     install)
         do_install
+        ;;
+    package)
+        build_release
+        target="${2:-all}"
+        case "$target" in
+            deb)  generators="DEB" ;;
+            rpm)  generators="RPM" ;;
+            all)  generators="DEB;RPM" ;;
+            *)
+                echo "Unknown package target: $target  (use: deb | rpm | all)"
+                exit 1
+                ;;
+        esac
+        echo "Creating package(s): $generators"
+        (cd "$BUILD_DIR" && cpack -G "$generators" --config CPackConfig.cmake)
+        echo "Package(s) written to $BUILD_DIR/"
+        ls -lh "$BUILD_DIR"/email-cli_*.deb "$BUILD_DIR"/email-cli-*.rpm 2>/dev/null || true
         ;;
     uninstall)
         do_uninstall

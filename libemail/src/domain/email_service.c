@@ -416,71 +416,90 @@ static void show_help_popup(const char *title,
     if (tcols <= 0) tcols = 80;
     if (trows <= 0) trows = 24;
 
-    /* Compute popup dimensions */
-    int key_col_w = 12;   /* width of the key column */
-    int desc_col_w = 44;  /* width of the description column */
-    int inner_w = key_col_w + 2 + desc_col_w; /* key + "  " + desc */
-    int box_w   = inner_w + 4;  /* "| " + inner + " |" */
-    int box_h   = n + 4;        /* title + separator + n rows + bottom border */
+    int key_col_w  = 12;
+    int desc_col_w = 44;
+    int inner_w    = key_col_w + 2 + desc_col_w;
+    int box_w      = inner_w + 4;
 
-    /* Center the popup */
+    /* How many data rows fit: total rows minus top border, title, separator,
+     * bottom border, and footer line. */
+    int max_data  = trows - 5;
+    if (max_data < 1) max_data = 1;
+    int visible_n = (n < max_data) ? n : max_data;
+    int box_h     = visible_n + 4;
+
     int col0 = (tcols - box_w) / 2;
     int row0 = (trows - box_h) / 2;
     if (col0 < 1) col0 = 1;
     if (row0 < 1) row0 = 1;
 
-    /* Draw popup using stderr so it overlays stdout content */
-    /* Top border */
-    fprintf(stderr, "\033[%d;%dH\033[7m", row0, col0);
-    fprintf(stderr, "\u250c");
-    for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
-    fprintf(stderr, "\u2510\033[0m");
+    int scroll = 0;  /* index of first visible row */
 
-    /* Title row */
-    fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 1, col0);
-    int tlen = (int)strlen(title);
-    int pad_left  = (box_w - 4 - tlen) / 2;
-    int pad_right = (box_w - 4 - tlen) - pad_left;
-    for (int i = 0; i < pad_left;  i++) fputc(' ', stderr);
-    fprintf(stderr, "%s", title);
-    for (int i = 0; i < pad_right; i++) fputc(' ', stderr);
-    fprintf(stderr, " \u2502\033[0m");
+    for (;;) {
+        /* Top border */
+        fprintf(stderr, "\033[%d;%dH\033[7m\u250c", row0, col0);
+        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
+        fprintf(stderr, "\u2510\033[0m");
 
-    /* Separator */
-    fprintf(stderr, "\033[%d;%dH\033[7m\u251c", row0 + 2, col0);
-    for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
-    fprintf(stderr, "\u2524\033[0m");
-
-    /* Data rows */
-    for (int i = 0; i < n; i++) {
-        fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 3 + i, col0);
-        /* key label — bold, left-padded to key_col_w */
-        fprintf(stderr, "\033[1m%-*.*s\033[22m", key_col_w, key_col_w, rows[i][0]);
-        fprintf(stderr, "  ");
-        /* description — truncated to desc_col_w */
-        fprintf(stderr, "%-*.*s", desc_col_w, desc_col_w, rows[i][1]);
+        /* Title row */
+        fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 1, col0);
+        int tlen      = (int)strlen(title);
+        int pad_left  = (box_w - 4 - tlen) / 2;
+        int pad_right = (box_w - 4 - tlen) - pad_left;
+        for (int i = 0; i < pad_left;  i++) fputc(' ', stderr);
+        fprintf(stderr, "%s", title);
+        for (int i = 0; i < pad_right; i++) fputc(' ', stderr);
         fprintf(stderr, " \u2502\033[0m");
+
+        /* Separator */
+        fprintf(stderr, "\033[%d;%dH\033[7m\u251c", row0 + 2, col0);
+        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
+        fprintf(stderr, "\u2524\033[0m");
+
+        /* Data rows */
+        for (int i = 0; i < visible_n; i++) {
+            int ri = scroll + i;
+            fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 3 + i, col0);
+            fprintf(stderr, "\033[1m%-*.*s\033[22m", key_col_w, key_col_w, rows[ri][0]);
+            fprintf(stderr, "  ");
+            fprintf(stderr, "%-*.*s", desc_col_w, desc_col_w, rows[ri][1]);
+            fprintf(stderr, " \u2502\033[0m");
+        }
+
+        /* Bottom border */
+        fprintf(stderr, "\033[%d;%dH\033[7m\u2514", row0 + 3 + visible_n, col0);
+        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
+        fprintf(stderr, "\u2518\033[0m");
+
+        /* Footer */
+        const char *footer = (n > visible_n)
+            ? " \u2191\u2193/j/k=scroll  any other key=close "
+            : " Press any key to close ";
+        int flen = (int)strlen(footer);
+        if (flen < box_w - 2) {
+            int fc = col0 + (box_w - flen) / 2;
+            fprintf(stderr, "\033[%d;%dH\033[2m%s\033[0m",
+                    row0 + 4 + visible_n, fc, footer);
+        }
+        fflush(stderr);
+
+        TermKey key = terminal_read_key();
+        int ch = terminal_last_printable();
+        if (n > visible_n) {
+            if (key == TERM_KEY_NEXT_LINE || ch == 'j') {
+                if (scroll + visible_n < n) scroll++;
+                continue;
+            }
+            if (key == TERM_KEY_PREV_LINE || ch == 'k') {
+                if (scroll > 0) scroll--;
+                continue;
+            }
+        }
+        break;  /* any other key closes */
     }
 
-    /* Bottom border */
-    fprintf(stderr, "\033[%d;%dH\033[7m\u2514", row0 + 3 + n, col0);
-    for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
-    fprintf(stderr, "\u2518\033[0m");
-
-    /* Footer: "Press any key to close" */
-    const char *footer = " Press any key to close ";
-    int flen = (int)strlen(footer);
-    if (flen < box_w - 2) {
-        int fc = col0 + (box_w - flen) / 2;
-        fprintf(stderr, "\033[%d;%dH\033[2m%s\033[0m", row0 + 4 + n, fc, footer);
-    }
-    fflush(stderr);
-
-    /* Wait for any key */
-    terminal_read_key();
-
-    /* Clear the popup area */
-    for (int r = row0; r <= row0 + 4 + n; r++) {
+    /* Clear the popup area (include footer row) */
+    for (int r = row0; r <= row0 + 5 + visible_n; r++) {
         fprintf(stderr, "\033[%d;%dH\033[K", r, col0);
         for (int c = 0; c < box_w; c++) fputc(' ', stderr);
     }
@@ -2955,6 +2974,8 @@ read_key_again: ;
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
+            /* Physical Delete key → same action as 'D' (trash) outside filter */
+            if (key == TERM_KEY_DELETE && !filter_input && ch == 0) ch = 'D';
 
             /* ── Filter input mode: Tab cycles scope, printable chars typed ── */
             if (filter_input && key == TERM_KEY_TAB) {
@@ -3038,7 +3059,7 @@ read_key_again: ;
                         { "f",                 "Toggle Starred label"            },
                         { "a",                 "Archive (remove INBOX label)"    },
                         { "d",                 "Remove current label"            },
-                        { "D",                 "Move to Trash"                   },
+                        { "D / Delete",        "Move to Trash"                   },
                         { "u",                 "Untrash (restore to INBOX)"      },
                         { "t",                 "Toggle labels (picker)"          },
                         { "s",                 "Start background sync"           },
@@ -3066,7 +3087,7 @@ read_key_again: ;
                         { "f",                 "Toggle Flagged (starred) flag"   },
                         { "j",                 "Toggle Junk (spam) flag"         },
                         { "d",                 "Toggle Done flag"                },
-                        { "D",                 "Move to Trash (del if in Trash)" },
+                        { "D / Delete",        "Move to Trash (del if in Trash)" },
                         { "s",                 "Start background sync"           },
                         { "U",                 "Refresh after sync"              },
                         { "l",                 "Open rules editor"               },

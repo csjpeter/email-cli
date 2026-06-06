@@ -16,7 +16,8 @@
 #define MSG_FLAG_PHISHING  (1 << 7)  /* $Phishing — phishing warning */
 #define MSG_FLAG_DMARC_PASS    (1 << 8)  /* Authentication-Results: dmarc=pass */
 #define MSG_FLAG_DMARC_FAIL    (1 << 9)  /* Authentication-Results: dmarc=fail */
-#define MSG_FLAG_DMARC_CHECKED (1 << 10) /* Authentication-Results header was parsed */
+#define MSG_FLAG_DMARC_CHECKED  (1 << 10) /* Authentication-Results header was parsed */
+#define MSG_FLAG_ATTACH_CHECKED (1 << 11) /* attachment presence has been determined */
 
 /**
  * @file local_store.h

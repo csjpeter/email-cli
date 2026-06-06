@@ -763,13 +763,18 @@ static void print_clean(const char *s, const char *fallback, int max_cols) {
     }
 }
 
-static void print_show_headers(const char *from, const char *subject,
+static void print_show_headers(const char *from, const char *to,
+                                const char *subject,
                                 const char *date, const char *uid,
                                 const char *labels,
                                 const char *file_path,
-                                const char *dmarc_desc) {
+                                const char *dmarc_desc,
+                                const char *attachments) {
     /* label = 9 chars ("From:    "), remaining = SHOW_WIDTH - 9 = 71 */
     printf("From:    "); print_clean(from,    "(none)", SHOW_WIDTH - 9); putchar('\n');
+    if (to && to[0]) {
+        printf("To:      "); print_clean(to, "", SHOW_WIDTH - 9); putchar('\n');
+    }
     printf("Subject: "); print_clean(subject, "(none)", SHOW_WIDTH - 9); putchar('\n');
     printf("Date:    "); print_clean(date,    "(none)", SHOW_WIDTH - 9); putchar('\n');
     printf("UID:     %s\n", uid ? uid : "(none)");
@@ -779,6 +784,9 @@ static void print_show_headers(const char *from, const char *subject,
         printf("File:    %s\n", file_path);
     if (dmarc_desc && dmarc_desc[0]) {
         printf("DMARC:   "); print_clean(dmarc_desc, "", SHOW_WIDTH - 9); putchar('\n');
+    }
+    if (attachments && attachments[0]) {
+        printf("Attach:  "); print_clean(attachments, "", SHOW_WIDTH - 9); putchar('\n');
     }
     printf(SHOW_SEPARATOR);
 }
@@ -939,6 +947,10 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
     free(date_raw);
     /* Gmail: load labels from .hdr cache for display in reader header */
     char *show_labels = cfg->gmail_mode ? local_hdr_get_labels("", uid) : NULL;
+    /* To: field for reader header */
+    char *to_raw  = mime_get_header(raw, "To");
+    char *show_to = to_raw ? mime_decode_words(to_raw) : NULL;
+    free(to_raw);
     /* Local .eml file path and DMARC description for the reader header */
     char *show_path = local_msg_path(folder, uid);
     char *ar_hdr    = mime_get_header(raw, "Authentication-Results");
@@ -981,11 +993,40 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
     /* Detect attachments once */
     int att_count = 0;
     MimeAttachment *atts = mime_list_attachments(raw, &att_count);
+    /* Propagate attachment result back to caller via reader_flags */
+    if (att_count > 0)
+        reader_flags |= MSG_FLAG_ATTACH | MSG_FLAG_ATTACH_CHECKED;
+    else
+        reader_flags |= MSG_FLAG_ATTACH_CHECKED;
+    /* Build single-line attachment summary for reader header */
+    char attach_buf[256] = "";
+    if (att_count > 0) {
+        int pos = snprintf(attach_buf, sizeof(attach_buf),
+                           "%d file%s: ", att_count, att_count == 1 ? "" : "s");
+        for (int _i = 0; _i < att_count && pos < (int)sizeof(attach_buf) - 2; _i++) {
+            const char *fn = atts[_i].filename ? atts[_i].filename : "?";
+            if (_i > 0) { attach_buf[pos++] = ','; attach_buf[pos++] = ' '; attach_buf[pos] = '\0'; }
+            if (pos + (int)strlen(fn) > SHOW_WIDTH - 12) {
+                snprintf(attach_buf + pos, sizeof(attach_buf) - (size_t)pos,
+                         "(+%d more)", att_count - _i);
+                break;
+            }
+            size_t av = sizeof(attach_buf) - (size_t)pos - 1;
+            strncpy(attach_buf + pos, fn, av);
+            attach_buf[sizeof(attach_buf) - 1] = '\0';
+            pos += (int)strlen(fn);
+        }
+    }
 
-/* Header: From+Subject+Date+separator = 4 rows; +1 if Labels line present.
+/* Header: From+Subject+Date+UID+separator = 5 base rows; optional To/Labels/File/DMARC/Attach.
  * Footer: info line (trows-1) + statusbar (trows) = 2 rows. */
 #define SHOW_HDR_LINES_INT 8  /* kept for #undef below */
-    int hdr_rows    = (show_labels && show_labels[0]) ? 8 : 7;
+    int hdr_rows = 5;  /* From + Subject + Date + UID + separator */
+    if (show_to    && show_to[0])    hdr_rows++;
+    if (show_labels && show_labels[0]) hdr_rows++;
+    if (show_path  && show_path[0])  hdr_rows++;
+    if (show_dmarc && show_dmarc[0]) hdr_rows++;
+    if (att_count > 0)               hdr_rows++;
     int rows_avail  = (term_rows > hdr_rows + 2) ? term_rows - hdr_rows - 2 : 1;
     int view_raw    = 0; /* 0=rendered, 1=raw source */
     int body_vrows  = count_visual_rows(body_text, term_cols);
@@ -1006,7 +1047,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
         if (total_pages < 1) total_pages = 1;
 
         printf("\033[0m\033[H\033[2J");     /* reset attrs + clear screen */
-        print_show_headers(from, subject, date, uid, show_labels, show_path, show_dmarc);
+        print_show_headers(from, show_to, subject, date, uid, show_labels, show_path, show_dmarc, attach_buf);
         print_body_page(body_text, cur_line, rows_avail, term_cols);
         printf("\033[0m");                  /* close any open ANSI from body */
         fflush(stdout);
@@ -1429,7 +1470,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
 show_int_done:
 #undef SHOW_HDR_LINES_INT
     mime_free_attachments(atts, att_count);
-    free(show_path); free(show_dmarc);
+    free(show_path); free(show_dmarc); free(show_to);
     free(body); free(body_wrapped); free(from); free(subject); free(date); free(show_labels); free(raw);
     if (flags_out) *flags_out = reader_flags;
     return result;
@@ -2486,8 +2527,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (!opts->pager && !is_tty) {
             for (int i = wstart; i < wend; i++) {
                 ManifestEntry *cme = manifest_find(manifest, entries[i].uid);
-                int need_dmarc = cme && !(cme->flags & MSG_FLAG_DMARC_CHECKED);
-                if (cme && !need_dmarc) continue;
+                int need_dmarc  = cme && !(cme->flags & MSG_FLAG_DMARC_CHECKED);
+                int need_attach = cme && !(cme->flags & MSG_FLAG_ATTACH_CHECKED);
+                if (cme && !need_dmarc && !need_attach) continue;
                 char *hdrs   = list_mc
                                ? fetch_uid_headers_via(list_mc, folder, entries[i].uid)
                                : fetch_uid_headers_cached(cfg, folder, entries[i].uid);
@@ -2505,6 +2547,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     char *ct_raw = hdrs ? mime_get_header(hdrs, "Content-Type") : NULL;
                     if (ct_raw && strcasestr(ct_raw, "multipart/mixed"))
                         entries[i].flags |= MSG_FLAG_ATTACH;
+                    entries[i].flags |= MSG_FLAG_ATTACH_CHECKED;
                     free(ct_raw);
                     char *ar_raw = hdrs ? mime_get_header(hdrs, "Authentication-Results") : NULL;
                     int dmarc_st = mime_get_dmarc_status(ar_raw);
@@ -2515,7 +2558,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     free(hdrs);
                     manifest_upsert(manifest, entries[i].uid, fr, su, dt, entries[i].flags);
                 } else {
-                    /* Existing entry: update DMARC bits only from local cache */
+                    /* Existing entry: update DMARC and/or attach bits from local cache */
+                    if (need_attach) {
+                        char *ct2 = hdrs ? mime_get_header(hdrs, "Content-Type") : NULL;
+                        if (ct2 && strcasestr(ct2, "multipart/mixed"))
+                            cme->flags |= MSG_FLAG_ATTACH;
+                        cme->flags |= MSG_FLAG_ATTACH_CHECKED;
+                        free(ct2);
+                    }
                     char *ar_raw = hdrs ? mime_get_header(hdrs, "Authentication-Results") : NULL;
                     int dmarc_st = mime_get_dmarc_status(ar_raw);
                     free(ar_raw);
@@ -2626,6 +2676,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 char *ct_raw = hdrs ? mime_get_header(hdrs, "Content-Type") : NULL;
                 if (ct_raw && strcasestr(ct_raw, "multipart/mixed"))
                     entries[ei].flags |= MSG_FLAG_ATTACH;
+                entries[ei].flags |= MSG_FLAG_ATTACH_CHECKED;
                 free(ct_raw);
                 char *ar_raw2 = hdrs ? mime_get_header(hdrs, "Authentication-Results") : NULL;
                 int dmarc_st2 = mime_get_dmarc_status(ar_raw2);
@@ -2636,10 +2687,18 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 free(hdrs);
                 manifest_upsert(manifest, entries[ei].uid, fr, su, dt, entries[ei].flags);
                 manifest_dirty = 1;
-            } else if (!(cached_me->flags & MSG_FLAG_DMARC_CHECKED)) {
-                /* Cached entry without DMARC check — read from local .hdr only */
+            } else if (!(cached_me->flags & MSG_FLAG_DMARC_CHECKED) ||
+                       !(cached_me->flags & MSG_FLAG_ATTACH_CHECKED)) {
+                /* Cached entry needing DMARC and/or attach check — read from local .hdr */
                 const char *hf2 = entries[ei].folder[0] ? entries[ei].folder : folder;
                 char *hdrs2 = fetch_uid_headers_cached(cfg, hf2, entries[ei].uid);
+                if (!(cached_me->flags & MSG_FLAG_ATTACH_CHECKED)) {
+                    char *ct3 = hdrs2 ? mime_get_header(hdrs2, "Content-Type") : NULL;
+                    if (ct3 && strcasestr(ct3, "multipart/mixed"))
+                        cached_me->flags |= MSG_FLAG_ATTACH;
+                    cached_me->flags |= MSG_FLAG_ATTACH_CHECKED;
+                    free(ct3);
+                }
                 char *ar_raw3 = hdrs2 ? mime_get_header(hdrs2, "Authentication-Results") : NULL;
                 int dmarc_st3 = mime_get_dmarc_status(ar_raw3);
                 free(ar_raw3);
@@ -2650,8 +2709,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 manifest_dirty = 1;
             } else {
                 /* Sync server-controlled bits; preserve locally-computed bits */
-                int computed = MSG_FLAG_ATTACH | MSG_FLAG_DMARC_PASS |
-                               MSG_FLAG_DMARC_FAIL | MSG_FLAG_DMARC_CHECKED;
+                int computed = MSG_FLAG_ATTACH | MSG_FLAG_ATTACH_CHECKED |
+                               MSG_FLAG_DMARC_PASS | MSG_FLAG_DMARC_FAIL | MSG_FLAG_DMARC_CHECKED;
                 int merged = entries[ei].flags | (cached_me->flags & computed);
                 if (merged != cached_me->flags) {
                     cached_me->flags = merged;
@@ -2705,7 +2764,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             char sts[128];
             /* Merge server bits (entries[]) with computed bits (manifest) */
             ManifestEntry *me_sts = manifest_find(manifest, entries[ei].uid);
-            int computed_mask = MSG_FLAG_ATTACH | MSG_FLAG_DMARC_PASS | MSG_FLAG_DMARC_FAIL;
+            int computed_mask = MSG_FLAG_ATTACH | MSG_FLAG_ATTACH_CHECKED | MSG_FLAG_DMARC_PASS | MSG_FLAG_DMARC_FAIL;
             int eflags = entries[ei].flags | (me_sts ? (me_sts->flags & computed_mask) : 0);
             if (opts->pager && !remove_pending && !label_pending && !restore_pending) {
                 const char *n_s;
@@ -3069,8 +3128,12 @@ read_key_again: ;
                         { "ESC / q",           "Quit"                            },
                         { "h / ?",             "Show this help"                  },
                         { "────────────",      "──────────────────────────────" },
-                        { "Status col 1:",     "P=Phishing  J=Junk  N=Unread  -" },
-                        { "Status col 2:",     "\u2605=Starred  -=normal"          },
+                        { "Sts col 1:",        "P=phish  J=junk  N=unread  -"   },
+                        { "Sts col 2:",        "\u2605=starred  -=normal"         },
+                        { "Sts col 3:",        "D=done  -=normal"               },
+                        { "Sts col 4:",        "A=attachment  -=none"           },
+                        { "Sts col 5:",        "R=replied  F=fwd  -=neither"    },
+                        { "Sts col 6:",        "\u2713=DMARC ok  \u2717=fail  -=?" },
                     };
                     show_help_popup("Message list shortcuts (Gmail)",
                                     ghelp, (int)(sizeof(ghelp)/sizeof(ghelp[0])));
@@ -3095,8 +3158,12 @@ read_key_again: ;
                         { "ESC / q",           "Quit"                            },
                         { "h / ?",             "Show this help"                  },
                         { "────────────",      "──────────────────────────────" },
-                        { "Status col 1:",     "P=Phishing  J=Junk  N=Unread  -" },
-                        { "Status col 2:",     "\u2605=Starred  -=normal"          },
+                        { "Sts col 1:",        "P=phish  J=junk  N=unread  -"   },
+                        { "Sts col 2:",        "\u2605=starred  -=normal"         },
+                        { "Sts col 3:",        "D=done  -=normal"               },
+                        { "Sts col 4:",        "A=attachment  -=none"           },
+                        { "Sts col 5:",        "R=replied  F=fwd  -=neither"    },
+                        { "Sts col 6:",        "\u2713=DMARC ok  \u2717=fail  -=?" },
                     };
                     show_help_popup("Message list shortcuts",
                                     help, (int)(sizeof(help)/sizeof(help[0])));
@@ -4942,8 +5009,33 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
     char *ro_ar      = mime_get_header(raw, "Authentication-Results");
     char *ro_dmarc   = mime_describe_dmarc(ro_ar);
     free(ro_ar);
+    char *ro_to_raw  = mime_get_header(raw, "To");
+    char *ro_to      = ro_to_raw ? mime_decode_words(ro_to_raw) : NULL;
+    free(ro_to_raw);
+    /* Build attachment summary */
+    int ro_att_count = 0;
+    MimeAttachment *ro_atts = mime_list_attachments(raw, &ro_att_count);
+    char ro_attach_buf[256] = "";
+    if (ro_att_count > 0) {
+        int pos = snprintf(ro_attach_buf, sizeof(ro_attach_buf),
+                           "%d file%s: ", ro_att_count, ro_att_count == 1 ? "" : "s");
+        for (int _i = 0; _i < ro_att_count && pos < (int)sizeof(ro_attach_buf) - 2; _i++) {
+            const char *fn = ro_atts[_i].filename ? ro_atts[_i].filename : "?";
+            if (_i > 0) { ro_attach_buf[pos++] = ','; ro_attach_buf[pos++] = ' '; ro_attach_buf[pos] = '\0'; }
+            if (pos + (int)strlen(fn) > SHOW_WIDTH - 12) {
+                snprintf(ro_attach_buf + pos, sizeof(ro_attach_buf) - (size_t)pos,
+                         "(+%d more)", ro_att_count - _i);
+                break;
+            }
+            size_t av = sizeof(ro_attach_buf) - (size_t)pos - 1;
+            strncpy(ro_attach_buf + pos, fn, av);
+            ro_attach_buf[sizeof(ro_attach_buf) - 1] = '\0';
+            pos += (int)strlen(fn);
+        }
+    }
+    mime_free_attachments(ro_atts, ro_att_count);
 
-    print_show_headers(from, subject, date, uid, ro_labels, ro_path, ro_dmarc);
+    print_show_headers(from, ro_to, subject, date, uid, ro_labels, ro_path, ro_dmarc, ro_attach_buf);
 
     int term_cols_show = pager ? terminal_cols() : SHOW_WIDTH;
     int wrap_cols = term_cols_show > SHOW_WIDTH ? SHOW_WIDTH : term_cols_show;
@@ -4980,7 +5072,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
         for (int cur_line = 0, show_displayed = 0; ; ) {
             if (show_displayed) {
                 printf("\033[0m\033[H\033[2J");   /* reset attrs + clear screen */
-                print_show_headers(from, subject, date, uid, ro_labels, ro_path, ro_dmarc);
+                print_show_headers(from, ro_to, subject, date, uid, ro_labels, ro_path, ro_dmarc, ro_attach_buf);
             }
             show_displayed = 1;
             print_body_page(body_text, cur_line, rows_avail, term_cols_show);
@@ -5000,7 +5092,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
     }
 #undef SHOW_HDR_LINES
 
-    free(ro_path); free(ro_dmarc);
+    free(ro_path); free(ro_dmarc); free(ro_to);
     free(body); free(from); free(subject); free(date); free(ro_labels); free(raw);
     return 0;
 }

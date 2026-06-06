@@ -3717,14 +3717,15 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 snprintf(cl, sizeof(cl), "  Folders \u2014 %s  (%d)",
                          cfg->user ? cfg->user : "?",
                          display_count);
-            printf("\033[7m%s", cl);
+            /* Explicit row 1: avoids pending-wrap shifting layout when title fills the row */
+            printf("\033[1;1H\033[7m%s", cl);
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols_f; p++) putchar(' ');
-            printf("\033[0m\n\n");
+            printf("\033[0m");
         }
 
-        /* Column header and separator (both flat and tree mode) */
-        printf("  %6s  %7s  %-*s  %7s\n", "Unread", "Flagged", name_w, "Folder", "Total");
+        /* Column header and separator pinned at rows 3 and 4 */
+        printf("\033[3;1H  %6s  %7s  %-*s  %7s\n", "Unread", "Flagged", name_w, "Folder", "Total");
         printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
         print_dbar(name_w);
         printf("  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
@@ -4451,13 +4452,15 @@ char *email_service_list_labels_interactive(const Config *cfg,
             char cl[512];
             snprintf(cl, sizeof(cl), "  Labels \u2014 %s  (%d)",
                      cfg->user ? cfg->user : "?", lbl_count);
-            printf("\033[7m%s", cl);
+            /* Explicit row 1: avoids pending-wrap shifting layout when title fills the row */
+            printf("\033[1;1H\033[7m%s", cl);
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
-            printf("\033[0m\n\n");
+            printf("\033[0m");
         }
 
-        printf("  %6s  %-*s\n", "Count", name_w, "Label");
+        /* Column header and separator pinned at rows 3 and 4 */
+        printf("\033[3;1H  %6s  %-*s\n", "Count", name_w, "Label");
         printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
         print_dbar(name_w);
         printf("\n");

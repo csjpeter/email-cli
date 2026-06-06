@@ -157,6 +157,34 @@ static char *unescape(const char *src, size_t len) {
 
 /* ── Public API ─────────────────────────────────────────────────────── */
 
+char *json_get_nested_string(const char *json,
+                              const char *outer_key, const char *inner_key) {
+    if (!json || !outer_key || !inner_key) return NULL;
+
+    const char *p = skip_ws(json);
+    if (*p != '{') return NULL;
+    p++;
+
+    const char *outer_val = find_key(p, outer_key);
+    if (!outer_val) return NULL;
+    outer_val = skip_ws(outer_val);
+    if (*outer_val != '{') return NULL;
+    outer_val++; /* inside the sub-object */
+
+    const char *inner_val = find_key(outer_val, inner_key);
+    if (!inner_val || *inner_val != '"') return NULL;
+    inner_val++; /* past opening quote */
+
+    const char *end = inner_val;
+    while (*end && *end != '"') {
+        if (*end == '\\') { end++; if (!*end) return NULL; }
+        end++;
+    }
+    if (!*end) return NULL;
+
+    return unescape(inner_val, (size_t)(end - inner_val));
+}
+
 char *json_get_string(const char *json, const char *key) {
     if (!json || !key) return NULL;
 

@@ -591,10 +591,8 @@ static void process_message_added(const char *obj, int index, void *ctx) {
     (void)index;
     struct history_ctx *hc = ctx;
 
-    /* obj is a history record with "message" sub-object */
-    /* Extract message ID from the "message" field */
-    /* The history API returns: {"message": {"id": "...", "labelIds": [...]}} */
-    char *id = json_get_string(obj, "id");
+    /* Gmail history item: {"message": {"id": "...", "labelIds": [...]}} */
+    char *id = json_get_nested_string(obj, "message", "id");
     if (!id) return;
 
     /* Fetch and store the new message */
@@ -646,7 +644,8 @@ static void process_message_deleted(const char *obj, int index, void *ctx) {
     (void)index;
     struct history_ctx *hc = ctx;
 
-    char *id = json_get_string(obj, "id");
+    /* Gmail history item: {"message": {"id": "..."}} */
+    char *id = json_get_nested_string(obj, "message", "id");
     if (!id) return;
 
     local_msg_delete("", id);
@@ -676,7 +675,8 @@ static void process_labels_added(const char *obj, int index, void *ctx) {
     (void)index;
     struct history_ctx *hc = ctx;
 
-    char *id = json_get_string(obj, "id");
+    /* Gmail history item: {"message": {"id": "..."}, "labelIds": [...]} */
+    char *id = json_get_nested_string(obj, "message", "id");
     if (!id) return;
 
     char **add_labels = NULL;
@@ -708,7 +708,8 @@ static void process_labels_removed(const char *obj, int index, void *ctx) {
     (void)index;
     struct history_ctx *hc = ctx;
 
-    char *id = json_get_string(obj, "id");
+    /* Gmail history item: {"message": {"id": "..."}, "labelIds": [...]} */
+    char *id = json_get_nested_string(obj, "message", "id");
     if (!id) return;
 
     char **rm_labels = NULL;
@@ -789,6 +790,93 @@ void gmail_sync_repair_archive_flags(void) {
     free(uids);
 }
 
+/* ── History record dispatcher ───────────────────────────────────── */
+
+/* Called once per entry in the "history" array.
+ * Each record may contain messagesAdded/Deleted and labelsAdded/Removed. */
+static void process_history_record(const char *rec, int index, void *ctx) {
+    (void)index;
+    struct history_ctx *hc = ctx;
+    json_foreach_object(rec, "messagesAdded",   process_message_added,   hc);
+    json_foreach_object(rec, "messagesDeleted", process_message_deleted, hc);
+    json_foreach_object(rec, "labelsAdded",     process_labels_added,    hc);
+    json_foreach_object(rec, "labelsRemoved",   process_labels_removed,  hc);
+}
+
+/* ── Recover stale UNREAD labels from server ─────────────────────── */
+
+/* Query the server for currently unread messages and update any locally
+ * cached .hdr files that are missing the UNREAD label.  Called after
+ * every sync to correct state that the (previously broken) incremental
+ * sync may have failed to propagate. */
+static void recover_unread_labels(GmailClient *gc) {
+    char (*server_uids)[17] = NULL;
+    int server_count = 0;
+    char *dummy_hid = NULL;
+
+    if (gmail_list_messages(gc, "UNREAD", NULL,
+                            &server_uids, &server_count, &dummy_hid) != 0) {
+        free(dummy_hid);
+        return;
+    }
+    free(dummy_hid);
+
+    if (server_count == 0) { free(server_uids); return; }
+
+    logger_log(LOG_INFO, "gmail_sync: recover_unread: %d unread on server",
+               server_count);
+
+    /* Load current local UNREAD index to skip already-correct entries */
+    char (*local_uids)[17] = NULL;
+    int local_count = 0;
+    label_idx_load("UNREAD", &local_uids, &local_count);
+
+    MailRules *rules = mail_rules_load(local_store_account_name());
+    int updated = 0, fetched = 0;
+
+    for (int i = 0; i < server_count; i++) {
+        const char *uid = server_uids[i];
+
+        /* Binary search in sorted local UNREAD index */
+        int found = 0;
+        int lo = 0, hi = local_count - 1;
+        while (lo <= hi) {
+            int mid = lo + (hi - lo) / 2;
+            int cmp = strcmp(local_uids[mid], uid);
+            if (cmp == 0) { found = 1; break; }
+            if (cmp < 0) lo = mid + 1; else hi = mid - 1;
+        }
+        if (found) continue; /* already in local UNREAD index */
+
+        if (local_hdr_exists("", uid)) {
+            /* Cached but missing UNREAD label — patch the .hdr */
+            const char *add[] = {"UNREAD"};
+            local_hdr_update_labels("", uid, add, 1, NULL, 0);
+            label_idx_add("UNREAD", uid);
+            updated++;
+        } else {
+            /* Not in local cache — download with current labels (includes UNREAD) */
+            if (store_fetched_message(gc, uid, rules) == 0)
+                fetched++;
+        }
+    }
+
+    mail_rules_free(rules);
+    free(server_uids);
+    free(local_uids);
+
+    if (updated > 0 || fetched > 0) {
+        logger_log(LOG_INFO,
+                   "gmail_sync: recover_unread: patched=%d fetched=%d",
+                   updated, fetched);
+        if (updated > 0)
+            fprintf(stderr, "  Recovered UNREAD flag for %d cached messages.\n",
+                    updated);
+        if (fetched > 0)
+            fprintf(stderr, "  Downloaded %d new unread messages.\n", fetched);
+    }
+}
+
 /* ── Incremental Sync ─────────────────────────────────────────────── */
 
 int gmail_sync_incremental(GmailClient *gc) {
@@ -812,18 +900,12 @@ int gmail_sync_incremental(GmailClient *gc) {
     MailRules *inc_rules = mail_rules_load(local_store_account_name());
     struct history_ctx hc = { .gc = gc, .rules = inc_rules, .added = 0, .deleted = 0, .label_changes = 0 };
 
-    /* Process each history record */
-    /* The history response has: {"history": [{...}, ...], "historyId": "..."} */
-    /* Each history entry may contain messagesAdded, messagesDeleted,
-     * labelsAdded, labelsRemoved arrays */
-
-    /* Process delta events from the history response.
-     * Gmail nests events inside history records, but our json_foreach_object
-     * searches the full response for matching keys, so a single scan works. */
-    json_foreach_object(resp, "messagesAdded", process_message_added, &hc);
-    json_foreach_object(resp, "messagesDeleted", process_message_deleted, &hc);
-    json_foreach_object(resp, "labelsAdded", process_labels_added, &hc);
-    json_foreach_object(resp, "labelsRemoved", process_labels_removed, &hc);
+    /* Process each history record.
+     * The response is {"history": [{...}, ...], "historyId": "..."}.
+     * Each record may contain messagesAdded, messagesDeleted,
+     * labelsAdded, labelsRemoved arrays.
+     * process_history_record dispatches to the individual handlers. */
+    json_foreach_object(resp, "history", process_history_record, &hc);
 
     /* Save updated historyId */
     RAII_STRING char *new_history_id = json_get_string(resp, "historyId");
@@ -846,6 +928,10 @@ int gmail_sync_incremental(GmailClient *gc) {
 
     /* Ensure no archived message is marked unread (repair existing data too) */
     gmail_sync_repair_archive_flags();
+
+    /* Refresh UNREAD state from the server to correct any label changes that
+     * were missed while the history-parsing bug was present. */
+    recover_unread_labels(gc);
 
     mail_rules_free(inc_rules);
     logger_log(LOG_INFO, "gmail_sync: incremental done — added=%d deleted=%d labels=%d",

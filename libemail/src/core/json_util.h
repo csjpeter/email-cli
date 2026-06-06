@@ -85,4 +85,15 @@ typedef void (*JsonObjectCb)(const char *obj_json, int index, void *ctx);
 int json_foreach_object(const char *json, const char *key,
                         JsonObjectCb cb, void *ctx);
 
+/**
+ * @brief Extract a string nested one level deep: json[outer_key][inner_key].
+ *
+ * Finds @p outer_key at the top level of @p json (must be an object value),
+ * then finds @p inner_key inside that sub-object.
+ *
+ * @return Heap-allocated unescaped value, or NULL if not found. Caller frees.
+ */
+char *json_get_nested_string(const char *json,
+                              const char *outer_key, const char *inner_key);
+
 #endif /* JSON_UTIL_H */

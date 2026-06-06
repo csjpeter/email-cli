@@ -3680,7 +3680,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
     for (;;) {
         int rows  = terminal_rows();
-        int limit = (rows > 4) ? rows - 3 : 10;
+        int limit = (rows > 5) ? rows - 5 : 3;
 
         /* Rebuild flat view on each iteration (alphabetical order) */
         int display_count;

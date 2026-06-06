@@ -932,6 +932,9 @@ Manifest *manifest_load_all_with_flag(int flag_mask) {
         const char *name = ent->d_name;
         size_t nlen = strlen(name);
         if (nlen <= 4 || strcmp(name + nlen - 4, ".tsv") != 0) continue;
+        /* Skip virtual flag manifests (__unread__, __flagged__, etc.) —
+         * they are legacy artifacts; real data lives in per-folder manifests. */
+        if (name[0] == '_' && name[1] == '_') continue;
         RAII_STRING char *folder = strndup(name, nlen - 4);
         if (!folder) continue;
         Manifest *m = manifest_load(folder);
@@ -1000,6 +1003,9 @@ int local_flag_search(int flag_mask,
         const char *name = ent->d_name;
         size_t nlen = strlen(name);
         if (nlen <= 4 || strcmp(name + nlen - 4, ".tsv") != 0) continue;
+        /* Skip virtual flag manifests (__unread__, __flagged__, etc.) —
+         * they are legacy artifacts; real data lives in per-folder manifests. */
+        if (name[0] == '_' && name[1] == '_') continue;
         RAII_STRING char *folder = strndup(name, nlen - 4);
         if (!folder) continue;
         Manifest *m = manifest_load(folder);

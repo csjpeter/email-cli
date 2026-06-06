@@ -2767,7 +2767,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             printf("\n");
             fflush(stdout); /* show row immediately as it arrives */
         }
-        if (manifest_dirty && !is_virtual_search) manifest_save(folder, manifest);
+        if (manifest_dirty && !is_virtual_flags && !is_virtual_search) manifest_save(folder, manifest);
         if (load_interrupted) goto list_done;
 
         if (!opts->pager) {

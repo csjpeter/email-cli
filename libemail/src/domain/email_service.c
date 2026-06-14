@@ -2530,9 +2530,17 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int need_dmarc  = cme && !(cme->flags & MSG_FLAG_DMARC_CHECKED);
                 int need_attach = cme && !(cme->flags & MSG_FLAG_ATTACH_CHECKED);
                 if (cme && !need_dmarc && !need_attach) continue;
-                char *hdrs   = list_mc
-                               ? fetch_uid_headers_via(list_mc, folder, entries[i].uid)
-                               : fetch_uid_headers_cached(cfg, folder, entries[i].uid);
+                /* For Gmail: .hdr files use from\tsubject\tdate\tlabels\tflags format,
+                 * not RFC 2822 headers — Content-Type/Authentication-Results are absent.
+                 * Read the full local message instead (no network access needed). */
+                char *hdrs;
+                if (cfg->gmail_mode) {
+                    hdrs = local_msg_load("", entries[i].uid);
+                } else {
+                    hdrs = list_mc
+                           ? fetch_uid_headers_via(list_mc, folder, entries[i].uid)
+                           : fetch_uid_headers_cached(cfg, folder, entries[i].uid);
+                }
                 if (!cme) {
                     /* New entry: full header parse */
                     char *fr_raw = hdrs ? mime_get_header(hdrs, "From")    : NULL;
@@ -2574,6 +2582,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     else if (dmarc_st == -1) cme->flags |= MSG_FLAG_DMARC_FAIL;
                     if (dmarc_st != -2) cme->flags |= MSG_FLAG_DMARC_CHECKED;
                     entries[i].flags = cme->flags;
+                    /* Persist updated flags so next startup skips backfill */
+                    if (cfg->gmail_mode)
+                        local_hdr_update_flags("", entries[i].uid, cme->flags);
                 }
                 manifest_dirty = 1;
             }
@@ -2689,9 +2700,19 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 manifest_dirty = 1;
             } else if (!(cached_me->flags & MSG_FLAG_DMARC_CHECKED) ||
                        !(cached_me->flags & MSG_FLAG_ATTACH_CHECKED)) {
-                /* Cached entry needing DMARC and/or attach check — read from local .hdr */
+                /* Cached entry needing DMARC and/or attach check.
+                 * For Gmail: headers are in `from\tsubject\tdate\tlabels\tflags` format,
+                 * not RFC 2822 — Content-Type/Authentication-Results are not available
+                 * there.  Read from the full local message instead (no network).
+                 * For IMAP: fall back to the per-folder header cache (may download
+                 * if the header file is missing, but that is IMAP-normal). */
+                char *hdrs2;
                 const char *hf2 = entries[ei].folder[0] ? entries[ei].folder : folder;
-                char *hdrs2 = fetch_uid_headers_cached(cfg, hf2, entries[ei].uid);
+                if (cfg->gmail_mode) {
+                    hdrs2 = local_msg_load("", entries[ei].uid);
+                } else {
+                    hdrs2 = fetch_uid_headers_cached(cfg, hf2, entries[ei].uid);
+                }
                 if (!(cached_me->flags & MSG_FLAG_ATTACH_CHECKED)) {
                     char *ct3 = hdrs2 ? mime_get_header(hdrs2, "Content-Type") : NULL;
                     if (ct3 && strcasestr(ct3, "multipart/mixed"))
@@ -2706,6 +2727,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if      (dmarc_st3 ==  1) cached_me->flags |= MSG_FLAG_DMARC_PASS;
                 else if (dmarc_st3 == -1) cached_me->flags |= MSG_FLAG_DMARC_FAIL;
                 if (dmarc_st3 != -2) cached_me->flags |= MSG_FLAG_DMARC_CHECKED;
+                /* Persist updated flags to the .hdr file so next startup skips backfill */
+                local_hdr_update_flags(cfg->gmail_mode ? "" : hf2,
+                                       entries[ei].uid, cached_me->flags);
                 manifest_dirty = 1;
             } else {
                 /* Sync server-controlled bits; preserve locally-computed bits */

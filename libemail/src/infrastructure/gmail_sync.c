@@ -61,6 +61,19 @@ char *gmail_sync_build_hdr(const char *raw_msg, char **labels, int label_count) 
         if (strcmp(labels[i], "SPAM")    == 0) flags |= MSG_FLAG_JUNK;
     }
 
+    /* Compute attachment and DMARC flags from the raw message so the TUI
+     * never needs to download anything to display these indicators. */
+    RAII_STRING char *ct_raw = mime_get_header(raw_msg, "Content-Type");
+    if (ct_raw && strcasestr(ct_raw, "multipart/mixed"))
+        flags |= MSG_FLAG_ATTACH;
+    flags |= MSG_FLAG_ATTACH_CHECKED;
+
+    RAII_STRING char *ar_raw = mime_get_header(raw_msg, "Authentication-Results");
+    int dmarc_st = mime_get_dmarc_status(ar_raw);
+    if      (dmarc_st ==  1) flags |= MSG_FLAG_DMARC_PASS;
+    else if (dmarc_st == -1) flags |= MSG_FLAG_DMARC_FAIL;
+    if (dmarc_st != -2) flags |= MSG_FLAG_DMARC_CHECKED;
+
     /* Replace tabs in fields with spaces */
     char *hdr = NULL;
     if (asprintf(&hdr, "%s\t%s\t%s\t%s\t%d",

@@ -215,10 +215,12 @@ static void test_build_hdr_no_labels(void) {
     char *hdr = gmail_sync_build_hdr(raw, NULL, 0);
     ASSERT(hdr != NULL, "build_hdr no labels: not NULL");
 
-    /* Flags should be 0 (no UNREAD, no STARRED) */
+    /* No UNREAD, no STARRED — but ATTACH_CHECKED/DMARC_CHECKED are always set */
     const char *last_tab = strrchr(hdr, '\t');
     int flags = atoi(last_tab + 1);
-    ASSERT(flags == 0, "build_hdr no labels: flags=0");
+    ASSERT((flags & MSG_FLAG_UNSEEN)         == 0, "build_hdr no labels: UNSEEN not set");
+    ASSERT((flags & MSG_FLAG_FLAGGED)        == 0, "build_hdr no labels: FLAGGED not set");
+    ASSERT((flags & MSG_FLAG_ATTACH_CHECKED) != 0, "build_hdr no labels: ATTACH_CHECKED set");
 
     free(hdr);
 }
@@ -1161,22 +1163,20 @@ static void run_incremental_server(int lfd, int count) {
         sscanf(buf, "%15s %2047s", method, path);
 
         if (strstr(path, "/history") && strcmp(method, "GET") == 0) {
-            /* Flat top-level JSON: json_foreach_object searches at top level */
+            /* Nested format matching the real Gmail History API:
+             * events are objects inside the "history" array, and each
+             * event item nests the message ID under {"message":{"id":"..."}}. */
             char body_buf[2048];
             snprintf(body_buf, sizeof(body_buf),
                 "{"
                 "\"historyId\":\"99999\","
-                "\"messagesAdded\":["
-                "  {\"id\":\"incr000000000001\"}"
-                "],"
-                "\"labelsAdded\":["
-                "  {\"id\":\"incr000000000001\",\"labelIds\":[\"STARRED\"]}"
-                "],"
-                "\"labelsRemoved\":["
-                "  {\"id\":\"incr000000000001\",\"labelIds\":[\"UNREAD\"]}"
-                "],"
-                "\"messagesDeleted\":["
-                "  {\"id\":\"incr000000000002\"}"
+                "\"history\":["
+                "  {"
+                "    \"messagesAdded\":[{\"message\":{\"id\":\"incr000000000001\"}}],"
+                "    \"labelsAdded\":[{\"message\":{\"id\":\"incr000000000001\"},\"labelIds\":[\"STARRED\"]}],"
+                "    \"labelsRemoved\":[{\"message\":{\"id\":\"incr000000000001\"},\"labelIds\":[\"UNREAD\"]}],"
+                "    \"messagesDeleted\":[{\"message\":{\"id\":\"incr000000000002\"}}]"
+                "  }"
                 "]"
                 "}");
             gs_send_json(cfd, 200, body_buf);

@@ -2132,11 +2132,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 snprintf(cl, sizeof(cl),
                          "  0 of 0 message(s) in %s (0 unread) [%s].  \u26a0 No cached data \u2014 run 'email-sync' or 's=sync'",
                          folder_display, cfg->user ? cfg->user : "?");
-                printf("\033[7m%s", cl);
+                printf("\033[1;1H\033[7m%s", cl);
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
-                printf("\033[0m\n\n");
-                printf("  %-16s  %-6s  %-*s  %s\n",
+                printf("\033[0m");
+                printf("\033[3;1H  %-16s  %-6s  %-*s  %s\n",
                        "Date", "Sts", subj_w, "Subject", "From");
                 printf("  ");
                 print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
@@ -2301,11 +2301,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 snprintf(cl, sizeof(cl),
                          "  0 of 0 message(s) in %s (0 unread) [%s].",
                          folder_display, cfg->user ? cfg->user : "?");
-                printf("\033[7m%s", cl);
+                printf("\033[1;1H\033[7m%s", cl);
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
-                printf("\033[0m\n\n");
-                printf("  %-16s  %-6s  %-*s  %s\n",
+                printf("\033[0m");
+                printf("\033[3;1H  %-16s  %-6s  %-*s  %s\n",
                        "Date", "Sts", subj_w, "Subject", "From");
                 printf("  ");
                 print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
@@ -2386,11 +2386,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             snprintf(cl, sizeof(cl),
                      "  0 of 0 message(s) in %s (0 unread) [%s].",
                      folder_display, cfg->user ? cfg->user : "?");
-            printf("\033[7m%s", cl);
+            printf("\033[1;1H\033[7m%s", cl);
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
-            printf("\033[0m\n\n");
-            printf("  %-16s  %-6s  %-*s  %s\n",
+            printf("\033[0m");
+            printf("\033[3;1H  %-16s  %-6s  %-*s  %s\n",
                    "Date", "Sts", subj_w, "Subject", "From");
             printf("  ");
             print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
@@ -2627,15 +2627,16 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                          cfg->user ? cfg->user : "?", suffix);
             }
             if (opts->pager) {
-                /* TUI mode: reverse-video status bar padded to full terminal width */
-                printf("\033[7m%s", cl);
+                /* TUI mode: reverse-video status bar pinned to row 1 */
+                printf("\033[1;1H\033[7m%s", cl);
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
-                printf("\033[0m\n\n");
+                printf("\033[0m");
             } else {
                 printf("%s\n\n", cl);
             }
         }
+        if (opts->pager) printf("\033[3;1H");
         if (show_uid)
             printf("  %-16s  %-16s  %-6s  %-*s  %s\n",
                    "UID", "Date", "Sts", subj_w, "Subject", "From");

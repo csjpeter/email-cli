@@ -238,15 +238,23 @@ static void help_list(void) {
 
 static void help_show(void) {
     printf(
-        "Usage: email-cli show <uid>\n"
+        "Usage: email-cli show <uid> [--folder <name>]\n"
         "\n"
         "Displays the full content of the message identified by <uid>.\n"
         "\n"
-        "  <uid>   Numeric IMAP UID shown by 'email-cli list'\n"
+        "  <uid>             Numeric IMAP UID shown by 'email-cli list'\n"
+        "  --folder <name>   Folder/label containing the message (default: configured folder).\n"
+        "                    IMAP UIDs are unique only within a mailbox, so if the message\n"
+        "                    was listed from a non-default folder, pass it here too.\n"
+        "  --label  <name>   Gmail: alias for --folder.\n"
         "\n"
         "The message is fetched from the server on first access and stored\n"
         "locally at ~/.local/share/email-cli/messages/<folder>/<uid>.eml.\n"
         "Subsequent reads are served from the local store.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli show 42\n"
+        "  email-cli show 42 --folder \"Archive\"\n"
     );
 }
 
@@ -843,13 +851,31 @@ int main(int argc, char *argv[]) {
         if (ok) result = email_service_list(cfg, &opts);
 
     } else if (strcmp(cmd, "show") == 0) {
-        /* UID is the first non --batch arg after "show" */
+        /* UID is the first non --batch, non-option arg after "show" */
         const char *uid_str = NULL;
-        for (int i = cmd_idx + 1; i < argc; i++) {
-            if (strcmp(argv[i], "--batch") == 0) continue;
-            uid_str = argv[i]; break;
+        const char *folder  = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) {
+                continue;
+            } else if (strcmp(argv[i], "--folder") == 0 ||
+                       strcmp(argv[i], "--label")  == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: %s requires a name.\n", argv[i]);
+                    ok = 0;
+                } else {
+                    folder = argv[++i];
+                }
+            } else if (!uid_str) {
+                uid_str = argv[i];
+            } else {
+                unknown_option("show", argv[i]);
+                ok = 0;
+            }
         }
-        if (!uid_str) {
+        if (!ok) {
+            /* error already printed above */
+        } else if (!uid_str) {
             fprintf(stderr, "Error: 'show' requires a UID argument.\n");
             help_show();
         } else {
@@ -859,7 +885,7 @@ int main(int argc, char *argv[]) {
                         "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n",
                         uid_str);
             else
-                result = email_service_read(cfg, uid, 0, BATCH_DEFAULT_LIMIT);
+                result = email_service_read(cfg, folder, uid, 0, BATCH_DEFAULT_LIMIT);
         }
 
     } else if (strcmp(cmd, "list-folders") == 0) {

@@ -144,11 +144,14 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
  *
  * @param cfg        Connection configuration.
  * @param uid        IMAP UID of the message.
+ * @param folder     Folder/label containing the message, or NULL to use cfg->folder.
+ *                   IMAP UIDs are unique only within a mailbox, so the caller must
+ *                   supply the folder the UID was listed in.
  * @param pager      1 = interactive pager for long bodies; 0 = print all at once.
  * @param page_size  Lines per page when pager=1.
  * @return 0 on success, -1 on failure.
  */
-int email_service_read(const Config *cfg, const char *uid, int pager, int page_size);
+int email_service_read(const Config *cfg, const char *folder, const char *uid, int pager, int page_size);
 
 /**
  * @brief Downloads all messages in all folders to the local cache.

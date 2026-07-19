@@ -1451,7 +1451,7 @@ void test_email_service(void) {
         if (rnull >= 0) { dup2(rnull, STDERR_FILENO); close(rnull); }
 
         /* email_service_read(cfg, uid, pager=0, page_size=25) for batch output */
-        int rr = email_service_read(&rcfg, ruid, 0, 25);
+        int rr = email_service_read(&rcfg, NULL, ruid, 0, 25);
 
         fflush(stdout);
         dup2(rsout, STDOUT_FILENO); close(rsout);
@@ -2695,7 +2695,7 @@ void test_email_service(void) {
 
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int rpager_r = email_service_read(&rpager_cfg, "0000000000008888", 1, 25);
+        int rpager_r = email_service_read(&rpager_cfg, NULL, "0000000000008888", 1, 25);
         RESTORE_OUT(sout, serr);
         ASSERT(rpager_r == 0, "email_service_read pager: short msg fits → 0");
     }
@@ -2710,7 +2710,7 @@ void test_email_service(void) {
 
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int rcron_r = email_service_read(&rcron_cfg, "nonexistent_uid_xyz", 0, 0);
+        int rcron_r = email_service_read(&rcron_cfg, NULL, "nonexistent_uid_xyz", 0, 0);
         RESTORE_OUT(sout, serr);
         ASSERT(rcron_r == -1, "email_service_read: cron + no cache → -1");
     }
@@ -3075,7 +3075,7 @@ void test_email_service(void) {
         INJECT_STDIN("\033[B\033x", 5, saved_stdin);
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        int pr = email_service_read(&pcfg, puid, 1, 8);
+        int pr = email_service_read(&pcfg, NULL, puid, 1, 8);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         ASSERT(pr == 0, "email_service_read: multi-page pager → 0");

@@ -4978,25 +4978,26 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
 #undef ACC_FREE
 }
 
-int email_service_read(const Config *cfg, const char *uid, int pager, int page_size) {
+int email_service_read(const Config *cfg, const char *folder, const char *uid, int pager, int page_size) {
+    if (!folder) folder = cfg->folder;
     char *raw = NULL;
 
-    if (local_msg_exists(cfg->folder, uid)) {
-        logger_log(LOG_DEBUG, "Cache hit for UID %s in %s", uid, cfg->folder);
-        raw = local_msg_load(cfg->folder, uid);
+    if (local_msg_exists(folder, uid)) {
+        logger_log(LOG_DEBUG, "Cache hit for UID %s in %s", uid, folder);
+        raw = local_msg_load(folder, uid);
     } else if (cfg->sync_interval > 0) {
         /* cron/offline mode: serve only from local cache; do not connect */
-        fprintf(stderr, "Could not load message UID %s.\n", uid);
+        fprintf(stderr, "Could not load message UID %s in folder '%s'.\n", uid, folder);
         return -1;
     } else {
-        raw = fetch_uid_content_in(cfg, cfg->folder, uid, 0);
+        raw = fetch_uid_content_in(cfg, folder, uid, 0);
         if (raw) {
-            local_msg_save(cfg->folder, uid, raw, strlen(raw));
-            local_index_update(cfg->folder, uid, raw);
+            local_msg_save(folder, uid, raw, strlen(raw));
+            local_index_update(folder, uid, raw);
         }
     }
 
-    if (!raw) { fprintf(stderr, "Could not load message UID %s.\n", uid); return -1; }
+    if (!raw) { fprintf(stderr, "Could not load message UID %s in folder '%s'.\n", uid, folder); return -1; }
 
     char *from_raw = mime_get_header(raw, "From");
     char *from     = from_raw ? mime_decode_words(from_raw) : NULL;
@@ -5008,7 +5009,7 @@ int email_service_read(const Config *cfg, const char *uid, int pager, int page_s
     char *date     = date_raw ? mime_format_date(date_raw) : NULL;
     free(date_raw);
     char *ro_labels  = cfg->gmail_mode ? local_hdr_get_labels("", uid) : NULL;
-    char *ro_path    = local_msg_path(cfg->folder, uid);
+    char *ro_path    = local_msg_path(folder, uid);
     char *ro_ar      = mime_get_header(raw, "Authentication-Results");
     char *ro_dmarc   = mime_describe_dmarc(ro_ar);
     free(ro_ar);

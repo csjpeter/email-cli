@@ -273,8 +273,14 @@ static char *make_tmp_attach(const char *content)
     char *path = strdup("/tmp/test-compose-attach-XXXXXX");
     int fd = mkstemp(path);
     if (fd < 0) { free(path); return NULL; }
-    write(fd, content, strlen(content));
+    size_t len = strlen(content);
+    ssize_t written = write(fd, content, len);
     close(fd);
+    if (written < 0 || (size_t)written != len) {
+        unlink(path);
+        free(path);
+        return NULL;
+    }
     return path;
 }
 

@@ -1583,11 +1583,11 @@ static void clear_gmail_local_store(void) {
     snprintf(cmd, sizeof(cmd),
              "rm -rf '/tmp/email-cli-gmail-pty-%d/.local/share/email-cli/accounts/%s'",
              (int)getpid(), GMAIL_TEST_EMAIL);
-    (void)system(cmd);
+    int _rc1 = system(cmd);  (void)_rc1;
     char cmd2[640];
     snprintf(cmd2, sizeof(cmd2),
              "rm -f '%s/.local/share/email-cli/ui.ini'", g_test_home);
-    (void)system(cmd2);
+    int _rc2 = system(cmd2); (void)_rc2;
 }
 
 /** Run email-sync and capture stdout + stderr into out_buf. */
@@ -1754,8 +1754,9 @@ static void test_gmail_sync_pending_fetch_uid_format(void) {
     ASSERT(rp != NULL, "pending_fetch format: re-open");
     if (rp) {
         char line[64] = {0};
-        fgets(line, sizeof(line), rp);
+        char *got = fgets(line, sizeof(line), rp);
         fclose(rp);
+        ASSERT(got != NULL, "pending_fetch format: entry readable");
         size_t len = strlen(line);
         while (len > 0 && (line[len-1]=='\n'||line[len-1]=='\r')) line[--len] = '\0';
         ASSERT(len == 16, "pending_fetch format: entry is 16 characters");

@@ -6125,6 +6125,7 @@ int email_service_rebuild_contacts(const char *only_account) {
         printf("=== Rebuilding contacts: %s ===\n", accounts[i].name);
         local_store_init(accounts[i].cfg->host, accounts[i].cfg->user);
         local_contacts_rebuild();
+        printf("Contacts rebuilt for %s\n", accounts[i].name);
         done++;
     }
     config_free_account_list(accounts, count);

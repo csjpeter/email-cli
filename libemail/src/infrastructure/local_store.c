@@ -1827,7 +1827,10 @@ void local_contacts_rebuild(void) {
             fprintf(f, "%s\t%s\t%d\n", arr[i].addr, arr[i].name, arr[i].freq);
         fclose(f);
     }
-    printf("Contacts rebuilt: %d entries written to %s\n", cb.count, path);
+    /* Infrastructure must not print to the user's screen — the TUI calls this
+     * while a full-screen dialog is on display.  Callers that want a message
+     * (e.g. email-sync --rebuild-contacts) print their own. */
+    logger_log(LOG_INFO, "contacts rebuilt: %d entries written to %s", cb.count, path);
     free(arr);
 }
 

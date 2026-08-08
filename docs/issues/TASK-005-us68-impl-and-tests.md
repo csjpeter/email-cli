@@ -1,5 +1,8 @@
 # TASK-005 — Implement US-68 and add functional tests
 
+**Status:** DONE  
+Implemented and covered by functional tests: US-68 (negated conditions).
+
 **Type:** Feature + Test  
 **Related US:** US-68  
 

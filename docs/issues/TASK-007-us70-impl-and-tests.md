@@ -1,5 +1,8 @@
 # TASK-007 — Implement US-70 and add functional tests
 
+**Status:** DONE  
+Implemented and covered by functional tests: US-70 (age condition).
+
 **Type:** Feature + Test  
 **Related US:** US-70  
 

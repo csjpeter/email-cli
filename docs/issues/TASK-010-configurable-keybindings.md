@@ -1,5 +1,9 @@
 # TASK-010 — Configurable Keyboard Shortcuts
 
+**Status:** OPEN  
+Not implemented — key bindings in `email_service.c` and `main_tui.c` are still
+hardcoded.  No work has started on the `[keybindings]` config section.
+
 ## Summary
 
 All interactive key bindings in `email_service.c` (list view, reader, folder browser)

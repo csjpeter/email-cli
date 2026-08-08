@@ -1,5 +1,10 @@
 # BUG-001 — `isn't` match type silently converts to positive exact match
 
+**Status:** FIXED  
+Fixed in `src/main_import_rules.c`: the match type is compared with `strcmp`, so
+`isn't` / `doesn't contain` convert to negated conditions instead of silently
+becoming positive matches.  Covered by functional test 38.12.
+
 **Severity:** Medium  
 **Component:** `src/main_import_rules.c`  
 **Related US:** US-68, US-74  

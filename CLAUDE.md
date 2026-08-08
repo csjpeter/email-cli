@@ -5,37 +5,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 
 ```bash
-./manage.sh build      # Release build → bin/email-cli
+./manage.sh build      # Release build → bin/{email-cli,email-cli-ro,email-tui,email-sync,email-import-rules}
 ./manage.sh debug      # Debug build with Address Sanitizer (ASAN)
 ./manage.sh test       # Unit tests with ASAN
 ./manage.sh valgrind   # Unit tests with Valgrind
 ./manage.sh coverage   # GCOV/LCOV coverage report (>90% goal for core/infra)
+                       # also runs the functional suite and the PTY tests
 ./manage.sh clean      # Remove build artifacts
 ./manage.sh integration # Integration test against real Dovecot IMAP (Docker required)
+./manage.sh integration-local # APPEND integration test against a local Dovecot (no Docker)
 ./manage.sh imap-down  # Stop integration container (volume preserved)
 ./manage.sh imap-clean # Remove integration container and volume
 ./manage.sh deps       # Install system dependencies (Ubuntu 24.04 / Rocky 9)
 ./manage.sh run        # Release build + launch email-cli
+./manage.sh install    # Release build + install binaries into ~/.local/bin
+./manage.sh uninstall  # Remove installed binaries from ~/.local/bin
+./manage.sh package [deb|rpm|all]  # Build CPack distribution package(s)
 ./manage.sh clean-logs # Purge application log files
 ./manage.sh help       # Show available commands
 ```
 
 There is no Makefile — `manage.sh` calls CMake directly. There is no mechanism to run a single test in isolation; all unit tests run together via `build/tests/unit/test-runner`.
 
+The functional suite has no dedicated `manage.sh` target; run it directly with
+`./tests/functional/run_functional.sh` after a build (it drives the mock IMAP /
+Gmail servers itself).
+
 ## Architecture
 
 The project follows a strict layered CLEAN architecture with zero circular dependencies:
 
 ```
-Application    →  src/main.c, main_ro.c, main_sync.c, main_tui.c
+Application    →  src/main.c, main_ro.c, main_sync.c, main_tui.c, main_import_rules.c
 Domain         →  libemail/src/domain/email_service.c
 Infrastructure →  libemail/src/infrastructure/{config_store,local_store,imap_client,setup_wizard,
-                                                  gmail_auth,gmail_client,gmail_sync,mail_client}.c
+                                                  gmail_auth,gmail_client,gmail_sync,mail_client,
+                                                  mail_rules,when_expr}.c
 Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_parser,html_render,
                                      imap_util,input_line,path_complete,json_util}.c + raii.h
-Platform       →  libemail/src/platform/{terminal,path,process}.h + html_medium.h
-                    libemail/src/platform/posix/{terminal,path,process,html_medium}.c    (Linux/macOS/Android)
-                    libemail/src/platform/windows/{terminal,path,process,html_medium}.c  (MinGW-w64)
+Platform       →  libemail/src/platform/{terminal,path,process,credential_key}.h + html_medium.h
+                    libemail/src/platform/posix/{terminal,path,process,credential_key,html_medium}.c    (Linux/macOS/Android)
+                    libemail/src/platform/windows/{terminal,path,process,credential_key,html_medium}.c  (MinGW-w64)
 Write library  →  libwrite/src/{smtp_adapter,compose_service}.c
 ```
 
@@ -124,13 +134,13 @@ canonical RAII mechanism for this project.  MSVC is explicitly not a target.
 
 ## Platform Abstraction
 
-Platform-specific behaviour is isolated in `src/platform/`.  The layer exposes
-a thin C header with a single canonical interface; each platform provides its
-own implementation file.  CMake selects the right source file at configure
+Platform-specific behaviour is isolated in `libemail/src/platform/`.  The layer
+exposes a thin C header with a single canonical interface; each platform provides
+its own implementation file.  CMake selects the right source file at configure
 time — **no `#ifdef` guards in shared code**.
 
 ```
-src/platform/
+libemail/src/platform/
   terminal.h          ← canonical interface (get_cols, set_raw, restore, …)
   posix/terminal.c    ← termios + ioctl  (Linux, macOS, Android)
   windows/terminal.c  ← GetConsoleMode + GetConsoleScreenBufferInfo
@@ -143,25 +153,35 @@ src/platform/
   posix/process.c     ← fork + exec + waitpid
   windows/process.c   ← CreateProcess
 
+  credential_key.h    ← per-account key derivation for credential obfuscation
+  posix/credential_key.c   ← ~/.ssh private key, else machine-id
+  windows/credential_key.c ← %USERPROFILE%\.ssh key, else registry MachineGuid
+
   html_medium.h       ← HTML rendering backend (image handling)
   posix/html_medium.c ← open_memstream-based
   windows/html_medium.c ← tmpfile-based
 ```
 
-CMakeLists.txt pattern:
+CMakeLists.txt pattern (in `libemail/CMakeLists.txt`):
 
 ```cmake
 if(WIN32)
-    target_sources(email-cli PRIVATE src/platform/windows/terminal.c
-                                     src/platform/windows/path.c
-                                     src/platform/windows/process.c
-                                     src/platform/windows/html_medium.c)
+    set(LIBEMAIL_PLATFORM_SOURCES
+        src/platform/windows/terminal.c
+        src/platform/windows/path.c
+        src/platform/windows/html_medium.c
+        src/platform/windows/process.c
+        src/platform/windows/credential_key.c)
 else()
-    target_sources(email-cli PRIVATE src/platform/posix/terminal.c
-                                     src/platform/posix/path.c
-                                     src/platform/posix/process.c
-                                     src/platform/posix/html_medium.c)
+    set(LIBEMAIL_PLATFORM_SOURCES
+        src/platform/posix/terminal.c
+        src/platform/posix/path.c
+        src/platform/posix/html_medium.c
+        src/platform/posix/process.c
+        src/platform/posix/credential_key.c)
 endif()
+
+add_library(libemail STATIC ... ${LIBEMAIL_PLATFORM_SOURCES})
 ```
 
 **Allowed `#ifdef` use:** only inside a platform implementation file itself
@@ -176,6 +196,8 @@ docs/
   spec/                   ← behavioural specification (commands, local-store, etc.)
   dev/                    ← developer guides (testing, logging)
   adr/                    ← Architecture Decision Records (CLEAN arch, RAII, test framework)
+  userstories/            ← numbered user stories (US-1 …), one file each
+  issues/                 ← open work items: BUG-nnn (defects), TASK-nnn (tasks)
 libs/
   libptytest/             ← PTY-based terminal test library (self-contained)
 ```
@@ -185,7 +207,7 @@ libs/
 - Use direct Grep/Read/Edit tools for targeted changes. Use Agent for genuinely parallel, independent work.
 - Avoid reading entire large files when only a section is needed — use offset/limit.
 - Prefer direct edits over exploratory agents when the change location is known.
-
-## Project Memory
-
-Current project status, architectural decisions, and user preferences are tracked in `.claude/memory/`. Read these files at the start of each session for context on what has been done and what comes next.
+- Do **not** keep a persistent project-memory store (e.g. `.claude/memory/`).
+  The authoritative project state lives in the repository itself: `docs/spec/`
+  for behaviour, `docs/adr/` for decisions, `docs/issues/` for open work, and
+  the git history for what has been done.

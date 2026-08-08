@@ -1,5 +1,8 @@
 # TASK-003 — Implement US-66 and add functional tests
 
+**Status:** DONE  
+Implemented and covered by functional tests: US-66 (flag actions: read/unread/starred/junk/delete).
+
 **Type:** Feature + Test  
 **Related US:** US-66  
 

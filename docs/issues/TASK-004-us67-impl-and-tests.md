@@ -1,5 +1,8 @@
 # TASK-004 — Implement US-67 and add functional tests
 
+**Status:** DONE  
+Implemented and covered by functional tests: US-67 (Label action).
+
 **Type:** Feature + Test  
 **Related US:** US-67  
 

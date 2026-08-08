@@ -22,7 +22,7 @@ See the project [README](../README.md) for installation, configuration, interact
 
 ## User Stories
 
-- [User stories directory](userstories/) — 32 user stories covering all features
+- [User stories directory](userstories/) — 85 user stories covering all features
 - Gmail-specific: [US-27](userstories/27-gmail-account-setup.md), [US-28](userstories/28-gmail-label-navigation.md), [US-29](userstories/29-gmail-message-operations.md), [US-30](userstories/30-gmail-label-picker.md), [US-31](userstories/31-gmail-sync.md), [US-32](userstories/32-gmail-compose-send.md)
 
 ## Developer Guides
@@ -37,3 +37,8 @@ See the project [README](../README.md) for installation, configuration, interact
 - [ADR-0002: RAII Memory Safety](adr/0002-raii-memory-safety.md)
 - [ADR-0003: Custom Test Framework](adr/0003-custom-test-framework.md)
 - [ADR-0004: Binary Split](adr/0004-binary-split-ro-tui-sync.md) — trust boundaries for email-cli-ro / email-tui / email-sync
+
+## Issues
+
+- [Issues directory](issues/) — `BUG-nnn` defect reports and `TASK-nnn` work items.
+  Each file carries a `**Status:**` line (`OPEN`, `DONE`, or `FIXED`).

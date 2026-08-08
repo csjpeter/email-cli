@@ -1,5 +1,10 @@
 # BUG-002 — IMAP Modified UTF-7 Folder Names Displayed Raw in Rules Detail View
 
+**Status:** FIXED  
+Fixed in `libemail/src/infrastructure/mail_rules.c`: `then-move-folder` is decoded
+with `imap_utf7_decode()` on load, so the rules views show the UTF-8 folder name.
+Covered by functional Phase 75.
+
 ## Summary
 
 Folder names that contain non-ASCII characters (e.g. `és pénzügy`) are stored in

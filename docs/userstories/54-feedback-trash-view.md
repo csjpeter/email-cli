@@ -13,7 +13,7 @@
 | 1 | The Trash view reserves the second-to-last row as the feedback line. |
 | 2 | After pressing **u** (restore to Inbox): `Restored to Inbox`. Green strikethrough on row. |
 | 3 | After the label picker (**t**) adds a real label (implicit untrash): `<label> added — restored from Trash`. Green strikethrough. |
-| 4 | After **D** (re-trash a message already in trash, idempotent): `Already in Trash — no change`. No row change. |
+| 4 | After **D** on a message already in Trash: the message is permanently deleted and the feedback shows `Permanently deleted`. The row keeps its red `D` marker until the next refresh. |
 | 5 | After **f**: `Starred` or `Unstarred`. |
 | 6 | The feedback line is empty on initial load and after **R** / ESC. |
 | 7 | When the Trash folder is empty the feedback line is also empty. |

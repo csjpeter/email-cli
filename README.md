@@ -7,9 +7,9 @@
 # email-cli
 
 A terminal-based email client suite written in C, supporting both standard **IMAP** and the
-native **Gmail REST API** (OAuth2). Offers four binaries for different use cases: a
+native **Gmail REST API** (OAuth2). Offers five binaries for different use cases: a
 read-only batch tool for scripting and AI agents, a full read-write CLI, a full-featured
-interactive TUI, and a background sync daemon.
+interactive TUI, a background sync daemon, and a Thunderbird rule importer.
 
 ---
 
@@ -38,8 +38,9 @@ interactive TUI, and a background sync daemon.
 | `email-cli-ro` | Batch | No | Read-only CLI; safe for AI agents and automation |
 | `email-tui` | Interactive + subcommands | Yes | Full TUI navigator; also `compose`, `reply`, `send` subcommands |
 | `email-sync` | Batch | Sync only | Background sync daemon / cron helper |
+| `email-import-rules` | Batch | Local only | One-shot import of Thunderbird message filters into `rules.ini` |
 
-All four binaries share the same configuration and local message cache.
+All five binaries share the same configuration and local message cache.
 
 **`email-cli-ro`** is strictly read-only: it only issues `FETCH` (with `BODY.PEEK`) and
 `SEARCH` IMAP commands — never sends, moves, deletes, or modifies flags on the server.
@@ -76,6 +77,7 @@ All four binaries share the same configuration and local message cache.
 ```bash
 ./manage.sh deps    # Install system dependencies (Ubuntu 24.04 / Rocky 9)
 ./manage.sh build   # Build → bin/email-cli  bin/email-tui  bin/email-cli-ro  bin/email-sync
+                    #         bin/email-import-rules
 ```
 
 Run:

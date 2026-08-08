@@ -1,5 +1,13 @@
 # TASK-001 — Phase 38: Add missing warn tests for niche TB elements
 
+**Status:** DONE  
+Phase 38 now covers every still-unsupported element: condition fields
+(`to or cc`, `size`, `has attachment`, `date`), an unsupported match type on a
+supported field (`is in ab`), and the `Stop filter evaluation` action (checks
+38.23–38.30).  The elements this ticket originally expected to warn about
+(`isn't`, `starred`, `junk`, `Delete`) are supported since US-66/US-68 and are
+asserted NOT to warn.
+
 **Type:** Test  
 **Related US:** US-74, BUG-001  
 

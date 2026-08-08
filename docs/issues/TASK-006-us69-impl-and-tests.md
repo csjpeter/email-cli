@@ -1,5 +1,8 @@
 # TASK-006 — Implement US-69 and add functional tests
 
+**Status:** DONE  
+Implemented and covered by functional tests: US-69 (body condition).
+
 **Type:** Feature + Test  
 **Related US:** US-69  
 

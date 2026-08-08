@@ -1,5 +1,8 @@
 # TASK-002 — Implement US-65 and add functional tests
 
+**Status:** DONE  
+Implemented and covered by functional tests: US-65 (begins with / ends with match types).
+
 **Type:** Feature + Test  
 **Related US:** US-65  
 

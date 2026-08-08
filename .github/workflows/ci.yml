@@ -21,3 +21,12 @@ jobs:
 
       - name: Unit tests with ASAN
         run: ./manage.sh test
+
+      # The functional and PTY suites used to run only inside `coverage`, where
+      # their exit status was discarded with `|| true` — regressions in them
+      # stayed invisible.  Run them here so a failure breaks the build.
+      - name: Functional tests
+        run: ./manage.sh functional
+
+      - name: PTY tests
+        run: ./manage.sh pty

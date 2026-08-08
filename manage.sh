@@ -22,6 +22,8 @@ show_help() {
     echo "  debug          Build the project in Debug mode (with ASAN)"
     echo "  run            Build and run the application"
     echo "  test           Build and run unit tests (with ASAN)"
+    echo "  functional     Build and run the functional test suite"
+    echo "  pty            Build and run all PTY (terminal) test suites"
     echo "  valgrind       Build and run unit tests with Valgrind"
     echo "  coverage       Run tests and generate coverage report"
     echo "  integration    Run integration test against Dovecot IMAP container"
@@ -158,6 +160,50 @@ case "$1" in
         build_debug
         build_test_runner
         (cd "$BUILD_DIR" && ./tests/unit/test-runner)
+        ;;
+    functional)
+        echo "Running functional tests..."
+        build_release
+        ./tests/functional/run_functional.sh
+        ;;
+    pty)
+        echo "Running PTY tests..."
+        build_release
+        cmake --build "$BUILD_DIR" \
+            --target test-pty-views test-pty-gmail-tui test-pty-mail-rules \
+                     test-pty-compose-dialog test-pty-attachment \
+                     test-pty-send-local test-pty-compose test-pty-input-line \
+                     mock-imap-server mock-gmail-server mock-smtp-server \
+                     input-line-harness -- -j"$JOBS"
+        ABS_BUILD="$(realpath "$BUILD_DIR")"
+        ABS_BIN="$(realpath "$BIN_DIR")"
+        pty_rc=0
+        run_pty() {  # run_pty <label> <binary> [args…]
+            local label="$1"; shift
+            echo "--- PTY: $label ---"
+            # Each suite binds fixed mock-server ports; run them sequentially
+            # and let the ports settle in between.
+            if ! (cd "$ABS_BUILD" && "$@"); then
+                echo "  [FAILED] $label"
+                pty_rc=1
+            fi
+            sleep 2
+        }
+        run_pty views          ./tests/pty/test-pty-views "$ABS_BIN/email-cli" \
+                               ./tests/pty/mock-imap-server "$ABS_BIN/email-cli-ro" \
+                               "$ABS_BIN/email-sync" "$ABS_BIN/email-tui"
+        run_pty gmail-tui      ./tests/pty/test-pty-gmail-tui "$ABS_BIN/email-tui" \
+                               "$ABS_BIN/email-sync" ./tests/pty/mock-gmail-server
+        run_pty mail-rules     ./tests/pty/test-pty-mail-rules "$ABS_BIN/email-sync" \
+                               "$ABS_BIN/email-tui" ./tests/pty/mock-imap-server
+        run_pty compose-dialog ./tests/pty/test-pty-compose-dialog "$ABS_BIN/email-tui" \
+                               ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
+        run_pty attachment     ./tests/pty/test-pty-attachment "$ABS_BIN/email-tui" \
+                               ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
+        run_pty send-local     ./tests/pty/test-pty-send-local "$ABS_BIN/email-tui" \
+                               "$ABS_BIN/email-sync" ./tests/pty/mock-imap-server \
+                               ./tests/pty/mock-smtp-server
+        exit $pty_rc
         ;;
     valgrind)
         echo "Running unit tests with Valgrind..."

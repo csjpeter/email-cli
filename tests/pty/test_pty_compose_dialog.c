@@ -1808,6 +1808,12 @@ int main(int argc, char *argv[]) {
     if (getenv("HOME"))
         snprintf(g_old_home, sizeof(g_old_home), "%s", getenv("HOME"));
     setenv("HOME", g_test_home, 1);
+    /* XDG_*_HOME wins over $HOME in the binaries; if the caller's environment
+     * sets them (GitHub runners do) the test home is bypassed and the setup
+     * wizard opens instead of the configured account. */
+    unsetenv("XDG_CONFIG_HOME");
+    unsetenv("XDG_DATA_HOME");
+    unsetenv("XDG_CACHE_HOME");
 
     mkdirs();
     write_config();

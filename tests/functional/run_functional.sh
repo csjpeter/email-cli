@@ -7,6 +7,14 @@ set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# Every phase drives the binaries through a throwaway $HOME.  If the caller's
+# environment sets XDG_*_HOME (GitHub runners do), those win over $HOME and the
+# binaries look for the config outside the test home — they then find nothing
+# and drop into the interactive setup wizard, which hangs or aborts.  Clear
+# them once here; the helpers that need a specific XDG_DATA_HOME still export
+# it inside their own subshell.
+unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
 BIN_DIR="$PROJECT_ROOT/bin"
 MOCK_SERVER_SRC="$PROJECT_ROOT/tests/functional/mock_imap_server.c"
 MOCK_SERVER_BIN="$PROJECT_ROOT/build/tests/functional/mock_imap_server"

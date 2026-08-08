@@ -4448,6 +4448,9 @@ char *email_service_list_labels_interactive(const Config *cfg,
 
         if (cursor >= lbl_count) cursor = lbl_count - 1;
         if (cursor < 0) cursor = 0;
+        /* Never land on a section header: header rows are drawn without the
+         * selection highlight, so a cursor parked there would be invisible. */
+        while (cursor < lbl_count - 1 && lbl_hdr[cursor]) cursor++;
         if (cursor < wstart) wstart = cursor;
         /* Advance wstart until cursor is within the visible window, counting
          * separator rows so the window never overflows the terminal. */
@@ -4546,19 +4549,21 @@ char *email_service_list_labels_interactive(const Config *cfg,
             cursor = lbl_count > 0 ? lbl_count - 1 : 0;
             while (cursor > 0 && lbl_hdr[cursor]) cursor--;
             break;
-        case TERM_KEY_NEXT_LINE:
-            if (cursor < lbl_count - 1) {
-                cursor++;
-                while (cursor < lbl_count - 1 && lbl_hdr[cursor]) cursor++;
-                if (lbl_hdr[cursor]) cursor--;
-            }
+        case TERM_KEY_NEXT_LINE: {
+            /* Move to the next selectable row; stay put if there is none. */
+            int p = cursor + 1;
+            while (p < lbl_count && lbl_hdr[p]) p++;
+            if (p < lbl_count) cursor = p;
             break;
-        case TERM_KEY_PREV_LINE:
-            if (cursor > 0) {
-                cursor--;
-                while (cursor > 0 && lbl_hdr[cursor]) cursor--;
-            }
+        }
+        case TERM_KEY_PREV_LINE: {
+            /* Move to the previous selectable row; stay put if there is none —
+             * without this the cursor lands on the leading section header. */
+            int p = cursor - 1;
+            while (p >= 0 && lbl_hdr[p]) p--;
+            if (p >= 0) cursor = p;
             break;
+        }
         case TERM_KEY_NEXT_PAGE:
             cursor += avail;
             if (cursor >= lbl_count) cursor = lbl_count - 1;

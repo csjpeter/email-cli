@@ -652,6 +652,47 @@ static void test_trash_statusbar_restore_hint(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  TEST: label browser — Up on the first selectable row is a no-op
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Row 0 of the label browser is the "Tags / Flags" section header, and row 1
+ * is the first selectable entry ("Unread").  Header rows are drawn without the
+ * selection highlight, so a cursor parked on one is invisible to the user.
+ *
+ * Holding Up on "Unread" (key auto-repeat) must therefore leave the cursor on
+ * "Unread" — the status bar keeps reporting position 2 — instead of walking
+ * onto the header at position 1.
+ */
+static void test_labels_up_at_top_is_noop(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "lbl-up: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "lbl-up: pty_run");
+
+    ASSERT(pty_wait_for(s, "Email Accounts", WAIT_MS) == 0, "lbl-up: accounts screen");
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT(pty_wait_for(s, "Labels", WAIT_MS) == 0, "lbl-up: label browser");
+    pty_settle(s, SETTLE_MS);
+
+    /* Go to the first selectable row, then keep pressing Up (auto-repeat). */
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_settle(s, SETTLE_MS / 2);
+    for (int i = 0; i < 8; i++) pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+
+    /* Status bar shows a 1-based cursor position: "[2/N]" = first selectable
+     * row.  "[1/N]" would mean the cursor sits on the section header. */
+    ASSERT_SCREEN_CONTAINS(s, "[2/");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "[1/");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  TEST: 'D' key → row has red marker 'D' (immediate feedback)
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -1839,6 +1880,7 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_trash_statusbar_restore_hint);
+    RUN_TEST(test_labels_up_at_top_is_noop);
 
     printf("--- Fresh sync (test 12) ---\n");
     if (reset_and_sync() != 0) {

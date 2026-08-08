@@ -51,11 +51,15 @@ jobs:
           python3 - "$FUNC_PCT" "$FUNC_HIT" "$FUNC_TOTAL" <<'PYEOF'
           import sys, pathlib
           pct, hit, total = float(sys.argv[1])/100, sys.argv[2], sys.argv[3]
+          # genbadge reads every standard Cobertura root attribute and calls
+          # float() on them unconditionally — a missing one (complexity) raises
+          # TypeError, so emit the full set.
           xml = (
               '<?xml version="1.0" ?>\n'
               f'<coverage line-rate="{pct:.4f}" branch-rate="{pct:.4f}"'
               f' lines-covered="{hit}" lines-valid="{total}"'
-              ' version="" timestamp=""><packages/></coverage>\n'
+              ' branches-covered="0" branches-valid="0" complexity="0"'
+              ' version="" timestamp="0"><packages/></coverage>\n'
           )
           pathlib.Path('build/coverage-functional-func.xml').write_text(xml)
           PYEOF

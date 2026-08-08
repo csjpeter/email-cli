@@ -463,24 +463,35 @@ static void handle_history(int fd) {
     }
 
     if (g_extra_count > 0) {
-        /* Return messagesAdded for messages g_count+1 .. g_count+g_extra_count */
+        /* Return messagesAdded for messages g_count+1 .. g_count+g_extra_count.
+         *
+         * Shape must match the real Gmail API: the change records live in a
+         * top-level "history" array, and every messagesAdded entry wraps the
+         * message in a "message" object.
+         *
+         *   {"history":[{"id":"<hid>","messagesAdded":[
+         *       {"message":{"id":"..","threadId":"..","labelIds":[..]}}]}],
+         *    "historyId":"<hid>"}
+         */
         int new_hid = atoi(g_histid) + 1;
-        size_t cap = (size_t)g_extra_count * 64 + 256;
+        size_t cap = (size_t)g_extra_count * 160 + 256;
         char *buf = malloc(cap);
         if (!buf) { send_404(fd); return; }
 
         int off = 0;
         off += snprintf(buf + off, cap - (size_t)off,
-                        "{\"historyId\":\"%d\",\"messagesAdded\":[", new_hid);
+                        "{\"history\":[{\"id\":\"%d\",\"messagesAdded\":[", new_hid);
         for (int i = 0; i < g_extra_count; i++) {
             int n = g_count + 1 + i;
             char id[17];
             msg_id(n, id);
             if (i > 0) off += snprintf(buf + off, cap - (size_t)off, ",");
             off += snprintf(buf + off, cap - (size_t)off,
-                            "{\"id\":\"%s\",\"threadId\":\"%s\"}", id, id);
+                            "{\"message\":{\"id\":\"%s\",\"threadId\":\"%s\","
+                            "\"labelIds\":[\"INBOX\",\"UNREAD\"]}}", id, id);
         }
-        off += snprintf(buf + off, cap - (size_t)off, "]}");
+        off += snprintf(buf + off, cap - (size_t)off,
+                        "]}],\"historyId\":\"%d\"}", new_hid);
         (void)off;
         send_json(fd, buf);
         free(buf);

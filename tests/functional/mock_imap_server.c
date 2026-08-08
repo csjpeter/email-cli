@@ -55,6 +55,35 @@ static int         g_changed_count    = 0;
  * Strips the trailing CR and LF.  Returns the number of characters placed
  * in buf (excluding NUL), or -1 on EOF/error.
  */
+
+/* Session-local \Flagged state: UIDs the client has STOREd \Flagged on.
+ * Without this a stateless mock reports "no flagged messages" on the next
+ * SEARCH FLAGGED and the client dutifully clears the flag it just pushed. */
+#define MOCK_MAX_FLAGGED 64
+static int g_flagged_uids[MOCK_MAX_FLAGGED];
+static int g_flagged_count = 0;
+
+static int mock_is_flagged(int uid) {
+    for (int i = 0; i < g_flagged_count; i++)
+        if (g_flagged_uids[i] == uid) return 1;
+    return 0;
+}
+
+static void mock_set_flagged(int uid, int on) {
+    if (on) {
+        if (mock_is_flagged(uid) || g_flagged_count >= MOCK_MAX_FLAGGED) return;
+        g_flagged_uids[g_flagged_count++] = uid;
+        return;
+    }
+    for (int i = 0; i < g_flagged_count; i++) {
+        if (g_flagged_uids[i] != uid) continue;
+        g_flagged_uids[i] = g_flagged_uids[--g_flagged_count];
+        return;
+    }
+}
+
+static int extract_uid(const char *buffer);
+
 static int readline_crlf_ssl(SSL *ssl, char *buf, int len) {
     int n = 0;
     char c;
@@ -338,9 +367,10 @@ static char *build_legacy_content(int is_header, const char **section_out) {
                  "<!-- a -- b -->"
                  "<head><style>body { color: #222; font-size: 14px; }</style></head>"
                  "<body>"
-                 /* h2 kept recognisable so PTY/functional tests can match
-                  * "Hello from Mock Server" and "Hello.*Welcome" patterns. */
-                 "<h2>Hello, Welcome from Mock Server!</h2>"
+                 /* h2 kept recognisable so PTY/functional tests can match both
+                  * the literal "Hello from Mock Server" and the "Hello.*Welcome"
+                  * regex.  Keep both substrings intact when editing this line. */
+                 "<h2>Hello from Mock Server. Welcome!</h2>"
                  "<p style=\"color: red; font-weight: bold\">Bold &lt;styled&gt; &bull; <em>em</em> text</p>"
                  "<p style=\"color: #333; font-style: italic\">Dark italic &auml; text 3 <3 html</p>"
                  "<div style=\"text-decoration: underline; background-color: yellow\">"
@@ -541,7 +571,19 @@ static void handle_client(SSL *ssl) {
                 SSL_write(ssl, sr_buf, off);
                 free(sr_buf);
             } else {
-                const char *sr = "* SEARCH 1\r\n";
+                /* Single-message mode.  The one test message carries only
+                 * \Unseen, so flag searches must come back empty — otherwise
+                 * every message looks flagged/done/answered to the client. */
+                int is_flagged  = (strstr(buffer, "FLAGGED")  != NULL);
+                int is_keyword  = (strstr(buffer, "KEYWORD")  != NULL);
+                int is_answered = (strstr(buffer, "ANSWERED") != NULL);
+                const char *sr;
+                if (is_flagged)
+                    sr = mock_is_flagged(1) ? "* SEARCH 1\r\n" : "* SEARCH\r\n";
+                else if (is_keyword || is_answered)
+                    sr = "* SEARCH\r\n";
+                else
+                    sr = "* SEARCH 1\r\n";
                 SSL_write(ssl, sr, (int)strlen(sr));
             }
             char ok[64];
@@ -580,7 +622,13 @@ static void handle_client(SSL *ssl) {
             snprintf(ok, sizeof(ok), "%s OK FETCH completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "STORE")) {
-            /* Flag update (e.g. restore \Seen) */
+            /* Flag update (e.g. restore \Seen).  Track \Flagged so a later
+             * SEARCH FLAGGED reflects what the client pushed. */
+            if (strstr(buffer, "\\Flagged")) {
+                int uid = extract_uid(buffer);
+                if (uid < 1) uid = 1;
+                mock_set_flagged(uid, strstr(buffer, "-FLAGS") == NULL);
+            }
             const char *resp = "* 1 FETCH (FLAGS ())\r\n";
             SSL_write(ssl, resp, (int)strlen(resp));
             char ok[64];

@@ -284,8 +284,10 @@ static void test_successful_send_saves_locally(void) {
     pty_send_key(s, PTY_KEY_ENTER); /* open editor */
 
     /* Wait for send confirmation prompt, confirm, then check result */
-    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
-    pty_send_str(s, "y");
+    /* US-85: the post-compose review screen replaced the old "Send? [y/n]"
+     * prompt; 's' sends from there. */
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
+    pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Message sent.", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
@@ -321,8 +323,10 @@ static void test_failed_send_saves_to_drafts(void) {
     pty_send_key(s, PTY_KEY_ENTER);
 
     /* Wait for send confirmation, confirm, then check failure path */
-    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
-    pty_send_str(s, "y");
+    /* US-85: the post-compose review screen replaced the old "Send? [y/n]"
+     * prompt; 's' sends from there. */
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
+    pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Saved to Drafts", WAIT_MS);
 
@@ -353,8 +357,10 @@ static void test_sync_uploads_pending_and_clears_queue(void) {
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_str(s, "TC-SL-03 Sync Test");
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
-    pty_send_str(s, "y");
+    /* US-85: the post-compose review screen replaced the old "Send? [y/n]"
+     * prompt; 's' sends from there. */
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
+    pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
     pty_close(s);
 
@@ -391,8 +397,10 @@ static void test_pending_queue_survives_restart(void) {
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_str(s, "TC-SL-04 Persist Test");
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
-    pty_send_str(s, "y");
+    /* US-85: the post-compose review screen replaced the old "Send? [y/n]"
+     * prompt; 's' sends from there. */
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
+    pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
     pty_close(s);
 

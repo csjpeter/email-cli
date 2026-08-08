@@ -266,7 +266,9 @@ static void test_batch_list_empty(void) {
 
 static void test_batch_show(void) {
     const char *a[] = {"show", "1", "--batch", NULL};
-    PtySession *s = cli_run(a);
+    /* The mock message renders to ~30 lines; on a 24-row terminal the header
+     * block would scroll off before the assertions run. */
+    PtySession *s = cli_open_size(COLS, 60, a);
     ASSERT(s != NULL, "batch show: opens");
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -452,6 +454,8 @@ static void test_delete_folder_missing_arg(void) {
 
 /* Forward declaration — defined later after the email-tui helper section */
 static PtySession *tui_open_to_list(void);
+static PtySession *tui_open_to_list_size(int cols, int rows);
+static void folders_goto_inbox(PtySession *s);
 
 /* ══════════════════════════════════════════════════════════════════════
  *  INTERACTIVE LIST VIEW
@@ -630,7 +634,11 @@ static void test_interactive_show_separator(void) {
 
 static void test_interactive_show_statusbar(void) {
     restart_mock();
-    PtySession *s = tui_open_to_list();
+    /* The reader status bar lists every shortcut, including the two attachment
+     * entries the mock message provides (a=save, A=save-all).  That line is
+     * longer than 100 columns and would be truncated before "/=search", so use
+     * a wider terminal here. */
+    PtySession *s = tui_open_to_list_size(160, ROWS);
     ASSERT(s != NULL, "show statusbar: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -733,9 +741,11 @@ static void test_interactive_show_uid_in_header(void) {
  * ══════════════════════════════════════════════════════════════════════
  */
 static void test_interactive_show_source_toggle(void) {
-    /* US-RD-02 */
+    /* US-RD-02.  The v=source / v=rendered hint sits near the end of the
+     * reader status bar, which is wider than 100 columns for a message with
+     * attachments — use a wide terminal so it is not truncated away. */
     restart_mock();
-    PtySession *s = tui_open_to_list();
+    PtySession *s = tui_open_to_list_size(160, ROWS);
     ASSERT(s != NULL, "show source toggle: opens");
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -896,14 +906,18 @@ static void test_interactive_show_arrow_scroll(void) {
      * there are 3 pages.  PgDn jumps to page 2; ↑ steps back to page 1;
      * ↓ steps forward to page 2 again — confirming single-line granularity. */
     restart_mock();
-    /* Open email-tui in a 10-row terminal and navigate to message list */
+    /* Open email-tui in a short terminal and navigate to the message list.
+     * 16 rows: the reader header block (From/Subject/Date/UID/File/DMARC/Attach
+     * plus separator) needs 8 of them, and the rest still forces multi-page
+     * scrolling — which is what this test exercises. */
     const char *tui_args[] = {g_tui_bin, NULL};
-    PtySession *s = pty_open(COLS, 10);
+    PtySession *s = pty_open(COLS, 16);
     ASSERT(s != NULL, "show arrow scroll: opens");
     if (pty_run(s, tui_args) != 0) { pty_close(s); return; }
     if (pty_wait_for(s, "Email Account", WAIT_MS) != 0) { pty_close(s); return; }
     pty_send_key(s, PTY_KEY_ENTER);
     if (pty_wait_for(s, "Folders", WAIT_MS) != 0) { pty_close(s); return; }
+    folders_goto_inbox(s);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -1134,7 +1148,10 @@ static void test_interactive_empty_folder(void) {
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    /* Navigate to INBOX.Empty (tree: INBOX=0, Empty=1, Sent=2, Trash=3) */
+    /* Navigate to INBOX.Empty.  Folders are sorted byte-wise, so the mock's
+     * LIST reply yields: INBOX(0), INBOX.AT&T(1), INBOX.Empty(2), INBOX.Sent(3),
+     * INBOX.Trash(4), INBOX.Träger(5), INBOX.中(6), INBOX.😀(7). */
+    pty_send_key(s, PTY_KEY_DOWN);
     pty_send_key(s, PTY_KEY_DOWN);
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ENTER);
@@ -1166,7 +1183,8 @@ static void test_interactive_empty_folder_cron(void) {
     pty_send_key(s, PTY_KEY_BACK);              /* open folder browser */
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_DOWN);              /* move to INBOX.Empty */
+    pty_send_key(s, PTY_KEY_DOWN);              /* INBOX → INBOX.AT&T */
+    pty_send_key(s, PTY_KEY_DOWN);              /* → INBOX.Empty */
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ENTER);             /* open empty folder */
     ASSERT_WAIT_FOR(s, "0 of 0 message(s) in", WAIT_MS);
@@ -1822,10 +1840,12 @@ static void test_show_cache_hit(void) {
       ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
       pty_close(s); }
 
-    /* Show must work from cache even with no server */
+    /* Show must work from cache even with no server.
+     * 60 rows: the rendered mock message is longer than a 24-row screen and
+     * would scroll the header block away before the assertion runs. */
     stop_mock_server();
     { const char *a[] = {"show", "1", "--batch", NULL};
-      PtySession *s = cli_run(a);
+      PtySession *s = cli_open_size(COLS, 60, a);
       ASSERT(s != NULL, "show cache: show opens");
       ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
       pty_close(s); }
@@ -1886,9 +1906,9 @@ static void test_offline_show_not_cached(void) {
  * and return the PTY session sitting on the message list view.
  * Returns NULL if any step fails.
  */
-static PtySession *tui_open_to_list(void) {
+static PtySession *tui_open_to_list_size(int cols, int rows) {
     const char *args[] = {g_tui_bin, NULL};
-    PtySession *s = pty_open(COLS, ROWS);
+    PtySession *s = pty_open(cols, rows);
     if (!s) return NULL;
     if (pty_run(s, args) != 0) { pty_close(s); return NULL; }
     /* email-tui opens the accounts screen first; press Enter to open account */
@@ -1914,6 +1934,10 @@ static PtySession *tui_open_to_list(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     return s;
+}
+
+static PtySession *tui_open_to_list(void) {
+    return tui_open_to_list_size(COLS, ROWS);
 }
 
 static void test_tui_list_content(void) {
@@ -2325,9 +2349,12 @@ static void test_tui_accounts_help_panel(void) {
 }
 
 static void test_tui_list_help_panel(void) {
-    /* US-22 AC7: 'h' in message list shows help overlay */
+    /* US-22 AC7: 'h' in message list shows help overlay.
+     * The popup only prints the "Press any key to close" footer when every
+     * shortcut row fits; otherwise it becomes scrollable and shows the
+     * scroll hint instead.  Use a tall terminal so the full list fits. */
     restart_mock();
-    PtySession *s = tui_open_to_list();
+    PtySession *s = tui_open_to_list_size(COLS, 50);
     ASSERT(s != NULL, "list help: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -2517,11 +2544,20 @@ static void test_tui_list_compose_key(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "c");
     ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);  /* compose dialog title */
-    pty_send_key(s, PTY_KEY_ENTER);  /* To → Cc */
-    pty_send_key(s, PTY_KEY_ENTER);  /* Cc → Bcc */
-    pty_send_key(s, PTY_KEY_ENTER);  /* Bcc → Subject */
-    pty_send_key(s, PTY_KEY_ENTER);  /* Subject → submit with empty To */
-    ASSERT_WAIT_FOR(s, "Aborted", WAIT_MS);
+    /* Enter confirms the dialog from any field; with an empty To it only
+     * raises the inline guard, so fill To: first (Tab moves between fields). */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "To: is empty", WAIT_MS);
+    pty_send_str(s, "someone@example.com");
+    pty_send_key(s, PTY_KEY_ENTER);  /* confirm: no subject → y/n prompt */
+    ASSERT_WAIT_FOR(s, "Subject is empty", WAIT_MS);
+    pty_send_str(s, "y");
+    /* US-85: the editor runs, then the review screen appears; 'q' discards. */
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Cancelled. Draft discarded.", WAIT_MS);
     ASSERT_WAIT_FOR(s, "[Press any key to return to inbox]", WAIT_MS);
     pty_send_str(s, " ");   /* any key — return to list */
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
@@ -2554,7 +2590,12 @@ static void test_tui_list_reply_key(void) {
     pty_send_key(s, PTY_KEY_ENTER);  /* Cc → Bcc (To: pre-filled, starts at Cc) */
     pty_send_key(s, PTY_KEY_ENTER);  /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);  /* Subject → submit */
-    ASSERT_WAIT_FOR(s, "Aborted", WAIT_MS * 2);
+    /* US-85: the editor blanks To:, then the review screen appears; 'q' discards. */
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Cancelled. Draft discarded.", WAIT_MS);
     ASSERT_WAIT_FOR(s, "[Press any key to return to inbox]", WAIT_MS);
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
@@ -2942,6 +2983,18 @@ static void write_test_eml(const char *folder, const char *uid,
     fclose(fp);
 }
 
+/* Helper: move the folder-browser cursor onto INBOX, whatever the saved
+ * folder preference is.  email-tui pre-selects the __unread__ virtual label
+ * when no preference exists, so tests must not assume INBOX is under the
+ * cursor.  HOME lands on the first selectable row (Unread); six DOWN presses
+ * step over the remaining virtual rows and the "Folders" header (VPREFIX=8:
+ * one header + six virtual rows + one header). */
+static void folders_goto_inbox(PtySession *s) {
+    pty_send_key(s, PTY_KEY_HOME);
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, 200);
+}
+
 /* Helper: open email-tui and stop at the folder browser (before INBOX list).
  * Caller must call pty_close(s) and ESC/settle as needed. */
 static PtySession *tui_open_to_folders(void) {
@@ -3253,7 +3306,8 @@ static void test_unread_count_refreshes_after_mark(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "1");
 
-    /* Navigate to INBOX (default position) and open the message list */
+    /* Navigate to INBOX and open the message list */
+    folders_goto_inbox(s);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -3441,7 +3495,8 @@ static void test_status_junk_marker_shown(void) {
     ASSERT(s != NULL, "junk marker: opens folder browser");
     pty_settle(s, SETTLE_MS);
 
-    /* Open INBOX (default cursor position) */
+    /* Open INBOX (cursor may start on a virtual row) */
+    folders_goto_inbox(s);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -3480,6 +3535,8 @@ static void test_status_phishing_marker_shown(void) {
     ASSERT(s != NULL, "phishing marker: opens folder browser");
     pty_settle(s, SETTLE_MS);
 
+    /* Open INBOX (cursor may start on a virtual row) */
+    folders_goto_inbox(s);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -3516,6 +3573,8 @@ static void test_status_answered_marker_shown(void) {
     ASSERT(s != NULL, "answered marker: opens folder browser");
     pty_settle(s, SETTLE_MS);
 
+    /* Open INBOX (cursor may start on a virtual row) */
+    folders_goto_inbox(s);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -3553,6 +3612,8 @@ static void test_status_forwarded_marker_shown(void) {
     ASSERT(s != NULL, "forwarded marker: opens folder browser");
     pty_settle(s, SETTLE_MS);
 
+    /* Open INBOX (cursor may start on a virtual row) */
+    folders_goto_inbox(s);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);

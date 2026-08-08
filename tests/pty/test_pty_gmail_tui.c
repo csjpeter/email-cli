@@ -150,6 +150,25 @@ static int run_gmail_sync(void) {
 }
 
 /**
+ * Persist the per-account folder cursor in the shared UI prefs file.
+ *
+ * email-tui reads "folder_cursor_<account>" on startup and pre-selects that
+ * folder in the label browser; with no entry it defaults to the __unread__
+ * virtual label.
+ */
+static void write_folder_pref(const char *folder) {
+    char dir[400], path[450];
+    snprintf(dir, sizeof(dir), "%s/.local", g_test_home);              mkdir(dir, 0700);
+    snprintf(dir, sizeof(dir), "%s/.local/share", g_test_home);        mkdir(dir, 0700);
+    snprintf(dir, sizeof(dir), "%s/.local/share/email-cli", g_test_home); mkdir(dir, 0700);
+    snprintf(path, sizeof(path), "%s/ui.ini", dir);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp, "folder_cursor_%s=%s\n", GMAIL_TEST_EMAIL, folder);
+    fclose(fp);
+}
+
+/**
  * Reset account local data and re-populate from the mock server.
  *
  * Deletes the account's local store (labels/, headers/, history ID, etc.)
@@ -172,6 +191,11 @@ static int reset_and_sync(void) {
              "rm -f '%s/.local/share/email-cli/ui.ini'",
              g_test_home);
     int _rc2 = system(cmd2);  (void)_rc2;
+
+    /* Pin the folder cursor to INBOX.  Without a saved preference email-tui
+     * opens the __unread__ virtual label instead, and navigate_to_inbox()
+     * would land on a virtual view where label operations ('d') are no-ops. */
+    write_folder_pref("INBOX");
 
     return run_gmail_sync();
 }
@@ -1177,10 +1201,14 @@ static void test_label_picker_untrash_green_fg(void) {
  * ══════════════════════════════════════════════════════════════════════ */
 
 /**
- * In Trash view, pressing 'D' is a no-op: message is already in Trash.
- * No pending marker must appear and feedback shows "Already in Trash".
+ * In Trash view, pressing 'D' permanently deletes the message (US-83).
+ * The row gets the red pending marker and the feedback line reports
+ * "Permanently deleted".
+ *
+ * This replaced the earlier no-op ("Already in Trash") behaviour when
+ * D=trash was introduced for both IMAP and Gmail.
  */
-static void test_D_noop_in_trash_view(void) {
+static void test_D_permanent_delete_in_trash_view(void) {
     /* Session 1: trash a message */
     reset_and_sync();
     {
@@ -1195,30 +1223,32 @@ static void test_D_noop_in_trash_view(void) {
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
     }
-    /* Session 2: open Trash, press 'D' — must be no-op */
+    /* Session 2: open Trash, press 'D' — permanently deletes */
     {
         const char *args[] = { g_tui_bin, NULL };
         PtySession *s = pty_open(COLS, ROWS);
-        ASSERT(s != NULL, "D-noop: pty_open s2");
+        ASSERT(s != NULL, "D-perm: pty_open s2");
         if (!s) return;
-        ASSERT(pty_run(s, args) == 0, "D-noop: pty_run s2");
-        ASSERT(navigate_to_trash(s) == 0, "D-noop: navigate_to_trash");
+        ASSERT(pty_run(s, args) == 0, "D-perm: pty_run s2");
+        ASSERT(navigate_to_trash(s) == 0, "D-perm: navigate_to_trash");
         pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
         pty_settle(s, SETTLE_MS);
 
         int row = find_row(s, GMAIL_TOP_MSG);
-        ASSERT(row >= 0, "D-noop: " GMAIL_TOP_MSG " visible in Trash");
+        ASSERT(row >= 0, "D-perm: " GMAIL_TOP_MSG " visible in Trash");
 
         pty_send_str(s, "D");
         pty_settle(s, SETTLE_MS);
 
+        /* The row stays visible with a red 'D' marker until the next refresh,
+         * so the user can see what was deleted. */
         row = find_row(s, GMAIL_TOP_MSG);
-        ASSERT(row >= 0, "D-noop: row still present after D (no-op)");
+        ASSERT(row >= 0, "D-perm: row still present after D");
         if (row >= 0)
-            ASSERT(strcmp(pty_cell_text(s, row, 0), " ") == 0,
-                   "D-noop: no pending marker in Trash view after D");
-        ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Already in Trash"),
-               "D-noop: feedback shows 'Already in Trash'");
+            ASSERT(strcmp(pty_cell_text(s, row, 0), "D") == 0,
+                   "D-perm: 'D' pending marker in Trash view after D");
+        ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Permanently deleted"),
+               "D-perm: feedback shows 'Permanently deleted'");
 
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -1965,7 +1995,7 @@ int main(int argc, char *argv[]) {
         stop_gmail_mock();
         goto done;
     }
-    RUN_TEST(test_D_noop_in_trash_view);
+    RUN_TEST(test_D_permanent_delete_in_trash_view);
 
     printf("--- Fresh sync (test 21: D+D undo) ---\n");
     if (reset_and_sync() != 0) {

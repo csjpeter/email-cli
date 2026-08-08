@@ -445,7 +445,10 @@ static PtySession *compose_to_review(const char *to, const char *subject)
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_str(s, subject);
     pty_send_key(s, PTY_KEY_ENTER); /* confirm → editor → review */
-    if (pty_wait_for(s, "Review", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    /* Wait for the footer, which pcr_render() prints last — waiting for the
+     * title alone can return while the body/attachment lines are still being
+     * written. */
+    if (pty_wait_for(s, "[s] Send", WAIT_MS) != 0) { pty_close(s); return NULL; }
     return s;
 }
 
@@ -555,9 +558,10 @@ static void test_review_b_reopens_editor(void)
     PtySession *s = compose_to_review("alice@example.com", "Edit body test");
     ASSERT(s != NULL, "TC-PCR-09: review screen reached");
     pty_send_str(s, "b");
-    /* Fake editor appends another "Test body" line → 2 lines total */
-    ASSERT_WAIT_FOR(s, "Review", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "2");
+    /* Fake editor appends another "Test body" line → 2 lines total.
+     * Wait for the new count, not for "Review" — that string is still on
+     * screen from the previous render and would match immediately. */
+    ASSERT_WAIT_FOR(s, "2 lines", WAIT_MS);
     pty_send_str(s, "q");
     pty_send_str(s, "y");
     pty_close(s);
@@ -575,8 +579,7 @@ static void test_review_a_opens_attach_picker(void)
     ASSERT_SCREEN_CONTAINS(s, "Attach");
     pty_send_str(s, g_attach_file2);
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "Review", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "notes.txt");
+    ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
     pty_send_str(s, "q");
     pty_send_str(s, "y");
     pty_close(s);
@@ -593,8 +596,7 @@ static void test_review_d_removes_attachment(void)
     pty_settle(s, 200);
     pty_send_str(s, g_attach_file1);
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "Review", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "report.pdf");
+    ASSERT_WAIT_FOR(s, "report.pdf", WAIT_MS);
     /* Remove via [d] */
     pty_send_str(s, "d");
     pty_settle(s, 200);
@@ -631,6 +633,8 @@ static void test_review_q_y_cancels(void)
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard", WAIT_MS);
     pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "[Press any key to return to inbox]", WAIT_MS);
+    pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "message(s)", WAIT_MS);
     pty_close(s);
 }

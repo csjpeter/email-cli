@@ -107,6 +107,10 @@ static void write_rules(const char *content) {
 
 /** Wipe the entire local email-cli store (account data + UI prefs). */
 static void reset_all_state(void) {
+    /* pty_close() only SIGTERMs the child: a previous email-sync may still be
+     * flushing its manifest.  Wiping the store while that write is in flight
+     * lets stale flags reappear, so give it a moment to finish first. */
+    usleep(500000);
     char cmd[600];
     snprintf(cmd, sizeof(cmd),
              "rm -rf '/tmp/email-cli-rules-test-%d/.local/share/email-cli'",
@@ -240,6 +244,7 @@ static void test_rule_no_rules_sync_succeeds(void) {
     PtySession *s = sync_run(NULL);
     ASSERT(s != NULL, "no-rules sync: PTY opens");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     pty_close(s);
 }
 
@@ -257,7 +262,7 @@ static void test_rule_from_glob_flags_message(void) {
     write_config();
     write_rules(
         "[rule \"Flag example.com\"]\n"
-        "if-from = *@example.com\n"
+        "if-from = *@example.com*\n"
         "then-add-label = _flagged\n"
     );
     restart_mock();
@@ -265,6 +270,7 @@ static void test_rule_from_glob_flags_message(void) {
     PtySession *s = sync_run(NULL);
     ASSERT(s != NULL, "from-glob flag: PTY opens");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     pty_close(s);
 
     int flags = find_manifest_flags("Test Message");
@@ -294,6 +300,7 @@ static void test_rule_subject_glob_flags_message(void) {
     PtySession *s = sync_run(NULL);
     ASSERT(s != NULL, "subject-glob flag: PTY opens");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     pty_close(s);
 
     int flags = find_manifest_flags("Test Message");
@@ -316,7 +323,7 @@ static void test_rule_nonmatch_no_effect(void) {
     write_config();
     write_rules(
         "[rule \"No match\"]\n"
-        "if-from = *@nomatch.example.com\n"
+        "if-from = *@nomatch.example.com*\n"
         "then-add-label = _flagged\n"
     );
     restart_mock();
@@ -324,6 +331,7 @@ static void test_rule_nonmatch_no_effect(void) {
     PtySession *s = sync_run(NULL);
     ASSERT(s != NULL, "nonmatch rule: PTY opens");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     pty_close(s);
 
     int flags = find_manifest_flags("Test Message");
@@ -349,7 +357,7 @@ static void test_rule_multiple_rules_both_apply(void) {
         "then-add-label = _flagged\n"
         "\n"
         "[rule \"Junk by from\"]\n"
-        "if-from = *@example.com\n"
+        "if-from = *@example.com*\n"
         "then-add-label = _junk\n"
     );
     restart_mock();
@@ -357,6 +365,7 @@ static void test_rule_multiple_rules_both_apply(void) {
     PtySession *s = sync_run(NULL);
     ASSERT(s != NULL, "multi-rule: PTY opens");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     pty_close(s);
 
     int flags = find_manifest_flags("Test Message");
@@ -386,6 +395,7 @@ static void test_rule_apply_rules_retroactive(void) {
         PtySession *s = sync_run(NULL);
         ASSERT(s != NULL, "apply-rules retro: initial sync PTY opens");
         ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
         pty_close(s);
     }
 
@@ -398,17 +408,23 @@ static void test_rule_apply_rules_retroactive(void) {
     /* Step 2: create rules.ini targeting the already-downloaded message */
     write_rules(
         "[rule \"Retroactive flag\"]\n"
-        "if-from = *@example.com\n"
+        "if-from = *@example.com*\n"
         "then-add-label = _flagged\n"
     );
 
-    /* Step 3: run email-sync --apply-rules (no server contact needed) */
+    /* Step 3: run email-sync --apply-rules.
+     * It applies the rules locally, then syncs the resulting flag changes to
+     * the server.  Wait for that whole sequence: "ule" alone would already
+     * match the "=== Applying rules: … ===" banner printed on entry, and
+     * pty_close() would then SIGTERM the process before it saves the
+     * manifest. */
     {
         const char *args[] = {"--apply-rules", NULL};
         PtySession *s = sync_run(args);
         ASSERT(s != NULL, "apply-rules retro: --apply-rules PTY opens");
-        /* --apply-rules prints "Rules applied." or "Sync complete" */
-        ASSERT_WAIT_FOR(s, "ule", WAIT_MS);   /* matches "Rules applied." */
+        ASSERT_WAIT_FOR(s, "Rules applied:", WAIT_MS);
+        ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
         pty_close(s);
     }
 

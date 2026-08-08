@@ -38,6 +38,10 @@ static char g_tui_bin[512];
 static char g_imap_bin[512];
 static char g_smtp_bin[512];
 
+/* EMAIL_USER value in the generated config — the local store names the
+ * data directory after it (the .config directory name is unrelated). */
+#define TEST_ACCOUNT "testuser@example.com"
+
 static char g_test_home[512];
 static char g_old_home[512];
 static char g_editor_script[600]; /* path to fake editor script */
@@ -82,8 +86,8 @@ static void mkdirs(void) {
     snprintf(d, sizeof(d), "%s/.local/share", g_test_home);      mkdir(d, 0700);
     snprintf(d, sizeof(d), "%s/.local/share/email-cli", g_test_home); mkdir(d, 0700);
     snprintf(d, sizeof(d), "%s/.local/share/email-cli/accounts", g_test_home); mkdir(d, 0700);
-    snprintf(d, sizeof(d), "%s/.local/share/email-cli/accounts/testuser", g_test_home); mkdir(d, 0700);
-    snprintf(d, sizeof(d), "%s/.local/share/email-cli/accounts/testuser/manifests", g_test_home); mkdir(d, 0700);
+    snprintf(d, sizeof(d), "%s/.local/share/email-cli/accounts/" TEST_ACCOUNT "", g_test_home); mkdir(d, 0700);
+    snprintf(d, sizeof(d), "%s/.local/share/email-cli/accounts/" TEST_ACCOUNT "/manifests", g_test_home); mkdir(d, 0700);
 }
 
 static void write_config(void) {
@@ -116,7 +120,7 @@ static void write_config(void) {
 static void write_contacts_tsv(void) {
     char path[700];
     snprintf(path, sizeof(path),
-             "%s/.local/share/email-cli/accounts/testuser/contacts.tsv",
+             "%s/.local/share/email-cli/accounts/" TEST_ACCOUNT "/contacts.tsv",
              g_test_home);
     FILE *f = fopen(path, "w");
     if (!f) return;
@@ -134,7 +138,7 @@ static void write_contacts_tsv(void) {
 static void write_inbox_manifest(void) {
     char path[700];
     snprintf(path, sizeof(path),
-             "%s/.local/share/email-cli/accounts/testuser/manifests/INBOX.tsv",
+             "%s/.local/share/email-cli/accounts/" TEST_ACCOUNT "/manifests/INBOX.tsv",
              g_test_home);
     FILE *f = fopen(path, "w");
     if (!f) return;
@@ -148,7 +152,7 @@ static void write_inbox_manifest(void) {
 static void write_contacts_from_manifests(void) {
     char path[700];
     snprintf(path, sizeof(path),
-             "%s/.local/share/email-cli/accounts/testuser/contacts.tsv",
+             "%s/.local/share/email-cli/accounts/" TEST_ACCOUNT "/contacts.tsv",
              g_test_home);
     FILE *f = fopen(path, "w");
     if (!f) return;
@@ -228,6 +232,14 @@ static PtySession *tui_run(const char **extra_args) {
  * The TUI starts at the accounts screen; press Enter to open the account,
  * then Enter again to open the INBOX folder.
  */
+/* US-85: submitting the compose dialog runs $EDITOR and then shows the
+ * post-compose review screen.  Press 's' there to actually send. */
+static void pcr_send(PtySession *s) {
+    if (pty_wait_for(s, "Review: Message", WAIT_MS) != 0)
+        printf("  [WARN] pcr_send: review screen did not appear\n");
+    pty_send_str(s, "s");
+}
+
 static PtySession *tui_open_to_inbox(void) {
     write_config();
     PtySession *s = tui_run(NULL);
@@ -402,6 +414,7 @@ static void test_compose_empty_subject_y_opens_editor(void) {
 
     pty_send_str(s, "y");
     /* Editor (our fake script) runs and returns; TUI continues */
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
 
     pty_close(s);
@@ -427,6 +440,7 @@ static void test_compose_opens_editor_with_to(void) {
     pty_send_key(s, PTY_KEY_ENTER);
 
     /* Editor runs and the TUI shows "Sending" */
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
 
     pty_close(s);
@@ -595,6 +609,7 @@ static void test_compose_cc_written_to_tempfile(void) {
 
     /* After editor runs, message is sent; the Cc: header must have been
      * in the temp file and picked up by the send flow. */
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
 
     pty_close(s);
@@ -619,6 +634,7 @@ static void test_compose_bcc_written_to_tempfile(void) {
     pty_send_str(s, "Bcc test");
     pty_send_key(s, PTY_KEY_ENTER);
 
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
 
     pty_close(s);
@@ -986,6 +1002,7 @@ static void test_reply_can_add_cc(void) {
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);
 
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
 
     pty_close(s);
@@ -1022,6 +1039,7 @@ static void test_reply_editor_opens_with_quoted_body(void) {
     pty_send_key(s, PTY_KEY_TAB);   /* Cc → Bcc */
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     pty_close(s);
 
@@ -1114,8 +1132,8 @@ static void test_reply_all_in_help_panel(void) {
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "reply-all help: reached inbox");
 
-    pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Reply All", WAIT_MS);
+    pty_send_str(s, "h");
+    ASSERT_WAIT_FOR(s, "Reply-all", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "A");
 
@@ -1231,6 +1249,7 @@ static void test_forward_fill_to_opens_editor(void) {
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);
 
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
 
     pty_close(s);
@@ -1267,6 +1286,7 @@ static void test_forward_body_has_original(void) {
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_key(s, PTY_KEY_ENTER);
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     pty_close(s);
 
@@ -1327,7 +1347,7 @@ static void test_forward_in_help_panel(void) {
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "forward help: reached inbox");
 
-    pty_send_str(s, "?");
+    pty_send_str(s, "h");
     ASSERT_WAIT_FOR(s, "Forward", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "F");
@@ -1402,6 +1422,7 @@ static void test_compose_folder_fill_opens_editor(void) {
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_str(s, "Folder compose test");
     pty_send_key(s, PTY_KEY_ENTER);
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
 
     pty_close(s);
@@ -1439,7 +1460,7 @@ static void test_contacts_tsv_created_on_first_query(void) {
     /* Remove contacts.tsv if it exists */
     char path[700];
     snprintf(path, sizeof(path),
-             "%s/.local/share/email-cli/accounts/testuser/contacts.tsv",
+             "%s/.local/share/email-cli/accounts/" TEST_ACCOUNT "/contacts.tsv",
              g_test_home);
     unlink(path);
 
@@ -1496,6 +1517,7 @@ static void test_cc_in_smtp_envelope(void) {
     pty_send_key(s, PTY_KEY_TAB);           /* → Subject */
     pty_send_str(s, "Cc envelope test");
     pty_send_key(s, PTY_KEY_ENTER);
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     pty_close(s);
 
@@ -1538,6 +1560,7 @@ static void test_bcc_not_in_message_headers(void) {
     pty_send_key(s, PTY_KEY_TAB);           /* → Subject */
     pty_send_str(s, "Bcc strip test");
     pty_send_key(s, PTY_KEY_ENTER);
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     pty_close(s);
 
@@ -1592,6 +1615,7 @@ static void test_multiple_cc_semicolon_separated(void) {
     pty_send_key(s, PTY_KEY_TAB);                    /* → Subject */
     pty_send_str(s, "Multi Cc test");
     pty_send_key(s, PTY_KEY_ENTER);
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     pty_close(s);
 
@@ -1668,6 +1692,7 @@ static void test_reply_send_saves_to_sent(void) {
     pty_send_key(s, PTY_KEY_ENTER);
 
     /* Verify full send + local Sent folder flow */
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Message sent.", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
@@ -1712,6 +1737,7 @@ static void test_replied_message_shows_answered_marker(void) {
     pty_send_key(s, PTY_KEY_TAB);   /* Cc → Bcc */
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
     pty_send_str(s, " ");
@@ -1741,6 +1767,7 @@ static void test_forwarded_message_shows_forwarded_marker(void) {
     pty_send_key(s, PTY_KEY_TAB);   /* Cc → Bcc */
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);
+    pcr_send(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
     pty_send_str(s, " ");

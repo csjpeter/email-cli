@@ -77,6 +77,10 @@ static void help(void) {
 
 #define CD_MAX_CONTACTS   512
 #define CD_MAX_MATCH        5
+/* Minimum token length that opens the contact autocomplete dropdown
+ * (docs/spec/compose-dialog.md: "Typing >= 2 characters ... opens the
+ * autocomplete dropdown"; a single character would match almost everything). */
+#define CD_AC_MIN_CHARS     2
 #define CD_NFIELDS          5
 #define CD_FIELD_TO         0
 #define CD_FIELD_CC         1
@@ -201,6 +205,18 @@ static int cd_contacts_load(const Config *cfg, CDContact *contacts, int maxn) {
     return count;
 }
 
+/** Returns 1 if the account's contacts.tsv exists (even when empty). */
+static int cd_contacts_file_exists(const Config *cfg) {
+    if (!cfg || !cfg->user) return 0;
+    const char *data_base = platform_data_dir();
+    if (!data_base) return 0;
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/email-cli/accounts/%s/contacts.tsv",
+             data_base, cfg->user);
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
 /** Case-insensitive substring match against addr and name.
  *  Fills indices[] with up to max matching indices; returns count. */
 static int cd_contacts_match(const CDContact *contacts, int ncontacts,
@@ -274,7 +290,9 @@ static int cd_render(const char *title,
                      const CDContact *contacts,
                      const int *match_idx,
                      int match_count,
-                     const CDAttachState *attach) {
+                     const CDAttachState *attach,
+                     int match_sel,
+                     const char *dlg_error) {
     int tcols = terminal_cols();
     if (tcols < 20) tcols = 80;
 
@@ -330,7 +348,8 @@ static int cd_render(const char *title,
             /* Contact autocomplete dropdown */
             for (int m = 0; m < match_count; m++) {
                 printf("\033[%d;1H\033[K", row);
-                printf("             \033[36m\xe2\x96\xb6 %-40s  %s\033[0m",
+                printf("             %s\033[36m\xe2\x96\xb6 %-40s  %s\033[0m",
+                       (m == match_sel) ? "\033[7m" : "",
                        contacts[match_idx[m]].addr,
                        contacts[match_idx[m]].name);
                 row++;
@@ -359,6 +378,13 @@ static int cd_render(const char *title,
             printf("    \033[32m[%d] %s\033[0m", i + 1, fname);
             row++;
         }
+    }
+
+    /* Dialog-level inline error (empty To, no-subject prompt, …) */
+    if (dlg_error && dlg_error[0]) {
+        printf("\033[%d;1H\033[K", row);
+        printf("  \033[31m%s\033[0m", dlg_error);
+        row++;
     }
 
     /* Inline error message */
@@ -399,6 +425,14 @@ static int compose_dialog(const Config *cfg,
     CDContact *contacts = calloc((size_t)CD_MAX_CONTACTS, sizeof(CDContact));
     if (!contacts) return 0;
     int ncontacts = cd_contacts_load(cfg, contacts, CD_MAX_CONTACTS);
+    if (ncontacts == 0 && cfg && cfg->user && !cd_contacts_file_exists(cfg)) {
+        /* No contacts cache yet — build it once from the cached headers so the
+         * very first compose already offers autocomplete.  Keyed on the file's
+         * existence, not on the entry count: an account with no cached headers
+         * yields an empty file, and re-scanning on every open would be slow. */
+        local_contacts_rebuild();
+        ncontacts = cd_contacts_load(cfg, contacts, CD_MAX_CONTACTS);
+    }
 
     char bufs[CD_NFIELDS][CD_FIELD_BUFSZ];
     memset(bufs, 0, sizeof(bufs));
@@ -428,26 +462,31 @@ static int compose_dialog(const Config *cfg,
 
         int match_idx[CD_MAX_MATCH];
         int match_count = 0;
+        int match_sel   = 0;   /* highlighted dropdown row */
+        int dd_hidden   = 0;   /* Esc dismissed the dropdown for this token */
+        char dlg_error[256] = "";
 
         for (;;) {
             /* Autocomplete: contacts for address fields, files for Attach */
             match_count = 0;
             attach_state.match_count = 0;
-            if (active < CD_FIELD_SUBJ) {
+            if (active < CD_FIELD_SUBJ && !dd_hidden) {
                 char tok[256];
                 cd_current_token(bufs[active], cursors[active], tok, sizeof(tok));
-                if (tok[0])
+                if (strlen(tok) >= CD_AC_MIN_CHARS)
                     match_count = cd_contacts_match(contacts, ncontacts, tok,
                                                     match_idx, CD_MAX_MATCH);
-            } else if (active == CD_FIELD_ATTACH && bufs[CD_FIELD_ATTACH][0]) {
+            }
+            else if (active == CD_FIELD_ATTACH && bufs[CD_FIELD_ATTACH][0]) {
                 attach_state.match_count = cd_files_match(bufs[CD_FIELD_ATTACH],
                                                            attach_state.matches,
                                                            CD_MAX_FILE_MATCH);
             }
+            if (match_sel >= match_count) match_sel = 0;
 
             int active_row = cd_render(title, bufs, cursors, active,
                                        contacts, match_idx, match_count,
-                                       &attach_state);
+                                       &attach_state, match_sel, dlg_error);
 
             int tcols = terminal_cols();
             if (tcols < 20) tcols = 80;
@@ -463,11 +502,24 @@ static int compose_dialog(const Config *cfg,
             TermKey key = terminal_read_key();
 
             if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT) {
+                if (match_count > 0) {
+                    dd_hidden = 1;      /* dismiss dropdown, keep typed text */
+                    continue;
+                }
                 result = 0;
                 goto dialog_done;
             }
 
             if (key == TERM_KEY_ENTER) {
+                if (match_count > 0 && active < CD_FIELD_SUBJ) {
+                    /* Dropdown open: commit the highlighted address instead of
+                     * confirming the dialog. */
+                    cd_complete(bufs[active], &cursors[active],
+                                contacts[match_idx[match_sel]].addr);
+                    dd_hidden = 1;
+                    match_sel = 0;
+                    continue;
+                }
                 if (active == CD_FIELD_ATTACH) {
                     if (bufs[CD_FIELD_ATTACH][0]) {
                         /* Validate and add the typed path */
@@ -492,14 +544,10 @@ static int compose_dialog(const Config *cfg,
                         }
                     } else {
                         /* Empty Attach field + Enter → confirm dialog */
-                        result = 1;
-                        goto dialog_done;
+                        goto confirm_dialog;
                     }
-                } else if (active == CD_FIELD_SUBJ) {
-                    result = 1;
-                    goto dialog_done;
                 } else {
-                    active = (active + 1) % CD_NFIELDS;
+                    goto confirm_dialog;
                 }
                 continue;
             }
@@ -507,7 +555,9 @@ static int compose_dialog(const Config *cfg,
             if (key == TERM_KEY_TAB) {
                 if (match_count > 0 && active < CD_FIELD_SUBJ) {
                     cd_complete(bufs[active], &cursors[active],
-                                contacts[match_idx[0]].addr);
+                                contacts[match_idx[match_sel]].addr);
+                    dd_hidden = 1;
+                    match_sel = 0;
                 } else if (active == CD_FIELD_ATTACH && attach_state.match_count > 0) {
                     size_t _ml = strlen(attach_state.matches[0]);
                     if (_ml >= CD_FIELD_BUFSZ) _ml = CD_FIELD_BUFSZ - 1;
@@ -521,12 +571,44 @@ static int compose_dialog(const Config *cfg,
                 continue;
             }
 
+            if (key == TERM_KEY_NEXT_LINE && match_count > 0) {
+                if (match_sel < match_count - 1) match_sel++;
+                continue;
+            }
+
+            if (key == TERM_KEY_PREV_LINE && match_count > 0) {
+                if (match_sel > 0) match_sel--;
+                continue;
+            }
+
             if (key == TERM_KEY_SHIFT_TAB) {
                 active = (active - 1 + CD_NFIELDS) % CD_NFIELDS;
                 continue;
             }
 
             if (key == TERM_KEY_BACK) {
+                dd_hidden = 0;
+                if (active < CD_FIELD_SUBJ && cursors[active] > 0) {
+                    /* If the caret sits right after a separator the current
+                     * token is empty — drop the whole preceding address. */
+                    char tok[256];
+                    cd_current_token(bufs[active], cursors[active], tok, sizeof(tok));
+                    if (!tok[0]) {
+                        int i = cursors[active] - 1;
+                        while (i >= 0 && (bufs[active][i] == ' ' ||
+                                          bufs[active][i] == ';' ||
+                                          bufs[active][i] == ',')) i--;
+                        while (i >= 0 && bufs[active][i] != ';' &&
+                                         bufs[active][i] != ',') i--;
+                        i++;                        /* first byte of that address */
+                        while (bufs[active][i] == ' ') i++;
+                        int rest = (int)strlen(bufs[active]) - cursors[active];
+                        memmove(bufs[active] + i, bufs[active] + cursors[active],
+                                (size_t)(rest + 1));
+                        cursors[active] = i;
+                        continue;
+                    }
+                }
                 if (cursors[active] > 0) {
                     int i = cursors[active] - 1;
                     while (i > 0 && ((unsigned char)bufs[active][i] & 0xC0) == 0x80)
@@ -577,8 +659,37 @@ static int compose_dialog(const Config *cfg,
             if (key == TERM_KEY_HOME) { cursors[active] = 0; continue; }
             if (key == TERM_KEY_END)  { cursors[active] = (int)strlen(bufs[active]); continue; }
 
+            if (0) {
+confirm_dialog:
+                /* Empty-To guard: inline error, focus stays on To. */
+                if (!bufs[CD_FIELD_TO][0]) {
+                    snprintf(dlg_error, sizeof(dlg_error),
+                             "To: is empty \xe2\x80\x94 enter at least one recipient.");
+                    active = CD_FIELD_TO;
+                    continue;
+                }
+                /* No-subject warning: 'y' or Enter proceeds, anything else
+                 * returns focus to the Subject field. */
+                if (!bufs[CD_FIELD_SUBJ][0]) {
+                    snprintf(dlg_error, sizeof(dlg_error),
+                             "Subject is empty \xe2\x80\x94 send anyway? (y/n)");
+                    cd_render(title, bufs, cursors, active, contacts,
+                              match_idx, 0, &attach_state, 0, dlg_error);
+                    TermKey ck = terminal_read_key();
+                    int cch = (ck == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
+                    dlg_error[0] = '\0';
+                    if (!(cch == 'y' || cch == 'Y' || ck == TERM_KEY_ENTER)) {
+                        active = CD_FIELD_SUBJ;
+                        continue;
+                    }
+                }
+                result = 1;
+                goto dialog_done;
+            }
+
             if (key == TERM_KEY_IGNORE) {
                 int ch = terminal_last_printable();
+                if (ch) { dd_hidden = 0; match_sel = 0; dlg_error[0] = '\0'; }
                 if (ch == 'd' && active == CD_FIELD_ATTACH &&
                     bufs[CD_FIELD_ATTACH][0] == '\0') {
                     /* Remove last attachment (only when input field is empty) */

@@ -6,3 +6,4 @@ bin/
 *.gcov
 .claude/
 compile_commands.json
+.cache/

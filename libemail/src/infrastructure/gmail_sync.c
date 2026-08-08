@@ -947,6 +947,15 @@ int gmail_sync_incremental(GmailClient *gc) {
     recover_unread_labels(gc);
 
     mail_rules_free(inc_rules);
+
+    /* Report what actually changed — "up to date" alone would hide the
+     * messages this run downloaded. */
+    if (hc.added || hc.deleted || hc.label_changes)
+        fprintf(stderr, "  Incremental sync: %d new, %d deleted, %d label change(s).\n",
+                hc.added, hc.deleted, hc.label_changes);
+    else
+        fprintf(stderr, "  Incremental sync: up to date.\n");
+
     logger_log(LOG_INFO, "gmail_sync: incremental done — added=%d deleted=%d labels=%d",
                hc.added, hc.deleted, hc.label_changes);
     return 0;
@@ -989,10 +998,8 @@ int gmail_sync(GmailClient *gc) {
     if (have_history) {
         fprintf(stderr, "  Incremental sync (historyId present)...\n");
         int rc = gmail_sync_incremental(gc);
-        if (rc == 0) {
-            fprintf(stderr, "  Incremental sync: up to date.\n");
-            return 0; /* fast path — done */
-        }
+        if (rc == 0)
+            return 0; /* fast path — done; the callee reported the outcome */
         if (rc != -2) return rc; /* unexpected error */
         fprintf(stderr, "  Incremental sync: historyId expired — falling back to full reconcile.\n");
         logger_log(LOG_INFO, "gmail_sync: historyId expired, falling back to reconcile");

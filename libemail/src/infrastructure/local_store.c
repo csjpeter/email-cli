@@ -1946,31 +1946,42 @@ void local_pending_append_remove(const char *folder, const char *uid) {
     RAII_STRING char *path = pending_append_path();
     if (!path) return;
 
-    /* Read all lines except the matching one */
-    FILE *rfp = fopen(path, "r");
+    /* Copy every line except the matching one to a sibling temp file, then
+     * rename it over the original.  Streaming keeps the queue length
+     * unbounded and the rename makes the update atomic — an earlier version
+     * buffered the whole file in a 2 MB stack array and silently dropped
+     * everything past 4096 entries. */
+    RAII_FILE FILE *rfp = fopen(path, "r");
     if (!rfp) return;
 
-    char lines[4096][512];
-    int lcount = 0;
-    char line[512];
-    while (lcount < 4096 && fgets(line, sizeof(line), rfp)) {
-        char tmp[512];
-        strncpy(tmp, line, sizeof(tmp) - 1); tmp[sizeof(tmp) - 1] = '\0';
-        char *tab = strchr(tmp, '\t');
-        if (!tab) { snprintf(lines[lcount++], 512, "%s", line); continue; }
-        *tab = '\0';
-        char *nl = strchr(tab + 1, '\n'); if (nl) *nl = '\0';
-        if (strcmp(tmp, folder) == 0 && strcmp(tab + 1, uid) == 0)
-            continue; /* skip this entry */
-        snprintf(lines[lcount++], 512, "%s", line);
-    }
-    fclose(rfp);
+    RAII_STRING char *tmp_path = NULL;
+    if (asprintf(&tmp_path, "%s.tmp", path) == -1) return;
 
-    FILE *wfp = fopen(path, "w");
+    RAII_FILE FILE *wfp = fopen(tmp_path, "w");
     if (!wfp) return;
-    for (int i = 0; i < lcount; i++)
-        fputs(lines[i], wfp);
-    fclose(wfp);
+
+    char line[512];
+    while (fgets(line, sizeof(line), rfp)) {
+        char tmp[512];
+        snprintf(tmp, sizeof(tmp), "%s", line);
+        char *tab = strchr(tmp, '\t');
+        if (tab) {
+            *tab = '\0';
+            char *nl = strchr(tab + 1, '\n');
+            if (nl) *nl = '\0';
+            if (strcmp(tmp, folder) == 0 && strcmp(tab + 1, uid) == 0)
+                continue;   /* this is the entry being removed */
+        }
+        fputs(line, wfp);
+    }
+
+    /* Close both handles before renaming: the write must be flushed, and on
+     * Windows a rename over an open file fails. */
+    fclose(wfp); wfp = NULL;
+    fclose(rfp); rfp = NULL;
+
+    if (rename(tmp_path, path) != 0)
+        remove(tmp_path);
 }
 
 /* ── Pending Gmail fetch queue ───────────────────────────────────────── */

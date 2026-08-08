@@ -677,8 +677,10 @@ void test_flag_search_folder_isolation(void) {
 
     /* Pre-clean: remove all TSV files (stale files from other test runs
      * would otherwise inflate cnt and make the count assertion fragile) */
-    system("find '/tmp/email-cli-flag-iso-test/.local/share/email-cli/"
-           "accounts/testuser/manifests' -name '*.tsv' -delete 2>/dev/null");
+    int _clean_rc = system(
+        "find '/tmp/email-cli-flag-iso-test/.local/share/email-cli/"
+        "accounts/testuser/manifests' -name '*.tsv' -delete 2>/dev/null");
+    (void)_clean_rc;   /* best-effort pre-clean; the directory may not exist yet */
 
     /* Same UID in two different folders: verify that dedup returns it only once */
     Manifest *inbox = calloc(1, sizeof(Manifest));

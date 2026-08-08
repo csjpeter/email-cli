@@ -2418,6 +2418,23 @@ condition="AND (from,contains,@company.example.com)"
 action="Label"
 actionValue="$label2"
 
+name="Niche fields"
+enabled="yes"
+condition="AND (to or cc,contains,@example.com) (size,greater than,100) (has attachment,is,true) (date,is before,2020-01-01)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Niche"
+
+name="Address book match"
+enabled="yes"
+condition="AND (from,is in ab,Personal)"
+action="Move to folder"
+actionValue="imap://user@imap.test.local/Contacts"
+
+name="Stop processing"
+enabled="yes"
+condition="AND (subject,contains,Bulk)"
+action="Stop filter evaluation"
+
 TBDAT
 
 # We need an account for the importer; use a dummy config
@@ -2463,6 +2480,21 @@ check_not "38.20 no warn for Mark as read (US-66)"        "\[warn\].*read"    "$
 # US-67: Label action converted to named label (no warn emitted)
 check "38.21 Label \$label2 → then-add-label = Work"      "Work"              "$IR_OUT"
 check_not "38.22 no warn for Label action (US-67)"        "\[warn\].*Label"   "$IR_OUT"
+
+# US-74 / TASK-001: niche Thunderbird elements that remain unsupported must warn.
+# Condition fields (the field check runs before the match-type check, so an
+# unsupported field always reports the field, never the match type).
+check "38.23 warn for unsupported field (to or cc)"       "\[warn\].*to or cc"     "$IR_OUT"
+check "38.24 warn for unsupported field (size)"           "\[warn\].*size"         "$IR_OUT"
+check "38.25 warn for unsupported field (has attachment)" "\[warn\].*attachment"   "$IR_OUT"
+check "38.26 warn for unsupported field (date)"           "\[warn\].*date"         "$IR_OUT"
+# Match type on a *supported* field: reports the match type itself.
+check "38.27 warn for unsupported match type (is in ab)"  "\[warn\].*is in ab"     "$IR_OUT"
+# Actions
+check "38.28 warn for unsupported action (Stop filter)"   "\[warn\].*Stop filter"  "$IR_OUT"
+# Skipped terms are dropped, but the rule's convertible action is still kept.
+check "38.29 niche rule kept with its action"             "then-move-folder  = Niche"   "$IR_OUT"
+check_not "38.30 skipped niche term absent from when"     "when.*to or cc"             "$IR_OUT"
 
 # The --help output must mention the binary name
 IR_HELP=$( "$BIN_DIR/email-import-rules" --help 2>&1 || true )

@@ -1483,6 +1483,69 @@ show_int_done:
 
 typedef struct { char uid[17]; int flags; time_t epoch; char folder[256]; } MsgEntry;
 
+/* Write s as a JSON string value, escaping what RFC 8259 requires.
+ * Bytes are emitted as-is: the manifest already holds UTF-8. */
+static void print_json_string(const char *s) {
+    putchar('"');
+    for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; p++) {
+        switch (*p) {
+            case '"':  fputs("\\\"", stdout); break;
+            case '\\': fputs("\\\\", stdout); break;
+            case '\n': fputs("\\n", stdout);  break;
+            case '\r': fputs("\\r", stdout);  break;
+            case '\t': fputs("\\t", stdout);  break;
+            default:
+                if (*p < 0x20) printf("\\u%04x", *p);
+                else           putchar((char)*p);
+        }
+    }
+    putchar('"');
+}
+
+/* True when no batch filter is configured — the common case, kept cheap. */
+static int list_filters_off(const EmailListOpts *o) {
+    return !(o->filter_from   && o->filter_from[0])
+        && !(o->filter_since  && o->filter_since[0])
+        && !(o->filter_before && o->filter_before[0]);
+}
+
+/* Match one entry against --from / --since / --before.
+ *
+ * Dates are compared on the "YYYY-MM-DD" prefix of the manifest's
+ * "YYYY-MM-DD HH:MM" field, which sorts correctly as text: --since is
+ * inclusive, --before exclusive.  Entries with no manifest row (headers not
+ * fetched yet) cannot be judged and are dropped, so a filtered list never
+ * claims a match it did not verify. */
+static int entry_matches_filters(const Manifest *m, const MsgEntry *e,
+                                 const EmailListOpts *o) {
+    if (list_filters_off(o)) return 1;
+    const ManifestEntry *me = manifest_find(m, e->uid);
+    if (!me) return 0;
+
+    if (o->filter_from && o->filter_from[0] &&
+        (!me->from || !strcasestr(me->from, o->filter_from)))
+        return 0;
+    if (o->filter_since && o->filter_since[0] &&
+        (!me->date || strncmp(me->date, o->filter_since, 10) < 0))
+        return 0;
+    if (o->filter_before && o->filter_before[0] &&
+        (!me->date || strncmp(me->date, o->filter_before, 10) >= 0))
+        return 0;
+    return 1;
+}
+
+/* Remove non-matching entries in place; returns the remaining count. */
+static int apply_list_filters(const Manifest *m, MsgEntry *entries, int count,
+                              const EmailListOpts *o) {
+    if (list_filters_off(o)) return count;
+    int kept = 0;
+    for (int i = 0; i < count; i++)
+        if (entry_matches_filters(m, &entries[i], o))
+            entries[kept++] = entries[i];
+    return kept;
+}
+
+
 /* Parse "YYYY-MM-DD HH:MM" (manifest date format) to time_t in local time.
  * Returns 0 on failure. */
 static time_t parse_manifest_date(const char *d) {
@@ -2030,6 +2093,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (strcmp(folder, "__phishing__")  == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_PHISHING;  folder_display = "Phishing";  }
         if (strcmp(folder, "__answered__")  == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_ANSWERED;  folder_display = "Answered";  }
         if (strcmp(folder, "__forwarded__") == 0) { is_virtual_flags = 1; virtual_flag_mask = MSG_FLAG_FORWARDED; folder_display = "Forwarded"; }
+        /* Mask 0 = no flag requirement, i.e. every cached message in every
+         * folder — the cross-folder counterpart of a plain folder listing. */
+        if (strcmp(folder, "__all__")       == 0) { is_virtual_flags = 1; virtual_flag_mask = 0;                    folder_display = "All mail";  }
     }
 
     /* Cross-folder content search: folder = "__search__:<scope>:<query>" */
@@ -2120,7 +2186,15 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (manifest->count == 0) {
             manifest_free(manifest);
             if (!opts->pager) {
-                printf("No cached data for %s. Run 'email-cli sync' first.\n", folder);
+                if (opts->json) {
+                    /* JSON mode must always emit one parseable document; the
+                     * advice goes to stderr so stdout stays machine-readable. */
+                    printf("[\n]\n");
+                    fprintf(stderr,
+                            "No cached data for %s. Run 'email-sync' first.\n", folder);
+                } else {
+                    printf("No cached data for %s. Run 'email-cli sync' first.\n", folder);
+                }
                 return 0;
             }
             RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
@@ -2437,6 +2511,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         }
     }
 
+    /* Batch filters run before sorting and paging so that --limit/--offset and
+     * the "N more message(s)" hint all refer to the filtered set. */
+    show_count = apply_list_filters(manifest, entries, show_count, opts);
+
     /* Sort: unseen → flagged → rest, within each group newest (highest UID) first */
     qsort(entries, (size_t)show_count, sizeof(MsgEntry), cmp_uid_entry);
 
@@ -2603,8 +2681,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
         if (opts->pager) printf("\033[H\033[2J");
 
-        /* Count / status line */
-        {
+        /* Count / status line — suppressed in JSON mode, where stdout must be
+         * a single parseable document and nothing else. */
+        if (!opts->json) {
             char cl[512];
             int sync = (bg_sync_pid > 0) || sync_is_running();
             const char *suffix;
@@ -2639,6 +2718,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 printf("%s\n\n", cl);
             }
         }
+        if (opts->json) {
+            printf("[");
+        } else {
         if (opts->pager) printf("\033[3;1H");
         if (show_uid)
             printf("  %-16s  %-16s  %-6s  %-*s  %s\n",
@@ -2652,6 +2734,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         printf("\u2550\u2550\u2550\u2550\u2550\u2550  ");
         print_dbar(subj_w > 0 ? subj_w : 30); printf("  ");
         print_dbar(from_w > 0 ? from_w : 40); printf("\n");
+        }
 
         /* Data rows: fetch-on-demand + immediate render per row */
         int load_interrupted = 0;
@@ -2841,6 +2924,25 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                        : (eflags & MSG_FLAG_DMARC_FAIL)  ? 'x' : '-';
                 sts[6] = '\0';
             }
+            if (opts->json) {
+                /* One object per message, fields untruncated — the whole point
+                 * of this mode is that a consumer gets complete values. */
+                printf("%s\n  {\"uid\": ", (i > wstart) ? "," : "");
+                print_json_string(entries[ei].uid);
+                printf(", \"date\": ");    print_json_string(date);
+                printf(", \"from\": ");    print_json_string(from);
+                printf(", \"subject\": "); print_json_string(subject);
+                printf(", \"folder\": ");
+                print_json_string(entries[ei].folder[0] ? entries[ei].folder : folder);
+                printf(", \"status\": ");  print_json_string(sts);
+                printf(", \"flags\": %d", eflags);
+                printf(", \"unread\": %s",    (eflags & MSG_FLAG_UNSEEN)   ? "true" : "false");
+                printf(", \"flagged\": %s",   (eflags & MSG_FLAG_FLAGGED)  ? "true" : "false");
+                printf(", \"attachments\": %s",(eflags & MSG_FLAG_ATTACH)  ? "true" : "false");
+                printf("}");
+                fflush(stdout);
+                continue;
+            }
             if (show_uid)
                 printf("%s%-16.16s  %-16.16s  %s  ", row_pfx, entries[ei].uid, date, sts);
             else
@@ -2857,6 +2959,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (manifest_dirty && !is_virtual_flags && !is_virtual_search) manifest_save(folder, manifest);
         if (load_interrupted) goto list_done;
 
+        if (opts->json) {
+            printf("\n]\n");
+            fflush(stdout);
+            break;
+        }
         if (!opts->pager) {
             if (wend < show_count)
                 printf("\n  -- %d more message(s) --  use --offset %d for next page\n",

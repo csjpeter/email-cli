@@ -202,6 +202,17 @@ static void help_rules_remove(void) {
     );
 }
 
+/* Accept only YYYY-MM-DD for --since/--before: the manifest stores dates in
+ * that form, so anything else would silently match nothing. */
+static int valid_date_arg(const char *s) {
+    if (!s) return 0;
+    for (int i = 0; i < 10; i++) {
+        if (i == 4 || i == 7) { if (s[i] != '-') return 0; }
+        else if (s[i] < '0' || s[i] > '9') return 0;
+    }
+    return s[10] == '\0';
+}
+
 static void help_list(void) {
     printf(
         "Usage: email-cli [<account>] list [options]\n"
@@ -216,6 +227,18 @@ static void help_list(void) {
         "  --label  <id-or-name>    Gmail: filter by label (alias for --folder).\n"
         "  --limit <n>              Show at most <n> messages (default: %d).\n"
         "  --offset <n>             Start listing from the <n>-th message (1-based).\n"
+        "  --from <text>            Only messages whose From contains <text>\n"
+        "                           (case-insensitive substring).\n"
+        "  --since <YYYY-MM-DD>     Only messages on or after this date.\n"
+        "  --before <YYYY-MM-DD>    Only messages strictly before this date.\n"
+        "  --all-accounts           List every configured account in turn, each\n"
+        "                           under an \"=== <account> ===\" heading.\n"
+        "                           Cannot be combined with --json.\n"
+        "  --json                   Emit JSON instead of the text table: one\n"
+        "                           object per message, fields never truncated.\n"
+        "                           stdout stays a single parseable document;\n"
+        "                           notices go to stderr.\n"
+
         "\n"
         "Virtual folders (pass to --folder; they span every cached folder):\n"
         "  __unread__     Unread messages\n"
@@ -224,6 +247,7 @@ static void help_list(void) {
         "  __forwarded__  Messages that were forwarded\n"
         "  __junk__       Messages marked as junk / spam\n"
         "  __phishing__   Messages flagged as phishing\n"
+        "  __all__        Every cached message, from every folder\n"
         "\n"
         "Content search (pass to --folder):\n"
         "  __search__:<scope>:<query>   scope 0=Subject 1=From 2=To 3=Body\n"
@@ -242,6 +266,8 @@ static void help_list(void) {
         "  email-cli list --all --offset 21\n"
         "  email-cli list --folder INBOX.Sent --limit 50\n"
         "  email-cli list --folder __unread__ --limit 20\n"
+        "  email-cli list --all --from @shop.example --since 2024-01-01\n"
+        "  email-cli list --all --folder __all__ --json\n"
         "  email-cli list --folder \"__search__:3:invoice\"   (search message bodies)\n"
         "\n"
         "Examples (Gmail):\n"
@@ -763,8 +789,14 @@ int main(int argc, char *argv[]) {
                                   strcmp(cmd, "rules")              == 0));
 
     /* 4. Load configuration */
+    /* --all-accounts iterates over every configured account, so the usual
+     * "which account?" resolution below must be skipped for it. */
+    int all_accounts = 0;
+    for (int i = 1; i < argc; i++)
+        if (strcmp(argv[i], "--all-accounts") == 0) all_accounts = 1;
+
     Config *cfg = NULL;
-    if (cmd_needs_cfg) {
+    if (cmd_needs_cfg && !all_accounts) {
         if (account_arg) {
             /* Specific account requested */
             cfg = config_load_account(account_arg);
@@ -822,7 +854,8 @@ int main(int argc, char *argv[]) {
     int result = -1;
 
     if (strcmp(cmd, "list") == 0) {
-        EmailListOpts opts = {0, NULL, BATCH_DEFAULT_LIMIT, 0, 0, {0}, {0}};
+        EmailListOpts opts = {0};
+        opts.limit = BATCH_DEFAULT_LIMIT;
         int ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) {
@@ -851,6 +884,37 @@ int main(int argc, char *argv[]) {
                         opts.limit = (int)v;
                     }
                 }
+            } else if (strcmp(argv[i], "--all-accounts") == 0) {
+                /* handled before account resolution; accepted here as a no-op */
+            } else if (strcmp(argv[i], "--json") == 0) {
+                opts.json = 1;
+            } else if (strcmp(argv[i], "--from") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --from requires a substring.\n");
+                    ok = 0;
+                } else {
+                    opts.filter_from = argv[++i];
+                }
+            } else if (strcmp(argv[i], "--since") == 0 ||
+                       strcmp(argv[i], "--before") == 0) {
+                int is_since = (strcmp(argv[i], "--since") == 0);
+                const char *name = argv[i];
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: %s requires a date (YYYY-MM-DD).\n", name);
+                    ok = 0;
+                } else {
+                    const char *v = argv[++i];
+                    if (!valid_date_arg(v)) {
+                        fprintf(stderr,
+                                "Error: %s must be a date in YYYY-MM-DD form (got '%s').\n",
+                                name, v);
+                        ok = 0;
+                    } else if (is_since) {
+                        opts.filter_since = v;
+                    } else {
+                        opts.filter_before = v;
+                    }
+                }
             } else if (strcmp(argv[i], "--offset") == 0) {
                 if (i + 1 >= argc) {
                     fprintf(stderr, "Error: --offset requires a number.\n");
@@ -870,7 +934,45 @@ int main(int argc, char *argv[]) {
                 ok = 0;
             }
         }
-        if (ok) result = email_service_list(cfg, &opts);
+        if (all_accounts) {
+            /* Run the same listing for every configured account.  JSON mode is
+             * refused rather than emitting several documents back to back:
+             * stdout must stay one parseable value. */
+            if (opts.json) {
+                fprintf(stderr,
+                        "Error: --all-accounts cannot be combined with --json yet.\n"
+                        "Run one account at a time, e.g.:\n"
+                        "  for a in $(%s list-accounts --batch); do %s \"$a\" list --json; done\n",
+                        "email-cli", "email-cli");
+                result = -1;
+            } else if (!ok) {
+                /* option error already reported */
+            } else {
+                int acc_count = 0;
+                AccountEntry *accs = config_list_accounts(&acc_count);
+                if (!accs || acc_count == 0) {
+                    fprintf(stderr, "Error: No accounts configured.\n");
+                    result = -1;
+                } else {
+                    result = 0;
+                    for (int ai = 0; ai < acc_count; ai++) {
+                        if (!accs[ai].cfg) continue;
+                        printf("=== %s ===\n", accs[ai].name ? accs[ai].name : "?");
+                        if (local_store_init(accs[ai].cfg->host, accs[ai].cfg->user) != 0) {
+                            fprintf(stderr, "Warning: local store unavailable for %s\n",
+                                    accs[ai].name ? accs[ai].name : "?");
+                            continue;
+                        }
+                        EmailListOpts aopts = opts;
+                        if (email_service_list(accs[ai].cfg, &aopts) < 0) result = -1;
+                        printf("\n");
+                    }
+                }
+                config_free_account_list(accs, acc_count);
+            }
+        } else if (ok) {
+            result = email_service_list(cfg, &opts);
+        }
 
     } else if (strcmp(cmd, "show") == 0) {
         /* UID is the first non --batch, non-option arg after "show" */

@@ -29,6 +29,12 @@ typedef struct {
     int         limit;
     int         offset;
     int         pager;
+    /* Batch-mode filters, applied to the local manifest before paging.
+     * NULL / empty means "no filter". */
+    const char *filter_from;    /**< Case-insensitive substring of the From field */
+    const char *filter_since;   /**< YYYY-MM-DD, inclusive lower bound on Date */
+    const char *filter_before;  /**< YYYY-MM-DD, exclusive upper bound on Date */
+    int         json;           /**< 1 = emit JSON instead of the text table */
     char        action_uid[17];  /**< Output: UID for reply/fwd/reply-all */
     char        action_folder[512]; /**< Output: physical folder for action_uid */
 } EmailListOpts;

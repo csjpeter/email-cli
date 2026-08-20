@@ -216,6 +216,7 @@ void manifest_count_all_flags(int *unread_out, int *flagged_out,
                                int *answered_out, int *forwarded_out);
 
 /** @brief Build a synthetic manifest with entries from ALL folders matching flag_mask. */
+/* flag_mask 0 selects every cached message, not none. */
 Manifest *manifest_load_all_with_flag(int flag_mask);
 
 /**

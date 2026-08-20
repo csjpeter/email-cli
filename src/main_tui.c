@@ -2556,7 +2556,10 @@ int main(int argc, char *argv[]) {
 
         int back_to_accounts = 0;
         for (;;) {  /* inner: message list + folder browser */
-            EmailListOpts opts = {0, tui_folder, page_size, 0, 1, {0}, {0}};
+            EmailListOpts opts = {0};
+            opts.folder = tui_folder;
+            opts.limit  = page_size;
+            opts.pager  = 1;
             int ret = email_service_list(sel_cfg, &opts);
             if (ret == 1) {
                 /* Backspace from message list → folder/label browser */

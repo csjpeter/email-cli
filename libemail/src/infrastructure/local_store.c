@@ -940,7 +940,7 @@ Manifest *manifest_load_all_with_flag(int flag_mask) {
         Manifest *m = manifest_load(folder);
         if (!m) continue;
         for (int i = 0; i < m->count; i++) {
-            if (m->entries[i].flags & flag_mask)
+            if (flag_mask == 0 || (m->entries[i].flags & flag_mask))
                 manifest_upsert(result, m->entries[i].uid,
                                 strdup(m->entries[i].from    ? m->entries[i].from    : ""),
                                 strdup(m->entries[i].subject ? m->entries[i].subject : ""),
@@ -1011,7 +1011,7 @@ int local_flag_search(int flag_mask,
         Manifest *m = manifest_load(folder);
         if (!m) continue;
         for (int i = 0; i < m->count; i++) {
-            if (!(m->entries[i].flags & flag_mask)) continue;
+            if (flag_mask != 0 && !(m->entries[i].flags & flag_mask)) continue;
             /* Deduplicate by UID.  For Gmail a message appears in multiple label
              * manifests; prefer the empty-folder entry (where .eml is stored).
              * If the UID is already present with a non-empty folder, replace it

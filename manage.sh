@@ -257,6 +257,7 @@ case "$1" in
              --output-file coverage-functional-raw.info && \
          lcov --remove coverage-functional-raw.info \
               --ignore-errors unused \
+              '/usr/include/*' \
               '*/src/main_tui.c' \
               '*/tests/unit/*' \
               --output-file coverage-functional.info)
@@ -270,6 +271,7 @@ case "$1" in
              --output-file coverage-raw.info && \
          lcov --remove coverage-raw.info \
               --ignore-errors unused \
+              '/usr/include/*' \
               '*/src/main_tui.c' \
               --output-file coverage.info)
 

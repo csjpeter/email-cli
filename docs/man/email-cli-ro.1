@@ -82,6 +82,37 @@ Start at the
 .IR n th
 message, 1\-based.
 .TP
+.BI \-\-from " text"
+.RB ( list )
+Keep only messages whose From field contains
+.I text
+(case\-insensitive substring).
+.TP
+.BI \-\-since " YYYY-MM-DD"
+.RB ( list )
+Keep only messages dated on or after this day, inclusive.
+.TP
+.BI \-\-before " YYYY-MM-DD"
+.RB ( list )
+Keep only messages dated strictly before this day.
+.TP
+.B \-\-all\-accounts
+.RB ( list )
+Repeat the listing for every configured account, each under an
+.RI "\(dq=== " account " ===\(dq"
+heading. Cannot be combined with
+.BR \-\-json ,
+since several JSON documents in sequence would not form one parseable value.
+.TP
+.B \-\-json
+.RB ( list )
+Emit JSON instead of the table: one object per message, with
+.BR uid ", " date ", " from ", " subject ", " folder ", " status ", " flags ", "
+.BR unread ", " flagged " and " attachments .
+Standard output stays a single parseable document \- the count line and the
+paging hint are suppressed, notices go to standard error, and an empty result
+is an empty array. Unlike the table, fields are never truncated.
+.TP
 .B \-\-raw
 .RB ( show )
 Write the RFC 2822 source exactly as stored: no MIME parsing, no
@@ -117,6 +148,10 @@ Messages marked as junk or spam.
 .TP
 .B __phishing__
 Messages flagged as phishing.
+.TP
+.B __all__
+Every cached message, whatever its flags \- the cross\-folder counterpart of a
+plain folder listing.
 .SH SEARCH
 .PP
 .B \-\-folder \(dq__search__:<scope>:<query>\(dq
@@ -204,6 +239,15 @@ Unread mail across all folders:
 .RS
 .nf
 email\-cli\-ro \-\-batch list \-\-folder __unread__ \-\-limit 20
+.fi
+.RE
+.PP
+Everything from one sender in a date range, as JSON:
+.PP
+.RS
+.nf
+email\-cli\-ro \-\-batch list \-\-all \-\-folder __all__ \\
+    \-\-from @shop.example \-\-since 2024\-01\-01 \-\-json
 .fi
 .RE
 .PP

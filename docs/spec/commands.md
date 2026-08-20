@@ -67,6 +67,62 @@ Lists messages in the configured (or overridden) IMAP folder.
 | `--folder <name>` | `cfg.folder` | Override the IMAP folder for this invocation only |
 | `--limit <n>` | terminal height − 6, or 100 in batch mode | Maximum rows per page; must be a positive integer |
 | `--offset <n>` | 1 | 1-based index of the first message to display |
+| `--from <text>` | — | Keep only messages whose From contains `<text>` (case-insensitive substring) |
+| `--since <YYYY-MM-DD>` | — | Keep only messages dated on or after this day (inclusive) |
+| `--before <YYYY-MM-DD>` | — | Keep only messages dated strictly before this day (exclusive) |
+| `--json` | off | Emit JSON instead of the text table |
+| `--all-accounts` | off | Repeat the listing for every configured account |
+
+### Filters
+
+`--from`, `--since` and `--before` are evaluated against the **local manifest**
+before sorting and paging, so `--limit`, `--offset` and the "N more message(s)"
+hint all describe the filtered set. They combine with AND.
+
+Dates are compared on the `YYYY-MM-DD` prefix of the manifest's
+`YYYY-MM-DD HH:MM` field, which orders correctly as text. A value that is not
+in `YYYY-MM-DD` form is rejected with an error rather than silently matching
+nothing.
+
+A message whose headers are not cached yet has no manifest row and therefore
+cannot be judged; such entries are dropped from a filtered listing, so the
+result never claims a match that was not verified.
+
+### Listing across accounts
+
+`--all-accounts` runs the same listing for every configured account, each
+preceded by an `=== <account> ===` heading, and skips the usual "which
+account?" prompt. Combining it with `--json` is refused: several JSON
+documents in sequence would not form one parseable value. To collect JSON per
+account, loop in the shell:
+
+```bash
+for a in $(email-cli-ro list-accounts --batch); do
+    email-cli-ro "$a" --batch list --json
+done
+```
+
+### JSON output
+
+`--json` writes one object per message:
+
+```json
+[
+  {"uid": "0000000000000001", "date": "2024-01-10 10:00",
+   "from": "Alice <alice@shop.example>", "subject": "Order A",
+   "folder": "INBOX", "status": "N-----", "flags": 3073,
+   "unread": true, "flagged": false, "attachments": false}
+]
+```
+
+Guarantees this mode makes:
+
+- **stdout is a single parseable document.** The count line, the paging hint
+  and the "no cached data" advice are suppressed or routed to stderr. An empty
+  result is `[]`, including for a folder with no cached data.
+- **Fields are never truncated**, unlike the terminal table, which fits
+  `Subject` and `From` to the window.
+- Strings are escaped per RFC 8259; the values are UTF-8, as stored.
 
 ### Virtual folders
 
@@ -82,6 +138,7 @@ offline. Each selects messages carrying one flag:
 | `__forwarded__` | Messages that were forwarded | `MSG_FLAG_FORWARDED` |
 | `__junk__` | Messages marked as junk / spam | `MSG_FLAG_JUNK` |
 | `__phishing__` | Messages flagged as phishing | `MSG_FLAG_PHISHING` |
+| `__all__` | Every cached message, whatever its flags | — (no flag required) |
 
 A message appearing in several folders (e.g. the same UID in `INBOX` and
 `INBOX.Sent`) is listed once — the synthesized manifest is deduplicated by UID.

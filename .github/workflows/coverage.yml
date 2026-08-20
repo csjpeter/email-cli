@@ -45,18 +45,21 @@ jobs:
           # genbadge reads Cobertura line-rate, so we build a synthetic XML
           # that exposes function hit/total as the line-rate metric.
           FUNC_SUMMARY=$(lcov --summary build/coverage-functional.info 2>&1 | grep 'functions')
-          FUNC_PCT=$(echo "$FUNC_SUMMARY" | grep -oP '[0-9]+\.[0-9]+(?=%)')
           FUNC_HIT=$(echo "$FUNC_SUMMARY" | grep -oP '(?<=\()\d+')
           FUNC_TOTAL=$(echo "$FUNC_SUMMARY" | grep -oP '\d+(?= functions)')
-          python3 - "$FUNC_PCT" "$FUNC_HIT" "$FUNC_TOTAL" <<'PYEOF'
+          python3 - "$FUNC_HIT" "$FUNC_TOTAL" <<'PYEOF'
           import sys, pathlib
-          pct, hit, total = float(sys.argv[1])/100, sys.argv[2], sys.argv[3]
-          # genbadge reads every standard Cobertura root attribute and calls
-          # float() on them unconditionally — a missing one (complexity) raises
-          # TypeError, so emit the full set.
+          hit, total = sys.argv[1], sys.argv[2]
+          # genbadge float()s every standard Cobertura root attribute (a missing
+          # `complexity` raises TypeError) and re-derives the rates from the
+          # covered/valid counts, rejecting any mismatch.  So: emit the full
+          # attribute set, derive line-rate from hit/total rather than from
+          # lcov's rounded percentage, and keep branch-rate at 0 to match the
+          # zero branch counts — this badge reports function coverage only.
+          rate = (float(hit) / float(total)) if float(total) else 0.0
           xml = (
               '<?xml version="1.0" ?>\n'
-              f'<coverage line-rate="{pct:.4f}" branch-rate="{pct:.4f}"'
+              f'<coverage line-rate="{rate:.4f}" branch-rate="0"'
               f' lines-covered="{hit}" lines-valid="{total}"'
               ' branches-covered="0" branches-valid="0" complexity="0"'
               ' version="" timestamp="0"><packages/></coverage>\n'

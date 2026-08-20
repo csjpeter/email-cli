@@ -4831,6 +4831,163 @@ kill "$TRASH83_PID" 2>/dev/null; wait "$TRASH83_PID" 2>/dev/null || true
 
 export HOME="$H_ALPHA"
 
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 84 — list filters (--from/--since/--before), __all__ and --json
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 84: list filters, __all__, JSON output ---"
+
+H_F84="./build/tests/functional/homes/f84"
+rm -rf "./build/tests/functional/homes/f84"
+mkdir -p "$H_F84/.config/email-cli/accounts/f84@test.local"
+cat > "$H_F84/.config/email-cli/accounts/f84@test.local/config.ini" <<CFG84
+EMAIL_HOST=imaps://localhost:19984
+EMAIL_USER=f84@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+SYNC_INTERVAL=5
+CFG84
+M84="$H_F84/.local/share/email-cli/accounts/f84@test.local/manifests"
+mkdir -p "$M84"
+# uid \t from \t subject \t date \t flags   (1 = MSG_FLAG_UNSEEN)
+{
+  printf "0000000000000001\tAlice <alice@shop.example>\tOrderAlpha\t2024-01-10 10:00\t1\n"
+  printf "0000000000000002\tBob <bob@other.example>\tOrderBeta\t2024-03-15 10:00\t0\n"
+} > "$M84/INBOX.tsv"
+printf "0000000000000003\tAlice <alice@shop.example>\tSentGamma\t2024-02-20 10:00\t0\n" > "$M84/INBOX.Sent.tsv"
+
+f84() { (export HOME="$H_F84"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+         "$BIN_DIR/email-cli-ro" --batch list --all "$@" 2>&1 || true); }
+
+# --from: case-insensitive substring on the From field
+OUT84_1=$(f84 --from alice)
+check     "84.1 --from matches sender"            "OrderAlpha"  "$OUT84_1"
+check_not "84.2 --from excludes other senders"    "OrderBeta"   "$OUT84_1"
+OUT84_2=$(f84 --from ALICE)
+check     "84.3 --from is case-insensitive"       "OrderAlpha"  "$OUT84_2"
+
+# --since is inclusive, --before is exclusive
+OUT84_3=$(f84 --since 2024-03-15)
+check     "84.4 --since includes the bound day"   "OrderBeta"   "$OUT84_3"
+check_not "84.5 --since drops earlier mail"       "OrderAlpha"  "$OUT84_3"
+OUT84_4=$(f84 --before 2024-03-15)
+check     "84.6 --before keeps earlier mail"      "OrderAlpha"  "$OUT84_4"
+check_not "84.7 --before excludes the bound day"  "OrderBeta"   "$OUT84_4"
+
+# Filters combine
+OUT84_5=$(f84 --from alice --since 2024-01-01 --before 2024-02-01)
+check     "84.8 combined filters match"           "OrderAlpha"  "$OUT84_5"
+check_not "84.9 combined filters exclude"         "OrderBeta"   "$OUT84_5"
+
+# Invalid date is rejected, not silently ignored
+OUT84_6=$( (export HOME="$H_F84"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" --batch list --since 2024/01/01 2>&1 || true) )
+check     "84.10 invalid --since rejected"        "YYYY-MM-DD"  "$OUT84_6"
+
+# __all__ spans folders; a plain listing does not
+OUT84_7=$(f84 --folder __all__)
+check     "84.11 __all__ includes INBOX mail"     "OrderAlpha"  "$OUT84_7"
+check     "84.12 __all__ includes other folders"  "SentGamma"   "$OUT84_7"
+OUT84_8=$(f84)
+check_not "84.13 plain list stays in one folder"  "SentGamma"   "$OUT84_8"
+
+# --json: parseable, complete, and free of decoration
+OUT84_9=$(f84 --json)
+check     "84.14 json: opens an array"            "^\["        "$OUT84_9"
+check     "84.15 json: has uid field"             "\"uid\""     "$OUT84_9"
+check     "84.16 json: has boolean unread"        "\"unread\": \(true\|false\)" "$OUT84_9"
+check_not "84.17 json: no count line on stdout"   "message(s) in" "$OUT84_9"
+JSON_OK=$(printf '%s' "$OUT84_9" | python3 -c "
+import json,sys
+try:
+    d = json.load(sys.stdin)
+    print('PARSED', len(d))
+except Exception as e:
+    print('BROKEN', e)
+" 2>/dev/null || echo "BROKEN")
+check     "84.18 json: stdout parses as JSON"     "PARSED 2"    "$JSON_OK"
+
+# --json with no matches is still a valid empty array
+OUT84_10=$(f84 --json --from zzznomatch)
+JSON_EMPTY=$(printf '%s' "$OUT84_10" | python3 -c "
+import json,sys
+try:
+    print('EMPTY' if json.load(sys.stdin) == [] else 'NONEMPTY')
+except Exception:
+    print('BROKEN')
+" 2>/dev/null || echo "BROKEN")
+check     "84.19 json: empty result is []"        "EMPTY"       "$JSON_EMPTY"
+
+# --json for an uncached folder: still valid JSON, advice on stderr
+OUT84_11=$( (export HOME="$H_F84"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" --batch list --all --json --folder INBOX.Missing 2>/dev/null || true) )
+JSON_MISS=$(printf '%s' "$OUT84_11" | python3 -c "
+import json,sys
+try:
+    print('EMPTY' if json.load(sys.stdin) == [] else 'NONEMPTY')
+except Exception:
+    print('BROKEN')
+" 2>/dev/null || echo "BROKEN")
+check     "84.20 json: uncached folder yields []" "EMPTY"       "$JSON_MISS"
+OUT84_12=$( (export HOME="$H_F84"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" --batch list --all --json --folder INBOX.Missing 2>&1 >/dev/null || true) )
+check     "84.21 json: advice goes to stderr"     "No cached data" "$OUT84_12"
+
+# The same options exist on the read-write binary
+OUT84_13=$( (export HOME="$H_F84"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --all --from alice 2>&1 || true) )
+check     "84.22 email-cli has the same filters"  "OrderAlpha"  "$OUT84_13"
+
+# Help documents them
+OUT84_14=$( "$BIN_DIR/email-cli-ro" help list 2>&1 || true )
+check     "84.23 help documents --from"           "\-\-from"    "$OUT84_14"
+check     "84.24 help documents --json"           "\-\-json"    "$OUT84_14"
+check     "84.25 help documents __all__"          "__all__"     "$OUT84_14"
+
+# --all-accounts: every configured account, each under its own heading
+H_F84B="./build/tests/functional/homes/f84b"
+rm -rf "./build/tests/functional/homes/f84b"
+for acct in first@test.local second@test.local; do
+    mkdir -p "$H_F84B/.config/email-cli/accounts/$acct"
+    cat > "$H_F84B/.config/email-cli/accounts/$acct/config.ini" <<CFGB
+EMAIL_HOST=imaps://localhost:19984
+EMAIL_USER=$acct
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+SYNC_INTERVAL=5
+CFGB
+    mkdir -p "$H_F84B/.local/share/email-cli/accounts/$acct/manifests"
+done
+printf "0000000000000010\tSender One <one@x.test>\tSubjectOne\t2024-01-01 10:00\t1\n" \
+    > "$H_F84B/.local/share/email-cli/accounts/first@test.local/manifests/INBOX.tsv"
+printf "0000000000000020\tSender Two <two@x.test>\tSubjectTwo\t2024-01-02 10:00\t1\n" \
+    > "$H_F84B/.local/share/email-cli/accounts/second@test.local/manifests/INBOX.tsv"
+
+OUT84_15=$( (export HOME="$H_F84B"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" --batch list --all --all-accounts 2>&1 || true) )
+check "84.26 --all-accounts lists first account"  "SubjectOne"        "$OUT84_15"
+check "84.27 --all-accounts lists second account" "SubjectTwo"        "$OUT84_15"
+check "84.28 --all-accounts prints headings"      "=== first@test.local ===" "$OUT84_15"
+
+# Without the flag, several accounts are ambiguous and the command refuses
+OUT84_16=$( (export HOME="$H_F84B"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" --batch list --all 2>&1 || true) )
+check "84.29 without the flag multiple accounts error" "Multiple accounts" "$OUT84_16"
+
+# --all-accounts with --json is refused rather than emitting several documents
+OUT84_17=$( (export HOME="$H_F84B"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" --batch list --all --all-accounts --json 2>&1 || true) )
+check "84.30 --all-accounts + --json refused"     "cannot be combined" "$OUT84_17"
+check "84.31 refusal suggests a shell loop"       "list-accounts"      "$OUT84_17"
+
+OUT84_18=$( "$BIN_DIR/email-cli-ro" help list 2>&1 || true )
+check "84.32 help documents --all-accounts"       "\-\-all-accounts"  "$OUT84_18"
+
+export HOME="$H_ALPHA"
+
 # ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════

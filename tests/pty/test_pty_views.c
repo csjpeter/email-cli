@@ -181,7 +181,7 @@ static void test_help_general(void) {
 
 static void test_help_list(void) {
     const char *a[] = {"list", "--help", NULL};
-    PtySession *s = cli_open_size(120, 50, a);
+    PtySession *s = cli_open_size(120, 80, a)   /* list --help is ~60 lines */;
     ASSERT(s != NULL, "help list: opens");
     ASSERT_WAIT_FOR(s, "Usage: email-cli", WAIT_MS); /* common prefix for -ro too */
     pty_settle(s, 300);
@@ -1437,7 +1437,7 @@ static void test_ro_help_general(void) {
 
 static void test_ro_help_list(void) {
     const char *a[] = {"list", "--help", NULL};
-    PtySession *s = cli_open_size(120, 50, a);
+    PtySession *s = cli_open_size(120, 80, a)   /* list --help is ~60 lines */;
     ASSERT(s != NULL, "ro help list: opens");
     ASSERT_WAIT_FOR(s, "Usage: email-cli-ro", WAIT_MS);
     pty_settle(s, 300);

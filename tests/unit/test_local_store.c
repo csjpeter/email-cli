@@ -612,6 +612,39 @@ void test_local_flag_search(void) {
     ASSERT(!found2, "flag_search: read UID2 not in UNSEEN results");
     local_search_free(res, cnt);
 
+    /* Test 5: mask 0 means "no flag requirement", i.e. every cached message
+     * across every folder — this is what the __all__ view is built on.  A
+     * literal reading of `flags & 0` would return nothing, so the special
+     * case has to be explicit. */
+    res = NULL; cnt = 0;
+    int rc0 = local_flag_search(0, &res, &cnt);
+    ASSERT(rc0 == 0, "flag_search mask 0: returns 0");
+    ASSERT(cnt == 4, "flag_search mask 0: all four messages");
+    int seen_read = 0, seen_folders = 0;
+    for (int i = 0; i < cnt; i++) {
+        if (strcmp(res[i].uid, "0000000000000002") == 0) seen_read = 1;
+        if (strcmp(res[i].folder, "Sent") == 0)          seen_folders = 1;
+    }
+    ASSERT(seen_read,    "flag_search mask 0: includes the flagless message");
+    ASSERT(seen_folders, "flag_search mask 0: spans folders");
+    local_search_free(res, cnt);
+
+    /* Test 6: the aggregate manifest honours the same convention. */
+    Manifest *all = manifest_load_all_with_flag(0);
+    ASSERT(all != NULL,     "manifest_load_all_with_flag(0): returns a manifest");
+    ASSERT(all && all->count == 4,
+           "manifest_load_all_with_flag(0): every message, not none");
+    manifest_free(all);
+
+    Manifest *only_unread = manifest_load_all_with_flag(MSG_FLAG_UNSEEN);
+    ASSERT(only_unread && only_unread->count == 2,
+           "manifest_load_all_with_flag(UNSEEN): still filters");
+    manifest_free(only_unread);
+
+    res = NULL; cnt = 0;
+    local_flag_search(MSG_FLAG_UNSEEN, &res, &cnt);
+    local_search_free(res, cnt);
+
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
 }

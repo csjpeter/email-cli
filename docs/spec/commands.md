@@ -68,6 +68,56 @@ Lists messages in the configured (or overridden) IMAP folder.
 | `--limit <n>` | terminal height − 6, or 100 in batch mode | Maximum rows per page; must be a positive integer |
 | `--offset <n>` | 1 | 1-based index of the first message to display |
 
+### Virtual folders
+
+`--folder` also accepts virtual names that are not IMAP folders. They are
+resolved entirely from the local store, span every cached folder, and work
+offline. Each selects messages carrying one flag:
+
+| Virtual folder | Selects | Flag bit |
+|----------------|---------|----------|
+| `__unread__` | Unread messages | `MSG_FLAG_UNSEEN` |
+| `__flagged__` | Starred / flagged messages | `MSG_FLAG_FLAGGED` |
+| `__answered__` | Messages that were replied to | `MSG_FLAG_ANSWERED` |
+| `__forwarded__` | Messages that were forwarded | `MSG_FLAG_FORWARDED` |
+| `__junk__` | Messages marked as junk / spam | `MSG_FLAG_JUNK` |
+| `__phishing__` | Messages flagged as phishing | `MSG_FLAG_PHISHING` |
+
+A message appearing in several folders (e.g. the same UID in `INBOX` and
+`INBOX.Sent`) is listed once — the synthesized manifest is deduplicated by UID.
+
+### Content search
+
+```
+--folder "__search__:<scope>:<query>"
+```
+
+| Scope | Field searched |
+|-------|----------------|
+| `0` | Subject |
+| `1` | From |
+| `2` | To |
+| `3` | Body |
+
+The query is matched case-insensitively as a substring; it is not a glob. The
+search reads the local store only, so it needs no server connection, and it
+sees only messages already cached (run `email-sync` first for full coverage).
+
+Scope `3` searches the **decoded** body: `base64` and `quoted-printable` parts
+are decoded, non-UTF-8 charsets are converted via `iconv`, and `text/html`
+parts are searched as rendered text. This matters for machine-generated mail
+such as order confirmations, where the subject is generic and the identifying
+detail (a product name, an order number) appears only in the body.
+
+`--all` has no effect on a search: every cached message is considered
+regardless of read state.
+
+Quote the argument — it contains colons.
+
+```bash
+email-cli-ro --batch list --folder "__search__:3:order number"
+```
+
 ### Behaviour
 
 1. Issue `UID SEARCH UNSEEN` to obtain the set of unread UIDs.
@@ -177,7 +227,7 @@ the current ALL set.
 ## `show`
 
 ```
-email-cli [--batch] show <uid>
+email-cli [--batch] show <uid> [--folder <name>] [--raw]
 ```
 
 Displays the full content of one message identified by its IMAP UID.
@@ -187,6 +237,34 @@ Displays the full content of one message identified by its IMAP UID.
 | Argument | Description |
 |----------|-------------|
 | `<uid>` | Positive integer IMAP UID (as shown in `list` output) |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--folder <name>` | Folder/label holding the message; UIDs are unique only within a mailbox |
+| `--label <name>` | Gmail alias for `--folder` |
+| `--raw` | Print the stored message verbatim (see below) |
+
+### `--raw`
+
+Writes the RFC 2822 source exactly as stored: no MIME parsing, no
+transfer-encoding or charset decoding, no HTML rendering, no header
+reformatting. The message is still fetched and cached the same way.
+
+This is the view for diagnosing encoding problems, where the question is what
+the sender actually transmitted — for example reading the real `Content-Type`
+line to see which charset was declared and in what syntax.
+
+### Charset diagnostics
+
+When a text body declares a charset that `iconv` does not know, or the
+conversion hits an invalid byte sequence, the body is emitted **undecoded**.
+Because that is otherwise indistinguishable from correctly decoded output, a
+warning is written to **stderr** naming the UID and the declared charset;
+stdout still carries the message. The detection lives in `core/mime_util`
+(which reports outcomes via `MimeTextInfo` and never writes to the user), and
+the message is emitted by the domain layer.
 
 ### Behaviour
 

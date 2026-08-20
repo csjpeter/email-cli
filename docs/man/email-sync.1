@@ -1,0 +1,74 @@
+.TH EMAIL\-SYNC 1 "" "email-cli" "User Commands"
+.SH NAME
+email\-sync \- background mail synchroniser for email-cli
+.SH SYNOPSIS
+.B email\-sync
+.RI [ options ]
+.br
+.B email\-sync cron
+.RB { setup | status | remove }
+.SH DESCRIPTION
+.B email\-sync
+downloads new mail into the local store so that
+.BR email\-cli (1),
+.BR email\-cli\-ro (1)
+and
+.BR email\-tui (1)
+can read \- and search \- without contacting the server.
+.PP
+Run it before searching: the content search only sees messages that are
+already cached.
+.PP
+Gmail accounts use the History API for incremental runs and fall back to a
+full reconcile when the stored history ID has expired. IMAP accounts use
+CONDSTORE/QRESYNC when the server offers it.
+.SH OPTIONS
+.TP
+.BI \-\-account " email"
+Sync only this account instead of all of them.
+.TP
+.B \-\-reconcile
+Force a full listing instead of the incremental path.
+.TP
+.B \-\-rebuild\-index
+Rebuild label index files from cached headers. Offline; fixes zero or wrong
+counts without re\-downloading.
+.TP
+.B \-\-rebuild\-contacts
+Rebuild the contact suggestion cache from cached headers. Offline.
+.TP
+.B \-\-apply\-rules
+Apply the account's sorting rules to already\-cached messages, then push the
+resulting flag changes to the server.
+.TP
+.B \-\-verbose ", " \-v
+Report each rule that fires and each message that changes.
+.TP
+.B \-\-help ", " \-h
+Show help.
+.SH CRON
+.TP
+.B cron setup
+Install a crontab entry that runs a sync every
+.I SYNC_INTERVAL
+minutes.
+.TP
+.B cron status
+Report whether the entry is installed.
+.TP
+.B cron remove
+Remove the entry.
+.SH FILES
+.TP
+.I ~/.cache/email\-cli/logs/sync-session.log
+Sync diagnostics.
+.PP
+Store and configuration paths are as in
+.BR email\-cli\-ro (1).
+.SH EXIT STATUS
+.B 0
+on success, non\-zero on failure.
+.SH SEE ALSO
+.BR email\-cli (1),
+.BR email\-cli\-ro (1),
+.BR email\-tui (1)

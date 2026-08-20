@@ -92,6 +92,14 @@ add_subdirectory(tests/pty EXCLUDE_FROM_ALL)
 install(TARGETS email-cli email-cli-ro email-sync email-tui email-import-rules
         RUNTIME DESTINATION bin)
 
+# Man pages: section 1, one per binary.  Packagers compress them themselves.
+install(FILES docs/man/email-cli.1
+              docs/man/email-cli-ro.1
+              docs/man/email-sync.1
+              docs/man/email-tui.1
+              docs/man/email-import-rules.1
+        DESTINATION share/man/man1)
+
 # ── CPack packaging (DEB + RPM) ────────────────────────────────────────────────
 set(CPACK_PACKAGE_NAME        "email-cli")
 set(CPACK_PACKAGE_VERSION     "${PROJECT_VERSION}")

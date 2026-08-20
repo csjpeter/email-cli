@@ -1,0 +1,59 @@
+.TH EMAIL\-TUI 1 "" "email-cli" "User Commands"
+.SH NAME
+email\-tui \- full-screen terminal mail reader for email-cli
+.SH SYNOPSIS
+.B email\-tui
+.br
+.B email\-tui
+.RB { compose | reply | send }
+.RI [ options ]
+.SH DESCRIPTION
+Interactive reader for the accounts configured with
+.BR email\-cli (1).
+Started without arguments it opens the account list, then a folder or label
+browser, then the message list.
+.PP
+It requires a terminal. For scripting use
+.BR email\-cli (1)
+or
+.BR email\-cli\-ro (1).
+.SH NAVIGATION
+Arrow keys or
+.BR j / k
+move,
+.B Enter
+opens,
+.B Backspace
+goes up one level,
+.B ESC
+quits, and
+.B h
+shows the full shortcut list for the current view \- that popup is the
+authoritative key reference and is kept in sync with the code.
+.PP
+The browser starts on the
+.B Unread
+virtual label; the folder list also offers
+.BR Flagged ", " Junk ", " Phishing ", " Answered " and " Forwarded .
+.B /
+starts a content search in the current view.
+.SH SUBCOMMANDS
+.TP
+.B compose
+Open the compose dialog directly.
+.TP
+.B reply
+Reply to a message.
+.TP
+.B send
+Send a message non\-interactively.
+.SH FILES
+As in
+.BR email\-cli\-ro (1),
+plus
+.I ~/.local/share/email\-cli/ui.ini
+which remembers the last account and folder.
+.SH SEE ALSO
+.BR email\-cli (1),
+.BR email\-cli\-ro (1),
+.BR email\-sync (1)

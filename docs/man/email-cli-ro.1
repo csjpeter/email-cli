@@ -1,0 +1,230 @@
+.TH EMAIL\-CLI\-RO 1 "" "email-cli" "User Commands"
+.SH NAME
+email\-cli\-ro \- read\-only terminal email client for scripts and AI agents
+.SH SYNOPSIS
+.B email\-cli\-ro
+.RI [ account ]
+.RI [ --batch ]
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+.B email\-cli\-ro
+reads mail over IMAP or the Gmail API and prints it to standard output.
+It is the read\-only member of the email\-cli suite: it can only issue
+.B FETCH
+(with
+.BR BODY.PEEK )
+and
+.B SEARCH
+commands, so it never sends, moves, deletes, or changes a flag \- not even
+.BR \eSeen .
+This makes it safe to hand to automation that must not modify a mailbox.
+.PP
+For write operations use
+.BR email\-cli (1);
+for an interactive terminal UI use
+.BR email\-tui (1).
+.SH COMMANDS
+.TP
+.B list
+List messages. Unread only by default; see
+.B \-\-all
+and the virtual folders below.
+.TP
+.BI show " uid " [ \-\-raw ]
+Print one message: headers, then the body as rendered text. HTML mail is
+converted to text; attachments are listed, not dumped. With
+.B \-\-raw
+the stored message is written verbatim instead \- see OPTIONS.
+.TP
+.B list\-folders
+List IMAP folders, with message and unread counts.
+.TP
+.B list\-labels
+List Gmail labels with their IDs.
+.TP
+.BI list\-attachments " uid"
+List the attachments of a message.
+.TP
+.BI save\-attachment " uid filename " [ dir ]
+Write one attachment to disk.
+.TP
+.B list\-accounts
+List configured accounts.
+.TP
+.BI help " [command]"
+Show help for a command.
+.SH OPTIONS
+.TP
+.B \-\-batch
+Disable the interactive pager and use a fixed page size of 100. This is
+implied whenever standard output is not a terminal, so a pipe or a captured
+subprocess already behaves this way; pass it explicitly when in doubt.
+.TP
+.B \-\-all
+List every message, not just unread ones.
+.TP
+.BI \-\-folder " name"
+Folder to operate on, overriding the configured one. Accepts the virtual
+folders described below.
+.TP
+.BI \-\-label " id-or-name"
+Gmail alias for
+.BR \-\-folder .
+.TP
+.BI \-\-limit " n"
+At most
+.I n
+messages (default 100 in batch mode).
+.TP
+.BI \-\-offset " n"
+Start at the
+.IR n th
+message, 1\-based.
+.TP
+.B \-\-raw
+.RB ( show )
+Write the RFC 2822 source exactly as stored: no MIME parsing, no
+transfer\-encoding or charset decoding, no HTML rendering, no header
+reformatting. Use it to see what the sender actually transmitted \- for
+instance the real
+.B Content\-Type
+line when text looks mis\-decoded.
+.TP
+.BI \-\-account " email"
+Select the account. Required when several are configured; it can also be
+given as the first positional argument.
+.SH VIRTUAL FOLDERS
+.B \-\-folder
+also accepts names that are not real folders. They are resolved from the
+local store, span every cached folder, and need no server connection.
+A message cached in several folders is listed once.
+.TP
+.B __unread__
+Unread messages.
+.TP
+.B __flagged__
+Starred / flagged messages.
+.TP
+.B __answered__
+Messages that were replied to.
+.TP
+.B __forwarded__
+Messages that were forwarded.
+.TP
+.B __junk__
+Messages marked as junk or spam.
+.TP
+.B __phishing__
+Messages flagged as phishing.
+.SH SEARCH
+.PP
+.B \-\-folder \(dq__search__:<scope>:<query>\(dq
+.PP
+.I scope
+selects the field:
+.BR 0 " = Subject, " 1 " = From, " 2 " = To, " 3 " = Body."
+The query is a case\-insensitive substring, not a glob. Quote the whole
+argument \- it contains colons.
+.PP
+The search runs against the local store, so it works offline and sees only
+messages already cached. Run
+.BR email\-sync (1)
+first if the mailbox may have unfetched mail.
+.PP
+Scope
+.B 3
+searches the
+.I decoded
+body:
+.B base64
+and
+.B quoted\-printable
+parts are decoded, non\-UTF\-8 charsets are converted, and
+.B text/html
+parts are searched as rendered text. Prefer it over a subject search for
+machine\-generated mail \- order confirmations, invoices and receipts
+usually carry a generic subject, and the identifying detail (a product
+name, an order number) appears only in the body.
+.PP
+.B \-\-all
+has no effect on a search: every cached message is considered.
+.SH OUTPUT
+Batch output is a fixed\-width table: UID, date, a six\-character status
+column, subject, and sender. The subject is truncated to the column width,
+so parse the UID and re\-read the full text with
+.B show
+rather than scraping the table. Status characters, in order:
+.PP
+.RS
+.nf
+1  P=phishing  J=junk  N=unread  \-
+2  *=starred  \-
+3  D=done  \-
+4  A=has attachment  \-
+5  R=replied  F=forwarded  \-
+6  v=DMARC pass  x=DMARC fail  \-
+.fi
+.RE
+.SH DIAGNOSTICS
+If a text body declares a charset that
+.BR iconv (3)
+does not know, or the conversion hits an invalid byte sequence, the body is
+printed
+.I undecoded
+\- it cannot be recovered. Since that is otherwise indistinguishable from
+correct output, a warning naming the UID and the declared charset is written to
+standard error; the message itself still goes to standard output. Use
+.B show \-\-raw
+to inspect the original headers in that case.
+.SH FILES
+.TP
+.I ~/.config/email\-cli/accounts/<email>/config.ini
+Per\-account configuration, mode 0600. IMAP host, user, password and folder;
+Gmail accounts store an OAuth2 refresh token instead of a password.
+.TP
+.I ~/.local/share/email\-cli/accounts/<email>/
+Local store: cached messages, per\-folder manifests, label indexes and
+queued operations. Directory mode 0700.
+.TP
+.I ~/.cache/email\-cli/logs/session.log
+Diagnostics. May contain server responses.
+.PP
+.BR XDG_CONFIG_HOME ", " XDG_DATA_HOME " and " XDG_CACHE_HOME
+override these locations and take precedence over
+.BR HOME .
+.SH EXIT STATUS
+.B 0
+on success, non\-zero on failure. Errors go to standard error, results to
+standard output.
+.SH EXAMPLES
+.PP
+Unread mail across all folders:
+.PP
+.RS
+.nf
+email\-cli\-ro \-\-batch list \-\-folder __unread__ \-\-limit 20
+.fi
+.RE
+.PP
+Find an order confirmation by product name, then read it in full:
+.PP
+.RS
+.nf
+email\-cli\-ro \-\-batch list \-\-folder \(dq__search__:3:water heater\(dq
+email\-cli\-ro \-\-batch show 0000000000012345 \-\-folder INBOX
+.fi
+.RE
+.PP
+A specific sender, when several accounts are configured:
+.PP
+.RS
+.nf
+email\-cli\-ro user@example.com \-\-batch list \-\-folder \(dq__search__:1:@shop.example\(dq
+.fi
+.RE
+.SH SEE ALSO
+.BR email\-cli (1),
+.BR email\-tui (1),
+.BR email\-sync (1),
+.BR email\-import\-rules (1)

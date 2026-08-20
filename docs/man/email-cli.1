@@ -1,0 +1,138 @@
+.TH EMAIL\-CLI 1 "" "email-cli" "User Commands"
+.SH NAME
+email\-cli \- terminal email client for IMAP and Gmail (batch mode)
+.SH SYNOPSIS
+.B email\-cli
+.RI [ account ]
+.RI [ --batch ]
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+.B email\-cli
+reads and modifies mail over IMAP or the Gmail API from the command line.
+It is the read\-write member of the suite: besides listing and reading it can
+send, flag, label, move and delete.
+.PP
+If you need a tool that provably cannot change anything \- for scripts, cron
+jobs or AI agents \- use
+.BR email\-cli\-ro (1)
+instead. For an interactive terminal UI use
+.BR email\-tui (1).
+.PP
+On first run, with no account configured, an interactive setup wizard starts.
+It needs a terminal; in a non\-interactive context configure the account first
+or the command aborts.
+.SH COMMANDS
+.SS Reading
+.TP
+.B list
+List messages. Unread only by default.
+.TP
+.BI show " uid " [ \-\-raw ]
+Print one message as rendered text, or verbatim with
+.BR \-\-raw .
+.TP
+.B list\-folders
+List IMAP folders with counts.
+.TP
+.B list\-labels
+List Gmail labels with IDs.
+.TP
+.BI list\-attachments " uid"
+List a message's attachments.
+.TP
+.BI save\-attachment " uid filename " [ dir ]
+Write an attachment to disk.
+.SS Writing
+.TP
+.B send
+Send a message non\-interactively; see
+.B email\-cli help send
+for the required options.
+.TP
+.BI mark\-read " uid" "\fR, \fP" mark\-unread " uid"
+Toggle the read state.
+.TP
+.BI mark\-starred " uid" "\fR, \fP" remove\-starred " uid"
+Toggle the star / flagged state.
+.TP
+.BI mark\-junk " uid" "\fR, \fP" mark\-notjunk " uid"
+Toggle the junk state.
+.TP
+.BI add\-label " uid label" "\fR, \fP" remove\-label " uid label"
+Gmail: add or remove a label.
+.TP
+.BI create\-label " name" "\fR, \fP" delete\-label " id"
+Gmail: manage labels.
+.TP
+.BI create\-folder " name" "\fR, \fP" delete\-folder " name"
+IMAP: manage folders.
+.SS Accounts and rules
+.TP
+.B list\-accounts ", " add\-account ", " remove\-account " " \fIemail\fP
+Manage configured accounts.
+.TP
+.B config
+Show or change configuration, including SMTP.
+.TP
+.B migrate\-credentials
+Re\-encrypt or decrypt stored passwords.
+.TP
+.B rules list ", " rules apply " [\fB\-\-dry\-run\fP], " rules add ", " rules remove
+Manage per\-account sorting rules. See
+.BR email\-import\-rules (1)
+to import them from Thunderbird.
+.TP
+.B help " [\fIcommand\fP], " help gmail
+Command help; the
+.B gmail
+topic walks through OAuth2 setup.
+.SH OPTIONS
+The options of
+.B list
+and
+.BR show ,
+the
+.B \-\-batch
+flag, and the
+.B \-\-account
+selector behave exactly as described in
+.BR email\-cli\-ro (1).
+.SH VIRTUAL FOLDERS AND SEARCH
+.B \-\-folder
+accepts the virtual folders
+.BR __unread__ ", " __flagged__ ", " __answered__ ", " __forwarded__ ", "
+.B __junk__
+and
+.BR __phishing__ ,
+and the content search
+.BR "__search__:<scope>:<query>" .
+Both are resolved from the local store and work offline.
+See
+.BR email\-cli\-ro (1)
+for the full description, including why a body search (scope
+.BR 3 )
+is usually the right choice for order confirmations and other
+machine\-generated mail.
+.SH FILES
+As in
+.BR email\-cli\-ro (1).
+Configuration is written with mode 0600 and the local store with 0700.
+.SH EXIT STATUS
+.B 0
+on success, non\-zero on failure. Errors go to standard error.
+.SH EXAMPLES
+.PP
+.RS
+.nf
+email\-cli \-\-batch list \-\-folder __unread__
+email\-cli \-\-batch list \-\-folder \(dq__search__:3:invoice\(dq
+email\-cli mark\-read 0000000000012345 \-\-folder INBOX
+email\-cli send \-\-to a@example.com \-\-subject Hi \-\-body \(dqHello\(dq
+.fi
+.RE
+.SH SEE ALSO
+.BR email\-cli\-ro (1),
+.BR email\-tui (1),
+.BR email\-sync (1),
+.BR email\-import\-rules (1)

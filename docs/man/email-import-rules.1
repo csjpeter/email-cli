@@ -1,0 +1,57 @@
+.TH EMAIL\-IMPORT\-RULES 1 "" "email-cli" "User Commands"
+.SH NAME
+email\-import\-rules \- import Thunderbird message filters into email-cli
+.SH SYNOPSIS
+.B email\-import\-rules
+.RI [ options ]
+.SH DESCRIPTION
+Converts Thunderbird
+.I msgFilterRules.dat
+files into the
+.I rules.ini
+format used by
+.BR email\-cli (1).
+.PP
+Without
+.BR \-\-account ,
+every configured account is processed and each Thunderbird filter is matched
+to the account whose IMAP server it belongs to, using the profile's
+.IR prefs.js .
+.PP
+Filter elements that have no equivalent are reported on standard error as
+.B [warn]
+lines and skipped; the rest of the rule is still converted. Run with
+.B \-\-dry\-run
+first to see exactly what would be written.
+.SH OPTIONS
+.TP
+.BI \-\-thunderbird\-path " dir"
+Thunderbird profile directory. Auto\-detected from
+.I ~/.thunderbird
+when omitted.
+.TP
+.BI \-\-account " email"
+Import for this account only.
+.TP
+.BI \-\-output " path"
+Write to this file instead of the account's
+.IR rules.ini .
+Requires
+.BR \-\-account .
+.TP
+.B \-\-dry\-run
+Print the converted rules without saving.
+.TP
+.B \-\-version ", " \-\-help ", " \-h
+Version and help.
+.SH FILES
+.TP
+.I ~/.config/email\-cli/accounts/<email>/rules.ini
+Destination rule file. Apply the rules with
+.BR "email\-sync \-\-apply\-rules" .
+.SH EXIT STATUS
+.B 0
+on success, non\-zero on failure.
+.SH SEE ALSO
+.BR email\-cli (1),
+.BR email\-sync (1)

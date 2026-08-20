@@ -157,21 +157,63 @@ static char *decode_transfer(const char *body, size_t len, const char *enc) {
  * Returns a malloc'd string or NULL if not found. */
 static char *extract_charset(const char *ctype) {
     if (!ctype) return NULL;
-    const char *p = strcasestr(ctype, "charset=");
-    if (!p) return NULL;
-    p += 8;
-    if (*p == '"') p++;          /* skip optional opening quote */
-    const char *start = p;
-    while (*p && *p != ';' && *p != ' ' && *p != '\t' && *p != '"' && *p != '\r' && *p != '\n')
-        p++;
-    if (p == start) return NULL;
-    return strndup(start, (size_t)(p - start));
+
+    /* RFC 2045 §5.1: parameters are  attribute [LWSP] "=" [LWSP] value,
+     * and the value may be a token or a quoted-string.  All of these are
+     * legal and must yield "iso-8859-2":
+     *
+     *     charset=iso-8859-2
+     *     charset="iso-8859-2"
+     *     charset = "iso-8859-2"
+     *
+     * Matching the literal "charset=" misses the spaced forms, and the
+     * conversion is then skipped silently, emitting the raw bytes. */
+    for (const char *p = ctype; (p = strcasestr(p, "charset")) != NULL; p += 7) {
+        /* Must start a parameter, so that e.g. "x-charset" does not match. */
+        if (p != ctype) {
+            char prev = p[-1];
+            if (prev != ';' && prev != ' ' && prev != '\t' &&
+                prev != '\r' && prev != '\n')
+                continue;
+        }
+
+        const char *q = p + 7;                       /* past "charset" */
+        while (*q == ' ' || *q == '\t') q++;
+        if (*q != '=') continue;
+        q++;
+        while (*q == ' ' || *q == '\t') q++;
+
+        if (*q == '"') {                             /* quoted-string value */
+            q++;
+            const char *end = strchr(q, '"');
+            if (!end || end == q) return NULL;
+            return strndup(q, (size_t)(end - q));
+        }
+
+        const char *start = q;                       /* bare token value */
+        while (*q && *q != ';' && *q != ' ' && *q != '\t' &&
+               *q != '"' && *q != '\r' && *q != '\n')
+            q++;
+        if (q == start) return NULL;
+        return strndup(start, (size_t)(q - start));
+    }
+    return NULL;
 }
 
 /* Convert s from from_charset to UTF-8 via iconv.
- * Returns a malloc'd UTF-8 string; on failure returns strdup(s). */
-static char *charset_to_utf8(const char *s, const char *from_charset) {
+ * Returns a malloc'd UTF-8 string; on failure returns strdup(s).
+ *
+ * @param info  Optional; records what happened so that callers can report a
+ *              pass-through instead of letting undecoded bytes reach the user
+ *              unannounced.  The core layer only records — deciding whether to
+ *              tell the user is the caller's job. */
+static char *charset_to_utf8_info(const char *s, const char *from_charset,
+                                  MimeTextInfo *info) {
     if (!s) return NULL;
+    if (info && from_charset && !info->declared_charset[0])
+        snprintf(info->declared_charset, sizeof(info->declared_charset),
+                 "%s", from_charset);
+
     if (!from_charset ||
         strcasecmp(from_charset, "utf-8")  == 0 ||
         strcasecmp(from_charset, "utf8")   == 0 ||
@@ -179,7 +221,10 @@ static char *charset_to_utf8(const char *s, const char *from_charset) {
         return strdup(s);
 
     iconv_t cd = iconv_open("UTF-8", from_charset);
-    if (cd == (iconv_t)-1) return strdup(s);
+    if (cd == (iconv_t)-1) {
+        if (info) info->unknown_charset = 1;
+        return strdup(s);
+    }
 
     size_t in_len   = strlen(s);
     size_t out_size = in_len * 4 + 1;
@@ -193,14 +238,25 @@ static char *charset_to_utf8(const char *s, const char *from_charset) {
     size_t r        = iconv(cd, &inp, &inbytes, &outp, &outbytes);
     iconv_close(cd);
 
-    if (r == (size_t)-1) { free(out); return strdup(s); }
+    if (r == (size_t)-1) {
+        if (info) info->invalid_sequence = 1;
+        free(out);
+        return strdup(s);
+    }
     *outp = '\0';
+    if (info) info->converted = 1;
     return out;
 }
 
-static char *text_from_part(const char *part);
+/* Backwards-compatible wrapper for call sites that do not want diagnostics. */
+static char *charset_to_utf8(const char *s, const char *from_charset) {
+    return charset_to_utf8_info(s, from_charset, NULL);
+}
 
-static char *text_from_multipart(const char *msg, const char *ctype) {
+static char *text_from_part_info(const char *part, MimeTextInfo *info);
+
+static char *text_from_multipart_info(const char *msg, const char *ctype,
+                                      MimeTextInfo *info) {
     const char *b = strcasestr(ctype, "boundary=");
     if (!b) return NULL;
     b += strlen("boundary=");
@@ -236,7 +292,7 @@ static char *text_from_multipart(const char *msg, const char *ctype) {
         size_t partlen = (size_t)(next - p);
         char *part = strndup(p, partlen);
         if (!part) break;
-        char *result = text_from_part(part);
+        char *result = text_from_part_info(part, info);
         free(part);
         if (result) return result;
 
@@ -248,7 +304,7 @@ static char *text_from_multipart(const char *msg, const char *ctype) {
     return NULL;
 }
 
-static char *text_from_part(const char *part) {
+static char *text_from_part_info(const char *part, MimeTextInfo *info) {
     char *ctype   = mime_get_header(part, "Content-Type");
     char *enc     = mime_get_header(part, "Content-Transfer-Encoding");
     char *charset = extract_charset(ctype);
@@ -259,17 +315,17 @@ static char *text_from_part(const char *part) {
         if (body) {
             char *raw = decode_transfer(body, strlen(body), enc);
             if (raw) {
-                result = charset_to_utf8(raw, charset);
+                result = charset_to_utf8_info(raw, charset, info);
                 free(raw);
             }
         }
     } else if (strncasecmp(ctype, "multipart/", 10) == 0) {
-        result = text_from_multipart(part, ctype);
+        result = text_from_multipart_info(part, ctype, info);
     } else if (strncasecmp(ctype, "text/html", 9) == 0) {
         if (body) {
             char *raw = decode_transfer(body, strlen(body), enc);
             if (raw) {
-                char *utf8 = charset_to_utf8(raw, charset);
+                char *utf8 = charset_to_utf8_info(raw, charset, info);
                 free(raw);
                 if (utf8) {
                     result = html_render(utf8, 0, 0);
@@ -561,8 +617,13 @@ static char *html_from_part(const char *part) {
 /* ── Public API ─────────────────────────────────────────────────────── */
 
 char *mime_get_text_body(const char *msg) {
+    return mime_get_text_body_ex(msg, NULL);
+}
+
+char *mime_get_text_body_ex(const char *msg, MimeTextInfo *info) {
+    if (info) memset(info, 0, sizeof(*info));
     if (!msg) return NULL;
-    return text_from_part(msg);
+    return text_from_part_info(msg, info);
 }
 
 char *mime_get_html_part(const char *msg) {

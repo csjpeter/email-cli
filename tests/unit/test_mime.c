@@ -344,6 +344,96 @@ void test_mime_util(void) {
                "quoted charset body mismatch");
     }
 
+    /* ── extract_charset: RFC 2045 allows LWSP around '=' ──────────── */
+
+    {
+        /* A real message from a webshop used  charset = "iso-8859-2"  with
+         * spaces.  extract_charset() matched the literal "charset=" only, so
+         * the parameter went unnoticed, the iconv step was skipped silently,
+         * and the raw bytes reached the terminal.  Every spelling below must
+         * decode identically. */
+        static const char *headers[] = {
+            "Content-Type: text/plain; charset=iso-8859-2\r\n",
+            "Content-Type: text/plain; charset=\"iso-8859-2\"\r\n",
+            "Content-Type: text/plain; charset = \"iso-8859-2\"\r\n",
+            "Content-Type: text/plain; charset\t=\tiso-8859-2\r\n",
+        };
+        /* 0xE9 is 'é' in ISO-8859-2; in UTF-8 that is C3 A9. */
+        for (size_t i = 0; i < sizeof(headers) / sizeof(headers[0]); i++) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "%s\r\nX\xe9Y", headers[i]);
+            RAII_STRING char *body = mime_get_text_body(msg);
+            ASSERT(body != NULL, "latin-2 charset spelling: body decoded");
+            ASSERT(body && strstr(body, "X\xc3\xa9Y") != NULL,
+                   "latin-2 charset spelling: 0xE9 must become UTF-8 C3 A9");
+        }
+    }
+
+    /* ── MimeTextInfo: charset handling must be visible to the caller ── */
+
+    {
+        /* Successful conversion: latin-2 in, UTF-8 out, no problem reported. */
+        MimeTextInfo info;
+        RAII_STRING char *body = mime_get_text_body_ex(
+            "Content-Type: text/plain; charset=iso-8859-2\r\n\r\nX\xe9Y", &info);
+        ASSERT(body != NULL, "text info: latin-2 body decoded");
+        ASSERT(info.converted == 1, "text info: converted flag set");
+        ASSERT(info.unknown_charset == 0, "text info: charset was known");
+        ASSERT(info.invalid_sequence == 0, "text info: no invalid sequence");
+        ASSERT(strcmp(info.declared_charset, "iso-8859-2") == 0,
+               "text info: declared charset recorded");
+    }
+
+    {
+        /* Unknown charset: iconv cannot open it, so the raw bytes pass through.
+         * Without this flag the caller cannot tell that happened. */
+        MimeTextInfo info;
+        RAII_STRING char *body = mime_get_text_body_ex(
+            "Content-Type: text/plain; charset=x-nonexistent-charset-42\r\n\r\nX\xe9Y",
+            &info);
+        ASSERT(body != NULL, "text info: unknown charset still returns text");
+        ASSERT(info.unknown_charset == 1, "text info: unknown charset reported");
+        ASSERT(info.converted == 0, "text info: nothing was converted");
+        ASSERT(body && strstr(body, "X\xe9Y") != NULL,
+               "text info: unknown charset passes bytes through unchanged");
+    }
+
+    {
+        /* No charset parameter at all: nothing declared, nothing converted,
+         * and no problem to report. */
+        MimeTextInfo info;
+        RAII_STRING char *body = mime_get_text_body_ex(
+            "Content-Type: text/plain\r\n\r\nplain ascii", &info);
+        ASSERT(body != NULL, "text info: body without charset decoded");
+        ASSERT(info.declared_charset[0] == '\0',
+               "text info: no charset declared");
+        ASSERT(info.unknown_charset == 0 && info.invalid_sequence == 0,
+               "text info: absent charset is not an error");
+    }
+
+    {
+        /* The convenience wrapper must keep working with no info requested. */
+        RAII_STRING char *body = mime_get_text_body(
+            "Content-Type: text/plain; charset=iso-8859-2\r\n\r\nX\xe9Y");
+        ASSERT(body != NULL && strstr(body, "X\xc3\xa9Y") != NULL,
+               "text info: NULL info argument still decodes");
+    }
+
+    /* ── extract_charset: must not match a different parameter ──────── */
+
+    {
+        /* "x-charset" is not the charset parameter; treating it as one would
+         * convert from the wrong encoding. */
+        const char *ct_other =
+            "Content-Type: text/plain; x-charset=iso-8859-2\r\n"
+            "\r\n"
+            "plain \xc3\xa9 text";
+        RAII_STRING char *body = mime_get_text_body(ct_other);
+        ASSERT(body != NULL, "x-charset: body returned");
+        ASSERT(body && strstr(body, "\xc3\xa9") != NULL,
+               "x-charset must not be treated as charset (bytes unchanged)");
+    }
+
     /* ── extract_charset: empty quoted value → NULL (p == start) ────── */
 
     {

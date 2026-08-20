@@ -35,6 +35,33 @@ char *mime_get_header(const char *msg, const char *name);
 char *mime_get_text_body(const char *msg);
 
 /**
+ * @brief Outcome of the charset handling while extracting a text body.
+ *
+ * The core layer records what happened and never talks to the user; whether a
+ * pass-through is worth reporting — and on which stream — is a decision for
+ * the domain layer.
+ */
+typedef struct {
+    char declared_charset[64];  /**< Charset named by Content-Type, "" if none */
+    int  converted;             /**< 1 = text was converted to UTF-8 */
+    int  unknown_charset;       /**< 1 = iconv does not know declared_charset */
+    int  invalid_sequence;      /**< 1 = conversion hit an invalid byte sequence */
+} MimeTextInfo;
+
+/**
+ * @brief Like mime_get_text_body(), but also reports how the charset was handled.
+ *
+ * When @p info reports unknown_charset or invalid_sequence, the returned text
+ * is the raw (undecoded) bytes: the conversion was skipped or abandoned.
+ * Without this signal that failure is invisible to the caller.
+ *
+ * @param msg   Raw message string.
+ * @param info  Optional; zeroed on entry, filled in on return. May be NULL.
+ * @return Heap-allocated text, or NULL on failure. Caller must free.
+ */
+char *mime_get_text_body_ex(const char *msg, MimeTextInfo *info);
+
+/**
  * @brief Formats an RFC 2822 date string as "YYYY-MM-DD HH:MM" in local timezone.
  *
  * Supports dates with and without the leading day-of-week field.

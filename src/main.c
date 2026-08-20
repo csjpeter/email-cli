@@ -217,6 +217,21 @@ static void help_list(void) {
         "  --limit <n>              Show at most <n> messages (default: %d).\n"
         "  --offset <n>             Start listing from the <n>-th message (1-based).\n"
         "\n"
+        "Virtual folders (pass to --folder; they span every cached folder):\n"
+        "  __unread__     Unread messages\n"
+        "  __flagged__    Starred / flagged messages\n"
+        "  __answered__   Messages that were replied to\n"
+        "  __forwarded__  Messages that were forwarded\n"
+        "  __junk__       Messages marked as junk / spam\n"
+        "  __phishing__   Messages flagged as phishing\n"
+        "\n"
+        "Content search (pass to --folder):\n"
+        "  __search__:<scope>:<query>   scope 0=Subject 1=From 2=To 3=Body\n"
+        "  Searches the locally cached messages, so it works offline.  Body\n"
+        "  search runs on the decoded text: base64 / quoted-printable parts and\n"
+        "  non-UTF-8 charsets are matched too, and HTML mail is searched as\n"
+        "  rendered text.  Quote the argument -- it contains colons.\n"
+        "\n"
         "Gmail notes:\n"
         "  Use 'email-cli list-labels' to see available labels and their IDs.\n"
         "  Predefined labels: INBOX, SENT, DRAFT, SPAM, TRASH, STARRED, IMPORTANT.\n"
@@ -226,6 +241,8 @@ static void help_list(void) {
         "  email-cli list --all\n"
         "  email-cli list --all --offset 21\n"
         "  email-cli list --folder INBOX.Sent --limit 50\n"
+        "  email-cli list --folder __unread__ --limit 20\n"
+        "  email-cli list --folder \"__search__:3:invoice\"   (search message bodies)\n"
         "\n"
         "Examples (Gmail):\n"
         "  email-cli list\n"
@@ -238,7 +255,7 @@ static void help_list(void) {
 
 static void help_show(void) {
     printf(
-        "Usage: email-cli show <uid> [--folder <name>]\n"
+        "Usage: email-cli show <uid> [--folder <name>] [--raw]\n"
         "\n"
         "Displays the full content of the message identified by <uid>.\n"
         "\n"
@@ -247,9 +264,14 @@ static void help_show(void) {
         "                    IMAP UIDs are unique only within a mailbox, so if the message\n"
         "                    was listed from a non-default folder, pass it here too.\n"
         "  --label  <name>   Gmail: alias for --folder.\n"
+        "  --raw             Print the message exactly as stored (RFC 2822 source):\n"
+        "                    no MIME parsing, no transfer-encoding or charset\n"
+        "                    decoding, no HTML rendering.  Use it to inspect the\n"
+        "                    real headers when text looks mis-decoded.\n"
         "\n"
         "The message is fetched from the server on first access and stored\n"
-        "locally at ~/.local/share/email-cli/messages/<folder>/<uid>.eml.\n"
+        "locally under ~/.local/share/email-cli/accounts/<account>/store/.\n"
+        "The exact path of a message is printed by 'show' as the File: line.\n"
         "Subsequent reads are served from the local store.\n"
         "\n"
         "Examples:\n"
@@ -854,10 +876,13 @@ int main(int argc, char *argv[]) {
         /* UID is the first non --batch, non-option arg after "show" */
         const char *uid_str = NULL;
         const char *folder  = NULL;
+        int raw_mode = 0;
         int ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) {
                 continue;
+            } else if (strcmp(argv[i], "--raw") == 0) {
+                raw_mode = 1;
             } else if (strcmp(argv[i], "--folder") == 0 ||
                        strcmp(argv[i], "--label")  == 0) {
                 if (i + 1 >= argc) {
@@ -885,7 +910,9 @@ int main(int argc, char *argv[]) {
                         "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n",
                         uid_str);
             else
-                result = email_service_read(cfg, folder, uid, 0, BATCH_DEFAULT_LIMIT);
+                result = raw_mode
+                         ? email_service_read_raw(cfg, folder, uid)
+                         : email_service_read(cfg, folder, uid, 0, BATCH_DEFAULT_LIMIT);
         }
 
     } else if (strcmp(cmd, "list-folders") == 0) {

@@ -213,6 +213,7 @@ static char *word_wrap(const char *text, int width) {
 
 /* Forward declaration — defined after visible_line_cols (below). */
 static void print_statusbar(int trows, int width, const char *text);
+static void warn_charset(const MimeTextInfo *info, const char *uid);
 static void show_label_picker(MailClient *mc, const char *uid,
                                char *feedback_out, int feedback_cap);
 static int is_system_or_special_label(const char *name);
@@ -980,8 +981,10 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
         body = html_render(html_raw, wrap_cols, 1);
         free(html_raw);
     } else {
-        char *plain = mime_get_text_body(raw);
+        MimeTextInfo tinfo;
+        char *plain = mime_get_text_body_ex(raw, &tinfo);
         if (plain) {
+            warn_charset(&tinfo, uid);
             char *wrapped = word_wrap(plain, wrap_cols);
             if (wrapped) { free(plain); body = wrapped; }
             else body = plain;
@@ -5008,8 +5011,9 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
 #undef ACC_FREE
 }
 
-int email_service_read(const Config *cfg, const char *folder, const char *uid, int pager, int page_size) {
-    if (!folder) folder = cfg->folder;
+/* Load one message: local store first, server on a miss.
+ * Returns a heap-allocated RFC 2822 message, or NULL (error already reported). */
+static char *load_message(const Config *cfg, const char *folder, const char *uid) {
     char *raw = NULL;
 
     if (local_msg_exists(folder, uid)) {
@@ -5018,7 +5022,7 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
     } else if (cfg->sync_interval > 0) {
         /* cron/offline mode: serve only from local cache; do not connect */
         fprintf(stderr, "Could not load message UID %s in folder '%s'.\n", uid, folder);
-        return -1;
+        return NULL;
     } else {
         raw = fetch_uid_content_in(cfg, folder, uid, 0);
         if (raw) {
@@ -5027,7 +5031,48 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
         }
     }
 
-    if (!raw) { fprintf(stderr, "Could not load message UID %s in folder '%s'.\n", uid, folder); return -1; }
+    if (!raw)
+        fprintf(stderr, "Could not load message UID %s in folder '%s'.\n", uid, folder);
+    return raw;
+}
+
+/* Report a charset problem once, on stderr, so the caller sees that the text
+ * below is not what the sender wrote.  The core layer records the fact; saying
+ * it out loud belongs here, in the layer that owns the user interaction. */
+static void warn_charset(const MimeTextInfo *info, const char *uid) {
+    if (!info) return;
+    if (info->unknown_charset)
+        fprintf(stderr,
+                "Warning: UID %s declares charset '%s', which iconv does not "
+                "know — showing undecoded bytes.\n",
+                uid ? uid : "?", info->declared_charset);
+    else if (info->invalid_sequence)
+        fprintf(stderr,
+                "Warning: UID %s is not valid %s — conversion failed, showing "
+                "undecoded bytes.\n",
+                uid ? uid : "?", info->declared_charset);
+}
+
+int email_service_read_raw(const Config *cfg, const char *folder, const char *uid) {
+    if (!folder) folder = cfg->folder;
+    char *raw = load_message(cfg, folder, uid);
+    if (!raw) return -1;
+
+    /* Write the message exactly as stored: headers and body, no MIME parsing,
+     * no charset conversion, no rendering.  This is the view needed to debug
+     * encoding problems, where the point is what the sender actually sent. */
+    fwrite(raw, 1, strlen(raw), stdout);
+    if (strlen(raw) > 0 && raw[strlen(raw) - 1] != '\n') putchar('\n');
+    fflush(stdout);
+
+    free(raw);
+    return 0;
+}
+
+int email_service_read(const Config *cfg, const char *folder, const char *uid, int pager, int page_size) {
+    if (!folder) folder = cfg->folder;
+    char *raw = load_message(cfg, folder, uid);
+    if (!raw) return -1;
 
     char *from_raw = mime_get_header(raw, "From");
     char *from     = from_raw ? mime_decode_words(from_raw) : NULL;
@@ -5081,8 +5126,10 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
         free(html_raw);
     }
     if (!body) {
-        char *plain = mime_get_text_body(raw);
+        MimeTextInfo tinfo;
+        char *plain = mime_get_text_body_ex(raw, &tinfo);
         if (plain) {
+            warn_charset(&tinfo, uid);
             body = word_wrap(plain, wrap_cols);
             if (!body) body = plain;
             else free(plain);

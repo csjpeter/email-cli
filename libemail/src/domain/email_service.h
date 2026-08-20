@@ -154,6 +154,22 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
 int email_service_read(const Config *cfg, const char *folder, const char *uid, int pager, int page_size);
 
 /**
+ * @brief Print one message verbatim, as stored (RFC 2822 source).
+ *
+ * Same lookup as email_service_read() — local store first, server on a miss —
+ * but the message is written to stdout unmodified: no MIME parsing, no
+ * transfer-encoding or charset decoding, no HTML rendering, no header
+ * formatting.  Intended for diagnosing encoding problems, where the question
+ * is what the sender actually transmitted.
+ *
+ * @param cfg     Connection configuration.
+ * @param folder  Folder/label containing the message, or NULL for cfg->folder.
+ * @param uid     IMAP UID of the message.
+ * @return 0 on success, -1 on failure.
+ */
+int email_service_read_raw(const Config *cfg, const char *folder, const char *uid);
+
+/**
  * @brief Downloads all messages in all folders to the local cache.
  *
  * Iterates over every folder returned by LIST, fetches each message that is

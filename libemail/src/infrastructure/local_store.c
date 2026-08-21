@@ -1736,37 +1736,100 @@ static void parse_addr_list(const char *hdr,
  * output carries no folder column — without this lookup the user has to guess
  * which folder to hand to `show`.  Returns a heap-allocated folder name, or
  * NULL when the UID is not in the local store. */
-char *local_msg_find_folder(const char *uid) {
-    if (!uid || !uid[0] || !g_account_base[0]) return NULL;
+static int cmp_folder_names(const void *a, const void *b) {
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+int local_msg_find_folders(const char *uid, char ***folders_out, int *count_out) {
+    if (folders_out) *folders_out = NULL;
+    if (count_out)   *count_out   = 0;
+    if (!uid || !uid[0] || !g_account_base[0]) return 0;
 
     char dir_path[8300];
     snprintf(dir_path, sizeof(dir_path), "%s/manifests", g_account_base);
     RAII_DIR DIR *dp = opendir(dir_path);
-    if (!dp) return NULL;
+    if (!dp) return 0;
+
+    int cap = 8, n = 0;
+    char **list = malloc((size_t)cap * sizeof(char *));
+    if (!list) return -1;
 
     struct dirent *ent;
     while ((ent = readdir(dp)) != NULL) {
         const char *name = ent->d_name;
         size_t nlen = strlen(name);
         if (nlen <= 4 || strcmp(name + nlen - 4, ".tsv") != 0) continue;
-        /* Skip legacy virtual manifests; real data lives in per-folder ones. */
         if (name[0] == '_' && name[1] == '_') continue;
 
         RAII_STRING char *folder = strndup(name, nlen - 4);
         if (!folder) continue;
 
-        /* Prefer a cached body, but a manifest row is enough to name the
-         * folder — `show` can then fetch the message itself. */
-        if (local_msg_exists(folder, uid)) return strdup(folder);
-
-        Manifest *m = manifest_load(folder);
-        if (m) {
-            int found = manifest_find(m, uid) != NULL;
-            manifest_free(m);
-            if (found) return strdup(folder);
+        /* RFC 3501: INBOX is the one mailbox name that is case-insensitive,
+         * so a store holding both "Inbox" and "INBOX" holds one mailbox, not
+         * two.  Reporting both would make every inbox message look ambiguous. */
+        if (strcasecmp(folder, "INBOX") == 0) {
+            int dup = 0;
+            for (int i = 0; i < n; i++) {
+                if (strcasecmp(list[i], "INBOX") != 0) continue;
+                /* Keep the spelling closest to the canonical "INBOX" so the
+                 * reported name does not depend on readdir order. */
+                if (strcmp(folder, list[i]) < 0) {
+                    char *swap = strdup(folder);
+                    if (swap) { free(list[i]); list[i] = swap; }
+                }
+                dup = 1;
+                break;
+            }
+            if (dup) continue;
         }
+
+        int here = local_msg_exists(folder, uid);
+        if (!here) {
+            Manifest *m = manifest_load(folder);
+            if (m) {
+                here = manifest_find(m, uid) != NULL;
+                manifest_free(m);
+            }
+        }
+        if (!here) continue;
+
+        if (n == cap) {
+            cap *= 2;
+            char **tmp = realloc(list, (size_t)cap * sizeof(char *));
+            if (!tmp) break;
+            list = tmp;
+        }
+        list[n] = strdup(folder);
+        if (list[n]) n++;
     }
-    return NULL;
+
+    if (n == 0) { free(list); return 0; }
+    /* readdir order is filesystem-defined; sort so callers, error messages and
+     * tests all see the same sequence. */
+    qsort(list, (size_t)n, sizeof(char *), cmp_folder_names);
+    if (folders_out) *folders_out = list; else { for (int i = 0; i < n; i++) free(list[i]); free(list); }
+    if (count_out)   *count_out   = n;
+    return n;
+}
+
+void local_folder_list_free(char **folders, int count) {
+    if (!folders) return;
+    for (int i = 0; i < count; i++) free(folders[i]);
+    free(folders);
+}
+
+char *local_msg_find_folder(const char *uid) {
+    /* One scan, one set of rules: sharing local_msg_find_folders() keeps the
+     * INBOX case-folding and the ordering from drifting between the two. */
+    char **folders = NULL;
+    int n = 0;
+    local_msg_find_folders(uid, &folders, &n);
+    if (n <= 0) return NULL;
+
+    char *first = folders[0];
+    folders[0] = NULL;
+    local_folder_list_free(folders, n);
+    return first;
 }
 
 /* ---- contacts.tsv upsert ---- */

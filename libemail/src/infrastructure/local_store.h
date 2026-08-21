@@ -58,12 +58,35 @@ int local_msg_exists(const char *folder, const char *uid);
  * @brief Find which cached folder holds a UID.
  *
  * Useful after a cross-folder search, where the caller knows the UID but not
- * the folder it lives in.
+ * the folder it lives in.  Returns the first match only; callers that must not
+ * guess when a UID sits in several folders want local_msg_find_folders().
  *
  * @param uid  Message UID.
  * @return Heap-allocated folder name, or NULL if not found. Caller must free.
  */
 char *local_msg_find_folder(const char *uid);
+
+/**
+ * @brief List every cached folder that holds a UID.
+ *
+ * IMAP UIDs are unique only within a mailbox, so the same number routinely
+ * names different messages in different folders.  Callers that must not guess
+ * use this to detect ambiguity and report it instead of picking one.
+ *
+ * Names are sorted with strcmp() so the result never depends on readdir order.
+ * Per RFC 3501 "INBOX" is case-insensitive, so spellings such as "Inbox" and
+ * "INBOX" are reported once, under the spelling closest to the canonical one.
+ *
+ * @param uid          Message UID.
+ * @param folders_out  Output: heap array of folder names (free with
+ *                     local_folder_list_free()).
+ * @param count_out    Output: number of folders.
+ * @return Number of folders found, or -1 on allocation failure.
+ */
+int local_msg_find_folders(const char *uid, char ***folders_out, int *count_out);
+
+/** @brief Free an array returned by local_msg_find_folders(). */
+void local_folder_list_free(char **folders, int count);
 
 /** @brief Writes raw message content to the local store. */
 int local_msg_save(const char *folder, const char *uid, const char *content, size_t len);

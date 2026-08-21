@@ -3,6 +3,7 @@
 #include "fs_util.h"
 #include "raii.h"
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -1169,4 +1170,78 @@ void test_manifest_dmarc_flags(void) {
 
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
+}
+
+/* ── Cross-folder UID lookup ─────────────────────────────────────────── */
+
+/* The lookup enumerates manifests, so a folder only counts once it has one —
+ * mirror what a real sync produces. */
+static void ff_add(const char *folder, const char *uid, const char *body) {
+    local_msg_save(folder, uid, body, strlen(body));
+    const char *base = "/tmp/email-cli-find-folders-test/.local/share/"
+                       "email-cli/accounts/testuser/manifests";
+    fs_mkdir_p(base, 0700);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s.tsv", base, folder);
+    FILE *f = fopen(path, "w");
+    ASSERT(f != NULL, "find_folders fixture: manifest must be writable");
+    if (f) {
+        fprintf(f, "%s\ta@x\tS\t2024-01-01 10:00\t0\n", uid);
+        fclose(f);
+    }
+}
+
+void test_local_msg_find_folders(void) {
+    /* Start from a clean tree: leftovers from an earlier run would change the
+     * folder counts asserted below. */
+    if (system("rm -rf '/tmp/email-cli-find-folders-test'") != 0) { /* best effort */ }
+    setup_test_env("/tmp/email-cli-find-folders-test");
+
+    const char *uid  = "0000000000000837";
+    const char *body = "From: a@x\r\nSubject: S\r\n\r\nb";
+
+    /* Not stored anywhere yet. */
+    char **f = NULL; int n = -1;
+    local_msg_find_folders(uid, &f, &n);
+    ASSERT(n == 0, "find_folders: 0 when the UID is nowhere");
+    ASSERT(f == NULL, "find_folders: no list when the UID is nowhere");
+
+    /* One folder — the caller needs no --folder. */
+    ff_add("vasarlas", uid, body);
+    local_msg_find_folders(uid, &f, &n);
+    ASSERT(n == 1, "find_folders: 1 for a single-folder UID");
+    ASSERT(n == 1 && strcmp(f[0], "vasarlas") == 0, "find_folders: names that folder");
+    local_folder_list_free(f, n); f = NULL;
+
+    /* Several folders — every candidate is reported, sorted, so the message
+     * and the caller's choice do not depend on readdir order. */
+    ff_add("Trash", uid, body);
+    ff_add("Archive", uid, body);
+    local_msg_find_folders(uid, &f, &n);
+    ASSERT(n == 3, "find_folders: 3 when three folders hold the UID");
+    ASSERT(n == 3 && strcmp(f[0], "Archive") == 0, "find_folders: sorted, Archive first");
+    ASSERT(n == 3 && strcmp(f[1], "Trash") == 0,   "find_folders: sorted, Trash second");
+    ASSERT(n == 3 && strcmp(f[2], "vasarlas") == 0, "find_folders: sorted, vasarlas last");
+    local_folder_list_free(f, n); f = NULL;
+
+    /* RFC 3501: INBOX is case-insensitive, so "Inbox" and "INBOX" are one
+     * mailbox and must not look like two conflicting locations. */
+    ff_add("INBOX", uid, body);
+    ff_add("Inbox", uid, body);
+    local_msg_find_folders(uid, &f, &n);
+    ASSERT(n == 4, "find_folders: Inbox/INBOX counted once, not twice");
+    int inbox_seen = 0;
+    for (int i = 0; i < n; i++)
+        if (strcasecmp(f[i], "INBOX") == 0) inbox_seen++;
+    ASSERT(inbox_seen == 1, "find_folders: exactly one INBOX entry");
+    local_folder_list_free(f, n); f = NULL;
+
+    /* A NULL/empty UID must not report matches. */
+    local_msg_find_folders("", &f, &n);
+    ASSERT(n == 0, "find_folders: empty UID yields nothing");
+    local_msg_find_folders(NULL, &f, &n);
+    ASSERT(n == 0, "find_folders: NULL UID yields nothing");
+
+    /* Freeing an empty list is a no-op, not a crash. */
+    local_folder_list_free(NULL, 0);
 }

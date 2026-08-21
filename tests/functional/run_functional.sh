@@ -327,8 +327,8 @@ check_not "3.3 alpha fresh: no beta"        "BetaAccountMsg"   "$A3"
 check_not "3.4 alpha fresh: no gamma"       "GammaAccountMsg"  "$A3"
 
 STORE_A="$SHARED/email-cli/accounts/$ALPHA"
-check "3.5 alpha local store dir created"   "." "$(test -d "$STORE_A"   && echo ok || echo missing)"
-check "3.6 alpha manifest created"          "." "$(test -f "$STORE_A/manifests/INBOX.tsv" && echo ok || echo missing)"
+check "3.5 alpha local store dir created"   "^ok$" "$(test -d "$STORE_A"   && echo ok || echo missing)"
+check "3.6 alpha manifest created"          "^ok$" "$(test -f "$STORE_A/manifests/INBOX.tsv" && echo ok || echo missing)"
 
 # 3.2 beta — alpha's cache exists, beta is empty → must fetch from server 2
 B3=$(run_list "$H_BETA" "$SHARED")
@@ -338,9 +338,9 @@ check_not "3.9 beta fresh: no alpha cached" "AlphaAccountMsg"  "$B3"
 check_not "3.10 beta fresh: no gamma"       "GammaAccountMsg"  "$B3"
 
 STORE_B="$SHARED/email-cli/accounts/$BETA"
-check "3.11 beta: own local store dir"      "." "$(test -d "$STORE_B"   && echo ok || echo missing)"
-check "3.12 beta: manifest separate"        "." "$(test -f "$STORE_B/manifests/INBOX.tsv" && echo ok || echo missing)"
-check "3.13 beta+alpha stores are distinct" "." "$([ "$STORE_A" != "$STORE_B" ] && echo ok || echo same)"
+check "3.11 beta: own local store dir"      "^ok$" "$(test -d "$STORE_B"   && echo ok || echo missing)"
+check "3.12 beta: manifest separate"        "^ok$" "$(test -f "$STORE_B/manifests/INBOX.tsv" && echo ok || echo missing)"
+check "3.13 beta+alpha stores are distinct" "^ok$" "$([ "$STORE_A" != "$STORE_B" ] && echo ok || echo same)"
 
 # 3.3 gamma — alpha+beta both cached
 G3=$(run_list "$H_GAMMA" "$SHARED")
@@ -350,7 +350,7 @@ check_not "3.16 gamma fresh: no alpha"      "AlphaAccountMsg"  "$G3"
 check_not "3.17 gamma fresh: no beta"       "BetaAccountMsg"   "$G3"
 
 STORE_G="$SHARED/email-cli/accounts/$GAMMA"
-check "3.18 gamma: own local store dir"     "." "$(test -d "$STORE_G"   && echo ok || echo missing)"
+check "3.18 gamma: own local store dir"     "^ok$" "$(test -d "$STORE_G"   && echo ok || echo missing)"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 4 — Warm cache isolation: re-run after all caches are populated
@@ -521,9 +521,9 @@ MA="$SHARED/email-cli/accounts/$ALPHA/manifests/INBOX.tsv"
 MB="$SHARED/email-cli/accounts/$BETA/manifests/INBOX.tsv"
 MG="$SHARED/email-cli/accounts/$GAMMA/manifests/INBOX.tsv"
 
-check "9.1 alpha manifest exists"             "." "$(test -f "$MA" && echo ok || echo missing)"
-check "9.2 beta manifest exists"              "." "$(test -f "$MB" && echo ok || echo missing)"
-check "9.3 gamma manifest exists"             "." "$(test -f "$MG" && echo ok || echo missing)"
+check "9.1 alpha manifest exists"             "^ok$" "$(test -f "$MA" && echo ok || echo missing)"
+check "9.2 beta manifest exists"              "^ok$" "$(test -f "$MB" && echo ok || echo missing)"
+check "9.3 gamma manifest exists"             "^ok$" "$(test -f "$MG" && echo ok || echo missing)"
 
 MA_CONTENT=$(cat "$MA" 2>/dev/null || true)
 MB_CONTENT=$(cat "$MB" 2>/dev/null || true)
@@ -541,17 +541,17 @@ check "9.10 gamma manifest: own subject"       "GammaAccountMsg"  "$MG_CONTENT"
 check_not "9.11 gamma manifest: no alpha"      "AlphaAccountMsg"  "$MG_CONTENT"
 check_not "9.12 gamma manifest: no beta"       "BetaAccountMsg"   "$MG_CONTENT"
 
-check "9.13 manifests are in distinct paths"   "." \
+check "9.13 manifests are in distinct paths"   "^ok$" \
     "$([ "$MA" != "$MB" ] && [ "$MB" != "$MG" ] && [ "$MA" != "$MG" ] && echo ok || echo overlap)"
 
 # Header cache files must also be separate
 HDR_A="$SHARED/email-cli/accounts/$ALPHA/headers"
 HDR_B="$SHARED/email-cli/accounts/$BETA/headers"
 HDR_G="$SHARED/email-cli/accounts/$GAMMA/headers"
-check "9.14 alpha header cache dir exists"     "." "$(test -d "$HDR_A" && echo ok || echo missing)"
-check "9.15 beta header cache dir exists"      "." "$(test -d "$HDR_B" && echo ok || echo missing)"
-check "9.16 gamma header cache dir exists"     "." "$(test -d "$HDR_G" && echo ok || echo missing)"
-check "9.17 header dirs are distinct"          "." \
+check "9.14 alpha header cache dir exists"     "^ok$" "$(test -d "$HDR_A" && echo ok || echo missing)"
+check "9.15 beta header cache dir exists"      "^ok$" "$(test -d "$HDR_B" && echo ok || echo missing)"
+check "9.16 gamma header cache dir exists"     "^ok$" "$(test -d "$HDR_G" && echo ok || echo missing)"
+check "9.17 header dirs are distinct"          "^ok$" \
     "$([ "$HDR_A" != "$HDR_B" ] && [ "$HDR_B" != "$HDR_G" ] && echo ok || echo overlap)"
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -656,7 +656,7 @@ mkdir -p "$SAVE_DIR"
 SAVE_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
     "$BIN_DIR/email-cli" --batch save-attachment 1 notes.txt "$SAVE_DIR" 2>&1 || true) )
 check "15.1 save-attachment: saved confirmation"  "aved\|uccessful\|notes" "$SAVE_OUT"
-check "15.2 save-attachment: file exists"  "." "$(test -f "$SAVE_DIR/notes.txt" && echo ok || echo missing)"
+check "15.2 save-attachment: file exists"  "^ok$" "$(test -f "$SAVE_DIR/notes.txt" && echo ok || echo missing)"
 rm -rf "./build/tests/functional/homes/attach-$$"
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1156,7 +1156,7 @@ SAVE200_DIR="./build/tests/functional/homes/attach200-$$"
 mkdir -p "$SAVE200_DIR"
 SA200=$(run_200 --batch save-attachment 10 notes_10.txt "$SAVE200_DIR")
 check "25.11 imap-A save-attachment UID 10: confirmation" "aved\|uccessful\|notes" "$SA200"
-check "25.12 imap-A save-attachment UID 10: file exists" "." \
+check "25.12 imap-A save-attachment UID 10: file exists" "^ok$" \
     "$(test -f "$SAVE200_DIR/notes_10.txt" && echo ok || echo missing)"
 rm -rf "./build/tests/functional/homes/attach200-$$"
 
@@ -1194,7 +1194,7 @@ SAVE250_DIR="./build/tests/functional/homes/attach250-$$"
 mkdir -p "$SAVE250_DIR"
 SA250=$(run_250 --batch save-attachment 20 notes_20.txt "$SAVE250_DIR")
 check "25.20 imap-B save-attachment UID 20: confirmation" "aved\|uccessful\|notes" "$SA250"
-check "25.21 imap-B save-attachment UID 20: file exists" "." \
+check "25.21 imap-B save-attachment UID 20: file exists" "^ok$" \
     "$(test -f "$SAVE250_DIR/notes_20.txt" && echo ok || echo missing)"
 rm -rf "./build/tests/functional/homes/attach250-$$"
 
@@ -1328,7 +1328,7 @@ GSAVE_A_DIR="./build/tests/functional/homes/gattach-a-$$"
 mkdir -p "$GSAVE_A_DIR"
 GSA_A=$(run_gmail_ro_a --batch save-attachment 000000000000000a notes_10.txt "$GSAVE_A_DIR")
 check "26.9 gmail-A save-attachment: exit ok" "aved\|uccessful\|notes\|ok" "$GSA_A"
-check "26.10 gmail-A save-attachment: file exists" "." \
+check "26.10 gmail-A save-attachment: file exists" "^ok$" \
     "$(test -f "$GSAVE_A_DIR/notes_10.txt" && echo ok || echo missing)"
 rm -rf "./build/tests/functional/homes/gattach-a-$$"
 
@@ -1366,7 +1366,7 @@ GSAVE_B_DIR="./build/tests/functional/homes/gattach-b-$$"
 mkdir -p "$GSAVE_B_DIR"
 GSA_B=$(run_gmail_ro_b --batch save-attachment 0000000000000014 GmailB-notes_20.txt "$GSAVE_B_DIR")
 check "26.21 gmail-B save-attachment: exit ok" "aved\|uccessful\|notes\|ok" "$GSA_B"
-check "26.22 gmail-B save-attachment: file exists" "." \
+check "26.22 gmail-B save-attachment: file exists" "^ok$" \
     "$(test -f "$GSAVE_B_DIR/GmailB-notes_20.txt" && echo ok || echo missing)"
 rm -rf "./build/tests/functional/homes/gattach-b-$$"
 
@@ -1407,7 +1407,7 @@ run_rebuild_idx() {
 }
 
 # 27.1 After Phase 26 sync, INBOX.idx should exist for account A
-check "27.1 gmail-A INBOX.idx exists after sync" "." \
+check "27.1 gmail-A INBOX.idx exists after sync" "^ok$" \
     "$([ -f "$INBOX_IDX_A" ] && echo ok || echo missing)"
 
 # Record entry count before deletion
@@ -1415,35 +1415,35 @@ IDX_A_BEFORE=$(wc -c < "$INBOX_IDX_A" 2>/dev/null || echo "0")
 
 # 27.2 Delete all .idx files for account A
 rm -f "$LABELS_DIR_A"/*.idx
-check "27.2 gmail-A idx files deleted" "." \
+check "27.2 gmail-A idx files deleted" "^ok$" \
     "$([ ! -f "$INBOX_IDX_A" ] && echo ok || echo still-present)"
 
 # 27.3 Run --rebuild-index for account A only (offline, no server contact)
 REBUILD27A=$(run_rebuild_idx --rebuild-index --account "$GMAIL_ACCT_A")
-check "27.3 rebuild-index --account A: exits cleanly" "." \
+check "27.3 rebuild-index --account A: exits cleanly" "^ok$" \
     "$([ $? -eq 0 ] && echo ok || echo nonzero)"
 
 # 27.4 INBOX.idx recreated for account A
-check "27.4 gmail-A INBOX.idx recreated by --rebuild-index" "." \
+check "27.4 gmail-A INBOX.idx recreated by --rebuild-index" "^ok$" \
     "$([ -f "$INBOX_IDX_A" ] && echo ok || echo missing)"
 
 # 27.5 Entry count unchanged after rebuild
 IDX_A_AFTER=$(wc -c < "$INBOX_IDX_A" 2>/dev/null || echo "0")
-check "27.5 gmail-A INBOX.idx size unchanged after rebuild" "." \
+check "27.5 gmail-A INBOX.idx size unchanged after rebuild" "^ok$" \
     "$([ "$IDX_A_AFTER" = "$IDX_A_BEFORE" ] && echo ok || echo "changed-${IDX_A_BEFORE}-to-${IDX_A_AFTER}")"
 
 # 27.6 Run --rebuild-index for ALL accounts (no --account flag)
 rm -f "$LABELS_DIR_A"/*.idx "$LABELS_DIR_B"/*.idx
 REBUILD27ALL=$(run_rebuild_idx --rebuild-index)
-check "27.6 rebuild-index (all accounts): exits cleanly" "." \
+check "27.6 rebuild-index (all accounts): exits cleanly" "^ok$" \
     "$([ $? -eq 0 ] && echo ok || echo nonzero)"
 
 # 27.7 Account A INBOX.idx recreated
-check "27.7 gmail-A INBOX.idx recreated by all-accounts rebuild" "." \
+check "27.7 gmail-A INBOX.idx recreated by all-accounts rebuild" "^ok$" \
     "$([ -f "$INBOX_IDX_A" ] && echo ok || echo missing)"
 
 # 27.8 Account B INBOX.idx recreated
-check "27.8 gmail-B INBOX.idx recreated by all-accounts rebuild" "." \
+check "27.8 gmail-B INBOX.idx recreated by all-accounts rebuild" "^ok$" \
     "$([ -f "$INBOX_IDX_B" ] && echo ok || echo missing)"
 
 # 27.9 Auto-rebuild during full sync:
@@ -1456,7 +1456,7 @@ check "27.9 auto-rebuild: full sync runs after historyId deleted" \
     "fetched\|cached\|stored\|downloaded\|queued\|server" "$SYNC27A"
 
 # 27.10 After auto-rebuild full sync, INBOX.idx exists for account A
-check "27.10 gmail-A INBOX.idx recreated by auto-rebuild full sync" "." \
+check "27.10 gmail-A INBOX.idx recreated by auto-rebuild full sync" "^ok$" \
     "$([ -f "$INBOX_IDX_A" ] && echo ok || echo missing)"
 
 # 27.11 After rebuild, list shows messages — confirms index is functional, not just present
@@ -1701,7 +1701,7 @@ PF_COUNT30=$(wc -l < "$GSYNC_PENDING" 2>/dev/null || echo 0)
 check "30.2 first sync: pending_fetch.tsv empty after sync" "0" "$PF_COUNT30"
 
 # 30.3 After first sync: historyId must be saved
-check "30.3 first sync: historyId saved" "." \
+check "30.3 first sync: historyId saved" "^ok$" \
     "$(test -f "$GSYNC_HISTID" && echo ok || echo missing)"
 
 # 30.4 After first sync: messages are accessible
@@ -1713,7 +1713,7 @@ check "30.4 first sync: messages accessible" "Message 1" "$GL30"
 # succeeds with 0 changes (the server has no history endpoint that signals
 # expiry for these tests).
 SYNC30B=$(run_gsync)
-check "30.5 second sync: runs without error" "." "$(echo "$SYNC30B" | head -1; echo ok)"
+check "30.5 second sync: runs without error" "^ok$" "$(echo "$SYNC30B" | head -1; echo ok)"
 # No reconcile message should appear (fast incremental path)
 check_not "30.5b second sync: no 'Listing messages' output (incremental)" \
     "Listing messages" "$SYNC30B"
@@ -1730,7 +1730,7 @@ check "30.6 interrupted sync: pending_fetch.tsv has 1 entry before resume" "1" "
 # 30.7 Run sync with pending entry: should drain pending then go incremental
 # (not reconcile — historyId is valid so fast path is taken after drain)
 SYNC30C=$(run_gsync)
-check "30.7 resume sync: completes without error" "." "$(echo ok)"
+check "30.7 resume sync: completes without error" "^ok$" "$(echo ok)"
 # After resume, pending_fetch.tsv must be empty again
 PF_AFTER=$(wc -l < "$GSYNC_PENDING" 2>/dev/null || echo 0)
 check "30.8 resume sync: pending_fetch.tsv empty after resume" "0" "$PF_AFTER"
@@ -1833,7 +1833,7 @@ run_ginc_a_sync() {
 # 32.1 First sync (reconcile): historyId must come from messages.list, not /profile
 SYNC32A=$(run_ginc_a_sync)
 check "32.1 first sync: completes successfully" "fetched\|already\|downloaded" "$SYNC32A"
-check "32.2 first sync: historyId saved" "." \
+check "32.2 first sync: historyId saved" "^ok$" \
     "$(test -f "$GINC_HISTID_A" && echo ok || echo missing)"
 SAVED_HID=$(cat "$GINC_HISTID_A" 2>/dev/null || echo "")
 check "32.3 historyId from messages.list (not /profile)" "7777" "$SAVED_HID"
@@ -2352,7 +2352,7 @@ echo ""
 echo "--- Phase 38: email-import-rules (US-IR-01 / US-IR-02) ---"
 
 # US-IR-01: email-import-rules must be present in bin/
-check "38.1 email-import-rules binary exists in bin/" "." \
+check "38.1 email-import-rules binary exists in bin/" "^ok$" \
     "$(test -x "$BIN_DIR/email-import-rules" && echo ok || echo missing)"
 
 # US-IR-02: unsupported Thunderbird rule elements produce [warn] lines on stderr
@@ -4574,78 +4574,77 @@ check "78.16 email-cli send missing --body: required fields error" "required\|--
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 79 — Compose: file attachment via --attach flag (US-84)
-# NOTE: These tests will FAIL until US-84 (--attach) is implemented.
-#       Uncomment when the feature lands.
 # ════════════════════════════════════════════════════════════════════════════
-# --- Phase 79: email-cli send --attach (US-84) ---
-#
-# H_ATTACH=$(mktemp -d "/tmp/email-ft-attach-$$-XXXXXX")
-# trap 'rm -rf "/tmp/email-ft-attach-$$-"*' EXIT
-# export HOME="$H_ATTACH"
-# unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-# ATTACH_CFG="$H_ATTACH/.config/email-cli/accounts/testuser"
-# mkdir -p "$ATTACH_CFG"
-# cat > "$ATTACH_CFG/config.ini" <<'INI'
-# EMAIL_HOST=imaps://localhost:9993
-# EMAIL_USER=testuser@example.com
-# EMAIL_PASS=testpass
-# EMAIL_FOLDER=INBOX
-# SMTP_HOST=smtps://localhost:9025
-# SMTP_PORT=9025
-# SMTP_USER=testuser@example.com
-# SMTP_PASS=testpass
-# SSL_NO_VERIFY=1
-# INI
-# chmod 0600 "$ATTACH_CFG/config.ini"
-# ATTACH_TXT=$(mktemp "/tmp/email-ft-attach-$$-file-XXXXXX.txt")
-# echo "Attachment content" > "$ATTACH_TXT"
-# ATTACH_PDF=$(mktemp "/tmp/email-ft-attach-$$-file-XXXXXX.pdf")
-# printf '%%PDF-1.4 stub\n' > "$ATTACH_PDF"
-#
-# # 79.1: send with --attach → succeeds (mock SMTP accepts)
-# OUT79_1=$("$BIN_DIR/email-cli" send \
-#     --to alice@example.com \
-#     --subject "Attach test" \
-#     --body "See attached" \
-#     --attach "$ATTACH_TXT" 2>&1 || true)
-# check "79.1 send --attach: success" "sent\|Sent\|queued" "$OUT79_1"
-#
-# # 79.2: send with multiple --attach flags
-# OUT79_2=$("$BIN_DIR/email-cli" send \
-#     --to alice@example.com \
-#     --subject "Multi-attach test" \
-#     --body "Two files" \
-#     --attach "$ATTACH_TXT" \
-#     --attach "$ATTACH_PDF" 2>&1 || true)
-# check "79.2 send --attach --attach: success" "sent\|Sent\|queued" "$OUT79_2"
-#
-# # 79.3: --attach with non-existent file → error
-# OUT79_3=$("$BIN_DIR/email-cli" send \
-#     --to alice@example.com \
-#     --subject "Bad attach" \
-#     --body "body" \
-#     --attach "/tmp/no-such-file-xyz-404.pdf" 2>&1 || true)
-# check "79.3 send --attach non-existent: error" "not found\|No such file\|Error" "$OUT79_3"
-#
-# # 79.4: --attach with directory path → error
-# OUT79_4=$("$BIN_DIR/email-cli" send \
-#     --to alice@example.com \
-#     --subject "Dir attach" \
-#     --body "body" \
-#     --attach "/tmp/" 2>&1 || true)
-# check "79.4 send --attach directory: error" "Not a file\|directory\|Error" "$OUT79_4"
-#
-# # 79.5: --attach exceeding 25 MB limit → error
-# BIGFILE=$(mktemp "/tmp/email-ft-attach-$$-big-XXXXXX.bin")
-# dd if=/dev/zero of="$BIGFILE" bs=1M count=26 2>/dev/null
-# OUT79_5=$("$BIN_DIR/email-cli" send \
-#     --to alice@example.com \
-#     --subject "Big attach" \
-#     --body "body" \
-#     --attach "$BIGFILE" 2>&1 || true)
-# check "79.5 send --attach >25MB: size error" "too large\|exceeds\|25\|Error" "$OUT79_5"
-# rm -f "$BIGFILE" "$ATTACH_TXT" "$ATTACH_PDF"
-# export HOME="$H_ALPHA"
+echo ""
+echo "--- Phase 79: email-cli send --attach (US-84) ---"
+
+H_ATTACH=$(mktemp -d "/tmp/email-ft-attach-$$-XXXXXX")
+trap 'rm -rf "/tmp/email-ft-attach-$$-"*' EXIT
+export HOME="$H_ATTACH"
+unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+ATTACH_CFG="$H_ATTACH/.config/email-cli/accounts/testuser"
+mkdir -p "$ATTACH_CFG"
+cat > "$ATTACH_CFG/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=testuser@example.com
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SMTP_HOST=smtps://localhost:$SMTP_PORT
+SMTP_PORT=$SMTP_PORT
+SMTP_USER=testuser@example.com
+SMTP_PASS=testpass
+SSL_NO_VERIFY=1
+INI
+chmod 0600 "$ATTACH_CFG/config.ini"
+ATTACH_TXT=$(mktemp "/tmp/email-ft-attach-$$-file-XXXXXX.txt")
+echo "Attachment content" > "$ATTACH_TXT"
+ATTACH_PDF=$(mktemp "/tmp/email-ft-attach-$$-file-XXXXXX.pdf")
+printf '%%PDF-1.4 stub\n' > "$ATTACH_PDF"
+
+# 79.1: send with --attach → succeeds (mock SMTP accepts)
+OUT79_1=$("$BIN_DIR/email-cli" send \
+    --to alice@example.com \
+    --subject "Attach test" \
+    --body "See attached" \
+    --attach "$ATTACH_TXT" 2>&1 || true)
+check "79.1 send --attach: success" "sent\|Sent\|queued" "$OUT79_1"
+
+# 79.2: send with multiple --attach flags
+OUT79_2=$("$BIN_DIR/email-cli" send \
+    --to alice@example.com \
+    --subject "Multi-attach test" \
+    --body "Two files" \
+    --attach "$ATTACH_TXT" \
+    --attach "$ATTACH_PDF" 2>&1 || true)
+check "79.2 send --attach --attach: success" "sent\|Sent\|queued" "$OUT79_2"
+
+# 79.3: --attach with non-existent file → error
+OUT79_3=$("$BIN_DIR/email-cli" send \
+    --to alice@example.com \
+    --subject "Bad attach" \
+    --body "body" \
+    --attach "/tmp/no-such-file-xyz-404.pdf" 2>&1 || true)
+check "79.3 send --attach non-existent: error" "not found\|No such file\|Error" "$OUT79_3"
+
+# 79.4: --attach with directory path → error
+OUT79_4=$("$BIN_DIR/email-cli" send \
+    --to alice@example.com \
+    --subject "Dir attach" \
+    --body "body" \
+    --attach "/tmp/" 2>&1 || true)
+check "79.4 send --attach directory: error" "Not a file\|directory\|Error" "$OUT79_4"
+
+# 79.5: --attach exceeding 25 MB limit → error
+BIGFILE=$(mktemp "/tmp/email-ft-attach-$$-big-XXXXXX.bin")
+dd if=/dev/zero of="$BIGFILE" bs=1M count=26 2>/dev/null
+OUT79_5=$("$BIN_DIR/email-cli" send \
+    --to alice@example.com \
+    --subject "Big attach" \
+    --body "body" \
+    --attach "$BIGFILE" 2>&1 || true)
+check "79.5 send --attach >25MB: size error" "too large\|exceeds\|25\|Error" "$OUT79_5"
+rm -f "$BIGFILE" "$ATTACH_TXT" "$ATTACH_PDF"
+export HOME="$H_ALPHA"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 80: DMARC status in message list
@@ -4985,6 +4984,75 @@ check "84.31 refusal suggests a shell loop"       "list-accounts"      "$OUT84_1
 
 OUT84_18=$( "$BIN_DIR/email-cli-ro" help list 2>&1 || true )
 check "84.32 help documents --all-accounts"       "\-\-all-accounts"  "$OUT84_18"
+
+export HOME="$H_ALPHA"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 85 — body search decodes; show locates the folder itself
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 85: decoded body search, folder-less show ---"
+
+H_F85="./build/tests/functional/homes/f85"
+rm -rf "./build/tests/functional/homes/f85"
+mkdir -p "$H_F85/.config/email-cli/accounts/f85@test.local"
+cat > "$H_F85/.config/email-cli/accounts/f85@test.local/config.ini" <<CFG85
+EMAIL_HOST=imaps://localhost:19985
+EMAIL_USER=f85@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+SYNC_INTERVAL=5
+CFG85
+D85="$H_F85/.local/share/email-cli/accounts/f85@test.local"
+mkdir -p "$D85/manifests" "$D85/store/vasarlas/7/3" "$D85/store/vasarlas/8/3"
+
+# UID 837: latin-2 body — the accented words are NOT UTF-8 in the file.
+printf 'From: shop@x.hu\r\nSubject: Megrendeles\r\nDate: Mon, 1 Jan 2024 10:00:00 +0000\r\nContent-Type: text/plain; charset=iso-8859-2\r\n\r\nComputherm DS5-25 m\xe1gneses iszaplev\xe1laszt\xf3 1 db\r\n' \
+    > "$D85/store/vasarlas/7/3/0000000000000837.eml"
+# UID 838: base64 body — opaque unless the searcher decodes it.
+B64_85=$(printf 'Szallitasi ertesito: iszaplevalaszto uton van.' | base64 -w0)
+printf 'From: shop@x.hu\r\nSubject: Szallitas\r\nDate: Mon, 2 Jan 2024 10:00:00 +0000\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n' \
+    "$B64_85" > "$D85/store/vasarlas/8/3/0000000000000838.eml"
+{
+  printf "0000000000000837\tshop@x.hu\tMegrendeles\t2024-01-01 10:00\t0\n"
+  printf "0000000000000838\tshop@x.hu\tSzallitas\t2024-01-02 10:00\t0\n"
+} > "$D85/manifests/vasarlas.tsv"
+
+f85() { (export HOME="$H_F85"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+         "$BIN_DIR/email-cli-ro" --batch "$@" 2>&1 || true); }
+
+# ASCII inside a latin-2 message was always findable — the regression guard.
+OUT85_1=$(f85 list --folder "__search__:3:Computherm")
+check "85.1 body search finds ASCII in latin-2 mail"   "Megrendeles" "$OUT85_1"
+
+# The real defect: an accented word stored in iso-8859-2 must match a UTF-8
+# query, which only works if the search decodes like `show` does.
+OUT85_3=$( (export HOME="$H_F85"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli-ro" --batch list --folder "__search__:3:mágneses" 2>&1 || true) )
+check "85.2 body search matches accented latin-2 text" "Megrendeles" "$OUT85_3"
+
+# base64 bodies are opaque without transfer-decoding
+OUT85_4=$(f85 list --folder "__search__:3:ertesito")
+check "85.3 body search decodes base64 bodies"        "Szallitas"   "$OUT85_4"
+
+# A query that appears nowhere must still report nothing
+OUT85_5=$(f85 list --folder "__search__:3:zzznosuchword")
+check_not "85.4 body search: no false positives"      "Megrendeles" "$OUT85_5"
+
+# show without --folder: the UID lives in "vasarlas", not the configured INBOX
+OUT85_6=$(f85 show 837)
+check "85.4b show locates the folder itself"          "Megrendeles" "$OUT85_6"
+check "85.5 show decodes the latin-2 body"            "mágneses"    "$OUT85_6"
+
+# General help must advertise the search, filters and JSON
+OUT85_7=$( "$BIN_DIR/email-cli-ro" --help 2>&1 || true )
+check "85.6 general help mentions search"   "__search__"      "$OUT85_7"
+check "85.7 general help mentions --json"   "\-\-json"        "$OUT85_7"
+check "85.8 general help mentions --from"   "\-\-from"        "$OUT85_7"
+OUT85_8=$( "$BIN_DIR/email-cli" help send 2>&1 || true )
+check "85.9 send help documents --attach"   "\-\-attach"      "$OUT85_8"
 
 export HOME="$H_ALPHA"
 

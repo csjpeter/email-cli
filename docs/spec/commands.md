@@ -303,6 +303,30 @@ Displays the full content of one message identified by its IMAP UID.
 | `--label <name>` | Gmail alias for `--folder` |
 | `--raw` | Print the stored message verbatim (see below) |
 
+### Which folder a bare UID means
+
+IMAP UIDs are unique **within a mailbox**, not within an account, so the same
+UID usually names a different message in every folder. When `--folder` is
+omitted the folder is resolved from the local store:
+
+| Situation | Behaviour |
+|-----------|-----------|
+| The UID is cached in exactly one folder | That message is shown |
+| Several folders hold it, one being the configured folder | The configured folder's copy is shown; the other candidates are listed on **stderr** as a `Warning` |
+| Several folders hold it, none configured | **Error** on stderr listing every candidate; exit status is non-zero and nothing is printed |
+| The UID is cached nowhere | The configured folder is queried on the server |
+
+`Inbox` and `INBOX` count as one mailbox, per RFC 3501.
+
+Diagnostics go to stderr only, so piped stdout stays clean. To avoid the
+question entirely, pass the folder shown in the `Folder` column of a
+cross-folder listing:
+
+```
+email-cli-ro list --folder '__search__:0:invoice'
+email-cli-ro show 837 --folder vasarlas
+```
+
 ### `--raw`
 
 Writes the RFC 2822 source exactly as stored: no MIME parsing, no

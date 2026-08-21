@@ -2589,7 +2589,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         int tcols    = is_tty ? terminal_cols() : 0;
         int is_gmail = cfg->gmail_mode;
         int show_uid = !opts->pager;   /* UID column in CLI/RO mode, not TUI */
+        /* Cross-folder views draw rows from several mailboxes; without the
+         * folder the UID is not enough to open the message again. */
+        int show_folder = !opts->pager && (is_virtual_flags || is_virtual_search);
         int overhead = show_uid ? 48 : 30;  /* 48 = 30 + uid(16) + sep(2) */
+        if (show_folder) overhead += 22;    /* folder(20) + sep(2) */
         int subj_w, from_w;
         if (is_tty) {
             int avail = tcols - overhead;
@@ -2722,7 +2726,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             printf("[");
         } else {
         if (opts->pager) printf("\033[3;1H");
-        if (show_uid)
+        if (show_uid && show_folder)
+            printf("  %-16s  %-16s  %-6s  %-20s  %-*s  %s\n",
+                   "UID", "Date", "Sts", "Folder", subj_w, "Subject", "From");
+        else if (show_uid)
             printf("  %-16s  %-16s  %-6s  %-*s  %s\n",
                    "UID", "Date", "Sts", subj_w, "Subject", "From");
         else
@@ -2732,6 +2739,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         if (show_uid) { print_dbar(16); printf("  "); }
         print_dbar(16); printf("  ");
         printf("\u2550\u2550\u2550\u2550\u2550\u2550  ");
+        if (show_folder) { print_dbar(20); printf("  "); }
         print_dbar(subj_w > 0 ? subj_w : 30); printf("  ");
         print_dbar(from_w > 0 ? from_w : 40); printf("\n");
         }
@@ -2947,6 +2955,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 printf("%s%-16.16s  %-16.16s  %s  ", row_pfx, entries[ei].uid, date, sts);
             else
                 printf("%s%-16.16s  %s  ", row_pfx, date, sts);
+            if (show_folder)
+                printf("%-20.20s  ",
+                       entries[ei].folder[0] ? entries[ei].folder : folder);
             print_padded_col(subject, subj_w);
             printf("  ");
             print_padded_col(from,    from_w);
@@ -5120,20 +5131,75 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
 
 /* Load one message: local store first, server on a miss.
  * Returns a heap-allocated RFC 2822 message, or NULL (error already reported). */
-static char *load_message(const Config *cfg, const char *folder, const char *uid) {
+/* Locate the folder holding UID when the caller named none.
+ *
+ * IMAP UIDs are unique per mailbox, not per account, so the same UID routinely
+ * names a different message in every folder — an unqualified UID is genuinely
+ * under-specified.  "prefer" (the configured folder) is the user's implicit
+ * context and wins when it holds a copy, but the other candidates are named on
+ * stderr so the choice is never silent: picking one quietly is what made a
+ * search hit in one folder open a different message from another.
+ *
+ * Returns a heap-allocated folder name, or NULL.  *fatal is set when the
+ * caller must stop: the UID is ambiguous and no copy sits in "prefer". */
+static char *resolve_folder_for_uid(const char *uid, const char *prefer,
+                                    int *fatal) {
+    *fatal = 0;
+    char **folders = NULL;
+    int n = 0;
+    local_msg_find_folders(uid, &folders, &n);
+
+    if (n == 1) {
+        char *only = folders[0];
+        folders[0] = NULL;
+        local_folder_list_free(folders, n);
+        return only;
+    }
+    if (n > 1) {
+        int pick = -1;
+        if (prefer && prefer[0])
+            for (int i = 0; i < n; i++)
+                if (strcasecmp(folders[i], prefer) == 0) { pick = i; break; }
+
+        fprintf(stderr, "%s: UID %s exists in %d folders:",
+                pick >= 0 ? "Warning" : "Error", uid, n);
+        for (int i = 0; i < n; i++)
+            fprintf(stderr, "%s %s", i ? "," : "", folders[i]);
+        if (pick >= 0)
+            fprintf(stderr, "\n         Showing the copy in %s; "
+                            "use --folder <name> to pick another.\n",
+                    folders[pick]);
+        else
+            fprintf(stderr, "\n       Re-run with --folder <name> "
+                            "to say which one.\n");
+
+        char *chosen = NULL;
+        if (pick >= 0) { chosen = folders[pick]; folders[pick] = NULL; }
+        else           { *fatal = 1; }
+        local_folder_list_free(folders, n);
+        return chosen;
+    }
+    local_folder_list_free(folders, n);
+    return NULL;
+}
+
+/* A virtual name is a view, not a mailbox: no message is stored under it. */
+static int is_virtual_folder_name(const char *f) {
+    return f && f[0] == '_' && f[1] == '_';
+}
+
+static char *load_message(const Config *cfg, const char *folder, const char *uid,
+                          char **used_folder_out) {
     char *raw = NULL;
     RAII_STRING char *located = NULL;
 
-    /* A UID from a cross-folder search does not carry its folder, and the
-     * caller may have passed the configured default.  If the message is not
-     * there, look it up in the local store rather than failing with advice the
-     * user cannot act on. */
-    if (!local_msg_exists(folder, uid)) {
-        located = local_msg_find_folder(uid);
-        if (located) {
-            logger_log(LOG_DEBUG, "UID %s located in folder %s", uid, located);
-            folder = located;
-        }
+    /* No folder given, or a virtual view that stores nothing: resolve it. */
+    if (!folder || !folder[0] || is_virtual_folder_name(folder)) {
+        int fatal = 0;
+        located = resolve_folder_for_uid(uid, cfg ? cfg->folder : NULL, &fatal);
+        if (fatal) return NULL;
+        if (located) folder = located;
+        else         folder = cfg->folder;   /* not cached — try the default */
     }
 
     if (local_msg_exists(folder, uid)) {
@@ -5153,6 +5219,8 @@ static char *load_message(const Config *cfg, const char *folder, const char *uid
 
     if (!raw)
         fprintf(stderr, "Could not load message UID %s in folder '%s'.\n", uid, folder);
+    else if (used_folder_out)
+        *used_folder_out = strdup(folder);
     return raw;
 }
 
@@ -5174,8 +5242,7 @@ static void warn_charset(const MimeTextInfo *info, const char *uid) {
 }
 
 int email_service_read_raw(const Config *cfg, const char *folder, const char *uid) {
-    if (!folder) folder = cfg->folder;
-    char *raw = load_message(cfg, folder, uid);
+    char *raw = load_message(cfg, folder, uid, NULL);
     if (!raw) return -1;
 
     /* Write the message exactly as stored: headers and body, no MIME parsing,
@@ -5190,9 +5257,13 @@ int email_service_read_raw(const Config *cfg, const char *folder, const char *ui
 }
 
 int email_service_read(const Config *cfg, const char *folder, const char *uid, int pager, int page_size) {
-    if (!folder) folder = cfg->folder;
-    char *raw = load_message(cfg, folder, uid);
+    /* load_message resolves the folder when none was given; take its answer so
+     * that everything below (the File: line, flag updates) refers to the
+     * mailbox the message actually came from. */
+    RAII_STRING char *used_folder = NULL;
+    char *raw = load_message(cfg, folder, uid, &used_folder);
     if (!raw) return -1;
+    if (used_folder) folder = used_folder;
 
     char *from_raw = mime_get_header(raw, "From");
     char *from     = from_raw ? mime_decode_words(from_raw) : NULL;

@@ -130,6 +130,21 @@ given as the first positional argument.
 also accepts names that are not real folders. They are resolved from the
 local store, span every cached folder, and need no server connection.
 A message cached in several folders is listed once.
+.SS Bare UIDs and folders
+IMAP UIDs are unique within a mailbox, not within an account, so the same UID
+usually names a different message in each folder.  With no
+.B \-\-folder
+the message is located in the local store: a UID cached in a single folder is
+shown from there; if several folders hold it the configured folder wins and the
+alternatives are named on stderr as a warning; if none of them is the configured
+folder the command fails and lists the candidates.  Per RFC 3501
+.B Inbox
+and
+.B INBOX
+are the same mailbox.  Cross\-folder listings carry a
+.B Folder
+column so the right name can be passed straight back to
+.BR show .
 .TP
 .B __unread__
 Unread messages.

@@ -5057,6 +5057,99 @@ check "85.9 send help documents --attach"   "\-\-attach"      "$OUT85_8"
 export HOME="$H_ALPHA"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 86 — one UID in several folders: no silent wrong answer
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 86: cross-folder UID ambiguity, folder column ---"
+
+H_F86="./build/tests/functional/homes/f86"
+rm -rf "./build/tests/functional/homes/f86"
+mkdir -p "$H_F86/.config/email-cli/accounts/f86@test.local"
+cat > "$H_F86/.config/email-cli/accounts/f86@test.local/config.ini" <<CFG86
+EMAIL_HOST=imaps://localhost:19986
+EMAIL_USER=f86@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=Archive
+SSL_NO_VERIFY=1
+SYNC_INTERVAL=5
+CFG86
+D86="$H_F86/.local/share/email-cli/accounts/f86@test.local"
+mkdir -p "$D86/manifests" "$D86/store/Inbox/7/3" "$D86/store/INBOX/7/3" \
+         "$D86/store/vasarlas/7/3" "$D86/store/Trash/9/3"
+
+# The SAME UID in three real folders, each with different content, plus an
+# "Inbox"/"INBOX" pair that RFC 3501 says is a single mailbox.
+mk86() { printf 'From: %s\r\nSubject: %s\r\nDate: Mon, 1 Jan 2024 10:00:00 +0000\r\n\r\nbody %s\r\n' "$2" "$3" "$3" > "$1"; }
+mk86 "$D86/store/Inbox/7/3/0000000000000837.eml"    a@x.hu InboxCopy
+cp   "$D86/store/Inbox/7/3/0000000000000837.eml" "$D86/store/INBOX/7/3/0000000000000837.eml"
+mk86 "$D86/store/vasarlas/7/3/0000000000000837.eml" shop@x.hu OrderCopy
+mk86 "$D86/store/Trash/9/3/0000000000000839.eml"    z@x.hu TrashOnly
+printf "0000000000000837\ta@x.hu\tInboxCopy\t2024-01-01 10:00\t0\n"    > "$D86/manifests/Inbox.tsv"
+cp "$D86/manifests/Inbox.tsv" "$D86/manifests/INBOX.tsv"
+printf "0000000000000837\tshop@x.hu\tOrderCopy\t2024-01-01 10:00\t0\n" > "$D86/manifests/vasarlas.tsv"
+printf "0000000000000839\tz@x.hu\tTrashOnly\t2024-01-01 10:00\t0\n"    > "$D86/manifests/Trash.tsv"
+
+f86() { (export HOME="$H_F86"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+         "$BIN_DIR/email-cli-ro" --batch "$@" 2>&1 || true); }
+f86rc() { (export HOME="$H_F86"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+           "$BIN_DIR/email-cli-ro" --batch "$@" >/dev/null 2>&1; echo $?); }
+
+# The regression this phase exists for: "show" used to pick one folder
+# silently, so the user read a DIFFERENT message than the one searched for.
+# With no copy in the configured folder there is nothing to fall back on.
+OUT86_1=$(f86 show 837)
+check     "86.1 ambiguous show reports the conflict"  "exists in"   "$OUT86_1"
+check     "86.2 ambiguity names the vasarlas copy"    "vasarlas"    "$OUT86_1"
+check     "86.3 ambiguity names the inbox copy"       "INBOX"       "$OUT86_1"
+check_not "86.4 ambiguous show prints no message"     "InboxCopy"   "$OUT86_1"
+check     "86.5 ambiguous show fails loudly"          "1"           "$(f86rc show 837)"
+
+# RFC 3501: "Inbox" and "INBOX" are one mailbox, so they must not be counted
+# as two conflicting locations.
+check_not "86.6 Inbox/INBOX counted once"             "4 folders"   "$OUT86_1"
+
+# With --folder the right message comes back, and File: points at it.
+OUT86_2=$(f86 show 837 --folder vasarlas)
+check     "86.7 disambiguated show reads the right mail" "OrderCopy" "$OUT86_2"
+check_not "86.8 disambiguated show is not the inbox one" "InboxCopy" "$OUT86_2"
+check     "86.9 File: names the folder actually used"    "vasarlas"  "$OUT86_2"
+
+# An unambiguous UID still needs no --folder at all.
+OUT86_3=$(f86 show 839)
+check     "86.10 unique UID still resolves itself"    "TrashOnly"   "$OUT86_3"
+
+# --folder __all__ must not silently fall back to one folder either.
+check     "86.11 __all__ show reports the conflict"   "exists in"   "$(f86 show 837 --folder __all__)"
+
+# The workflow fix: cross-folder listings name the folder of every row, so the
+# user can pass it straight back to "show".
+OUT86_4=$(f86 list --folder "__search__:0:Copy")
+check     "86.12 search table has a Folder column"    "Folder"      "$OUT86_4"
+check     "86.13 search row names vasarlas"           "vasarlas"    "$OUT86_4"
+OUT86_5=$(f86 list --all --folder "__all__")
+check     "86.14 __all__ table has a Folder column"   "Folder"      "$OUT86_5"
+# A plain single-folder listing has nothing to disambiguate — no extra column.
+check_not "86.15 plain listing has no Folder column"  "Folder"      "$(f86 list --all --folder vasarlas)"
+
+# When the configured folder does hold a copy it wins — an unqualified UID is
+# read in the user's own mailbox context — but the other copies are still named
+# on stderr, and stdout stays clean for scripts.
+sed -i 's/^EMAIL_FOLDER=Archive$/EMAIL_FOLDER=INBOX/' \
+    "$H_F86/.config/email-cli/accounts/f86@test.local/config.ini"
+OUT86_6=$(f86 show 837)
+check     "86.16 configured folder wins over ambiguity" "InboxCopy" "$OUT86_6"
+check     "86.17 the other copies are still reported"   "vasarlas"  "$OUT86_6"
+check     "86.18 it warns rather than fails"            "Warning"   "$OUT86_6"
+check     "86.19 preferred show succeeds"               "0"         "$(f86rc show 837)"
+# stdout alone (stderr dropped) must carry the message and no diagnostics.
+OUT86_7=$( (export HOME="$H_F86"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+            "$BIN_DIR/email-cli-ro" --batch show 837 2>/dev/null || true) )
+check     "86.20 stdout holds the message"              "InboxCopy" "$OUT86_7"
+check_not "86.21 stdout free of the warning"            "Warning"   "$OUT86_7"
+
+export HOME="$H_ALPHA"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

@@ -97,6 +97,74 @@ static PtySession *open_harness(const char *initial)
 /* ── Tests: basic editing ────────────────────────────────────────────── */
 
 /** Prompt appears on row 0 immediately after launch. */
+
+/* ── UTF-8 input (accented characters) ──────────────────────────────── */
+
+/* Typing non-ASCII must insert the whole code point, not a placeholder byte.
+ *
+ * terminal_last_printable() reports multi-byte input as the value 1; inserting
+ * that produced a literal 0x01 in the buffer, so "hőcserélő" came out as
+ * "h\x01cser\x01l\x01" — and because a control byte occupies no column, the
+ * rendered cursor drifted away from the real insertion point, making editing
+ * unreliable. */
+static void test_utf8_accented_input(void)
+{
+    PtySession *s = open_harness(NULL);
+    ASSERT(s != NULL, "utf8: harness launched");
+    ASSERT_WAIT_FOR(s, "Path:", WAIT_MS);
+
+    /* A real-world filename: Hungarian accents, including two-byte ő and é. */
+    pty_send_str(s, "hőcserélő-számla.pdf");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "hőcserélő-számla.pdf");
+
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "RESULT:", WAIT_MS);
+    /* The value handed back must be the text that was typed, byte for byte. */
+    ASSERT_SCREEN_CONTAINS(s, "RESULT: hőcserélő-számla.pdf");
+    pty_close(s);
+}
+
+/* Backspace after an accented character must delete the whole code point,
+ * leaving valid UTF-8 rather than a dangling continuation byte. */
+static void test_utf8_backspace_deletes_code_point(void)
+{
+    PtySession *s = open_harness(NULL);
+    ASSERT(s != NULL, "utf8 bs: harness launched");
+    ASSERT_WAIT_FOR(s, "Path:", WAIT_MS);
+
+    pty_send_str(s, "árvíz");
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);   /* remove 'z' */
+    pty_send_key(s, PTY_KEY_BACK);   /* remove 'í' (two bytes) */
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "RESULT:", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "RESULT: árv");
+    pty_close(s);
+}
+
+/* Editing in the middle of accented text: the cursor position the terminal
+ * shows must match where the bytes actually go. */
+static void test_utf8_insert_in_middle(void)
+{
+    PtySession *s = open_harness(NULL);
+    ASSERT(s != NULL, "utf8 mid: harness launched");
+    ASSERT_WAIT_FOR(s, "Path:", WAIT_MS);
+
+    pty_send_str(s, "őz");
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_LEFT);        /* between ő and z */
+    pty_send_str(s, "é");
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "RESULT:", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "RESULT: őéz");
+    pty_close(s);
+}
+
 static void test_prompt_displayed(void)
 {
     PtySession *s = open_harness(NULL);
@@ -551,6 +619,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_hidden_files_excluded);
     RUN_TEST(test_dot_prefix_shows_hidden);
     RUN_TEST(test_no_match_leaves_buf_unchanged);
+    RUN_TEST(test_utf8_accented_input);
+    RUN_TEST(test_utf8_backspace_deletes_code_point);
+    RUN_TEST(test_utf8_insert_in_middle);
 
     fs_teardown();
 

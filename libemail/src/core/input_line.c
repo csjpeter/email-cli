@@ -90,11 +90,21 @@ static void il_delete_fwd(InputLine *il) {
     il->len -= end - start;
 }
 
-static void il_insert(InputLine *il, char ch) {
-    if (il->len + 1 >= il->bufsz) return;
-    memmove(il->buf + il->cur + 1, il->buf + il->cur, il->len - il->cur + 1);
-    il->buf[il->cur++] = ch;
-    il->len++;
+/* Insert a whole UTF-8 sequence at the cursor.
+ *
+ * Typed characters must be taken as complete code points: for anything above
+ * ASCII, terminal_last_printable() only reports *that* a character arrived
+ * (as the value 1) — the bytes live in terminal_last_utf8().  Inserting the
+ * flag byte instead produced a literal 0x01 in the text, which both corrupted
+ * the value (an accented letter became ^A) and desynchronised the rendered
+ * cursor, since a control byte occupies no column. */
+static void il_insert_utf8(InputLine *il, const char *seq) {
+    size_t n = seq ? strlen(seq) : 0;
+    if (n == 0 || il->len + n >= il->bufsz) return;
+    memmove(il->buf + il->cur + n, il->buf + il->cur, il->len - il->cur + 1);
+    memcpy(il->buf + il->cur, seq, n);
+    il->cur += n;
+    il->len += n;
 }
 
 /* ── Rendering ───────────────────────────────────────────────────────── */
@@ -191,8 +201,10 @@ int input_line_run(InputLine *il, int trow, const char *prompt) {
             break;
 
         case TERM_KEY_IGNORE: {
-            int ch = terminal_last_printable();
-            if (ch > 0) il_insert(il, (char)ch);
+            /* terminal_last_utf8() carries the complete sequence for both
+             * ASCII and multi-byte input, so it is the only correct source. */
+            const char *seq = terminal_last_utf8();
+            if (seq && seq[0]) il_insert_utf8(il, seq);
             break;
         }
 

@@ -288,7 +288,13 @@ static void test_compose_abort_no_to(void) {
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_open_size(120, 50, a);
     ASSERT(s != NULL, "compose abort no-to: opens");
-    ASSERT_WAIT_FOR(s, "Aborted", WAIT_MS);
+    /* US-85: the editor is followed by the review screen, not an immediate
+     * "Aborted"; discarding there is what ends the compose. */
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Cancelled. Draft discarded.", WAIT_MS);
     pty_close(s);
 }
 
@@ -303,8 +309,8 @@ static void test_compose_editor_send(void) {
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_run(a);
     ASSERT(s != NULL, "compose editor send: opens");
-    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
-    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
+    pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Message sent", WAIT_MS);
     pty_close(s);
     cleanup_editor_mock();
@@ -321,8 +327,10 @@ static void test_compose_confirm_cancel(void) {
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_run(a);
     ASSERT(s != NULL, "compose confirm cancel: opens");
-    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
-    pty_send_str(s, "n");
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);
     pty_close(s);
     cleanup_editor_mock();
@@ -412,8 +420,8 @@ static void test_compose_sent_folder(void) {
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_run(a);
     ASSERT(s != NULL, "compose sent folder: opens");
-    ASSERT_WAIT_FOR(s, "Send?", WAIT_MS * 2);
-    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
+    pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
     pty_close(s);
     cleanup_editor_mock();

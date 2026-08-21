@@ -167,7 +167,9 @@ static int find_row(PtySession *s, const char *text) {
 
 static void test_help_general(void) {
     const char *a[] = {"--help", NULL};
-    PtySession *s = cli_open_size(120, 50, a);
+    /* The general help now also lists the search, filters and JSON options;
+     * it no longer fits in 50 rows. */
+    PtySession *s = cli_open_size(120, 80, a);
     ASSERT(s != NULL, "help: opens");
     ASSERT_WAIT_FOR(s, "Reading:", WAIT_MS);
     pty_settle(s, 300);

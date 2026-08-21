@@ -284,6 +284,92 @@ static char *make_tmp_attach(const char *content)
     return path;
 }
 
+
+/* Write a temp file that keeps a given extension, so that the MIME type can be
+ * inferred from it.  mkstemps() reserves the trailing suffix. */
+static char *make_tmp_attach_ext(const char *content, const char *suffix)
+{
+    char *path = NULL;
+    if (asprintf(&path, "/tmp/test-compose-mime-XXXXXX%s", suffix) == -1) return NULL;
+    int fd = mkstemps(path, (int)strlen(suffix));
+    if (fd < 0) { free(path); return NULL; }
+    size_t len = strlen(content);
+    ssize_t written = write(fd, content, len);
+    close(fd);
+    if (written < 0 || (size_t)written != len) {
+        unlink(path); free(path); return NULL;
+    }
+    return path;
+}
+
+/* Every extension the builder knows must reach the outgoing part's
+ * Content-Type; an unknown one must fall back to application/octet-stream.
+ * Attachments carry their type from the filename alone, so a wrong mapping
+ * silently mislabels what the recipient receives. */
+static void test_attach_mime_type_per_extension(void)
+{
+    static const struct { const char *suffix; const char *ctype; } cases[] = {
+        { ".pdf",  "application/pdf"    },
+        { ".txt",  "text/plain"         },
+        { ".html", "text/html"          },
+        { ".htm",  "text/html"          },
+        { ".jpg",  "image/jpeg"         },
+        { ".jpeg", "image/jpeg"         },
+        { ".png",  "image/png"          },
+        { ".gif",  "image/gif"          },
+        { ".zip",  "application/zip"    },
+        { ".gz",   "application/gzip"   },
+        { ".csv",  "text/csv"           },
+        { ".json", "application/json"   },
+        { ".xml",  "application/xml"    },
+        { ".PDF",  "application/pdf"    },   /* extension match is case-insensitive */
+        { ".bin",  "application/octet-stream" },  /* unknown extension */
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        char *path = make_tmp_attach_ext("payload", cases[i].suffix);
+        ASSERT(path != NULL, "mime: temp attachment created");
+        if (!path) continue;
+
+        const char *atts[] = { path, NULL };
+        ComposeParams p = {
+            .from = "a@b.com", .to = "c@d.com",
+            .subject = "MIME", .body = "Hi",
+            .attachments = atts, .attach_count = 1
+        };
+        char *out = NULL; size_t len = 0;
+        int rc = compose_build_message(&p, &out, &len);
+        ASSERT(rc == 0, "mime: build succeeds");
+        ASSERT(out && strstr(out, cases[i].ctype) != NULL,
+               "mime: Content-Type inferred from the extension");
+        free(out);
+        unlink(path);
+        free(path);
+    }
+}
+
+/* A file with no dot at all has no extension to infer from. */
+static void test_attach_mime_type_without_extension(void)
+{
+    char *path = make_tmp_attach_ext("payload", "");
+    ASSERT(path != NULL, "mime: extensionless temp file created");
+    if (!path) return;
+
+    const char *atts[] = { path, NULL };
+    ComposeParams p = {
+        .from = "a@b.com", .to = "c@d.com",
+        .subject = "MIME", .body = "Hi",
+        .attachments = atts, .attach_count = 1
+    };
+    char *out = NULL; size_t len = 0;
+    ASSERT(compose_build_message(&p, &out, &len) == 0, "mime: build succeeds");
+    ASSERT(out && strstr(out, "application/octet-stream") != NULL,
+           "mime: no extension → application/octet-stream");
+    free(out);
+    unlink(path);
+    free(path);
+}
+
 static void test_build_no_attach_is_text_plain(void)
 {
     /* Zero attachments → must still produce text/plain (backward compat) */
@@ -457,6 +543,8 @@ void test_compose_service(void) {
     RUN_TEST(test_extract_re_dedup);
     RUN_TEST(test_extract_reply_to_header);
     /* US-84: attachment tests — fail until compose_build_message handles them */
+    RUN_TEST(test_attach_mime_type_per_extension);
+    RUN_TEST(test_attach_mime_type_without_extension);
     RUN_TEST(test_build_no_attach_is_text_plain);
     RUN_TEST(test_build_one_attachment_multipart);
     RUN_TEST(test_build_attachment_filename_in_disposition);

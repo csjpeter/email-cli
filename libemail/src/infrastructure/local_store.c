@@ -1099,8 +1099,21 @@ int local_search(const char *query, int scope,
                     free(hdr);
                 }
             } else {
-                char *body = local_msg_load(fold, me->uid);
-                if (body) { match = strcasestr(body, query) != NULL; free(body); }
+                /* Body scope: search the *decoded* text, not the stored file.
+                 * Matching the raw .eml only ever finds ASCII inside
+                 * unencoded parts: a base64 body is opaque, and in a
+                 * non-UTF-8 message the accented words are stored in their
+                 * original charset, so a UTF-8 query can never match them.
+                 * mime_get_text_body() applies transfer-decoding, charset
+                 * conversion and HTML rendering — the same text `show`
+                 * displays, which is what the user is searching for. */
+                char *raw = local_msg_load(fold, me->uid);
+                if (raw) {
+                    char *text = mime_get_text_body(raw);
+                    match = strcasestr(text ? text : raw, query) != NULL;
+                    free(text);
+                    free(raw);
+                }
             }
             if (!match) continue;
 
@@ -1714,6 +1727,46 @@ static void parse_addr_list(const char *hdr,
         if (addr[0]) cb(addr, name, ud);
         (void)start;
     }
+}
+
+/* Locate which cached folder holds a UID.
+ *
+ * IMAP UIDs are unique only within a mailbox, so callers normally pass the
+ * folder explicitly.  A search result, however, spans folders, and the table
+ * output carries no folder column — without this lookup the user has to guess
+ * which folder to hand to `show`.  Returns a heap-allocated folder name, or
+ * NULL when the UID is not in the local store. */
+char *local_msg_find_folder(const char *uid) {
+    if (!uid || !uid[0] || !g_account_base[0]) return NULL;
+
+    char dir_path[8300];
+    snprintf(dir_path, sizeof(dir_path), "%s/manifests", g_account_base);
+    RAII_DIR DIR *dp = opendir(dir_path);
+    if (!dp) return NULL;
+
+    struct dirent *ent;
+    while ((ent = readdir(dp)) != NULL) {
+        const char *name = ent->d_name;
+        size_t nlen = strlen(name);
+        if (nlen <= 4 || strcmp(name + nlen - 4, ".tsv") != 0) continue;
+        /* Skip legacy virtual manifests; real data lives in per-folder ones. */
+        if (name[0] == '_' && name[1] == '_') continue;
+
+        RAII_STRING char *folder = strndup(name, nlen - 4);
+        if (!folder) continue;
+
+        /* Prefer a cached body, but a manifest row is enough to name the
+         * folder — `show` can then fetch the message itself. */
+        if (local_msg_exists(folder, uid)) return strdup(folder);
+
+        Manifest *m = manifest_load(folder);
+        if (m) {
+            int found = manifest_find(m, uid) != NULL;
+            manifest_free(m);
+            if (found) return strdup(folder);
+        }
+    }
+    return NULL;
 }
 
 /* ---- contacts.tsv upsert ---- */

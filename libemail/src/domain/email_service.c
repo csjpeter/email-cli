@@ -5122,6 +5122,19 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
  * Returns a heap-allocated RFC 2822 message, or NULL (error already reported). */
 static char *load_message(const Config *cfg, const char *folder, const char *uid) {
     char *raw = NULL;
+    RAII_STRING char *located = NULL;
+
+    /* A UID from a cross-folder search does not carry its folder, and the
+     * caller may have passed the configured default.  If the message is not
+     * there, look it up in the local store rather than failing with advice the
+     * user cannot act on. */
+    if (!local_msg_exists(folder, uid)) {
+        located = local_msg_find_folder(uid);
+        if (located) {
+            logger_log(LOG_DEBUG, "UID %s located in folder %s", uid, located);
+            folder = located;
+        }
+    }
 
     if (local_msg_exists(folder, uid)) {
         logger_log(LOG_DEBUG, "Cache hit for UID %s in %s", uid, folder);

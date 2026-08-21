@@ -54,6 +54,17 @@ const char *local_store_account_name(void);
 /** @brief Checks whether a locally stored message exists. */
 int local_msg_exists(const char *folder, const char *uid);
 
+/**
+ * @brief Find which cached folder holds a UID.
+ *
+ * Useful after a cross-folder search, where the caller knows the UID but not
+ * the folder it lives in.
+ *
+ * @param uid  Message UID.
+ * @return Heap-allocated folder name, or NULL if not found. Caller must free.
+ */
+char *local_msg_find_folder(const char *uid);
+
 /** @brief Writes raw message content to the local store. */
 int local_msg_save(const char *folder, const char *uid, const char *content, size_t len);
 

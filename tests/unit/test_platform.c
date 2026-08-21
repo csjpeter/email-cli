@@ -87,16 +87,32 @@ void test_platform(void) {
     ASSERT(terminal_read_password("test", pwbuf, 0) == -1,
            "terminal_read_password: size 0 should return -1");
 
-    /* Non-tty stdin path: getline on an empty/closed stream returns -1. */
-    if (!terminal_is_tty(STDIN_FILENO)) {
-        int n = terminal_read_password("test", pwbuf, sizeof(pwbuf));
-        ASSERT(n == -1 || n >= 0,
-               "terminal_read_password non-tty: must not crash");
+    /* EOF on stdin → -1.
+     *
+     * This must read from a stream we closed ourselves, never the inherited
+     * stdin: "not a tty" does not imply "empty or closed".  When the test
+     * runner is started with a socket on stdin — as happens under a job
+     * runner — getline() blocks forever and the whole suite hangs with no
+     * output, which is exactly what it did before. */
+    {
+        int pfd[2];
+        if (pipe(pfd) == 0) {
+            close(pfd[1]);                    /* immediate EOF */
+            int saved = dup(STDIN_FILENO);
+            dup2(pfd[0], STDIN_FILENO);
+            close(pfd[0]);
+            clearerr(stdin);
+            int n = terminal_read_password("test", pwbuf, sizeof(pwbuf));
+            dup2(saved, STDIN_FILENO);
+            close(saved);
+            clearerr(stdin);
+            ASSERT(n == -1, "terminal_read_password: EOF on stdin returns -1");
+        }
     }
 
     /* Non-tty stdin with CRLF input: covers the \\r stripping step
      * (terminal.c line 214: if (slen > 0 && line[slen-1] == '\\r')). */
-    if (!terminal_is_tty(STDIN_FILENO)) {
+    {
         int pfd[2];
         if (pipe(pfd) == 0) {
             const char *crlf_input = "secret\r\n";

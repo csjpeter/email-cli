@@ -79,7 +79,13 @@ cmake_configure() {
     local extra_flags="${2:-}"
     mkdir -p "$BUILD_DIR" "$BIN_DIR"
     cd "$BUILD_DIR"
+    # Coverage is a per-invocation choice, not a sticky cache entry.  Without an
+    # explicit OFF here a previous `coverage` run leaves instrumentation enabled
+    # in CMakeCache.txt, and every later build — release binaries and packages
+    # included — silently carries gcov instrumentation.  $extra_flags comes
+    # last so the coverage target can still turn it back on.
     cmake -DCMAKE_BUILD_TYPE="$build_type" \
+          -DENABLE_COVERAGE=OFF \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
           $extra_flags ..
     cd ..

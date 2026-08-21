@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(email-cli VERSION 0.2.4 LANGUAGES C)
+project(email-cli VERSION 0.2.5 LANGUAGES C)
 
 # Version string: prefer "git describe", fall back to project version
 find_program(GIT_EXECUTABLE git)
@@ -18,6 +18,28 @@ else()
     set(EMAIL_CLI_VERSION "${PROJECT_VERSION}")
 endif()
 add_compile_definitions(EMAIL_CLI_VERSION="${EMAIL_CLI_VERSION}")
+
+# Package version, derived from the same describe.  Taking it from the
+# hardcoded project() version instead lets packages go stale the moment a tag
+# is added: the binary would report the tag while the .deb kept the old number.
+#   v0.2.5               -> 0.2.5
+#   v0.2.5-43-gabc1234   -> 0.2.5.43   (43 commits past the tag)
+#   v0.1                 -> 0.1
+# The "-dirty" marker stays in the binary's --version but is dropped here:
+# dpkg and rpm both need a plain dotted number.
+set(EMAIL_CLI_PACKAGE_VERSION "${PROJECT_VERSION}")
+if(_GIT_DESCRIBE)
+    set(_pkgver "${EMAIL_CLI_VERSION}")
+    string(REGEX REPLACE "-dirty$" "" _pkgver "${_pkgver}")
+    string(REGEX REPLACE "^([0-9]+(\\.[0-9]+)*)-([0-9]+)-g[0-9a-f]+$" "\\1.\\3"
+           _pkgver "${_pkgver}")
+    if(_pkgver MATCHES "^[0-9]+(\\.[0-9]+)*$")
+        set(EMAIL_CLI_PACKAGE_VERSION "${_pkgver}")
+    else()
+        message(WARNING "Cannot derive a package version from '${_GIT_DESCRIBE}'; "
+                        "falling back to ${PROJECT_VERSION}")
+    endif()
+endif()
 
 # Gmail OAuth2 credentials (optional — loaded from gmail_credentials.cmake)
 if(EXISTS "${CMAKE_SOURCE_DIR}/gmail_credentials.cmake")
@@ -102,7 +124,7 @@ install(FILES docs/man/email-cli.1
 
 # ── CPack packaging (DEB + RPM) ────────────────────────────────────────────────
 set(CPACK_PACKAGE_NAME        "email-cli")
-set(CPACK_PACKAGE_VERSION     "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VERSION     "${EMAIL_CLI_PACKAGE_VERSION}")
 set(CPACK_PACKAGE_CONTACT     "Peter Csaszar <peter@csaszar.email>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "Terminal-based email client suite (IMAP + Gmail REST API)")

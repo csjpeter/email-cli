@@ -87,6 +87,39 @@ cmake_configure() {
     ln -sf build/compile_commands.json compile_commands.json
 }
 
+# All PTY suites, defined once so that `pty` (which must fail the build) and
+# `coverage` (which must always produce a report) cannot drift apart.
+# Usage: for_each_pty_suite <runner>   where <runner> is called as
+#        <runner> <label> <binary> [args…]  from inside the build directory.
+for_each_pty_suite() {
+    local run="$1"
+    local B="$2"   # absolute bin dir
+    "$run" views          ./tests/pty/test-pty-views "$B/email-cli" \
+                          ./tests/pty/mock-imap-server "$B/email-cli-ro" \
+                          "$B/email-sync" "$B/email-tui"
+    "$run" gmail-tui      ./tests/pty/test-pty-gmail-tui "$B/email-tui" \
+                          "$B/email-sync" ./tests/pty/mock-gmail-server
+    "$run" mail-rules     ./tests/pty/test-pty-mail-rules "$B/email-sync" \
+                          "$B/email-tui" ./tests/pty/mock-imap-server
+    "$run" compose-dialog ./tests/pty/test-pty-compose-dialog "$B/email-tui" \
+                          ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
+    "$run" attachment     ./tests/pty/test-pty-attachment "$B/email-tui" \
+                          ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
+    "$run" send-local     ./tests/pty/test-pty-send-local "$B/email-tui" \
+                          "$B/email-sync" ./tests/pty/mock-imap-server \
+                          ./tests/pty/mock-smtp-server
+    "$run" input-line     ./tests/pty/test-pty-input-line \
+                          ./tests/pty/input-line-harness
+    "$run" compose        ./tests/pty/test-pty-compose "$B/email-tui" \
+                          ./tests/pty/mock-smtp-server "$B/email-cli"
+}
+
+PTY_TARGETS="test-pty-views test-pty-gmail-tui test-pty-mail-rules \
+             test-pty-compose-dialog test-pty-attachment test-pty-send-local \
+             test-pty-compose test-pty-input-line \
+             mock-imap-server mock-gmail-server mock-smtp-server \
+             input-line-harness"
+
 JOBS=$(nproc)
 
 cmake_build() {
@@ -169,16 +202,21 @@ case "$1" in
     pty)
         echo "Running PTY tests..."
         build_release
-        cmake --build "$BUILD_DIR" \
-            --target test-pty-views test-pty-gmail-tui test-pty-mail-rules \
-                     test-pty-compose-dialog test-pty-attachment \
-                     test-pty-send-local test-pty-compose test-pty-input-line \
-                     mock-imap-server mock-gmail-server mock-smtp-server \
-                     input-line-harness -- -j"$JOBS"
+        cmake --build "$BUILD_DIR" --target $PTY_TARGETS -- -j"$JOBS"
         ABS_BUILD="$(realpath "$BUILD_DIR")"
         ABS_BIN="$(realpath "$BIN_DIR")"
+        # Mock servers bind fixed ports.  A previous interrupted run can leave
+        # one behind, and the next suite then talks to a stale server with
+        # different contents — which looks exactly like a product regression.
+        pkill -f "mock_imap_server"  2>/dev/null || true
+        pkill -f "mock-imap-server"  2>/dev/null || true
+        pkill -f "mock_gmail_api_server" 2>/dev/null || true
+        pkill -f "mock-gmail-server" 2>/dev/null || true
+        pkill -f "mock_smtp_server"  2>/dev/null || true
+        pkill -f "mock-smtp-server"  2>/dev/null || true
+        sleep 1
         pty_rc=0
-        run_pty() {  # run_pty <label> <binary> [args…]
+        run_pty_strict() {  # run_pty_strict <label> <binary> [args…]
             local label="$1"; shift
             echo "--- PTY: $label ---"
             # Each suite binds fixed mock-server ports; run them sequentially
@@ -189,20 +227,7 @@ case "$1" in
             fi
             sleep 2
         }
-        run_pty views          ./tests/pty/test-pty-views "$ABS_BIN/email-cli" \
-                               ./tests/pty/mock-imap-server "$ABS_BIN/email-cli-ro" \
-                               "$ABS_BIN/email-sync" "$ABS_BIN/email-tui"
-        run_pty gmail-tui      ./tests/pty/test-pty-gmail-tui "$ABS_BIN/email-tui" \
-                               "$ABS_BIN/email-sync" ./tests/pty/mock-gmail-server
-        run_pty mail-rules     ./tests/pty/test-pty-mail-rules "$ABS_BIN/email-sync" \
-                               "$ABS_BIN/email-tui" ./tests/pty/mock-imap-server
-        run_pty compose-dialog ./tests/pty/test-pty-compose-dialog "$ABS_BIN/email-tui" \
-                               ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
-        run_pty attachment     ./tests/pty/test-pty-attachment "$ABS_BIN/email-tui" \
-                               ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
-        run_pty send-local     ./tests/pty/test-pty-send-local "$ABS_BIN/email-tui" \
-                               "$ABS_BIN/email-sync" ./tests/pty/mock-imap-server \
-                               ./tests/pty/mock-smtp-server
+        for_each_pty_suite run_pty_strict "$ABS_BIN"
         exit $pty_rc
         ;;
     valgrind)
@@ -217,10 +242,7 @@ case "$1" in
         cmake_build
         build_test_runner
         echo "Building PTY test binaries..."
-        cmake --build "$BUILD_DIR" \
-            --target test-pty-views --target mock-imap-server \
-            --target mock-smtp-server --target test-pty-compose \
-            --target test-pty-send-local -- -j"$JOBS"
+        cmake --build "$BUILD_DIR" --target $PTY_TARGETS -- -j"$JOBS"
 
         # Pass 1 — functional suite + PTY tests (fresh .gcda) → functional badge
         find "$BUILD_DIR" -name "*.gcda" -delete
@@ -232,26 +254,19 @@ case "$1" in
         echo "Running PTY tests for coverage..."
         ABS_BUILD="$(realpath "$BUILD_DIR")"
         ABS_BIN="$(realpath "$BIN_DIR")"
-        # PTY tests must run from the build directory so mock-imap-server finds
-        # tests/certs/test.crt relative to cwd.
-        (cd "$ABS_BUILD" && ./tests/pty/test-pty-views \
-            "$ABS_BIN/email-cli" \
-            ./tests/pty/mock-imap-server \
-            "$ABS_BIN/email-cli-ro" \
-            "$ABS_BIN/email-sync" \
-            "$ABS_BIN/email-tui" \
-            2>/dev/null) || true
-        (cd "$ABS_BUILD" && ./tests/pty/test-pty-compose \
-            "$ABS_BIN/email-tui" \
-            ./tests/pty/mock-smtp-server \
-            "$ABS_BIN/email-cli" \
-            2>/dev/null) || true
-        (cd "$ABS_BUILD" && ./tests/pty/test-pty-send-local \
-            "$ABS_BIN/email-tui" \
-            "$ABS_BIN/email-sync" \
-            ./tests/pty/mock-imap-server \
-            ./tests/pty/mock-smtp-server \
-            2>/dev/null) || true
+        # Every suite contributes to the measured coverage.  Failures are
+        # tolerated here on purpose — the report must still be produced — but
+        # they are reported, and `./manage.sh pty` (which CI runs) fails on them.
+        run_pty_lenient() {  # run_pty_lenient <label> <binary> [args…]
+            local label="$1"; shift
+            # PTY tests run from the build directory so that mock servers find
+            # tests/certs/test.crt relative to cwd.
+            if ! (cd "$ABS_BUILD" && "$@" 2>/dev/null >/dev/null); then
+                echo "  [warn] PTY suite '$label' reported failures (coverage run continues)"
+            fi
+            sleep 2
+        }
+        for_each_pty_suite run_pty_lenient "$ABS_BIN"
         echo "Capturing functional coverage..."
         (cd "$BUILD_DIR" && lcov --capture --directory . \
              --output-file coverage-functional-raw.info && \

@@ -5150,6 +5150,107 @@ check_not "86.21 stdout free of the warning"            "Warning"   "$OUT86_7"
 export HOME="$H_ALPHA"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 87 — Gmail with a cron sync: the cache must actually be readable
+# ════════════════════════════════════════════════════════════════════════════
+# A Gmail account with SYNC_INTERVAL > 0 used to fall into the IMAP
+# cache-only branch, which reads manifests/<folder>.tsv — a file gmail_sync
+# never writes.  Result: "No cached data" over a fully synced store, "Could
+# not load message" for messages sitting on disk, and a search that found
+# nothing.  Everything here is driven through a real sync of the mock API.
+echo ""
+echo "--- Phase 87: Gmail cron-mode cache (list, show, search) ---"
+
+GMAIL_PORT_C=19987
+echo "Starting mock Gmail API server C (port $GMAIL_PORT_C, 30 messages)..."
+(MOCK_GMAIL_PORT=$GMAIL_PORT_C MOCK_GMAIL_COUNT=30 \
+    MOCK_GMAIL_EMAIL="cron@gmail.com" \
+    MOCK_GMAIL_SUBJECT_PREFIX="CronMail-" \
+    "$MOCK_GMAIL_BIN") >"./build/tests/functional/mock_gmail_cron.log" 2>&1 &
+GMAIL_SERVER_C_PID=$!
+sleep 0.5
+
+H_F87="./build/tests/functional/homes/f87"
+rm -rf "./build/tests/functional/homes/f87"
+mkdir -p "$H_F87/config/email-cli/accounts/cron@gmail.com" "$H_F87/data"
+# SYNC_INTERVAL=5 is the whole point: a background syncer owns the network.
+cat > "$H_F87/config/email-cli/accounts/cron@gmail.com/config.ini" <<GCFG87
+EMAIL_HOST=
+EMAIL_USER=cron@gmail.com
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=fakefaketoken
+SYNC_INTERVAL=5
+GCFG87
+
+f87env() {
+    export XDG_CONFIG_HOME="$H_F87/config"
+    export XDG_DATA_HOME="$H_F87/data"
+    export XDG_CACHE_HOME="$H_F87/cache"
+    export HOME="$H_F87"
+    export GMAIL_TEST_TOKEN=testtoken
+    export GMAIL_API_BASE_URL="http://localhost:$GMAIL_PORT_C/gmail/v1/users/me"
+}
+f87() { (f87env; "$BIN_DIR/email-cli-ro" --batch "$@" 2>&1 || true); }
+f87out() { (f87env; "$BIN_DIR/email-cli-ro" --batch "$@" 2>/dev/null || true); }
+f87rc() { (f87env; "$BIN_DIR/email-cli-ro" --batch "$@" >/dev/null 2>&1; echo $?); }
+
+OUT87_SYNC=$( (f87env; "$BIN_DIR/email-sync" --account cron@gmail.com 2>&1 || true) )
+check "87.1 gmail sync completes"                "30 of 30 downloaded" "$OUT87_SYNC"
+check "87.2 sync builds label indexes"           "Label indexes rebuilt" "$OUT87_SYNC"
+
+# The syncer writes label indexes and headers, never a manifest — the premise
+# the listing code has to respect.
+D87="$H_F87/data/email-cli/accounts/cron@gmail.com"
+check     "87.3 label index written"             "INBOX.idx" "$(ls "$D87/labels" 2>&1)"
+check_not "87.4 no manifest is written by sync"  "tsv"       "$(ls "$D87/manifests" 2>&1)"
+
+# The reported defect: listing a synced Gmail account in cron mode.
+OUT87_LIST=$(f87 list --folder INBOX)
+check     "87.5 cron-mode list shows the mail"   "CronMail-"   "$OUT87_LIST"
+check     "87.6 cron-mode list counts them all"  "of 30 message" "$OUT87_LIST"
+check_not "87.7 no bogus empty-cache claim"      "No cached data" "$OUT87_LIST"
+
+# The same store through a real Gmail label.
+check "87.8 label listing works too"             "of 30 message" "$(f87 list --folder UNREAD)"
+
+# Opening a message: the .eml is in the flat Gmail store, so cron mode must
+# find it locally instead of refusing to connect.
+U87=$(head -c 16 "$D87/labels/INBOX.idx")
+OUT87_SHOW=$(f87 show "$U87" --folder INBOX)
+check     "87.9 cron-mode show reads the mail"   "CronMail-"   "$OUT87_SHOW"
+check_not "87.10 show does not fail to load"     "Could not load" "$OUT87_SHOW"
+check     "87.11 show succeeds"                  "0"           "$(f87rc show "$U87" --folder INBOX)"
+# A bare UID must work as well: Gmail stores one copy, so there is nothing to
+# disambiguate.
+check     "87.12 bare UID resolves on Gmail"     "CronMail-"   "$(f87 show "$U87")"
+
+# Search across the Gmail cache — it reads .hdr records, not manifests.
+# The query string itself is echoed in the "Search: ..." heading, so every
+# assertion here matches on the result rows, never on the term searched for.
+OUT87_S1=$(f87 list --folder '__search__:0:Message 7')
+check "87.13 subject search finds exactly one"   "1-1 of 1 message" "$OUT87_S1"
+check "87.14 from search finds all senders"      "1-30 of 30 message" "$(f87 list --folder '__search__:1:sender')"
+check "87.15 body search reads the .eml"         "1-30 of 30 message" "$(f87 list --folder '__search__:3:CronMail-body')"
+check "87.16 search names the label"             "INBOX"       "$OUT87_S1"
+check "87.17 no false positives"                 "No messages" "$(f87 list --folder '__search__:0:ZZNOSUCHMAIL')"
+
+# A label that was never synced still earns the sync advice, not a bare
+# "no messages" that would suggest an empty mailbox.
+check "87.18 unknown label advises a sync"       "No cached data" "$(f87 list --folder NoSuchLabel)"
+
+# IMAP-only virtual views do not exist on Gmail; say so instead of implying
+# the cache is stale.
+OUT87_V=$(f87 list --folder __unread__)
+check     "87.19 virtual view explained on Gmail" "IMAP-only view" "$OUT87_V"
+check     "87.20 it points at the real label"     "UNREAD"         "$OUT87_V"
+check_not "87.21 stdout stays clean for scripts"  "IMAP-only"      "$(f87out list --folder __unread__)"
+
+# No "wait" here: under "set -e" the 143 from a killed child would abort the
+# script before the results summary ever printed.
+kill "$GMAIL_SERVER_C_PID" || echo "  (mock Gmail C had already exited)"
+
+export HOME="$H_ALPHA"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

@@ -2045,6 +2045,73 @@ static void list_filter_rebuild(
     *fcount_out = fc;
 }
 
+/* A virtual name is a view, not a mailbox: no message is stored under it. */
+static int is_virtual_folder_name(const char *f) {
+    return f && f[0] == '_' && f[1] == '_';
+}
+
+/* Nothing is cached for this view: say so, and in the TUI offer a sync.
+ *
+ * Shared by the IMAP manifest branch and the Gmail label-index branch — both
+ * can legitimately find an empty cache, and the advice (run email-sync) is the
+ * same either way; only the artifact they looked in differs.  Returns the same
+ * codes as email_service_list(): 0 quit, 1 back, 4 refresh, 7 rules editor. */
+static int list_empty_cache_view(const Config *cfg, const EmailListOpts *opts,
+                                 const char *folder, const char *folder_display) {
+    if (!opts->pager) {
+        if (opts->json) {
+            /* JSON mode must always emit one parseable document; the
+             * advice goes to stderr so stdout stays machine-readable. */
+            printf("[\n]\n");
+            fprintf(stderr,
+                    "No cached data for %s. Run 'email-sync' first.\n", folder);
+        } else {
+            printf("No cached data for %s. Run 'email-cli sync' first.\n", folder);
+        }
+        return 0;
+    }
+    RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
+    {
+        int tcols = terminal_cols(); int trows = terminal_rows();
+        if (tcols <= 0) tcols = 80;
+        if (trows <= 0) trows = 24;
+        int avail = tcols - 29; if (avail < 40) avail = 40;
+        int subj_w = avail * 3 / 5, from_w = avail - subj_w;
+        printf("\033[H\033[2J");
+        char cl[512];
+        snprintf(cl, sizeof(cl),
+                 "  0 of 0 message(s) in %s (0 unread) [%s].  \u26a0 No cached data \u2014 run 'email-sync' or 's=sync'",
+                 folder_display, cfg->user ? cfg->user : "?");
+        printf("\033[1;1H\033[7m%s", cl);
+        int used = visible_line_cols(cl, cl + strlen(cl));
+        for (int p = used; p < tcols; p++) putchar(' ');
+        printf("\033[0m");
+        printf("\033[3;1H  %-16s  %-6s  %-*s  %s\n",
+               "Date", "Sts", subj_w, "Subject", "From");
+        printf("  ");
+        print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
+        print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
+        printf("\n  \033[2m(empty)\033[0m\n");
+        fflush(stdout);
+        char sb[256];
+        snprintf(sb, sizeof(sb),
+                 "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
+                 "  Backspace=%s  ESC=quit"
+                 "  s=sync  U=refresh  l=rules  [0/0]",
+                 cfg->gmail_mode ? "labels" : "folders");
+        print_statusbar(trows, tcols, sb);
+    }
+    for (;;) {
+        TermKey key = terminal_read_key();
+        if (key == TERM_KEY_BACK) return 1;
+        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
+        int ch = terminal_last_printable();
+        if (ch == 's') { sync_start_background(); }
+        if (ch == 'U') return 4; /* refresh: re-list */
+        if (ch == 'l') return 7; /* rules editor */
+    }
+}
+
 int email_service_list(const Config *cfg, EmailListOpts *opts) {
     /* Always re-initialise the local store so the correct account's manifests
      * and header cache are used, regardless of which account was active before. */
@@ -2165,7 +2232,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         /* ── Cross-folder content search (always local data) ────────────── */
         SearchResult *sr = NULL;
         int sr_count = 0;
-        local_search(search_query, search_scope, &sr, &sr_count);
+        local_search(search_query, search_scope, cfg->gmail_mode, &sr, &sr_count);
         show_count = sr_count;
         entries = calloc((size_t)(sr_count > 0 ? sr_count : 1), sizeof(MsgEntry));
         if (!entries) { local_search_free(sr, sr_count); manifest_free(manifest); return -1; }
@@ -2181,62 +2248,19 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             if (entries[i].flags & MSG_FLAG_UNSEEN) unseen_count++;
         }
         local_search_free(sr, sr_count);
-    } else if (cfg->sync_interval > 0) {
-        /* ── Cron / cache-only mode: serve entirely from manifest ──────── */
+    } else if (cfg->sync_interval > 0 && !cfg->gmail_mode) {
+        /* ── IMAP cron / cache-only mode: serve entirely from manifest ───
+         *
+         * Manifests are an IMAP-side artifact: gmail_sync.c writes
+         * labels/<label>.idx and headers/<uid>.hdr, never a manifest.  Testing
+         * sync_interval before gmail_mode therefore routed every Gmail account
+         * with a cron sync into a branch reading a file nothing ever fills,
+         * reporting "No cached data" over a fully populated store.  Storage
+         * format follows the account type; only the refresh policy follows
+         * sync_interval. */
         if (manifest->count == 0) {
             manifest_free(manifest);
-            if (!opts->pager) {
-                if (opts->json) {
-                    /* JSON mode must always emit one parseable document; the
-                     * advice goes to stderr so stdout stays machine-readable. */
-                    printf("[\n]\n");
-                    fprintf(stderr,
-                            "No cached data for %s. Run 'email-sync' first.\n", folder);
-                } else {
-                    printf("No cached data for %s. Run 'email-cli sync' first.\n", folder);
-                }
-                return 0;
-            }
-            RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
-            {
-                int tcols = terminal_cols(); int trows = terminal_rows();
-                if (tcols <= 0) tcols = 80;
-                if (trows <= 0) trows = 24;
-                int avail = tcols - 29; if (avail < 40) avail = 40;
-                int subj_w = avail * 3 / 5, from_w = avail - subj_w;
-                printf("\033[H\033[2J");
-                char cl[512];
-                snprintf(cl, sizeof(cl),
-                         "  0 of 0 message(s) in %s (0 unread) [%s].  \u26a0 No cached data \u2014 run 'email-sync' or 's=sync'",
-                         folder_display, cfg->user ? cfg->user : "?");
-                printf("\033[1;1H\033[7m%s", cl);
-                int used = visible_line_cols(cl, cl + strlen(cl));
-                for (int p = used; p < tcols; p++) putchar(' ');
-                printf("\033[0m");
-                printf("\033[3;1H  %-16s  %-6s  %-*s  %s\n",
-                       "Date", "Sts", subj_w, "Subject", "From");
-                printf("  ");
-                print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
-                print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
-                printf("\n  \033[2m(empty)\033[0m\n");
-                fflush(stdout);
-                char sb[256];
-                snprintf(sb, sizeof(sb),
-                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                         "  Backspace=%s  ESC=quit"
-                         "  s=sync  U=refresh  l=rules  [0/0]",
-                         cfg->gmail_mode ? "labels" : "folders");
-                print_statusbar(trows, tcols, sb);
-            }
-            for (;;) {
-                TermKey key = terminal_read_key();
-                if (key == TERM_KEY_BACK) return 1;
-                if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
-                int ch = terminal_last_printable();
-                if (ch == 's') { sync_start_background(); }
-                if (ch == 'U') return 4; /* refresh: re-list */
-                if (ch == 'l') return 7; /* rules editor */
-            }
+            return list_empty_cache_view(cfg, opts, folder, folder_display);
         }
         show_count = manifest->count;
         entries = malloc((size_t)show_count * sizeof(MsgEntry));
@@ -2259,6 +2283,35 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         char (*idx_uids)[17] = NULL;
         int idx_count = 0;
         label_idx_load(idx_folder, &idx_uids, &idx_count);
+
+        /* The cross-folder flag views are an IMAP construct: Gmail expresses
+         * the same thing as real labels, which the user selects by name.
+         * Saying so beats advising a sync that would change nothing. */
+        if (is_virtual_folder_name(folder)) {
+            free(idx_uids);
+            manifest_free(manifest);
+            if (!opts->pager)
+                fprintf(stderr,
+                        "'%s' is an IMAP-only view. On Gmail use the label "
+                        "itself, e.g. --folder UNREAD or --folder STARRED "
+                        "('list-labels' shows them all).\n", folder);
+            return 1;
+        }
+
+        /* A missing or empty label index means the label was never synced —
+         * the Gmail equivalent of an absent manifest, so give the same advice
+         * rather than the flat "no messages" that suggests an empty mailbox.
+         *
+         * Batch output only: the TUI keeps rendering its normal empty view,
+         * whose status bar carries the hints that belong to the label being
+         * viewed (Trash offers u=restore, for one).  The generic panel would
+         * drop them, and an empty Trash is an ordinary state, not a missing
+         * cache. */
+        if (idx_count == 0 && !opts->pager) {
+            free(idx_uids);
+            manifest_free(manifest);
+            return list_empty_cache_view(cfg, opts, folder, folder_display);
+        }
 
         /* Only include entries that have a cached .hdr file.
          * UIDs without a .hdr were never fully synced (e.g. sync was
@@ -5183,23 +5236,30 @@ static char *resolve_folder_for_uid(const char *uid, const char *prefer,
     return NULL;
 }
 
-/* A virtual name is a view, not a mailbox: no message is stored under it. */
-static int is_virtual_folder_name(const char *f) {
-    return f && f[0] == '_' && f[1] == '_';
-}
-
 static char *load_message(const Config *cfg, const char *folder, const char *uid,
                           char **used_folder_out) {
     char *raw = NULL;
     RAII_STRING char *located = NULL;
+    /* Kept for diagnostics: Gmail's storage folder is the empty string, which
+     * would read as "in folder ''" in an error message. */
+    const char *named_folder = (folder && folder[0]) ? folder : "INBOX";
 
-    /* No folder given, or a virtual view that stores nothing: resolve it. */
-    if (!folder || !folder[0] || is_virtual_folder_name(folder)) {
+    if (cfg && cfg->gmail_mode) {
+        /* Gmail keeps one copy of each message in a flat store keyed by UID
+         * alone — a folder there is a label, not a location.  Resolving a
+         * folder from the manifests cannot work (gmail_sync writes none), and
+         * asking for the message under a label name looks up a path that was
+         * never written: in cron mode that produced "Could not load message"
+         * for messages sitting in the store. */
+        folder = "";
+    } else if (!folder || !folder[0] || is_virtual_folder_name(folder)) {
+        /* No folder given, or a virtual view that stores nothing: resolve it. */
         int fatal = 0;
         located = resolve_folder_for_uid(uid, cfg ? cfg->folder : NULL, &fatal);
         if (fatal) return NULL;
         if (located) folder = located;
         else         folder = cfg->folder;   /* not cached — try the default */
+        named_folder = (folder && folder[0]) ? folder : "INBOX";
     }
 
     if (local_msg_exists(folder, uid)) {
@@ -5207,7 +5267,8 @@ static char *load_message(const Config *cfg, const char *folder, const char *uid
         raw = local_msg_load(folder, uid);
     } else if (cfg->sync_interval > 0) {
         /* cron/offline mode: serve only from local cache; do not connect */
-        fprintf(stderr, "Could not load message UID %s in folder '%s'.\n", uid, folder);
+        fprintf(stderr, "Could not load message UID %s in folder '%s'.\n",
+                uid, named_folder);
         return NULL;
     } else {
         raw = fetch_uid_content_in(cfg, folder, uid, 0);
@@ -5218,7 +5279,8 @@ static char *load_message(const Config *cfg, const char *folder, const char *uid
     }
 
     if (!raw)
-        fprintf(stderr, "Could not load message UID %s in folder '%s'.\n", uid, folder);
+        fprintf(stderr, "Could not load message UID %s in folder '%s'.\n",
+                uid, named_folder);
     else if (used_folder_out)
         *used_folder_out = strdup(folder);
     return raw;

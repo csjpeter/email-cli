@@ -118,11 +118,15 @@ for_each_pty_suite() {
                           ./tests/pty/input-line-harness
     "$run" compose        ./tests/pty/test-pty-compose "$B/email-tui" \
                           ./tests/pty/mock-smtp-server "$B/email-cli"
+    # The PTY harness itself.  Its self-test existed but was never wired into
+    # any target, so a break in the library the other eight suites depend on
+    # would have surfaced as confusing failures in those suites instead.
+    "$run" ptytest        ./tests/pty/libptytest/test-ptytest
 }
 
 PTY_TARGETS="test-pty-views test-pty-gmail-tui test-pty-mail-rules \
              test-pty-compose-dialog test-pty-attachment test-pty-send-local \
-             test-pty-compose test-pty-input-line \
+             test-pty-compose test-pty-input-line test-ptytest \
              mock-imap-server mock-gmail-server mock-smtp-server \
              input-line-harness"
 
@@ -260,6 +264,21 @@ case "$1" in
         echo "Running PTY tests for coverage..."
         ABS_BUILD="$(realpath "$BUILD_DIR")"
         ABS_BIN="$(realpath "$BIN_DIR")"
+        # The functional suite above runs a mock on port 9993 — the same fixed
+        # port three PTY suites use, and the mock's own default.  Any server it
+        # leaves behind answers the next suite's connect probe, which then
+        # tests against a mailbox belonging to someone else: that is how
+        # mail-rules came to assert over messages titled "AlphaAccountMsg".
+        # `./manage.sh pty` has cleared these since the same bug bit it; the
+        # coverage path needs it just as much, because here the functional run
+        # immediately precedes the PTY run.
+        pkill -f "mock_imap_server"  2>/dev/null || true
+        pkill -f "mock-imap-server"  2>/dev/null || true
+        pkill -f "mock_gmail_api_server" 2>/dev/null || true
+        pkill -f "mock-gmail-server" 2>/dev/null || true
+        pkill -f "mock_smtp_server"  2>/dev/null || true
+        pkill -f "mock-smtp-server"  2>/dev/null || true
+        sleep 1
         # Every suite contributes to the measured coverage.  Failures are
         # tolerated here on purpose — the report must still be produced — but
         # they are reported, and `./manage.sh pty` (which CI runs) fails on them.

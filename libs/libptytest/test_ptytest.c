@@ -180,6 +180,74 @@ static void test_pty_cat_interactive(void) {
     pty_close(s);
 }
 
+/* ── Waiting for the child to exit ───────────────────────────────────── */
+
+static void test_pty_wait_exit_clean(void) {
+    PtySession *s = pty_open(40, 10);
+    ASSERT(s != NULL, "wait_exit: pty_open");
+    if (!s) return;
+
+    const char *argv[] = { "sh", "-c", "echo done; exit 0", NULL };
+    ASSERT(pty_run(s, argv) == 0, "wait_exit: pty_run");
+
+    /* The child exits on its own, so the status is its own, not a signal's. */
+    ASSERT(pty_wait_exit(s, 3000) == 0, "wait_exit: reports the exit status");
+    /* Output produced on the way out is still collected. */
+    ASSERT(pty_screen_contains(s, "done"), "wait_exit: drains pending output");
+    /* Calling again finds no child: it was reaped by the first call, and a
+     * second wait must not block or report a bogus status. */
+    ASSERT(pty_wait_exit(s, 200) == -1, "wait_exit: second call has no child");
+
+    pty_close(s);   /* must be safe after the child was reaped */
+}
+
+static void test_pty_wait_exit_nonzero(void) {
+    PtySession *s = pty_open(40, 10);
+    ASSERT(s != NULL, "wait_exit rc: pty_open");
+    if (!s) return;
+
+    const char *argv[] = { "sh", "-c", "exit 3", NULL };
+    ASSERT(pty_run(s, argv) == 0, "wait_exit rc: pty_run");
+    ASSERT(pty_wait_exit(s, 3000) == 3, "wait_exit rc: non-zero status is returned");
+
+    pty_close(s);
+}
+
+static void test_pty_wait_exit_timeout(void) {
+    PtySession *s = pty_open(40, 10);
+    ASSERT(s != NULL, "wait_exit timeout: pty_open");
+    if (!s) return;
+
+    /* A child that does not exit: the wait must give up rather than hang. */
+    const char *argv[] = { "sleep", "30", NULL };
+    ASSERT(pty_run(s, argv) == 0, "wait_exit timeout: pty_run");
+    ASSERT(pty_wait_exit(s, 300) == -1, "wait_exit timeout: returns -1");
+
+    pty_close(s);   /* still the owner of the child; must terminate it */
+}
+
+static void test_pty_wait_exit_chatty_child(void) {
+    PtySession *s = pty_open(40, 10);
+    ASSERT(s != NULL, "wait_exit chatty: pty_open");
+    if (!s) return;
+
+    /* More output than a PTY buffer holds.  Without draining while waiting,
+     * the child would block writing and this call would never return — the
+     * deadlock the implementation has to avoid. */
+    const char *argv[] = { "sh", "-c",
+                           "i=0; while [ $i -lt 400 ]; do "
+                           "echo line-$i-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; "
+                           "i=$((i+1)); done", NULL };
+    ASSERT(pty_run(s, argv) == 0, "wait_exit chatty: pty_run");
+    ASSERT(pty_wait_exit(s, 5000) == 0, "wait_exit chatty: no deadlock on a full buffer");
+
+    pty_close(s);
+}
+
+static void test_pty_wait_exit_null(void) {
+    ASSERT(pty_wait_exit(NULL, 100) == -1, "wait_exit: NULL session returns -1");
+}
+
 /* ── Row text extraction ─────────────────────────────────────────────── */
 
 static void test_row_text(void) {
@@ -216,6 +284,11 @@ int main(void) {
     RUN_TEST(test_screen_24bit_color_skip);
     RUN_TEST(test_pty_echo);
     RUN_TEST(test_pty_cat_interactive);
+    RUN_TEST(test_pty_wait_exit_clean);
+    RUN_TEST(test_pty_wait_exit_nonzero);
+    RUN_TEST(test_pty_wait_exit_timeout);
+    RUN_TEST(test_pty_wait_exit_chatty_child);
+    RUN_TEST(test_pty_wait_exit_null);
     RUN_TEST(test_row_text);
 
     printf("\n--- Results ---\n");

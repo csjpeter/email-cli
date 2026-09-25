@@ -107,6 +107,26 @@ int pty_wait_for(PtySession *s, const char *text, int timeout_ms);
 int pty_settle(PtySession *s, int quiet_ms);
 
 /**
+ * @brief Waits for the child to exit on its own, reading output meanwhile.
+ *
+ * Use this for a child that finishes by itself — a sync run, a one-shot
+ * command — before inspecting what it wrote to disk.  pty_close() terminates
+ * the child with SIGTERM and then SIGKILL, which can cut it off mid-write:
+ * the last screen line saying the work is done is not a promise that the
+ * process has flushed its files and exited.
+ *
+ * Output is drained while waiting, so a child writing more than a pipe buffer
+ * cannot deadlock against this call.  On success the child is reaped here and
+ * a subsequent pty_close() will not signal it.
+ *
+ * @param s          Session handle.
+ * @param timeout_ms Maximum wait time in milliseconds.
+ * @return Child exit status (0 on clean success), or -1 on timeout, on a
+ *         child killed by a signal, or when there is no child to wait for.
+ */
+int pty_wait_exit(PtySession *s, int timeout_ms);
+
+/**
  * @brief Reads and processes any pending PTY output (non-blocking).
  * @return Number of bytes read, or 0 if nothing available.
  */

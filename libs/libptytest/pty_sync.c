@@ -9,6 +9,7 @@
 #include "pty_internal.h"
 #include <errno.h>
 #include <poll.h>
+#include <sys/wait.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <time.h>
@@ -96,6 +97,34 @@ int pty_wait_for(PtySession *s, const char *text, int timeout_ms) {
             pty_drain(s);
             return pty_screen_contains(s, text) ? 0 : -1;
         }
+    }
+}
+
+int pty_wait_exit(PtySession *s, int timeout_ms) {
+    if (!s || s->child_pid <= 0) return -1;
+
+    long deadline = now_ms() + timeout_ms;
+    struct pollfd pfd = { .fd = s->master_fd, .events = POLLIN };
+
+    for (;;) {
+        int status = 0;
+        pid_t r = waitpid(s->child_pid, &status, WNOHANG);
+        if (r == s->child_pid) {
+            /* Clear the pid now that it is reaped: pty_close() must never
+             * signal a pid the kernel may have already reassigned. */
+            s->child_pid = -1;
+            pty_drain(s);   /* pick up whatever it printed on the way out */
+            return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        }
+        if (r < 0) { s->child_pid = -1; return -1; }
+
+        long remaining = deadline - now_ms();
+        if (remaining <= 0) return -1;
+        /* Poll in slices: the child exiting does not wake poll() on the
+         * master fd in every case, so waitpid has to be re-checked. */
+        if (remaining > 20) remaining = 20;
+        int ret = poll(&pfd, 1, (int)remaining);
+        if (ret > 0 && (pfd.revents & POLLIN)) read_and_feed(s);
     }
 }
 

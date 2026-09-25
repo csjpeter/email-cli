@@ -16,32 +16,10 @@
 #include "terminal.h"
 #include <stdio.h>
 #include <string.h>
-#include <signal.h>
-#include <unistd.h>
-
-/* A PTY test ends by sending SIGTERM and, 100ms later, SIGKILL.  Under a
- * coverage build the default SIGTERM action skips the atexit handler that
- * writes the .gcda, and a SIGKILL landing while that write is in flight
- * leaves a truncated file behind — which fails the whole coverage run with
- * "not a gcov data file".  Flush the counters ourselves and exit at once, so
- * the file is either complete or absent, never half-written. */
-#ifdef ENABLE_GCOV
-extern void __gcov_dump(void);
-static void harness_on_term(int sig) {
-    (void)sig;
-    __gcov_dump();
-    _exit(0);
-}
-#endif
 
 int main(int argc, char *argv[])
 {
     const char *initial = (argc >= 2) ? argv[1] : "";
-
-#ifdef ENABLE_GCOV
-    signal(SIGTERM, harness_on_term);
-    signal(SIGHUP,  harness_on_term);
-#endif
 
     TermRawState *raw = terminal_raw_enter();
     if (!raw) {

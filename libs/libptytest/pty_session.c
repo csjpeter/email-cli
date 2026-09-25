@@ -74,10 +74,24 @@ void pty_close(PtySession *s) {
 
     if (s->child_pid > 0) {
         kill(s->child_pid, SIGTERM);
-        /* Give the child 100ms to exit */
-        usleep(100000);
+        /* Poll for the child to go, rather than assume a fixed 100ms is
+         * enough.  A coverage-instrumented binary writes its .gcda while
+         * exiting; a SIGKILL landing in the middle of that write leaves a
+         * truncated or internally inconsistent file, which fails the whole
+         * coverage report — once as "not a gcov data file", once as a
+         * negative hit count.  Waiting costs nothing when the child is
+         * already gone, which is the normal case. */
         int status;
-        if (waitpid(s->child_pid, &status, WNOHANG) == 0) {
+        int waited_ms = 0;
+        while (waited_ms < 2000) {
+            if (waitpid(s->child_pid, &status, WNOHANG) == s->child_pid) {
+                s->child_pid = -1;
+                break;
+            }
+            usleep(20000);
+            waited_ms += 20;
+        }
+        if (s->child_pid > 0) {   /* ignored SIGTERM or is wedged */
             kill(s->child_pid, SIGKILL);
             waitpid(s->child_pid, &status, 0);
         }

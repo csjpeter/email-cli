@@ -574,19 +574,32 @@ typedef struct {
 } SearchResult;
 
 /**
- * @brief Search all local manifests for entries matching @p query in @p scope.
+ * @brief Search the local cache for entries matching @p query in @p scope.
  *
- * scope: 0=Subject (manifest), 1=From (manifest),
- *        2=To (.hdr file), 3=Body (.eml file).
+ * scope: 0=Subject, 1=From, 2=To, 3=Body (decoded text).
+ *
+ * The two account types cache mail in different shapes, so each is walked in
+ * its own terms:
+ *
+ *   - IMAP  — one manifest per folder; subject/from come from the manifest
+ *             row, To from the RFC 2822 `.hdr`, the body from `store/<folder>`.
+ *   - Gmail — no manifests exist (gmail_sync writes none).  Every message is
+ *             cached once in a flat store keyed by UID, with subject/from/date
+ *             in a TSV `.hdr` record; To and body come from that one `.eml`.
+ *             `folder` in the result carries the message's first Gmail label.
+ *
+ * Passing the wrong mode is not an error, it simply finds nothing: a Gmail
+ * account has no manifests to walk, and an IMAP account has no TSV headers.
  *
  * @param query       Search term (case-insensitive substring).
  * @param scope       0-3, see above.
+ * @param gmail_mode  Non-zero to walk the Gmail cache instead of manifests.
  * @param results_out Heap-allocated array of SearchResult.  Caller frees with
  *                    local_search_free() — or may steal strings first.
  * @param count_out   Number of entries in *results_out.
  * @return 0 on success, -1 on allocation error.
  */
-int  local_search(const char *query, int scope,
+int  local_search(const char *query, int scope, int gmail_mode,
                   SearchResult **results_out, int *count_out);
 
 /**

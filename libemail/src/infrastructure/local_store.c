@@ -1053,12 +1053,94 @@ int local_flag_search(int flag_mask,
 
 /* ── Cross-folder text search ─────────────────────────────────────────── */
 
-int local_search(const char *query, int scope,
+/* Search the Gmail cache: a flat store keyed by UID, with the searchable
+ * header fields in a TSV .hdr record (from\tsubject\tdate\tlabels\tflags) and
+ * the body in the single .eml under the empty folder.  There are no manifests
+ * to walk here — gmail_sync writes none — which is why the manifest walk below
+ * finds nothing at all for a Gmail account. */
+static int local_search_gmail(const char *query, int scope,
+                              SearchResult **results_out, int *count_out)
+{
+    char (*uids)[17] = NULL;
+    int n = 0;
+    /* Distinguish "nothing cached" from "could not allocate": reporting the
+     * latter as an empty result would read as "no such mail". */
+    if (local_hdr_list_all_uids("", &uids, &n) != 0) { free(uids); return -1; }
+    if (n <= 0) { free(uids); return 0; }
+
+    int cap = 64, count = 0;
+    SearchResult *results = malloc((size_t)cap * sizeof(SearchResult));
+    if (!results) { free(uids); return -1; }
+
+    for (int i = 0; i < n; i++) {
+        RAII_STRING char *hdr = local_hdr_load("", uids[i]);
+        if (!hdr) continue;
+
+        /* Split the five TSV fields in place. */
+        char *f[5] = {0};
+        f[0] = hdr;
+        int nf = 1;
+        for (char *p = hdr; *p && nf < 5; p++)
+            if (*p == '\t') { *p = '\0'; f[nf++] = p + 1; }
+        const char *from    = f[0] ? f[0] : "";
+        const char *subject = f[1] ? f[1] : "";
+        const char *date    = f[2] ? f[2] : "";
+        const char *labels  = f[3] ? f[3] : "";
+        int flags = f[4] ? atoi(f[4]) : 0;
+
+        int match = 0;
+        if (scope == 0) {
+            match = strcasestr(subject, query) != NULL;
+        } else if (scope == 1) {
+            match = strcasestr(from, query) != NULL;
+        } else {
+            /* To and Body both need the message itself.  Body is matched on
+             * the decoded text for the same reason as the IMAP path below. */
+            RAII_STRING char *raw = local_msg_load("", uids[i]);
+            if (raw && scope == 2) {
+                RAII_STRING char *to_raw = mime_get_header(raw, "To");
+                if (to_raw) match = strcasestr(to_raw, query) != NULL;
+            } else if (raw) {
+                RAII_STRING char *text = mime_get_text_body(raw);
+                match = strcasestr(text ? text : raw, query) != NULL;
+            }
+        }
+        if (!match) continue;
+
+        if (count >= cap) {
+            cap *= 2;
+            SearchResult *tmp = realloc(results, (size_t)cap * sizeof(SearchResult));
+            if (!tmp) { free(uids); local_search_free(results, count); return -1; }
+            results = tmp;
+        }
+        SearchResult *r = &results[count++];
+        memcpy(r->uid, uids[i], 17);
+        /* Show the first label, so a cross-folder listing can name where the
+         * message lives even though every Gmail message shares one store. */
+        snprintf(r->folder, sizeof(r->folder), "%s", labels);
+        char *comma = strchr(r->folder, ',');
+        if (comma) *comma = '\0';
+        r->flags   = flags;
+        r->from    = strdup(from);
+        r->subject = strdup(subject);
+        r->date    = strdup(date);
+    }
+
+    free(uids);
+    *results_out = results;
+    *count_out   = count;
+    return 0;
+}
+
+int local_search(const char *query, int scope, int gmail_mode,
                  SearchResult **results_out, int *count_out)
 {
     *results_out = NULL;
     *count_out   = 0;
     if (!query || !query[0] || !g_account_base[0]) return 0;
+
+    if (gmail_mode)
+        return local_search_gmail(query, scope, results_out, count_out);
 
     char dir_path[8300];
     snprintf(dir_path, sizeof(dir_path), "%s/manifests", g_account_base);

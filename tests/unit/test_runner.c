@@ -52,6 +52,7 @@ void test_smtp_adapter(void);
 void test_mail_rules(void);
 void test_when_expr(void);
 void test_local_search(void);
+void test_local_search_gmail(void);
 void test_local_contacts_rebuild(void);
 void test_local_pending_append(void);
 void test_local_pending_fetch(void);
@@ -89,6 +90,7 @@ int main() {
     RUN_TEST(test_flag_search_folder_isolation);
     RUN_TEST(test_local_contacts_update);
     RUN_TEST(test_local_search);
+    RUN_TEST(test_local_search_gmail);
     RUN_TEST(test_local_contacts_rebuild);
     RUN_TEST(test_local_pending_append);
     RUN_TEST(test_local_pending_fetch);

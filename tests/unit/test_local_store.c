@@ -924,7 +924,7 @@ void test_local_search(void) {
     int cnt = 0;
 
     /* scope=0: subject search — "Hello" matches UID1 */
-    int rc = local_search("Hello", 0, &res, &cnt);
+    int rc = local_search("Hello", 0, 0, &res, &cnt);
     ASSERT(rc == 0,  "local_search subject: returns 0");
     ASSERT(cnt == 1, "local_search subject: 1 result");
     if (cnt == 1) {
@@ -935,13 +935,13 @@ void test_local_search(void) {
 
     /* scope=0: case-insensitive */
     res = NULL; cnt = 0;
-    local_search("hello", 0, &res, &cnt);
+    local_search("hello", 0, 0, &res, &cnt);
     ASSERT(cnt == 1, "local_search case-insensitive: 1 result");
     local_search_free(res, cnt);
 
     /* scope=1: from search — "alice" matches UID1 */
     res = NULL; cnt = 0;
-    local_search("alice", 1, &res, &cnt);
+    local_search("alice", 1, 0, &res, &cnt);
     ASSERT(cnt == 1, "local_search from: 1 result");
     if (cnt == 1)
         ASSERT(strcmp(res[0].uid, "0000000000000001") == 0, "local_search from: UID1");
@@ -949,16 +949,16 @@ void test_local_search(void) {
 
     /* scope=0: no match → 0 results */
     res = NULL; cnt = 0;
-    local_search("ZZZNOMATCH99", 0, &res, &cnt);
+    local_search("ZZZNOMATCH99", 0, 0, &res, &cnt);
     ASSERT(cnt == 0, "local_search no match: 0 results");
     local_search_free(res, cnt);
 
     /* NULL / empty query → 0 results, no crash */
     res = NULL; cnt = 0;
-    local_search(NULL, 0, &res, &cnt);
+    local_search(NULL, 0, 0, &res, &cnt);
     ASSERT(cnt == 0, "local_search NULL query: safe");
     res = NULL; cnt = 0;
-    local_search("", 0, &res, &cnt);
+    local_search("", 0, 0, &res, &cnt);
     ASSERT(cnt == 0, "local_search empty query: safe");
 
     if (old_home) setenv("HOME", old_home, 1);
@@ -1244,4 +1244,83 @@ void test_local_msg_find_folders(void) {
 
     /* Freeing an empty list is a no-op, not a crash. */
     local_folder_list_free(NULL, 0);
+}
+
+/* ── local_search: the Gmail cache has no manifests to walk ───────────── */
+
+void test_local_search_gmail(void) {
+    if (system("rm -rf '/tmp/email-cli-gsearch-test'") != 0) { /* best effort */ }
+    setup_test_env("/tmp/email-cli-gsearch-test");
+
+    /* What gmail_sync leaves on disk: one .eml per message in the flat store
+     * (empty folder name) and a TSV .hdr record beside it —
+     * from \t subject \t date \t labels \t flags.  No manifest anywhere. */
+    const char *eml1 =
+        "From: alice@example.com\r\nTo: team@corp.example\r\n"
+        "Subject: Invoice 2024\r\n\r\nThe boiler pump is on its way.\r\n";
+    const char *eml2 =
+        "From: bob@other.org\r\nTo: nobody@corp.example\r\n"
+        "Subject: Weekly report\r\n\r\nNothing of note this week.\r\n";
+    local_msg_save("", "0000000000000001", eml1, strlen(eml1));
+    local_msg_save("", "0000000000000002", eml2, strlen(eml2));
+    const char *hdr1 = "alice@example.com\tInvoice 2024\t2024-01-01 10:00\tINBOX,UNREAD\t1";
+    const char *hdr2 = "bob@other.org\tWeekly report\t2024-01-02 11:00\tINBOX\t0";
+    local_hdr_save("", "0000000000000001", hdr1, strlen(hdr1));
+    local_hdr_save("", "0000000000000002", hdr2, strlen(hdr2));
+
+    SearchResult *res = NULL;
+    int cnt = 0;
+
+    /* The regression guard: in IMAP mode this store is invisible, because
+     * the manifest directory it walks does not exist. */
+    ASSERT(local_search("Invoice", 0, 0, &res, &cnt) == 0,
+           "gmail search: IMAP mode returns cleanly");
+    ASSERT(cnt == 0, "gmail search: IMAP mode finds nothing without manifests");
+    local_search_free(res, cnt); res = NULL; cnt = 0;
+
+    /* Subject comes from the .hdr record. */
+    ASSERT(local_search("Invoice", 0, 1, &res, &cnt) == 0, "gmail subject: returns 0");
+    ASSERT(cnt == 1, "gmail subject: exactly one match");
+    if (cnt == 1) {
+        ASSERT(strcmp(res[0].uid, "0000000000000001") == 0, "gmail subject: right UID");
+        ASSERT(strcmp(res[0].subject, "Invoice 2024") == 0, "gmail subject: subject filled");
+        ASSERT(strcmp(res[0].from, "alice@example.com") == 0, "gmail subject: from filled");
+        ASSERT(strcmp(res[0].date, "2024-01-01 10:00") == 0, "gmail subject: date filled");
+        ASSERT(res[0].flags == 1, "gmail subject: flags decoded from the record");
+        /* Only the first label, so a listing can name one place per row. */
+        ASSERT(strcmp(res[0].folder, "INBOX") == 0, "gmail subject: first label only");
+    }
+    local_search_free(res, cnt); res = NULL; cnt = 0;
+
+    /* From scope, same source. */
+    ASSERT(local_search("other.org", 1, 1, &res, &cnt) == 0, "gmail from: returns 0");
+    ASSERT(cnt == 1, "gmail from: one match");
+    if (cnt == 1)
+        ASSERT(strcmp(res[0].uid, "0000000000000002") == 0, "gmail from: right UID");
+    local_search_free(res, cnt); res = NULL; cnt = 0;
+
+    /* To and body need the .eml — the .hdr has neither. */
+    ASSERT(local_search("team@corp", 2, 1, &res, &cnt) == 0, "gmail to: returns 0");
+    ASSERT(cnt == 1, "gmail to: matches the To header from the .eml");
+    local_search_free(res, cnt); res = NULL; cnt = 0;
+
+    ASSERT(local_search("boiler pump", 3, 1, &res, &cnt) == 0, "gmail body: returns 0");
+    ASSERT(cnt == 1, "gmail body: matches decoded body text");
+    if (cnt == 1)
+        ASSERT(strcmp(res[0].uid, "0000000000000001") == 0, "gmail body: right UID");
+    local_search_free(res, cnt); res = NULL; cnt = 0;
+
+    /* Case-insensitive, like the IMAP path. */
+    ASSERT(local_search("INVOICE", 0, 1, &res, &cnt) == 0, "gmail case: returns 0");
+    ASSERT(cnt == 1, "gmail case: match is case-insensitive");
+    local_search_free(res, cnt); res = NULL; cnt = 0;
+
+    /* No match, and empty queries, must stay quiet. */
+    ASSERT(local_search("ZZZNOSUCHTEXT", 0, 1, &res, &cnt) == 0, "gmail miss: returns 0");
+    ASSERT(cnt == 0, "gmail miss: no results");
+    local_search_free(res, cnt); res = NULL; cnt = 0;
+    ASSERT(local_search("", 0, 1, &res, &cnt) == 0, "gmail empty query: returns 0");
+    ASSERT(cnt == 0, "gmail empty query: no results");
+    ASSERT(local_search(NULL, 0, 1, &res, &cnt) == 0, "gmail NULL query: returns 0");
+    ASSERT(cnt == 0, "gmail NULL query: no results");
 }

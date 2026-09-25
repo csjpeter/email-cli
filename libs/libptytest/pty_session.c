@@ -73,25 +73,49 @@ void pty_close(PtySession *s) {
     if (!s) return;
 
     if (s->child_pid > 0) {
-        kill(s->child_pid, SIGTERM);
-        /* Poll for the child to go, rather than assume a fixed 100ms is
-         * enough.  A coverage-instrumented binary writes its .gcda while
-         * exiting; a SIGKILL landing in the middle of that write leaves a
-         * truncated or internally inconsistent file, which fails the whole
-         * coverage report — once as "not a gcov data file", once as a
-         * negative hit count.  Waiting costs nothing when the child is
-         * already gone, which is the normal case. */
         int status;
-        int waited_ms = 0;
-        while (waited_ms < 2000) {
+        int waited_ms;
+
+#ifdef ENABLE_GCOV
+        /* Coverage builds only: let a child that is already on its way out
+         * finish before signalling it at all.
+         *
+         * The gcov runtime writes each .gcda during exit, opening the file
+         * truncated first.  The default action for SIGTERM is to kill the
+         * process immediately — atexit handlers included — so signalling a
+         * child in the middle of that leaves a zero-byte file behind, and
+         * geninfo then fails the entire report with "not a gcov data file".
+         * Waiting first is what avoids it; waiting after the signal, as an
+         * earlier attempt did, is too late because the damage is done the
+         * moment the signal lands.
+         *
+         * A child that never exits by itself (a TUI waiting for a key) pays
+         * this in full, so the budget is the time a .gcda write plausibly
+         * needs — not the time a slow child might take to finish its work.
+         * Three seconds here added more than twenty minutes to a coverage
+         * run; 600ms covers the writes and costs a fraction of that.  It is
+         * confined to coverage builds either way. */
+        for (waited_ms = 0; waited_ms < 600; waited_ms += 20) {
             if (waitpid(s->child_pid, &status, WNOHANG) == s->child_pid) {
                 s->child_pid = -1;
                 break;
             }
             usleep(20000);
-            waited_ms += 20;
         }
-        if (s->child_pid > 0) {   /* ignored SIGTERM or is wedged */
+#endif
+
+        if (s->child_pid > 0) {
+            kill(s->child_pid, SIGTERM);
+            /* Poll rather than assume a fixed delay is enough. */
+            for (waited_ms = 0; waited_ms < 2000; waited_ms += 20) {
+                if (waitpid(s->child_pid, &status, WNOHANG) == s->child_pid) {
+                    s->child_pid = -1;
+                    break;
+                }
+                usleep(20000);
+            }
+        }
+        if (s->child_pid > 0) {   /* ignored SIGTERM, or wedged */
             kill(s->child_pid, SIGKILL);
             waitpid(s->child_pid, &status, 0);
         }

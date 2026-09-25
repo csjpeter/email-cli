@@ -93,16 +93,32 @@ static void write_config_with_interval(int interval) {
 }
 
 static int start_mock_server(void) {
-    g_mock_pid = fork();
-    if (g_mock_pid < 0) return -1;
-    if (g_mock_pid == 0) {
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) { dup2(devnull, 1); dup2(devnull, 2); close(devnull); }
-        execl(g_mock_bin, "mock_imap_server", (char *)NULL);
-        _exit(127);
+    /* Retry rather than give up on the first failure: a mock killed moments
+     * ago can still hold the port briefly, and at that instant it looks
+     * exactly like a foreign server squatting on it.  Only a conflict that
+     * outlives several attempts is worth reporting — and it must be reported,
+     * because the connect probe cannot tell our server from a stranger's, and
+     * testing against someone else's mailbox is how this stayed hidden. */
+    for (int attempt = 0; attempt < 15; attempt++) {
+        g_mock_pid = fork();
+        if (g_mock_pid < 0) return -1;
+        if (g_mock_pid == 0) {
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0) { dup2(devnull, 1); dup2(devnull, 2); close(devnull); }
+            execl(g_mock_bin, "mock_imap_server", (char *)NULL);
+            _exit(127);
+        }
+        usleep(attempt == 0 ? 800000 : 200000);
+
+        int _st = 0;
+        if (waitpid(g_mock_pid, &_st, WNOHANG) != g_mock_pid)
+            return 0;               /* still running: the port is ours */
+        g_mock_pid = -1;               /* bind failed; wait and try again */
     }
-    usleep(800000);
-    return 0;
+    fprintf(stderr, "views: mock server could not bind its port after "
+                    "15 attempts - it is held by another process. "
+                    "Refusing to test against it.\n");
+    return -1;
 }
 
 static int probe_server(void) {

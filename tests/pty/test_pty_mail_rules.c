@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -134,16 +135,33 @@ static int probe_server(void) {
 }
 
 static int start_mock_server(void) {
-    g_mock_pid = fork();
-    if (g_mock_pid < 0) return -1;
-    if (g_mock_pid == 0) {
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) { dup2(devnull, 1); dup2(devnull, 2); close(devnull); }
-        execl(g_mock_bin, "mock_imap_server", (char *)NULL);
-        _exit(127);
+    /* Retry rather than give up on the first failure: a mock killed moments
+     * ago can still hold the port briefly, and at that instant it looks
+     * exactly like a foreign server squatting on it.  Only a conflict that
+     * outlives several attempts is worth reporting — and it must be reported,
+     * because the connect probe cannot tell our server from a stranger's, and
+     * testing against someone else's mailbox is how this stayed hidden. */
+    for (int attempt = 0; attempt < 15; attempt++) {
+        g_mock_pid = fork();
+        if (g_mock_pid < 0) return -1;
+        if (g_mock_pid == 0) {
+            /* stdout is chatty; stderr is kept so "bind failed" stays visible. */
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0) { dup2(devnull, 1); close(devnull); }
+            execl(g_mock_bin, "mock_imap_server", (char *)NULL);
+            _exit(127);
+        }
+        usleep(attempt == 0 ? 800000 : 200000);
+
+        int _st = 0;
+        if (waitpid(g_mock_pid, &_st, WNOHANG) != g_mock_pid)
+            return 0;               /* still running: the port is ours */
+        g_mock_pid = -1;               /* bind failed; wait and try again */
     }
-    usleep(800000);
-    return 0;
+    fprintf(stderr, "mail-rules: mock server could not bind its port after "
+                    "15 attempts - it is held by another process. "
+                    "Refusing to test against it.\n");
+    return -1;
 }
 
 static void stop_mock_server(void) {
@@ -161,7 +179,7 @@ static void restart_mock(void) {
         g_mock_pid = -1;
     }
     usleep(200000);
-    start_mock_server();
+    if (start_mock_server() != 0) return;   /* already reported */
     for (int i = 0; i < 30 && probe_server() != 0; i++)
         usleep(100000);
 }
@@ -182,6 +200,21 @@ static PtySession *sync_run(const char **extra_args) {
     if (!s) return NULL;
     if (pty_run(s, argv) != 0) { pty_close(s); return NULL; }
     return s;
+}
+
+/* Finish a sync run before its output on disk is examined.
+ *
+ * "Sync complete" reaching the screen only means the line was printed; the
+ * manifest is still being written and flushed after it.  pty_close() sends
+ * SIGTERM and, 100ms later, SIGKILL, so closing straight away can cut the
+ * process off before it has written the entry the assertions look for.  The
+ * old code papered over this with a fixed settle delay here and another half
+ * second in reset_all_state(); waiting for the process to actually exit is
+ * both correct and faster. */
+static void sync_finish(PtySession *s) {
+    if (!s) return;
+    pty_wait_exit(s, WAIT_MS);
+    pty_close(s);
 }
 
 /**
@@ -244,8 +277,7 @@ static void test_rule_no_rules_sync_succeeds(void) {
     PtySession *s = sync_run(NULL);
     ASSERT(s != NULL, "no-rules sync: PTY opens");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
-    pty_settle(s, SETTLE_MS);
-    pty_close(s);
+    sync_finish(s);
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -270,8 +302,7 @@ static void test_rule_from_glob_flags_message(void) {
     PtySession *s = sync_run(NULL);
     ASSERT(s != NULL, "from-glob flag: PTY opens");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
-    pty_settle(s, SETTLE_MS);
-    pty_close(s);
+    sync_finish(s);
 
     int flags = find_manifest_flags("Test Message");
     ASSERT(flags >= 0, "from-glob flag: manifest entry found");
@@ -300,8 +331,7 @@ static void test_rule_subject_glob_flags_message(void) {
     PtySession *s = sync_run(NULL);
     ASSERT(s != NULL, "subject-glob flag: PTY opens");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
-    pty_settle(s, SETTLE_MS);
-    pty_close(s);
+    sync_finish(s);
 
     int flags = find_manifest_flags("Test Message");
     ASSERT(flags >= 0, "subject-glob flag: manifest entry found");
@@ -331,8 +361,7 @@ static void test_rule_nonmatch_no_effect(void) {
     PtySession *s = sync_run(NULL);
     ASSERT(s != NULL, "nonmatch rule: PTY opens");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
-    pty_settle(s, SETTLE_MS);
-    pty_close(s);
+    sync_finish(s);
 
     int flags = find_manifest_flags("Test Message");
     ASSERT(flags >= 0, "nonmatch rule: manifest entry found");
@@ -365,8 +394,7 @@ static void test_rule_multiple_rules_both_apply(void) {
     PtySession *s = sync_run(NULL);
     ASSERT(s != NULL, "multi-rule: PTY opens");
     ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
-    pty_settle(s, SETTLE_MS);
-    pty_close(s);
+    sync_finish(s);
 
     int flags = find_manifest_flags("Test Message");
     ASSERT(flags >= 0, "multi-rule: manifest entry found");
@@ -395,8 +423,7 @@ static void test_rule_apply_rules_retroactive(void) {
         PtySession *s = sync_run(NULL);
         ASSERT(s != NULL, "apply-rules retro: initial sync PTY opens");
         ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
-        pty_settle(s, SETTLE_MS);
-        pty_close(s);
+        sync_finish(s);
     }
 
     /* Verify no flags set after initial sync */
@@ -424,8 +451,7 @@ static void test_rule_apply_rules_retroactive(void) {
         ASSERT(s != NULL, "apply-rules retro: --apply-rules PTY opens");
         ASSERT_WAIT_FOR(s, "Rules applied:", WAIT_MS);
         ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
-        pty_settle(s, SETTLE_MS);
-        pty_close(s);
+        sync_finish(s);
     }
 
     /* Step 4: verify the flag bit is now set */

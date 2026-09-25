@@ -820,7 +820,21 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+    /* SO_REUSEADDR only — deliberately NOT SO_REUSEPORT.
+     *
+     * SO_REUSEPORT lets several processes bind the same port at once, and the
+     * kernel then hands each incoming connection to one of them at random.
+     * For a test mock that silently destroys isolation: a server left over
+     * from an earlier suite keeps serving, the new one binds "successfully"
+     * beside it, and roughly every other connection reaches the wrong
+     * mailbox.  That is what made the mail-rules suite assert over messages
+     * from another suite's fixture, failing a different subset of checks on
+     * each run.  With REUSEADDR alone the second bind fails loudly, which is
+     * the correct outcome: two suites must not share a port.
+     *
+     * SO_REUSEADDR is still wanted, so a restart is not blocked by sockets
+     * lingering in TIME_WAIT. */
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
         perror("setsockopt");
         close(server_fd);
         SSL_CTX_free(ctx);

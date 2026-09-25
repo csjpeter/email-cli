@@ -260,6 +260,8 @@ static void help_list(void) {
         "  __junk__       Messages marked as junk / spam\n"
         "  __phishing__   Messages flagged as phishing\n"
         "  __all__        Every cached message, from every folder\n"
+        "  IMAP only.  Gmail has the same thing as real labels: use\n"
+        "  --folder UNREAD, --folder STARRED, ... ('list-labels' shows them).\n"
         "\n"
         "Content search (pass to --folder):\n"
         "  __search__:<scope>:<query>   scope 0=Subject 1=From 2=To 3=Body\n"

@@ -143,6 +143,12 @@ offline. Each selects messages carrying one flag:
 A message appearing in several folders (e.g. the same UID in `INBOX` and
 `INBOX.Sent`) is listed once — the synthesized manifest is deduplicated by UID.
 
+**IMAP only.** These views aggregate per-folder manifests, which exist only for
+IMAP accounts. Gmail expresses the same idea as ordinary labels, so select them
+by name instead — `--folder UNREAD`, `--folder STARRED`, `--folder SPAM`;
+`list-labels` shows every one. Asking for a virtual name on a Gmail account
+reports this rather than pretending the view is empty.
+
 ### Content search
 
 ```
@@ -159,6 +165,11 @@ A message appearing in several folders (e.g. the same UID in `INBOX` and
 The query is matched case-insensitively as a substring; it is not a glob. The
 search reads the local store only, so it needs no server connection, and it
 sees only messages already cached (run `email-sync` first for full coverage).
+
+Search works on both account types, reading whichever cache the account keeps:
+per-folder manifests for IMAP, and the header records plus message bodies of
+the flat store for Gmail. On Gmail the `Folder` column of the result table
+names the message's first label.
 
 Scope `3` searches the **decoded** body: `base64` and `quoted-printable` parts
 are decoded, non-UTF-8 charsets are converted via `iconv`, and `text/html`
@@ -317,6 +328,10 @@ omitted the folder is resolved from the local store:
 | The UID is cached nowhere | The configured folder is queried on the server |
 
 `Inbox` and `INBOX` count as one mailbox, per RFC 3501.
+
+None of this applies to Gmail accounts: they store one copy of each message in
+a flat store keyed by UID alone, so a UID is never ambiguous there and
+`--folder` selects a label for display only.
 
 Diagnostics go to stderr only, so piped stdout stays clean. To avoid the
 question entirely, pass the folder shown in the `Folder` column of a

@@ -130,6 +130,16 @@ given as the first positional argument.
 also accepts names that are not real folders. They are resolved from the
 local store, span every cached folder, and need no server connection.
 A message cached in several folders is listed once.
+.PP
+The flag views below are IMAP\-only: they aggregate per\-folder manifests,
+which Gmail accounts do not have.  Gmail expresses the same thing as real
+labels, so select them by name instead \(em
+.BR "\-\-folder UNREAD" ", " "\-\-folder STARRED" ,
+with
+.B list\-labels
+showing every one.  Content search
+.RB ( __search__ )
+does work on both account types.
 .SS Bare UIDs and folders
 IMAP UIDs are unique within a mailbox, not within an account, so the same UID
 usually names a different message in each folder.  With no
@@ -145,6 +155,10 @@ are the same mailbox.  Cross\-folder listings carry a
 .B Folder
 column so the right name can be passed straight back to
 .BR show .
+Gmail accounts are exempt: they keep one copy of each message in a flat store
+keyed by UID, so a UID is never ambiguous there and
+.B \-\-folder
+picks a label for display only.
 .TP
 .B __unread__
 Unread messages.

@@ -1,9 +1,9 @@
 # BUG-004 — mail-rules PTY suite is unstable under the coverage build
 
-**Status:** OPEN
+**Status:** FIXED
 **Severity:** Medium — no product defect proven, but the suite cannot be
 trusted to gate anything while it behaves this way
-**Component:** `tests/pty/test_pty_mail_rules.c`
+**Component:** `tests/functional/mock_imap_server.c`, the PTY suites, `manage.sh`
 **Found:** while investigating the Coverage workflow failure of BUG-003
 
 ---
@@ -47,16 +47,61 @@ lines, which is how the assertions above became visible.
 ## Not the cause of the Coverage workflow failure
 
 That was a truncated `.gcda` from the input-line harness, fixed separately.
-The coverage run tolerates PTY failures, so this suite does not fail the
-workflow — it only means the mail-rules paths contribute unreliable coverage
-data.
+The coverage run tolerates PTY failures, so this suite never failed the
+workflow — it only meant the mail-rules paths contributed unreliable coverage
+data.  The two share a theme, though: both were a test process being treated
+as disposable, and both hid their own evidence.
 
-## Next steps
+## Root cause
 
-1. Establish whether the product misbehaves without ASAN, or whether the test
-   simply races the sync it waits on — the assertions all wait for a manifest
-   entry to appear after a rule is applied.
-2. If it is a race, give the wait a real condition instead of a fixed settle
-   time.
-3. `./manage.sh pty` (the gate CI enforces) passes all 92, so this is not
-   currently blocking; it should not stay open on that basis.
+`tests/functional/mock_imap_server.c` set **`SO_REUSEPORT`** alongside
+`SO_REUSEADDR` on its listening socket:
+
+```c
+setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+```
+
+`SO_REUSEPORT` exists so several processes can share one listening port, with
+the kernel distributing incoming connections between them at random.  For a
+test mock that quietly destroys isolation.
+
+Port 9993 is the mock's own default and the port three PTY suites use.  Under
+`./manage.sh coverage` the functional suite runs first and starts a mock on
+9993 with `MOCK_IMAP_SUBJECT="AlphaAccountMsg"`; any instance left behind kept
+listening.  The mail-rules suite then started its own mock, which bound
+*successfully beside it*, and from then on roughly every other connection went
+to the wrong server.  Hence a different subset of assertions failing each run,
+and the giveaway once diagnostics were added:
+
+```
+DIAG: manifest row subj='AlphaAccountMsg (folded continuation)' flags='67'
+```
+
+— the suite asserting over another fixture's mail.
+
+The two guards that should have caught it both failed: the mock's stderr went
+to `/dev/null`, so `bind failed` was invisible, and the connect probe cannot
+tell our server from a stranger's.
+
+## Fix
+
+1. `mock_imap_server.c` keeps `SO_REUSEADDR` (wanted, for TIME_WAIT) and drops
+   `SO_REUSEPORT`.  A second bind on a busy port now fails loudly, which is
+   the correct outcome — two suites must not share a port.
+2. The suites that fork a mock now check the child is still alive after the
+   startup delay, and report a port conflict instead of proceeding.  The
+   mail-rules mock also keeps its stderr, so `bind failed` is visible.
+3. `manage.sh coverage` clears stale mock servers before the PTY run, as the
+   `pty` target already did — on this path the functional run immediately
+   precedes the PTY run, so it needs it most.
+4. `sync_finish()` waits for the sync process to exit (new
+   `pty_wait_exit()` in libptytest) before reading the manifest, replacing
+   fixed settle delays with a real condition.
+
+## Verified
+
+- Port free: 28/28 assertions pass, where the suite previously passed 21-24
+  with a varying set of failures.
+- Port deliberately taken by a foreign mock: the suite now prints
+  `bind failed: Address already in use` and `mock server exited immediately
+  … Refusing to test against it` rather than silently testing against it.

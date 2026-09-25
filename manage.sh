@@ -266,9 +266,15 @@ case "$1" in
         run_pty_lenient() {  # run_pty_lenient <label> <binary> [args…]
             local label="$1"; shift
             # PTY tests run from the build directory so that mock servers find
-            # tests/certs/test.crt relative to cwd.
-            if ! (cd "$ABS_BUILD" && "$@" 2>/dev/null >/dev/null); then
-                echo "  [warn] PTY suite '$label' reported failures (coverage run continues)"
+            # tests/certs/test.crt relative to cwd.  Output is captured rather
+            # than discarded: a suite that fails only under the coverage build
+            # is exactly the one whose failure lines nobody can reconstruct
+            # afterwards, and a bare "reported failures" says nothing.
+            local log="$ABS_BUILD/pty-coverage-$label.log"
+            if ! (cd "$ABS_BUILD" && "$@" >"$log" 2>&1); then
+                echo "  [warn] PTY suite '$label' reported failures (coverage run continues):"
+                grep -E "\[FAIL\]|ASSERT|Segmentation|Assertion" "$log" | head -20 | sed 's/^/    /'
+                echo "    (full output: $log)"
             fi
             sleep 2
         }

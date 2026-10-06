@@ -20,14 +20,26 @@
 #define GMAIL_DEFAULT_CLIENT_SECRET ""
 #endif
 
+/** 1 when the test hook asks us to behave as a build with no built-in
+ *  credentials.  Whether GMAIL_DEFAULT_CLIENT_ID is compiled in is a property
+ *  of the build (gmail_credentials.cmake), so without this the "credentials
+ *  are not configured" path is unreachable — and untestable — in any build
+ *  that ships them. */
+static int no_builtin_credentials(void) {
+    const char *v = getenv("GMAIL_TEST_NO_CLIENT_ID");
+    return (v && v[0]) ? 1 : 0;
+}
+
 static const char *get_client_id(const Config *cfg) {
-    return (cfg->gmail_client_id && cfg->gmail_client_id[0])
-        ? cfg->gmail_client_id : GMAIL_DEFAULT_CLIENT_ID;
+    if (cfg->gmail_client_id && cfg->gmail_client_id[0])
+        return cfg->gmail_client_id;
+    return no_builtin_credentials() ? "" : GMAIL_DEFAULT_CLIENT_ID;
 }
 
 static const char *get_client_secret(const Config *cfg) {
-    return (cfg->gmail_client_secret && cfg->gmail_client_secret[0])
-        ? cfg->gmail_client_secret : GMAIL_DEFAULT_CLIENT_SECRET;
+    if (cfg->gmail_client_secret && cfg->gmail_client_secret[0])
+        return cfg->gmail_client_secret;
+    return no_builtin_credentials() ? "" : GMAIL_DEFAULT_CLIENT_SECRET;
 }
 
 /* ── libcurl write callback ───────────────────────────────────────── */

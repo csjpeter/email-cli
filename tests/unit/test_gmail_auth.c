@@ -26,6 +26,61 @@ static void wait_child(pid_t pid) {
     int st; waitpid(pid, &st, 0);
 }
 
+/* The loopback redirect range gmail_auth_device_flow() picks a port from.
+ * Mirrors LOOPBACK_PORT_START/END in libemail/src/infrastructure/gmail_auth.c. */
+#define REDIRECT_PORT_FIRST 8089
+#define REDIRECT_PORT_LAST  8099
+
+/**
+ * Stand in for the browser Google redirects: connect to the loopback listener
+ * gmail_auth_device_flow() opened and deliver @p request.
+ *
+ * The port is not known in advance — device_flow binds the first free one in
+ * the range — so the range is scanned.  The scan is *retried* until it
+ * connects or @p deadline_ms passes, because a single pass can finish before
+ * the parent has reached listen(): every connect is then refused, this child
+ * exits, and the parent sits out its own 300-second accept timeout with
+ * nothing left to answer it.  While the parent is in accept() it is listening
+ * by definition, so a retry always gets through.
+ *
+ * A read timeout guards against a foreign listener in the same range: a peer
+ * that takes the connection but never answers is skipped instead of trapping
+ * this child in read().
+ *
+ * Runs in the forked child and never returns.
+ */
+static void redirect_child(const char *request, int deadline_ms) {
+    for (int waited = 0; waited <= deadline_ms; waited += 50) {
+        for (int port = REDIRECT_PORT_FIRST; port <= REDIRECT_PORT_LAST; port++) {
+            int fd = socket(AF_INET, SOCK_STREAM, 0);
+            if (fd < 0) continue;
+            struct timeval tv = {1, 0};
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+            struct sockaddr_in ca = {0};
+            ca.sin_family      = AF_INET;
+            ca.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            ca.sin_port        = htons((uint16_t)port);
+
+            if (connect(fd, (struct sockaddr *)&ca, sizeof(ca)) == 0) {
+                ssize_t w = write(fd, request, strlen(request));
+                if (w == (ssize_t)strlen(request)) {
+                    char buf[512];
+                    ssize_t r = read(fd, buf, sizeof(buf));
+                    if (r > 0) { close(fd); _exit(0); }   /* answered: this was it */
+                }
+                close(fd);
+                continue;                                  /* wrong peer — keep looking */
+            }
+            close(fd);
+        }
+        struct timespec ts = {0, 50000000L};   /* 50 ms */
+        nanosleep(&ts, NULL);
+    }
+    _exit(1);
+}
+
 /* ── gmail_auth_refresh — error paths (no network needed) ─────────── */
 
 static void test_refresh_no_token(void) {
@@ -203,15 +258,34 @@ static void test_refresh_with_client_credentials(void) {
 }
 
 static void test_device_flow_no_credentials(void) {
-    /* Empty client_id → returns -1 immediately, covering lines 184-203. */
+    /* No client_id anywhere → device_flow must refuse before it opens a
+     * listener.
+     *
+     * Whether a client_id exists is a property of the build: when
+     * gmail_credentials.cmake is present, GMAIL_DEFAULT_CLIENT_ID is compiled
+     * in and this branch is simply not reachable.  Without the hook this test
+     * then walked straight into the authorization flow, opened the loopback
+     * listener and sat out its own 300-second accept timeout waiting for a
+     * browser — and still returned -1 at the end, so the assertion passed for
+     * entirely the wrong reason while costing five minutes per unit run. */
+    setenv("GMAIL_TEST_NO_CLIENT_ID", "1", 1);
+
     Config cfg = {0};
     int saved = dup(2);
     int dn = open("/dev/null", O_WRONLY);
     if (dn >= 0) dup2(dn, 2);
+    time_t t0 = time(NULL);
     int rc = gmail_auth_device_flow(&cfg);
+    time_t elapsed = time(NULL) - t0;
     if (dn >= 0) { dup2(saved, 2); close(dn); }
     close(saved);
-    ASSERT(rc == -1, "device_flow: empty client_id returns -1");
+
+    unsetenv("GMAIL_TEST_NO_CLIENT_ID");
+
+    ASSERT(rc == -1, "device_flow: no client_id returns -1");
+    /* The point of the branch is that it refuses *before* waiting for anyone:
+     * a -1 that arrives after the accept timeout is not the same answer. */
+    ASSERT(elapsed < 5, "device_flow: no client_id refuses without waiting");
 }
 
 static void test_device_flow_access_denied(void) {
@@ -223,29 +297,9 @@ static void test_device_flow_access_denied(void) {
     cfg.gmail_client_secret = strdup("test-client-secret");
 
     pid_t pid = fork();
-    if (pid == 0) {
-        usleep(200000);
-        for (int port = 8089; port <= 8099; port++) {
-            int fd = socket(AF_INET, SOCK_STREAM, 0);
-            if (fd < 0) continue;
-            struct sockaddr_in ca = {0};
-            ca.sin_family      = AF_INET;
-            ca.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-            ca.sin_port        = htons((uint16_t)port);
-            if (connect(fd, (struct sockaddr *)&ca, sizeof(ca)) == 0) {
-                const char *req =
-                    "GET /callback?error=access_denied HTTP/1.1\r\n"
-                    "Host: localhost\r\n\r\n";
-                ssize_t w = write(fd, req, strlen(req)); (void)w;
-                char buf[512];
-                ssize_t r = read(fd, buf, sizeof(buf)); (void)r;
-                close(fd);
-                _exit(0);
-            }
-            close(fd);
-        }
-        _exit(1);
-    }
+    if (pid == 0)
+        redirect_child("GET /callback?error=access_denied HTTP/1.1\r\n"
+                       "Host: localhost\r\n\r\n", 5000);   /* never returns */
 
     int saved = dup(2);
     int dn = open("/dev/null", O_WRONLY);
@@ -439,29 +493,9 @@ static void test_device_flow_full_mock(void) {
 
     /* Browser redirect child */
     pid_t br_pid = fork();
-    if (br_pid == 0) {
-        usleep(250000); /* wait for listener to open */
-        for (int port = 8089; port <= 8099; port++) {
-            int fd = socket(AF_INET, SOCK_STREAM, 0);
-            if (fd < 0) continue;
-            struct sockaddr_in ca = {0};
-            ca.sin_family      = AF_INET;
-            ca.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-            ca.sin_port        = htons((uint16_t)port);
-            if (connect(fd, (struct sockaddr *)&ca, sizeof(ca)) == 0) {
-                const char *req =
-                    "GET /callback?code=full_test_code&scope=x HTTP/1.1\r\n"
-                    "Host: localhost\r\n\r\n";
-                ssize_t w = write(fd, req, strlen(req)); (void)w;
-                char buf[512];
-                ssize_t r = read(fd, buf, sizeof(buf)); (void)r;
-                close(fd);
-                _exit(0);
-            }
-            close(fd);
-        }
-        _exit(1);
-    }
+    if (br_pid == 0)
+        redirect_child("GET /callback?code=full_test_code&scope=x HTTP/1.1\r\n"
+                       "Host: localhost\r\n\r\n", 5000);   /* never returns */
 
     int saved = dup(2);
     int dn = open("/dev/null", O_WRONLY);
@@ -495,29 +529,9 @@ static void test_device_flow_with_code(void) {
     cfg.gmail_client_secret = strdup("test-client-secret");
 
     pid_t pid = fork();
-    if (pid == 0) {
-        usleep(200000);
-        for (int port = 8089; port <= 8099; port++) {
-            int fd = socket(AF_INET, SOCK_STREAM, 0);
-            if (fd < 0) continue;
-            struct sockaddr_in ca = {0};
-            ca.sin_family      = AF_INET;
-            ca.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-            ca.sin_port        = htons((uint16_t)port);
-            if (connect(fd, (struct sockaddr *)&ca, sizeof(ca)) == 0) {
-                const char *req =
-                    "GET /callback?code=test_code_exchange&scope=x HTTP/1.1\r\n"
-                    "Host: localhost\r\n\r\n";
-                ssize_t w = write(fd, req, strlen(req)); (void)w;
-                char buf[512];
-                ssize_t r = read(fd, buf, sizeof(buf)); (void)r;
-                close(fd);
-                _exit(0);
-            }
-            close(fd);
-        }
-        _exit(1);
-    }
+    if (pid == 0)
+        redirect_child("GET /callback?code=test_code_exchange&scope=x HTTP/1.1\r\n"
+                       "Host: localhost\r\n\r\n", 5000);   /* never returns */
 
     int saved = dup(2);
     int dn = open("/dev/null", O_WRONLY);

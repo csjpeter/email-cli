@@ -5319,6 +5319,134 @@ OUT88_SMTP2=$(f88 smtp '\n\n\n\n')
 check "88.14 SMTP empty says unchanged"  "SMTP password unchanged"               "$OUT88_SMTP2"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 89 — changing only the credential, and being told whether it works
+# ════════════════════════════════════════════════════════════════════════════
+# A password changed at the provider had no repair path: config offered only
+# show / imap / smtp, and a Gmail account - whose refresh token Google revokes
+# on a password change - had none at all short of deleting the account.
+echo ""
+echo "--- Phase 89: config password / config reauth ---"
+
+H_F89="./build/tests/functional/homes/f89-$$"
+case "$H_F89" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F89 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/f89-$$"
+mkdir -p "$H_F89/.config/email-cli/accounts/f89@test.local"
+cat > "$H_F89/.config/email-cli/settings.ini" <<'SETTINGS'
+credential_obfuscation=false
+SETTINGS
+# Points at mock server 1, which answers on 9993 for the whole run.
+cat > "$H_F89/.config/email-cli/accounts/f89@test.local/config.ini" <<'CONFIG'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=f89@test.local
+EMAIL_PASS=oldpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CONFIG
+F89_INI="$H_F89/.config/email-cli/accounts/f89@test.local/config.ini"
+
+# A Gmail account for the other half.  GMAIL_TEST_NO_CLIENT_ID makes
+# gmail_auth behave as a build with no compiled-in credentials, so the
+# authorization refuses at once instead of opening a browser and waiting out
+# its 300-second timeout.
+H_F89G="./build/tests/functional/homes/f89g-$$"
+case "$H_F89G" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F89G path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/f89g-$$"
+mkdir -p "$H_F89G/.config/email-cli/accounts/f89@gmail.com"
+# Plaintext credentials, so the stored token can be read back as written:
+# with obfuscation on, merely loading the config re-encrypts it and the test
+# could no longer tell a surviving token from a replaced one.
+cat > "$H_F89G/.config/email-cli/settings.ini" <<'SETTINGS'
+credential_obfuscation=false
+SETTINGS
+cat > "$H_F89G/.config/email-cli/accounts/f89@gmail.com/config.ini" <<'CONFIG'
+EMAIL_USER=f89@gmail.com
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=revoked-token
+CONFIG
+
+# Run a config subcommand with the exit code appended, so a non-zero status is
+# asserted rather than swallowed.
+f89() {
+    local home="$1" sub="$2" lines="$3"
+    (export HOME="$home"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     export GMAIL_TEST_NO_CLIENT_ID=1
+     printf '%b' "$lines" | "$BIN_DIR/email-cli" config "$sub" 2>&1
+     echo "exit-code=$?")
+}
+
+# The two subcommands must be discoverable, or they are no repair path at all.
+OUT89_HELP=$( (export HOME="$H_F89"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" config --help 2>&1; echo "exit-code=$?") )
+check "89.1 help lists 'password'"  "password  Change nothing but the password" "$OUT89_HELP"
+check "89.2 help lists 'reauth'"    "reauth    Renew a Gmail account"           "$OUT89_HELP"
+
+# A new password: taken, saved, and then actually tried against the server.
+OUT89_SET=$(f89 "$H_F89" password 'freshpw89\n')
+check "89.3 password acknowledged"   "password updated (9 characters)" "$OUT89_SET"
+check "89.4 password saved"          "Password saved"                  "$OUT89_SET"
+check "89.5 the connection is tried" "Checking the connection to imaps://localhost:9993" "$OUT89_SET"
+check "89.6 and the server took it"  "Connected: f89@test.local"       "$OUT89_SET"
+check "89.7 exits zero"              "exit-code=0"                     "$OUT89_SET"
+check "89.8 stored verbatim"         "EMAIL_PASS=freshpw89"            "$(cat "$F89_INI")"
+# Nothing but the password may move: that is the point of the subcommand.
+check "89.9 host untouched"          "EMAIL_HOST=imaps://localhost:9993" "$(cat "$F89_INI")"
+check "89.10 folder untouched"       "EMAIL_FOLDER=INBOX"                "$(cat "$F89_INI")"
+
+# An empty field keeps the stored password - and still answers the other half
+# of the question: does the one I have still work?
+OUT89_KEEP=$(f89 "$H_F89" password '\n')
+check "89.11 empty says unchanged"   "password unchanged"              "$OUT89_KEEP"
+check "89.12 still tests it"         "Connected: f89@test.local"       "$OUT89_KEEP"
+check "89.13 and exits zero"         "exit-code=0"                     "$OUT89_KEEP"
+check "89.14 password still there"   "EMAIL_PASS=freshpw89"            "$(cat "$F89_INI")"
+
+# EOF is a cancel: nothing written, and said so without a log-file pointer.
+OUT89_EOF=$(f89 "$H_F89" password '')
+check     "89.15 EOF cancels"          "Cancelled"            "$OUT89_EOF"
+check_not "89.16 no log-file pointer"  "Check logs"           "$OUT89_EOF"
+check     "89.17 exits non-zero"       "exit-code=1"          "$OUT89_EOF"
+check     "89.18 nothing was written"  "EMAIL_PASS=freshpw89" "$(cat "$F89_INI")"
+
+# A server that is not there is reported as such, not as success.
+H_F89D="./build/tests/functional/homes/f89d-$$"
+case "$H_F89D" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F89D path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/f89d-$$"
+mkdir -p "$H_F89D/.config/email-cli/accounts/f89d@test.local"
+cat > "$H_F89D/.config/email-cli/accounts/f89d@test.local/config.ini" <<'CONFIG'
+EMAIL_HOST=imaps://localhost:9099
+EMAIL_USER=f89d@test.local
+EMAIL_PASS=oldpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CONFIG
+OUT89_DEAD=$(f89 "$H_F89D" password 'whatever\n')
+check "89.19 a dead server is reported" "did not accept the connection" "$OUT89_DEAD"
+check "89.20 and the command fails"     "exit-code=1"                   "$OUT89_DEAD"
+
+# 'config reauth' on an IMAP account refuses and names the right subcommand.
+OUT89_RA_IMAP=$(f89 "$H_F89" reauth '')
+check "89.21 reauth refused on IMAP"   "no authorization to renew"  "$OUT89_RA_IMAP"
+check "89.22 and it names 'password'"  "config password"            "$OUT89_RA_IMAP"
+check "89.23 exits non-zero"           "exit-code=1"                "$OUT89_RA_IMAP"
+
+# 'config password' on a Gmail account explains why there is no password and
+# carries out the renewal the user actually needs.
+OUT89_PW_GMAIL=$(f89 "$H_F89G" password '')
+check "89.24 Gmail has no password here" "it has no password here"   "$OUT89_PW_GMAIL"
+check "89.25 and says what revoked it"   "revokes"                   "$OUT89_PW_GMAIL"
+check "89.26 it hands over to reauth"    "config reauth"             "$OUT89_PW_GMAIL"
+check "89.27 a failed renewal is said"   "was not completed"         "$OUT89_PW_GMAIL"
+check "89.28 and the command fails"      "exit-code=1"               "$OUT89_PW_GMAIL"
+# The revoked token must still be there: a failed renewal may not destroy it.
+check "89.29 the old token survives"     "GMAIL_REFRESH_TOKEN=revoked-token" \
+      "$(cat "$H_F89G/.config/email-cli/accounts/f89@gmail.com/config.ini")"
+
+# 'config reauth' on a Gmail account reaches the authorization flow itself.
+OUT89_RA_GMAIL=$(f89 "$H_F89G" reauth '')
+check "89.30 reauth runs on Gmail"   "OAuth2 credentials are not configured" "$OUT89_RA_GMAIL"
+check "89.31 and reports the failure" "was not completed"                    "$OUT89_RA_GMAIL"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

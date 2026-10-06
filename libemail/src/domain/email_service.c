@@ -6564,6 +6564,31 @@ int email_service_cron_remove(void) {
     return 0;
 }
 
+/* ── Credential check ────────────────────────────────────────────────── */
+
+int email_service_check_credential(const Config *cfg) {
+    if (!cfg) return -1;
+
+    const char *who   = cfg->user ? cfg->user : "(no username set)";
+    const char *where = cfg->gmail_mode ? "the Gmail API"
+                                        : (cfg->host ? cfg->host : "(no host set)");
+
+    printf("Checking the connection to %s...\n", where);
+    fflush(stdout);
+
+    RAII_MAIL MailClient *mc = make_mail(cfg);
+    if (!mc) {
+        /* Why it failed is reported by the layer that knows: imap_connect()
+         * names a rejected login, gmail_auth_refresh() names a revoked
+         * authorization.  Here we only say which answer we got. */
+        fprintf(stderr, "The server did not accept the connection for %s.\n", who);
+        return -1;
+    }
+
+    printf("Connected: %s accepted by %s.\n", who, where);
+    return 0;
+}
+
 int email_service_cron_status(void) {
     RAII_PFILE FILE *fp = popen("crontab -l 2>/dev/null", "r");
     if (!fp) {

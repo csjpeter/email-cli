@@ -293,8 +293,11 @@ Config* setup_wizard_run_internal(FILE *stream) {
     }
 
     if (stream == stdin && is_tty)
-        printf("\nConfiguration collected. Checking connection...\n");
+        printf("\nConfiguration collected.\n");
 
+    /* The connection is tested by the caller, not here: this layer may not
+     * reach into the domain, and the line that used to promise a check here
+     * was never followed by one. */
     return cfg;
 }
 
@@ -410,6 +413,29 @@ int setup_wizard_smtp(Config *cfg) {
 
     printf("\nSMTP configuration updated.\n");
     return 0;
+}
+
+/* ── Password-only prompt ────────────────────────────────────────────── */
+
+int setup_wizard_password(Config *cfg) {
+    printf("\n--- Password for %s ---\n", cfg->user ? cfg->user : "(no username set)");
+
+    const char *prompt = cfg->pass
+        ? "New password [Enter=keep current]"
+        : "New password";
+    char *pass = get_input(prompt, 1, stdin);
+    if (!pass) return -1;            /* EOF / Ctrl-C → change nothing */
+
+    if (!pass[0]) {
+        free(pass);
+        report_credential("password", "", 0);
+        return 0;
+    }
+
+    free(cfg->pass);
+    cfg->pass = pass;
+    report_credential("password", cfg->pass, 1);
+    return 1;
 }
 
 /* ── IMAP sub-wizard ─────────────────────────────────────────────────── */

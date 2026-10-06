@@ -41,24 +41,40 @@ An invalid or unsupported configuration is **never saved**.
 
 ## Example Interaction
 ```
-IMAP Host (e.g. imap.example.com): imap.gmail.com
-  → using imaps://imap.gmail.com
-Email Username: user@gmail.com
+IMAP Host (e.g. imap.example.com): imap.example.com
+  → using imaps://imap.example.com
+Email Username: user@example.com
 Email Password: ********
+  → password updated (8 characters)
 Default Folder [INBOX]:
 
 --- SMTP (outgoing mail) — press Enter to skip ---
-SMTP Host [Enter = smtps://imap.gmail.com] (e.g. smtp.example.com):
+SMTP Host [Enter = smtps://imap.example.com] (e.g. smtp.example.com):
 SMTP Port [587]:
 ...
 
-Configuration collected. Checking connection...
+Configuration collected.
+Configuration saved. Run 'email-cli sync' to download your mail.
+Checking the connection to imaps://imap.example.com...
+Connected: user@example.com accepted by imaps://imap.example.com.
 ```
+
+The connection check is made by the caller after the config has been saved —
+for a long time this line promised a check that nothing performed.
+
+A Gmail address does not belong in the IMAP host field: account type **[2]
+Gmail** uses the Gmail API, and an IMAP host under gmail.com is rejected.
+
+## Changing only the password later
+
+`email-cli config password` asks for the password alone and then tests it; a
+Gmail account is sent to `email-cli config reauth`, which renews the OAuth2
+authorization that a Google password change revokes.
 
 ## Re-entry on bad protocol
 ```
-IMAP Host (e.g. imap.example.com): imap://imap.gmail.com
-Error: 'imap://imap.gmail.com' uses an unsupported protocol (only imaps:// is supported).
+IMAP Host (e.g. imap.example.com): imap://imap.example.com
+Error: 'imap://imap.example.com' uses an unsupported protocol (only imaps:// is supported).
 IMAP Host (e.g. imap.example.com):
 ```
 

@@ -804,6 +804,51 @@ If SMTP is not configured:
     (not configured — will be derived from IMAP host)
 ```
 
+#### `config password`
+
+Changes nothing but the account's password, then tests it.
+
+A password changed at the provider is the one reconfiguration users actually
+need, and `config imap` makes them walk the host, the username and the folder
+to reach it.  This prompt asks for the password alone, saves it, and then
+connects once to find out whether the server accepts it — because a password
+accepted by a prompt is not a password that works.
+
+```
+--- Password for user@example.com ---
+New password [Enter=keep current]: *********
+  → password updated (9 characters)
+Password saved.
+Checking the connection to imaps://imap.example.com...
+Connected: user@example.com accepted by imaps://imap.example.com.
+```
+
+An empty field keeps the stored password and still runs the check, since
+"does the one I have still work?" is the other half of the same question.
+
+On a **Gmail account** there is no password to change: access is granted by an
+OAuth2 authorization, and changing the Google account password revokes it.
+`config password` says so and carries out the renewal, which is what
+`config reauth` does.
+
+Exit status is non-zero when the server did not accept the credential.
+
+#### `config reauth`
+
+Renews a **Gmail** account's OAuth2 authorization and stores the new refresh
+token, then tests it.
+
+Google revokes refresh tokens that carry Gmail scopes when the account password
+changes, so `email-sync` starts failing with *"Gmail refresh token expired"*.
+Before this subcommand existed the only way back was to remove the account and
+add it again, which also discarded its local store.
+
+The browser flow is the same as the one the first-run wizard uses: a loopback
+listener on ports 8089–8099, the authorization URL opened in the default
+browser, and the redirect carrying the code.
+
+On an **IMAP account** it refuses and points at `config password`.
+
 #### `config imap`
 
 Runs the interactive IMAP setup wizard for the selected account.  On

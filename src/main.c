@@ -13,6 +13,7 @@
 #include "fs_util.h"
 #include "smtp_adapter.h"
 #include "compose_service.h"
+#include "gmail_auth.h"
 #include "help_gmail.h"
 #include "mail_rules.h"
 #include "when_expr.h"
@@ -365,6 +366,31 @@ static void help_send(void) {
     );
 }
 
+/**
+ * Renew a Gmail account's OAuth2 authorization and persist the new token.
+ *
+ * Google revokes refresh tokens carrying Gmail scopes when the account
+ * password changes, and until this existed the only way back was to delete the
+ * account and add it again — which also threw away its local store.
+ *
+ * @return 0 on success, RESULT_REPORTED when it failed for a reason already
+ *         written to stderr.
+ */
+static int config_reauth_gmail(Config *cfg) {
+    if (gmail_auth_device_flow(cfg) != 0) {
+        fprintf(stderr, "Authorization was not completed — the account is unchanged.\n");
+        return RESULT_REPORTED;
+    }
+    if (config_save_to_store(cfg) != 0) {
+        fprintf(stderr,
+                "Error: the authorization succeeded but the new token could not"
+                " be saved.\n");
+        return RESULT_REPORTED;
+    }
+    printf("Gmail authorization renewed.\n");
+    return email_service_check_credential(cfg) == 0 ? 0 : RESULT_REPORTED;
+}
+
 static void help_config(void) {
     printf(
         "Usage: email-cli [<account>] config <subcommand>\n"
@@ -372,15 +398,25 @@ static void help_config(void) {
         "View or update configuration settings.\n"
         "\n"
         "Subcommands:\n"
-        "  show    Print current configuration (passwords masked)\n"
-        "  imap    Interactively configure IMAP (incoming mail) settings\n"
-        "  smtp    Interactively configure SMTP (outgoing mail) settings\n"
+        "  show      Print current configuration (passwords masked)\n"
+        "  password  Change nothing but the password, then test it\n"
+        "  reauth    Renew a Gmail account's authorization, then test it\n"
+        "  imap      Interactively configure IMAP (incoming mail) settings\n"
+        "  smtp      Interactively configure SMTP (outgoing mail) settings\n"
+        "\n"
+        "A password changed at the provider is repaired with 'config password'.\n"
+        "A Gmail account has no password here: access is granted by an OAuth2\n"
+        "authorization, and changing the Google account password revokes it, so\n"
+        "'config reauth' is what puts a Gmail account back to work.  Either\n"
+        "subcommand sends you to the right one if you pick the other.\n"
         "\n"
         "SMTP settings are used by email-tui for composing and sending mail.\n"
         "Configuring them here writes to the shared config file.\n"
         "\n"
         "Examples:\n"
         "  email-cli config show\n"
+        "  email-cli config password\n"
+        "  email-cli config reauth\n"
         "  email-cli config imap\n"
         "  email-cli user@example.com config show\n"
     );
@@ -860,6 +896,10 @@ int main(int argc, char *argv[]) {
                         fprintf(stderr, "Error: Failed to save configuration to disk.\n");
                     } else {
                         printf("Configuration saved. Run 'email-cli sync' to download your mail.\n");
+                        /* The wizard used to promise a connection check and
+                         * never make one.  Make it, so a mistyped password is
+                         * found now and not at the first sync. */
+                        email_service_check_credential(cfg);
                     }
                 } else {
                     logger_log(LOG_ERROR, "Configuration aborted by user.");
@@ -1124,6 +1164,47 @@ int main(int argc, char *argv[]) {
             printf("\n");
             result = 0;
 
+        } else if (strcmp(subcmd, "password") == 0) {
+            if (cfg->gmail_mode) {
+                /* A Gmail account has no password here.  Saying so and then
+                 * doing nothing is what sent the reporter down the IMAP
+                 * wizard, so explain and carry out the repair they meant. */
+                printf("This is a Gmail account: it has no password here.\n"
+                       "Access is granted by an OAuth2 authorization you give\n"
+                       "Google, and changing the Google account password revokes\n"
+                       "it. Renewing that authorization now — 'config reauth'\n"
+                       "does exactly this.\n");
+                result = config_reauth_gmail(cfg);
+            } else {
+                int rc = setup_wizard_password(cfg);
+                if (rc < 0) {
+                    fprintf(stderr, "Cancelled — the password was left unchanged.\n");
+                    result = RESULT_REPORTED;
+                } else if (rc == 0) {
+                    /* Nothing to save; still worth telling the user whether
+                     * the stored password works, since that is why they came. */
+                    result = email_service_check_credential(cfg) == 0
+                           ? 0 : RESULT_REPORTED;
+                } else if (config_save_to_store(cfg) != 0) {
+                    fprintf(stderr, "Error: Could not save configuration.\n");
+                    result = RESULT_REPORTED;
+                } else {
+                    printf("Password saved.\n");
+                    result = email_service_check_credential(cfg) == 0
+                           ? 0 : RESULT_REPORTED;
+                }
+            }
+
+        } else if (strcmp(subcmd, "reauth") == 0) {
+            if (!cfg->gmail_mode) {
+                fprintf(stderr,
+                        "This is an IMAP account: there is no authorization to renew.\n"
+                        "Run 'email-cli config password' to change its password.\n");
+                result = RESULT_REPORTED;
+            } else {
+                result = config_reauth_gmail(cfg);
+            }
+
         } else if (strcmp(subcmd, "imap") == 0) {
             if (setup_wizard_imap(cfg) == 0) {
                 if (config_save_to_store(cfg) == 0) {
@@ -1158,6 +1239,7 @@ int main(int argc, char *argv[]) {
             help_config();
             result = subcmd[0] ? -1 : 0;
         }
+        /* (config subcommands end here) */
 
     } else if (strcmp(cmd, "send") == 0) {
         const char *to = NULL, *subject = NULL, *body = NULL;
@@ -1411,6 +1493,7 @@ int main(int argc, char *argv[]) {
             if (config_save_account(new_cfg) == 0) {
                 printf("Account '%s' added.\n", new_cfg->user ? new_cfg->user : "?");
                 result = 0;
+                email_service_check_credential(new_cfg);
             } else {
                 fprintf(stderr, "Error: Failed to save account.\n");
             }

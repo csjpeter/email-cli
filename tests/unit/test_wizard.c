@@ -388,4 +388,96 @@ void test_wizard(void) {
                "setup_wizard_smtp derived: has smtps:// prefix");
         free(cfg.host); free(cfg.smtp_host);
     }
+
+    /* ── setup_wizard_password: the password and nothing else ─────────── */
+
+    // 23. A new password is taken and reported as a change
+    {
+        Config cfg = {0};
+        cfg.host   = strdup("imaps://imap.pw23.com");
+        cfg.user   = strdup("user@pw23.com");
+        cfg.pass   = strdup("oldpass");
+        cfg.folder = strdup("INBOX");
+
+        const char *input23 = "brandnew\n";
+        int pipefd[2];
+        ASSERT(pipe(pipefd) == 0, "pipe for password prompt");
+        ssize_t wr = write(pipefd[1], input23, strlen(input23));
+        ASSERT(wr > 0, "write to pipe for password prompt");
+        close(pipefd[1]);
+
+        int saved = dup(STDIN_FILENO);
+        dup2(pipefd[0], STDIN_FILENO);
+        close(pipefd[0]);
+        clearerr(stdin);
+        int rc = setup_wizard_password(&cfg);
+        dup2(saved, STDIN_FILENO);
+        close(saved);
+        clearerr(stdin);
+
+        ASSERT(rc == 1, "setup_wizard_password: a new password returns 1 (save me)");
+        ASSERT(strcmp(cfg.pass, "brandnew") == 0,
+               "setup_wizard_password: the typed password is stored verbatim");
+        /* Nothing but the password may move — that is the whole point of it. */
+        ASSERT(strcmp(cfg.host,   "imaps://imap.pw23.com") == 0,
+               "setup_wizard_password: host untouched");
+        ASSERT(strcmp(cfg.user,   "user@pw23.com")         == 0,
+               "setup_wizard_password: user untouched");
+        ASSERT(strcmp(cfg.folder, "INBOX")                 == 0,
+               "setup_wizard_password: folder untouched");
+        free(cfg.host); free(cfg.user); free(cfg.pass); free(cfg.folder);
+    }
+
+    // 24. An empty field keeps the stored password and says it changed nothing
+    {
+        Config cfg = {0};
+        cfg.user = strdup("user@pw24.com");
+        cfg.pass = strdup("keepthis");
+
+        const char *input24 = "\n";
+        int pipefd[2];
+        ASSERT(pipe(pipefd) == 0, "pipe for password keep");
+        ssize_t wr = write(pipefd[1], input24, strlen(input24));
+        ASSERT(wr > 0, "write to pipe for password keep");
+        close(pipefd[1]);
+
+        int saved = dup(STDIN_FILENO);
+        dup2(pipefd[0], STDIN_FILENO);
+        close(pipefd[0]);
+        clearerr(stdin);
+        int rc = setup_wizard_password(&cfg);
+        dup2(saved, STDIN_FILENO);
+        close(saved);
+        clearerr(stdin);
+
+        ASSERT(rc == 0, "setup_wizard_password: an empty field returns 0 (nothing to save)");
+        ASSERT(strcmp(cfg.pass, "keepthis") == 0,
+               "setup_wizard_password: the stored password survives an empty field");
+        free(cfg.user); free(cfg.pass);
+    }
+
+    // 25. EOF is a cancel: the stored password must not be lost
+    {
+        Config cfg = {0};
+        cfg.user = strdup("user@pw25.com");
+        cfg.pass = strdup("intact");
+
+        int pipefd[2];
+        ASSERT(pipe(pipefd) == 0, "pipe for password EOF");
+        close(pipefd[1]);   /* immediate EOF */
+
+        int saved = dup(STDIN_FILENO);
+        dup2(pipefd[0], STDIN_FILENO);
+        close(pipefd[0]);
+        clearerr(stdin);
+        int rc = setup_wizard_password(&cfg);
+        dup2(saved, STDIN_FILENO);
+        close(saved);
+        clearerr(stdin);
+
+        ASSERT(rc == -1, "setup_wizard_password: EOF returns -1");
+        ASSERT(strcmp(cfg.pass, "intact") == 0,
+               "setup_wizard_password: a cancel leaves the stored password alone");
+        free(cfg.user); free(cfg.pass);
+    }
 }

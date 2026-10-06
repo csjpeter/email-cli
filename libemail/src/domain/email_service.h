@@ -281,6 +281,19 @@ int email_service_cron_remove(void);
 int email_service_cron_status(void);
 
 /**
+ * @brief Try the account's credential against its server and say what happened.
+ *
+ * A credential that was accepted by a prompt is not a credential that works:
+ * the only thing that settles it is a connection.  This connects once (Gmail
+ * API or IMAP, by account type), reports the outcome on stdout/stderr, and
+ * disconnects.  Nothing is fetched and nothing is written.
+ *
+ * @param cfg  Account configuration to test.  Must not be NULL.
+ * @return 0 when the server accepted the credential, -1 otherwise.
+ */
+int email_service_check_credential(const Config *cfg);
+
+/**
  * @brief Load (or fetch) the raw RFC 2822 message for a given UID.
  *
  * Checks the local cache first; fetches from the server on a cache miss

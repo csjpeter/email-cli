@@ -643,6 +643,46 @@ static void test_password_typeahead_discarded(void) {
     pty_close(s);
 }
 
+/**
+ * config password (EMAIL-7): the password-only prompt masks what is typed,
+ * reports the change, and does not ask about the host, the username or the
+ * folder on the way.
+ */
+static void test_config_password_only(void) {
+    write_config();
+    disable_credential_obfuscation();
+    const char *a[] = {"config", "password", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "config password: opens");
+    ASSERT_WAIT_FOR(s, "Password for testuser", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "New password", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* The whole point: none of the other fields are in the way. */
+    ASSERT_SCREEN_NOT_CONTAINS(s, "IMAP Host");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Default Folder");
+    pty_send_str(s, "onlypass1");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "*********");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "onlypass1");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "password updated (9 characters)", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Password saved", WAIT_MS);
+    /* No server is running here, so the check must say so rather than
+     * claiming the new password works. */
+    ASSERT_WAIT_FOR(s, "Checking the connection", WAIT_MS);
+    pty_close(s);
+
+    char cfgbuf[4096];
+    ASSERT(read_stored_config(cfgbuf, sizeof(cfgbuf)), "config password: config readable");
+    ASSERT(strstr(cfgbuf, "EMAIL_PASS=onlypass1\n") != NULL,
+           "config password: exactly the typed password was stored");
+    /* The fields it never asked about must be exactly as they were. */
+    ASSERT(strstr(cfgbuf, "EMAIL_HOST=imaps://localhost:9993") != NULL,
+           "config password: the host was left alone");
+    ASSERT(strstr(cfgbuf, "EMAIL_FOLDER=INBOX") != NULL,
+           "config password: the folder was left alone");
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
@@ -697,6 +737,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_password_unchanged);
     RUN_TEST(test_password_ctrl_c_cancels);
     RUN_TEST(test_password_typeahead_discarded);
+    RUN_TEST(test_config_password_only);
 
     stop_smtp_server();
 

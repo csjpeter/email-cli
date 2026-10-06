@@ -72,8 +72,14 @@ IMAP: manage folders.
 .B list\-accounts ", " add\-account ", " remove\-account " " \fIemail\fP
 Manage configured accounts.
 .TP
-.B config
-Show or change configuration, including SMTP.
+.B config show ", " config password ", " config reauth ", " config imap ", " config smtp
+Show or change configuration.
+.B config password
+changes nothing but the password and then tests it against the server;
+.B config reauth
+renews a Gmail account's OAuth2 authorization, which a change of the Google
+account password revokes.
+Each of the two points at the other when it is given the wrong account type.
 .TP
 .B migrate\-credentials
 Re\-encrypt or decrypt stored passwords.

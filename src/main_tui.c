@@ -2293,6 +2293,9 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Error: Failed to save configuration to disk.\n");
             } else {
                 printf("Configuration saved. Run 'email-sync' to download your mail.\n");
+                /* Test the credential now rather than letting the first sync
+                 * be the thing that discovers a typo. */
+                email_service_check_credential(cfg);
             }
         } else {
             logger_log(LOG_ERROR, "Configuration aborted by user.");

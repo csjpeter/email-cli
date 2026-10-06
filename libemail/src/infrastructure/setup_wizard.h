@@ -50,4 +50,21 @@ int setup_wizard_smtp(Config *cfg);
  */
 int setup_wizard_imap(Config *cfg);
 
+/**
+ * @brief Interactively change nothing but the account's password.
+ *
+ * A changed password is the one reconfiguration users actually need, and
+ * walking the whole IMAP wizard for it means pressing Enter past the host, the
+ * username and the folder and trusting that each one kept its value.  This
+ * prompt asks for the password and nothing else.
+ *
+ * The caller is responsible for saving the updated Config.
+ *
+ * @param cfg  Existing configuration to update in-place.  Must not be NULL.
+ * @return 1 when a new password was entered (the caller should save),
+ *         0 when the field was left empty and the stored password kept,
+ *         -1 when the user cancelled (Ctrl-C / EOF) — nothing was changed.
+ */
+int setup_wizard_password(Config *cfg);
+
 #endif /* SETUP_WIZARD_H */

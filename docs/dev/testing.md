@@ -74,6 +74,32 @@ dup2(saved, STDIN_FILENO);
 close(saved);
 ```
 
+### Build-dependent behaviour, and the hooks that neutralise it
+
+`gmail_credentials.cmake` compiles a `GMAIL_DEFAULT_CLIENT_ID` and
+`GMAIL_DEFAULT_CLIENT_SECRET` into the binaries.  Whether they are present is a
+property of the build, so any test about "no credentials configured" would
+otherwise test a different code path depending on the checkout.  That is how
+`test_device_flow_no_credentials` came to walk into the real authorization
+flow, open the loopback listener and sit out its own 300-second accept timeout
+— while still returning `-1`, so it passed for the wrong reason.
+
+`gmail_auth.c` therefore recognises three environment hooks:
+
+| Variable | Effect |
+|---|---|
+| `GMAIL_TEST_NO_CLIENT_ID` | `get_client_id()`/`get_client_secret()` behave as in a build with no compiled-in credentials |
+| `GMAIL_TEST_TOKEN` | `gmail_auth_refresh()` returns this value instead of contacting Google |
+| `GMAIL_TEST_TOKEN_URL` | the token endpoint, so a local mock server can answer |
+
+Set a hook with `setenv()` immediately before the call and `unsetenv()` it
+immediately after: they are global state, and a leaked hook changes the
+meaning of every later test in the same process.
+
+A test that waits for a network peer must also assert *how long* the answer
+took when the point of the branch is that it answers without waiting.  A
+correct value that arrives after a five-minute timeout is not the same answer.
+
 ## Functional Tests (`tests/functional/`)
 
 The mock IMAP server (`mock_imap_server.c`) listens on TCP port 9993 and

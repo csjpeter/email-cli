@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 static void config_cleanup(void *ptr) {
     Config **cfg = (Config **)ptr;
@@ -479,5 +480,85 @@ void test_wizard(void) {
         ASSERT(strcmp(cfg.pass, "intact") == 0,
                "setup_wizard_password: a cancel leaves the stored password alone");
         free(cfg.user); free(cfg.pass);
+    }
+
+    // 26. setup_wizard_imap() refuses a Google host, as the first-run wizard does
+    {
+        Config cfg = {0};
+        cfg.host   = strdup("imaps://imap.old26.com");
+        cfg.user   = strdup("user@old26.com");
+        cfg.pass   = strdup("pass26");
+        cfg.folder = strdup("INBOX");
+
+        /* gmail.com is rejected and the host prompt repeats; the second
+         * answer is a legitimate host, so the wizard completes with it. */
+        const char *input26 = "imap.gmail.com\nimaps://imap.new26.com\n\n\n\n";
+        int pipefd[2];
+        ASSERT(pipe(pipefd) == 0, "pipe for gmail-host rejection");
+        ssize_t wr = write(pipefd[1], input26, strlen(input26));
+        ASSERT(wr > 0, "write to pipe for gmail-host rejection");
+        close(pipefd[1]);
+
+        int saved_err = dup(STDERR_FILENO);
+        int dn = open("/dev/null", O_WRONLY);
+        if (dn >= 0) dup2(dn, STDERR_FILENO);
+        int saved = dup(STDIN_FILENO);
+        dup2(pipefd[0], STDIN_FILENO);
+        close(pipefd[0]);
+        clearerr(stdin);
+        int rc = setup_wizard_imap(&cfg);
+        dup2(saved, STDIN_FILENO);
+        close(saved);
+        if (dn >= 0) { dup2(saved_err, STDERR_FILENO); close(dn); }
+        close(saved_err);
+        clearerr(stdin);
+
+        ASSERT(rc == 0, "setup_wizard_imap gmail host: completes after re-prompt");
+        ASSERT(strcmp(cfg.host, "imaps://imap.new26.com") == 0,
+               "setup_wizard_imap gmail host: the Google host was never stored");
+        free(cfg.host); free(cfg.user); free(cfg.pass); free(cfg.folder);
+    }
+
+    // 27. Every Google domain the first-run wizard refuses is refused here too
+    {
+        const char *hosts[] = { "imap.gmail.com", "imap.googlemail.com",
+                                "mail.google.com" };
+        for (unsigned h = 0; h < sizeof(hosts) / sizeof(hosts[0]); h++) {
+            Config cfg = {0};
+            cfg.host   = strdup("imaps://imap.keep27.com");
+            cfg.user   = strdup("user@keep27.com");
+            cfg.pass   = strdup("pass27");
+            cfg.folder = strdup("INBOX");
+
+            char input[256];
+            /* rejected host, then Enter to keep the current one, then the
+             * remaining three fields */
+            snprintf(input, sizeof(input), "%s\n\n\n\n\n", hosts[h]);
+
+            int pipefd[2];
+            ASSERT(pipe(pipefd) == 0, "pipe for google domain rejection");
+            ssize_t wr = write(pipefd[1], input, strlen(input));
+            ASSERT(wr > 0, "write to pipe for google domain rejection");
+            close(pipefd[1]);
+
+            int saved_err = dup(STDERR_FILENO);
+            int dn = open("/dev/null", O_WRONLY);
+            if (dn >= 0) dup2(dn, STDERR_FILENO);
+            int saved = dup(STDIN_FILENO);
+            dup2(pipefd[0], STDIN_FILENO);
+            close(pipefd[0]);
+            clearerr(stdin);
+            int rc = setup_wizard_imap(&cfg);
+            dup2(saved, STDIN_FILENO);
+            close(saved);
+            if (dn >= 0) { dup2(saved_err, STDERR_FILENO); close(dn); }
+            close(saved_err);
+            clearerr(stdin);
+
+            ASSERT(rc == 0, "setup_wizard_imap google domain: completes");
+            ASSERT(strcmp(cfg.host, "imaps://imap.keep27.com") == 0,
+                   "setup_wizard_imap google domain: the original host survives");
+            free(cfg.host); free(cfg.user); free(cfg.pass); free(cfg.folder);
+        }
     }
 }

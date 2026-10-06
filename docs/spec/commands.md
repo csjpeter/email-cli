@@ -804,6 +804,28 @@ If SMTP is not configured:
     (not configured — will be derived from IMAP host)
 ```
 
+For a **Gmail account** none of those fields are used, so none are shown.  A
+Gmail account is reached through the Gmail API with an OAuth2 authorization;
+it has no password here at all:
+
+```
+email-cli configuration (user@gmail.com):
+
+  Account type: Gmail (Gmail API over OAuth2)
+    Email:         user@gmail.com
+    Password:      none — Gmail accounts do not use one
+    Authorization: stored (refresh token)
+    OAuth2 client: built into this build
+    Default label: INBOX
+
+  A changed Google account password revokes the authorization.
+  'email-cli config reauth' renews it.
+```
+
+`Authorization` reads `missing — run 'email-cli config reauth'` when no refresh
+token is stored.  `OAuth2 client` says whether the client_id comes from this
+account's config or from the build.
+
 #### `config password`
 
 Changes nothing but the account's password, then tests it.
@@ -855,10 +877,23 @@ Runs the interactive IMAP setup wizard for the selected account.  On
 success, the updated configuration is saved to
 `~/.config/email-cli/accounts/<email>/config.ini`.
 
+A **Gmail host** (`gmail.com`, `googlemail.com`, `google.com`) is refused in
+the host field, exactly as the first-run wizard refuses it: Gmail is reached
+through the API, never over IMAP.
+
+On a **Gmail account** the subcommand refuses outright and names
+`config reauth` and `config show`.  It used to run: it accepted a new
+password, wrote `EMAIL_HOST` and `EMAIL_PASS` into the config and reported
+*"IMAP configuration saved"*, while `GMAIL_MODE=1` stayed and sync kept using
+the API.  Nothing changed and nothing said so.
+
 #### `config smtp`
 
 Runs the interactive SMTP setup wizard for the selected account.  On
 success, the SMTP fields are appended/updated in the account's config file.
+
+On a **Gmail account** it refuses: outgoing mail goes through the Gmail API,
+not SMTP.
 
 ### Credential fields
 

@@ -60,6 +60,17 @@ static void report_credential(const char *label, const char *value, int changed)
 }
 
 /**
+ * Is this host one of Google's?  Gmail is reached through the Gmail API with
+ * OAuth2, never through IMAP, so such a host in an IMAP field cannot work.
+ */
+static int is_gmail_host(const char *input) {
+    if (!input) return 0;
+    return strstr(input, "gmail.com")     != NULL ||
+           strstr(input, "googlemail.com") != NULL ||
+           strstr(input, "google.com")     != NULL;
+}
+
+/**
  * Normalise a user-supplied IMAP host string.
  *
  * Rules:
@@ -185,8 +196,7 @@ Config* setup_wizard_run_internal(FILE *stream) {
         if (!input) { config_free(cfg); return NULL; }
 
         /* Reject Gmail IMAP — Gmail must use the Gmail API (account type 2) */
-        if (strstr(input, "gmail.com") || strstr(input, "google.com") ||
-            strstr(input, "googlemail.com")) {
+        if (is_gmail_host(input)) {
             fprintf(stderr,
                     "Error: Gmail is not supported via IMAP.\n"
                     "  Please re-run the wizard and select account type [2] Gmail,\n"
@@ -459,6 +469,17 @@ int setup_wizard_imap(Config *cfg) {
         if (!input[0]) {
             free(input);
             break;  /* keep current */
+        }
+        /* The first-run wizard refuses a Google host here; this one used to
+         * accept it, so the setting the product rejects at the front door
+         * could be written through the back one. */
+        if (is_gmail_host(input)) {
+            fprintf(stderr,
+                    "Error: Gmail is not reachable over IMAP.\n"
+                    "  A Gmail account uses the Gmail API with OAuth2: add it with\n"
+                    "  'email-cli add-account' and choose account type [2] Gmail.\n");
+            free(input);
+            continue;  /* re-prompt */
         }
         char *host = normalize_imap_host(input);
         if (!host) {

@@ -5251,6 +5251,74 @@ kill "$GMAIL_SERVER_C_PID" || echo "  (mock Gmail C had already exited)"
 export HOME="$H_ALPHA"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 88 — the credential field says what it did (EMAIL-9, EMAIL-5)
+# ════════════════════════════════════════════════════════════════════════════
+# The password prompt used to be silent in both directions: nothing was
+# echoed while typing, and nothing was said afterwards.  A user could not
+# tell a stored password from a dropped one.  The masked echo needs a
+# terminal (see the PTY suite); the spoken part is checked here, where stdin
+# is a pipe and the prompt reads the line as-is.
+echo ""
+echo "--- Phase 88: credential field feedback ---"
+
+H_F88="./build/tests/functional/homes/f88-$$"
+case "$H_F88" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F88 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/f88-$$"
+mkdir -p "$H_F88/.config/email-cli/accounts/f88@test.local"
+cat > "$H_F88/.config/email-cli/settings.ini" <<'SETTINGS'
+credential_obfuscation=false
+SETTINGS
+cat > "$H_F88/.config/email-cli/accounts/f88@test.local/config.ini" <<'CONFIG'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=f88@test.local
+EMAIL_PASS=oldpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CONFIG
+
+# Feed the given lines to a config subcommand and append the exit code to the
+# captured output.  The status is kept rather than swallowed with "|| true":
+# a cancelled wizard exits non-zero on purpose, and that is worth asserting.
+f88() {
+    local sub="$1" lines="$2"
+    (export HOME="$H_F88"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     printf '%b' "$lines" | "$BIN_DIR/email-cli" config "$sub" 2>&1
+     echo "exit-code=$?")
+}
+
+# A new password reports that it was taken, and how long it was.
+OUT88_SET=$(f88 imap '\n\nfreshpass\n\n')
+check "88.1 new password acknowledged"  "password updated (9 characters)" "$OUT88_SET"
+check "88.2 the change was saved"       "IMAP configuration saved"        "$OUT88_SET"
+check "88.3 stored verbatim"            "EMAIL_PASS=freshpass" \
+      "$(cat "$H_F88/.config/email-cli/accounts/f88@test.local/config.ini")"
+
+# An empty field keeps the stored password and says so, instead of leaving the
+# user to guess which of the two happened.
+OUT88_KEEP=$(f88 imap '\n\n\n\n')
+check "88.4 empty field says unchanged" "password unchanged"              "$OUT88_KEEP"
+check "88.5 the password survived it"   "EMAIL_PASS=freshpass" \
+      "$(cat "$H_F88/.config/email-cli/accounts/f88@test.local/config.ini")"
+
+# EOF in the middle of the wizard is a cancel: nothing is written, and the
+# user is told so rather than being sent to the log file.
+OUT88_EOF=$(f88 imap '\n\n')
+check     "88.6 EOF cancels the wizard"   "Cancelled"                "$OUT88_EOF"
+check_not "88.7 no misleading log hint"   "Check logs"               "$OUT88_EOF"
+check     "88.8 nothing was saved"        "EMAIL_PASS=freshpass" \
+      "$(cat "$H_F88/.config/email-cli/accounts/f88@test.local/config.ini")"
+check_not "88.9 and it did not claim to"  "IMAP configuration saved" "$OUT88_EOF"
+check     "88.10 a cancel exits non-zero" "exit-code=1"              "$OUT88_EOF"
+
+# The SMTP password field speaks the same way.
+OUT88_SMTP=$(f88 smtp '\n\n\nsmtpsecret\n')
+check "88.11 SMTP password acknowledged" "SMTP password updated (10 characters)" "$OUT88_SMTP"
+check "88.12 SMTP change saved"          "SMTP configuration saved"              "$OUT88_SMTP"
+check "88.13 and it exits zero"          "exit-code=0"                           "$OUT88_SMTP"
+OUT88_SMTP2=$(f88 smtp '\n\n\n\n')
+check "88.14 SMTP empty says unchanged"  "SMTP password unchanged"               "$OUT88_SMTP2"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

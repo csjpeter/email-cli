@@ -85,9 +85,23 @@ const char *terminal_last_utf8(void);
 int terminal_wcwidth(uint32_t cp);
 
 /**
- * Prompt for a password with echo suppressed.
+ * Prompt for a password without echoing it back.
+ *
+ * On a terminal every accepted character is acknowledged with one mask
+ * character, so the user can see that typing arrives; backspace erases one
+ * character and Ctrl-U erases the field.  Escape sequences (arrow keys and
+ * friends) are discarded instead of being taken as password bytes, and
+ * anything typed ahead of the prompt is discarded rather than used.
+ * The terminal mode is always restored before this function returns.
+ *
+ * When stdin is not a terminal one line is read as-is: no mode changes, no
+ * masking, no type-ahead handling.
+ *
  * Writes at most size-1 bytes to buf (NUL-terminated).
- * Returns the number of characters read, or -1 on error.
+ *
+ * @return Number of bytes read, or -1 when the field was cancelled (Ctrl-C),
+ *         ended by EOF, or the terminal could not be reconfigured.  On -1 the
+ *         buffer is wiped, so a caller must not use a partial password.
  */
 int terminal_read_password(const char *prompt, char *buf, size_t size);
 

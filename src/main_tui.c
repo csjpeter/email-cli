@@ -994,6 +994,8 @@ static void ensure_smtp_configured(Config *cfg) {
             printf("  SMTP settings saved.\n\n");
         else
             fprintf(stderr, "  Warning: SMTP configured but could not save to disk.\n\n");
+    } else {
+        fprintf(stderr, "  Cancelled — SMTP was left unconfigured.\n\n");
     }
 }
 
@@ -2426,15 +2428,23 @@ int main(int argc, char *argv[]) {
             if (!sel_cfg) continue;
             if (acc == 4) {
                 /* 'i' → edit IMAP settings for selected account */
-                if (setup_wizard_imap(sel_cfg) == 0)
+                if (setup_wizard_imap(sel_cfg) == 0) {
                     config_save_account(sel_cfg);
+                    acc_flash = "  IMAP settings saved.";
+                } else {
+                    acc_flash = "  Cancelled — nothing was changed.";
+                }
                 config_free(sel_cfg);
                 continue;  /* re-display accounts screen with updated info */
             }
             if (acc == 2) {
                 /* 'e' → edit SMTP settings for selected account */
-                if (setup_wizard_smtp(sel_cfg) == 0)
+                if (setup_wizard_smtp(sel_cfg) == 0) {
                     config_save_account(sel_cfg);
+                    acc_flash = "  SMTP settings saved.";
+                } else {
+                    acc_flash = "  Cancelled — nothing was changed.";
+                }
                 config_free(sel_cfg);
                 continue;  /* re-display accounts screen with updated info */
             }

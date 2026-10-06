@@ -473,6 +473,176 @@ static void test_config_imap_help(void) {
     pty_close(s);
 }
 
+/* ── Password prompt tests (EMAIL-9, EMAIL-5) ────────────────────────── */
+
+/**
+ * Keep credentials plaintext in this test home, so a test can read back the
+ * exact password that was stored.  With obfuscation on (the default) merely
+ * loading the config rewrites EMAIL_PASS as enc:…, which hides both the value
+ * and any stray byte that leaked into it.
+ */
+static void disable_credential_obfuscation(void) {
+    char dir[620], path[700];
+    snprintf(dir,  sizeof(dir),  "%s/.config/email-cli", g_test_home);
+    snprintf(path, sizeof(path), "%s/settings.ini", dir);
+    mkdir(dir, 0700);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp, "credential_obfuscation=false\n");
+    fclose(fp);
+    chmod(path, 0600);
+}
+
+/** Read the account config file into buf; returns 1 on success. */
+static int read_stored_config(char *buf, size_t size) {
+    char path[800];
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/testuser/config.ini", g_test_home);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return 0;
+    size_t n = fread(buf, 1, size - 1, fp);
+    fclose(fp);
+    buf[n] = '\0';
+    return 1;
+}
+
+/**
+ * Walk 'config imap' as far as the password prompt.  Each field is reached by
+ * waiting for its own prompt: the password field discards type-ahead on
+ * purpose, so keys sent before the prompt appears would be thrown away.
+ */
+static PtySession *open_password_prompt(void) {
+    const char *a[] = {"config", "imap", NULL};
+    PtySession *s = cli_run(a);
+    if (!s) return NULL;
+    if (pty_wait_for(s, "IMAP Host", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "IMAP Username", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "IMAP Password", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/**
+ * A typed password is acknowledged with one mask character each and is never
+ * echoed in clear; the field then says how many characters it took.
+ */
+static void test_password_masked_echo(void) {
+    write_config();
+    disable_credential_obfuscation();
+    PtySession *s = open_password_prompt();
+    ASSERT(s != NULL, "password masked: prompt reached");
+    pty_send_str(s, "newsecret");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "*********");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "newsecret");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "password updated (9 characters)", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Default Folder", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "IMAP configuration saved", WAIT_MS);
+    pty_close(s);
+
+    char cfgbuf[4096];
+    ASSERT(read_stored_config(cfgbuf, sizeof(cfgbuf)), "password masked: config readable");
+    ASSERT(strstr(cfgbuf, "EMAIL_PASS=newsecret\n") != NULL,
+           "password masked: exactly the typed password was stored");
+}
+
+/** Backspace removes one character and one mask from the field. */
+static void test_password_backspace(void) {
+    write_config();
+    PtySession *s = open_password_prompt();
+    ASSERT(s != NULL, "password backspace: prompt reached");
+    pty_send_str(s, "abcXX");
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    pty_send_key(s, PTY_KEY_BACK);
+    pty_send_str(s, "d");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "password updated (4 characters)", WAIT_MS);
+    pty_close(s);
+}
+
+/** An arrow key is discarded instead of becoming three password bytes. */
+static void test_password_arrow_discarded(void) {
+    write_config();
+    disable_credential_obfuscation();
+    PtySession *s = open_password_prompt();
+    ASSERT(s != NULL, "password arrow: prompt reached");
+    pty_send_str(s, "ab");
+    pty_send_key(s, PTY_KEY_UP);
+    pty_send_str(s, "cd");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "password updated (4 characters)", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Default Folder", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "IMAP configuration saved", WAIT_MS);
+    pty_close(s);
+
+    char cfgbuf[4096];
+    ASSERT(read_stored_config(cfgbuf, sizeof(cfgbuf)), "password arrow: config readable");
+    ASSERT(strstr(cfgbuf, "EMAIL_PASS=abcd\n") != NULL,
+           "password arrow: no escape bytes reached the stored password");
+}
+
+/** An empty field keeps the stored password, and says so. */
+static void test_password_unchanged(void) {
+    write_config();
+    PtySession *s = open_password_prompt();
+    ASSERT(s != NULL, "password unchanged: prompt reached");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "password unchanged", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Default Folder", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "IMAP configuration saved", WAIT_MS);
+    pty_close(s);
+}
+
+/**
+ * Ctrl-C in the password field cancels the whole wizard: it says so, it does
+ * not point at the log file, and nothing is written to config.ini.
+ */
+static void test_password_ctrl_c_cancels(void) {
+    write_config();
+    disable_credential_obfuscation();
+    PtySession *s = open_password_prompt();
+    ASSERT(s != NULL, "password ctrl-c: prompt reached");
+    pty_send_str(s, "half");
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Check logs");
+    pty_close(s);
+
+    char cfgbuf[4096];
+    ASSERT(read_stored_config(cfgbuf, sizeof(cfgbuf)), "password ctrl-c: config readable");
+    ASSERT(strstr(cfgbuf, "EMAIL_PASS=testpass") != NULL,
+           "password ctrl-c: the stored password is untouched");
+}
+
+/**
+ * Type-ahead is discarded: a password typed before the prompt appears was
+ * echoed by the previous field in clear, so it must not be taken silently.
+ */
+static void test_password_typeahead_discarded(void) {
+    write_config();
+    const char *a[] = {"config", "imap", NULL};
+    PtySession *s = cli_run(a);
+    ASSERT(s != NULL, "password typeahead: opens");
+    ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
+    /* Everything at once: host, username, and a password behind them. */
+    pty_send_str(s, "\r\rtypedahead\r");
+    ASSERT_WAIT_FOR(s, "IMAP Password", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "**********");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "password unchanged", WAIT_MS);
+    pty_close(s);
+}
+
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
@@ -519,6 +689,14 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_config_show);
     RUN_TEST(test_config_help);
     RUN_TEST(test_config_imap_help);
+
+    printf("\n--- Password prompt feedback (EMAIL-9, EMAIL-5) ---\n");
+    RUN_TEST(test_password_masked_echo);
+    RUN_TEST(test_password_backspace);
+    RUN_TEST(test_password_arrow_discarded);
+    RUN_TEST(test_password_unchanged);
+    RUN_TEST(test_password_ctrl_c_cancels);
+    RUN_TEST(test_password_typeahead_discarded);
 
     stop_smtp_server();
 

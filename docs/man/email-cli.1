@@ -87,6 +87,19 @@ to import them from Thunderbird.
 Command help; the
 .B gmail
 topic walks through OAuth2 setup.
+.SH CREDENTIAL PROMPTS
+A password prompt never echoes what is typed, and it is never silent about it
+either: each accepted character is acknowledged with one
+.BR * ,
+Backspace erases one character and Ctrl\-U the whole field, arrow keys and
+other escape sequences are discarded instead of being taken as password bytes,
+and anything typed ahead of the prompt is discarded \(em those keystrokes were
+echoed in clear by the previous field.
+Ctrl\-C cancels: the terminal mode is restored, nothing is saved, and the
+program says so.
+The field then reports whether the credential was updated, and how long it was,
+or that it was left unchanged.
+When standard input is not a terminal the line is read as\-is, without masking.
 .SH OPTIONS
 The options of
 .B list

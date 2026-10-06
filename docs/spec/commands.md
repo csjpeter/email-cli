@@ -815,6 +815,44 @@ success, the updated configuration is saved to
 Runs the interactive SMTP setup wizard for the selected account.  On
 success, the SMTP fields are appended/updated in the account's config file.
 
+### Credential fields
+
+A password is never echoed in clear, but it is never answered with silence
+either: a blind field leaves the user unable to tell a stored password from a
+dropped keystroke.
+
+On a terminal:
+
+* each accepted character is acknowledged with one `*` (one per character, so
+  a multi-byte UTF-8 character counts once);
+* **Backspace** erases one character, **Ctrl-U** erases the whole field;
+* escape sequences (arrow keys, Home, function keys) are discarded instead of
+  being taken as password bytes;
+* anything typed ahead of the prompt is discarded — those keystrokes were
+  echoed in clear by the previous, canonical-mode field and must not silently
+  become part of a password;
+* **Ctrl-C** cancels the wizard: the terminal mode is restored, nothing is
+  saved, and `Cancelled — the configuration was left unchanged.` is printed on
+  stderr without the "check the logs" pointer that a real malfunction gets.
+
+When stdin is not a terminal the line is read as-is, with no masking and no
+type-ahead handling.
+
+Either way the field then states what it did:
+
+```
+IMAP Password [Enter=keep current]: *********
+  → password updated (9 characters)
+```
+
+```
+IMAP Password [Enter=keep current]:
+  → password unchanged
+```
+
+EOF anywhere in a wizard field is a cancel with the same guarantee: nothing is
+written to the config file.
+
 ### Multi-account dispatch
 
 When multiple accounts are configured and `--account` is omitted, the
@@ -831,7 +869,7 @@ Multiple accounts configured. Re-run with --account <email>:
 | Code | Condition |
 |------|-----------|
 | 0 | Subcommand completed successfully |
-| 1 | Unknown subcommand, missing account, or wizard aborted |
+| 1 | Unknown subcommand, missing account, or wizard aborted or cancelled |
 
 ---
 

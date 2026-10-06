@@ -552,6 +552,68 @@ static void test_device_flow_with_code(void) {
 
 /* ── Registration ─────────────────────────────────────────────────── */
 
+/**
+ * A revoked authorization must say what revoked it and how to get it back.
+ *
+ * "Gmail refresh token expired. Re-authorization needed." was true and
+ * useless: it named no cause, and for a long time there was no command to
+ * re-authorize with.  stderr is captured here, because the message is the
+ * whole behaviour under test.
+ */
+static void test_refresh_invalid_grant_message(void) {
+    const int mock_port = 18774;
+    const char *http_resp =
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n"
+        "{\"error\":\"invalid_grant\"}";
+
+    pid_t pid = fork();
+    if (pid == 0)
+        run_mock_token_server(mock_port, http_resp);
+    usleep(50000);
+
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
+    setenv("GMAIL_TEST_TOKEN_URL", url, 1);
+
+    char errfile[] = "/tmp/email-cli-invalid-grant-XXXXXX";
+    int efd = mkstemp(errfile);
+    ASSERT(efd >= 0, "invalid_grant: temp file for stderr");
+
+    Config cfg = {0};
+    cfg.gmail_refresh_token = strdup("revoked_token");
+    cfg.user                = strdup("someone@gmail.com");
+
+    int saved = dup(2);
+    dup2(efd, 2);
+    char *tok = gmail_auth_refresh(&cfg);
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
+
+    ASSERT(tok == NULL, "invalid_grant: returns NULL");
+
+    char buf[2048] = {0};
+    lseek(efd, 0, SEEK_SET);
+    ssize_t rd = read(efd, buf, sizeof(buf) - 1);
+    close(efd);
+    unlink(errfile);
+    ASSERT(rd > 0, "invalid_grant: something was written to stderr");
+
+    ASSERT(strstr(buf, "revoked") != NULL,
+           "invalid_grant: says the authorization was revoked");
+    ASSERT(strstr(buf, "someone@gmail.com") != NULL,
+           "invalid_grant: names the account it happened to");
+    ASSERT(strstr(buf, "password") != NULL,
+           "invalid_grant: names the cause — a changed Google password");
+    ASSERT(strstr(buf, "config reauth") != NULL,
+           "invalid_grant: names the command that repairs it");
+
+    free(cfg.gmail_refresh_token);
+    free(cfg.user);
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+    wait_child(pid);
+}
+
 void test_gmail_auth(void) {
     RUN_TEST(test_refresh_no_token);
     RUN_TEST(test_refresh_empty_token);
@@ -566,6 +628,7 @@ void test_gmail_auth(void) {
     RUN_TEST(test_refresh_via_mock_server_200);
     RUN_TEST(test_refresh_via_mock_server_200_no_token);
     RUN_TEST(test_refresh_via_mock_server_400_unknown_error);
+    RUN_TEST(test_refresh_invalid_grant_message);
     RUN_TEST(test_refresh_via_mock_server_curl_error);
     RUN_TEST(test_device_flow_full_mock);
 }

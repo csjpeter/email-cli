@@ -895,6 +895,31 @@ success, the SMTP fields are appended/updated in the account's config file.
 On a **Gmail account** it refuses: outgoing mail goes through the Gmail API,
 not SMTP.
 
+### A refused credential
+
+A server that answers and says no is a different fact from a server that could
+not be reached, and it is the one the user can act on.  An IMAP login refusal
+names the server, the username, what the server itself said, and the command
+that changes the stored password:
+
+```
+ERROR: imap.example.com rejected the login for user@example.com.
+  The server said: NO [AUTHENTICATIONFAILED] Invalid credentials
+  The stored username or password is not accepted.
+  Change the stored password with: email-cli config password
+```
+
+This is written to stderr directly rather than relying on the logger's
+`LOG_ERROR` mirror: what a user is told about their own credential must not
+depend on a global toggle.  The log keeps the record at `WARN`, next to the
+server's exact answer.
+
+`email-sync` prints the same block before its own `sync: could not retrieve
+folder list.` and exits non-zero.
+
+For Gmail the equivalent is the revoked-authorization message in
+[gmail-api.md](gmail-api.md) §11.
+
 ### Credential fields
 
 A password is never echoed in clear, but it is never answered with silence

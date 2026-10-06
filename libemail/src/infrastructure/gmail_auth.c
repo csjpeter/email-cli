@@ -365,10 +365,19 @@ char *gmail_auth_refresh(const Config *cfg) {
     RAII_STRING char *error = json_get_string(resp, "error");
     if (error && strcmp(error, "invalid_grant") == 0) {
         logger_log(LOG_WARN, "gmail_auth: refresh token expired or revoked");
-        fprintf(stderr, "Gmail refresh token expired. Re-authorization needed.\n");
+        /* Name the cause and the cure.  "Re-authorization needed" was true and
+         * useless: there was no command to do it with, and nothing said that a
+         * changed Google password is what revokes the token. */
+        fprintf(stderr,
+                "ERROR: Google has revoked the authorization for %s.\n"
+                "  Changing the Google account password revokes it; so does\n"
+                "  withdrawing access at myaccount.google.com.\n"
+                "  Renew it with: email-cli config reauth\n",
+                (cfg->user && cfg->user[0]) ? cfg->user : "this account");
     } else if (error && strcmp(error, "invalid_client") == 0) {
         fprintf(stderr, "OAuth2 client credentials are invalid. "
-                        "Check GMAIL_CLIENT_ID/SECRET in config.ini.\n");
+                        "Check GMAIL_CLIENT_ID/SECRET in config.ini.\n"
+                        "  'email-cli help gmail' walks through creating them.\n");
     } else {
         logger_log(LOG_ERROR, "gmail_auth: token refresh failed (HTTP %ld): %s",
                    code, error ? error : "unknown");

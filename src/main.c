@@ -17,6 +17,9 @@
 #include "mail_rules.h"
 #include "when_expr.h"
 
+/** Exit path marker: the failure has already been explained on stderr. */
+#define RESULT_REPORTED (-2)
+
 /* Default limit for batch output */
 #define BATCH_DEFAULT_LIMIT 100
 
@@ -873,6 +876,9 @@ int main(int argc, char *argv[]) {
         logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
 
     /* 6. Dispatch — batch mode only (no interactive TUI) */
+    /* result: >= 0 succeeded; -1 failed and the log file may explain why;
+     * RESULT_REPORTED failed for a reason already written to stderr, so the
+     * "check the logs" pointer would only mislead. */
     int result = -1;
 
     if (strcmp(cmd, "list") == 0) {
@@ -1126,6 +1132,11 @@ int main(int argc, char *argv[]) {
                 } else {
                     fprintf(stderr, "Error: Could not save configuration.\n");
                 }
+            } else {
+                /* A cancelled wizard is not a malfunction: say what happened
+                 * instead of sending the user to the log file. */
+                fprintf(stderr, "Cancelled — the configuration was left unchanged.\n");
+                result = RESULT_REPORTED;
             }
 
         } else if (strcmp(subcmd, "smtp") == 0) {
@@ -1136,6 +1147,9 @@ int main(int argc, char *argv[]) {
                 } else {
                     fprintf(stderr, "Error: Could not save configuration.\n");
                 }
+            } else {
+                fprintf(stderr, "Cancelled — the configuration was left unchanged.\n");
+                result = RESULT_REPORTED;
             }
 
         } else {
@@ -1795,6 +1809,7 @@ int main(int argc, char *argv[]) {
 
     if (result >= 0)
         return EXIT_SUCCESS;
-    fprintf(stderr, "\nFailed. Check logs in %s\n", log_file);
+    if (result != RESULT_REPORTED)
+        fprintf(stderr, "\nFailed. Check logs in %s\n", log_file);
     return EXIT_FAILURE;
 }

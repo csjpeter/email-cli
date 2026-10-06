@@ -131,6 +131,29 @@ void test_platform(void) {
         }
     }
 
+    /* A line longer than the buffer is truncated, never written past the end:
+     * the caller passes a fixed array and the prompt has no way to grow it. */
+    {
+        int pfd[2];
+        if (pipe(pfd) == 0) {
+            const char *long_input = "0123456789abcdef\n";   /* 16 + newline */
+            ssize_t _wr = write(pfd[1], long_input, strlen(long_input)); (void)_wr;
+            close(pfd[1]);
+            int saved = dup(STDIN_FILENO);
+            dup2(pfd[0], STDIN_FILENO);
+            close(pfd[0]);
+            clearerr(stdin);
+            char small[8];
+            memset(small, 0x7F, sizeof(small));
+            int n3 = terminal_read_password("Password", small, sizeof(small));
+            dup2(saved, STDIN_FILENO);
+            close(saved);
+            clearerr(stdin);
+            ASSERT(n3 == 7 && strcmp(small, "0123456") == 0,
+                   "terminal_read_password: over-long input is truncated to size-1");
+        }
+    }
+
     /* ── platform_home_dir ──────────────────────────────────────────── */
 
     const char *home = platform_home_dir();

@@ -196,64 +196,146 @@ int terminal_wcwidth(uint32_t cp) {
     return (w < 0) ? 0 : w;
 }
 
+/* ── Password input ──────────────────────────────────────────────────── */
+
+/**
+ * Read one line with the echo replaced by mask characters.
+ *
+ * The terminal is switched out of canonical mode so that every keystroke can
+ * be acknowledged on screen: a blind field gives the user no way to tell a
+ * typed password from a dead keyboard.  One '*' is written per character (not
+ * per byte, so a multi-byte UTF-8 character counts once), backspace erases
+ * one character, and Ctrl-U erases the whole field.
+ *
+ * Reading goes through stdio (getchar) rather than read(2) so that the stream
+ * the other wizard fields use with getline() stays in sync.
+ *
+ * ISIG is cleared for the duration, so Ctrl-C and Ctrl-Z cannot end or stop
+ * the process while echo is off; Ctrl-C is handled here and cancels the field
+ * after the terminal has been put back the way it was.
+ *
+ * @return Number of bytes placed in @p buf, or -1 when the field was
+ *         cancelled (Ctrl-C), ended by EOF, or the terminal could not be
+ *         reconfigured.  On -1 the buffer is wiped.
+ */
+static int read_password_masked(int fd, const char *prompt, char *buf, size_t size) {
+    struct termios oldt, newt;
+    if (tcgetattr(fd, &oldt) != 0) return -1;
+    newt = oldt;
+    newt.c_lflag &= ~(unsigned)(ECHO | ECHONL | ICANON | ISIG);
+    /* IXON off: Ctrl-S/Ctrl-Q are data here, not flow control.
+     * ICRNL off: the Enter key arrives as CR and is recognised as such. */
+    newt.c_iflag &= ~(unsigned)(IXON | ICRNL);
+    newt.c_cc[VMIN]  = 1;
+    newt.c_cc[VTIME] = 0;
+    /* TCSAFLUSH discards whatever was typed ahead: those keystrokes were
+     * echoed by the previous, canonical-mode field and must not silently
+     * become part of a password. */
+    if (tcsetattr(fd, TCSAFLUSH, &newt) != 0) return -1;
+
+    /* The prompt is written only once echo is off, so type-ahead arriving
+     * between the two cannot be echoed. */
+    printf("%s: ", prompt);
+    fflush(stdout);
+
+    size_t len    = 0;   /* bytes in buf */
+    int    masks  = 0;   /* mask characters currently on screen */
+    int    rc     = -1;
+    int    pushed = -2;  /* a byte read ahead and not consumed yet */
+
+    for (;;) {
+        int c = (pushed != -2) ? pushed : getchar();
+        pushed = -2;
+
+        if (c == EOF || c == 0x04) break;                   /* EOF / Ctrl-D */
+        if (c == '\r' || c == '\n') { rc = (int)len; break; }
+
+        if (c == 0x03) {                                    /* Ctrl-C */
+            printf("^C");
+            break;
+        }
+
+        if (c == 0x15) {                                    /* Ctrl-U */
+            while (masks > 0) { printf("\b \b"); masks--; }
+            fflush(stdout);
+            len = 0;
+            continue;
+        }
+
+        if (c == 0x7F || c == 0x08) {                       /* Backspace */
+            if (len > 0) {
+                do { len--; } while (len > 0 && ((unsigned char)buf[len] & 0xC0) == 0x80);
+                if (masks > 0) { printf("\b \b"); masks--; fflush(stdout); }
+            }
+            continue;
+        }
+
+        if (c == 0x1B) {                                    /* ESC */
+            /* Swallow a CSI/SS3 sequence (arrow keys, Home, F-keys): its
+             * bytes would otherwise land in the password unseen. */
+            int n = getchar();
+            if (n == '[' || n == 'O') {
+                int f;
+                do { f = getchar(); } while (f != EOF && (f < 0x40 || f > 0x7E));
+            } else {
+                pushed = n;   /* a lone ESC: drop the ESC, keep what followed */
+            }
+            continue;
+        }
+
+        if (c < 0x20) continue;                             /* other controls */
+
+        if (len + 1 < size) {
+            buf[len++] = (char)c;
+            if (((unsigned char)c & 0xC0) != 0x80) {        /* not a UTF-8 tail */
+                putchar('*');
+                masks++;
+                fflush(stdout);
+            }
+        } else {
+            putchar('\a');                                  /* field full */
+            fflush(stdout);
+        }
+    }
+
+    buf[len] = '\0';
+    tcsetattr(fd, TCSANOW, &oldt);
+    printf("\n");
+    fflush(stdout);
+
+    if (rc < 0) {
+        memset(buf, 0, size);
+        return -1;
+    }
+    return rc;
+}
+
+/** Read one line from a stream that is not a terminal — no echo to suppress. */
+static int read_password_plain(char *buf, size_t size) {
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t nread = getline(&line, &len, stdin);
+    if (nread == -1 || !line) {
+        free(line);
+        return -1;
+    }
+    size_t slen = strlen(line);
+    if (slen > 0 && (line[slen-1] == '\n' || line[slen-1] == '\r'))
+        line[--slen] = '\0';
+    if (slen > 0 && (line[slen-1] == '\r'))
+        line[--slen] = '\0';
+    if (slen >= size) slen = size - 1;
+    memcpy(buf, line, slen);
+    buf[slen] = '\0';
+    free(line);
+    return (int)slen;
+}
+
 int terminal_read_password(const char *prompt, char *buf, size_t size) {
     if (!buf || size == 0) return -1;
 
     int fd = fileno(stdin);
-    int is_tty = isatty(fd);
-
-    if (is_tty) {
-        printf("%s: ", prompt);
-        fflush(stdout);
-
-        struct termios oldt, newt;
-        tcgetattr(fd, &oldt);
-        newt = oldt;
-        newt.c_lflag &= ~(unsigned)ECHO;
-        tcsetattr(fd, TCSANOW, &newt);
-
-        char *line = NULL;
-        size_t len = 0;
-        ssize_t nread = getline(&line, &len, stdin);
-
-        tcsetattr(fd, TCSANOW, &oldt);
-        printf("\n");
-
-        if (nread == -1 || !line) {
-            free(line);
-            return -1;
-        }
-
-        /* Strip trailing newline */
-        size_t slen = strlen(line);
-        if (slen > 0 && (line[slen-1] == '\n' || line[slen-1] == '\r'))
-            line[--slen] = '\0';
-        if (slen > 0 && (line[slen-1] == '\r'))
-            line[--slen] = '\0';
-
-        if (slen >= size) slen = size - 1;
-        memcpy(buf, line, slen);
-        buf[slen] = '\0';
-        free(line);
-        return (int)slen;
-    } else {
-        /* Non-TTY: read from stdin without echo manipulation */
-        char *line = NULL;
-        size_t len = 0;
-        ssize_t nread = getline(&line, &len, stdin);
-        if (nread == -1 || !line) {
-            free(line);
-            return -1;
-        }
-        size_t slen = strlen(line);
-        if (slen > 0 && (line[slen-1] == '\n' || line[slen-1] == '\r'))
-            line[--slen] = '\0';
-        if (slen > 0 && (line[slen-1] == '\r'))
-            line[--slen] = '\0';
-        if (slen >= size) slen = size - 1;
-        memcpy(buf, line, slen);
-        buf[slen] = '\0';
-        free(line);
-        return (int)slen;
-    }
+    if (isatty(fd))
+        return read_password_masked(fd, prompt, buf, size);
+    return read_password_plain(buf, size);
 }

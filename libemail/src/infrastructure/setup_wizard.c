@@ -39,6 +39,26 @@ static char* get_input(const char *prompt, int hide, FILE *stream) {
     return line;
 }
 
+/** Number of characters (not bytes) in a UTF-8 string. */
+static size_t utf8_chars(const char *s) {
+    size_t n = 0;
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++)
+        if ((*p & 0xC0) != 0x80) n++;
+    return n;
+}
+
+/**
+ * Report what a credential field did, so that a masked prompt is not the only
+ * thing the user sees.  A field that changed nothing says so too: silence
+ * after a password prompt reads as a program that lost the input.
+ */
+static void report_credential(const char *label, const char *value, int changed) {
+    if (changed)
+        printf("  → %s updated (%zu characters)\n", label, utf8_chars(value));
+    else
+        printf("  → %s unchanged\n", label);
+}
+
 /**
  * Normalise a user-supplied IMAP host string.
  *
@@ -214,6 +234,12 @@ Config* setup_wizard_run_internal(FILE *stream) {
 
     cfg->pass = get_input("Email Password", 1, stream);
     if (!cfg->pass) { config_free(cfg); return NULL; }
+    if (stream == stdin && is_tty) {
+        if (cfg->pass[0])
+            report_credential("password", cfg->pass, 1);
+        else
+            printf("  → no password entered — the server will refuse the login\n");
+    }
 
     cfg->folder = get_input("Default Folder [INBOX]", 0, stream);
     if (!cfg->folder || strlen(cfg->folder) == 0) {
@@ -356,7 +382,8 @@ int setup_wizard_smtp(Config *cfg) {
                  "SMTP Username [Enter = same as IMAP (%s)]",
                  cfg->user ? cfg->user : "");
     char *su = get_input(user_prompt, 0, stdin);
-    if (su && su[0]) {
+    if (!su) return -1;              /* EOF / cancel → save nothing */
+    if (su[0]) {
         free(cfg->smtp_user);
         cfg->smtp_user = su;
     } else {
@@ -370,12 +397,15 @@ int setup_wizard_smtp(Config *cfg) {
              cfg->smtp_pass ? "SMTP Password [Enter = keep current]"
                             : "SMTP Password [Enter = same as IMAP]");
     char *sp = get_input(pass_prompt, 1, stdin);
-    if (sp && sp[0]) {
+    if (!sp) return -1;              /* EOF / Ctrl-C → save nothing */
+    if (sp[0]) {
         free(cfg->smtp_pass);
         cfg->smtp_pass = sp;
+        report_credential("SMTP password", cfg->smtp_pass, 1);
     } else {
         free(sp);
-        /* NULL means "use IMAP password" — keep as-is */
+        /* Empty means "use the IMAP password" — keep whatever is stored. */
+        report_credential("SMTP password", "", 0);
     }
 
     printf("\nSMTP configuration updated.\n");
@@ -429,7 +459,8 @@ int setup_wizard_imap(Config *cfg) {
         snprintf(user_prompt, sizeof(user_prompt), "IMAP Username");
 
     char *user = get_input(user_prompt, 0, stdin);
-    if (user && user[0]) {
+    if (!user) return -1;            /* EOF / cancel → save nothing */
+    if (user[0]) {
         free(cfg->user);
         cfg->user = user;
     } else {
@@ -441,11 +472,14 @@ int setup_wizard_imap(Config *cfg) {
         ? "IMAP Password [Enter=keep current]"
         : "IMAP Password";
     char *pass = get_input(pass_prompt, 1, stdin);
-    if (pass && pass[0]) {
+    if (!pass) return -1;            /* EOF / Ctrl-C → save nothing */
+    if (pass[0]) {
         free(cfg->pass);
         cfg->pass = pass;
+        report_credential("password", cfg->pass, 1);
     } else {
         free(pass);
+        report_credential("password", "", 0);
     }
 
     /* ── Default Folder ───────────────────────────────────────────── */
@@ -455,7 +489,8 @@ int setup_wizard_imap(Config *cfg) {
              "Default Folder [current: %s]", cur_folder);
 
     char *folder = get_input(folder_prompt, 0, stdin);
-    if (folder && folder[0]) {
+    if (!folder) return -1;          /* EOF / cancel → save nothing */
+    if (folder[0]) {
         free(cfg->folder);
         cfg->folder = folder;
     } else {

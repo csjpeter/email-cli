@@ -502,9 +502,22 @@ On success:
 
 ### Reauthorization
 
-If the refresh token expires or is revoked, `gmail_connect()` detects the
-`invalid_grant` error and prompts for reauthorization using the same device
-flow.
+Google revokes a refresh token that carries Gmail scopes when the account
+password changes; withdrawing access at *myaccount.google.com* revokes it too.
+`gmail_auth_refresh()` then receives `invalid_grant` and reports it:
+
+```
+ERROR: Google has revoked the authorization for user@gmail.com.
+  Changing the Google account password revokes it; so does
+  withdrawing access at myaccount.google.com.
+  Renew it with: email-cli config reauth
+```
+
+Reauthorization is **not** triggered automatically.  The browser flow needs a
+person in front of a browser, and the most common caller is `email-sync` from
+cron: a syncer that opened a browser window, or sat waiting 300 seconds for a
+redirect, would be worse than one that fails with an explanation.
+`email-cli config reauth` runs the flow when the user is there to complete it.
 
 ---
 
@@ -671,8 +684,8 @@ No SMTP configuration is stored or needed for Gmail accounts.
 
 | Error | Handling |
 |-------|----------|
-| `invalid_grant` (expired/revoked refresh token) | Auto-trigger device flow reauthorization; display the device code prompt |
-| `invalid_client` | Display: `"OAuth2 client credentials are invalid. Check GMAIL_CLIENT_ID/SECRET in config.ini."` |
+| `invalid_grant` (expired/revoked refresh token) | Report it on stderr, naming the account, that a Google password change revokes it, and `email-cli config reauth`.  The flow is **not** started automatically — see §11, Reauthorization |
+| `invalid_client` | Display: `"OAuth2 client credentials are invalid. Check GMAIL_CLIENT_ID/SECRET in config.ini."` plus a pointer to `email-cli help gmail` |
 | Network error during device flow poll | Retry silently up to `expires_in` timeout; then display: `"Authorization timed out."` |
 | User cancels (^C during device flow) | Return to account setup; no partial config saved |
 

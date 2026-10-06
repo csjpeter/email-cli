@@ -34,6 +34,11 @@ static int         g_count      = 1;
 static const char *g_msg_prefix = "Message"; /* MOCK_IMAP_MSG_PREFIX */
 static const char *g_long_url   = NULL;      /* MOCK_IMAP_LONG_URL */
 static const char *g_dmarc      = NULL;  /* MOCK_IMAP_DMARC: "pass" / "fail" / NULL */
+/* MOCK_IMAP_PASSWORD: when set, LOGIN must present exactly this password or
+ * the server answers NO [AUTHENTICATIONFAILED].  Without it every LOGIN is
+ * accepted, which means a wrong password is indistinguishable from a right
+ * one and the product's own handling of a rejection cannot be tested. */
+static const char *g_password   = NULL;
 
 /*
  * CONDSTORE / QRESYNC support (RFC 4551 / RFC 5162):
@@ -465,9 +470,35 @@ static void handle_client(SSL *ssl) {
             snprintf(ok, sizeof(ok), "%s OK ENABLE completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "LOGIN")) {
-            char ok[64];
-            snprintf(ok, sizeof(ok), "%s OK LOGIN completed\r\n", tag);
-            SSL_write(ssl, ok, (int)strlen(ok));
+            /* LOGIN "user" "password" — the password is the second quoted
+             * argument.  Only checked when MOCK_IMAP_PASSWORD is set. */
+            int accept = 1;
+            if (g_password) {
+                accept = 0;
+                const char *q = strchr(buffer, '"');
+                if (q) {
+                    const char *user_end = strchr(q + 1, '"');
+                    const char *q2 = user_end ? strchr(user_end + 1, '"') : NULL;
+                    const char *pass_end = q2 ? strchr(q2 + 1, '"') : NULL;
+                    if (q2 && pass_end) {
+                        size_t plen = (size_t)(pass_end - (q2 + 1));
+                        if (plen == strlen(g_password) &&
+                            strncmp(q2 + 1, g_password, plen) == 0)
+                            accept = 1;
+                    }
+                }
+            }
+            char reply[128];
+            if (accept)
+                snprintf(reply, sizeof(reply), "%s OK LOGIN completed\r\n", tag);
+            else
+                snprintf(reply, sizeof(reply),
+                         "%s NO [AUTHENTICATIONFAILED] Invalid credentials\r\n", tag);
+            SSL_write(ssl, reply, (int)strlen(reply));
+            if (!accept) {
+                printf("LOGIN rejected (wrong password)\n");
+                break;   /* a server that said no does not go on serving */
+            }
         } else if (strstr(buffer, "SELECT")) {
             /* Track selected folder — handle both quoted and unquoted names */
             char *sel = strstr(buffer, "SELECT ");
@@ -773,6 +804,8 @@ int main(void) {
     if (long_url_env && long_url_env[0]) g_long_url = long_url_env;
     const char *dmarc_env = getenv("MOCK_IMAP_DMARC");
     if (dmarc_env && dmarc_env[0]) g_dmarc = dmarc_env;
+    const char *pass_env = getenv("MOCK_IMAP_PASSWORD");
+    if (pass_env && pass_env[0]) g_password = pass_env;
 
     /* CONDSTORE / QRESYNC */
     const char *caps_env = getenv("MOCK_IMAP_CAPS");

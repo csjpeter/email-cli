@@ -117,6 +117,20 @@ Run via `./tests/functional/run_functional.sh`. The script:
 3. Checks 5 assertions on the output.
 4. Kills the server on exit (via trap).
 
+### Mock IMAP server options
+
+`tests/functional/mock_imap_server.c` is configured through the environment.
+Besides `MOCK_IMAP_PORT`, `MOCK_IMAP_SUBJECT`, `MOCK_IMAP_COUNT` and the
+CONDSTORE/QRESYNC switches:
+
+| Variable | Effect |
+|---|---|
+| `MOCK_IMAP_PASSWORD` | `LOGIN` must present exactly this password, or the server answers `NO [AUTHENTICATIONFAILED]` and closes |
+
+Without it every `LOGIN` is accepted, which means a wrong password is
+indistinguishable from a right one and the product's own handling of a refusal
+cannot be tested at all.
+
 ## Integration Tests (`tests/integration/`)
 
 Requires Docker. Runs a real Dovecot IMAP server with:

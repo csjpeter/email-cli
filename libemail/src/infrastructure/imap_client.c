@@ -529,11 +529,33 @@ ImapClient *imap_connect(const char *host_url, const char *user,
 
     Response resp = {0};
     rc = read_response(c, tag, &resp);
-    response_free(&resp);
     if (rc != 0) {
-        logger_log(LOG_ERROR, "LOGIN failed for user %s on %s", user, host);
+        /* The server answered, and it said no.  That is a different fact from
+         * "could not connect": it is the credential, not the network.  Writing
+         * it only to the log file left the user with a generic failure and
+         * nothing to act on. */
+        const char *said = NULL;
+        if (resp.tagged) {
+            said = strchr(resp.tagged, ' ');       /* skip the tag */
+            if (said) said++;
+        }
+        /* The user-facing message is written here rather than left to the
+         * logger's LOG_ERROR mirror: that mirror is a global toggle, and what
+         * the user is told about their own credential must not depend on it.
+         * The log keeps the record at WARN, next to read_response()'s copy of
+         * the server's exact answer. */
+        logger_log(LOG_WARN, "LOGIN rejected for %s on %s: %s", user, host,
+                   resp.tagged ? resp.tagged : "(no response line)");
+        fprintf(stderr, "ERROR: %s rejected the login for %s.\n", host, user);
+        if (said && said[0])
+            fprintf(stderr, "  The server said: %s\n", said);
+        fprintf(stderr,
+                "  The stored username or password is not accepted.\n"
+                "  Change the stored password with: email-cli config password\n");
+        response_free(&resp);
         goto fail;
     }
+    response_free(&resp);
 
     logger_log(LOG_DEBUG, "IMAP connected and authenticated: %s@%s", user, host);
     return c;

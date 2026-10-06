@@ -2,6 +2,7 @@
 #include "imap_client.h"
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
 #include <time.h>
@@ -299,9 +300,35 @@ void test_imap_connect_login_rejected(void) {
 
     char url[64];
     snprintf(url, sizeof(url), "imaps://127.0.0.1:%d", port);
+
+    /* The message is half the behaviour: a rejected credential that reports
+     * itself as a generic failure leaves the user with nothing to change. */
+    char errfile[] = "/tmp/email-cli-login-reject-XXXXXX";
+    int efd = mkstemp(errfile);
+    ASSERT(efd >= 0, "login rejected: temp file for stderr");
+    int saved = dup(2);
+    dup2(efd, 2);
     ImapClient *c = imap_connect(url, "bad_user", "bad_pass", 0);
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
 
     ASSERT(c == NULL, "imap_connect must return NULL when server says NO");
+
+    char buf[2048] = {0};
+    lseek(efd, 0, SEEK_SET);
+    ssize_t rd = read(efd, buf, sizeof(buf) - 1);
+    close(efd);
+    unlink(errfile);
+    ASSERT(rd > 0, "login rejected: something was written to stderr");
+    ASSERT(strstr(buf, "rejected the login") != NULL,
+           "login rejected: says the server rejected the login, not that it could not connect");
+    ASSERT(strstr(buf, "bad_user") != NULL,
+           "login rejected: names the username that was refused");
+    ASSERT(strstr(buf, "AUTHENTICATIONFAILED") != NULL,
+           "login rejected: passes on what the server itself said");
+    ASSERT(strstr(buf, "config password") != NULL,
+           "login rejected: names the command that changes the stored password");
 
     wait_child(pid);
 }

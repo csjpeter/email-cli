@@ -296,7 +296,7 @@ check_not "1.20 list: no STORE sent to server" "STORE" "$(cat "$MOCK_LOG1")"
 # 1.8 login regression
 SESSION1="$H_ALPHA/.cache/email-cli/logs/session.log"
 SESS1=$(cat "$SESSION1" 2>/dev/null || true)
-check_not "1.21 no LOGIN failed in output"  "LOGIN failed"   "$L1"
+check_not "1.21 no login rejection in output" "rejected the login" "$L1"
 check     "1.22 LOGIN completed in session" "LOGIN completed\|authenticated" "$SESS1"
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -5549,6 +5549,74 @@ check_not "90.23 and it was not stored"     "EMAIL_HOST=imaps://imap.gmail.com" 
 # The prompt is repeated rather than the wizard abandoned, so the next answer
 # is still accepted.
 check     "90.24 the host prompt repeats"   "EMAIL_HOST=imaps://localhost" "$(cat "$F90I_INI")"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 91 — a rejected credential says so, and says what to do (EMAIL-10)
+# ════════════════════════════════════════════════════════════════════════════
+# The rejection used to arrive as "ERROR: LOGIN failed for user X on Y": a log
+# line with no cause, no cure, and nothing of what the server itself said.
+# The mock IMAP server now enforces a password when MOCK_IMAP_PASSWORD is set,
+# so the product's own handling of a refusal is finally observable.
+echo ""
+echo "--- Phase 91: a rejected login is explained ---"
+
+AUTH_PORT=19446
+echo "Starting mock IMAP server with password enforcement (port $AUTH_PORT)..."
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$AUTH_PORT MOCK_IMAP_PASSWORD="rightpass91" \
+    MOCK_IMAP_SUBJECT="AuthMsg" "$MOCK_SERVER_BIN") \
+    >"./build/tests/functional/mock_auth.log" 2>&1 &
+AUTH_SERVER_PID=$!
+sleep 0.5
+
+H_F91="./build/tests/functional/homes/f91-$$"
+case "$H_F91" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F91 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/f91-$$"
+mkdir -p "$H_F91/.config/email-cli/accounts/f91@test.local"
+cat > "$H_F91/.config/email-cli/settings.ini" <<'SETTINGS'
+credential_obfuscation=false
+SETTINGS
+cat > "$H_F91/.config/email-cli/accounts/f91@test.local/config.ini" <<CONFIG
+EMAIL_HOST=imaps://localhost:$AUTH_PORT
+EMAIL_USER=f91@test.local
+EMAIL_PASS=stale-password
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CONFIG
+
+f91() {
+    local sub="$1" lines="$2"
+    (export HOME="$H_F91"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     printf '%b' "$lines" | "$BIN_DIR/email-cli" config "$sub" 2>&1
+     echo "exit-code=$?")
+}
+
+# A wrong password: the refusal is named as a refusal, the server's own words
+# are passed on, and the command that repairs it is named.
+OUT91_BAD=$(f91 password 'wrongpass91\n')
+check "91.1 named as a rejection"      "rejected the login for f91@test.local" "$OUT91_BAD"
+check "91.2 the server's words quoted" "AUTHENTICATIONFAILED"                  "$OUT91_BAD"
+check "91.3 says what is wrong"        "username or password is not accepted"  "$OUT91_BAD"
+check "91.4 names the repair command"  "config password"                       "$OUT91_BAD"
+check "91.5 and the command fails"     "exit-code=1"                           "$OUT91_BAD"
+
+# The right password is accepted, and says so — the same check that condemns a
+# wrong one must clear a right one, or it proves nothing.
+OUT91_GOOD=$(f91 password 'rightpass91\n')
+check     "91.6 the right one connects"  "Connected: f91@test.local" "$OUT91_GOOD"
+check     "91.7 exits zero"              "exit-code=0"               "$OUT91_GOOD"
+check_not "91.8 and nothing is rejected" "rejected the login"        "$OUT91_GOOD"
+
+# email-sync hits the same path: a stale password must not come out as a
+# generic "could not retrieve folder list" with no cause given.
+sed -i 's/^EMAIL_PASS=.*/EMAIL_PASS=stale-again/' \
+    "$H_F91/.config/email-cli/accounts/f91@test.local/config.ini"
+OUT91_SYNC=$( (export HOME="$H_F91"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1; echo "exit-code=$?") )
+check "91.9 sync names the rejection"  "rejected the login" "$OUT91_SYNC"
+check "91.10 sync names the repair"    "config password"    "$OUT91_SYNC"
+check "91.11 sync fails"               "exit-code=1"        "$OUT91_SYNC"
+
+kill "$AUTH_SERVER_PID" || echo "  (the password-enforcing mock had already exited)"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

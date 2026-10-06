@@ -5447,6 +5447,110 @@ check "89.30 reauth runs on Gmail"   "OAuth2 credentials are not configured" "$O
 check "89.31 and reports the failure" "was not completed"                    "$OUT89_RA_GMAIL"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 90 — config tells the truth about the account type (EMAIL-8)
+# ════════════════════════════════════════════════════════════════════════════
+# 'config show' printed an IMAP host/user/password block for a Gmail account
+# too, and 'config imap' then ran on it: it accepted a new password, wrote
+# EMAIL_HOST/EMAIL_PASS into the config and said "IMAP configuration saved",
+# while GMAIL_MODE=1 stayed and sync kept using the API.
+echo ""
+echo "--- Phase 90: config is account-type aware ---"
+
+H_F90G="./build/tests/functional/homes/f90g-$$"
+case "$H_F90G" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F90G path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/f90g-$$"
+mkdir -p "$H_F90G/.config/email-cli/accounts/f90@gmail.com"
+cat > "$H_F90G/.config/email-cli/settings.ini" <<'SETTINGS'
+credential_obfuscation=false
+SETTINGS
+cat > "$H_F90G/.config/email-cli/accounts/f90@gmail.com/config.ini" <<'CONFIG'
+EMAIL_USER=f90@gmail.com
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=f90-token
+EMAIL_FOLDER=INBOX
+CONFIG
+F90G_INI="$H_F90G/.config/email-cli/accounts/f90@gmail.com/config.ini"
+
+f90() {
+    local home="$1" sub="$2" lines="$3"
+    (export HOME="$home"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     export GMAIL_TEST_NO_CLIENT_ID=1
+     printf '%b' "$lines" | "$BIN_DIR/email-cli" config "$sub" 2>&1
+     echo "exit-code=$?")
+}
+
+# 'config show' on a Gmail account names the type and the credential that
+# actually grants access — and shows no IMAP password at all.
+OUT90_SHOW=$(f90 "$H_F90G" show '')
+check     "90.1 Gmail type named"          "Account type: Gmail"        "$OUT90_SHOW"
+check     "90.2 says it has no password"   "none — Gmail accounts do not use one" "$OUT90_SHOW"
+check     "90.3 authorization shown"       "Authorization: stored"      "$OUT90_SHOW"
+check     "90.4 names the renewal command" "config reauth"              "$OUT90_SHOW"
+check_not "90.5 no IMAP block"             "IMAP:"                      "$OUT90_SHOW"
+check_not "90.6 no masked password line"   "Password: \*\*\*\*"         "$OUT90_SHOW"
+check     "90.7 exits zero"                "exit-code=0"                "$OUT90_SHOW"
+
+# A missing token is reported as missing, not as present.
+H_F90N="./build/tests/functional/homes/f90n-$$"
+case "$H_F90N" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F90N path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/f90n-$$"
+mkdir -p "$H_F90N/.config/email-cli/accounts/f90n@gmail.com"
+# The key must be present for the loader to accept gmail_mode at all; an
+# empty value is an account that was never authorized, or whose token was
+# cleared.  That must read as missing, with the way out named.
+cat > "$H_F90N/.config/email-cli/accounts/f90n@gmail.com/config.ini" <<'CONFIG'
+EMAIL_USER=f90n@gmail.com
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=
+CONFIG
+OUT90_TOK=$(f90 "$H_F90N" show '')
+check "90.8 a missing token reads as missing" "Authorization: missing" "$OUT90_TOK"
+check "90.9 and names the way out"            "config reauth"          "$OUT90_TOK"
+
+# 'config imap' on a Gmail account refuses, and writes nothing.
+OUT90_IMAP=$(f90 "$H_F90G" imap 'imaps://imap.example.com\n\nnewpass\n\n')
+check     "90.10 refused on a Gmail account"  "does not use IMAP"          "$OUT90_IMAP"
+check     "90.11 and names reauth"           "config reauth"              "$OUT90_IMAP"
+check     "90.12 exits non-zero"             "exit-code=1"                "$OUT90_IMAP"
+check_not "90.13 it does not claim success"  "IMAP configuration saved"   "$OUT90_IMAP"
+check_not "90.14 no EMAIL_HOST was written"  "EMAIL_HOST=imaps://imap.example.com" "$(cat "$F90G_INI")"
+check_not "90.15 no password was written"    "EMAIL_PASS=newpass"         "$(cat "$F90G_INI")"
+check     "90.16 the token is untouched"     "GMAIL_REFRESH_TOKEN=f90-token" "$(cat "$F90G_INI")"
+
+# 'config smtp' likewise: Gmail sends through the API.
+OUT90_SMTP=$(f90 "$H_F90G" smtp '\n\n\n\n')
+check     "90.17 smtp refused on Gmail"      "not SMTP"                   "$OUT90_SMTP"
+check     "90.18 exits non-zero"             "exit-code=1"                "$OUT90_SMTP"
+check_not "90.19 it does not claim success"  "SMTP configuration saved"   "$OUT90_SMTP"
+check_not "90.20 no SMTP_HOST was written"   "SMTP_HOST"                  "$(cat "$F90G_INI")"
+
+# An IMAP account may not be pointed at Gmail through the sub-wizard either:
+# the first-run wizard has always refused that host.
+H_F90I="./build/tests/functional/homes/f90i-$$"
+case "$H_F90I" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F90I path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/f90i-$$"
+mkdir -p "$H_F90I/.config/email-cli/accounts/f90@test.local"
+cat > "$H_F90I/.config/email-cli/settings.ini" <<'SETTINGS'
+credential_obfuscation=false
+SETTINGS
+cat > "$H_F90I/.config/email-cli/accounts/f90@test.local/config.ini" <<'CONFIG'
+EMAIL_HOST=imaps://localhost:9993
+EMAIL_USER=f90@test.local
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+CONFIG
+F90I_INI="$H_F90I/.config/email-cli/accounts/f90@test.local/config.ini"
+
+OUT90_GH=$(f90 "$H_F90I" imap 'imap.gmail.com\n\n\n\n\n')
+check     "90.21 gmail host refused"        "not reachable over IMAP"   "$OUT90_GH"
+check     "90.22 it names the account type" "\[2\] Gmail"               "$OUT90_GH"
+check_not "90.23 and it was not stored"     "EMAIL_HOST=imaps://imap.gmail.com" "$(cat "$F90I_INI")"
+# The prompt is repeated rather than the wizard abandoned, so the next answer
+# is still accepted.
+check     "90.24 the host prompt repeats"   "EMAIL_HOST=imaps://localhost" "$(cat "$F90I_INI")"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

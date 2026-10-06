@@ -1147,19 +1147,42 @@ int main(int argc, char *argv[]) {
             printf("\nemail-cli configuration");
             if (cfg->user) printf(" (%s)", cfg->user);
             printf(":\n\n");
-            printf("  IMAP:\n");
-            printf("    Host:     %s\n", cfg->host   ? cfg->host   : "(not set)");
-            printf("    User:     %s\n", cfg->user   ? cfg->user   : "(not set)");
-            printf("    Password: %s\n", cfg->pass   ? "****"      : "(not set)");
-            printf("    Folder:   %s\n", cfg->folder ? cfg->folder : "INBOX");
-            printf("\n  SMTP:\n");
-            if (cfg->smtp_host) {
-                printf("    Host:     %s\n", cfg->smtp_host);
-                printf("    Port:     %d\n", cfg->smtp_port ? cfg->smtp_port : 587);
-                printf("    User:     %s\n", cfg->smtp_user ? cfg->smtp_user : "(same as IMAP)");
-                printf("    Password: %s\n", cfg->smtp_pass ? "****"         : "(same as IMAP)");
+
+            if (cfg->gmail_mode) {
+                /* A Gmail account uses none of the IMAP or SMTP fields.
+                 * Printing them anyway is what told the reporter their
+                 * account was password-authenticated and sent them into the
+                 * IMAP wizard, where nothing they did could help. */
+                printf("  Account type: Gmail (Gmail API over OAuth2)\n");
+                printf("    Email:         %s\n", cfg->user ? cfg->user : "(not set)");
+                printf("    Password:      none — Gmail accounts do not use one\n");
+                printf("    Authorization: %s\n",
+                       (cfg->gmail_refresh_token && cfg->gmail_refresh_token[0])
+                           ? "stored (refresh token)"
+                           : "missing — run 'email-cli config reauth'");
+                printf("    OAuth2 client: %s\n",
+                       (cfg->gmail_client_id && cfg->gmail_client_id[0])
+                           ? "from this account's config"
+                           : "built into this build");
+                printf("    Default label: %s\n", cfg->folder ? cfg->folder : "INBOX");
+                printf("\n"
+                       "  A changed Google account password revokes the authorization.\n"
+                       "  'email-cli config reauth' renews it.\n");
             } else {
-                printf("    (not configured — will be derived from IMAP host)\n");
+                printf("  IMAP:\n");
+                printf("    Host:     %s\n", cfg->host   ? cfg->host   : "(not set)");
+                printf("    User:     %s\n", cfg->user   ? cfg->user   : "(not set)");
+                printf("    Password: %s\n", cfg->pass   ? "****"      : "(not set)");
+                printf("    Folder:   %s\n", cfg->folder ? cfg->folder : "INBOX");
+                printf("\n  SMTP:\n");
+                if (cfg->smtp_host) {
+                    printf("    Host:     %s\n", cfg->smtp_host);
+                    printf("    Port:     %d\n", cfg->smtp_port ? cfg->smtp_port : 587);
+                    printf("    User:     %s\n", cfg->smtp_user ? cfg->smtp_user : "(same as IMAP)");
+                    printf("    Password: %s\n", cfg->smtp_pass ? "****"         : "(same as IMAP)");
+                } else {
+                    printf("    (not configured — will be derived from IMAP host)\n");
+                }
             }
             printf("\n");
             result = 0;
@@ -1206,7 +1229,20 @@ int main(int argc, char *argv[]) {
             }
 
         } else if (strcmp(subcmd, "imap") == 0) {
-            if (setup_wizard_imap(cfg) == 0) {
+            if (cfg->gmail_mode) {
+                /* It used to run, accept a new password, write EMAIL_HOST and
+                 * EMAIL_PASS into the config and report "IMAP configuration
+                 * saved" — while GMAIL_MODE=1 stayed and sync kept using the
+                 * API.  A subcommand that reports success and changes nothing
+                 * that matters is worse than one that refuses. */
+                fprintf(stderr,
+                        "This is a Gmail account: it does not use IMAP, so there are no\n"
+                        "IMAP settings to change. Mail is fetched through the Gmail API\n"
+                        "with an OAuth2 authorization.\n"
+                        "  'email-cli config reauth' renews that authorization.\n"
+                        "  'email-cli config show' lists what this account actually uses.\n");
+                result = RESULT_REPORTED;
+            } else if (setup_wizard_imap(cfg) == 0) {
                 if (config_save_to_store(cfg) == 0) {
                     printf("IMAP configuration saved.\n");
                     result = 0;
@@ -1221,7 +1257,13 @@ int main(int argc, char *argv[]) {
             }
 
         } else if (strcmp(subcmd, "smtp") == 0) {
-            if (setup_wizard_smtp(cfg) == 0) {
+            if (cfg->gmail_mode) {
+                fprintf(stderr,
+                        "This is a Gmail account: outgoing mail goes through the Gmail\n"
+                        "API, not SMTP, so there are no SMTP settings to change.\n"
+                        "  'email-cli config show' lists what this account actually uses.\n");
+                result = RESULT_REPORTED;
+            } else if (setup_wizard_smtp(cfg) == 0) {
                 if (config_save_to_store(cfg) == 0) {
                     printf("SMTP configuration saved.\n");
                     result = 0;

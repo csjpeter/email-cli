@@ -539,8 +539,7 @@ email-cli help list-labels
 ## License
 
 email-cli is free software, released under the **GNU General Public License,
-version 3 or (at your option) any later version** — `GPL-3.0-or-later`.  The
-full text is in [`LICENSE`](LICENSE).
+version 3 only** — `GPL-3.0-only`.  The full text is in [`LICENSE`](LICENSE).
 
 You may use, study, change and redistribute it, provided that a redistributed
 or modified version stays under the same terms and comes with its source.

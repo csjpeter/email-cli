@@ -5656,6 +5656,25 @@ check "92.10 email-cli-ro help is non-empty" "Reading:" "$RO92"
 check "92.11 email-cli-ro lists no send" "^0$" "$SEND92"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 93: the licence is GPL-3.0-only everywhere it is stated (EMAIL-30)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== Phase 93: GPL-3.0-only, never 'or later' ==="
+TRACKED93=$(git -C "$PROJECT_ROOT" ls-files)
+check "93.1 the file list is not empty" "^LICENSE$" "$TRACKED93"
+# Every tracked text file except the licence text itself (whose standard
+# paragraphs discuss later versions) and the submodules.
+OR_LATER93=$(cd "$PROJECT_ROOT" && echo "$TRACKED93" | grep -v -e '^LICENSE$' -e '^libs/' -e '^tests/functional/run_functional.sh$' \
+    | xargs grep -n -I -i -E 'GPL-3\.0-or-later|GPL-3\.0\+|or \(at your option\) any later|GPLv3\+|or later' \
+    | awk 'END{print NR}')
+check "93.2 nothing says 'or later'" "^0$" "$OR_LATER93"
+check "93.3 CMakeLists SPDX tag"  "^# SPDX-License-Identifier: GPL-3.0-only$" \
+      "$(head -1 "$PROJECT_ROOT/CMakeLists.txt")"
+check "93.4 package licence field" 'CPACK_RPM_PACKAGE_LICENSE *"GPL-3.0-only"' \
+      "$(cat "$PROJECT_ROOT/CMakeLists.txt")"
+check "93.5 README names the licence" "GPL-3.0-only" "$(cat "$PROJECT_ROOT/README.md")"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

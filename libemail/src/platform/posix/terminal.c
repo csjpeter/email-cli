@@ -104,32 +104,60 @@ TermKey terminal_read_key(void) {
 
         int c2 = read_byte();
         if (c2 == '[') {
+            /* CSI: parameter bytes (digits and ';') up to a final byte in
+             * 0x40..0x7E.  The whole sequence is always consumed, so no part
+             * of it can be read later as typed characters.  A parameter list
+             * with ';' carries a modifier (ESC[1;5A is Ctrl+Up): such a key
+             * is dropped rather than mistaken for the plain one. */
+            char params[16];
+            size_t np = 0;
+            int fin = read_byte();
+            while (fin != -1 && ((fin >= '0' && fin <= '9') || fin == ';' ||
+                                 fin == ':' || fin == '<' || fin == '=' ||
+                                 fin == '>' || fin == '?')) {
+                if (np + 1 < sizeof(params)) params[np++] = (char)fin;
+                fin = read_byte();
+            }
+            params[np] = '\0';
+            int modified = (strchr(params, ';') != NULL);
+            int num = atoi(params);
+
+            if (fin == -1 || modified) {
+                result = TERM_KEY_IGNORE;
+            } else {
+                switch (fin) {
+                case 'A': result = TERM_KEY_PREV_LINE; break;  /* ESC[A — Up          */
+                case 'B': result = TERM_KEY_NEXT_LINE; break;  /* ESC[B — Down        */
+                case 'C': result = TERM_KEY_RIGHT;     break;  /* ESC[C — Right       */
+                case 'D': result = TERM_KEY_LEFT;      break;  /* ESC[D — Left        */
+                case 'H': result = TERM_KEY_HOME;      break;  /* ESC[H — Home        */
+                case 'F': result = TERM_KEY_END;       break;  /* ESC[F — End         */
+                case 'Z': result = TERM_KEY_SHIFT_TAB; break;  /* ESC[Z — Shift+Tab   */
+                case '~':
+                    switch (num) {
+                    case 1: case 7: result = TERM_KEY_HOME;      break; /* Home   */
+                    case 3:         result = TERM_KEY_DELETE;    break; /* Delete */
+                    case 4: case 8: result = TERM_KEY_END;       break; /* End    */
+                    case 5:         result = TERM_KEY_PREV_PAGE; break; /* PgUp   */
+                    case 6:         result = TERM_KEY_NEXT_PAGE; break; /* PgDn   */
+                    default:        result = TERM_KEY_IGNORE;    break; /* Ins, F5-F12 */
+                    }
+                    break;
+                default: result = TERM_KEY_IGNORE; break;
+                }
+            }
+        } else if (c2 == 'O') {
+            /* SS3: ESC O <final>.  F1-F4 are P/Q/R/S; terminals in
+             * application cursor mode send the arrows and Home/End this way. */
             int c3 = read_byte();
             switch (c3) {
-            case 'A': result = TERM_KEY_PREV_LINE; break;  /* ESC[A — Up          */
-            case 'B': result = TERM_KEY_NEXT_LINE; break;  /* ESC[B — Down        */
-            case 'C': result = TERM_KEY_RIGHT;     break;  /* ESC[C — Right       */
-            case 'D': result = TERM_KEY_LEFT;      break;  /* ESC[D — Left        */
-            case 'H': result = TERM_KEY_HOME;      break;  /* ESC[H — Home        */
-            case 'F': result = TERM_KEY_END;       break;  /* ESC[F — End         */
-            case 'Z': result = TERM_KEY_SHIFT_TAB; break;  /* ESC[Z — Shift+Tab   */
-            case '1': { int nx=read_byte(); result=(nx=='~')?TERM_KEY_HOME:TERM_KEY_IGNORE; break; } /* ESC[1~ Home */
-            case '3': { read_byte(); result = TERM_KEY_DELETE;    break; } /* ESC[3~ Delete */
-            case '4': { read_byte(); result = TERM_KEY_END;       break; } /* ESC[4~ End    */
-            case '5': { read_byte(); result = TERM_KEY_PREV_PAGE; break; } /* ESC[5~ PgUp   */
-            case '6': { read_byte(); result = TERM_KEY_NEXT_PAGE; break; } /* ESC[6~ PgDn   */
-            case '7': { read_byte(); result = TERM_KEY_HOME;      break; } /* ESC[7~ Home   */
-            case '8': { read_byte(); result = TERM_KEY_END;       break; } /* ESC[8~ End    */
-            default:
-                if (c3 != -1) {
-                    int ch;
-                    while ((ch = read_byte()) != -1) {
-                        if ((ch >= 'A' && ch <= 'Z') ||
-                            (ch >= 'a' && ch <= 'z') || ch == '~') break;
-                    }
-                }
-                result = TERM_KEY_IGNORE;
-                break;
+            case 'A': result = TERM_KEY_PREV_LINE; break;
+            case 'B': result = TERM_KEY_NEXT_LINE; break;
+            case 'C': result = TERM_KEY_RIGHT;     break;
+            case 'D': result = TERM_KEY_LEFT;      break;
+            case 'H': result = TERM_KEY_HOME;      break;
+            case 'F': result = TERM_KEY_END;       break;
+            default:  result = TERM_KEY_IGNORE;    break;  /* F1-F4 and the rest */
             }
         } else {
             result = TERM_KEY_ESC;   /* bare ESC — go back */

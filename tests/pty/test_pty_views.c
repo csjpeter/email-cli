@@ -4138,6 +4138,24 @@ static void test_tui_rules_edit_form_prefill(void) {
     remove_rules_ini();
 }
 
+/* EMAIL-2 / EMAIL-3: function keys and modified cursor keys are no keys at
+ * all.  F1 (ESC O P) used to act as Esc ("go back") and leave a typed 'P'. */
+static void test_tui_function_and_modified_keys_do_nothing(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "unknown keys: reaches the message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "\033OP");          /* F1 */
+    pty_send_str(s, "\033[1;5A");       /* Ctrl+Up */
+    pty_send_str(s, "\033[15~");        /* F5 */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");   /* still in the list */
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+
 static void test_tui_rules_edit_form_esc_cancel(void) {
     /* US-80 AC3: ESC in step 1 of the edit form cancels without modifying the rule */
     remove_rules_ini();
@@ -4526,6 +4544,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_tui_rules_edit_form_opens);
     RUN_TEST(test_tui_rules_edit_form_prefill);
     RUN_TEST(test_tui_rules_edit_form_esc_cancel);
+    RUN_TEST(test_tui_function_and_modified_keys_do_nothing);
 
 done:
     stop_mock_server();

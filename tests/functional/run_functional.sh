@@ -118,14 +118,35 @@ check() {
     fi
 }
 
+# check_not: the pattern must be absent from non-empty text.  An empty text
+# contains no pattern, so a binary that crashed or a log that was never
+# written would pass every absence assertion; "there was nothing to search" is
+# a failure.  A call site that really expects no output says so with
+# check_empty.
 check_not() {
     local desc="$1" pattern="$2" text="$3"
-    if ! echo "$text" | grep -q "$pattern"; then
+    if [ -z "${text//[[:space:]]/}" ]; then
+        echo "  [FAIL] $desc  (nothing to search: the output is empty, so the absence proves nothing)"
+        FAILED=$((FAILED + 1))
+    elif ! echo "$text" | grep -q "$pattern"; then
         echo "  [PASS] $desc"
         PASSED=$((PASSED + 1))
     else
         echo "  [FAIL] $desc  (unexpected pattern found: '$pattern')"
         echo "         actual: $(echo "$text" | grep "$pattern" | head -2 | tr '\n' '|')"
+        FAILED=$((FAILED + 1))
+    fi
+}
+
+# check_empty: the text must be empty (the command is expected to print nothing).
+check_empty() {
+    local desc="$1" text="$2"
+    if [ -z "${text//[[:space:]]/}" ]; then
+        echo "  [PASS] $desc"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  [FAIL] $desc  (expected no output)"
+        echo "         actual: $(echo "$text" | head -2 | tr '\n' '|')"
         FAILED=$((FAILED + 1))
     fi
 }
@@ -681,12 +702,14 @@ rm -rf "./build/tests/functional/homes/attach-$$"
 echo ""
 echo "--- Phase 16: mark-read / mark-unread ---"
 MARKR=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
-    "$BIN_DIR/email-cli" --batch mark-read 1 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch mark-read 1 2>&1 ; echo "exit-code=$?") )
+check "exit status of MARKR is 0" "exit-code=0" "$MARKR"
 # Should not error
 check_not "16.1 mark-read: no error"  "Error\|error\|failed" "$MARKR"
 
 MARKUR=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
-    "$BIN_DIR/email-cli" --batch mark-unread 1 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch mark-unread 1 2>&1 ; echo "exit-code=$?") )
+check "exit status of MARKUR is 0" "exit-code=0" "$MARKUR"
 check_not "16.2 mark-unread: no error"  "Error\|error\|failed" "$MARKUR"
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -695,11 +718,13 @@ check_not "16.2 mark-unread: no error"  "Error\|error\|failed" "$MARKUR"
 echo ""
 echo "--- Phase 17: mark-starred / remove-starred ---"
 STARS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
-    "$BIN_DIR/email-cli" --batch mark-starred 1 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch mark-starred 1 2>&1 ; echo "exit-code=$?") )
+check "exit status of STARS is 0" "exit-code=0" "$STARS"
 check_not "17.1 mark-starred: no error"  "Error\|error\|failed" "$STARS"
 
 UNSTAR=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
-    "$BIN_DIR/email-cli" --batch remove-starred 1 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch remove-starred 1 2>&1 ; echo "exit-code=$?") )
+check "exit status of UNSTAR is 0" "exit-code=0" "$UNSTAR"
 check_not "17.2 remove-starred: no error"  "Error\|error\|failed" "$UNSTAR"
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1501,27 +1526,33 @@ run_gmail_cli_a() {
 HEX_UID="0000000000000001"   # message 1, synced in Phase 26+27
 
 # 28.1 mark-read: hex UID must not produce a parse error
-MR28=$(run_gmail_cli_a mark-read "$HEX_UID")
+MR28=$(run_gmail_cli_a mark-read "$HEX_UID"; echo "exit-code=$?")
+check "exit status of MR28 is 0" "exit-code=0" "$MR28"
 check_not "28.1 mark-read hex UID: no parse error"  "invalid UID\|positive integer" "$MR28"
 
 # 28.2 mark-unread: hex UID must not produce a parse error
-MU28=$(run_gmail_cli_a mark-unread "$HEX_UID")
+MU28=$(run_gmail_cli_a mark-unread "$HEX_UID"; echo "exit-code=$?")
+check "exit status of MU28 is 0" "exit-code=0" "$MU28"
 check_not "28.2 mark-unread hex UID: no parse error"  "invalid UID\|positive integer" "$MU28"
 
 # 28.3 mark-starred: hex UID must not produce a parse error
-MS28=$(run_gmail_cli_a mark-starred "$HEX_UID")
+MS28=$(run_gmail_cli_a mark-starred "$HEX_UID"; echo "exit-code=$?")
+check "exit status of MS28 is 0" "exit-code=0" "$MS28"
 check_not "28.3 mark-starred hex UID: no parse error"  "invalid UID\|positive integer" "$MS28"
 
 # 28.4 remove-starred: hex UID must not produce a parse error
-RS28=$(run_gmail_cli_a remove-starred "$HEX_UID")
+RS28=$(run_gmail_cli_a remove-starred "$HEX_UID"; echo "exit-code=$?")
+check "exit status of RS28 is 0" "exit-code=0" "$RS28"
 check_not "28.4 remove-starred hex UID: no parse error"  "invalid UID\|positive integer" "$RS28"
 
 # 28.5 add-label: hex UID must not produce a parse error
-AL28=$(run_gmail_cli_a add-label "$HEX_UID" INBOX)
+AL28=$(run_gmail_cli_a add-label "$HEX_UID" INBOX; echo "exit-code=$?")
+check "exit status of AL28 is 0" "exit-code=0" "$AL28"
 check_not "28.5 add-label hex UID: no parse error"  "invalid UID\|positive integer" "$AL28"
 
 # 28.6 remove-label: hex UID must not produce a parse error
-RL28=$(run_gmail_cli_a remove-label "$HEX_UID" INBOX)
+RL28=$(run_gmail_cli_a remove-label "$HEX_UID" INBOX; echo "exit-code=$?")
+check "exit status of RL28 is 0" "exit-code=0" "$RL28"
 check_not "28.6 remove-label hex UID: no parse error"  "invalid UID\|positive integer" "$RL28"
 
 # 28.7 show (email-cli-ro): hex UID must not produce a parse error
@@ -1546,7 +1577,8 @@ H28_IMAP="./build/tests/functional/homes/hex28-$$"
 make_home "$H28_IMAP" "alpha@test.local" 9993
 DEC28=$( (export HOME="$H28_IMAP"
     unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch mark-read 42 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch mark-read 42 2>&1 ; echo "exit-code=$?") )
+check "exit status of DEC28 is 0" "exit-code=0" "$DEC28"
 check_not "28.11 mark-read decimal UID (IMAP): no parse error"  "invalid UID\|positive integer" "$DEC28"
 rm -rf "./build/tests/functional/homes/hex28-$$"
 
@@ -1569,7 +1601,8 @@ echo "--- Phase 29: .hdr labels CSV / flags-int consistency ---"
 idx_contains() { grep -qF "$1" "$2" 2>/dev/null && echo yes || echo no; }
 
 # 29.1 mark-read: UID removed from UNREAD.idx AND stays removed after rebuild
-MR29=$(run_gmail_cli_a mark-read "$HEX_UID")
+MR29=$(run_gmail_cli_a mark-read "$HEX_UID"; echo "exit-code=$?")
+check "exit status of MR29 is 0" "exit-code=0" "$MR29"
 check_not "29.1a mark-read: no error"  "Error\|invalid UID" "$MR29"
 check "29.1b mark-read: UID removed from UNREAD.idx immediately" "no" \
     "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
@@ -1578,7 +1611,8 @@ check "29.1c mark-read: UID still absent from UNREAD.idx after rebuild" "no" \
     "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
 
 # 29.2 mark-unread: UID re-added to UNREAD.idx AND persists after rebuild
-MU29=$(run_gmail_cli_a mark-unread "$HEX_UID")
+MU29=$(run_gmail_cli_a mark-unread "$HEX_UID"; echo "exit-code=$?")
+check "exit status of MU29 is 0" "exit-code=0" "$MU29"
 check_not "29.2a mark-unread: no error"  "Error\|invalid UID" "$MU29"
 check "29.2b mark-unread: UID back in UNREAD.idx immediately" "yes" \
     "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
@@ -1587,7 +1621,8 @@ check "29.2c mark-unread: UID still in UNREAD.idx after rebuild" "yes" \
     "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/UNREAD.idx")"
 
 # 29.3 mark-starred: UID added to STARRED.idx AND persists after rebuild
-MS29=$(run_gmail_cli_a mark-starred "$HEX_UID")
+MS29=$(run_gmail_cli_a mark-starred "$HEX_UID"; echo "exit-code=$?")
+check "exit status of MS29 is 0" "exit-code=0" "$MS29"
 check_not "29.3a mark-starred: no error"  "Error\|invalid UID" "$MS29"
 check "29.3b mark-starred: UID in STARRED.idx immediately" "yes" \
     "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
@@ -1596,7 +1631,8 @@ check "29.3c mark-starred: UID still in STARRED.idx after rebuild" "yes" \
     "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
 
 # 29.4 remove-starred: UID removed from STARRED.idx AND stays removed after rebuild
-RS29=$(run_gmail_cli_a remove-starred "$HEX_UID")
+RS29=$(run_gmail_cli_a remove-starred "$HEX_UID"; echo "exit-code=$?")
+check "exit status of RS29 is 0" "exit-code=0" "$RS29"
 check_not "29.4a remove-starred: no error"  "Error\|invalid UID" "$RS29"
 check "29.4b remove-starred: UID absent from STARRED.idx immediately" "no" \
     "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
@@ -3450,12 +3486,14 @@ run_gmail60_ro() {
 }
 
 # 60.1-60.2: add-label to message 1
-AL60=$( run_gmail60_cli add-label 0000000000000001 Work )
+AL60=$( run_gmail60_cli add-label 0000000000000001 Work ; echo "exit-code=$?")
+check "exit status of AL60 is 0" "exit-code=0" "$AL60"
 check_not "60.1 add-label Gmail: no crash"  "Segmentation\|Abort" "$AL60"
 check_not "60.2 add-label Gmail: no error"  "Error:"              "$AL60"
 
 # 60.3-60.4: remove-label from message 1
-RL60=$( run_gmail60_cli remove-label 0000000000000001 Work )
+RL60=$( run_gmail60_cli remove-label 0000000000000001 Work ; echo "exit-code=$?")
+check "exit status of RL60 is 0" "exit-code=0" "$RL60"
 check_not "60.3 remove-label Gmail: no crash" "Segmentation\|Abort" "$RL60"
 check_not "60.4 remove-label Gmail: no error" "Error:"              "$RL60"
 
@@ -3465,15 +3503,19 @@ check "60.5 list-labels CLI: INBOX present" "INBOX" "$LL60"
 check "60.6 list-labels CLI: Work present"  "Work"  "$LL60"
 
 # 60.7-60.8: mark-read / mark-unread on Gmail
-MR60=$( run_gmail60_cli mark-read 0000000000000001 )
+MR60=$( run_gmail60_cli mark-read 0000000000000001 ; echo "exit-code=$?")
+check "exit status of MR60 is 0" "exit-code=0" "$MR60"
 check_not "60.7 mark-read Gmail: no crash"   "Segmentation\|Abort" "$MR60"
-MU60=$( run_gmail60_cli mark-unread 0000000000000001 )
+MU60=$( run_gmail60_cli mark-unread 0000000000000001 ; echo "exit-code=$?")
+check "exit status of MU60 is 0" "exit-code=0" "$MU60"
 check_not "60.8 mark-unread Gmail: no crash" "Segmentation\|Abort" "$MU60"
 
 # 60.9-60.10: mark-starred / remove-starred on Gmail
-MS60=$( run_gmail60_cli mark-starred 0000000000000001 )
+MS60=$( run_gmail60_cli mark-starred 0000000000000001 ; echo "exit-code=$?")
+check "exit status of MS60 is 0" "exit-code=0" "$MS60"
 check_not "60.9 mark-starred Gmail: no crash"    "Segmentation\|Abort" "$MS60"
-RS60=$( run_gmail60_cli remove-starred 0000000000000001 )
+RS60=$( run_gmail60_cli remove-starred 0000000000000001 ; echo "exit-code=$?")
+check "exit status of RS60 is 0" "exit-code=0" "$RS60"
 check_not "60.10 remove-starred Gmail: no crash" "Segmentation\|Abort" "$RS60"
 
 # 60.11: add-label on IMAP account → Gmail-mode error
@@ -3744,17 +3786,20 @@ echo "--- Phase 67: IMAP mark-read/starred with --folder ---"
 
 # mark-read with explicit --folder option
 MR67=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch mark-read 1 --folder INBOX 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch mark-read 1 --folder INBOX 2>&1 ; echo "exit-code=$?") )
+check "exit status of MR67 is 0" "exit-code=0" "$MR67"
 check_not "67.1 mark-read --folder: no crash" "Segmentation\|Abort" "$MR67"
 
 # mark-starred with explicit --folder option
 MS67=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch mark-starred 1 --folder INBOX 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch mark-starred 1 --folder INBOX 2>&1 ; echo "exit-code=$?") )
+check "exit status of MS67 is 0" "exit-code=0" "$MS67"
 check_not "67.2 mark-starred --folder: no crash" "Segmentation\|Abort" "$MS67"
 
 # remove-starred with explicit --folder option
 RS67=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch remove-starred 1 --folder INBOX 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch remove-starred 1 --folder INBOX 2>&1 ; echo "exit-code=$?") )
+check "exit status of RS67 is 0" "exit-code=0" "$RS67"
 check_not "67.3 remove-starred --folder: no crash" "Segmentation\|Abort" "$RS67"
 
 # mark-read with invalid UID → parse error
@@ -5261,7 +5306,10 @@ check "87.18 unknown label advises a sync"       "No cached data" "$(f87 list --
 OUT87_V=$(f87 list --folder __unread__)
 check     "87.19 virtual view explained on Gmail" "IMAP-only view" "$OUT87_V"
 check     "87.20 it points at the real label"     "UNREAD"         "$OUT87_V"
-check_not "87.21 stdout stays clean for scripts"  "IMAP-only"      "$(f87out list --folder __unread__)"
+# The notice is on stderr (87.19 saw it with both streams merged), so stdout is
+# empty: said as such, not as an absence that an empty capture would also satisfy.
+check_empty "87.21 stdout stays clean for scripts"            "$(f87out list --folder __unread__)"
+check       "87.21b and the command itself succeeds"  "^0$"    "$(f87rc list --folder __unread__)"
 
 # No "wait" here: under "set -e" the 143 from a killed child would abort the
 # script before the results summary ever printed.
@@ -5739,6 +5787,35 @@ check "95.1 the listener list is readable" "^State" "$LISTEN95"
 for p95 in 9993 9994 9995 9996 9998; do
     check_not "95.2 port $p95 is free" ":$p95 " "$LISTEN95"
 done
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 96: the assertion helpers can fail (EMAIL-13)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== Phase 96: absence assertions need something to search ==="
+# Run the helpers in a subshell so their counters do not touch the totals.
+SELF96_EMPTY=$( (check_not "x" "STORE" "") 2>&1 )
+check "96.1 check_not on empty text fails" "nothing to search" "$SELF96_EMPTY"
+SELF96_BLANK=$( (check_not "x" "STORE" "   ") 2>&1 )
+check "96.2 check_not on blank text fails" "nothing to search" "$SELF96_BLANK"
+SELF96_FOUND=$( (check_not "x" "STORE" "a STORE b") 2>&1 )
+check "96.3 check_not finds a present pattern" "unexpected pattern" "$SELF96_FOUND"
+SELF96_OK=$( (check_not "x" "STORE" "FETCH only") 2>&1 )
+check "96.4 check_not passes when absent from real output" "PASS" "$SELF96_OK"
+SELF96_CE=$( (check_empty "x" "something") 2>&1 )
+check "96.5 check_empty fails on output" "expected no output" "$SELF96_CE"
+
+# The total is compared with a floor: a suite that stops early or loses
+# registration lines must not report "all passed".
+ASSERT_FLOOR=960
+TOTAL96=$((PASSED + FAILED))
+if [ "$TOTAL96" -ge "$ASSERT_FLOOR" ]; then
+    echo "  [PASS] 96.6 assertion count $TOTAL96 >= floor $ASSERT_FLOOR"
+    PASSED=$((PASSED + 1))
+else
+    echo "  [FAIL] 96.6 assertion count $TOTAL96 is below the floor $ASSERT_FLOOR"
+    FAILED=$((FAILED + 1))
+fi
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

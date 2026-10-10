@@ -27,6 +27,7 @@ interactive TUI, a background sync daemon, and a Thunderbird rule importer.
 - [Configuration](#configuration)
 - [Interactive Mode](#interactive-mode)
 - [CLI Batch Mode](#cli-batch-mode)
+- [License](#license)
 
 ---
 
@@ -532,3 +533,19 @@ email-cli help gmail           # Gmail OAuth2 setup guide
 email-cli help add-label
 email-cli help list-labels
 ```
+
+---
+
+## License
+
+email-cli is free software, released under the **GNU General Public License,
+version 3 or (at your option) any later version** — `GPL-3.0-or-later`.  The
+full text is in [`LICENSE`](LICENSE).
+
+You may use, study, change and redistribute it, provided that a redistributed
+or modified version stays under the same terms and comes with its source.
+There is no warranty.
+
+The libraries the project is built with are used under their own licences and
+are compatible with the GPL: `libtuikit` and `libptytest` (see their
+repositories), OpenSSL and libcurl.

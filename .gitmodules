@@ -1,3 +1,6 @@
 [submodule "libs/libptytest"]
 	path = libs/libptytest
 	url = https://github.com/csjpeter/libptytest.git
+[submodule "libs/libtuikit"]
+	path = libs/libtuikit
+	url = https://github.com/csjpeter/libtuikit.git

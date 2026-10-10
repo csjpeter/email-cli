@@ -25,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./manage.sh help       # Show available commands
 ```
 
-The tree has git submodules (`libs/libptytest`): clone with
+The tree has git submodules (`libs/libptytest`, `libs/libtuikit`): clone with
 `git clone --recurse-submodules`, or run `git submodule update --init` in an
 existing checkout, before building.
 
@@ -94,6 +94,13 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 ## Dependency Policy
 
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libssl (OpenSSL), and libcurl (SMTP only, in libwrite).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
+
+The one library of the workspace used at run time is **libtuikit**
+(`libs/libtuikit`, a git submodule pinned to a release tag), linked
+**statically**: the binaries carry no run-time dependency on it, and the
+package declares none.  It replaces this project's own terminal code module by
+module (EMAIL-28); until a module is migrated, the old code stays authoritative.
+`libs/libptytest` is the PTY test harness, test-only.
 
 ## Portability
 
@@ -203,6 +210,7 @@ docs/
   userstories/            ← numbered user stories (US-1 …), one file each
   issues/                 ← open work items: BUG-nnn (defects), TASK-nnn (tasks)
 libs/
+  libtuikit/              ← terminal toolkit (git submodule, linked statically)
   libptytest/             ← PTY-based terminal test library (git submodule, pinned to a release tag)
 ```
 

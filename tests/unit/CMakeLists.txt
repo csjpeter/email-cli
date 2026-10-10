@@ -29,6 +29,7 @@ endif()
 set(TEST_SOURCES
     test_runner.c
     test_platform.c
+    test_tuikit_link.c
     test_fs_util.c
     test_config.c
     test_logger.c
@@ -80,7 +81,10 @@ set(TEST_SOURCES
 
 add_executable(test-runner ${TEST_SOURCES})
 find_package(CURL REQUIRED)
-target_link_libraries(test-runner OpenSSL::SSL OpenSSL::Crypto CURL::libcurl)
+# The runner compiles the library sources itself instead of linking libemail,
+# so the static libtuikit has to be named here as well.
+target_link_libraries(test-runner OpenSSL::SSL OpenSSL::Crypto CURL::libcurl
+                                  tuikit::tuikit_static)
 add_dependencies(test-runner test-tls-certs)
 target_compile_definitions(test-runner PRIVATE
     TEST_CERT_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.crt"

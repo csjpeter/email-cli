@@ -90,6 +90,11 @@ add_custom_command(
 )
 add_custom_target(test-tls-certs DEPENDS ${TEST_CERT} ${TEST_KEY})
 
+# libtuikit is a git submodule (libs/libtuikit, pinned to a release tag) and is
+# linked statically: the binaries carry no run-time dependency on it.  Used
+# through add_subdirectory() it builds only the library; EXCLUDE_FROM_ALL keeps
+# the shared flavour (which nothing here links) out of the default build.
+add_subdirectory(libs/libtuikit EXCLUDE_FROM_ALL)
 add_subdirectory(libemail)
 add_subdirectory(libwrite)
 

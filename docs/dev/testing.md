@@ -197,8 +197,22 @@ ASSERT_WAIT_FOR(s, "text", timeout_ms);
 
 ## Coverage Requirements
 
-| Scope | Target |
-|-------|--------|
+`./manage.sh coverage` measures **line coverage of product code only**
+(`src/`, `libemail/src/`, `libwrite/src/`; never `tests/`, never libptytest or
+other libraries) with one definition for every report, and fails the run
+below the policy floors (policies/testing-model.md, *Coverage*):
+
+| Figure | Measured from | Requirement |
+|--------|---------------|-------------|
+| Unit tests alone | fresh counters, `test-runner` only | at least 80% (gate) |
+| Functional + PTY together | the black-box suites on the instrumented binaries | at least 80% (gate) |
+| Everything combined | unit on top of the above | target above 90% (reported, not a gate) |
+
+The published badges are the combined figure and the functional + PTY figure,
+both line coverage over the same code.
+
+| Scope | Expectation |
+|-------|-------------|
 | `libemail/src/core/` + `libemail/src/infrastructure/` combined | >90% line coverage |
 | `libemail/src/domain/` | best-effort |
 | `src/main.c` | best-effort (wiring code) |

@@ -491,6 +491,102 @@ static void test_label_picker_shows_unread(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  Label browser: cross-folder search ('/') and label creation ('c')
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static PtySession *open_label_browser(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    if (!s) return NULL;
+    if (pty_run(s, args) != 0 ||
+        pty_wait_for(s, "Email Accounts", WAIT_MS) != 0) {
+        pty_close(s);
+        return NULL;
+    }
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "Labels", WAIT_MS) != 0) {
+        pty_close(s);
+        return NULL;
+    }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+static void test_label_browser_search_prompt_and_scopes(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label browser: reaches the label list");
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]:", WAIT_MS);
+    pty_send_str(s, "abc");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Search [Subject]: abc");
+    pty_send_key(s, PTY_KEY_BACK);                 /* Backspace removes one */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Search [Subject]: ab");
+    pty_send_key(s, PTY_KEY_TAB);                  /* Tab cycles the scope */
+    ASSERT_WAIT_FOR(s, "Search [From]:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [To]:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [Body]:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [Subject]:", WAIT_MS);   /* wraps around */
+    pty_send_key(s, PTY_KEY_ESC);                  /* cancel: back in the browser */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Labels");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_label_browser_search_runs(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label browser: reaches the label list");
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]:", WAIT_MS);
+    pty_send_str(s, "Message");
+    pty_send_key(s, PTY_KEY_ENTER);
+    /* A search is a listing of the cached messages that match. */
+    ASSERT_WAIT_FOR(s, "message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Search");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_label_browser_create_label_prompt(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label browser: reaches the label list");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
+    pty_send_str(s, "PtyMade");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "New label name: PtyMade");
+    pty_send_key(s, PTY_KEY_ESC);                  /* cancel: nothing is created */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Labels");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_label_browser_create_label_confirmed(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label browser: reaches the label list");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
+    pty_send_str(s, "PtyMade");
+    pty_send_key(s, PTY_KEY_ENTER);
+    /* The browser redraws with the label list rebuilt; it is still the
+     * label browser, and the new name is among the labels. */
+    ASSERT_WAIT_FOR(s, "PtyMade", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Labels");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  TEST: 'a' key → row has yellow marker 'd' (immediate feedback)
  * ══════════════════════════════════════════════════════════════════════ */
 
@@ -1829,6 +1925,10 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_d_key_row_stays_visible);
+    RUN_TEST(test_label_browser_search_prompt_and_scopes);
+    RUN_TEST(test_label_browser_search_runs);
+    RUN_TEST(test_label_browser_create_label_prompt);
+    RUN_TEST(test_label_browser_create_label_confirmed);
 
     printf("--- Fresh sync (test 2) ---\n");
     if (reset_and_sync() != 0) {

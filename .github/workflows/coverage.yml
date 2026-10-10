@@ -36,37 +36,16 @@ jobs:
         run: |
           pip install genbadge[coverage] lcov_cobertura --quiet
 
-          # Combined badge: line coverage
+          # Combined badge: line coverage of product code (src, libemail, libwrite)
           lcov_cobertura build/coverage.info -o build/coverage.xml
           genbadge coverage -i build/coverage.xml \
               -o build/coverage_report/coverage-badge.svg
 
-          # Functional badge: FUNCTION coverage (not line coverage)
-          # genbadge reads Cobertura line-rate, so we build a synthetic XML
-          # that exposes function hit/total as the line-rate metric.
-          FUNC_SUMMARY=$(lcov --summary build/coverage-functional.info 2>&1 | grep 'functions')
-          FUNC_HIT=$(echo "$FUNC_SUMMARY" | grep -oP '(?<=\()\d+')
-          FUNC_TOTAL=$(echo "$FUNC_SUMMARY" | grep -oP '\d+(?= functions)')
-          python3 - "$FUNC_HIT" "$FUNC_TOTAL" <<'PYEOF'
-          import sys, pathlib
-          hit, total = sys.argv[1], sys.argv[2]
-          # genbadge float()s every standard Cobertura root attribute (a missing
-          # `complexity` raises TypeError) and re-derives the rates from the
-          # covered/valid counts, rejecting any mismatch.  So: emit the full
-          # attribute set, derive line-rate from hit/total rather than from
-          # lcov's rounded percentage, and keep branch-rate at 0 to match the
-          # zero branch counts — this badge reports function coverage only.
-          rate = (float(hit) / float(total)) if float(total) else 0.0
-          xml = (
-              '<?xml version="1.0" ?>\n'
-              f'<coverage line-rate="{rate:.4f}" branch-rate="0"'
-              f' lines-covered="{hit}" lines-valid="{total}"'
-              ' branches-covered="0" branches-valid="0" complexity="0"'
-              ' version="" timestamp="0"><packages/></coverage>\n'
-          )
-          pathlib.Path('build/coverage-functional-func.xml').write_text(xml)
-          PYEOF
-          genbadge coverage -i build/coverage-functional-func.xml \
+          # External badge: line coverage of the functional + PTY suites
+          # together, over the same product code and the same metric.
+          lcov_cobertura build/coverage-functional.info \
+              -o build/coverage-functional.xml
+          genbadge coverage -i build/coverage-functional.xml \
               --name "functional coverage" \
               -o build/coverage_report/coverage-functional-badge.svg
 

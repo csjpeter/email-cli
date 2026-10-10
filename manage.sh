@@ -311,44 +311,74 @@ case "$1" in
             sleep 2
         }
         for_each_pty_suite run_pty_lenient "$ABS_BIN"
-        echo "Capturing functional coverage..."
-        (cd "$BUILD_DIR" && lcov --capture --directory . \
-             --output-file coverage-functional-raw.info && \
-         lcov --remove coverage-functional-raw.info \
-              --ignore-errors unused \
-              '/usr/include/*' \
-              '*/src/main_tui.c' \
-              '*/tests/unit/*' \
-              --output-file coverage-functional.info)
+        # One definition of "product code" for every report: the program's own
+        # sources.  Test code, the PTY library and the system headers are not
+        # measured (policies/testing-model.md, Coverage).
+        ROOT_ABS="$(pwd)"
+        capture_product() {  # capture_product <raw.info> <product.info>
+            (cd "$BUILD_DIR" && lcov --capture --directory . --output-file "$1" && \
+             lcov --extract "$1" --ignore-errors unused \
+                  "$ROOT_ABS/src/*" "$ROOT_ABS/libemail/src/*" "$ROOT_ABS/libwrite/src/*" \
+                  --output-file "$2")
+        }
+        line_pct() {         # line_pct <product.info> -> "91.8"
+            lcov --summary "$BUILD_DIR/$1" 2>&1 | grep 'lines' | grep -oP '[0-9]+\.[0-9]+(?=%)' | head -1
+        }
 
-        # Pass 2 — run unit suite ON TOP of existing functional .gcda → combined badge
-        # (LCOV 2.x --add-tracefile intersects lines instead of unioning; running both
-        # test suites in sequence and capturing once gives the correct union.)
+        # External suites alone: functional + PTY (black-box, instrumented binaries).
+        echo "Capturing external (functional + PTY) coverage..."
+        capture_product coverage-functional-raw.info coverage-functional.info
+
+        # Unit tests on top of the same .gcda give the union of everything.
+        # (LCOV 2.x --add-tracefile intersects lines instead of unioning; running
+        # both kinds in sequence and capturing once gives the correct union.)
         (cd "$BUILD_DIR" && ./tests/unit/test-runner)
-        echo "Capturing combined (unit + functional) coverage..."
-        (cd "$BUILD_DIR" && lcov --capture --directory . \
-             --output-file coverage-raw.info && \
-         lcov --remove coverage-raw.info \
-              --ignore-errors unused \
-              '/usr/include/*' \
-              '*/src/main_tui.c' \
-              --output-file coverage.info)
+        echo "Capturing combined coverage..."
+        capture_product coverage-raw.info coverage.info
+
+        # Unit tests alone, from fresh counters: they have to stand on their own.
+        find "$BUILD_DIR" -name "*.gcda" -delete
+        (cd "$BUILD_DIR" && ./tests/unit/test-runner)
+        echo "Capturing unit-only coverage..."
+        capture_product coverage-unit-raw.info coverage-unit.info
 
         echo "Generating coverage reports..."
         (cd "$BUILD_DIR" && \
          genhtml coverage.info --output-directory coverage_report && \
          genhtml coverage-functional.info --output-directory coverage_functional_report)
-        FUNC_SUMMARY=$(lcov --summary "$BUILD_DIR/coverage-functional.info" 2>&1 | grep 'functions')
-        FUNC_PCT=$(echo "$FUNC_SUMMARY" | grep -oP '[0-9]+\.[0-9]+(?=%)')
-        LINE_SUMMARY=$(lcov --summary "$BUILD_DIR/coverage.info" 2>&1 | grep 'functions')
-        LINE_PCT=$(echo "$LINE_SUMMARY" | grep -oP '[0-9]+\.[0-9]+(?=%)')
-        echo "Functional badge: ${FUNC_PCT}%  (function coverage)"
-        echo "Combined badge:   ${LINE_PCT}%  (function coverage, unit+functional)"
-        echo "Combined coverage:    $BUILD_DIR/coverage_report/index.html"
-        echo "Functional coverage:  $BUILD_DIR/coverage_functional_report/index.html"
+
+        UNIT_PCT=$(line_pct coverage-unit.info)
+        EXT_PCT=$(line_pct coverage-functional.info)
+        ALL_PCT=$(line_pct coverage.info)
+        COVERAGE_MIN=80      # policy floor for unit alone and for the external suites
+        COVERAGE_TARGET=90   # policy target for everything together (not a gate)
+        echo ""
+        echo "Line coverage of product code (src/, libemail/src/, libwrite/src/):"
+        echo "  unit tests alone            ${UNIT_PCT}%   (minimum ${COVERAGE_MIN}%)"
+        echo "  functional + PTY together   ${EXT_PCT}%   (minimum ${COVERAGE_MIN}%)"
+        echo "  everything combined         ${ALL_PCT}%   (target ${COVERAGE_TARGET}%)"
+        echo "Combined report:  $BUILD_DIR/coverage_report/index.html"
+        echo "External report:  $BUILD_DIR/coverage_functional_report/index.html"
+        coverage_gate_rc=0
+        for pair in "unit tests alone:$UNIT_PCT" "functional + PTY:$EXT_PCT"; do
+            label="${pair%%:*}"; pct="${pair##*:}"
+            if [ -z "$pct" ]; then
+                echo "ERROR: no coverage figure for '$label'." >&2
+                coverage_gate_rc=1
+            elif awk -v p="$pct" -v m="$COVERAGE_MIN" 'BEGIN{exit !(p+0 < m+0)}'; then
+                echo "ERROR: coverage of '$label' is ${pct}%, below the ${COVERAGE_MIN}% minimum." >&2
+                coverage_gate_rc=1
+            fi
+        done
+        if awk -v p="$ALL_PCT" -v m="$COVERAGE_TARGET" 'BEGIN{exit !(p+0 < m+0)}'; then
+            echo "note: the combined figure is below the ${COVERAGE_TARGET}% target (not a gate)."
+        fi
         if [ "$functional_rc" -ne 0 ] || [ "$pty_cov_rc" -ne 0 ]; then
             echo "ERROR: coverage run failed: functional suite status $functional_rc," \
                  "PTY suites status $pty_cov_rc (reports above were still produced)." >&2
+            exit 1
+        fi
+        if [ "$coverage_gate_rc" -ne 0 ]; then
             exit 1
         fi
         ;;

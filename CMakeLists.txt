@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-only
 cmake_minimum_required(VERSION 3.10)
 project(email-cli VERSION 0.3.0 LANGUAGES C)
 
@@ -154,7 +154,7 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER    "${CPACK_PACKAGE_CONTACT}")
 set(CPACK_DEBIAN_FILE_NAME             "DEB-DEFAULT")
 
 # RPM-specific
-set(CPACK_RPM_PACKAGE_LICENSE          "GPL-3.0-or-later")
+set(CPACK_RPM_PACKAGE_LICENSE          "GPL-3.0-only")
 set(CPACK_RPM_PACKAGE_GROUP            "Applications/Internet")
 set(CPACK_RPM_PACKAGE_REQUIRES         "openssl-libs >= 3.0.0, libcurl >= 7.68.0")
 set(CPACK_RPM_FILE_NAME                "RPM-DEFAULT")

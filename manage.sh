@@ -25,6 +25,7 @@ show_help() {
     echo "  functional     Build and run the functional test suite"
     echo "  pty            Build and run all PTY (terminal) test suites"
     echo "  valgrind       Build and run unit tests with Valgrind"
+    echo "  check          Run every gate (test, functional, pty, valgrind) and summarise"
     echo "  coverage       Run tests and generate coverage report"
     echo "  integration    Run integration test against Dovecot IMAP container"
     echo "  integration-local  Run APPEND integration test with local Dovecot (no Docker)"
@@ -132,13 +133,31 @@ PTY_TARGETS="test-pty-views test-pty-gmail-tui test-pty-mail-rules \
 
 JOBS=$(nproc)
 
+# Stops mock servers an interrupted run left behind.  pkill exits 1 when
+# nothing matched, which is the normal case and is handled explicitly; any
+# other status is a real failure and is shown.  The fixed mock ports that make
+# this necessary are EMAIL-33's to remove.
+stop_stale_mocks() {
+    local pat rc
+    for pat in mock_imap_server mock-imap-server mock_gmail_api_server \
+               mock-gmail-server mock_smtp_server mock-smtp-server; do
+        pkill -f "$pat" && rc=0 || rc=$?
+        if [ "$rc" -gt 1 ]; then
+            echo "ERROR: pkill -f $pat failed with status $rc" >&2
+            exit 1
+        fi
+    done
+}
+
+
 cmake_build() {
     cmake --build "$BUILD_DIR" -- -j"$JOBS"
-    cp "$BUILD_DIR/$PROJECT_NAME" "$BIN_DIR/"
-    cp "$BUILD_DIR/${PROJECT_NAME}-ro" "$BIN_DIR/" 2>/dev/null || true
-    cp "$BUILD_DIR/email-sync"         "$BIN_DIR/" 2>/dev/null || true
-    cp "$BUILD_DIR/email-tui"          "$BIN_DIR/" 2>/dev/null || true
-    cp "$BUILD_DIR/email-import-rules" "$BIN_DIR/" 2>/dev/null || true
+    mkdir -p "$BIN_DIR"
+    # A copy that fails must fail the build: otherwise the next suite tests the
+    # binary left over from an earlier build (testing-model.md).
+    for b in "$PROJECT_NAME" "${PROJECT_NAME}-ro" email-sync email-tui email-import-rules; do
+        cp "$BUILD_DIR/$b" "$BIN_DIR/" || exit 1
+    done
 }
 
 build_release() {
@@ -218,12 +237,7 @@ case "$1" in
         # Mock servers bind fixed ports.  A previous interrupted run can leave
         # one behind, and the next suite then talks to a stale server with
         # different contents — which looks exactly like a product regression.
-        pkill -f "mock_imap_server"  2>/dev/null || true
-        pkill -f "mock-imap-server"  2>/dev/null || true
-        pkill -f "mock_gmail_api_server" 2>/dev/null || true
-        pkill -f "mock-gmail-server" 2>/dev/null || true
-        pkill -f "mock_smtp_server"  2>/dev/null || true
-        pkill -f "mock-smtp-server"  2>/dev/null || true
+        stop_stale_mocks
         sleep 1
         pty_rc=0
         run_pty_strict() {  # run_pty_strict <label> <binary> [args…]
@@ -257,10 +271,13 @@ case "$1" in
         # Pass 1 — functional suite + PTY tests (fresh .gcda) → functional badge
         find "$BUILD_DIR" -name "*.gcda" -delete
         # Kill any lingering mock server processes by process name (not by -f to avoid self-kill)
-        pkill "mock_imap_server" 2>/dev/null || true
-        pkill "mock-imap-server" 2>/dev/null || true
+        stop_stale_mocks
         sleep 0.3
-        ./tests/functional/run_functional.sh || true
+        # The report is still produced when the suite fails, but the failure is
+        # the verdict of this run: it is kept and returned at the end.
+        functional_rc=0
+        ./tests/functional/run_functional.sh || functional_rc=$?
+        pty_cov_rc=0
         echo "Running PTY tests for coverage..."
         ABS_BUILD="$(realpath "$BUILD_DIR")"
         ABS_BIN="$(realpath "$BIN_DIR")"
@@ -272,12 +289,7 @@ case "$1" in
         # `./manage.sh pty` has cleared these since the same bug bit it; the
         # coverage path needs it just as much, because here the functional run
         # immediately precedes the PTY run.
-        pkill -f "mock_imap_server"  2>/dev/null || true
-        pkill -f "mock-imap-server"  2>/dev/null || true
-        pkill -f "mock_gmail_api_server" 2>/dev/null || true
-        pkill -f "mock-gmail-server" 2>/dev/null || true
-        pkill -f "mock_smtp_server"  2>/dev/null || true
-        pkill -f "mock-smtp-server"  2>/dev/null || true
+        stop_stale_mocks
         sleep 1
         # Every suite contributes to the measured coverage.  Failures are
         # tolerated here on purpose — the report must still be produced — but
@@ -294,6 +306,7 @@ case "$1" in
                 echo "  [warn] PTY suite '$label' reported failures (coverage run continues):"
                 grep -E "\[FAIL\]|ASSERT|Segmentation|Assertion" "$log" | head -20 | sed 's/^/    /'
                 echo "    (full output: $log)"
+                pty_cov_rc=1
             fi
             sleep 2
         }
@@ -333,6 +346,11 @@ case "$1" in
         echo "Combined badge:   ${LINE_PCT}%  (function coverage, unit+functional)"
         echo "Combined coverage:    $BUILD_DIR/coverage_report/index.html"
         echo "Functional coverage:  $BUILD_DIR/coverage_functional_report/index.html"
+        if [ "$functional_rc" -ne 0 ] || [ "$pty_cov_rc" -ne 0 ]; then
+            echo "ERROR: coverage run failed: functional suite status $functional_rc," \
+                 "PTY suites status $pty_cov_rc (reports above were still produced)." >&2
+            exit 1
+        fi
         ;;
     integration)
         build_release
@@ -347,6 +365,30 @@ case "$1" in
         ;;
     imap-clean)
         ./tests/integration/run_integration.sh --clean
+        ;;
+    check)
+        # Every gate, each in its own run, one summary to compare with CI.
+        # Coverage joins when it has a threshold that fails (EMAIL-15).
+        check_rc=0
+        check_summary=""
+        for gate in test functional pty valgrind; do
+            echo "=== check: $gate ==="
+            if "$0" "$gate"; then
+                check_summary="${check_summary}  $(printf '%-12s' "$gate") PASS"$'\n'
+            else
+                check_summary="${check_summary}  $(printf '%-12s' "$gate") FAIL"$'\n'
+                check_rc=1
+            fi
+        done
+        echo ""
+        echo "=== check: summary ==="
+        printf '%s' "$check_summary"
+        if [ "$check_rc" -ne 0 ]; then
+            echo "check FAILED" >&2
+        else
+            echo "check passed"
+        fi
+        exit $check_rc
         ;;
     install)
         do_install

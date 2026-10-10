@@ -1,11 +1,13 @@
 cmake_minimum_required(VERSION 3.10)
-project(email-cli VERSION 0.2.5 LANGUAGES C)
+project(email-cli VERSION 0.3.0 LANGUAGES C)
 
-# Version string: prefer "git describe", fall back to project version
+# Version string: prefer "git describe", fall back to project version.
+# Only release tags (v<digit>...) count: `--tags` alone accepts every tag, so a
+# bookmark such as "before-some-work" would silently become the product version.
 find_program(GIT_EXECUTABLE git)
 if(GIT_EXECUTABLE)
     execute_process(
-        COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+        COMMAND ${GIT_EXECUTABLE} describe --tags --match "v[0-9]*" --always --dirty
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         OUTPUT_VARIABLE _GIT_DESCRIBE
         OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -22,8 +24,8 @@ add_compile_definitions(EMAIL_CLI_VERSION="${EMAIL_CLI_VERSION}")
 # Package version, derived from the same describe.  Taking it from the
 # hardcoded project() version instead lets packages go stale the moment a tag
 # is added: the binary would report the tag while the .deb kept the old number.
-#   v0.2.5               -> 0.2.5
-#   v0.2.5-43-gabc1234   -> 0.2.5.43   (43 commits past the tag)
+#   v0.3.0               -> 0.3.0
+#   v0.3.0-43-gabc1234   -> 0.3.0.43   (43 commits past the tag)
 #   v0.1                 -> 0.1
 # The "-dirty" marker stays in the binary's --version but is dropped here:
 # dpkg and rpm both need a plain dotted number.

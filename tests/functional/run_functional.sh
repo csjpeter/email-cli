@@ -4112,6 +4112,9 @@ echo "--- Phase 74: help functions and error paths ---"
 VER_CLI=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-cli" --version 2>&1 || true) )
 check "74.1 email-cli --version" "email-cli" "$VER_CLI"
+# The name alone proves nothing: "email-cli before-some-work-8-g2ec730a" contains
+# "email-cli" too, and that is exactly what a stray tag used to produce.
+check "74.1b version is a release number" "^email-cli [0-9][0-9.]*" "$VER_CLI"
 
 # ── email-cli help <subcmd> — rules sub-commands ───────────────────────────
 HLP_RL=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME

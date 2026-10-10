@@ -78,10 +78,26 @@ SMTP_LOG="$PROJECT_ROOT/build/tests/functional/mock_smtp.log"
     "$MOCK_SMTP_BIN") >"$SMTP_LOG" 2>&1 &
 SMTP_PID=$!
 
-trap "kill $SERVER1_PID $SERVER2_PID $SERVER3_PID $SMTP_PID \
-          \${SERVER200_PID:-} \${GMAIL_SERVER_PID:-} \
-          \${GMAIL60_PID:-} \${GMAIL_RECONC_PID:-} \${GMAIL_LABEL_PID:-} \
-          \${QRESYNC_PID:-} \${GMAIL_EXPIRED_PID:-} \${VANISHED_PID:-} 2>/dev/null || true" EXIT
+# Every background job of this script is a mock server.  A mock is started as
+# `( cd ... && VAR=... mock )`, so the job is the subshell and the mock is its
+# child: both are stopped, or the mock outlives the run and holds its port
+# (the PTY suites then refuse to start against it).  pkill -P exits 1 when the
+# job has no child left, which is fine and is handled explicitly.
+cleanup_mocks() {
+    local job rc
+    for job in $(jobs -r -p); do      # running jobs only
+        pkill -P "$job" && rc=0 || rc=$?
+        if [ "$rc" -gt 1 ]; then echo "  pkill -P $job failed ($rc)" >&2; fi
+        # The job is the subshell around the mock, or the mock itself.  With
+        # its child gone the subshell has usually exited already.
+        if [ -d "/proc/$job" ]; then
+            kill "$job" && rc=0 || rc=$?
+        fi
+        # Reap it; its status is death by SIGTERM and is not a verdict.
+        wait "$job" && rc=0 || rc=$?
+    done
+}
+trap cleanup_mocks EXIT
 
 sleep 1
 
@@ -5673,6 +5689,56 @@ check "93.3 CMakeLists SPDX tag"  "^# SPDX-License-Identifier: GPL-3.0-only$" \
 check "93.4 package licence field" 'CPACK_RPM_PACKAGE_LICENSE *"GPL-3.0-only"' \
       "$(cat "$PROJECT_ROOT/CMakeLists.txt")"
 check "93.5 README names the licence" "GPL-3.0-only" "$(cat "$PROJECT_ROOT/README.md")"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 94: a client that disconnects mid-response must not kill the mocks
+# (EMAIL-42: SIGPIPE ended the IMAP mock, and every later test timed out)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== Phase 94: the IMAP mock survives clients that vanish mid-response ==="
+P94=9960
+while ss -ltn | grep -q ":$P94 "; do P94=$((P94 + 1)); done
+LOG94="$PROJECT_ROOT/build/tests/functional/mock_sigpipe.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$P94 MOCK_IMAP_COUNT=250 \
+    "$MOCK_SERVER_BIN") >"$LOG94" 2>&1 &
+PID94=$!
+sleep 1
+kill -0 "$PID94" && ALIVE94=yes || ALIVE94=no
+check "94.1 the mock started" "^yes$" "$ALIVE94"
+# Fifteen clients log in, ask for a large response and are cut off by timeout
+# before it has been read.  Their PIDs are collected one by one: `jobs -p`
+# would also list the long-running mocks of this script and wait forever.
+CLIENTS94=""
+for i in $(seq 1 15); do
+    printf 'a1 LOGIN u p\r\na2 SELECT INBOX\r\na3 FETCH 1:* (FLAGS)\r\na4 FETCH 1:* (BODY[HEADER])\r\n' \
+        | timeout 3 openssl s_client -quiet -connect 127.0.0.1:$P94 >>"$LOG94.clients" 2>&1 &
+    CLIENTS94="$CLIENTS94 $!"
+done
+for c in $CLIENTS94; do
+    # Status 124 (timeout) is the expected end of such a client.
+    wait "$c" && W94=0 || W94=$?
+done
+sleep 1
+kill -0 "$PID94" && ALIVE94=yes || ALIVE94=no
+check "94.2 the mock is still running" "^yes$" "$ALIVE94"
+# s_client may be ended by the timeout (status 124); the greeting is what counts.
+GREET94=$( (printf 'a1 LOGOUT\r\n' | timeout 5 openssl s_client -quiet -connect 127.0.0.1:$P94) 2>&1 ) \
+    && G94=0 || G94=$?
+check "94.3 and still answers a new client" "OK" "$GREET94"
+kill "$PID94"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 95: the suite leaves no mock server behind (EMAIL-42)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== Phase 95: no mock server outlives the run ==="
+cleanup_mocks
+sleep 1
+LISTEN95=$(ss -ltn)
+check "95.1 the listener list is readable" "^State" "$LISTEN95"
+for p95 in 9993 9994 9995 9996 9998; do
+    check_not "95.2 port $p95 is free" ":$p95 " "$LISTEN95"
+done
 
 # ════════════════════════════════════════════════════════════════════════════
 # Results

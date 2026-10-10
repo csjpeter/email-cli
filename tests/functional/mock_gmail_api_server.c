@@ -27,6 +27,7 @@
  */
 
 #include <stdio.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -595,6 +596,9 @@ static void handle_connection(int fd) {
 /* ── Main ─────────────────────────────────────────────────────────── */
 
 int main(void) {
+    /* A client that goes away mid-response must not kill the server (EMAIL-42). */
+    signal(SIGPIPE, SIG_IGN);
+
     const char *port_env   = getenv("MOCK_GMAIL_PORT");
     if (port_env  && atoi(port_env)  > 0) g_port  = atoi(port_env);
     const char *count_env  = getenv("MOCK_GMAIL_COUNT");

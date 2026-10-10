@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <locale.h>
+#include <termios.h>
 
 /* Feed `bytes` to terminal_read_key() through a pipe (closed afterwards, so a
  * lone ESC is a bare ESC) and perform `count` reads.  keys[i] is the TermKey,
@@ -240,6 +241,47 @@ void test_platform(void) {
         /* A lone ESC is still ESC. */
         feed_keys("\033", 1, k, t);
         ASSERT(k[0] == TERM_KEY_ESC, "read_key: a lone ESC is ESC");
+    }
+
+    /* ── terminal_raw_enter: flow control off, mode restored ─────────── */
+    {
+        int master = posix_openpt(O_RDWR | O_NOCTTY);
+        if (master >= 0 && grantpt(master) == 0 && unlockpt(master) == 0) {
+            const char *slave_name = ptsname(master);
+            int slave = slave_name ? open(slave_name, O_RDWR | O_NOCTTY) : -1;
+            if (slave >= 0) {
+                struct termios before;
+                tcgetattr(slave, &before);
+                before.c_iflag |= IXON | IXOFF;           /* the usual default */
+                before.c_lflag |= ICANON | ECHO | ISIG;
+                tcsetattr(slave, TCSANOW, &before);
+
+                int saved = dup(STDIN_FILENO);
+                dup2(slave, STDIN_FILENO);
+                TermRawState *st = terminal_raw_enter();
+                ASSERT(st != NULL, "raw_enter: succeeds on a terminal");
+                struct termios during;
+                tcgetattr(slave, &during);
+                ASSERT((during.c_iflag & IXON) == 0, "raw_enter: IXON is off (Ctrl-S is a key)");
+                ASSERT((during.c_iflag & IXOFF) == 0, "raw_enter: IXOFF is off");
+                ASSERT((during.c_lflag & (ICANON | ECHO | ISIG)) == 0,
+                       "raw_enter: ICANON, ECHO and ISIG are off");
+                terminal_raw_exit(&st);
+                struct termios after;
+                tcgetattr(slave, &after);
+                ASSERT((after.c_iflag & IXON) != 0 && (after.c_lflag & ICANON) != 0,
+                       "raw_exit: the saved mode is restored");
+                ASSERT(st == NULL, "raw_exit: the state is cleared");
+                dup2(saved, STDIN_FILENO);
+                close(saved);
+                close(slave);
+            } else {
+                ASSERT(0, "raw_enter test: the pty slave could not be opened");
+            }
+            close(master);
+        } else {
+            ASSERT(0, "raw_enter test: no pseudo-terminal could be made");
+        }
     }
 
     /* ── platform_home_dir ──────────────────────────────────────────── */

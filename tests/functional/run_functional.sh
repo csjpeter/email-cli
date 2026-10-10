@@ -5789,6 +5789,41 @@ for p95 in 9993 9994 9995 9996 9998; do
 done
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 97: two mocks cannot share a port, and they listen on loopback only
+# (EMAIL-14: SO_REUSEPORT let a stale mock split connections with a new one)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== Phase 97: mock servers refuse a port that is taken ==="
+P97=9940
+while ss -ltn | grep -q ":$P97 "; do P97=$((P97 + 1)); done
+for kind97 in gmail smtp; do
+    if [ "$kind97" = gmail ]; then
+        BIN97="$MOCK_GMAIL_BIN"; ENV97="MOCK_GMAIL_PORT=$P97"
+    else
+        BIN97="$MOCK_SMTP_BIN";  ENV97="MOCK_SMTP_PORT=$P97"
+    fi
+    LOG97="$PROJECT_ROOT/build/tests/functional/mock_port97_$kind97"
+    (cd "$PROJECT_ROOT/build" && env "$ENV97" "$BIN97") >"$LOG97.a.log" 2>&1 &
+    A97=$!
+    sleep 1
+    kill -0 "$A97" && A97UP=yes || A97UP=no
+    check "97.1 first $kind97 mock is up" "^yes$" "$A97UP"
+    check "97.2 $kind97 mock listens on loopback only" "127.0.0.1:$P97 " "$(ss -ltn)"
+    check_not "97.3 $kind97 mock is not on all interfaces" "0.0.0.0:$P97 " "$(ss -ltn)"
+    # In the foreground under a timeout: a mock that binds anyway runs until
+    # the timeout kills it (status 124); one that refuses exits by itself.
+    (cd "$PROJECT_ROOT/build" && env "$ENV97" timeout 3 "$BIN97") >"$LOG97.b.log" 2>&1 \
+        && B97RC=0 || B97RC=$?
+    check "97.4 second $kind97 mock on the same port exits by itself" "^[1-9][0-9]*$" "$B97RC"
+    check_not "97.5 it was not left running until the timeout" "^124$" "$B97RC"
+    check "97.6 saying why" "Address already in use" "$(cat "$LOG97.b.log")"
+    kill -0 "$A97" && A97UP=yes || A97UP=no
+    check "97.7 the first mock is undisturbed" "^yes$" "$A97UP"
+    kill "$A97"
+    wait "$A97" && A97RC=0 || A97RC=$?    # SIGTERM status: not a verdict
+done
+
+# ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
@@ -5807,7 +5842,7 @@ check "96.5 check_empty fails on output" "expected no output" "$SELF96_CE"
 
 # The total is compared with a floor: a suite that stops early or loses
 # registration lines must not report "all passed".
-ASSERT_FLOOR=960
+ASSERT_FLOOR=980
 TOTAL96=$((PASSED + FAILED))
 if [ "$TOTAL96" -ge "$ASSERT_FLOOR" ]; then
     echo "  [PASS] 96.6 assertion count $TOTAL96 >= floor $ASSERT_FLOOR"

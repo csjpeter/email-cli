@@ -628,13 +628,23 @@ int main(void) {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) { perror("socket"); return 1; }
 
+    /* SO_REUSEADDR only, never SO_REUSEPORT: with it a second mock binds a
+     * port a stale one still holds and the kernel splits the connections
+     * between them at random, so a suite can read another fixture's data.
+     * Two mocks on one port must fail loudly (see mock_imap_server.c).  The
+     * return value is checked: an option that silently failed to apply is
+     * indistinguishable from one never set.  Loopback only, so the mock is
+     * not reachable from the network while a suite runs. */
     int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT,
-               &opt, sizeof(opt));
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) != 0) {
+        perror("setsockopt SO_REUSEADDR");
+        close(server_fd);
+        return 1;
+    }
 
     struct sockaddr_in addr = {0};
     addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port        = htons((uint16_t)g_port);
 
     if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {

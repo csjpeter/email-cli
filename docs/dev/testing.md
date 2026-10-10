@@ -111,6 +111,12 @@ implements a minimal IMAP state machine:
 - Returns `* SEARCH 1` (one message exists).
 - Returns a hardcoded test email body on FETCH.
 
+`./tests/functional/run_package_dir.sh` is a separate script (it performs its own
+release build, so it is not part of the coverage run): it checks that
+`./manage.sh package deb` leaves exactly one run's packages in `build/packages/`
+and an empty directory with a non-zero exit when packaging fails (a stub
+`cpack` first on `PATH` provides the failure).
+
 Run via `./tests/functional/run_functional.sh`. The script:
 1. Compiles and starts the mock server in background.
 2. Runs `email-cli` with a temporary config pointing at `imap://localhost:9993`.

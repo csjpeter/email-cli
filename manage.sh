@@ -32,7 +32,7 @@ show_help() {
     echo "  imap-clean     Remove integration test container and volume"
     echo "  install        Build (release) and install binaries to ~/.local/bin"
     echo "  uninstall      Remove installed binaries from ~/.local/bin"
-    echo "  package [deb|rpm|all]  Build release and create distribution package(s)"
+    echo "  package [deb|rpm|all]  Build release and create package(s) in build/packages/"
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
@@ -364,9 +364,27 @@ case "$1" in
                 ;;
         esac
         echo "Creating package(s): $generators"
-        (cd "$BUILD_DIR" && cpack -G "$generators" --config CPackConfig.cmake)
-        echo "Package(s) written to $BUILD_DIR/"
-        ls -lh "$BUILD_DIR"/email-cli_*.deb "$BUILD_DIR"/email-cli-*.rpm 2>/dev/null || true
+        # build/packages/ holds exactly the packages of this run: it is emptied
+        # first, and left empty when the run fails (packaging policy, "Where
+        # the output goes").  The cd is checked so the rm can only act there.
+        PKG_DIR="$(cd "$BUILD_DIR" && pwd)/packages"
+        mkdir -p "$PKG_DIR" || exit 1
+        ( cd "$PKG_DIR" && rm -f -- ./*.deb ./*.rpm && rm -rf _CPack_Packages ) || exit 1
+        if ! ( cd "$BUILD_DIR" && cpack -G "$generators" --config CPackConfig.cmake -B "$PKG_DIR" ); then
+            ( cd "$PKG_DIR" && rm -f -- ./*.deb ./*.rpm && rm -rf _CPack_Packages )
+            echo "ERROR: packaging failed; $PKG_DIR is left empty." >&2
+            exit 1
+        fi
+        # CPack's staging tree is not a package; the directory is the packages.
+        ( cd "$PKG_DIR" && rm -rf _CPack_Packages ) || exit 1
+        # One package per requested generator, or the run is not a result.
+        built=$(find "$PKG_DIR" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)
+        if [ "$built" -lt 1 ]; then
+            echo "ERROR: cpack reported success but $PKG_DIR holds no package." >&2
+            exit 1
+        fi
+        echo "Package(s) written to $PKG_DIR/"
+        ls -lh "$PKG_DIR"
         ;;
     uninstall)
         do_uninstall

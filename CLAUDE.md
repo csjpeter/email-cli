@@ -2,6 +2,34 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workspace policies
+
+This project follows the workspace policies in `../policies/` (GitHub
+`csjpeter/policies`, private). They stand above this project. **Before changing
+anything, read the ones that touch your task**; start from
+`../policies/README.md`, which lists them all. When this file and a policy
+disagree, stop and tell the owner; do not choose silently.
+
+The ones that bind every task:
+
+- `change-flow-model.md` and `issue-tracking-model.md`: every change has a
+  ticket in the issue manager and a branch named exactly after its key; commit
+  messages carry the key; a finished ticket goes to `READY`, and the owner closes.
+- `project-boundaries-model.md`: this project writes only inside its own
+  directory. **It never writes into `policies/`**; a finding about a policy or
+  another project is filed as a ticket under the key that owns it.
+- `testing-model.md`: every behaviour has a test that fails without the change;
+  tests keep every path under `build/` and never use `/tmp`.
+- `manage-sh-model.md`, `packaging-and-release-model.md`,
+  `dependencies-model.md`: build, package and link the way they say.
+- `source-header-model.md`, `licensing-model.md`: every source and script
+  carries the header; the licence is the project's own.
+- `platform-scope-model.md`, `private-names-model.md`: Linux only for now; the
+  owner's private domain appears in no file.
+
+Working through the approved tickets of this project by itself is the
+`ticket-queue` skill; the supervisor may ask for one ticket by key.
+
 ## Build Commands
 
 ```bash

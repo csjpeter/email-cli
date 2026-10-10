@@ -125,6 +125,11 @@ install(FILES docs/man/email-cli.1
               docs/man/email-import-rules.1
         DESTINATION share/man/man1)
 
+# Claude skill: tells an AI agent when and how to use the CLI
+# (policies/cli-skill-model.md).  The package never writes into a home.
+install(FILES claude/skills/email-cli/SKILL.md
+        DESTINATION share/claude-skills/email-cli)
+
 # ── CPack packaging (DEB + RPM) ────────────────────────────────────────────────
 set(CPACK_PACKAGE_NAME        "email-cli")
 set(CPACK_PACKAGE_VERSION     "${EMAIL_CLI_PACKAGE_VERSION}")

@@ -5622,6 +5622,40 @@ check "91.11 sync fails"               "exit-code=1"        "$OUT91_SYNC"
 kill "$AUTH_SERVER_PID" || echo "  (the password-enforcing mock had already exited)"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 92: the Claude skill (policies/cli-skill-model.md) agrees with the binary
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== Phase 92: claude/skills/email-cli/SKILL.md ==="
+SKILL92="$PROJECT_ROOT/claude/skills/email-cli/SKILL.md"
+SKILL92_TEXT=$(cat "$SKILL92"); SKILL92_RC=$?
+check "92.1 the skill file is readable and has content" "email-cli" "$SKILL92_TEXT"
+check "92.1b read exit status is zero" "^0$" "$SKILL92_RC"
+check "92.2 front matter opens the file" "^---$" "$(echo "$SKILL92_TEXT" | head -1)"
+check "92.3 name is the CLI's name" "^name: email-cli$" "$(echo "$SKILL92_TEXT" | sed -n 2p)"
+check "92.4 description says when to use" "^description: Use when " "$(echo "$SKILL92_TEXT" | sed -n 3p)"
+check "92.5 description says when not to" "Do not use for" "$(echo "$SKILL92_TEXT" | sed -n 3p)"
+check "92.6 the read-only variant is named" "email-cli-ro" "$SKILL92_TEXT"
+
+# Every command the binary advertises is in the skill ...
+HELP92=$("$BIN_DIR/email-cli" --help 2>&1)
+CMDS92=$(echo "$HELP92" | sed -n '/^Reading:/,/^Help:/p' \
+         | grep -E '^  [a-z][a-z-]+ ' | awk '{print $1}' | sort -u)
+check "92.7 the help lists commands to compare" "^list$" "$CMDS92"
+for c in $CMDS92; do
+    case "$c" in add-account|remove-account|config|migrate-credentials|help) continue ;; esac
+    check "92.8 skill mentions '$c'" "$c" "$SKILL92_TEXT"
+done
+# ... and every read-only command the skill lists is accepted by email-cli-ro.
+RO92=$("$BIN_DIR/email-cli-ro" --help 2>&1)
+for c in list show list-folders list-labels list-attachments save-attachment list-accounts; do
+    check "92.9 email-cli-ro has '$c'" "^  $c" "$RO92"
+done
+# email-cli-ro has no write command: its help is non-empty and lists no send.
+SEND92=$(echo "$RO92" | awk '/^  send /{n++} END{print n+0}')
+check "92.10 email-cli-ro help is non-empty" "Reading:" "$RO92"
+check "92.11 email-cli-ro lists no send" "^0$" "$SEND92"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

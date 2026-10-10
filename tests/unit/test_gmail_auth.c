@@ -26,6 +26,15 @@ static void wait_child(pid_t pid) {
     int st; waitpid(pid, &st, 0);
 }
 
+static void run_mock_token_server_expect(int port, const char *response,
+                                         const char *const *expect);
+
+/* Where the mock token server child reports whether the request it received
+ * carried everything expected ("OK", or "missing <string>"); -1 = nowhere.
+ * A pipe carries the verdict rather than the exit status: the status is not
+ * reliably collectable (an earlier test may have changed SIGCHLD handling). */
+static int g_mock_report_fd = -1;
+
 /* The loopback redirect range gmail_auth_device_flow() picks a port from.
  * Mirrors LOOPBACK_PORT_START/END in libemail/src/infrastructure/gmail_auth.c. */
 #define REDIRECT_PORT_FIRST 8089
@@ -239,22 +248,65 @@ static void test_wizard_rejects_gmail_imap(void) {
 /* ── Additional coverage tests ──────────────────────────────────────── */
 
 static void test_refresh_with_client_credentials(void) {
-    /* Covers get_client_id (non-NULL cfg field), get_client_secret, the post
-     * building, and http_post call in gmail_auth_refresh.
-     * http_post will fail (no valid OAuth credentials) → tok is NULL. */
+    /* Covers get_client_id/get_client_secret taking the configured values and
+     * the request body built from them.  The token endpoint is the local mock
+     * (GMAIL_TEST_TOKEN_URL): this test never leaves the machine, and it
+     * checks what was sent as well as what came back. */
+    const int mock_port = 18775;
+    const char *http_resp =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+        "{\"access_token\":\"cred_access_tok\",\"token_type\":\"Bearer\"}";
+    static const char *const expect[] = {
+        "client_id=test-client-id.apps.googleusercontent.com",
+        "client_secret=test-client-secret",
+        "refresh_token=dummy_refresh_token",
+        "grant_type=refresh_token",
+        NULL
+    };
+
+    int report[2];
+    ASSERT(pipe(report) == 0, "client credentials: report pipe");
+    g_mock_report_fd = report[1];
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(report[0]);
+        run_mock_token_server_expect(mock_port, http_resp, expect);
+    }
+    close(report[1]);
+    g_mock_report_fd = -1;
+    usleep(50000);   /* let the server bind */
+
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
+    setenv("GMAIL_TEST_TOKEN_URL", url, 1);
+    unsetenv("GMAIL_TEST_TOKEN");
+
     Config cfg = {0};
     cfg.gmail_refresh_token = strdup("dummy_refresh_token");
     cfg.gmail_client_id     = strdup("test-client-id.apps.googleusercontent.com");
     cfg.gmail_client_secret = strdup("test-client-secret");
-    unsetenv("GMAIL_TEST_TOKEN");
 
     char *tok = gmail_auth_refresh(&cfg);
-    /* Returns NULL (network failure or 400 from Google) — just no crash */
-    free(tok);
 
+    char verdict[300] = "";
+    ssize_t vn = read(report[0], verdict, sizeof(verdict) - 1);
+    verdict[vn > 0 ? vn : 0] = '\0';
+    close(report[0]);
+    wait_child(pid);
+    int tok_ok = tok != NULL && strcmp(tok, "cred_access_tok") == 0;
+    int sent_all = strcmp(verdict, "OK") == 0;
+
+    /* Release everything before asserting: a failed ASSERT returns. */
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+    free(tok);
     free(cfg.gmail_refresh_token);
     free(cfg.gmail_client_id);
     free(cfg.gmail_client_secret);
+
+    ASSERT(tok_ok, "client credentials: the mock's access token is returned");
+    ASSERT(sent_all, verdict[0] ? verdict : "client credentials: no verdict from the mock "
+                                            "(the request carried client_id, client_secret, "
+                                            "refresh_token and grant_type)");
 }
 
 static void test_device_flow_no_credentials(void) {
@@ -332,6 +384,13 @@ static void test_refresh_test_token_hook(void) {
 
 /* Minimal HTTP server child that sends a fixed response */
 static void run_mock_token_server(int port, const char *response) {
+    run_mock_token_server_expect(port, response, NULL);
+}
+
+/* As above, and exits 2 when the request lacks any string in the NULL-ended
+ * `expect` list, so the parent can assert on what was actually sent. */
+static void run_mock_token_server_expect(int port, const char *response,
+                                         const char *const *expect) {
     int srv = socket(AF_INET, SOCK_STREAM, 0);
     if (srv < 0) _exit(1);
     int opt = 1;
@@ -351,11 +410,37 @@ static void run_mock_token_server(int port, const char *response) {
     socklen_t cli_len = sizeof(cli);
     int conn = accept(srv, (struct sockaddr *)&cli, &cli_len);
     if (conn < 0) { close(srv); _exit(1); }
+    /* The request arrives in pieces (curl sends the headers, then the body):
+     * read until every expected string is there, or the headers are complete
+     * when nothing is expected, or the peer stops (receive timeout). */
     char buf[4096];
-    ssize_t n = read(conn, buf, sizeof(buf) - 1); (void)n;
+    size_t have = 0;
+    buf[0] = '\0';
+    while (have < sizeof(buf) - 1) {
+        ssize_t n = read(conn, buf + have, sizeof(buf) - 1 - have);
+        if (n <= 0) break;
+        have += (size_t)n;
+        buf[have] = '\0';
+        int complete = 1;
+        for (int i = 0; expect && expect[i]; i++)
+            if (!strstr(buf, expect[i])) { complete = 0; break; }
+        if (complete && (expect || strstr(buf, "\r\n\r\n"))) break;
+    }
     ssize_t w = write(conn, response, strlen(response)); (void)w;
     close(conn);
     close(srv);
+    for (int i = 0; expect && expect[i]; i++)
+        if (!strstr(buf, expect[i])) {
+            if (g_mock_report_fd >= 0) {
+                char msg[256];
+                int m = snprintf(msg, sizeof(msg), "missing %s", expect[i]);
+                ssize_t rw = write(g_mock_report_fd, msg, (size_t)m); (void)rw;
+            }
+            _exit(2);
+        }
+    if (g_mock_report_fd >= 0) {
+        ssize_t rw = write(g_mock_report_fd, "OK", 2); (void)rw;
+    }
     _exit(0);
 }
 

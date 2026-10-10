@@ -7,6 +7,26 @@
 #include <fcntl.h>
 #include <locale.h>
 
+/* Feed `bytes` to terminal_read_key() through a pipe (closed afterwards, so a
+ * lone ESC is a bare ESC) and perform `count` reads.  keys[i] is the TermKey,
+ * typed[i] the printable character that read produced or 0. */
+static void feed_keys(const char *bytes, int count, TermKey *keys, int *typed) {
+    int pfd[2];
+    if (pipe(pfd) != 0) { for (int i = 0; i < count; i++) { keys[i] = TERM_KEY_QUIT; typed[i] = -1; } return; }
+    size_t len = strlen(bytes);
+    ssize_t w = write(pfd[1], bytes, len); (void)w;
+    close(pfd[1]);
+    int saved = dup(STDIN_FILENO);
+    dup2(pfd[0], STDIN_FILENO);
+    close(pfd[0]);
+    for (int i = 0; i < count; i++) {
+        keys[i]  = terminal_read_key();
+        typed[i] = terminal_last_printable();
+    }
+    dup2(saved, STDIN_FILENO);
+    close(saved);
+}
+
 void test_platform(void) {
 
     /* ── terminal_wcwidth ───────────────────────────────────────────── */
@@ -152,6 +172,74 @@ void test_platform(void) {
             ASSERT(n3 == 7 && strcmp(small, "0123456") == 0,
                    "terminal_read_password: over-long input is truncated to size-1");
         }
+    }
+
+    /* ── terminal_read_key: escape sequences are consumed whole ─────── */
+    {
+        TermKey k[4]; int t[4];
+
+        /* F1 (ESC O P) is no key and leaves nothing behind: the next read is
+         * the 'x' that follows, not a 'P'. */
+        feed_keys("\033OPx", 2, k, t);
+        ASSERT(k[0] == TERM_KEY_IGNORE && t[0] == 0, "read_key: F1 (ESC O P) is ignored, not ESC");
+        ASSERT(t[1] == 'x', "read_key: nothing of ESC O P is left to be typed");
+
+        /* Ctrl+Up (ESC [ 1 ; 5 A): dropped whole. */
+        feed_keys("\033[1;5Ax", 2, k, t);
+        ASSERT(k[0] == TERM_KEY_IGNORE && t[0] == 0, "read_key: Ctrl+Up is ignored");
+        ASSERT(t[1] == 'x', "read_key: '5A' of Ctrl+Up is not typed");
+
+        feed_keys("\033[1;5Dy", 2, k, t);
+        ASSERT(k[0] == TERM_KEY_IGNORE && t[1] == 'y', "read_key: Ctrl+Left leaves nothing behind");
+
+        /* Shift+Delete, Ctrl+PgUp: modified '~' keys. */
+        feed_keys("\033[3;2~z", 2, k, t);
+        ASSERT(k[0] == TERM_KEY_IGNORE && t[1] == 'z', "read_key: Shift+Delete leaves nothing behind");
+        feed_keys("\033[5;5~z", 2, k, t);
+        ASSERT(k[0] == TERM_KEY_IGNORE && t[1] == 'z', "read_key: Ctrl+PgUp leaves nothing behind");
+
+        /* F5 (ESC [ 1 5 ~) and Insert (ESC [ 2 ~): two-digit and unmapped
+         * numbers are consumed to the '~' and are not Home or End. */
+        feed_keys("\033[15~q", 2, k, t);
+        ASSERT(k[0] == TERM_KEY_IGNORE && t[1] == 'q', "read_key: F5 is ignored and leaves nothing behind");
+        feed_keys("\033[2~q", 2, k, t);
+        ASSERT(k[0] == TERM_KEY_IGNORE && t[1] == 'q', "read_key: Insert is ignored");
+
+        /* The keys that were already handled keep working. */
+        feed_keys("\033[A", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_PREV_LINE, "read_key: ESC [ A is Up");
+        feed_keys("\033[B", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_NEXT_LINE, "read_key: ESC [ B is Down");
+        feed_keys("\033[3~", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_DELETE, "read_key: ESC [ 3 ~ is Delete");
+        feed_keys("\033[5~", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_PREV_PAGE, "read_key: ESC [ 5 ~ is PgUp");
+        feed_keys("\033[6~", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_NEXT_PAGE, "read_key: ESC [ 6 ~ is PgDn");
+        feed_keys("\033[1~", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_HOME, "read_key: ESC [ 1 ~ is Home");
+        feed_keys("\033[4~", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_END, "read_key: ESC [ 4 ~ is End");
+        feed_keys("\033[Z", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_SHIFT_TAB, "read_key: ESC [ Z is Shift+Tab");
+
+        /* Application cursor mode (SS3): the arrows must still be arrows. */
+        feed_keys("\033OA", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_PREV_LINE, "read_key: ESC O A is Up");
+        feed_keys("\033OB", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_NEXT_LINE, "read_key: ESC O B is Down");
+        feed_keys("\033OC", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_RIGHT, "read_key: ESC O C is Right");
+        feed_keys("\033OD", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_LEFT, "read_key: ESC O D is Left");
+        feed_keys("\033OH", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_HOME, "read_key: ESC O H is Home");
+        feed_keys("\033OF", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_END, "read_key: ESC O F is End");
+
+        /* A lone ESC is still ESC. */
+        feed_keys("\033", 1, k, t);
+        ASSERT(k[0] == TERM_KEY_ESC, "read_key: a lone ESC is ESC");
     }
 
     /* ── platform_home_dir ──────────────────────────────────────────── */

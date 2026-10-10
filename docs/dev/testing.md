@@ -117,6 +117,13 @@ release build, so it is not part of the coverage run): it checks that
 and an empty directory with a non-zero exit when packaging fails (a stub
 `cpack` first on `PATH` provides the failure).
 
+`./tests/functional/run_package_policy.sh` checks the package itself (EMAIL-16):
+`lintian` reports nothing, `Depends` is discovered (libc6 present, no
+hand-written or exact versions), man pages and changelog are gzipped, the
+copyright file is installed, every directory is 0755 although the build runs
+under `umask 002`, and a `lintian` finding (a stub first on `PATH`) makes
+`package deb` exit non-zero with `build/packages/` empty.
+
 Run via `./tests/functional/run_functional.sh`. The script:
 1. Compiles and starts the mock server in background.
 2. Runs `email-cli` with a temporary config pointing at `imap://localhost:9993`.

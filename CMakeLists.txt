@@ -117,13 +117,49 @@ add_subdirectory(tests/pty EXCLUDE_FROM_ALL)
 install(TARGETS email-cli email-cli-ro email-sync email-tui email-import-rules
         RUNTIME DESTINATION bin)
 
-# Man pages: section 1, one per binary.  Packagers compress them themselves.
-install(FILES docs/man/email-cli.1
-              docs/man/email-cli-ro.1
-              docs/man/email-sync.1
-              docs/man/email-tui.1
-              docs/man/email-import-rules.1
-        DESTINATION share/man/man1)
+# Man pages: section 1, one per binary, installed gzipped (Debian policy 12.1;
+# CPack does not compress them).  -n keeps the file name and time out of the
+# archive so the package is reproducible.
+find_program(GZIP_EXECUTABLE gzip REQUIRED)
+set(EMAIL_CLI_MAN_PAGES email-cli email-cli-ro email-sync email-tui
+                        email-import-rules)
+set(EMAIL_CLI_MAN_GZ "")
+foreach(_page IN LISTS EMAIL_CLI_MAN_PAGES)
+    set(_src "${CMAKE_SOURCE_DIR}/docs/man/${_page}.1")
+    set(_gz  "${CMAKE_BINARY_DIR}/man/${_page}.1.gz")
+    add_custom_command(
+        OUTPUT  "${_gz}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/man"
+        COMMAND sh -c "\"$1\" -9n -c \"$2\" > \"$3\"" sh
+                "${GZIP_EXECUTABLE}" "${_src}" "${_gz}"
+        DEPENDS "${_src}"
+        VERBATIM)
+    list(APPEND EMAIL_CLI_MAN_GZ "${_gz}")
+endforeach()
+
+# Changelog: a native package's /usr/share/doc/<pkg>/changelog.gz, in Debian
+# changelog format, generated for the version being built.
+string(TIMESTAMP _changelog_date "%a, %d %b %Y %H:%M:%S +0000" UTC)
+set(_changelog "${CMAKE_BINARY_DIR}/changelog")
+file(WRITE "${_changelog}"
+"email-cli (${EMAIL_CLI_PACKAGE_VERSION}) unstable; urgency=medium
+
+  * Build ${EMAIL_CLI_VERSION}.  The history is the git log of the
+    repository; every change carries the key of its ticket.
+
+ -- Peter Csaszar <csjpeter@gmail.com>  ${_changelog_date}
+")
+add_custom_command(
+    OUTPUT  "${_changelog}.gz"
+    COMMAND sh -c "\"$1\" -9n -c \"$2\" > \"$3\"" sh
+            "${GZIP_EXECUTABLE}" "${_changelog}" "${_changelog}.gz"
+    DEPENDS "${_changelog}"
+    VERBATIM)
+add_custom_target(email-cli-docs ALL DEPENDS ${EMAIL_CLI_MAN_GZ} "${_changelog}.gz")
+
+install(FILES ${EMAIL_CLI_MAN_GZ} DESTINATION share/man/man1)
+install(FILES "${_changelog}.gz" DESTINATION share/doc/email-cli)
+install(FILES packaging/copyright DESTINATION share/doc/email-cli)
 
 # Claude skill: tells an AI agent when and how to use the CLI
 # (policies/cli-skill-model.md).  The package never writes into a home.
@@ -133,7 +169,7 @@ install(FILES claude/skills/email-cli/SKILL.md
 # ── CPack packaging (DEB + RPM) ────────────────────────────────────────────────
 set(CPACK_PACKAGE_NAME        "email-cli")
 set(CPACK_PACKAGE_VERSION     "${EMAIL_CLI_PACKAGE_VERSION}")
-set(CPACK_PACKAGE_CONTACT     "Peter Csaszar <peter@csaszar.email>")
+set(CPACK_PACKAGE_CONTACT     "Peter Csaszar <csjpeter@gmail.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "Terminal-based email client suite (IMAP + Gmail REST API)")
 set(CPACK_PACKAGE_DESCRIPTION
@@ -149,7 +185,8 @@ set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 # Debian-specific
 set(CPACK_DEBIAN_PACKAGE_SECTION       "mail")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY      "optional")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS       "libssl3 (>= 3.0.0), libcurl4 (>= 7.68.0)")
+# Dependencies are discovered from the binaries, never written by hand.
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS      ON)
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER    "${CPACK_PACKAGE_CONTACT}")
 set(CPACK_DEBIAN_FILE_NAME             "DEB-DEFAULT")
 

@@ -442,7 +442,9 @@ case "$1" in
         PKG_DIR="$(cd "$BUILD_DIR" && pwd)/packages"
         mkdir -p "$PKG_DIR" || exit 1
         ( cd "$PKG_DIR" && rm -f -- ./*.deb ./*.rpm && rm -rf _CPack_Packages ) || exit 1
-        if ! ( cd "$BUILD_DIR" && cpack -G "$generators" --config CPackConfig.cmake -B "$PKG_DIR" ); then
+        # umask 022: CPack copies the caller's umask into the directory modes
+        # of the package (packaging policy, "The umask leak").
+        if ! ( umask 022; cd "$BUILD_DIR" && cpack -G "$generators" --config CPackConfig.cmake -B "$PKG_DIR" ); then
             ( cd "$PKG_DIR" && rm -f -- ./*.deb ./*.rpm && rm -rf _CPack_Packages )
             echo "ERROR: packaging failed; $PKG_DIR is left empty." >&2
             exit 1
@@ -455,6 +457,21 @@ case "$1" in
             echo "ERROR: cpack reported success but $PKG_DIR holds no package." >&2
             exit 1
         fi
+        # A package that is not lintian-clean is not a result (packaging policy,
+        # "The package passes lintian"): the packages are removed and the run fails.
+        for deb in "$PKG_DIR"/*.deb; do
+            [ -e "$deb" ] || continue
+            if ! command -v lintian >/dev/null; then
+                echo "ERROR: lintian is not installed; cannot check $deb." >&2
+                ( cd "$PKG_DIR" && rm -f -- ./*.deb ./*.rpm )
+                exit 1
+            fi
+            if ! lintian --fail-on error,warning "$deb"; then
+                echo "ERROR: lintian findings in $deb; $PKG_DIR is left empty." >&2
+                ( cd "$PKG_DIR" && rm -f -- ./*.deb ./*.rpm )
+                exit 1
+            fi
+        done
         echo "Package(s) written to $PKG_DIR/"
         ls -lh "$PKG_DIR"
         ;;

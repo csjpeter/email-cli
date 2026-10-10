@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.10)
 project(email-cli VERSION 0.3.0 LANGUAGES C)
 

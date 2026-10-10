@@ -143,19 +143,27 @@ Requires Docker. Runs a real Dovecot IMAP server with:
 ./manage.sh imap-clean    # stop + remove volume
 ```
 
-## PTY-based TUI Tests (`libs/libptytest/`)
+## PTY-based TUI Tests (`libs/libptytest`, submodule)
 
 `libptytest` is a reusable C library for automated testing of terminal programs.
 It opens a pseudo-terminal, forks/execs the program under test, sends keystrokes,
 and inspects a virtual screen buffer.
 
-### Building and running libptytest self-tests
+### Where the library comes from
+
+`libs/libptytest` is a **git submodule** pinned to a release tag of the
+libptytest repository, not a copy.  Clone with `--recurse-submodules`, or run
+`git submodule update --init` in an existing checkout.  It is built through
+`add_subdirectory()` (library only) and the PTY suites link the static target
+`ptytest::ptytest_static`, so they carry no run-time dependency on it.
+
+The library's own test suite and release gates run in its repository
+(`./manage.sh check` there), not in this one.  To move to a newer release:
 
 ```bash
-cd libs/libptytest
-cc -std=c11 -Wall -Wextra -Werror -o test_ptytest \
-   test_ptytest.c pty_session.c pty_screen.c pty_sync.c -lutil -I.
-./test_ptytest
+git -C libs/libptytest fetch --tags
+git -C libs/libptytest checkout v0.1.3
+git add libs/libptytest && git commit
 ```
 
 ### Key API

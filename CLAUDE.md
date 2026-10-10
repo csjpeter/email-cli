@@ -25,6 +25,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./manage.sh help       # Show available commands
 ```
 
+The tree has git submodules (`libs/libptytest`): clone with
+`git clone --recurse-submodules`, or run `git submodule update --init` in an
+existing checkout, before building.
+
 There is no Makefile — `manage.sh` calls CMake directly. There is no mechanism to run a single test in isolation; all unit tests run together via `build/tests/unit/test-runner`.
 
 The functional suite has no dedicated `manage.sh` target; run it directly with
@@ -199,7 +203,7 @@ docs/
   userstories/            ← numbered user stories (US-1 …), one file each
   issues/                 ← open work items: BUG-nnn (defects), TASK-nnn (tasks)
 libs/
-  libptytest/             ← PTY-based terminal test library (self-contained)
+  libptytest/             ← PTY-based terminal test library (git submodule, pinned to a release tag)
 ```
 
 ## Claude Code Usage Guidelines

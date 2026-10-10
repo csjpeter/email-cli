@@ -118,15 +118,13 @@ for_each_pty_suite() {
                           ./tests/pty/input-line-harness
     "$run" compose        ./tests/pty/test-pty-compose "$B/email-tui" \
                           ./tests/pty/mock-smtp-server "$B/email-cli"
-    # The PTY harness itself.  Its self-test existed but was never wired into
-    # any target, so a break in the library the other eight suites depend on
-    # would have surfaced as confusing failures in those suites instead.
-    "$run" ptytest        ./tests/pty/libptytest/test-ptytest
+    # The PTY harness is a git submodule (libs/libptytest) with its own test
+    # suite and release gates; they run in its repository, not here.
 }
 
 PTY_TARGETS="test-pty-views test-pty-gmail-tui test-pty-mail-rules \
              test-pty-compose-dialog test-pty-attachment test-pty-send-local \
-             test-pty-compose test-pty-input-line test-ptytest \
+             test-pty-compose test-pty-input-line \
              mock-imap-server mock-gmail-server mock-smtp-server \
              input-line-harness"
 

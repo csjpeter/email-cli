@@ -1,8 +1,11 @@
+# libptytest is a git submodule (libs/libptytest, pinned to a release tag).
+# Used through add_subdirectory() it builds only the library; the static target
+# is linked so the PTY suites carry no run-time dependency on it.
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/libptytest libptytest)
 
 # ── email-cli view tests (require mock IMAP server) ───────────────────
 add_executable(test-pty-views test_pty_views.c)
-target_link_libraries(test-pty-views ptytest)
+target_link_libraries(test-pty-views ptytest::ptytest_static)
 if(NOT APPLE)
     target_link_libraries(test-pty-views util)
 endif()
@@ -60,10 +63,7 @@ target_link_libraries(input-line-harness OpenSSL::SSL OpenSSL::Crypto)
 add_executable(test-pty-input-line EXCLUDE_FROM_ALL
     test_input_line_pty.c
 )
-target_include_directories(test-pty-input-line PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-input-line ptytest)
+target_link_libraries(test-pty-input-line ptytest::ptytest_static)
 if(NOT APPLE)
     target_link_libraries(test-pty-input-line util)
 endif()
@@ -78,10 +78,7 @@ add_executable(mock-gmail-server EXCLUDE_FROM_ALL
 add_executable(test-pty-gmail-tui EXCLUDE_FROM_ALL
     test_pty_gmail_tui.c
 )
-target_include_directories(test-pty-gmail-tui PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-gmail-tui ptytest)
+target_link_libraries(test-pty-gmail-tui ptytest::ptytest_static)
 if(NOT APPLE)
     target_link_libraries(test-pty-gmail-tui util)
 endif()
@@ -108,10 +105,7 @@ target_link_libraries(mock-smtp-server OpenSSL::SSL OpenSSL::Crypto)
 add_executable(test-pty-compose EXCLUDE_FROM_ALL
     test_compose_pty.c
 )
-target_include_directories(test-pty-compose PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-compose ptytest)
+target_link_libraries(test-pty-compose ptytest::ptytest_static)
 if(NOT APPLE)
     target_link_libraries(test-pty-compose util)
 endif()
@@ -131,10 +125,7 @@ add_custom_target(run-pty-compose
 add_executable(test-pty-mail-rules EXCLUDE_FROM_ALL
     test_pty_mail_rules.c
 )
-target_include_directories(test-pty-mail-rules PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-mail-rules ptytest)
+target_link_libraries(test-pty-mail-rules ptytest::ptytest_static)
 if(NOT APPLE)
     target_link_libraries(test-pty-mail-rules util)
 endif()
@@ -154,10 +145,7 @@ add_custom_target(run-pty-mail-rules
 add_executable(test-pty-compose-dialog EXCLUDE_FROM_ALL
     test_pty_compose_dialog.c
 )
-target_include_directories(test-pty-compose-dialog PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-compose-dialog ptytest)
+target_link_libraries(test-pty-compose-dialog ptytest::ptytest_static)
 if(NOT APPLE)
     target_link_libraries(test-pty-compose-dialog util)
 endif()
@@ -177,10 +165,7 @@ add_custom_target(run-pty-compose-dialog
 add_executable(test-pty-send-local EXCLUDE_FROM_ALL
     test_pty_send_local.c
 )
-target_include_directories(test-pty-send-local PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-send-local ptytest)
+target_link_libraries(test-pty-send-local ptytest::ptytest_static)
 if(NOT APPLE)
     target_link_libraries(test-pty-send-local util)
 endif()
@@ -202,10 +187,7 @@ add_custom_target(run-pty-send-local
 add_executable(test-pty-attachment EXCLUDE_FROM_ALL
     test_pty_attachment.c
 )
-target_include_directories(test-pty-attachment PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-attachment ptytest)
+target_link_libraries(test-pty-attachment ptytest::ptytest_static)
 if(NOT APPLE)
     target_link_libraries(test-pty-attachment util)
 endif()

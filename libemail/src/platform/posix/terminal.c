@@ -46,9 +46,25 @@ TermRawState *terminal_raw_enter(void) {
 
     struct termios raw = state->saved;
     raw.c_lflag &= ~(unsigned)(ICANON | ECHO | ISIG);
+    /* Flow control off: with IXON set the line discipline swallows Ctrl-S
+     * and stops the terminal's output until Ctrl-Q, which looks like a hang. */
+    raw.c_iflag &= ~(unsigned)(IXON | IXOFF);
     raw.c_cc[VMIN]  = 1;
     raw.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+        free(state);
+        return NULL;
+    }
+    /* tcsetattr() reports success if any part of the change took: read the
+     * mode back and refuse a terminal that is not actually raw. */
+    struct termios now;
+    if (tcgetattr(STDIN_FILENO, &now) != 0 ||
+        (now.c_lflag & (ICANON | ECHO | ISIG)) != 0 ||
+        (now.c_iflag & IXON) != 0) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &state->saved);
+        free(state);
+        return NULL;
+    }
     state->active = 1;
     return state;
 }

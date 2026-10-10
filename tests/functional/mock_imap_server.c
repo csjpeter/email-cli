@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -788,6 +789,12 @@ static void handle_client(SSL *ssl) {
 }
 
 int main(void) {
+    /* A client that disconnects while the server is still writing (a PTY
+     * test closing its terminal, a killed email-cli) must not take the
+     * server with it: SIGPIPE's default action terminates the process, and
+     * every later connection in the suite then times out (EMAIL-42). */
+    signal(SIGPIPE, SIG_IGN);
+
     /* Disable stdout buffering so log-watchers see lines immediately */
     setbuf(stdout, NULL);
 

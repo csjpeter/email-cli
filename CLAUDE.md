@@ -225,7 +225,6 @@ docs/
   dev/                    ← developer guides (testing, logging)
   adr/                    ← Architecture Decision Records (CLEAN arch, RAII, test framework)
   userstories/            ← numbered user stories (US-1 …), one file each
-  issues/                 ← open work items: BUG-nnn (defects), TASK-nnn (tasks)
 libs/
   libptytest/             ← PTY-based terminal test library (self-contained)
 ```
@@ -237,5 +236,5 @@ libs/
 - Prefer direct edits over exploratory agents when the change location is known.
 - Do **not** keep a persistent project-memory store (e.g. `.claude/memory/`).
   The authoritative project state lives in the repository itself: `docs/spec/`
-  for behaviour, `docs/adr/` for decisions, `docs/issues/` for open work, and
-  the git history for what has been done.
+  for behaviour, `docs/adr/` for decisions, the issue manager (`issue-cli`, project `EMAIL`) for
+  open work and defects, and the git history for what has been done.

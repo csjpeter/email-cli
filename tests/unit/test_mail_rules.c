@@ -417,6 +417,35 @@ static void test_rules_parse_file_features(void) {
     mail_rules_free(r);
 }
 
+static void test_rules_space_in_glob_fires(void) {
+    /* EMAIL-45: both spellings of a subject glob with a space must fire */
+    char tmppath[PATH_MAX];
+    snprintf(tmppath, sizeof(tmppath), "%s/test-mail-rules-space-XXXXXX", test_scratch_dir());
+    int fd = mkstemp(tmppath);
+    ASSERT(fd >= 0, "space glob: mkstemp failed");
+    const char *ini =
+        "[rule \"flat\"]\n"
+        "if-subject = *Message 1*\n"
+        "then-add-label = L1\n"
+        "[rule \"quoted\"]\n"
+        "when = subject:\"*Message 1*\"\n"
+        "then-add-label = L2\n";
+    ssize_t w = write(fd, ini, strlen(ini)); (void)w;
+    close(fd);
+    MailRules *r = mail_rules_load_path(tmppath);
+    unlink(tmppath);
+    ASSERT(r != NULL && r->count == 2, "space glob: 2 rules loaded");
+    if (r && r->count == 2) {
+        ASSERT(mail_rule_matches(&r->rules[0], "a@x", "Message 1", "", "", NULL, 0) == 1,
+               "space glob: if-subject = *Message 1* fires");
+        ASSERT(mail_rule_matches(&r->rules[1], "a@x", "Message 1", "", "", NULL, 0) == 1,
+               "space glob: when = subject:\"*Message 1*\" fires");
+        ASSERT(mail_rule_matches(&r->rules[0], "a@x", "Message 2", "", "", NULL, 0) == 0,
+               "space glob: flat rule does not match another subject");
+    }
+    mail_rules_free(r);
+}
+
 static void test_rules_when_expression(void) {
     MailRules *r = make_rules();
     MailRule  *rule = add_rule(r, "When test");
@@ -528,6 +557,7 @@ void test_mail_rules(void) {
     RUN_TEST(test_load_utf7_folder_name);
     RUN_TEST(test_rules_parse_file_features);
     RUN_TEST(test_rules_when_expression);
+    RUN_TEST(test_rules_space_in_glob_fires);
     RUN_TEST(test_rules_then_move_folder);
     RUN_TEST(test_rules_save_load_account);
 }

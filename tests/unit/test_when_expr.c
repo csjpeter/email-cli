@@ -308,6 +308,63 @@ static void test_roundtrip_or_eval(void) {
 
 /* ── Registration ───────────────────────────────────────────────── */
 
+/* ── quoted patterns (EMAIL-45) ────────────────────────────────────── */
+
+static void test_quoted_pattern_with_space(void) {
+    WhenNode *n = when_parse("subject:\"*Message 1*\"");
+    ASSERT(n != NULL, "quoted: parses");
+    ASSERT(when_eval(n, "a@x", "Hello Message 1 here", "", "", NULL, 0) == 1,
+           "quoted: matches a subject with a space");
+    ASSERT(when_eval(n, "a@x", "Message 2", "", "", NULL, 0) == 0,
+           "quoted: does not match another subject");
+    when_node_free(n);
+}
+
+static void test_quoted_pattern_with_paren_and_escape(void) {
+    WhenNode *n = when_parse("subject:\"*(a \\\"b\\\")*\" and from:*@x");
+    ASSERT(n != NULL, "quoted escape: parses");
+    ASSERT(when_eval(n, "u@x", "re (a \"b\") ok", "", "", NULL, 0) == 1,
+           "quoted escape: paren and embedded quote match");
+    when_node_free(n);
+}
+
+static void test_quoted_pattern_unterminated(void) {
+    ASSERT(when_parse("subject:\"*Message 1*") == NULL, "quoted: unterminated → NULL");
+}
+
+static void test_unquoted_space_still_two_terms(void) {
+    ASSERT(when_parse("subject:*Message 1*") == NULL,
+           "bare word ends at the space: the rest is a syntax error");
+}
+
+static void test_from_flat_quotes_space(void) {
+    char *w = when_from_flat(NULL, "*Message 1*", NULL, NULL, NULL, NULL, NULL,
+                             NULL, 0, 0);
+    ASSERT(w != NULL && strcmp(w, "subject:\"*Message 1*\"") == 0,
+           "from_flat: pattern with a space is quoted");
+    WhenNode *n = when_parse(w);
+    ASSERT(n != NULL, "from_flat: quoted result parses");
+    ASSERT(when_eval(n, "", "Message 1", "", "", NULL, 0) == 1,
+           "from_flat: rule with a space fires");
+    when_node_free(n);
+    free(w);
+}
+
+static void test_from_conds_quotes_space_and_roundtrips(void) {
+    WhenCond c[2] = {
+        { "subject", "*a \"b\"*", 0 },
+        { "from",    "*@x",       0 },
+    };
+    char *w = when_from_conds(c, 2, 0);
+    ASSERT(w != NULL, "from_conds quoting: built");
+    WhenNode *n = when_parse(w);
+    ASSERT(n != NULL, "from_conds quoting: built expression parses");
+    ASSERT(when_eval(n, "u@x", "see a \"b\" now", "", "", NULL, 0) == 1,
+           "from_conds quoting: embedded quote round-trips");
+    when_node_free(n);
+    free(w);
+}
+
 void test_when_expr(void) {
     RUN_TEST(test_parse_null_empty);
     RUN_TEST(test_parse_single_atom);
@@ -345,4 +402,11 @@ void test_when_expr(void) {
     RUN_TEST(test_from_conds_and);
     RUN_TEST(test_from_conds_negated);
     RUN_TEST(test_roundtrip_or_eval);
+
+    RUN_TEST(test_quoted_pattern_with_space);
+    RUN_TEST(test_quoted_pattern_with_paren_and_escape);
+    RUN_TEST(test_quoted_pattern_unterminated);
+    RUN_TEST(test_unquoted_space_still_two_terms);
+    RUN_TEST(test_from_flat_quotes_space);
+    RUN_TEST(test_from_conds_quotes_space_and_roundtrips);
 }

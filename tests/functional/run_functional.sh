@@ -2513,6 +2513,14 @@ cat > "$H_RA/.config/email-cli/accounts/$RA_ACCT/rules.ini" <<'RAINI'
 [rule "Tag alpha"]
 if-from = *@example.com*
 then-add-label = AlphaTag
+
+[rule "Space flat"]
+if-subject = *Msg (folded*
+then-add-label = SpaceFlat
+
+[rule "Space quoted"]
+when = subject:"*Msg (folded*"
+then-add-label = SpaceQuoted
 RAINI
 
 # First sync to populate local store
@@ -2525,6 +2533,9 @@ RA_DRY=$( (export HOME="$H_RA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HO
 check "36.1 rules apply --dry-run: [dry-run] marker present" "\[dry-run\]" "$RA_DRY"
 check "36.2 rules apply --dry-run: rule name shown"          "Tag alpha"   "$RA_DRY"
 check "36.3 rules apply --dry-run: dry-run summary"          "dry.run\|would be" "$RA_DRY"
+# EMAIL-45: a glob with a space fires in the flat and in the quoted spelling
+check "36.9 rules apply --dry-run: if-subject glob with a space fires"   "Space flat"   "$RA_DRY"
+check "36.10 rules apply --dry-run: quoted when pattern with a space fires" "Space quoted" "$RA_DRY"
 
 # Apply for real: must show [rule] lines and summary
 RA_REAL=$( (export HOME="$H_RA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME

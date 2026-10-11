@@ -10,7 +10,8 @@
  * Single-threaded: accepts one connection at a time.
  *
  * Environment variables:
- *   MOCK_GMAIL_PORT  - TCP port to listen on (default 9997)
+ *   MOCK_GMAIL_PORT  - TCP port to listen on (default 0: the kernel picks)
+ *   MOCK_GMAIL_PORT_FILE - file the bound port is written to
  *   MOCK_GMAIL_COUNT - Number of messages to simulate (default 200)
  *
  * Message layout (N = message number, 1-indexed):
@@ -38,10 +39,11 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include "../common/mock_port.h"
 
 /* ── Configuration ────────────────────────────────────────────────── */
 
-static int  g_port    = 9997;
+static int  g_port    = 0;
 static int  g_count   = 200;
 static char g_prefix[64]  = "";   /* MOCK_GMAIL_SUBJECT_PREFIX  */
 static char g_email[128]  = "test@gmail.com"; /* MOCK_GMAIL_EMAIL */
@@ -637,8 +639,7 @@ int main(void) {
     /* A client that goes away mid-response must not kill the server (EMAIL-42). */
     signal(SIGPIPE, SIG_IGN);
 
-    const char *port_env   = getenv("MOCK_GMAIL_PORT");
-    if (port_env  && atoi(port_env)  > 0) g_port  = atoi(port_env);
+    g_port = mock_requested_port("MOCK_GMAIL_PORT");   /* 0: the kernel picks */
     const char *count_env  = getenv("MOCK_GMAIL_COUNT");
     if (count_env && atoi(count_env) > 0) g_count = atoi(count_env);
     const char *prefix_env = getenv("MOCK_GMAIL_SUBJECT_PREFIX");
@@ -697,6 +698,8 @@ int main(void) {
         return 1;
     }
 
+    g_port = mock_publish_port(server_fd, "MOCK_GMAIL_PORT_FILE");
+    if (g_port < 0) { close(server_fd); return 1; }
     printf("Mock Gmail API server listening on port %d (count: %d, prefix: '%s', email: %s, histid: %s, extra: %d, expired: %d)\n",
            g_port, g_count, g_prefix, g_email, g_histid, g_extra_count, g_history_expired);
     fflush(stdout);

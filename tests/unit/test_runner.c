@@ -4,12 +4,17 @@
 /* Main of the unit test runner that calls every test group. */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "test_helpers.h"
 #include "logger.h"
 
 // Globals defined in test_helpers.h
 int g_tests_run = 0;
 int g_tests_failed = 0;
+const char *g_test_filter = NULL;
+int g_test_list_only = 0;
+int g_tests_selected = 0;
+int g_test_depth = 0;
 
 // Forward declarations of test suites
 void test_fs_util(void);
@@ -66,8 +71,38 @@ void test_config_load_account(void);
 void test_config_migrate(void);
 void test_manifest_dmarc_flags(void);
 
-int main() {
-    printf("--- email-cli Unit Test Suite ---\n\n");
+static void usage(const char *argv0) {
+    printf("Usage: %s [--list] [FILTER]\n"
+           "  FILTER   run only the test suites whose name contains FILTER\n"
+           "  --list   print the names of the test suites and exit\n", argv0);
+}
+
+int main(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            usage(argv[0]);
+            return EXIT_SUCCESS;
+        } else if (strcmp(argv[i], "--list") == 0) {
+            g_test_list_only = 1;
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "unknown option '%s'\n", argv[i]);
+            usage(argv[0]);
+            return EXIT_FAILURE;
+        } else {
+            g_test_filter = argv[i];
+        }
+    }
+
+    /* The suites must never read the developer's real configuration: HOME is
+     * a fixture and the XDG_* variables, which override it, are unset (a
+     * test that needs one sets it itself). */
+    unsetenv("XDG_CONFIG_HOME");
+    unsetenv("XDG_DATA_HOME");
+    unsetenv("XDG_CACHE_HOME");
+    if (!g_test_list_only) setenv("HOME", TP("home"), 1);
+
+    if (!g_test_list_only)
+        printf("--- email-cli Unit Test Suite ---\n\n");
 
     // Suppress mirror of ERROR logs to stderr during testing
     logger_set_stderr(0);
@@ -111,7 +146,7 @@ int main() {
     RUN_TEST(test_html_render_url_color);
     RUN_TEST(test_input_line);
     RUN_TEST(test_path_complete);
-    run_json_util_tests();
+    RUN_TEST(run_json_util_tests);
     RUN_TEST(test_gmail_auth);
     RUN_TEST(test_gmail_client);
     RUN_TEST(test_label_idx);
@@ -125,6 +160,12 @@ int main() {
     RUN_TEST(test_config_load_account);
     RUN_TEST(test_config_migrate);
     RUN_TEST(test_manifest_dmarc_flags);
+
+    if (g_test_list_only) return EXIT_SUCCESS;
+    if (g_test_filter && g_tests_selected == 0) {
+        fprintf(stderr, "no test suite matches '%s'\n", g_test_filter);
+        return EXIT_FAILURE;
+    }
 
     printf("\n--- Test Results ---\n");
     printf("Tests Run:    %d\n", g_tests_run);

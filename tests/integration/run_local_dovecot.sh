@@ -24,13 +24,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-IMAP_PORT=14993
 TEST_USER="itest-append"
 TEST_PASS="testpass123"
 CURRENT_UID="$(id -u)"
 CURRENT_GID="$(id -g)"
 
-TMPDIR_BASE="$(mktemp -d /tmp/dovecot-itest-XXXXXX)"
+# Every path of the run is under build/ and carries this shell's pid; nothing
+# is written to the system temp directory.  The port is whatever the kernel says is free.
+WORK_BASE="$PROJECT_ROOT/build/tests/integration"
+TMPDIR_BASE="$WORK_BASE/work-$$"
+mkdir -p "$TMPDIR_BASE"
+gcc "$PROJECT_ROOT/tests/functional/free_port.c" -o "$TMPDIR_BASE/free_port"
+IMAP_PORT="$("$TMPDIR_BASE/free_port")"
 DOVE_BASE="$TMPDIR_BASE/run"           # Dovecot runtime (pids, sockets)
 MAIL_HOME="$TMPDIR_BASE/mail"          # Maildir root for test user
 CERTS_DIR="$TMPDIR_BASE/certs"
@@ -63,7 +68,13 @@ dovecot_stop() {
 
 cleanup() {
     dovecot_stop
-    sudo rm -rf "/tmp/dovecot-itest-${TMPDIR_BASE##*/tmp/dovecot-itest-}"
+    # sudo: dovecot created files here as another user.  A guard, then a
+    # literal prefix with only the pid suffix expanded.
+    case "$TMPDIR_BASE" in
+        "$WORK_BASE"/work-*) ;;
+        *) echo "ERROR: refusing unsafe path '$TMPDIR_BASE'" >&2; return 1 ;;
+    esac
+    sudo rm -rf "$PROJECT_ROOT/build/tests/integration/work-${TMPDIR_BASE##*/work-}"
 }
 trap cleanup EXIT
 
@@ -96,8 +107,18 @@ fi
 
 mkdir -p "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR" "$EMAIL_HOME"
 # Dovecot auth/imap daemons run as system user 'dovecot' (uid≠current user)
-# and must be able to enter the temp directory.
+# and must be able to enter the work directory — and every directory above it.
 chmod 755 "$TMPDIR_BASE" "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR"
+walk="$TMPDIR_BASE"
+while [ "$walk" != "/" ]; do
+    perms="$(stat -c %A "$walk")"
+    if [ "${perms:9:1}" != "x" ] && [ "${perms:9:1}" != "t" ]; then
+        echo "ERROR: $walk is not searchable by other users ($perms); the dovecot" >&2
+        echo "       user could not reach the work directory under build/." >&2
+        exit 1
+    fi
+    walk="$(dirname "$walk")"
+done
 
 openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
     -keyout "$CERTS_DIR/server.key" \

@@ -17,10 +17,12 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "test_scratch.h"
 
 /* Minimal RUN_TEST compatible with g_tests_run / g_tests_failed globals */
 #ifndef RUN_TEST
 #define RUN_TEST(fn) do { \
+    if (!test_selected(#fn)) break; \
     printf("  %-50s", #fn); \
     int _before = g_tests_failed; \
     fn(); \
@@ -45,22 +47,27 @@ static char g_root[256];        /* per-run temp dir for filesystem tests */
 #define WAIT_MS   3000
 #define SETTLE_MS 150
 #define ROWS 24
-#define COLS 80
+/* The fixture paths are long (they sit under build/), so the terminal is wide
+ * enough that a path and the RESULT: prefix do not wrap. */
+#define COLS 200
 
 /* ── Temp filesystem helpers ─────────────────────────────────────────── */
 
 static void fs_setup(void)
 {
-    snprintf(g_root, sizeof(g_root), "/tmp/il_pty_%d", (int)getpid());
-    mkdir(g_root, 0755);
+    snprintf(g_root, sizeof(g_root), "%s", TP("il_pty"));
+    if (mkdir(g_root, 0755) != 0) {  /* a fixture that cannot be made fails the run */
+        perror("mkdir il_pty");
+        exit(EXIT_FAILURE);
+    }
 }
 
 static void fs_teardown(void)
 {
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "rm -rf '/tmp/il_pty_%d'", (int)getpid());
-    int r = system(cmd);
-    (void)r;
+    if (test_rmtree(g_root) != 0) {
+        fprintf(stderr, "il_pty: cannot remove %s\n", g_root);
+        g_tests_failed++;
+    }
 }
 
 static void make_file(const char *dir, const char *name)
@@ -251,9 +258,9 @@ static void test_typed_text_in_result(void)
     ASSERT(s != NULL, "harness launched");
     ASSERT_WAIT_FOR(s, "Path:", WAIT_MS);
 
-    pty_send_str(s, "/tmp/myfile.txt");
+    pty_send_str(s, "/typed/myfile.txt");
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "RESULT: /tmp/myfile.txt", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "RESULT: /typed/myfile.txt", WAIT_MS);
     pty_close(s);
 }
 

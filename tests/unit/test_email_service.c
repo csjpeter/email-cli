@@ -1197,9 +1197,9 @@ void test_email_service(void) {
         Config sv_cfg = {0};
         sv_cfg.folder = (char *)sv_folder;
 
-        /* Use /tmp as output dir to avoid touching $HOME */
+        /* Use the scratch directory as output dir to avoid touching $HOME */
         char sv_dest[256];
-        snprintf(sv_dest, sizeof(sv_dest), "/tmp/email_cli_test_%d", (int)getpid());
+        snprintf(sv_dest, sizeof(sv_dest), "%s/save-attachment-%d", test_scratch_dir(), (int)getpid());
         mkdir(sv_dest, 0700);
 
         /* Capture stdout (prints "Saved: ...") */
@@ -1247,7 +1247,7 @@ void test_email_service(void) {
         if (null_sf2 >= 0) { dup2(null_sf2, STDERR_FILENO); close(null_sf2); }
 
         int rc_sf2 = email_service_save_attachment(&sf2_cfg, sf2_uid,
-                                                    "nonexistent.txt", "/tmp");
+                                                    "nonexistent.txt", TP(""));
 
         fflush(stderr);
         dup2(saved_sf2_err, STDERR_FILENO); close(saved_sf2_err);
@@ -1266,7 +1266,7 @@ void test_email_service(void) {
         if (null_sf3 >= 0) { dup2(null_sf3, STDERR_FILENO); close(null_sf3); }
 
         int rc_sf3 = email_service_save_attachment(&sf3_cfg, "0000000000009998",
-                                                    "any.txt", "/tmp");
+                                                    "any.txt", TP(""));
 
         fflush(stderr);
         dup2(saved_sf3_err, STDERR_FILENO); close(saved_sf3_err);

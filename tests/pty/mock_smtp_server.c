@@ -13,17 +13,18 @@
 #include <signal.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include "../common/mock_port.h"
 
 /**
  * @file mock_smtp_server.c
  * @brief Minimal TLS SMTP server for compose/send integration testing.
  *
- * Listens on port 9025 (configurable via MOCK_SMTP_PORT env var).
+ * Listens on a port the kernel picks (or MOCK_SMTP_PORT) and writes it to
+ * the file named by MOCK_SMTP_PORT_FILE.
  * Accepts one SMTP exchange, prints "RECEIVED" + message headers to stdout,
  * then accepts further connections until killed.
  */
 
-#define DEFAULT_PORT 9025
 
 static int readline_crlf_ssl(SSL *ssl, char *buf, int len) {
     int n = 0;
@@ -132,8 +133,7 @@ static void handle_client(SSL *ssl) {
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
 
-    const char *port_env = getenv("MOCK_SMTP_PORT");
-    int port = port_env ? atoi(port_env) : DEFAULT_PORT;
+    int port = mock_requested_port("MOCK_SMTP_PORT");   /* 0: the kernel picks */
 
     /* Load TLS certificate and key */
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
@@ -183,6 +183,8 @@ int main(void) {
         perror("listen"); close(srv); SSL_CTX_free(ctx); return 1;
     }
 
+    port = mock_publish_port(srv, "MOCK_SMTP_PORT_FILE");
+    if (port < 0) { close(srv); SSL_CTX_free(ctx); return 1; }
     printf("Mock SMTP server (TLS) listening on port %d\n", port);
     fflush(stdout);
 

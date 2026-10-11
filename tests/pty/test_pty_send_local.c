@@ -22,6 +22,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "test_scratch.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -51,13 +52,15 @@ static char g_editor_script[600];
 
 static pid_t g_imap_pid = -1;
 static pid_t g_smtp_pid = -1;
+static int   g_imap_port = 0;   /* both ports are picked by the kernel */
+static int   g_smtp_port = 0;
 
 #define WAIT_MS    8000
 #define SETTLE_MS   400
 #define ROWS 24
 #define COLS 120
 
-#define RUN_TEST(fn) do { printf("  %s...\n", #fn); fflush(stdout); fn(); } while(0)
+#define RUN_TEST(fn) do { if (!test_selected(#fn)) break; printf("  %s...\n", #fn); fflush(stdout); fn(); } while(0)
 
 /* Account directory under test HOME (username-based path) */
 #define ACCOUNT_DIR  "/.local/share/email-cli/accounts/testuser@example.com"
@@ -97,62 +100,41 @@ static void write_config(void) {
     snprintf(path, sizeof(path),
              "%s/.config/email-cli/accounts/testuser/config.ini", g_test_home);
     FILE *fp = fopen(path, "w");
-    if (!fp) return;
+    if (!fp) {                       /* a fixture that cannot be made fails the run */
+        fprintf(stderr, "send-local: cannot write %s\n", path);
+        g_tests_failed++;
+        return;
+    }
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser@example.com\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SMTP_HOST=smtps://localhost:9025\n"
-        "SMTP_PORT=9025\n"
+        "SMTP_HOST=smtps://localhost:%d\n"
+        "SMTP_PORT=%d\n"
         "SMTP_USER=testuser@example.com\n"
         "SMTP_PASS=testpass\n"
-        "SSL_NO_VERIFY=1\n");
+        "SSL_NO_VERIFY=1\n", g_imap_port, g_smtp_port, g_smtp_port);
     fclose(fp);
     chmod(path, 0600);
 }
 
 /* ── Server helpers ───────────────────────────────────────────────────── */
 
-static int probe_port(int port) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
-    struct sockaddr_in a = {0};
-    a.sin_family = AF_INET;
-    a.sin_port   = htons((uint16_t)port);
-    a.sin_addr.s_addr = htonl(0x7f000001);
-    int r = connect(fd, (struct sockaddr *)&a, sizeof(a));
-    close(fd);
-    return r;
-}
-
-static int start_server(const char *bin, pid_t *pid_out) {
-    /* Retry rather than give up on the first failure: a mock killed moments
-     * ago can still hold the port briefly, and at that instant it looks
-     * exactly like a foreign server squatting on it.  Only a conflict that
-     * outlives several attempts is worth reporting — and it must be reported,
-     * because the connect probe cannot tell our server from a stranger's, and
-     * testing against someone else's mailbox is how this stayed hidden. */
-    for (int attempt = 0; attempt < 15; attempt++) {
-        *pid_out = fork();
-        if (*pid_out < 0) return -1;
-        if (*pid_out == 0) {
-            int devnull = open("/dev/null", O_WRONLY);
-            if (devnull >= 0) { dup2(devnull, 1); dup2(devnull, 2); close(devnull); }
-            execl(bin, bin, (char *)NULL);
-            _exit(127);
-        }
-        usleep(attempt == 0 ? 800000 : 200000);
-
-        int _st = 0;
-        if (waitpid(*pid_out, &_st, WNOHANG) != *pid_out)
-            return 0;               /* still running: the port is ours */
-        *pid_out = -1;               /* bind failed; wait and try again */
+/* Start a mock.  *port is 0 the first time (the kernel picks) and the port of
+ * the previous instance on a restart, because the config names it.  The call
+ * returns once the mock has bound the port and published it. */
+static int start_server(const char *bin, const char *prefix, pid_t *pid_out,
+                        int *port) {
+    int bound = 0;
+    *pid_out = test_spawn_mock(bin, prefix, *port, &bound);
+    if (*pid_out < 0) {
+        fprintf(stderr, "send-local: %s did not start\n", bin);
+        g_tests_failed++;
+        return -1;
     }
-    fprintf(stderr, "send-local: mock server could not bind its port after "
-                    "15 attempts - it is held by another process. "
-                    "Refusing to test against it.\n");
-    return -1;
+    *port = bound;
+    return 0;
 }
 
 static void stop_server(pid_t *pid_out) {
@@ -163,27 +145,14 @@ static void stop_server(pid_t *pid_out) {
     }
 }
 
-/* Kill any process still listening on the given TCP port (cleanup of
- * lingering instances from previous test runs). */
-static void kill_listeners_on_port(int port) {
-    char cmd[80];
-    snprintf(cmd, sizeof(cmd), "fuser -k -KILL %d/tcp >/dev/null 2>&1", port);
-    int _unused = system(cmd); (void)_unused;
-    usleep(200000);
-}
-
 static void restart_imap(void) {
     stop_server(&g_imap_pid);
-    usleep(200000);
-    start_server(g_imap_bin, &g_imap_pid);
-    for (int i = 0; i < 30 && probe_port(9993) != 0; i++) usleep(100000);
+    (void)start_server(g_imap_bin, "MOCK_IMAP", &g_imap_pid, &g_imap_port);
 }
 
 static void restart_smtp(void) {
     stop_server(&g_smtp_pid);
-    usleep(200000);
-    start_server(g_smtp_bin, &g_smtp_pid);
-    for (int i = 0; i < 30 && probe_port(9025) != 0; i++) usleep(100000);
+    (void)start_server(g_smtp_bin, "MOCK_SMTP", &g_smtp_pid, &g_smtp_port);
 }
 
 /* ── TUI / sync runners ───────────────────────────────────────────────── */
@@ -326,8 +295,7 @@ static void test_successful_send_saves_locally(void) {
 static void test_failed_send_saves_to_drafts(void) {
     pending_reset();
     restart_imap();
-    stop_server(&g_smtp_pid);       /* kill the server we started */
-    kill_listeners_on_port(9025);   /* kill any lingering instance */
+    stop_server(&g_smtp_pid);       /* nothing listens on its port now */
     write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "TC-SL-02: reached inbox");
@@ -451,11 +419,8 @@ int main(int argc, char **argv) {
     snprintf(g_imap_bin, sizeof(g_imap_bin), "%s", argv[3]);
     snprintf(g_smtp_bin, sizeof(g_smtp_bin), "%s", argv[4]);
 
-    snprintf(g_test_home, sizeof(g_test_home), "/tmp/test-send-local-XXXXXX");
-    if (!mkdtemp(g_test_home)) {
-        perror("mkdtemp");
-        return 1;
-    }
+    snprintf(g_test_home, sizeof(g_test_home), "%s", TP("home"));
+    if (mkdir(g_test_home, 0700) != 0) { perror("mkdir home"); return 1; }
     if (getenv("HOME"))
         snprintf(g_old_home, sizeof(g_old_home), "%s", getenv("HOME"));
     setenv("HOME", g_test_home, 1);
@@ -466,12 +431,14 @@ int main(int argc, char **argv) {
     unsetenv("XDG_DATA_HOME");
     unsetenv("XDG_CACHE_HOME");
 
+    /* The mocks first: the config written next names their ports. */
+    restart_imap();
+    restart_smtp();
+    if (g_imap_pid < 0 || g_smtp_pid < 0) return 1;
+
     mkdirs();
     write_config();
     write_editor_script();
-
-    restart_imap();
-    restart_smtp();
 
     printf("--- US-SL-01: Successful send saves locally ---\n");
     RUN_TEST(test_successful_send_saves_locally);

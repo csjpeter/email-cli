@@ -7,6 +7,7 @@
 #include "gmail_client.h"
 #include "local_store.h"
 #include "config.h"
+#include "fs_util.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -277,14 +278,15 @@ static void setup_gmail_test_env(const char *home) {
  * Used by network-based tests that need a clean message store to avoid
  * interference from messages written by earlier tests. */
 static void reset_gmail_test_env(void) {
-    int _sr = system("rm -rf '/tmp/email-cli-gmail-sync-test'"); (void)_sr;
-    setup_gmail_test_env("/tmp/email-cli-gmail-sync-test");
+    if (test_rmtree(TP("email-cli-gmail-sync-test")) != 0)
+        fprintf(stderr, "gmail sync test: cannot reset the test home\n");
+    setup_gmail_test_env(TP("email-cli-gmail-sync-test"));
 }
 
 static void test_repair_archive_flags_clears_unseen(void) {
     /* A message synced to _nolabel while still having UNREAD label → UNSEEN
      * flag should be cleared by repair_archive_flags(). */
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     const char *uid = "0000000000aabbcc";
@@ -311,7 +313,7 @@ static void test_repair_archive_flags_clears_unseen(void) {
 
 static void test_repair_archive_flags_preserves_flagged(void) {
     /* STARRED (FLAGGED bit) must survive the repair. */
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     const char *uid = "0000000000aabbdd";
@@ -334,7 +336,7 @@ static void test_repair_archive_flags_preserves_flagged(void) {
 
 static void test_repair_archive_flags_noop_when_already_read(void) {
     /* If UNSEEN is already 0, the .hdr should not be rewritten (flags stay). */
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     const char *uid = "0000000000aabbee";
@@ -374,7 +376,7 @@ static void test_build_hdr_archive_unread_flags(void) {
 /* ── pending_fetch queue (local_store) ───────────────────────────────── */
 
 static void test_pending_fetch_empty_initially(void) {
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     local_pending_fetch_clear();
@@ -386,7 +388,7 @@ static void test_pending_fetch_empty_initially(void) {
 }
 
 static void test_pending_fetch_add_and_load(void) {
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
     local_pending_fetch_clear();
 
@@ -409,7 +411,7 @@ static void test_pending_fetch_add_and_load(void) {
 }
 
 static void test_pending_fetch_remove(void) {
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
     local_pending_fetch_clear();
 
@@ -430,7 +432,7 @@ static void test_pending_fetch_remove(void) {
 }
 
 static void test_pending_fetch_clear(void) {
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     local_pending_fetch_add("cccc000000000001");
@@ -442,7 +444,7 @@ static void test_pending_fetch_clear(void) {
 }
 
 static void test_pending_fetch_count_matches_load(void) {
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
     local_pending_fetch_clear();
 
@@ -471,7 +473,7 @@ static void test_pending_fetch_count_matches_load(void) {
  */
 static void test_rebuild_indexes_empty_store(void) {
     /* With no messages, rebuild_indexes is a no-op but must not crash. */
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     int rc = gmail_sync_rebuild_indexes();
@@ -479,7 +481,7 @@ static void test_rebuild_indexes_empty_store(void) {
 }
 
 static void test_rebuild_indexes_basic(void) {
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     /* Write a few .hdr files with known labels */
@@ -528,7 +530,7 @@ static void test_rebuild_indexes_nolabel(void) {
     /* A message with only CATEGORY_ labels and no real labels → goes to _nolabel.
      * Note: UNREAD is a real (non-CATEGORY_) label, so we must NOT include it
      * here — otherwise has_real=1 and the message won't go to _nolabel. */
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     const char *uid = "2200000000000001";
@@ -563,7 +565,7 @@ static void test_rebuild_indexes_nolabel(void) {
 static void test_rebuild_indexes_many_labels(void) {
     /* Write many messages to force realloc in rebuild_label_indexes.
      * Each message has 6 labels → ~cap*5 pairs initial cap, then grows. */
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     /* Write 12 messages, each with multiple labels, to force the realloc path */
@@ -590,7 +592,7 @@ static void test_rebuild_indexes_many_labels(void) {
 
 static void test_rebuild_indexes_trash(void) {
     /* TRASH label should be indexed as _trash */
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     const char *uid = "4400000000000001";
@@ -613,7 +615,7 @@ static void test_rebuild_indexes_flags_sync(void) {
     /* A message where flags integer is inconsistent with labels:
      * labels say UNREAD,STARRED but flags field says 0.
      * rebuild_label_indexes must update the flags field. */
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     const char *uid = "5500000000000001";
@@ -634,7 +636,7 @@ static void test_rebuild_indexes_flags_sync(void) {
 
 static void test_rebuild_indexes_hdr_no_tabs(void) {
     /* A malformed .hdr with no tabs should be gracefully skipped. */
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     const char *uid = "6600000000000001";
@@ -652,7 +654,7 @@ static void test_incremental_with_saved_history_no_server(void) {
     /* Verify that gmail_sync_incremental returns -2 whenever there is no
      * saved historyId, regardless of prior store state.  This exercises the
      * early-return branch in gmail_sync_incremental (lines 794-798). */
-    const char home[] = "/tmp/email-cli-gmail-sync-test";
+    const char *home = TP("email-cli-gmail-sync-test");
     setup_gmail_test_env(home);
 
     /* Ensure no history id is saved (fresh environment) */
@@ -957,10 +959,8 @@ static void test_fetch_pending_with_rules(void) {
 
     /* Write a rules.ini for the test account */
     char rules_dir[512];
-    snprintf(rules_dir, sizeof(rules_dir),
-             "/tmp/email-cli-gmail-sync-test/.config/email-cli/accounts/csjpeterjaket@gmail.com");
-    /* Use system() with literal paths — no variable in rm -rf */
-    int _sr2 = system("mkdir -p '/tmp/email-cli-gmail-sync-test/.config/email-cli/accounts/csjpeterjaket@gmail.com'"); (void)_sr2;
+    snprintf(rules_dir, sizeof(rules_dir), "%s", TP("email-cli-gmail-sync-test/.config/email-cli/accounts/csjpeterjaket@gmail.com"));
+    ASSERT(fs_mkdir_p(rules_dir, 0700) == 0, "rules dir created");
 
     char rules_path[600];
     snprintf(rules_path, sizeof(rules_path), "%s/rules.ini", rules_dir);

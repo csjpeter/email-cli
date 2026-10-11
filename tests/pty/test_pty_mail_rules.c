@@ -25,6 +25,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "test_scratch.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,7 +41,7 @@
 int g_tests_run    = 0;
 int g_tests_failed = 0;
 
-#define RUN_TEST(fn) do { printf("  %s...\n", #fn); fn(); } while(0)
+#define RUN_TEST(fn) do { if (!test_selected(#fn)) break; printf("  %s...\n", #fn); fn(); } while(0)
 
 /* ── Configuration ───────────────────────────────────────────────────── */
 
@@ -56,6 +57,7 @@ int g_tests_failed = 0;
 /* ── Global state ────────────────────────────────────────────────────── */
 
 static pid_t g_mock_pid  = -1;
+static int   g_imap_port = 0;   /* the mock's port, picked by the kernel */
 static char  g_test_home[256];
 static char  g_old_home[512];
 static char  g_sync_bin[512];
@@ -78,13 +80,17 @@ static void write_config(void) {
     mkdir(d4, 0700);
     snprintf(path, sizeof(path), "%s/config.ini", d4);
     FILE *fp = fopen(path, "w");
-    if (!fp) return;
+    if (!fp) {                       /* a fixture that cannot be made fails the run */
+        fprintf(stderr, "mail-rules: cannot write %s\n", path);
+        g_tests_failed++;
+        return;
+    }
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SSL_NO_VERIFY=1\n");
+        "SSL_NO_VERIFY=1\n", g_imap_port);
     fclose(fp);
     chmod(path, 0600);
 }
@@ -116,56 +122,29 @@ static void reset_all_state(void) {
      * flushing its manifest.  Wiping the store while that write is in flight
      * lets stale flags reappear, so give it a moment to finish first. */
     usleep(500000);
-    char cmd[600];
-    snprintf(cmd, sizeof(cmd),
-             "rm -rf '/tmp/email-cli-rules-test-%d/.local/share/email-cli'",
-             (int)getpid());
-    int _rc = system(cmd); (void)_rc;
+    char store[600];
+    snprintf(store, sizeof(store), "%s/.local/share/email-cli", g_test_home);
+    if (test_rmtree(store) != 0) {
+        fprintf(stderr, "mail-rules: cannot wipe %s\n", store);
+        g_tests_failed++;
+    }
 }
 
 /* ── Mock IMAP server ────────────────────────────────────────────────── */
 
-static int probe_server(void) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
-    struct sockaddr_in addr = {
-        .sin_family      = AF_INET,
-        .sin_port        = htons(9993),
-        .sin_addr.s_addr = htonl(INADDR_LOOPBACK)
-    };
-    int ret = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    close(fd);
-    return ret;
-}
-
 static int start_mock_server(void) {
-    /* Retry rather than give up on the first failure: a mock killed moments
-     * ago can still hold the port briefly, and at that instant it looks
-     * exactly like a foreign server squatting on it.  Only a conflict that
-     * outlives several attempts is worth reporting — and it must be reported,
-     * because the connect probe cannot tell our server from a stranger's, and
-     * testing against someone else's mailbox is how this stayed hidden. */
-    for (int attempt = 0; attempt < 15; attempt++) {
-        g_mock_pid = fork();
-        if (g_mock_pid < 0) return -1;
-        if (g_mock_pid == 0) {
-            /* stdout is chatty; stderr is kept so "bind failed" stays visible. */
-            int devnull = open("/dev/null", O_WRONLY);
-            if (devnull >= 0) { dup2(devnull, 1); close(devnull); }
-            execl(g_mock_bin, "mock_imap_server", (char *)NULL);
-            _exit(127);
-        }
-        usleep(attempt == 0 ? 800000 : 200000);
-
-        int _st = 0;
-        if (waitpid(g_mock_pid, &_st, WNOHANG) != g_mock_pid)
-            return 0;               /* still running: the port is ours */
-        g_mock_pid = -1;               /* bind failed; wait and try again */
+    /* The first start lets the kernel pick the port; a restart asks for the
+     * same one, because the config names it.  test_spawn_mock() returns when
+     * the mock has bound the port and said which, so nothing is probed. */
+    int port = 0;
+    g_mock_pid = test_spawn_mock(g_mock_bin, "MOCK_IMAP", g_imap_port, &port);
+    if (g_mock_pid < 0) {
+        fprintf(stderr, "mail-rules: the mock IMAP server did not start\n");
+        g_tests_failed++;
+        return -1;
     }
-    fprintf(stderr, "mail-rules: mock server could not bind its port after "
-                    "15 attempts - it is held by another process. "
-                    "Refusing to test against it.\n");
-    return -1;
+    g_imap_port = port;
+    return 0;
 }
 
 static void stop_mock_server(void) {
@@ -177,15 +156,8 @@ static void stop_mock_server(void) {
 }
 
 static void restart_mock(void) {
-    if (g_mock_pid > 0) {
-        kill(g_mock_pid, SIGKILL);
-        waitpid(g_mock_pid, NULL, 0);
-        g_mock_pid = -1;
-    }
-    usleep(200000);
-    if (start_mock_server() != 0) return;   /* already reported */
-    for (int i = 0; i < 30 && probe_server() != 0; i++)
-        usleep(100000);
+    stop_mock_server();
+    (void)start_mock_server();   /* a failure is already counted */
 }
 
 /* ── Sync / TUI helpers ──────────────────────────────────────────────── */
@@ -485,14 +457,14 @@ int main(int argc, char *argv[]) {
     const char *home = getenv("HOME");
     if (home) snprintf(g_old_home, sizeof(g_old_home), "%s", home);
 
-    snprintf(g_test_home, sizeof(g_test_home),
-             "/tmp/email-cli-rules-test-%d", getpid());
+    snprintf(g_test_home, sizeof(g_test_home), "%s", TP("home"));
     setenv("HOME", g_test_home, 1);
     unsetenv("XDG_CONFIG_HOME");
     unsetenv("XDG_CACHE_HOME");
     unsetenv("XDG_DATA_HOME");
 
     mkdir(g_test_home, 0700);
+    if (start_mock_server() != 0) return EXIT_FAILURE;   /* the config names its port */
     write_config();
 
     printf("--- Mail rules: no rules ---\n");

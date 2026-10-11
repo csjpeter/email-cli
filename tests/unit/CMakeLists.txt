@@ -33,6 +33,7 @@ endif()
 
 set(TEST_SOURCES
     test_runner.c
+    ../common/test_scratch.c
     test_platform.c
     test_fs_util.c
     test_config.c
@@ -90,6 +91,8 @@ add_dependencies(test-runner test-tls-certs)
 target_compile_definitions(test-runner PRIVATE
     TEST_CERT_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.crt"
     TEST_KEY_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.key"
+    TEST_BUILD_DIR="${CMAKE_BINARY_DIR}"
+    TEST_CATEGORY="unit"
 )
 
 add_test(NAME UnitTests COMMAND test-runner)

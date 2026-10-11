@@ -313,10 +313,10 @@ void test_platform(void) {
            "platform_cache_dir default should contain '.cache'");
 
     /* XDG override */
-    setenv("XDG_CACHE_HOME", "/tmp/test-xdg-cache", 1);
+    setenv("XDG_CACHE_HOME", TP("test-xdg-cache"), 1);
     cache = platform_cache_dir();
     ASSERT(cache != NULL, "platform_cache_dir XDG should not return NULL");
-    ASSERT(strcmp(cache, "/tmp/test-xdg-cache") == 0,
+    ASSERT(strcmp(cache, TP("test-xdg-cache")) == 0,
            "platform_cache_dir should respect XDG_CACHE_HOME");
     unsetenv("XDG_CACHE_HOME");
 
@@ -330,10 +330,10 @@ void test_platform(void) {
            "platform_config_dir default should contain '.config'");
 
     /* XDG override */
-    setenv("XDG_CONFIG_HOME", "/tmp/test-xdg-config", 1);
+    setenv("XDG_CONFIG_HOME", TP("test-xdg-config"), 1);
     cfg = platform_config_dir();
     ASSERT(cfg != NULL, "platform_config_dir XDG should not return NULL");
-    ASSERT(strcmp(cfg, "/tmp/test-xdg-config") == 0,
+    ASSERT(strcmp(cfg, TP("test-xdg-config")) == 0,
            "platform_config_dir should respect XDG_CONFIG_HOME");
     unsetenv("XDG_CONFIG_HOME");
 }

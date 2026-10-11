@@ -274,7 +274,9 @@ static void test_build_empty_cc_omitted(void) {
 /* Write a small temp file and return a heap-allocated path, or NULL. */
 static char *make_tmp_attach(const char *content)
 {
-    char *path = strdup("/tmp/test-compose-attach-XXXXXX");
+    char *path = NULL;
+    if (asprintf(&path, "%s/test-compose-attach-XXXXXX", test_scratch_dir()) == -1)
+        return NULL;
     int fd = mkstemp(path);
     if (fd < 0) { free(path); return NULL; }
     size_t len = strlen(content);
@@ -294,7 +296,7 @@ static char *make_tmp_attach(const char *content)
 static char *make_tmp_attach_ext(const char *content, const char *suffix)
 {
     char *path = NULL;
-    if (asprintf(&path, "/tmp/test-compose-mime-XXXXXX%s", suffix) == -1) return NULL;
+    if (asprintf(&path, "%s/test-compose-mime-XXXXXX%s", test_scratch_dir(), suffix) == -1) return NULL;
     int fd = mkstemps(path, (int)strlen(suffix));
     if (fd < 0) { free(path); return NULL; }
     size_t len = strlen(content);
@@ -432,7 +434,7 @@ static void test_build_attachment_filename_in_disposition(void)
 
     /* Rename to something with a meaningful extension */
     char named[256];
-    snprintf(named, sizeof(named), "/tmp/report-%d.pdf", (int)getpid());
+    snprintf(named, sizeof(named), "%s/report-%d.pdf", test_scratch_dir(), (int)getpid());
     rename(path, named);
     free(path);
 
@@ -518,7 +520,7 @@ static void test_build_attachment_boundary_unique(void)
 static void test_build_attachment_nonexistent_file(void)
 {
     /* Non-existent file path → compose_build_message returns -1 */
-    const char *attachments[] = { "/tmp/no-such-file-xyz-404.bin", NULL };
+    const char *attachments[] = { TP("no-such-file-xyz-404.bin"), NULL };
     ComposeParams p = {
         .from = "a@b.com", .to = "c@d.com",
         .subject = "Bad", .body = ".",

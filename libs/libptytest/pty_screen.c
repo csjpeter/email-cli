@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-30 */
+/* Virtual screen buffer with a VT100 escape sequence parser. */
 /**
  * @file pty_screen.c
  * @brief Virtual screen buffer with VT100 escape sequence parser.

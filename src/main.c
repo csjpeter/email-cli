@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-24 */
+/* Entry point of email-cli: the batch and interactive command line client. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

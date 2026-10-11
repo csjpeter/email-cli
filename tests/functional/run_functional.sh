@@ -1,4 +1,8 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-03-25
+# Runs the functional test suite against the mock servers.
 
 # email-cli Functional Test Runner
 # Tests account isolation, CLI correctness, and multi-account scenarios.

@@ -1,4 +1,8 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-03-24
+# Build, test, package and install management script of email-cli.
 
 # email-cli management script
 # A user-friendly interface for building, testing, and running the project
@@ -25,7 +29,8 @@ show_help() {
     echo "  functional     Build and run the functional test suite"
     echo "  pty            Build and run all PTY (terminal) test suites"
     echo "  valgrind       Build and run unit tests with Valgrind"
-    echo "  check          Run every gate (test, functional, pty, valgrind) and summarise"
+    echo "  headers [DIR]  Fail on a source file or script without the source header"
+    echo "  check          Run every gate (headers, test, functional, pty, valgrind) and summarise"
     echo "  coverage       Run tests and generate coverage report"
     echo "  integration    Run integration test against Dovecot IMAP container"
     echo "  integration-local  Run APPEND integration test with local Dovecot (no Docker)"
@@ -37,6 +42,48 @@ show_help() {
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
+}
+
+# Every source file and script starts with the header of the source-header
+# policy: an SPDX licence tag that agrees with LICENSE, a copyright line with
+# the holder's name, a Created date that is valid and not in the future, and a
+# purpose line.  A shebang may precede it.  Prints each offender and fails.
+check_source_headers() {
+    local root="${1:-.}" today bad=0 total=0 f head_lines line
+    today=$(date +%F)
+    while IFS= read -r f; do
+        total=$((total + 1))
+        head_lines=$(head -n 8 "$f")
+        line=$(printf '%s\n' "$head_lines" | grep -m1 -E 'SPDX-License-Identifier: ') || line=""
+        line="${line##*SPDX-License-Identifier: }"
+        if [ "${line%% *}" != "GPL-3.0-only" ]; then
+            echo "header: $f: missing or wrong SPDX-License-Identifier (want GPL-3.0-only)" >&2
+            bad=$((bad + 1)); continue
+        fi
+        if ! printf '%s\n' "$head_lines" | grep -q -E 'Copyright \(c\) [0-9]{4} Peter Csaszar \(Császár Péter\)'; then
+            echo "header: $f: missing copyright line naming the holder" >&2
+            bad=$((bad + 1)); continue
+        fi
+        line=$(printf '%s\n' "$head_lines" | grep -m1 -E 'Created: [0-9]{4}-[0-9]{2}-[0-9]{2}') || line=""
+        created=$(printf '%s\n' "$line" | grep -o -E '[0-9]{4}-[0-9]{2}-[0-9]{2}') || created=""
+        if [ -z "$created" ] || [ "$(date -d "$created" +%F 2>&1)" != "$created" ]; then
+            echo "header: $f: missing or invalid Created: date" >&2
+            bad=$((bad + 1)); continue
+        fi
+        if [[ "$created" > "$today" ]]; then
+            echo "header: $f: Created: $created is in the future" >&2
+            bad=$((bad + 1)); continue
+        fi
+        # The purpose line is the line right after Created:, a non-empty comment.
+        if ! printf '%s\n' "$head_lines" | grep -A1 -E 'Created: [0-9]{4}-' | tail -n 1 \
+                | grep -q -E '^(/\* |# ).*[A-Za-z]'; then
+            echo "header: $f: missing purpose line after Created:" >&2
+            bad=$((bad + 1)); continue
+        fi
+    done < <(find "$root" \( -name .git -o -name 'build*' -o -name bin -o -name tmp \) -prune -o -type f \
+                 \( -name '*.c' -o -name '*.h' -o -name '*.sh' -o -name '*.cmake' -o -name CMakeLists.txt \) -print | sort)
+    echo "header: $total files checked, $bad without a valid header"
+    [ "$bad" -eq 0 ]
 }
 
 install_deps() {
@@ -396,12 +443,15 @@ case "$1" in
     imap-clean)
         ./tests/integration/run_integration.sh --clean
         ;;
+    headers)
+        check_source_headers "${2:-.}"
+        ;;
     check)
         # Every gate, each in its own run, one summary to compare with CI.
         # Coverage joins when it has a threshold that fails (EMAIL-15).
         check_rc=0
         check_summary=""
-        for gate in test functional pty valgrind; do
+        for gate in headers test functional pty valgrind; do
             echo "=== check: $gate ==="
             if "$0" "$gate"; then
                 check_summary="${check_summary}  $(printf '%-12s' "$gate") PASS"$'\n'

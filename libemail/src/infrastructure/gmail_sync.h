@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-17 */
+/* Interface of the Gmail synchronisation. */
 #ifndef GMAIL_SYNC_H
 #define GMAIL_SYNC_H
 

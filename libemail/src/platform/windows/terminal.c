@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-27 */
+/* Placeholder of the Windows terminal control. */
 /* Windows terminal implementation — to be implemented for MinGW-w64 */
 /* Uses Windows Console API: GetConsoleMode, SetConsoleMode,
  * GetConsoleScreenBufferInfo, ReadConsoleInput */

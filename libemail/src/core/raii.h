@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-24 */
+/* Cleanup-attribute macros that release strings, files and directories automatically. */
 #ifndef RAII_H
 #define RAII_H
 

@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-17 */
+/* Unit tests of the compose service. */
 #include "test_helpers.h"
 #include "compose_service.h"
 #include <fcntl.h>

@@ -1,4 +1,9 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-10-11
+# Checks the Debian package against the packaging policy.
+
 # Checks the Debian package against the packaging policy (EMAIL-16): lintian
 # clean, dependencies discovered by shlibdeps, gzipped man pages, changelog and
 # copyright present, directory modes independent of the caller's umask, and a

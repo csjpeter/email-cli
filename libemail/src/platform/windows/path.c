@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-27 */
+/* Placeholder of the Windows directory resolution. */
 /* Windows path implementation — to be implemented for MinGW-w64 */
 /* Uses %USERPROFILE%, %APPDATA%, %LOCALAPPDATA% */
 #include "../path.h"

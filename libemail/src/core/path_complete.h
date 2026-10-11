@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-12 */
+/* Interface of the path completion. */
 #ifndef CORE_PATH_COMPLETE_H
 #define CORE_PATH_COMPLETE_H
 

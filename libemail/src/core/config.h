@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-27 */
+/* The account configuration type shared by all layers. */
 #ifndef CORE_CONFIG_H
 #define CORE_CONFIG_H
 

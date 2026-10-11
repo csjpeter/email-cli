@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-26 */
+/* Local message storage with reverse digit bucketing and text indexes. */
 #include "local_store.h"
 #include "fs_util.h"
 #include "mime_util.h"

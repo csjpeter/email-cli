@@ -1,4 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-03-24
+# Top-level CMake build: options, shared flags and the sub-projects of email-cli.
+
 cmake_minimum_required(VERSION 3.10)
 project(email-cli VERSION 0.3.0 LANGUAGES C)
 

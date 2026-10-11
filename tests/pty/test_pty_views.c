@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-31 */
+/* PTY tests of every view and mode of the clients. */
 /**
  * @file test_pty_views.c
  * @brief PTY-based tests for all email-cli views and modes.

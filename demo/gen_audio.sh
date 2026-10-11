@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-04-18
+# Splits a narration file into per-section MP3s and measures their durations.
+
 # demo/gen_audio.sh — Parse narration file into per-section MP3s + durations.
 #
 # Usage:

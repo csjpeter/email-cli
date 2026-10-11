@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-24 */
+/* Entry point of email-tui: the full-screen interactive client. */
 /**
  * @file main_tui.c
  * @brief Entry point for email-tui — interactive full-screen TUI email client.

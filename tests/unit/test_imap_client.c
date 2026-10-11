@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-10 */
+/* Unit tests of the IMAP client. */
 #include "test_helpers.h"
 #include "imap_client.h"
 #include <stdlib.h>

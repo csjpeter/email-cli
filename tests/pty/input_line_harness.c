@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-12 */
+/* Test harness program for the input line and path completion PTY tests. */
 /**
  * @file input_line_harness.c
  * @brief Minimal test harness for InputLine + PathComplete PTY-based tests.

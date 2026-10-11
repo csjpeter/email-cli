@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-27 */
+/* POSIX terminal control with termios and ioctl. */
 /**
  * POSIX terminal implementation.
  * Uses termios(3), ioctl TIOCGWINSZ, wcwidth(3).

@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-23 */
+/* Interface of the mail rules engine. */
 #ifndef MAIL_RULES_H
 #define MAIL_RULES_H
 

@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-03-30
+# Build rules of the PTY terminal test library.
+
 cmake_minimum_required(VERSION 3.10)
 project(libptytest C)
 

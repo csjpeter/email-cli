@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-09 */
+/* Interface of the platform's process identity helpers. */
 #ifndef PLATFORM_PROCESS_H
 #define PLATFORM_PROCESS_H
 

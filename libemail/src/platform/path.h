@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-27 */
+/* Interface of the platform's home, config and cache directory resolution. */
 #ifndef PLATFORM_PATH_H
 #define PLATFORM_PATH_H
 

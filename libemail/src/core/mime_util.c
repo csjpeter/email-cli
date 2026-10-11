@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-26 */
+/* RFC 2822 header extraction and MIME body parsing. */
 #include "mime_util.h"
 #include "html_render.h"
 #include "raii.h"

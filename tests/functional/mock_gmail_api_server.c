@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-19 */
+/* Plain-HTTP mock Gmail REST API server for the functional tests. */
 /**
  * @file mock_gmail_api_server.c
  * @brief Minimal plain-HTTP mock Gmail REST API server for functional testing.

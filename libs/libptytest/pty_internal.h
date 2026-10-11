@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-30 */
+/* Data structures shared between the modules of libptytest. */
 #ifndef PTY_INTERNAL_H
 #define PTY_INTERNAL_H
 

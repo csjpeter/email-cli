@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-13 */
+/* PTY tests of the compose, reply and send commands of email-tui. */
 /**
  * @file test_compose_pty.c
  * @brief PTY tests for email-tui compose/reply/send commands.

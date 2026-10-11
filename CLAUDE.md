@@ -28,7 +28,7 @@ The ones that bind every task:
   owner's private domain appears in no file.
 
 Working through the approved tickets of this project by itself is the
-`ticket-queue` skill; the supervisor may ask for one ticket by key.
+`work-on-tickets` skill; the supervisor may ask for one ticket by key.
 
 ## Build Commands
 

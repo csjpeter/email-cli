@@ -40,6 +40,15 @@ echo "$list" | grep '^-.*usr/share/man/man1/' | grep -qv '\.1\.gz$' && bad "1.8 
 [ "$(echo "$list" | grep -c 'usr/share/man/man1/.*\.1\.gz$')" -eq 5 ] && ok "1.9 five man pages" || bad "1.9 man page count"
 echo "$list" | grep '^d' | grep -qv '^drwxr-xr-x' && bad "1.10 a directory is not 0755" || ok "1.10 every directory is 0755"
 
+# 1b. The package carries its commit and build date as XB- control fields
+# (EMAIL-75).  A tree with uncommitted changes adds "+dirty" to the commit.
+head=$(git rev-parse --short=12 HEAD)
+commit=$(dpkg-deb -f "$deb" XB-Git-Commit)
+case "$commit" in "$head"|"$head+dirty") ok "1.11 XB-Git-Commit is $commit" ;; *) bad "1.11 XB-Git-Commit '$commit', HEAD is $head" ;; esac
+bdate=$(dpkg-deb -f "$deb" XB-Build-Date)
+echo "$bdate" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' && ok "1.12 XB-Build-Date is $bdate" || bad "1.12 XB-Build-Date '$bdate'"
+[ "$(dpkg-deb -f "$deb" Version)" = "$(dpkg-deb -f "$deb" Version | tr -d '+ ')" ] && ok "1.13 Version carries no build metadata" || bad "1.13 Version polluted"
+
 # 2. A lintian finding fails the run and leaves build/packages/ empty.
 mkdir -p "$STUBS" || exit 1
 printf '#!/bin/sh\necho "stub lintian: E: invented-finding" >&2\nexit 1\n' > "$STUBS/lintian"

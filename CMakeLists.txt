@@ -164,6 +164,10 @@ add_custom_target(email-cli-docs ALL DEPENDS ${EMAIL_CLI_MAN_GZ} "${_changelog}.
 install(FILES ${EMAIL_CLI_MAN_GZ} DESTINATION share/man/man1)
 install(FILES "${_changelog}.gz" DESTINATION share/doc/email-cli)
 install(FILES packaging/copyright DESTINATION share/doc/email-cli)
+# The XB-Git-Commit / XB-Build-Date fields are deliberate, not a defect; the
+# override file states why, next to the package that carries them.
+install(FILES packaging/lintian-overrides
+        DESTINATION share/lintian/overrides RENAME email-cli)
 
 # Claude skill: tells an AI agent when and how to use the CLI
 # (policies/cli-skill-model.md).  The package never writes into a home.
@@ -193,6 +197,10 @@ set(CPACK_DEBIAN_PACKAGE_PRIORITY      "optional")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS      ON)
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER    "${CPACK_PACKAGE_CONTACT}")
 set(CPACK_DEBIAN_FILE_NAME             "DEB-DEFAULT")
+# XB-Git-Commit and XB-Build-Date: CPack has no control-field variable, so a
+# post-build script adds them (packaging policy, "Identifying a build").
+set(CPACK_EMAIL_SOURCE_DIR             "${CMAKE_SOURCE_DIR}")
+set(CPACK_POST_BUILD_SCRIPTS           "${CMAKE_SOURCE_DIR}/cmake/deb_build_info.cmake")
 
 # RPM-specific
 set(CPACK_RPM_PACKAGE_LICENSE          "GPL-3.0-only")

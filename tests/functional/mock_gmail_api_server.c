@@ -506,6 +506,36 @@ static void handle_history(int fd) {
     send_json(fd, body);
 }
 
+/**
+ * Log the JSON body of a users.messages.modify request, so tests can see
+ * which label IDs the client asked to add or remove.  The headers are
+ * already in buf; the body is read up to Content-Length.
+ */
+static void log_modify_body(int fd, char *buf, int buf_len,
+                            const char *id, int id_len) {
+    const char *cl = strstr(buf, "Content-Length:");
+    if (!cl) cl = strstr(buf, "content-length:");
+    int want = cl ? atoi(cl + 15) : 0;
+    char *hend = strstr(buf, "\r\n\r\n");
+    char body[2048] = {0};
+    int have = 0;
+    if (hend) {
+        hend += 4;
+        have = buf_len - (int)(hend - buf);
+        if (have < 0) have = 0;
+        if (have > (int)sizeof(body) - 1) have = (int)sizeof(body) - 1;
+        memcpy(body, hend, (size_t)have);
+    }
+    while (have < want && have < (int)sizeof(body) - 1) {
+        ssize_t n = read(fd, body + have, (size_t)((int)sizeof(body) - 1 - have));
+        if (n <= 0) break;
+        have += (int)n;
+    }
+    body[have] = '\0';
+    printf("Mock Gmail: MODIFY %.*s %s\n", id_len, id, body);
+    fflush(stdout);
+}
+
 /* ── Request dispatcher ───────────────────────────────────────────── */
 
 /**
@@ -513,7 +543,8 @@ static void handle_history(int fd) {
  */
 static void handle_connection(int fd) {
     char buf[8192];
-    if (read_request(fd, buf, (int)sizeof(buf)) <= 0) return;
+    int buf_len = read_request(fd, buf, (int)sizeof(buf));
+    if (buf_len <= 0) return;
 
     /* Extract request line: "GET /path?query HTTP/1.x" */
     char method[8] = {0};
@@ -571,6 +602,9 @@ static void handle_connection(int fd) {
             /* Check for sub-path (modify / trash / untrash) */
             if (*id_end == '/') {
                 /* POST .../modify, .../trash, .../untrash → accept, return {} */
+                if (strncmp(id_end, "/modify", 7) == 0)
+                    log_modify_body(fd, buf, buf_len, id_start,
+                                    (int)(id_end - id_start));
                 send_json(fd, "{}");
                 return;
             }

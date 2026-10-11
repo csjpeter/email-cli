@@ -949,6 +949,7 @@ static void test_fetch_pending_with_rules(void) {
      * so apply_rules_to_new_message is called.  Covers lines 109-167. */
     reset_gmail_test_env();
     local_pending_fetch_clear();
+    local_pending_label_clear();
 
     /* Write a rules.ini for the test account */
     char rules_dir[512];
@@ -987,6 +988,58 @@ static void test_fetch_pending_with_rules(void) {
     ASSERT(fetched == 1, "fetch_rules: 1 message downloaded");
     /* Rule applied — message should be fetched (rules firing doesn't prevent storage) */
     ASSERT(local_msg_exists("", uid), "fetch_rules: .eml saved after rule application");
+
+    /* EMAIL-20: the label the rule added must be queued for Google */
+    int qn = 0;
+    PendingLabel *q = local_pending_label_load(&qn);
+    ASSERT(qn == 1 && q != NULL, "fetch_rules: one label change queued for the server");
+    if (qn == 1 && q) {
+        ASSERT(strcmp(q[0].uid, uid) == 0, "fetch_rules: queued for the fetched message");
+        ASSERT(strcmp(q[0].label, "Filtered") == 0, "fetch_rules: queued label is the rule's");
+        ASSERT(q[0].add == 1, "fetch_rules: queued as an add");
+    }
+    free(q);
+    local_pending_label_clear();
+}
+
+static void test_pending_label_queue(void) {
+    reset_gmail_test_env();
+    local_pending_label_clear();
+
+    int n = -1;
+    PendingLabel *none = local_pending_label_load(&n);
+    ASSERT(none == NULL && n == 0, "pending_label: empty queue loads nothing");
+
+    ASSERT(local_pending_label_add("aaaa000000000001", "Work", 1) == 0,
+           "pending_label: add");
+    ASSERT(local_pending_label_add("aaaa000000000001", "UNREAD", 0) == 0,
+           "pending_label: remove");
+    ASSERT(local_pending_label_add("aaaa000000000002", "Label with space", 1) == 0,
+           "pending_label: name with a space is kept whole");
+    ASSERT(local_pending_label_add("aaaa000000000002", "bad\tname", 1) == -1,
+           "pending_label: a tab in the name is refused");
+
+    PendingLabel *q = local_pending_label_load(&n);
+    ASSERT(n == 3 && q != NULL, "pending_label: three entries loaded");
+    if (n == 3 && q) {
+        ASSERT(strcmp(q[0].label, "Work") == 0 && q[0].add == 1, "pending_label: entry 0");
+        ASSERT(strcmp(q[1].label, "UNREAD") == 0 && q[1].add == 0, "pending_label: entry 1");
+        ASSERT(strcmp(q[2].label, "Label with space") == 0 &&
+               strcmp(q[2].uid, "aaaa000000000002") == 0, "pending_label: entry 2");
+    }
+    free(q);
+
+    local_pending_label_clear();
+    q = local_pending_label_load(&n);
+    ASSERT(q == NULL && n == 0, "pending_label: clear empties the queue");
+}
+
+static void test_flush_pending_labels_empty(void) {
+    reset_gmail_test_env();
+    local_pending_label_clear();
+    /* No queue: nothing to send, so no client is needed at all. */
+    ASSERT(gmail_sync_flush_pending_labels(NULL) == 0,
+           "flush_labels: empty queue is a successful no-op");
 }
 
 static void test_reconcile_server_error(void) {
@@ -1435,6 +1488,8 @@ void test_gmail_sync(void) {
     RUN_TEST(test_fetch_pending_server_error);
     RUN_TEST(test_fetch_pending_nolabel_message);
     RUN_TEST(test_fetch_pending_with_rules);
+    RUN_TEST(test_pending_label_queue);
+    RUN_TEST(test_flush_pending_labels_empty);
     RUN_TEST(test_incremental_with_history);
     RUN_TEST(test_incremental_history_expired);
     RUN_TEST(test_sync_full_success);

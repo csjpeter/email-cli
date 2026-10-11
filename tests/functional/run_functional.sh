@@ -5824,6 +5824,98 @@ for kind97 in gmail smtp; do
 done
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 98 — Gmail mail rules reach Google (EMAIL-20)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 98: Gmail rules push labels to the server (EMAIL-20) ---"
+
+GR98_PORT=10090
+GR98_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail_rules98.log"
+(MOCK_GMAIL_PORT=$GR98_PORT MOCK_GMAIL_COUNT=3 \
+    MOCK_GMAIL_EMAIL="grules98@gmail.com" \
+    "$MOCK_GMAIL_BIN") >"$GR98_LOG" 2>&1 &
+GR98_PID=$!
+
+H_GR98="./build/tests/functional/homes/grules98-$$"
+ACCT_GR98="grules98@gmail.com"
+mkdir -p "$H_GR98/config/email-cli/accounts/$ACCT_GR98"
+mkdir -p "$H_GR98/data"
+cat > "$H_GR98/config/email-cli/accounts/$ACCT_GR98/config.ini" <<'GCFG97'
+EMAIL_HOST=
+EMAIL_USER=grules98@gmail.com
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=faketoken98
+GCFG97
+
+run_gr98_sync() {
+    (export XDG_CONFIG_HOME="$H_GR98/config"
+     export XDG_DATA_HOME="$H_GR98/data"
+     export XDG_CACHE_HOME="$H_GR98/cache"
+     export HOME="$H_GR98"
+     export GMAIL_TEST_TOKEN=testtoken98
+     export GMAIL_API_BASE_URL="http://localhost:$GR98_PORT/gmail/v1/users/me"
+     "$BIN_DIR/email-sync" "$@" 2>&1 && echo "exit-code=0" || echo "exit-code=$?")
+}
+
+count_gr98() { awk -v pat="$1" '$0 ~ pat { n++ } END { print n + 0 }' "$GR98_LOG"; }
+
+sleep 0.5
+GR98_FIRST=$( run_gr98_sync )
+check "98.0 first Gmail sync succeeds" "exit-code=0" "$GR98_FIRST"
+
+cat > "$H_GR98/config/email-cli/accounts/$ACCT_GR98/rules.ini" <<'GRINI97'
+[rule "Known label"]
+if-from = *sender1@*
+then-add-label = Work
+
+[rule "New label"]
+if-from = *sender2@*
+then-add-label = FreshRuleLabel
+GRINI97
+
+# dry-run must not push anything to Google
+GR98_DRYOUT=$( (export XDG_CONFIG_HOME="$H_GR98/config"
+     export XDG_DATA_HOME="$H_GR98/data"
+     export XDG_CACHE_HOME="$H_GR98/cache"
+     export HOME="$H_GR98"
+     export GMAIL_TEST_TOKEN=testtoken98
+     export GMAIL_API_BASE_URL="http://localhost:$GR98_PORT/gmail/v1/users/me"
+     "$BIN_DIR/email-cli" rules apply --dry-run 2>&1 && echo "exit-code=0" || echo "exit-code=$?") )
+check "98.1 dry-run: exit status 0" "exit-code=0" "$GR98_DRYOUT"
+check "98.2 dry-run sends no label change to Google" "^0$" "$(count_gr98 MODIFY)"
+
+# real apply: the local change reaches Google
+GR98_OUT=$( run_gr98_sync --apply-rules )
+check "98.3 apply-rules: exit status 0" "exit-code=0" "$GR98_OUT"
+check_not "98.4 apply-rules: no error" "Error:" "$GR98_OUT"
+GR98_MOD=$(awk '/MODIFY/' "$GR98_LOG")
+check "98.5 known label: message 1 modified with its label ID" \
+    "MODIFY 0000000000000001 .*addLabelIds.*Work" "$GR98_MOD"
+check "98.6 missing label is created and its new ID pushed for message 2" \
+    "MODIFY 0000000000000002 .*addLabelIds.*Label_Test001" "$GR98_MOD"
+check "98.7 the missing label was created exactly once" "^1$" \
+    "$(count_gr98 'POST /gmail/v1/users/me/labels')"
+
+# the queue is drained: another sync sends nothing more
+GR98_BEFORE=$(count_gr98 MODIFY)
+GR98_AGAIN=$( run_gr98_sync )
+check "98.8 later sync: exit status 0" "exit-code=0" "$GR98_AGAIN"
+check "98.9 a later sync does not resend drained changes" "^$GR98_BEFORE$" \
+    "$(count_gr98 MODIFY)"
+GR98_QUEUE="$H_GR98/data/email-cli/accounts/$ACCT_GR98/pending_labels.tsv"
+if [ -e "$GR98_QUEUE" ]; then
+    echo "  [FAIL] 98.10 pending_labels.tsv removed once pushed"
+    FAILED=$((FAILED + 1))
+else
+    echo "  [PASS] 98.10 pending_labels.tsv removed once pushed"
+    PASSED=$((PASSED + 1))
+fi
+
+kill "$GR98_PID"
+case "$H_GR98" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_GR98 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_GR98##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

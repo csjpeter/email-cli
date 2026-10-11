@@ -343,6 +343,30 @@ PendingFlag *local_pending_flag_load(const char *folder, int *count_out);
 /** @brief Removes the pending flag queue file for a folder. */
 void local_pending_flag_clear(const char *folder);
 
+/* ── Pending Gmail label changes (server sync queue) ─────────────────── */
+
+/**
+ * One pending Gmail label change that has not yet been pushed to Google.
+ * The label is a display name (user label), a system label ID (UNREAD, ...)
+ * or a local pseudo label (_flagged, _junk, ...); resolution to API label
+ * IDs happens when the queue is flushed.
+ */
+typedef struct {
+    char uid[17];     /**< 16-char UID string + NUL */
+    char label[256];  /**< label name as the mail rules produced it */
+    int  add;         /**< 1 = add label, 0 = remove label */
+} PendingLabel;
+
+/** @brief Appends a label change to the account's pending-label queue. */
+int local_pending_label_add(const char *uid, const char *label, int add);
+
+/** @brief Loads the pending-label queue.
+ *  Returns heap-allocated array (caller must free), or NULL if none. */
+PendingLabel *local_pending_label_load(int *count_out);
+
+/** @brief Removes the pending-label queue file. */
+void local_pending_label_clear(void);
+
 /* ── Pending folder moves (server sync queue) ────────────────────────── */
 
 typedef struct {

@@ -5916,6 +5916,92 @@ case "$H_GR98" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_
 rm -rf "./build/tests/functional/homes/${H_GR98##./build/tests/functional/homes/}"
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 99 — Gmail flag changes made offline reach Google on the next sync
+#            (EMAIL-21)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 99: Gmail offline flag change is queued and pushed (EMAIL-21) ---"
+
+GF99_PORT=10091
+GF99_DEAD_PORT=10092
+GF99_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail_flag99.log"
+(MOCK_GMAIL_PORT=$GF99_PORT MOCK_GMAIL_COUNT=3 \
+    MOCK_GMAIL_EMAIL="gflag99@gmail.com" \
+    "$MOCK_GMAIL_BIN") >"$GF99_LOG" 2>&1 &
+GF99_PID=$!
+
+H_GF99="./build/tests/functional/homes/gflag99-$$"
+ACCT_GF99="gflag99@gmail.com"
+mkdir -p "$H_GF99/config/email-cli/accounts/$ACCT_GF99"
+mkdir -p "$H_GF99/data"
+cat > "$H_GF99/config/email-cli/accounts/$ACCT_GF99/config.ini" <<'GCFG99'
+EMAIL_HOST=
+EMAIL_USER=gflag99@gmail.com
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=faketoken99
+GCFG99
+
+# run_gf99 PORT BINARY ARGS...: PORT picks the live mock or a closed port
+run_gf99() {
+    local port="$1" bin="$2"; shift 2
+    (export XDG_CONFIG_HOME="$H_GF99/config"
+     export XDG_DATA_HOME="$H_GF99/data"
+     export XDG_CACHE_HOME="$H_GF99/cache"
+     export HOME="$H_GF99"
+     export GMAIL_TEST_TOKEN=testtoken99
+     export GMAIL_API_BASE_URL="http://localhost:$port/gmail/v1/users/me"
+     "$BIN_DIR/$bin" "$@" 2>&1 && echo "exit-code=0" || echo "exit-code=$?")
+}
+
+sleep 0.5
+GF99_FIRST=$( run_gf99 $GF99_PORT email-sync )
+check "99.0 first Gmail sync succeeds" "exit-code=0" "$GF99_FIRST"
+
+GF99_BEFORE=$(awk '/MODIFY/ { n++ } END { print n + 0 }' "$GF99_LOG")
+GF99_OFF=$( run_gf99 $GF99_DEAD_PORT email-cli mark-read 0000000000000001 )
+check "99.1 offline mark-read promises the next sync" "queued for next sync" "$GF99_OFF"
+GF99_QUEUE="$H_GF99/data/email-cli/accounts/$ACCT_GF99/pending_labels.tsv"
+check "99.2 the change sits in pending_labels.tsv" "0000000000000001	UNREAD	0" \
+    "$(cat "$GF99_QUEUE")"
+GF99_DEADQ="$H_GF99/data/email-cli/accounts/$ACCT_GF99/pending_flags"
+if [ -e "$GF99_DEADQ" ]; then
+    echo "  [FAIL] 99.3 nothing is written to the undrained pending_flags queue"
+    FAILED=$((FAILED + 1))
+else
+    echo "  [PASS] 99.3 nothing is written to the undrained pending_flags queue"
+    PASSED=$((PASSED + 1))
+fi
+
+GF99_SYNC=$( run_gf99 $GF99_PORT email-sync )
+check "99.4 sync after reconnecting succeeds" "exit-code=0" "$GF99_SYNC"
+check "99.5 the offline change reached Google" \
+    "MODIFY 0000000000000001 .*removeLabelIds.*UNREAD" \
+    "$(awk '/MODIFY/' "$GF99_LOG")"
+if [ -e "$GF99_QUEUE" ]; then
+    echo "  [FAIL] 99.6 pending_labels.tsv removed once pushed"
+    FAILED=$((FAILED + 1))
+else
+    echo "  [PASS] 99.6 pending_labels.tsv removed once pushed"
+    PASSED=$((PASSED + 1))
+fi
+
+# online: the synchronous push does the work and queues nothing
+GF99_ON=$( run_gf99 $GF99_PORT email-cli mark-unread 0000000000000001 )
+check "99.7 online mark-unread succeeds" "exit-code=0" "$GF99_ON"
+check_not "99.8 online change is not reported as queued" "queued" "$GF99_ON"
+if [ -e "$GF99_QUEUE" ]; then
+    echo "  [FAIL] 99.9 online change queues nothing"
+    FAILED=$((FAILED + 1))
+else
+    echo "  [PASS] 99.9 online change queues nothing"
+    PASSED=$((PASSED + 1))
+fi
+
+kill "$GF99_PID"
+case "$H_GF99" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_GF99 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/homes/${H_GF99##./build/tests/functional/homes/}"
+
+# ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

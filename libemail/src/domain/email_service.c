@@ -6778,16 +6778,44 @@ int email_service_set_flag(const Config *cfg, const char *uid,
         }
     }
 
-    /* Enqueue to pending flag queue */
-    local_pending_flag_add(use_folder, uid, flag_name, imap_add);
+    /* Gmail has no pending_flags drain: its sync path flushes
+     * pending_labels.tsv instead.  Queue the change there, and only when the
+     * synchronous push below did not get through. */
+    const char *gmail_label = NULL;
+    if (cfg->gmail_mode) {
+        if (flag_bit == MSG_FLAG_UNSEEN)       gmail_label = "UNREAD";
+        else if (flag_bit == MSG_FLAG_FLAGGED) gmail_label = "STARRED";
+    } else {
+        /* Enqueue to pending flag queue */
+        local_pending_flag_add(use_folder, uid, flag_name, imap_add);
+    }
 
     /* Synchronous server push */
+    int pushed = 0;
     MailClient *mc = make_mail(cfg);
+    const int connected = mc != NULL;
     if (mc) {
-        if (mail_client_select(mc, use_folder) == 0)
-            mail_client_set_flag(mc, uid, flag_name, imap_add);
+        if (mail_client_select(mc, use_folder) == 0 &&
+            mail_client_set_flag(mc, uid, flag_name, imap_add) == 0)
+            pushed = 1;
         mail_client_free(mc);
-    } else {
+    }
+
+    if (cfg->gmail_mode) {
+        if (pushed) return 0;
+        if (!gmail_label) {
+            fprintf(stderr, "Warning: Could not reach Gmail. The %s change "
+                    "has no Gmail counterpart and was kept locally only.\n",
+                    flag_name);
+        } else if (local_pending_label_add(uid, gmail_label, add) == 0) {
+            fprintf(stderr, "Warning: Could not reach Gmail. Change queued "
+                    "for next sync.\n");
+        } else {
+            fprintf(stderr, "Error: Could not reach Gmail and could not "
+                    "queue the change; it exists only locally.\n");
+            return -1;
+        }
+    } else if (!connected) {
         fprintf(stderr, "Warning: Could not connect. Change queued for next sync.\n");
     }
 

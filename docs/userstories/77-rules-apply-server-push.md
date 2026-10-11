@@ -17,7 +17,7 @@
 | 5 | No `Error:` is printed when the server accepts the operations. |
 | 6 | Pending move operations are flushed before pending flag changes. |
 | 7 | After a successful push, the `pending_moves/` queue files are deleted. |
-| 8 | For Gmail accounts, folder-move is silently skipped (label-based model; use label operations instead). |
+| 8 | For Gmail accounts, folder-move is silently skipped (label-based model). The label additions and removals of the rules are pushed to Google with `users.messages.modify`: a user label that does not exist yet is created, rule-local pseudo labels without a Gmail counterpart (`_done`) are not sent, and a change that could not be sent stays queued for the next sync. |
 | 9 | `--dry-run` mode applies rules locally and prints what would be pushed, but does not contact the server. |
 
 ---
@@ -43,6 +43,11 @@ Sync complete.
 - **IMAP move:** `imap_uid_move()` = UID COPY to target + STORE `\Deleted` + EXPUNGE on source.
 - **Dispatch:** `mail_client_move_to_folder()` routes to `imap_uid_move()` for IMAP accounts
   and is a no-op for Gmail accounts.
+- **Gmail label queue:** both rule paths (`apply_rules` on cached mail, and
+  rules on newly downloaded mail) append to `pending_labels.tsv`
+  (`local_pending_label_add/load/clear()`); `gmail_sync()` and
+  `gmail_sync_full()` drain it before and after pulling, one modify call per
+  message (`gmail_sync_flush_pending_labels()`).
 - **Ordering:** `email_service_sync_all()` flushes `pending_moves` before `pending_flags`.
 - **Entry point:** `main_sync.c` calls `sync_all()` immediately after `apply_rules()`.
 

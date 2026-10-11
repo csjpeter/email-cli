@@ -162,10 +162,13 @@ static void apply_rules_to_new_message(const MailRules *rules, const char *uid,
                              (const char **)rm_out,  rm_count);
     for (int i = 0; i < add_count; i++) {
         label_idx_add(add_out[i], uid);
+        /* Queue the change so the flush pushes it to Google (EMAIL-20) */
+        local_pending_label_add(uid, add_out[i], 1);
         free(add_out[i]);
     }
     for (int i = 0; i < rm_count; i++) {
         label_idx_remove(rm_out[i], uid);
+        local_pending_label_add(uid, rm_out[i], 0);
         free(rm_out[i]);
     }
     free(add_out);
@@ -571,6 +574,7 @@ int gmail_sync_fetch_pending(GmailClient *gc) {
 int gmail_sync_full(GmailClient *gc) {
     logger_log(LOG_INFO, "gmail_sync: starting full sync");
 
+    gmail_sync_flush_pending_labels(gc);
     int queued = gmail_sync_reconcile(gc);
     if (queued < 0) return -1;
 
@@ -587,6 +591,7 @@ int gmail_sync_full(GmailClient *gc) {
         free(all_uids);
     }
 
+    gmail_sync_flush_pending_labels(gc);
     return 0;
 }
 
@@ -963,6 +968,153 @@ int gmail_sync_incremental(GmailClient *gc) {
 
 /* ── Auto Sync (public entry point) ───────────────────────────────── */
 
+/* ── Pending label flush ─────────────────────────────────────────────── */
+
+typedef struct {
+    char **names;
+    char **ids;
+    int    count;
+    int    loaded;
+} LabelTable;
+
+static void label_table_add(LabelTable *t, const char *name, const char *id) {
+    char **n = realloc(t->names, (size_t)(t->count + 1) * sizeof(char *));
+    if (!n) return;
+    t->names = n;
+    char **d = realloc(t->ids, (size_t)(t->count + 1) * sizeof(char *));
+    if (!d) return;
+    t->ids = d;
+    t->names[t->count] = strdup(name);
+    t->ids[t->count]   = strdup(id);
+    if (t->names[t->count] && t->ids[t->count]) t->count++;
+}
+
+static void label_table_free(LabelTable *t) {
+    for (int i = 0; i < t->count; i++) { free(t->names[i]); free(t->ids[i]); }
+    free(t->names);
+    free(t->ids);
+}
+
+static const char *label_table_find(const LabelTable *t, const char *name) {
+    for (int i = 0; i < t->count; i++)
+        if (strcmp(t->names[i], name) == 0) return t->ids[i];
+    return NULL;
+}
+
+/* A Gmail system label ID: upper-case letters, digits and '_' only. */
+static int is_system_label_id(const char *s) {
+    if (!s[0]) return 0;
+    for (const char *p = s; *p; p++)
+        if (!((*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_'))
+            return 0;
+    return 1;
+}
+
+/**
+ * Resolve a rule label to a Gmail API label ID.
+ * Returns a heap-allocated ID, or NULL when the label has no Gmail
+ * counterpart (*skip set to 1) or could not be resolved/created.
+ */
+static char *resolve_label_id(GmailClient *gc, LabelTable *t,
+                              const char *label, int add, int *skip)
+{
+    *skip = 0;
+    if (strcmp(label, "_flagged") == 0) return strdup("STARRED");
+    if (strcmp(label, "_junk") == 0 || strcmp(label, "_spam") == 0)
+        return strdup("SPAM");
+    if (strcmp(label, "_trash") == 0) return strdup("TRASH");
+    if (label[0] == '_') { *skip = 1; return NULL; } /* local-only (_done, ...) */
+    if (is_system_label_id(label) && strncmp(label, "Label_", 6) != 0)
+        return strdup(label);
+
+    char *cached = local_gmail_label_id_lookup(label);
+    if (cached) return cached;
+
+    if (!t->loaded) {
+        char **names = NULL, **ids = NULL;
+        int n = 0;
+        if (gmail_list_labels(gc, &names, &ids, &n) == 0) {
+            for (int i = 0; i < n; i++) {
+                if (names[i] && ids[i]) label_table_add(t, names[i], ids[i]);
+                free(names[i]);
+                free(ids[i]);
+            }
+            free(names);
+            free(ids);
+            t->loaded = 1;
+        }
+    }
+    const char *known = label_table_find(t, label);
+    if (known) return strdup(known);
+    if (!add) { *skip = 1; return NULL; }  /* nothing to remove on Google */
+
+    char *new_id = NULL;
+    if (gmail_create_label(gc, label, &new_id) != 0 || !new_id) return NULL;
+    label_table_add(t, label, new_id);
+    return new_id;
+}
+
+int gmail_sync_flush_pending_labels(GmailClient *gc) {
+    int count = 0;
+    PendingLabel *pend = local_pending_label_load(&count);
+    if (!pend || count == 0) { free(pend); return 0; }
+
+    LabelTable table = {0};
+    int failed = 0;
+    char *done = calloc((size_t)count, 1);
+    if (!done) { free(pend); return -1; }
+
+    for (int i = 0; i < count; i++) {
+        if (done[i]) continue;
+        /* Merge every queued change of this message into one modify call */
+        const char *uid = pend[i].uid;
+        char **add_ids = calloc((size_t)count, sizeof(char *));
+        char **rm_ids  = calloc((size_t)count, sizeof(char *));
+        int   *members = calloc((size_t)count, sizeof(int));
+        int na = 0, nr = 0, nm = 0, unresolved = 0;
+        if (!add_ids || !rm_ids || !members) {
+            free(add_ids); free(rm_ids); free(members);
+            failed++;
+            break;
+        }
+        for (int j = i; j < count; j++) {
+            if (done[j] || strcmp(pend[j].uid, uid) != 0) continue;
+            int skip = 0;
+            char *id = resolve_label_id(gc, &table, pend[j].label,
+                                        pend[j].add, &skip);
+            if (skip) { done[j] = 1; continue; }
+            if (!id) { unresolved++; continue; }
+            members[nm++] = j;
+            if (pend[j].add) add_ids[na++] = id;
+            else             rm_ids[nr++]  = id;
+        }
+        int ok = 1;
+        if (na > 0 || nr > 0)
+            ok = gmail_modify_labels(gc, uid, (const char **)add_ids, na,
+                                     (const char **)rm_ids, nr) == 0;
+        if (ok) for (int m = 0; m < nm; m++) done[members[m]] = 1;
+        if (!ok || unresolved > 0) {
+            failed++;
+            logger_log(LOG_WARN, "gmail_sync: label push for %s failed; kept queued", uid);
+        }
+        for (int a = 0; a < na; a++) free(add_ids[a]);
+        for (int r = 0; r < nr; r++) free(rm_ids[r]);
+        free(add_ids); free(rm_ids); free(members);
+    }
+
+    /* Rewrite the queue with what did not get through */
+    local_pending_label_clear();
+    for (int i = 0; i < count; i++)
+        if (!done[i]) local_pending_label_add(pend[i].uid, pend[i].label, pend[i].add);
+
+    label_table_free(&table);
+    free(done);
+    free(pend);
+    return failed ? -1 : 0;
+}
+
+static int gmail_sync_pull(GmailClient *gc);
+
 /**
  * Smart sync flow:
  *
@@ -979,6 +1131,15 @@ int gmail_sync_incremental(GmailClient *gc) {
  *   - Interrupted downloads: resume from pending_fetch.tsv without re-listing.
  */
 int gmail_sync(GmailClient *gc) {
+    /* Push local rule/label changes first, so the pull cannot overwrite them,
+     * then again for what the rules did to the messages just downloaded. */
+    gmail_sync_flush_pending_labels(gc);
+    int rc = gmail_sync_pull(gc);
+    gmail_sync_flush_pending_labels(gc);
+    return rc;
+}
+
+static int gmail_sync_pull(GmailClient *gc) {
     /* Step 1: check readiness before downloading anything */
     int had_pending = local_pending_fetch_count() > 0;
 

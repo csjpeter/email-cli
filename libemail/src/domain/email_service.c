@@ -6226,8 +6226,14 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
                             local_hdr_update_labels("", uid,
                                                      (const char **)add_out, add_count,
                                                      (const char **)rm_out,  rm_count);
-                            for (int j = 0; j < add_count; j++) label_idx_add(add_out[j], uid);
-                            for (int j = 0; j < rm_count;  j++) label_idx_remove(rm_out[j], uid);
+                            for (int j = 0; j < add_count; j++) {
+                                label_idx_add(add_out[j], uid);
+                                local_pending_label_add(uid, add_out[j], 1);
+                            }
+                            for (int j = 0; j < rm_count;  j++) {
+                                label_idx_remove(rm_out[j], uid);
+                                local_pending_label_add(uid, rm_out[j], 0);
+                            }
                         }
                     }
                     for (int j = 0; j < add_count; j++) free(add_out[j]);

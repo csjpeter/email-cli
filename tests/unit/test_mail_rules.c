@@ -357,7 +357,8 @@ static void test_negation_combined_with_positive(void) {
 
 static void test_load_utf7_folder_name(void) {
     /* Write a temp rules.ini with a then-move-folder in IMAP modified UTF-7 */
-    char tmppath[] = "/tmp/test-mail-rules-XXXXXX";
+    char tmppath[PATH_MAX];
+    snprintf(tmppath, sizeof(tmppath), "%s/test-mail-rules-XXXXXX", test_scratch_dir());
     int fd = mkstemp(tmppath);
     ASSERT(fd >= 0, "utf7 load: mkstemp failed");
     const char *ini =
@@ -383,7 +384,8 @@ static void test_load_utf7_folder_name(void) {
 
 static void test_rules_parse_file_features(void) {
     /* Rules file with unnamed rule, when=, then-add/remove-label, then-forward-to */
-    char tmppath[] = "/tmp/test-mail-rules-features-XXXXXX";
+    char tmppath[PATH_MAX];
+    snprintf(tmppath, sizeof(tmppath), "%s/test-mail-rules-features-XXXXXX", test_scratch_dir());
     int fd = mkstemp(tmppath);
     ASSERT(fd >= 0, "parse features: mkstemp failed");
 
@@ -469,7 +471,7 @@ static void test_rules_then_move_folder(void) {
 static void test_rules_save_load_account(void) {
     char *old_home = getenv("HOME");
     char *old_xdg  = getenv("XDG_CONFIG_HOME");
-    setenv("HOME", "/tmp/email-cli-rules-acct-test", 1);
+    setenv("HOME", TP("email-cli-rules-acct-test"), 1);
     unsetenv("XDG_CONFIG_HOME");
 
     MailRules *r = make_rules();

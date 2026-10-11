@@ -25,7 +25,8 @@ show_help() {
     echo "  build          Build the project in Release mode"
     echo "  debug          Build the project in Debug mode (with ASAN)"
     echo "  run            Build and run the application"
-    echo "  test           Build and run unit tests (with ASAN)"
+    echo "  test [FILTER]  Build and run unit tests (with ASAN); FILTER runs only the"
+    echo "                 test functions whose name contains it"
     echo "  functional     Build and run the functional test suite"
     echo "  pty            Build and run all PTY (terminal) test suites"
     echo "  valgrind       Build and run unit tests with Valgrind"
@@ -268,7 +269,9 @@ case "$1" in
         echo "Running unit tests with ASAN..."
         build_debug
         build_test_runner
-        (cd "$BUILD_DIR" && ./tests/unit/test-runner)
+        # An optional second argument runs only the test functions whose name
+        # contains it: ./manage.sh test test_mime
+        (cd "$BUILD_DIR" && ./tests/unit/test-runner ${2:+"$2"})
         ;;
     functional)
         echo "Running functional tests..."

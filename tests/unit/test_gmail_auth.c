@@ -664,7 +664,8 @@ static void test_refresh_invalid_grant_message(void) {
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
     setenv("GMAIL_TEST_TOKEN_URL", url, 1);
 
-    char errfile[] = "/tmp/email-cli-invalid-grant-XXXXXX";
+    char errfile[PATH_MAX];
+    snprintf(errfile, sizeof(errfile), "%s/invalid-grant-XXXXXX", test_scratch_dir());
     int efd = mkstemp(errfile);
     ASSERT(efd >= 0, "invalid_grant: temp file for stderr");
 

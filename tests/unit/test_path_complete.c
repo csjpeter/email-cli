@@ -16,15 +16,13 @@
 static char g_root[256]; /* per-run temp root, removed at end */
 
 static void fixture_setup(void) {
-    snprintf(g_root, sizeof(g_root), "/tmp/pc_test_%d", getpid());
+    snprintf(g_root, sizeof(g_root), "%s/pc_test", test_scratch_dir());
     mkdir(g_root, 0755);
 }
 
 static void fixture_teardown(void) {
-    /* Recursively remove the temp tree via shell to keep test code short. */
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "rm -rf '/tmp/pc_test_%d'", (int)getpid());
-    if (system(cmd)) { /* cleanup failure ignored in tests */ }
+    /* test_rmtree() refuses anything outside the scratch directory. */
+    if (test_rmtree(g_root) != 0) fprintf(stderr, "pc_test: cleanup failed\n");
 }
 
 /* Create a test sub-directory under g_root; return its path in out[outsz]. */

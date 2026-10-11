@@ -7,6 +7,8 @@
 
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
+#include "test_scratch.h"
 
 /**
  * @file test_helpers.h
@@ -25,7 +27,16 @@ extern int g_tests_failed;
     } \
 } while(0)
 
+/* Optional substring filter and list mode, set by the runner's command line:
+ * only the tests whose function name contains g_test_filter run. */
+extern const char *g_test_filter;
+extern int g_test_list_only;
+extern int g_tests_selected;
+
 #define RUN_TEST(test_func) do { \
+    if (g_test_filter && !strstr(#test_func, g_test_filter)) break; \
+    g_tests_selected++; \
+    if (g_test_list_only) { printf("%s\n", #test_func); break; } \
     printf("Running %s...\n", #test_func); \
     test_func(); \
 } while(0)

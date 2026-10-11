@@ -23,7 +23,7 @@ void test_fs_util(void) {
 
     // 3. Test Mkdir P (nested)
     char test_dir[256];
-    snprintf(test_dir, sizeof(test_dir), "/tmp/email-cli-test-%d/a/b/c", getpid());
+    snprintf(test_dir, sizeof(test_dir), "%s/fs-util-test/a/b/c", test_scratch_dir());
     int res = fs_mkdir_p(test_dir, 0700);
     ASSERT(res == 0, "fs_mkdir_p should return 0");
 
@@ -34,7 +34,7 @@ void test_fs_util(void) {
     // 4. Test Mkdir P with trailing slash
     char test_dir_slash[256];
     snprintf(test_dir_slash, sizeof(test_dir_slash),
-             "/tmp/email-cli-test-%d/a/b/c/", getpid());
+             "%s/fs-util-test/a/b/c/", test_scratch_dir());
     res = fs_mkdir_p(test_dir_slash, 0700);
     ASSERT(res == 0, "fs_mkdir_p should handle trailing slash");
 

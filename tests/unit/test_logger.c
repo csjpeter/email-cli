@@ -13,9 +13,9 @@
 #include <sys/stat.h>
 
 void test_logger(void) {
-    const char *test_log_dir = "/tmp/email-cli-log-test";
-    const char *test_log_file = "/tmp/email-cli-log-test/test.log";
-    const char *rotated_log_file = "/tmp/email-cli-log-test/test.log.1";
+    const char *test_log_dir = TP("email-cli-log-test");
+    const char *test_log_file = TP("email-cli-log-test/test.log");
+    const char *rotated_log_file = TP("email-cli-log-test/test.log.1");
 
     // 1. Prepare directory
     fs_mkdir_p(test_log_dir, 0700);
@@ -45,14 +45,14 @@ void test_logger(void) {
 
     // 6. Test Clean Logs
     {
-        RAII_FILE FILE *f = fopen("/tmp/email-cli-log-test/session.log.old", "w");
+        RAII_FILE FILE *f = fopen(TP("email-cli-log-test/session.log.old"), "w");
         if (f) {
             fprintf(f, "old data");
         }
     }
     res = logger_clean_logs(test_log_dir);
     ASSERT(res == 0, "logger_clean_logs should return 0");
-    ASSERT(access("/tmp/email-cli-log-test/session.log.old", F_OK) == -1,
+    ASSERT(access(TP("email-cli-log-test/session.log.old"), F_OK) == -1,
            "Old log should be deleted");
 
     // 7. Close and verify logger_log with NULL fp does not crash

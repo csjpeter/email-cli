@@ -5,6 +5,11 @@
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/libptytest libptytest)
 
+# Every path a PTY test uses is under build/tests/pty/work-<pid>
+# (tests/common/test_scratch.h); never /tmp.
+include_directories(${CMAKE_SOURCE_DIR}/tests/common)
+add_compile_definitions(TEST_BUILD_DIR="${CMAKE_BINARY_DIR}" TEST_CATEGORY="pty")
+
 # ── email-cli view tests (require mock IMAP server) ───────────────────
 add_executable(test-pty-views test_pty_views.c)
 target_link_libraries(test-pty-views ptytest)

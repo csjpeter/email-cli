@@ -263,8 +263,8 @@ int gmail_auth_device_flow(Config *cfg) {
      * On headless CI/servers this exits quickly; on desktops the browser opens. */
     RAII_STRING char *browser_cmd = NULL;
     if (asprintf(&browser_cmd,
-                 "(xdg-open '%s' || open '%s' || start '%s') >/dev/null 2>&1 &",
-                 auth_url, auth_url, auth_url) != -1) {
+                 "xdg-open '%s' >/dev/null 2>&1 &",
+                 auth_url) != -1) {
         int rc = system(browser_cmd);
         (void)rc;
     }

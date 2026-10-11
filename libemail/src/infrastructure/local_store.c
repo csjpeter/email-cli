@@ -2235,8 +2235,8 @@ void local_pending_append_remove(const char *folder, const char *uid) {
         fputs(line, wfp);
     }
 
-    /* Close both handles before renaming: the write must be flushed, and on
-     * Windows a rename over an open file fails. */
+    /* Close both handles before renaming: the write must be flushed before
+     * the rename. */
     fclose(wfp); wfp = NULL;
     fclose(rfp); rfp = NULL;
 

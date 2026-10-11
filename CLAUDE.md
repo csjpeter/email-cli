@@ -72,8 +72,7 @@ Infrastructure →  libemail/src/infrastructure/{config_store,local_store,imap_c
 Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_parser,html_render,
                                      imap_util,input_line,path_complete,json_util}.c + raii.h
 Platform       →  libemail/src/platform/{terminal,path,process,credential_key}.h + html_medium.h
-                    libemail/src/platform/posix/{terminal,path,process,credential_key,html_medium}.c    (Linux/macOS/Android)
-                    libemail/src/platform/windows/{terminal,path,process,credential_key,html_medium}.c  (MinGW-w64)
+                    libemail/src/platform/posix/{terminal,path,process,credential_key,html_medium}.c    (Linux)
 Write library  →  libwrite/src/{smtp_adapter,compose_service}.c
 ```
 
@@ -119,102 +118,20 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libssl (OpenSSL), and libcurl (SMTP only, in libwrite).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
-## Portability
+## Platform
 
-**Target platforms: Linux (primary), macOS, Windows, Android.**
+**The target platform is Linux (Debian).** A release for, or support of, macOS,
+iOS, Android or Windows is not a goal and nothing in this project may claim it
+(see `../policies/platform-scope-model.md`).  What binds the project to Linux is
+listed in `docs/portability.md`; keep that file current when a new Linux-specific
+dependency is added.
 
-Prefer standard C11 / POSIX interfaces.  Where platform-specific APIs are
-unavoidable, isolate them behind thin abstraction layers (e.g. a `platform/`
-module) so each target only needs to implement a small, well-defined surface.
-
-Known portability gaps that need shims before non-Linux builds work:
-
-| API / feature | macOS | Android (NDK) | Windows |
-|---|---|---|---|
-| `termios.h` raw mode | ✅ | ✅ | ❌ needs `GetConsoleMode`/`SetConsoleMode` |
-| `ioctl TIOCGWINSZ` | ✅ | ✅ | ❌ needs `GetConsoleScreenBufferInfo` |
-| `wcwidth(3)` | ✅ | ✅ | ❌ needs bundled implementation |
-| `asprintf` | ✅ | ✅ | ❌ needs a thin wrapper (available in MinGW) |
-| `iconv(3)` | ✅ | ⚠️ limited (NDK r23+) | ❌ needs libiconv or `WideCharToMultiByte` |
-| `__attribute__((cleanup(...)))` (RAII) | ✅ GCC / Apple Clang | ✅ Clang NDK | ✅ MinGW-w64 (GCC) |
-| Home dir (`$HOME`) | ✅ | ⚠️ use app data dir | ❌ use `%USERPROFILE%` |
-| Cache/config paths (`~/.cache`, `~/.config`) | ✅ | ❌ use app-specific dirs | ❌ use `%APPDATA%` |
-| `fork`/`waitpid` (process.h) | ✅ | ✅ | ❌ needs `CreateProcess` |
-| `open_memstream` (html_medium.h) | ✅ | ✅ | ❌ needs shim or tmpfile |
-
-**Compiler policy: GCC (or Clang) on every platform — MSVC is out of scope.**
-
-| Platform | Toolchain |
-|----------|-----------|
-| Linux | GCC |
-| macOS | GCC (Homebrew) or Apple Clang |
-| Windows | MinGW-w64 (GCC) |
-| Android | NDK Clang |
-
-`__attribute__((cleanup(...)))` is supported by all of the above and is the
-canonical RAII mechanism for this project.  MSVC is explicitly not a target.
-
-**Rules for new code:**
-- Never add a new POSIX/platform-specific call without noting it in the table above.
-- Platform differences are resolved by the **build system, not `#ifdef` macros**.
-  See the Platform Abstraction section below.
-- Android TUI works only inside a terminal emulator; non-interactive (batch) mode must always be functional.
-
-## Platform Abstraction
-
-Platform-specific behaviour is isolated in `libemail/src/platform/`.  The layer
-exposes a thin C header with a single canonical interface; each platform provides
-its own implementation file.  CMake selects the right source file at configure
-time — **no `#ifdef` guards in shared code**.
-
-```
-libemail/src/platform/
-  terminal.h          ← canonical interface (get_cols, set_raw, restore, …)
-  posix/terminal.c    ← termios + ioctl  (Linux, macOS, Android)
-  windows/terminal.c  ← GetConsoleMode + GetConsoleScreenBufferInfo
-
-  path.h              ← home_dir(), cache_dir(), config_dir()
-  posix/path.c        ← $HOME / XDG
-  windows/path.c      ← %USERPROFILE% / %APPDATA%
-
-  process.h           ← run_pager(), spawn child process
-  posix/process.c     ← fork + exec + waitpid
-  windows/process.c   ← CreateProcess
-
-  credential_key.h    ← per-account key derivation for credential obfuscation
-  posix/credential_key.c   ← ~/.ssh private key, else machine-id
-  windows/credential_key.c ← %USERPROFILE%\.ssh key, else registry MachineGuid
-
-  html_medium.h       ← HTML rendering backend (image handling)
-  posix/html_medium.c ← open_memstream-based
-  windows/html_medium.c ← tmpfile-based
-```
-
-CMakeLists.txt pattern (in `libemail/CMakeLists.txt`):
-
-```cmake
-if(WIN32)
-    set(LIBEMAIL_PLATFORM_SOURCES
-        src/platform/windows/terminal.c
-        src/platform/windows/path.c
-        src/platform/windows/html_medium.c
-        src/platform/windows/process.c
-        src/platform/windows/credential_key.c)
-else()
-    set(LIBEMAIL_PLATFORM_SOURCES
-        src/platform/posix/terminal.c
-        src/platform/posix/path.c
-        src/platform/posix/html_medium.c
-        src/platform/posix/process.c
-        src/platform/posix/credential_key.c)
-endif()
-
-add_library(libemail STATIC ... ${LIBEMAIL_PLATFORM_SOURCES})
-```
-
-**Allowed `#ifdef` use:** only inside a platform implementation file itself
-(e.g. to distinguish Linux vs macOS within the POSIX backend), never in
-`core/`, `domain/`, `infrastructure/`, or `main.c`.
+Platform-specific behaviour is isolated in `libemail/src/platform/`: a thin C
+header per concern (`terminal.h`, `path.h`, `process.h`, `credential_key.h`,
+`html_medium.h`) and its implementation in `platform/posix/`, chosen by CMake.
+No `#ifdef` platform guards in shared code, and none written for a platform
+nobody builds on.  Prefer standard C11 / POSIX where the portable form is no
+harder to write; GCC is the compiler.
 
 ## Documentation
 

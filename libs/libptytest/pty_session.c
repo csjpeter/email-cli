@@ -21,11 +21,7 @@
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 
-#if defined(__APPLE__)
-#include <util.h>
-#else
 #include <pty.h>
-#endif
 
 /* ── Lifecycle ───────────────────────────────────────────────────────── */
 

@@ -14,6 +14,7 @@ applied to the IMAP server on the next sync,
 | 1 | Pressing `n` / `f` / `d` in the interactive message list immediately updates the local manifest and re-renders the status column, regardless of connectivity. |
 | 2 | When an IMAP connection is active (online mode), the flag change is pushed to the server immediately via `UID STORE`. |
 | 3 | The flag change is **always** appended to a pending queue file (`pending_flags/<folder>.tsv`) under the account's local store directory, regardless of online/offline state. |
+| 3a | **Gmail accounts** do not use `pending_flags/`: their sync path never reads it. A flag change (`UNREAD`, `STARRED`) is pushed synchronously; only if that push fails it is appended to `pending_labels.tsv`, which `gmail_sync()` flushes before pulling. A flag without a Gmail counterpart (`$Done`) is kept locally and the user is told so. |
 | 4 | On the next `email-sync` run, all pending flag changes are applied to the IMAP server (via `UID STORE`) before fetching new messages, and the queue file is deleted after successful upload. |
 | 5 | If the pending queue file does not exist (no pending changes), sync proceeds normally without error. |
 | 6 | Queue entries use the tab-separated format: `<uid>\t<flag_name>\t<add>`, where `add` is `1` (set flag) or `0` (remove flag). |

@@ -117,6 +117,12 @@ release build, so it is not part of the coverage run): it checks that
 and an empty directory with a non-zero exit when packaging fails (a stub
 `cpack` first on `PATH` provides the failure).
 
+`./manage.sh headers [DIR]` is the source-header gate (EMAIL-29), the first gate
+of `./manage.sh check`: it fails, naming the file, on any `.c`, `.h`, `.sh`,
+`.cmake` or `CMakeLists.txt` without the licence, copyright, `Created:` date and
+purpose lines. `./tests/functional/run_source_header.sh` tests the gate itself
+against a scratch tree under `build/`.
+
 `./tests/functional/run_package_policy.sh` checks the package itself (EMAIL-16):
 `lintian` reports nothing, `Depends` is discovered (libc6 present, no
 hand-written or exact versions), man pages and changelog are gzipped, the

@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-24 */
+/* Interface of the configuration store. */
 #ifndef CONFIG_STORE_H
 #define CONFIG_STORE_H
 

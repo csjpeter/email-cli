@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-24 */
+/* The mail service: listing, reading, syncing and applying rules through the mail client. */
 #include "email_service.h"
 #include "config_store.h"
 #include "input_line.h"

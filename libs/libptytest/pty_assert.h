@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-30 */
+/* Assertion macros for PTY-based terminal tests. */
 #ifndef PTY_ASSERT_H
 #define PTY_ASSERT_H
 

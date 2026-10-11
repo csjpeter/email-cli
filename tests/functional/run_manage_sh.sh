@@ -1,4 +1,9 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-10-10
+# Tests that manage.sh reports honest verdicts.
+
 # manage.sh keeps its promises about verdicts (EMAIL-32): a failed copy fails
 # the build, `check` reports each gate and fails when one fails, and nothing in
 # the script swallows an error.  Runs a copy of manage.sh in a scratch tree
@@ -30,7 +35,8 @@ out=$(cd "$WORK/tree" && PATH="$WORK/stubs:$PATH" ./manage.sh check 2>&1); rc=$?
 for g in test functional pty valgrind; do
     echo "$out" | grep -Eq "^  $g +FAIL$"    && ok "2.2 summary shows $g FAIL"               || bad "2.2 no '$g FAIL' line"
 done
-echo "$out" | grep -q "PASS"                  && bad "2.3 a failing gate is shown as PASS"    || ok "2.3 no gate shown as PASS"
+echo "$out" | grep -Eq "^  (test|functional|pty|valgrind) +PASS$" && bad "2.3 a failing gate is shown as PASS" || ok "2.3 no failing gate shown as PASS"
+echo "$out" | grep -Eq "^  headers +(PASS|FAIL)$" && ok "2.4 summary names the headers gate"   || bad "2.4 no headers gate in the summary"
 
 # 3. the script itself suppresses nothing.
 SUPPRESS=$(grep -c -E '2>/dev/null|\|\| true|set \+e' "$ROOT/manage.sh")

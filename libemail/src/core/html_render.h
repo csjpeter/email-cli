@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-29 */
+/* Interface of the HTML to text renderer. */
 #ifndef HTML_RENDER_H
 #define HTML_RENDER_H
 

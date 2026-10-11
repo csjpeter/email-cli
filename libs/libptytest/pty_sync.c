@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-30 */
+/* PTY output reading and synchronisation with a timeout. */
 /**
  * @file pty_sync.c
  * @brief PTY output reading and synchronisation (poll + timeout).

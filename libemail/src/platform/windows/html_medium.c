@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-29 */
+/* Placeholder of the Windows HTML render medium. */
 #include "html_medium.h"
 
 int html_medium_char_width(uint32_t cp) {

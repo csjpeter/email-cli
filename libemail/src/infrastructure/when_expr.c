@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-05-05 */
+/* Parser, evaluator and builder of the boolean conditions of mail rules. */
 /**
  * @file when_expr.c
  * @brief Boolean condition expression parser, evaluator and builder (US-81).

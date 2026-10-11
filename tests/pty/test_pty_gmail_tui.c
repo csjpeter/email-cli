@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-19 */
+/* PTY tests of the Gmail interactions of the TUI. */
 /**
  * @file test_pty_gmail_tui.c
  * @brief PTY tests for Gmail TUI interactions.

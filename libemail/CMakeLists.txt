@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-04-13
+# Build rules of libemail: core, platform, domain and infrastructure sources.
+
 if(WIN32)
     set(LIBEMAIL_PLATFORM_SOURCES
         src/platform/windows/terminal.c

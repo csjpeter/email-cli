@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-25 */
+/* Unit tests of the logger. */
 #include "test_helpers.h"
 #include "logger.h"
 #include "fs_util.h"

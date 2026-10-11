@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-12 */
+/* PTY tests of the input line and path completion. */
 /**
  * @file test_input_line_pty.c
  * @brief PTY-based functional tests for InputLine and PathComplete.

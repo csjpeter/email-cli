@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-26 */
+/* Interface of the header and MIME utilities. */
 #ifndef MIME_UTIL_H
 #define MIME_UTIL_H
 

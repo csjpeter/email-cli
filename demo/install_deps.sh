@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-04-18
+# Installs the dependencies of the demo video pipeline.
+
 # demo/install_deps.sh — Install all dependencies for the demo video pipeline.
 # Supports: Ubuntu 22.04 / 24.04 (x86_64, arm64), macOS (Homebrew)
 # Run: bash demo/install_deps.sh

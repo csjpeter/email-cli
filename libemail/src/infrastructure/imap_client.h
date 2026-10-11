@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-10 */
+/* Interface of the IMAP client. */
 #ifndef IMAP_CLIENT_H
 #define IMAP_CLIENT_H
 

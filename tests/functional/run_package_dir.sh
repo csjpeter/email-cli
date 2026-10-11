@@ -1,4 +1,9 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-10-10
+# Tests that manage.sh package leaves exactly one run's packages in its directory.
+
 # Checks that `manage.sh package` leaves exactly one run's packages in
 # build/packages/ and nothing there when the run fails (EMAIL-18).
 # Run from anywhere after a build; it does its own release build.

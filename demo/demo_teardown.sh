@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-04-18
+# Stops the demo mock servers and removes the demo's temporary files.
+
 # demo/demo_teardown.sh — Stop demo mock servers and remove temp files.
 # Safe to call multiple times (all operations are idempotent).
 #

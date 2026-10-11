@@ -1,4 +1,9 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-04-30
+# Integration test of IMAP APPEND against a locally running Dovecot.
+
 # Integration test: IMAP APPEND via locally running Dovecot (no Docker).
 #
 # What this tests:

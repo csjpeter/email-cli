@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-23 */
+/* Entry point of email-import-rules: imports Thunderbird filters as mail rules. */
 /**
  * @file main_import_rules.c
  * @brief Import mail sorting rules from Thunderbird into email-cli rules.ini format.

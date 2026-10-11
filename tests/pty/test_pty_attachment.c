@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-05-08 */
+/* PTY tests of file attachments in compose. */
 /**
  * @file test_pty_attachment.c
  * @brief PTY tests for file attachment support in compose (US-84)

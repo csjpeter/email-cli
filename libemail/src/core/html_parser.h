@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-29 */
+/* Interface of the minimal HTML parser. */
 #ifndef HTML_PARSER_H
 #define HTML_PARSER_H
 

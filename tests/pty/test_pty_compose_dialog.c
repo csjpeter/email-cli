@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-26 */
+/* PTY tests of the pre-compose dialog. */
 /**
  * @file test_pty_compose_dialog.c
  * @brief PTY tests for the pre-compose dialog (US-CD-1 … US-CD-12).

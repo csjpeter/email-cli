@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-27 */
+/* PTY and functional tests of the mail sorting rules. */
 /**
  * @file test_pty_mail_rules.c
  * @brief PTY/functional tests for mail sorting rules (US-MR-01 … US-MR-06).

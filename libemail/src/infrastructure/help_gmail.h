@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-17 */
+/* The built-in Gmail OAuth2 setup guide shown by 'help gmail'. */
 #ifndef HELP_GMAIL_H
 #define HELP_GMAIL_H
 

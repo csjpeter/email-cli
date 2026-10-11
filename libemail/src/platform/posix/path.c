@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-27 */
+/* POSIX home, config and cache directories from HOME and XDG variables. */
 /**
  * POSIX path implementation.
  * Uses $HOME / $XDG_CACHE_HOME / $XDG_CONFIG_HOME / $XDG_DATA_HOME,

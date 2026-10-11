@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-29 */
+/* PTY tests of the local-first send behaviour. */
 /**
  * @file test_pty_send_local.c
  * @brief PTY tests for local-first send behaviour (US-SL-01 to US-SL-04).

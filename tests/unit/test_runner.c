@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-24 */
+/* Main of the unit test runner that calls every test group. */
 #include <stdio.h>
 #include <stdlib.h>
 #include "test_helpers.h"

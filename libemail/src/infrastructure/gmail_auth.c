@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-17 */
+/* OAuth2 authorisation and token refresh for the Gmail API. */
 #include "gmail_auth.h"
 #include "json_util.h"
 #include "logger.h"

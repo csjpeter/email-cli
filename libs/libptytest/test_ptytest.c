@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-30 */
+/* Self-tests of libptytest: screen buffer, VT100 parser and PTY session. */
 /**
  * @file test_ptytest.c
  * @brief Self-tests for libptytest: screen buffer, VT100 parser, PTY session.

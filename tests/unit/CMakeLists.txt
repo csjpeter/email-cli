@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-03-24
+# Build rules of the unit test runner.
+
 include_directories(
     ../../libemail/src
     ../../libemail/src/core

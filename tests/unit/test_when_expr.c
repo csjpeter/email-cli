@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-05-05 */
+/* Unit tests of the rule condition expressions. */
 #include "test_helpers.h"
 #include "when_expr.h"
 #include "raii.h"

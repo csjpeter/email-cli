@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-10 */
+/* IMAP4rev1 client over TLS or plain TCP. */
 #include "imap_client.h"
 #include "imap_util.h"
 #include "local_store.h"

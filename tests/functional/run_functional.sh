@@ -9,8 +9,59 @@
 
 set -e
 
+usage() {
+    cat <<'USAGE'
+Usage: run_functional.sh [--list] [--phase N[,N...]] [--help]
+
+  --phase LIST  run only the phases in LIST (numbers, or ranges such as 60-66)
+                together with the phases they need (see PHASE_NEEDS)
+  --list        print the phase numbers and titles, and exit
+  --help        show this text
+
+With no option every phase runs, in order.  The phases are not independent:
+later ones use homes, helper functions and mock servers made by earlier ones,
+which is why a selection pulls in what it needs.
+USAGE
+}
+
+PHASE_FILTER=""
+LIST_ONLY=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --phase)  [ $# -ge 2 ] || { echo "--phase needs a list" >&2; exit 2; }
+                  PHASE_FILTER="$PHASE_FILTER,$2"; shift 2 ;;
+        --phase=*) PHASE_FILTER="$PHASE_FILTER,${1#--phase=}"; shift ;;
+        --list)   LIST_ONLY=1; shift ;;
+        --help|-h) usage; exit 0 ;;
+        *) echo "unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
+
+if [ "$LIST_ONLY" = 1 ]; then
+    grep -E '^echo "(---|===) Phase [0-9]+' "$PROJECT_ROOT/tests/functional/run_functional.sh" \
+        | sed -E 's/^echo "(---|===) Phase ([0-9]+)[:]? ?/\2  /; s/ ?(---|===)"$//' \
+        | sort -n
+    exit 0
+fi
+
+# PHASE_WANTED holds " N N ... " when a selection was given (ranges expanded,
+# prerequisites added), and stays empty for a full run.
+PHASE_WANTED=""
+FULL_RUN=1
+if [ -n "$PHASE_FILTER" ]; then
+    FULL_RUN=0
+    for item in $(echo "$PHASE_FILTER" | tr ',' ' '); do
+        case "$item" in
+            [0-9]*-[0-9]*) for n in $(seq "${item%-*}" "${item#*-}"); do PHASE_WANTED="$PHASE_WANTED $n"; done ;;
+            [0-9]*) PHASE_WANTED="$PHASE_WANTED $item" ;;
+            *) echo "bad phase '$item'" >&2; exit 2 ;;
+        esac
+    done
+    # PHASE_NEEDS is filled in below the helper section; resolved there.
+fi
 
 # Every phase drives the binaries through a throwaway $HOME.  If the caller's
 # environment sets XDG_*_HOME (GitHub runners do), those win over $HOME and the
@@ -21,11 +72,11 @@ cd "$PROJECT_ROOT"
 unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
 BIN_DIR="$PROJECT_ROOT/bin"
 MOCK_SERVER_SRC="$PROJECT_ROOT/tests/functional/mock_imap_server.c"
-MOCK_SERVER_BIN="$PROJECT_ROOT/build/tests/functional/mock_imap_server"
+MOCK_SERVER_BIN="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_server"
 MOCK_SMTP_SRC="$PROJECT_ROOT/tests/pty/mock_smtp_server.c"
-MOCK_SMTP_BIN="$PROJECT_ROOT/build/tests/functional/mock_smtp_server"
+MOCK_SMTP_BIN="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp_server"
 MOCK_GMAIL_SRC="$PROJECT_ROOT/tests/functional/mock_gmail_api_server.c"
-MOCK_GMAIL_BIN="$PROJECT_ROOT/build/tests/functional/mock_gmail_api_server"
+MOCK_GMAIL_BIN="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_api_server"
 
 echo "--- email-cli Functional Tests ---"
 
@@ -41,43 +92,65 @@ if [ ! -f "$TEST_CERT" ] || [ ! -f "$TEST_KEY" ]; then
 fi
 
 # 1. Compile mock servers
+# Every path of this run — homes, logs, scratch files — is under one directory
+# of build/ that carries this shell's pid, and it is removed on exit.  Nothing
+# is written to /tmp.
+WORK_DIR="$PROJECT_ROOT/build/tests/functional/work-$$"
 mkdir -p "$PROJECT_ROOT/build/tests/functional"
-mkdir -p "./build/tests/functional/homes"
+mkdir -p "$WORK_DIR/homes" "$WORK_DIR/home"
+# The caller's HOME is not the suite's: until a phase picks its own home, HOME
+# is an empty directory of this run.  The XDG_* variables were unset above.
+export HOME="$WORK_DIR/home"
 gcc "$MOCK_SERVER_SRC" -o "$MOCK_SERVER_BIN" -lssl -lcrypto
 gcc "$MOCK_SMTP_SRC"   -o "$MOCK_SMTP_BIN"   -lssl -lcrypto
 gcc "$MOCK_GMAIL_SRC"  -o "$MOCK_GMAIL_BIN"
+FREE_PORT_BIN="$PROJECT_ROOT/build/tests/functional/free_port"
+gcc "$PROJECT_ROOT/tests/functional/free_port.c" -o "$FREE_PORT_BIN"
 
-# Kill any lingering mock server instances from a previous (interrupted) run
-# before binding to the same ports again.
-pkill -f "mock_imap_server" 2>/dev/null || true
-pkill -f "mock_smtp_server" 2>/dev/null || true
-sleep 0.3
-
-# 2. Start three independent mock IMAP servers on separate ports.
-#    Each serves a distinct subject so cross-account cache contamination is detectable.
-#    Servers run from BUILD_DIR so "tests/certs/test.crt" resolves correctly.
-
-echo "Starting mock IMAP server 1 (port 9993, subject: AlphaAccountMsg)..."
-MOCK_LOG1="$PROJECT_ROOT/build/tests/functional/mock_server1.log"
-(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=9993 MOCK_IMAP_SUBJECT="AlphaAccountMsg" \
+# alloc_port VAR: put in VAR a loopback port the kernel has just said is free,
+# never the same one twice in this run.  No port number is written in this
+# script, so two runs (two users, two CI jobs) cannot collide on one.  A caller
+# that wants a port nobody listens on (a "server is down" test) uses it too.
+ALLOCATED_PORTS=" "
+alloc_port() {
+    local p n
+    for n in 1 2 3 4 5 6 7 8 9 10; do
+        p=$("$FREE_PORT_BIN") || { echo "ERROR: free_port failed" >&2; exit 1; }
+        case "$ALLOCATED_PORTS" in
+            *" $p "*) continue ;;
+        esac
+        ALLOCATED_PORTS="$ALLOCATED_PORTS$p "
+        printf -v "$1" '%s' "$p"
+        return 0
+    done
+    echo "ERROR: no unused port after 10 attempts" >&2
+    exit 1
+}
+alloc_port IMAP1_PORT
+alloc_port IMAP2_PORT
+alloc_port IMAP3_PORT
+alloc_port DEAD_PORT   # nothing listens here: for the "server is down" cases
+echo "Starting mock IMAP server 1 (port $IMAP1_PORT, subject: AlphaAccountMsg)..."
+MOCK_LOG1="$PROJECT_ROOT/build/tests/functional/work-$$/mock_server1.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP1_PORT MOCK_IMAP_SUBJECT="AlphaAccountMsg" \
     "$MOCK_SERVER_BIN") >"$MOCK_LOG1" 2>&1 &
 SERVER1_PID=$!
 
-echo "Starting mock IMAP server 2 (port 9994, subject: BetaAccountMsg)..."
-MOCK_LOG2="$PROJECT_ROOT/build/tests/functional/mock_server2.log"
-(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=9994 MOCK_IMAP_SUBJECT="BetaAccountMsg" \
+echo "Starting mock IMAP server 2 (port $IMAP2_PORT, subject: BetaAccountMsg)..."
+MOCK_LOG2="$PROJECT_ROOT/build/tests/functional/work-$$/mock_server2.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP2_PORT MOCK_IMAP_SUBJECT="BetaAccountMsg" \
     "$MOCK_SERVER_BIN") >"$MOCK_LOG2" 2>&1 &
 SERVER2_PID=$!
 
-echo "Starting mock IMAP server 3 (port 9995, subject: GammaAccountMsg)..."
-MOCK_LOG3="$PROJECT_ROOT/build/tests/functional/mock_server3.log"
-(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=9995 MOCK_IMAP_SUBJECT="GammaAccountMsg" \
+echo "Starting mock IMAP server 3 (port $IMAP3_PORT, subject: GammaAccountMsg)..."
+MOCK_LOG3="$PROJECT_ROOT/build/tests/functional/work-$$/mock_server3.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP3_PORT MOCK_IMAP_SUBJECT="GammaAccountMsg" \
     "$MOCK_SERVER_BIN") >"$MOCK_LOG3" 2>&1 &
 SERVER3_PID=$!
 
-SMTP_PORT=9465
+alloc_port SMTP_PORT
 echo "Starting mock SMTP server (port $SMTP_PORT)..."
-SMTP_LOG="$PROJECT_ROOT/build/tests/functional/mock_smtp.log"
+SMTP_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp.log"
 (cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP_PORT \
     "$MOCK_SMTP_BIN") >"$SMTP_LOG" 2>&1 &
 SMTP_PID=$!
@@ -101,11 +174,61 @@ cleanup_mocks() {
         wait "$job" && rc=0 || rc=$?
     done
 }
-trap cleanup_mocks EXIT
+# The work directory goes too, after the mocks that write into it are gone.
+# A literal prefix with only the suffix expanded, as the testing model asks.
+cleanup_run() {
+    cleanup_mocks
+    case "$WORK_DIR" in
+        "$PROJECT_ROOT"/build/tests/functional/work-*) ;;
+        *) echo "ERROR: refusing unsafe path '$WORK_DIR'" >&2; return 1 ;;
+    esac
+    rm -rf "$PROJECT_ROOT/build/tests/functional/work-${WORK_DIR##*/work-}"
+}
+trap cleanup_run EXIT
 
 sleep 1
 
 # ── Test helpers ─────────────────────────────────────────────────────────────
+
+# ── Phase selection ──────────────────────────────────────────────────────────
+# Phases that cannot run alone: phase -> phases whose homes, helper functions
+# or mock servers it uses.  A selection is closed under this table.
+declare -A PHASE_NEEDS=(
+    [27]="26"          # Gmail mock and accounts of phase 26
+    [28]="26"
+    [29]="26 27 28"    # run_gmail_cli_a (28), run_rebuild_idx (27)
+    [30]="26"
+    [61]="60"          # run_gmail60_cli and the mock of phase 60
+    [65]="60"
+    [66]="60"
+    [70]="60"
+)
+
+phase_wanted() {
+    [ "$FULL_RUN" = 1 ] && return 0
+    case "$PHASE_WANTED" in *" $1 "*) return 0 ;; esac
+    return 1
+}
+
+if [ "$FULL_RUN" = 0 ]; then
+    changed=1
+    PHASE_WANTED="$PHASE_WANTED "
+    while [ "$changed" = 1 ]; do
+        changed=0
+        for p in $PHASE_WANTED; do
+            for need in ${PHASE_NEEDS[$p]}; do
+                case "$PHASE_WANTED" in *" $need "*) ;; *) PHASE_WANTED="$PHASE_WANTED$need "; changed=1 ;; esac
+            done
+        done
+    done
+    for p in $PHASE_WANTED; do
+        if ! grep -qE "^echo \"(---|===) Phase $p\b" "$PROJECT_ROOT/tests/functional/run_functional.sh"; then
+            echo "ERROR: there is no phase $p (see --list)" >&2
+            exit 2
+        fi
+    done
+    echo "Running phases:$PHASE_WANTED"
+fi
 
 PASSED=0
 FAILED=0
@@ -160,10 +283,10 @@ check_empty() {
 make_home() {
     local home="$1" email="$2" port="$3"
     case "$home" in
-        ./build/tests/functional/homes/*) ;;
+        ./build/tests/functional/work-$$/homes/*) ;;
         *) echo "ERROR: make_home: refusing unsafe path '$home'" >&2; exit 1 ;;
     esac
-    rm -rf "./build/tests/functional/homes/${home##./build/tests/functional/homes/}"
+    rm -rf "./build/tests/functional/work-$$/homes/${home##./build/tests/functional/work-$$/homes/}"
     mkdir -p "$home/.config/email-cli/accounts/$email"
     cat > "$home/.config/email-cli/accounts/$email/config.ini" <<CONFIG
 EMAIL_HOST=imaps://localhost:$port
@@ -248,9 +371,9 @@ run_folders() {
 # ── Account fixtures ──────────────────────────────────────────────────────────
 #
 #  Three accounts on three independent servers:
-#    alpha@test.local  →  server 9993  →  subject "AlphaAccountMsg"
-#    beta@test.local   →  server 9994  →  subject "BetaAccountMsg"
-#    gamma@test.local  →  server 9995  →  subject "GammaAccountMsg"
+#    alpha@test.local  →  server 1  →  subject "AlphaAccountMsg"
+#    beta@test.local   →  server 2  →  subject "BetaAccountMsg"
+#    gamma@test.local  →  server 3  →  subject "GammaAccountMsg"
 #
 #  Alphabetical order: alpha < beta < gamma
 #  (used by config_load_from_store and config_list_accounts)
@@ -259,26 +382,27 @@ ALPHA="alpha@test.local"
 BETA="beta@test.local"
 GAMMA="gamma@test.local"
 
-H_ALPHA="./build/tests/functional/homes/alpha"    # single-account home for alpha
-H_BETA="./build/tests/functional/homes/beta"      # single-account home for beta
-H_GAMMA="./build/tests/functional/homes/gamma"    # single-account home for gamma
-H_AB="./build/tests/functional/homes/ab"          # alpha + beta  (alpha first alphabetically)
-H_BG="./build/tests/functional/homes/bg"          # beta  + gamma (beta first alphabetically)
-H_ALL="./build/tests/functional/homes/all"        # all three      (alpha first alphabetically)
+H_ALPHA="./build/tests/functional/work-$$/homes/alpha"    # single-account home for alpha
+H_BETA="./build/tests/functional/work-$$/homes/beta"      # single-account home for beta
+H_GAMMA="./build/tests/functional/work-$$/homes/gamma"    # single-account home for gamma
+H_AB="./build/tests/functional/work-$$/homes/ab"          # alpha + beta  (alpha first alphabetically)
+H_BG="./build/tests/functional/work-$$/homes/bg"          # beta  + gamma (beta first alphabetically)
+H_ALL="./build/tests/functional/work-$$/homes/all"        # all three      (alpha first alphabetically)
 
-SHARED="./build/tests/functional/homes/shared"    # shared XDG_DATA_HOME for isolation tests
+SHARED="./build/tests/functional/work-$$/homes/shared"    # shared XDG_DATA_HOME for isolation tests
 
-make_home "$H_ALPHA" "$ALPHA" 9993
-make_home "$H_BETA"  "$BETA"  9994
-make_home "$H_GAMMA" "$GAMMA" 9995
+make_home "$H_ALPHA" "$ALPHA" $IMAP1_PORT
+make_home "$H_BETA"  "$BETA"  $IMAP2_PORT
+make_home "$H_GAMMA" "$GAMMA" $IMAP3_PORT
 
-make_home "$H_AB" "$ALPHA" 9993; add_account "$H_AB" "$BETA"  9994
-make_home "$H_BG" "$BETA"  9994; add_account "$H_BG" "$GAMMA" 9995
+make_home "$H_AB" "$ALPHA" $IMAP1_PORT; add_account "$H_AB" "$BETA"  $IMAP2_PORT
+make_home "$H_BG" "$BETA"  $IMAP2_PORT; add_account "$H_BG" "$GAMMA" $IMAP3_PORT
 
-make_home "$H_ALL" "$ALPHA" 9993
-add_account "$H_ALL" "$BETA"  9994
-add_account "$H_ALL" "$GAMMA" 9995
+make_home "$H_ALL" "$ALPHA" $IMAP1_PORT
+add_account "$H_ALL" "$BETA"  $IMAP2_PORT
+add_account "$H_ALL" "$GAMMA" $IMAP3_PORT
 
+if phase_wanted 1; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 1 — Basic single-account CLI
 # ════════════════════════════════════════════════════════════════════════════
@@ -340,6 +464,9 @@ SESS1=$(cat "$SESSION1" 2>/dev/null || true)
 check_not "1.21 no login rejection in output" "rejected the login" "$L1"
 check     "1.22 LOGIN completed in session" "LOGIN completed\|authenticated" "$SESS1"
 
+fi
+
+if phase_wanted 2; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 2 — Warm cache: second run uses cached manifest
 # ════════════════════════════════════════════════════════════════════════════
@@ -352,13 +479,16 @@ check "2.2 warm: own account header"       "$ALPHA"           "$L1W"
 check_not "2.3 warm: no beta subject"      "BetaAccountMsg"   "$L1W"
 check_not "2.4 warm: no gamma subject"     "GammaAccountMsg"  "$L1W"
 
+fi
+
+if phase_wanted 3; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 3 — Fresh isolation: three accounts, one shared data dir
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 3: Fresh multi-account isolation (shared data dir) ---"
 
-rm -rf "./build/tests/functional/homes/shared"
+rm -rf "./build/tests/functional/work-$$/homes/shared"
 
 # 3.1 alpha — first run, shared data dir empty
 A3=$(run_list "$H_ALPHA" "$SHARED")
@@ -393,6 +523,9 @@ check_not "3.17 gamma fresh: no beta"       "BetaAccountMsg"   "$G3"
 STORE_G="$SHARED/email-cli/accounts/$GAMMA"
 check "3.18 gamma: own local store dir"     "^ok$" "$(test -d "$STORE_G"   && echo ok || echo missing)"
 
+fi
+
+if phase_wanted 4; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 4 — Warm cache isolation: re-run after all caches are populated
 # ════════════════════════════════════════════════════════════════════════════
@@ -420,13 +553,16 @@ check "4.10 gamma warm: own header"         "$GAMMA"           "$G4"
 check_not "4.11 gamma warm: no alpha leak"  "AlphaAccountMsg"  "$G4"
 check_not "4.12 gamma warm: no beta leak"   "BetaAccountMsg"   "$G4"
 
+fi
+
+if phase_wanted 5; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 5 — Two-account HOME: config_load_from_store picks alphabetically first
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 5: Two-account HOME (alphabetical first wins) ---"
 
-rm -rf "./build/tests/functional/homes/shared"
+rm -rf "./build/tests/functional/work-$$/homes/shared"
 
 # 5.1 H_AB has alpha + beta; explicitly select alpha → must show alpha, not beta.
 run_list "$H_BETA" "$SHARED" >/dev/null 2>&1 || true   # beta cache now warm
@@ -451,13 +587,16 @@ check "5.6 BG home: select beta (own subject)"    "BetaAccountMsg"   "$BG_OUT"
 check "5.7 BG home: beta email in header"         "$BETA"            "$BG_OUT"
 check_not "5.8 BG home: gamma NOT shown"          "GammaAccountMsg"  "$BG_OUT"
 
+fi
+
+if phase_wanted 6; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 6 — Folder-specific isolation (Sent, Trash, Empty)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 6: Folder-specific isolation ---"
 
-rm -rf "./build/tests/functional/homes/shared"
+rm -rf "./build/tests/functional/work-$$/homes/shared"
 
 # 6.1 INBOX.Sent — each account sees its own content
 AS=$(run_list "$H_ALPHA" "$SHARED" "INBOX.Sent")
@@ -492,13 +631,16 @@ check "6.13 beta Empty: no messages"        "No messages"      "$BE"
 GE=$(run_list "$H_GAMMA" "$SHARED" "INBOX.Empty")
 check "6.14 gamma Empty: no messages"       "No messages"      "$GE"
 
+fi
+
+if phase_wanted 7; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 7 — show command isolation
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 7: show command isolation ---"
 
-rm -rf "./build/tests/functional/homes/shared"
+rm -rf "./build/tests/functional/work-$$/homes/shared"
 
 # 7.1 Fresh show: alpha
 SA=$(run_show "$H_ALPHA" "$SHARED")
@@ -522,13 +664,16 @@ check "7.7 gamma show (all cached): own"    "GammaAccountMsg"  "$SG"
 check_not "7.8 gamma show: no alpha"        "AlphaAccountMsg"  "$SG"
 check_not "7.9 gamma show: no beta"         "BetaAccountMsg"   "$SG"
 
+fi
+
+if phase_wanted 8; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 8 — Alternating runs: simulate rapid account switching
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 8: Alternating account runs (3 rounds) ---"
 
-rm -rf "./build/tests/functional/homes/shared"
+rm -rf "./build/tests/functional/work-$$/homes/shared"
 
 for ROUND in 1 2 3; do
     RA=$(run_list "$H_ALPHA" "$SHARED")
@@ -547,13 +692,16 @@ for ROUND in 1 2 3; do
     check_not "8.G round $ROUND: no beta leak"    "BetaAccountMsg"   "$RG"
 done
 
+fi
+
+if phase_wanted 9; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 9 — Manifest file content inspection
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 9: Manifest file content inspection ---"
 
-rm -rf "./build/tests/functional/homes/shared"
+rm -rf "./build/tests/functional/work-$$/homes/shared"
 run_list "$H_ALPHA" "$SHARED" >/dev/null 2>&1 || true
 run_list "$H_BETA"  "$SHARED" >/dev/null 2>&1 || true
 run_list "$H_GAMMA" "$SHARED" >/dev/null 2>&1 || true
@@ -595,13 +743,16 @@ check "9.16 gamma header cache dir exists"     "^ok$" "$(test -d "$HDR_G" && ech
 check "9.17 header dirs are distinct"          "^ok$" \
     "$([ "$HDR_A" != "$HDR_B" ] && [ "$HDR_B" != "$HDR_G" ] && echo ok || echo overlap)"
 
+fi
+
+if phase_wanted 10; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 10 — All-account HOME: list returns alphabetically-first account
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 10: Three-account HOME (alpha alphabetically first) ---"
 
-rm -rf "./build/tests/functional/homes/shared"
+rm -rf "./build/tests/functional/work-$$/homes/shared"
 
 # Pre-populate gamma and beta caches so cross-contamination is detectable
 run_list "$H_GAMMA" "$SHARED" >/dev/null 2>&1 || true
@@ -622,6 +773,9 @@ check "10.5 all-home warm: alpha unchanged"    "AlphaAccountMsg"  "$ALL_OUT2"
 check_not "10.6 all-home warm: no beta"        "BetaAccountMsg"   "$ALL_OUT2"
 check_not "10.7 all-home warm: no gamma"       "GammaAccountMsg"  "$ALL_OUT2"
 
+fi
+
+if phase_wanted 11; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 11 — SMTP send + IMAP APPEND
 # ════════════════════════════════════════════════════════════════════════════
@@ -644,6 +798,9 @@ CLI_LOG="$H_ALPHA/.cache/email-cli/logs/session.log"
 CLI_CONTENT=$(cat "$CLI_LOG" 2>/dev/null || true)
 check "11.4 IMAP APPEND command issued"         "APPEND"        "$CLI_CONTENT"
 
+fi
+
+if phase_wanted 12; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 12 — Sync pid-file indicator
 # ════════════════════════════════════════════════════════════════════════════
@@ -666,6 +823,9 @@ STALE=$(run_list "$H_ALPHA" "")
 check_not "12.3 stale pid: no spurious 'syncing'"   "syncing"        "$STALE"
 rm -f "$PID_FILE"
 
+fi
+
+if phase_wanted 13; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 13 — list --all mode
 # ════════════════════════════════════════════════════════════════════════════
@@ -676,6 +836,9 @@ ALL_LIST=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CAC
 check "13.1 list --all: message count"      "message"        "$ALL_LIST"
 check "13.2 list --all: own subject shown"  "AlphaAccountMsg" "$ALL_LIST"
 
+fi
+
+if phase_wanted 14; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 14 — attachments command
 # ════════════════════════════════════════════════════════════════════════════
@@ -687,19 +850,25 @@ ATTACH_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_C
 check "14.1 attachments: notes.txt listed"  "notes.txt"  "$ATTACH_OUT"
 check "14.2 attachments: data.bin listed"   "data.bin"   "$ATTACH_OUT"
 
+fi
+
+if phase_wanted 15; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 15 — save-attachment command
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 15: save-attachment command ---"
-SAVE_DIR="./build/tests/functional/homes/attach-$$"
+SAVE_DIR="./build/tests/functional/work-$$/homes/attach-$$"
 mkdir -p "$SAVE_DIR"
 SAVE_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME;
     "$BIN_DIR/email-cli" --batch save-attachment 1 notes.txt "$SAVE_DIR" 2>&1 || true) )
 check "15.1 save-attachment: saved confirmation"  "aved\|uccessful\|notes" "$SAVE_OUT"
 check "15.2 save-attachment: file exists"  "^ok$" "$(test -f "$SAVE_DIR/notes.txt" && echo ok || echo missing)"
-rm -rf "./build/tests/functional/homes/attach-$$"
+rm -rf "./build/tests/functional/work-$$/homes/attach-$$"
 
+fi
+
+if phase_wanted 16; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 16 — mark-read and mark-unread
 # ════════════════════════════════════════════════════════════════════════════
@@ -716,6 +885,9 @@ MARKUR=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE
 check "exit status of MARKUR is 0" "exit-code=0" "$MARKUR"
 check_not "16.2 mark-unread: no error"  "Error\|error\|failed" "$MARKUR"
 
+fi
+
+if phase_wanted 17; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 17 — mark-starred and remove-starred
 # ════════════════════════════════════════════════════════════════════════════
@@ -731,6 +903,9 @@ UNSTAR=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE
 check "exit status of UNSTAR is 0" "exit-code=0" "$UNSTAR"
 check_not "17.2 remove-starred: no error"  "Error\|error\|failed" "$UNSTAR"
 
+fi
+
+if phase_wanted 18; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 18 — list-accounts command
 # ════════════════════════════════════════════════════════════════════════════
@@ -741,6 +916,9 @@ ACCS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_H
 check "18.1 list-accounts: account listed"  "alpha@test.local"  "$ACCS"
 check "18.2 list-accounts: IMAP type"       "IMAP"              "$ACCS"
 
+fi
+
+if phase_wanted 19; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 19 — config show
 # ════════════════════════════════════════════════════════════════════════════
@@ -752,6 +930,9 @@ check "19.1 config show: host shown"   "localhost"         "$CONF"
 check "19.2 config show: user shown"   "alpha@test.local"  "$CONF"
 check_not "19.3 config show: pass masked"  "testpass"      "$CONF"
 
+fi
+
+if phase_wanted 20; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 20 — sync output format check
 # ════════════════════════════════════════════════════════════════════════════
@@ -763,6 +944,9 @@ SYNC_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CAC
 check_not "20.1 sync output: no garbage after stored"  "stored[0-9]"  "$SYNC_OUT"
 check "20.2 sync: fetched/stored line present"  "fetched.*stored\|already stored"  "$SYNC_OUT"
 
+fi
+
+if phase_wanted 21; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 21 — help for various topics
 # ════════════════════════════════════════════════════════════════════════════
@@ -780,6 +964,9 @@ check "21.3 help send: usage line"         "send"   "$HSEND"
 HCONF=$( (export HOME="$H_ALPHA"; "$BIN_DIR/email-cli" help config 2>&1 || true) )
 check "21.4 help config: usage line"       "config"  "$HCONF"
 
+fi
+
+if phase_wanted 22; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 22 — Credential obfuscation
 #
@@ -800,17 +987,17 @@ echo ""
 echo "--- Phase 22: credential obfuscation ---"
 
 # Isolated home for obfuscation tests (no mock server needed for format checks)
-H_CRED="./build/tests/functional/homes/cred-$$"
+H_CRED="./build/tests/functional/work-$$/homes/cred-$$"
 CRED_EMAIL="cred@test.local"
 CRED_CFG="$H_CRED/.config/email-cli/accounts/$CRED_EMAIL/config.ini"
 CRED_SETTINGS="$H_CRED/.config/email-cli/settings.ini"
 
 # Helper: write a plaintext account config
 make_cred_home() {
-    rm -rf "./build/tests/functional/homes/cred-$$"
+    rm -rf "./build/tests/functional/work-$$/homes/cred-$$"
     mkdir -p "$H_CRED/.config/email-cli/accounts/$CRED_EMAIL"
     cat > "$CRED_CFG" <<CFG
-EMAIL_HOST=imaps://localhost:9993
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=$CRED_EMAIL
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -901,14 +1088,14 @@ check "22-US06: after re-encrypt — list still works" \
     "AlphaAccountMsg" "$OUT_06"
 
 # ── US-07: Two accounts with the same password have different enc: values ─
-H_DUAL="./build/tests/functional/homes/dual-$$"
+H_DUAL="./build/tests/functional/work-$$/homes/dual-$$"
 DUAL_A="dual-a@test.local"
 DUAL_B="dual-b@test.local"
-rm -rf "./build/tests/functional/homes/dual-$$"
+rm -rf "./build/tests/functional/work-$$/homes/dual-$$"
 for ACCT in "$DUAL_A" "$DUAL_B"; do
     mkdir -p "$H_DUAL/.config/email-cli/accounts/$ACCT"
     cat > "$H_DUAL/.config/email-cli/accounts/$ACCT/config.ini" <<CFG
-EMAIL_HOST=imaps://localhost:9993
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=$ACCT
 EMAIL_PASS=samepassword
 EMAIL_FOLDER=INBOX
@@ -964,8 +1151,11 @@ check "22-US11: after auto-decrypt — list still works" \
     "AlphaAccountMsg" "$OUT_11"
 
 # Cleanup isolated homes
-rm -rf "./build/tests/functional/homes/cred-$$" "./build/tests/functional/homes/dual-$$"
+rm -rf "./build/tests/functional/work-$$/homes/cred-$$" "./build/tests/functional/work-$$/homes/dual-$$"
 
+fi
+
+if phase_wanted 23; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 23 — Account selection on the command line
 #
@@ -1071,6 +1261,9 @@ check "23-US10: email-cli list-accounts lists alpha" \
 check "23-US10: email-cli list-accounts lists beta" \
     "$BETA" "$OUT_23_10_rw"
 
+fi
+
+if phase_wanted 24; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 24 — --label alias and label name resolution
 #
@@ -1106,16 +1299,19 @@ OUT_24_03=$(
 check_not "24-US03: unknown label does not crash (no segfault output)" \
     "Segmentation fault" "$OUT_24_03"
 
+fi
+
+if phase_wanted 25; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 25 — IMAP with 2 accounts (200 + 250 messages) + cross-contamination
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 25: IMAP with 2 accounts (200 + 250 messages) ---"
 
-IMAP200_PORT=9996
-IMAP250_PORT=9998
-IMAP200_LOG="$PROJECT_ROOT/build/tests/functional/mock_server200.log"
-IMAP250_LOG="$PROJECT_ROOT/build/tests/functional/mock_server250.log"
+alloc_port IMAP200_PORT
+alloc_port IMAP250_PORT
+IMAP200_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_server200.log"
+IMAP250_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_server250.log"
 echo "Starting mock IMAP server A (port $IMAP200_PORT, 200 messages)..."
 (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP200_PORT MOCK_IMAP_COUNT=200 \
     MOCK_IMAP_MSG_PREFIX="IMapA-Message" \
@@ -1128,10 +1324,10 @@ echo "Starting mock IMAP server B (port $IMAP250_PORT, 250 messages)..."
 SERVER250_PID=$!
 sleep 0.5
 
-H_200="./build/tests/functional/homes/200-$$"
+H_200="./build/tests/functional/work-$$/homes/200-$$"
 ACCT200="imap200@test.local"
 ACCT250="imap250@test.local"
-rm -rf "./build/tests/functional/homes/200-$$"
+rm -rf "./build/tests/functional/work-$$/homes/200-$$"
 mkdir -p "$H_200/.config/email-cli/accounts/$ACCT200"
 mkdir -p "$H_200/.config/email-cli/accounts/$ACCT250"
 cat > "$H_200/.config/email-cli/accounts/$ACCT200/config.ini" <<CFG200
@@ -1197,13 +1393,13 @@ LA200_1=$(run_200 --batch list-attachments 1)
 check_not "25.10 imap-A list-attachments UID 1: no notes_10.txt" "notes_10" "$LA200_1"
 
 # 25.11 save-attachment
-SAVE200_DIR="./build/tests/functional/homes/attach200-$$"
+SAVE200_DIR="./build/tests/functional/work-$$/homes/attach200-$$"
 mkdir -p "$SAVE200_DIR"
 SA200=$(run_200 --batch save-attachment 10 notes_10.txt "$SAVE200_DIR")
 check "25.11 imap-A save-attachment UID 10: confirmation" "aved\|uccessful\|notes" "$SA200"
 check "25.12 imap-A save-attachment UID 10: file exists" "^ok$" \
     "$(test -f "$SAVE200_DIR/notes_10.txt" && echo ok || echo missing)"
-rm -rf "./build/tests/functional/homes/attach200-$$"
+rm -rf "./build/tests/functional/work-$$/homes/attach200-$$"
 
 # 25.13 list-folders
 F200=$(run_200 list-folders)
@@ -1235,13 +1431,13 @@ LA250=$(run_250 --batch list-attachments 20)
 check "25.19 imap-B list-attachments UID 20: notes_20.txt listed" "notes_20" "$LA250"
 
 # 25.20 save-attachment
-SAVE250_DIR="./build/tests/functional/homes/attach250-$$"
+SAVE250_DIR="./build/tests/functional/work-$$/homes/attach250-$$"
 mkdir -p "$SAVE250_DIR"
 SA250=$(run_250 --batch save-attachment 20 notes_20.txt "$SAVE250_DIR")
 check "25.20 imap-B save-attachment UID 20: confirmation" "aved\|uccessful\|notes" "$SA250"
 check "25.21 imap-B save-attachment UID 20: file exists" "^ok$" \
     "$(test -f "$SAVE250_DIR/notes_20.txt" && echo ok || echo missing)"
-rm -rf "./build/tests/functional/homes/attach250-$$"
+rm -rf "./build/tests/functional/work-$$/homes/attach250-$$"
 
 # ── IMAP cross-contamination checks ──────────────────────────────────────
 # 25.22 IMAP-A list must NOT contain IMAP-B subjects
@@ -1256,16 +1452,19 @@ check_not "25.24 imap-A show UID 1: no IMapB content" "IMapB" "$S200_1"
 # 25.25 IMAP-B has 250 messages; IMAP-A must report 200 max
 check_not "25.25 imap-A list: count not 250" "250 message" "$L200"
 
+fi
+
+if phase_wanted 26; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 26 — Gmail sync + offline list (2 accounts + cross-contamination)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 26: Gmail sync + offline list (2 accounts) ---"
 
-GMAIL_PORT_A=9997
-GMAIL_PORT_B=9999
-GMAIL_LOG_A="$PROJECT_ROOT/build/tests/functional/mock_gmail_a.log"
-GMAIL_LOG_B="$PROJECT_ROOT/build/tests/functional/mock_gmail_b.log"
+alloc_port GMAIL_PORT_A
+alloc_port GMAIL_PORT_B
+GMAIL_LOG_A="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_a.log"
+GMAIL_LOG_B="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_b.log"
 echo "Starting mock Gmail API server A (port $GMAIL_PORT_A, 200 messages)..."
 (MOCK_GMAIL_PORT=$GMAIL_PORT_A MOCK_GMAIL_COUNT=200 \
     MOCK_GMAIL_EMAIL="test@gmail.com" \
@@ -1280,10 +1479,10 @@ GMAIL_SERVER_B_PID=$!
 sleep 0.5
 
 # Shared temp home for both Gmail accounts (tests account isolation within one HOME)
-H_GMAIL="./build/tests/functional/homes/gmail-$$"
+H_GMAIL="./build/tests/functional/work-$$/homes/gmail-$$"
 GMAIL_ACCT_A="test@gmail.com"
 GMAIL_ACCT_B="test2@gmail.com"
-rm -rf "./build/tests/functional/homes/gmail-$$"
+rm -rf "./build/tests/functional/work-$$/homes/gmail-$$"
 mkdir -p "$H_GMAIL/config/email-cli/accounts/$GMAIL_ACCT_A"
 mkdir -p "$H_GMAIL/config/email-cli/accounts/$GMAIL_ACCT_B"
 mkdir -p "$H_GMAIL/data"
@@ -1369,13 +1568,13 @@ GLA_A=$(run_gmail_ro_a --batch list-attachments 000000000000000a)
 check "26.8 gmail-A list-attachments 10: notes_10.txt listed" "notes_10" "$GLA_A"
 
 # 26.9 save-attachment for message 10
-GSAVE_A_DIR="./build/tests/functional/homes/gattach-a-$$"
+GSAVE_A_DIR="./build/tests/functional/work-$$/homes/gattach-a-$$"
 mkdir -p "$GSAVE_A_DIR"
 GSA_A=$(run_gmail_ro_a --batch save-attachment 000000000000000a notes_10.txt "$GSAVE_A_DIR")
 check "26.9 gmail-A save-attachment: exit ok" "aved\|uccessful\|notes\|ok" "$GSA_A"
 check "26.10 gmail-A save-attachment: file exists" "^ok$" \
     "$(test -f "$GSAVE_A_DIR/notes_10.txt" && echo ok || echo missing)"
-rm -rf "./build/tests/functional/homes/gattach-a-$$"
+rm -rf "./build/tests/functional/work-$$/homes/gattach-a-$$"
 
 # 26.11 list-labels account A
 GF_A=$(run_gmail_ro_a --batch list-labels)
@@ -1407,13 +1606,13 @@ GLA_B=$(run_gmail_ro_b --batch list-attachments 0000000000000014)
 check "26.20 gmail-B list-attachments 20: GmailB-notes_20.txt listed" "GmailB-notes_20" "$GLA_B"
 
 # 26.21 save-attachment for message 20 (account B)
-GSAVE_B_DIR="./build/tests/functional/homes/gattach-b-$$"
+GSAVE_B_DIR="./build/tests/functional/work-$$/homes/gattach-b-$$"
 mkdir -p "$GSAVE_B_DIR"
 GSA_B=$(run_gmail_ro_b --batch save-attachment 0000000000000014 GmailB-notes_20.txt "$GSAVE_B_DIR")
 check "26.21 gmail-B save-attachment: exit ok" "aved\|uccessful\|notes\|ok" "$GSA_B"
 check "26.22 gmail-B save-attachment: file exists" "^ok$" \
     "$(test -f "$GSAVE_B_DIR/GmailB-notes_20.txt" && echo ok || echo missing)"
-rm -rf "./build/tests/functional/homes/gattach-b-$$"
+rm -rf "./build/tests/functional/work-$$/homes/gattach-b-$$"
 
 # ── Gmail cross-contamination checks ─────────────────────────────────────
 # 26.23 Account A list must NOT contain account B's GmailB- prefix
@@ -1431,6 +1630,9 @@ check_not "26.25 gmail-A list: no GmailB-Message 150" "GmailB-Message 150" "$GL_
 GF_B=$(run_gmail_ro_b --batch list-labels)
 check "26.26 gmail-B list-labels: INBOX listed" "INBOX" "$GF_B"
 
+fi
+
+if phase_wanted 27; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 27 — Gmail label index rebuild (--rebuild-index + auto-rebuild)
 # ════════════════════════════════════════════════════════════════════════════
@@ -1508,6 +1710,9 @@ check "27.10 gmail-A INBOX.idx recreated by auto-rebuild full sync" "^ok$" \
 GL27=$(run_gmail_ro_a --batch list --all --limit 200)
 check "27.11 gmail-A list: messages accessible after rebuild (index functional)" "Message 1" "$GL27"
 
+fi
+
+if phase_wanted 28; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 28 — Hex UID acceptance (US-6: Gmail `list` outputs hex UIDs)
 # Verifies that all commands that accept a UID accept the 16-char hex format
@@ -1569,7 +1774,7 @@ check_not "28.8 list-attachments hex UID: no parse error"  "invalid UID\|positiv
 
 # 28.9 save-attachment: hex UID must not produce a parse error
 #   (filename arg keeps command from showing usage; any other error is acceptable)
-SA28=$(run_gmail_ro_a save-attachment "$HEX_UID" nosuchfile.txt /tmp)
+SA28=$(run_gmail_ro_a save-attachment "$HEX_UID" nosuchfile.txt "$WORK_DIR")
 check_not "28.9 save-attachment hex UID: no parse error"  "invalid UID\|positive integer" "$SA28"
 
 # 28.10 Truly invalid UID (garbage string) is still rejected
@@ -1577,15 +1782,18 @@ BAD28=$(run_gmail_cli_a mark-read "notavaliduid123x")
 check "28.10 mark-read garbage UID rejected"  "invalid UID\|Error" "$BAD28"
 
 # 28.11 Regression: IMAP decimal UID still accepted (main.c)
-H28_IMAP="./build/tests/functional/homes/hex28-$$"
-make_home "$H28_IMAP" "alpha@test.local" 9993
+H28_IMAP="./build/tests/functional/work-$$/homes/hex28-$$"
+make_home "$H28_IMAP" "alpha@test.local" $IMAP1_PORT
 DEC28=$( (export HOME="$H28_IMAP"
     unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-cli" --batch mark-read 42 2>&1 ; echo "exit-code=$?") )
 check "exit status of DEC28 is 0" "exit-code=0" "$DEC28"
 check_not "28.11 mark-read decimal UID (IMAP): no parse error"  "invalid UID\|positive integer" "$DEC28"
-rm -rf "./build/tests/functional/homes/hex28-$$"
+rm -rf "./build/tests/functional/work-$$/homes/hex28-$$"
 
+fi
+
+if phase_wanted 29; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 29 — .hdr labels CSV / flags-int consistency after local mutations
 #
@@ -1704,6 +1912,9 @@ run_gmail_sync_a >/dev/null 2>&1
 check "29.10b remove-starred: UID still absent from STARRED.idx after full sync" "no" \
     "$(idx_contains "$HEX_UID" "$LABELS_DIR_A/STARRED.idx")"
 
+fi
+
+if phase_wanted 30; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 30 — Gmail smart sync: reconcile + pending_fetch + incremental fast path
 # ════════════════════════════════════════════════════════════════════════════
@@ -1711,9 +1922,9 @@ echo ""
 echo "--- Phase 30: Gmail smart sync (reconcile/pending_fetch/incremental) ---"
 
 # Use a fresh home dir so Phase 26-29 state does not interfere
-H_GSYNC="./build/tests/functional/homes/gsync-$$"
+H_GSYNC="./build/tests/functional/work-$$/homes/gsync-$$"
 GSYNC_ACCT="gsync@gmail.com"
-rm -rf "./build/tests/functional/homes/gsync-$$"
+rm -rf "./build/tests/functional/work-$$/homes/gsync-$$"
 mkdir -p "$H_GSYNC/config/email-cli/accounts/$GSYNC_ACCT"
 mkdir -p "$H_GSYNC/data"
 cat > "$H_GSYNC/config/email-cli/accounts/$GSYNC_ACCT/config.ini" <<GSYNC_CFG
@@ -1801,12 +2012,15 @@ check "30.9 forced reconcile (no historyId): lists server" \
     "messages on server\|Listing\|fetched\|already\|downloaded" "$SYNC30D"
 
 # Cleanup Phase 30
-rm -rf "./build/tests/functional/homes/gsync-$$"
+rm -rf "./build/tests/functional/work-$$/homes/gsync-$$"
 
 # Cleanup Phase 26+27+28+29
 kill "$GMAIL_SERVER_A_PID" "$GMAIL_SERVER_B_PID" 2>/dev/null || true
-rm -rf "./build/tests/functional/homes/gmail-$$"
+rm -rf "./build/tests/functional/work-$$/homes/gmail-$$"
 
+fi
+
+if phase_wanted 31; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 31 — URL word-wrap: long URLs must not be hard-broken mid-token
 # ════════════════════════════════════════════════════════════════════════════
@@ -1815,9 +2029,9 @@ echo "--- Phase 31: URL word-wrap (plain-text, no hard line breaks) ---"
 
 LONG_URL="https://www.agroinform.hu/aprohirdetes_adatlap/gep/gyumolcstermesztes-gepei/perfect-rf-egyoldalas-lengotarcsas-kasza-gyumolcs-es-szoloultetvenyekhez/h_7206309?ref=0a20571a"
 
-URL_PORT=9991
-H_URL="./build/tests/functional/homes/urlwrap"
-URL_LOG="$PROJECT_ROOT/build/tests/functional/mock_urlwrap.log"
+alloc_port URL_PORT
+H_URL="./build/tests/functional/work-$$/homes/urlwrap"
+URL_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_urlwrap.log"
 make_home "$H_URL" "urlwrap@test.local" "$URL_PORT"
 
 (cd "$PROJECT_ROOT/build" && \
@@ -1839,23 +2053,26 @@ check     "31.3 URL not broken at col 80"      "$URL_STRADDLE"   "$URL_OUT"
 
 # Cleanup Phase 31
 kill "$URL_SERVER_PID" 2>/dev/null || true
-rm -rf "./build/tests/functional/homes/urlwrap"
+rm -rf "./build/tests/functional/work-$$/homes/urlwrap"
 
+fi
+
+if phase_wanted 32; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 32 — Gmail incremental sync: historyId from list, new messages, expired
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 32: Gmail incremental sync (historyId / new msgs / expired) ---"
 
-GMAIL_INC_LOG="$PROJECT_ROOT/build/tests/functional"
+GMAIL_INC_LOG="$PROJECT_ROOT/build/tests/functional/work-$$"
 
 # ── Phase 32a: historyId captured from messages.list (not /profile) ──────
 # MOCK_GMAIL_HISTID=7777 → messages.list returns "historyId":"7777"
 # MOCK_GMAIL_PROFILE_FAIL=1 → /profile returns 404 (proves we don't rely on it)
-GINC_PORT_A=9990
-H_GINC_A="./build/tests/functional/homes/ginc-a-$$"
+alloc_port GINC_PORT_A
+H_GINC_A="./build/tests/functional/work-$$/homes/ginc-a-$$"
 GINC_ACCT_A="ginca@gmail.com"
-rm -rf "./build/tests/functional/homes/ginc-a-$$"
+rm -rf "./build/tests/functional/work-$$/homes/ginc-a-$$"
 mkdir -p "$H_GINC_A/config/email-cli/accounts/$GINC_ACCT_A"
 cat > "$H_GINC_A/config/email-cli/accounts/$GINC_ACCT_A/config.ini" <<GINC_CFG_A
 EMAIL_HOST=
@@ -1900,15 +2117,15 @@ check_not "32.4 second sync: no reconcile (incremental)" "Listing messages" "$SY
 check     "32.5 second sync: up to date" "up to date" "$SYNC32B"
 
 kill "$GINC_A_PID" 2>/dev/null || true
-rm -rf "./build/tests/functional/homes/ginc-a-$$"
+rm -rf "./build/tests/functional/work-$$/homes/ginc-a-$$"
 
 # ── Phase 32b: New messages via History API ───────────────────────────────
 # First sync downloads 5 messages.  Second sync: history returns 2 new msgs.
-GINC_PORT_B=9989
-GINC_PORT_B2=9987
-H_GINC_B="./build/tests/functional/homes/ginc-b-$$"
+alloc_port GINC_PORT_B
+alloc_port GINC_PORT_B2
+H_GINC_B="./build/tests/functional/work-$$/homes/ginc-b-$$"
 GINC_ACCT_B="gincb@gmail.com"
-rm -rf "./build/tests/functional/homes/ginc-b-$$"
+rm -rf "./build/tests/functional/work-$$/homes/ginc-b-$$"
 mkdir -p "$H_GINC_B/config/email-cli/accounts/$GINC_ACCT_B"
 cat > "$H_GINC_B/config/email-cli/accounts/$GINC_ACCT_B/config.ini" <<GINC_CFG_B
 EMAIL_HOST=
@@ -1980,13 +2197,13 @@ check "32.10 new message 7 accessible after incremental" "Message 7" "$GL32"
 check "32.11 historyId updated after incremental" "5001" "$(cat "$GINC_HISTID_B" 2>/dev/null || echo '')"
 
 kill "$GINC_B2_PID" 2>/dev/null || true
-rm -rf "./build/tests/functional/homes/ginc-b-$$"
+rm -rf "./build/tests/functional/work-$$/homes/ginc-b-$$"
 
 # ── Phase 32c: Expired historyId → fallback to full reconcile ─────────────
-GINC_PORT_C=9988
-H_GINC_C="./build/tests/functional/homes/ginc-c-$$"
+alloc_port GINC_PORT_C
+H_GINC_C="./build/tests/functional/work-$$/homes/ginc-c-$$"
 GINC_ACCT_C="gincc@gmail.com"
-rm -rf "./build/tests/functional/homes/ginc-c-$$"
+rm -rf "./build/tests/functional/work-$$/homes/ginc-c-$$"
 mkdir -p "$H_GINC_C/config/email-cli/accounts/$GINC_ACCT_C"
 cat > "$H_GINC_C/config/email-cli/accounts/$GINC_ACCT_C/config.ini" <<GINC_CFG_C
 EMAIL_HOST=
@@ -2039,8 +2256,11 @@ check     "32.14 expired historyId: new historyId saved after reconcile" "9001" 
     "$(cat "$GINC_HISTID_C" 2>/dev/null || echo '')"
 
 kill "$GINC_C2_PID" 2>/dev/null || true
-rm -rf "./build/tests/functional/homes/ginc-c-$$"
+rm -rf "./build/tests/functional/work-$$/homes/ginc-c-$$"
 
+fi
+
+if phase_wanted 33; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 33 — IMAP CONDSTORE incremental sync (RFC 4551)
 #
@@ -2054,8 +2274,8 @@ rm -rf "./build/tests/functional/homes/ginc-c-$$"
 echo ""
 echo "--- Phase 33: IMAP CONDSTORE incremental sync ---"
 
-CS_PORT=9984
-H_CS="./build/tests/functional/homes/cs-$$"
+alloc_port CS_PORT
+H_CS="./build/tests/functional/work-$$/homes/cs-$$"
 CS_ACCT="condtest@imap.local"
 CS_LOG="$H_CS/logs"
 make_home "$H_CS" "$CS_ACCT" "$CS_PORT"
@@ -2140,18 +2360,18 @@ check "33.8 UIDVALIDITY changed → new uidval in sync_state" "99" \
     "$(cat "$CS_SYNC_STATE" 2>/dev/null || echo '')"
 
 kill "$CS_C_PID" 2>/dev/null || true
-rm -rf "./build/tests/functional/homes/cs-$$"
+rm -rf "./build/tests/functional/work-$$/homes/cs-$$"
 
 # ── Phase 33d: no CONDSTORE → regular sync; no sync_state ────────────────
 
-H_CS_D="./build/tests/functional/homes/csd-$$"
+H_CS_D="./build/tests/functional/work-$$/homes/csd-$$"
 make_home "$H_CS_D" "$CS_ACCT" "$CS_PORT"
 CS_SYNC_STATE_D="$H_CS_D/.local/share/email-cli/accounts/$CS_ACCT/sync_state/INBOX.tsv"
 
 (cd "$PROJECT_ROOT/build" && \
     MOCK_IMAP_PORT=$CS_PORT \
     MOCK_IMAP_COUNT=1 \
-    "$MOCK_SERVER_BIN") >"$PROJECT_ROOT/build/tests/functional/mock_cs_d.log" 2>&1 &
+    "$MOCK_SERVER_BIN") >"$PROJECT_ROOT/build/tests/functional/work-$$/mock_cs_d.log" 2>&1 &
 CS_D_PID=$!
 sleep 0.3
 
@@ -2164,17 +2384,20 @@ check "33.10 no CONDSTORE → no sync_state file" \
     "absent" "$(test -f "$CS_SYNC_STATE_D" && echo present || echo absent)"
 
 kill "$CS_D_PID" 2>/dev/null || true
-rm -rf "./build/tests/functional/homes/csd-$$"
+rm -rf "./build/tests/functional/work-$$/homes/csd-$$"
 
+fi
+
+if phase_wanted 34; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 34 — US-01: rules list command
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 34: rules list (US-01) ---"
 
-H_RL="./build/tests/functional/homes/rl-$$"
+H_RL="./build/tests/functional/work-$$/homes/rl-$$"
 RL_ACCT="rules@test.local"
-make_home "$H_RL" "$RL_ACCT" 9993
+make_home "$H_RL" "$RL_ACCT" $IMAP1_PORT
 
 # Write a rules.ini for the account
 cat > "$H_RL/.config/email-cli/accounts/$RL_ACCT/rules.ini" <<'RINI'
@@ -2212,8 +2435,8 @@ RL_OUT2=$( (export HOME="$H_RL"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_H
 check "34.9 rules (no subcmd): same output"      "GitHub"            "$RL_OUT2"
 
 # Empty case: no rules.ini
-H_RL_EMPTY="./build/tests/functional/homes/rl-empty-$$"
-make_home "$H_RL_EMPTY" "$RL_ACCT" 9993
+H_RL_EMPTY="./build/tests/functional/work-$$/homes/rl-empty-$$"
+make_home "$H_RL_EMPTY" "$RL_ACCT" $IMAP1_PORT
 RL_EMPTY=$( (export HOME="$H_RL_EMPTY"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-cli" rules list 2>&1 || true) )
 check "34.10 rules list: no rules → helpful message" "No rules configured" "$RL_EMPTY"
@@ -2226,18 +2449,21 @@ check "34.12 help rules: usage line"   "rules list" "$RL_HELP"
 RL_HELP2=$( "$BIN_DIR/email-cli" rules --help 2>&1 || true )
 check "34.13 rules --help: usage line" "rules list" "$RL_HELP2"
 
-rm -rf "./build/tests/functional/homes/rl-$$"
-rm -rf "./build/tests/functional/homes/rl-empty-$$"
+rm -rf "./build/tests/functional/work-$$/homes/rl-$$"
+rm -rf "./build/tests/functional/work-$$/homes/rl-empty-$$"
 
+fi
+
+if phase_wanted 35; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 35 — US-02: email-sync --verbose rules firing log
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 35: email-sync --verbose rules log (US-02) ---"
 
-H_RV="./build/tests/functional/homes/rv-$$"
+H_RV="./build/tests/functional/work-$$/homes/rv-$$"
 RV_ACCT="rv@test.local"
-make_home "$H_RV" "$RV_ACCT" 9993
+make_home "$H_RV" "$RV_ACCT" $IMAP1_PORT
 
 # Rule that matches the mock server's from address "Sender N <senderN@example.com>"
 cat > "$H_RV/.config/email-cli/accounts/$RV_ACCT/rules.ini" <<'RVINI'
@@ -2268,17 +2494,20 @@ RV_ARULE=$( (export HOME="$H_RV"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_
 check "35.6 apply-rules --verbose: [rule] line"       "\[rule\]"      "$RV_ARULE"
 check "35.7 apply-rules --verbose: rule name"         "Mock messages" "$RV_ARULE"
 
-rm -rf "./build/tests/functional/homes/rv-$$"
+rm -rf "./build/tests/functional/work-$$/homes/rv-$$"
 
+fi
+
+if phase_wanted 36; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 36 — US-03/04: rules apply and rules apply --dry-run
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 36: rules apply / rules apply --dry-run (US-03/04) ---"
 
-H_RA="./build/tests/functional/homes/ra-$$"
+H_RA="./build/tests/functional/work-$$/homes/ra-$$"
 RA_ACCT="ra@test.local"
-make_home "$H_RA" "$RA_ACCT" 9993
+make_home "$H_RA" "$RA_ACCT" $IMAP1_PORT
 
 cat > "$H_RA/.config/email-cli/accounts/$RA_ACCT/rules.ini" <<'RAINI'
 [rule "Tag alpha"]
@@ -2313,17 +2542,20 @@ check_not "36.7 rules apply again: no messages to modify" "\[rule\]" "$RA_AGAIN"
 RA_HELP=$( "$BIN_DIR/email-cli" help rules 2>&1 || true )
 check "36.8 help rules: apply mentioned" "apply" "$RA_HELP"
 
-rm -rf "./build/tests/functional/homes/ra-$$"
+rm -rf "./build/tests/functional/work-$$/homes/ra-$$"
 
+fi
+
+if phase_wanted 37; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 37 — US-05: rules add and rules remove
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 37: rules add / rules remove (US-05) ---"
 
-H_RW="./build/tests/functional/homes/rw-$$"
+H_RW="./build/tests/functional/work-$$/homes/rw-$$"
 RW_ACCT="rw@test.local"
-make_home "$H_RW" "$RW_ACCT" 9993
+make_home "$H_RW" "$RW_ACCT" $IMAP1_PORT
 
 # 37.1 Add first rule
 ADD1=$( (export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
@@ -2399,8 +2631,11 @@ check "37.17 rules remove without --name: error" "name\|required\|Error" "$RM_NO
 check "37.18 help rules add: usage"    "rules add"    "$( "$BIN_DIR/email-cli" help rules 2>&1 || true )"
 check "37.19 help rules remove: usage" "rules remove" "$( "$BIN_DIR/email-cli" help rules 2>&1 || true )"
 
-rm -rf "./build/tests/functional/homes/rw-$$"
+rm -rf "./build/tests/functional/work-$$/homes/rw-$$"
 
+fi
+
+if phase_wanted 38; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 38 — email-import-rules: bin presence + unsupported rule warnings
 # ════════════════════════════════════════════════════════════════════════════
@@ -2414,7 +2649,7 @@ check "38.1 email-import-rules binary exists in bin/" "^ok$" \
 # US-IR-02: unsupported Thunderbird rule elements produce [warn] lines on stderr
 
 # Create a synthetic Thunderbird profile with mixed supported/unsupported rules
-TB_DIR="./build/tests/functional/homes/tb-$$"
+TB_DIR="./build/tests/functional/work-$$/homes/tb-$$"
 mkdir -p "$TB_DIR/ImapMail/localhost"
 make_tb_prefs "$TB_DIR" "localhost" "ir@test.local" "localhost"
 cat > "$TB_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TBDAT'
@@ -2502,10 +2737,10 @@ action="Stop filter evaluation"
 TBDAT
 
 # We need an account for the importer; use a dummy config
-H_IR="./build/tests/functional/homes/ir-$$"
+H_IR="./build/tests/functional/work-$$/homes/ir-$$"
 mkdir -p "$H_IR/.config/email-cli/accounts/ir@test.local"
-cat > "$H_IR/.config/email-cli/accounts/ir@test.local/config.ini" <<'CFG'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_IR/.config/email-cli/accounts/ir@test.local/config.ini" <<CFG
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=ir@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -2565,18 +2800,21 @@ IR_HELP=$( "$BIN_DIR/email-import-rules" --help 2>&1 || true )
 check "38.10 help: usage line"                            "email-import-rules" "$IR_HELP"
 check "38.11 help: --thunderbird-path option"             "thunderbird-path"   "$IR_HELP"
 
-rm -rf "./build/tests/functional/homes/ir-$$"
-case "$TB_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB_DIR path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${TB_DIR##./build/tests/functional/homes/}"
+rm -rf "./build/tests/functional/work-$$/homes/ir-$$"
+case "$TB_DIR" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe TB_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${TB_DIR##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 39; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 39 — US-65: begins with / ends with match type conversion
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 39: begins with / ends with match types (US-65) ---"
 
-TB39_DIR="./build/tests/functional/homes/tb39-$$"
-H_39="./build/tests/functional/homes/h39-$$"
+TB39_DIR="./build/tests/functional/work-$$/homes/tb39-$$"
+H_39="./build/tests/functional/work-$$/homes/h39-$$"
 mkdir -p "$TB39_DIR/ImapMail/localhost"
 make_tb_prefs "$TB39_DIR" "localhost" "t39@test.local" "localhost"
 cat > "$TB39_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB39DAT'
@@ -2601,8 +2839,8 @@ actionValue="imap://user@imap.test.local/Admin"
 TB39DAT
 
 mkdir -p "$H_39/.config/email-cli/accounts/t39@test.local"
-cat > "$H_39/.config/email-cli/accounts/t39@test.local/config.ini" <<'CFG39'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_39/.config/email-cli/accounts/t39@test.local/config.ini" <<CFG39
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=t39@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -2619,18 +2857,21 @@ check     "39.3 is exact: if-from = admin@example.com"    "admin@example.com" "$
 check_not "39.4 no warn for begins with (US-65)"          "\[warn\].*begins"  "$IR39"
 check_not "39.5 no warn for ends with (US-65)"            "\[warn\].*ends"    "$IR39"
 
-rm -rf "./build/tests/functional/homes/h39-$$"
-case "$TB39_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB39_DIR path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${TB39_DIR##./build/tests/functional/homes/}"
+rm -rf "./build/tests/functional/work-$$/homes/h39-$$"
+case "$TB39_DIR" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe TB39_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${TB39_DIR##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 40; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 40 — US-66: flag action conversion
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 40: flag action conversion (US-66) ---"
 
-TB40_DIR="./build/tests/functional/homes/tb40-$$"
-H_40="./build/tests/functional/homes/h40-$$"
+TB40_DIR="./build/tests/functional/work-$$/homes/tb40-$$"
+H_40="./build/tests/functional/work-$$/homes/h40-$$"
 mkdir -p "$TB40_DIR/ImapMail/localhost"
 make_tb_prefs "$TB40_DIR" "localhost" "t40@test.local" "localhost"
 cat > "$TB40_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB40DAT'
@@ -2662,8 +2903,8 @@ action="Mark as flagged"
 TB40DAT
 
 mkdir -p "$H_40/.config/email-cli/accounts/t40@test.local"
-cat > "$H_40/.config/email-cli/accounts/t40@test.local/config.ini" <<'CFG40'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_40/.config/email-cli/accounts/t40@test.local/config.ini" <<CFG40
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=t40@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -2684,18 +2925,21 @@ check_not "40.7 no warn for Mark as junk"                     "\[warn\].*junk"  
 check_not "40.8 no warn for Delete"                           "\[warn\].*Delete"  "$IR40"
 check_not "40.9 no warn for Mark as starred"                  "\[warn\].*starred" "$IR40"
 
-rm -rf "./build/tests/functional/homes/h40-$$"
-case "$TB40_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB40_DIR path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${TB40_DIR##./build/tests/functional/homes/}"
+rm -rf "./build/tests/functional/work-$$/homes/h40-$$"
+case "$TB40_DIR" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe TB40_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${TB40_DIR##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 41; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 41 — US-67: Thunderbird Label action → custom label
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 41: Label action -> custom label (US-67) ---"
 
-TB41_DIR="./build/tests/functional/homes/tb41-$$"
-H_41="./build/tests/functional/homes/h41-$$"
+TB41_DIR="./build/tests/functional/work-$$/homes/tb41-$$"
+H_41="./build/tests/functional/work-$$/homes/h41-$$"
 mkdir -p "$TB41_DIR/ImapMail/localhost"
 make_tb_prefs "$TB41_DIR" "localhost" "t41@test.local" "localhost"
 cat > "$TB41_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB41DAT'
@@ -2738,8 +2982,8 @@ actionValue="$label9"
 TB41DAT
 
 mkdir -p "$H_41/.config/email-cli/accounts/t41@test.local"
-cat > "$H_41/.config/email-cli/accounts/t41@test.local/config.ini" <<'CFG41'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_41/.config/email-cli/accounts/t41@test.local/config.ini" <<CFG41
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=t41@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -2758,18 +3002,21 @@ check     "41.5 \$label5 -> Later"        "Later"      "$IR41"
 check     "41.6 \$label9 -> Label9"       "Label9"     "$IR41"
 check_not "41.7 no warn for Label action" "\[warn\].*Label" "$IR41"
 
-rm -rf "./build/tests/functional/homes/h41-$$"
-case "$TB41_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB41_DIR path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${TB41_DIR##./build/tests/functional/homes/}"
+rm -rf "./build/tests/functional/work-$$/homes/h41-$$"
+case "$TB41_DIR" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe TB41_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${TB41_DIR##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 42; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 42 — US-68: negation conditions (doesn't contain / isn't)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 42: negation conditions (US-68) ---"
 
-TB42_DIR="./build/tests/functional/homes/tb42-$$"
-H_42="./build/tests/functional/homes/h42-$$"
+TB42_DIR="./build/tests/functional/work-$$/homes/tb42-$$"
+H_42="./build/tests/functional/work-$$/homes/h42-$$"
 mkdir -p "$TB42_DIR/ImapMail/localhost"
 make_tb_prefs "$TB42_DIR" "localhost" "t42@test.local" "localhost"
 cat > "$TB42_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB42DAT'
@@ -2788,8 +3035,8 @@ actionValue="imap://user@imap.test.local/Regular"
 TB42DAT
 
 mkdir -p "$H_42/.config/email-cli/accounts/t42@test.local"
-cat > "$H_42/.config/email-cli/accounts/t42@test.local/config.ini" <<'CFG42'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_42/.config/email-cli/accounts/t42@test.local/config.ini" <<CFG42
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=t42@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -2807,18 +3054,21 @@ check     "42.4 isn't value preserved"              "Unsubscribe"    "$IR42"
 check_not "42.5 no warn for doesn't contain"        "\[warn\].*doesn" "$IR42"
 check_not "42.6 no warn for isn't"                  "\[warn\].*isn"   "$IR42"
 
-rm -rf "./build/tests/functional/homes/h42-$$"
-case "$TB42_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB42_DIR path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${TB42_DIR##./build/tests/functional/homes/}"
+rm -rf "./build/tests/functional/work-$$/homes/h42-$$"
+case "$TB42_DIR" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe TB42_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${TB42_DIR##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 43; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 43 — US-69: body condition conversion
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 43: body condition (US-69) ---"
 
-TB43_DIR="./build/tests/functional/homes/tb43-$$"
-H_43="./build/tests/functional/homes/h43-$$"
+TB43_DIR="./build/tests/functional/work-$$/homes/tb43-$$"
+H_43="./build/tests/functional/work-$$/homes/h43-$$"
 mkdir -p "$TB43_DIR/ImapMail/localhost"
 make_tb_prefs "$TB43_DIR" "localhost" "t43@test.local" "localhost"
 cat > "$TB43_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB43DAT'
@@ -2837,8 +3087,8 @@ actionValue="imap://user@imap.test.local/Urgent"
 TB43DAT
 
 mkdir -p "$H_43/.config/email-cli/accounts/t43@test.local"
-cat > "$H_43/.config/email-cli/accounts/t43@test.local/config.ini" <<'CFG43'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_43/.config/email-cli/accounts/t43@test.local/config.ini" <<CFG43
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=t43@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -2853,18 +3103,21 @@ check     "43.1 body contains -> body:*unsubscribe*"     'body:.*unsubscribe'   
 check     "43.2 body begins with -> body:URGENT*"         'body:.*URGENT'          "$IR43"
 check_not "43.3 no warn for body condition (US-69)"        "\[warn\].*body"            "$IR43"
 
-rm -rf "./build/tests/functional/homes/h43-$$"
-case "$TB43_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB43_DIR path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${TB43_DIR##./build/tests/functional/homes/}"
+rm -rf "./build/tests/functional/work-$$/homes/h43-$$"
+case "$TB43_DIR" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe TB43_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${TB43_DIR##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 44; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 44 — US-70: age condition conversion
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 44: age condition (US-70) ---"
 
-TB44_DIR="./build/tests/functional/homes/tb44-$$"
-H_44="./build/tests/functional/homes/h44-$$"
+TB44_DIR="./build/tests/functional/work-$$/homes/tb44-$$"
+H_44="./build/tests/functional/work-$$/homes/h44-$$"
 mkdir -p "$TB44_DIR/ImapMail/localhost"
 make_tb_prefs "$TB44_DIR" "localhost" "t44@test.local" "localhost"
 cat > "$TB44_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB44DAT'
@@ -2883,8 +3136,8 @@ actionValue="imap://user@imap.test.local/Recent"
 TB44DAT
 
 mkdir -p "$H_44/.config/email-cli/accounts/t44@test.local"
-cat > "$H_44/.config/email-cli/accounts/t44@test.local/config.ini" <<'CFG44'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_44/.config/email-cli/accounts/t44@test.local/config.ini" <<CFG44
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=t44@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -2900,10 +3153,13 @@ check     "44.2 age,less than,7 -> age-lt:7"            "age-lt:7"       "$IR44"
 check_not "44.3 no warn for age,greater than (US-70)"   "\[warn\].*age"  "$IR44"
 check_not "44.4 no warn for age,less than (US-70)"      "\[warn\].*age"  "$IR44"
 
-rm -rf "./build/tests/functional/homes/h44-$$"
-case "$TB44_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB44_DIR path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${TB44_DIR##./build/tests/functional/homes/}"
+rm -rf "./build/tests/functional/work-$$/homes/h44-$$"
+case "$TB44_DIR" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe TB44_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${TB44_DIR##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 45; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 45 — email-import-rules: additional action support
 #   45.1  "Mark read" (TB shorthand) → then-remove-label = UNREAD
@@ -2915,8 +3171,8 @@ rm -rf "./build/tests/functional/homes/${TB44_DIR##./build/tests/functional/home
 echo ""
 echo "--- Phase 45: email-import-rules additional actions ---"
 
-TB45_DIR="./build/tests/functional/homes/tb45-$$"
-H_45="./build/tests/functional/homes/h45-$$"
+TB45_DIR="./build/tests/functional/work-$$/homes/tb45-$$"
+H_45="./build/tests/functional/work-$$/homes/h45-$$"
 mkdir -p "$TB45_DIR/ImapMail/localhost"
 make_tb_prefs "$TB45_DIR" "localhost" "t45@test.local" "localhost"
 cat > "$TB45_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB45DAT'
@@ -2947,8 +3203,8 @@ actionValue="imap://user@imap.test.local/Boss"
 TB45DAT
 
 mkdir -p "$H_45/.config/email-cli/accounts/t45@test.local"
-cat > "$H_45/.config/email-cli/accounts/t45@test.local/config.ini" <<'CFG45'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_45/.config/email-cli/accounts/t45@test.local/config.ini" <<CFG45
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=t45@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -2977,10 +3233,13 @@ check     "45.5 auto-detected account shown correctly"      "t45@test.local"    
 check     "45.5b save message contains account (dangling ptr fix)" \
     "saved.*t45@test.local" "$(echo "$IR45_AUTO" | grep -i "saved")"
 
-rm -rf "./build/tests/functional/homes/h45-$$"
-case "$TB45_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB45_DIR path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${TB45_DIR##./build/tests/functional/homes/}"
+rm -rf "./build/tests/functional/work-$$/homes/h45-$$"
+case "$TB45_DIR" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe TB45_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${TB45_DIR##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 46; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 46 — Multi-account prefs.js isolation (US-76)
 #   46.1  ta46 account gets only AlphaRule (its own rules)
@@ -2993,8 +3252,8 @@ rm -rf "./build/tests/functional/homes/${TB45_DIR##./build/tests/functional/home
 echo ""
 echo "--- Phase 46: multi-account prefs.js isolation (US-76) ---"
 
-TB46_DIR="./build/tests/functional/homes/tb46-$$"
-H_46="./build/tests/functional/homes/h46-$$"
+TB46_DIR="./build/tests/functional/work-$$/homes/tb46-$$"
+H_46="./build/tests/functional/work-$$/homes/h46-$$"
 
 mkdir -p "$TB46_DIR/ImapMail/ta-dir"
 mkdir -p "$TB46_DIR/ImapMail/tb-dir"
@@ -3031,24 +3290,24 @@ DB46
 
 # Three-account home: ta46/tb46 on localhost, tc46 on an unrelated host (no TB profile)
 mkdir -p "$H_46/.config/email-cli/accounts/ta46@test.local"
-cat > "$H_46/.config/email-cli/accounts/ta46@test.local/config.ini" <<'CFG46A'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_46/.config/email-cli/accounts/ta46@test.local/config.ini" <<CFG46A
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=ta46@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
 SSL_NO_VERIFY=1
 CFG46A
 mkdir -p "$H_46/.config/email-cli/accounts/tb46@test.local"
-cat > "$H_46/.config/email-cli/accounts/tb46@test.local/config.ini" <<'CFG46B'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_46/.config/email-cli/accounts/tb46@test.local/config.ini" <<CFG46B
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=tb46@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
 SSL_NO_VERIFY=1
 CFG46B
 mkdir -p "$H_46/.config/email-cli/accounts/tc46@test.local"
-cat > "$H_46/.config/email-cli/accounts/tc46@test.local/config.ini" <<'CFG46C'
-EMAIL_HOST=imaps://other.host:9993
+cat > "$H_46/.config/email-cli/accounts/tc46@test.local/config.ini" <<CFG46C
+EMAIL_HOST=imaps://other.host:$IMAP1_PORT
 EMAIL_USER=tc46@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -3070,10 +3329,13 @@ check_not "46.4 tb46 has no AlphaRule (isolation)"        "AlphaRule"  "$(cat "$
 check     "46.5 tc46 skipped (no matching TB profile)"    "skipping"   "$IR46"
 check     "46.6 tc46 rules.ini not created"               "ok"         "$(test ! -f "$RULES46C" && echo ok || echo fail)"
 
-rm -rf "./build/tests/functional/homes/h46-$$"
-case "$TB46_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB46_DIR path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${TB46_DIR##./build/tests/functional/homes/}"
+rm -rf "./build/tests/functional/work-$$/homes/h46-$$"
+case "$TB46_DIR" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe TB46_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${TB46_DIR##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 47; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 47 — US-77: email-sync --apply-rules pushes changes to IMAP server
 #   47.1  apply-rules produces summary line "Rules applied:"
@@ -3084,9 +3346,9 @@ rm -rf "./build/tests/functional/homes/${TB46_DIR##./build/tests/functional/home
 echo ""
 echo "--- Phase 47: email-sync --apply-rules server push (US-77) ---"
 
-H_77="./build/tests/functional/homes/h77-$$"
+H_77="./build/tests/functional/work-$$/homes/h77-$$"
 ACCT_77="t77@test.local"
-make_home "$H_77" "$ACCT_77" 9993
+make_home "$H_77" "$ACCT_77" $IMAP1_PORT
 
 # Write a rule that matches the mock server's single-message From address
 # and requests a folder move so both pending_flags and pending_moves are exercised.
@@ -3115,17 +3377,20 @@ PENDING_MOVES_COUNT=$(find "$PENDING_MOVES_DIR" -name "*.tsv" -path "*/pending_m
 check "47.4 apply-rules: pending_moves cleaned up after sync"  "ok" \
     "$([ "$PENDING_MOVES_COUNT" -eq 0 ] && echo ok || echo fail)"
 
-rm -rf "./build/tests/functional/homes/h77-$$"
+rm -rf "./build/tests/functional/work-$$/homes/h77-$$"
 
+fi
+
+if phase_wanted 48; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 48 — US-81: when expression in rules list output
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 48: when expression in rules list (US-81) ---"
 
-H_48="./build/tests/functional/homes/h48-$$"
+H_48="./build/tests/functional/work-$$/homes/h48-$$"
 ACCT_48="w81@test.local"
-make_home "$H_48" "$ACCT_48" 9993
+make_home "$H_48" "$ACCT_48" $IMAP1_PORT
 
 cat > "$H_48/.config/email-cli/accounts/$ACCT_48/rules.ini" <<'RINI48'
 [rule "OR filter"]
@@ -3147,17 +3412,20 @@ check "48.4 rules list: negated rule when shown"          "!from:"             "
 check "48.5 rules list: and keyword in negated rule"      " and "              "$OUT_48"
 check "48.6 rules list: then-add-label shown"             "then-add-label"     "$OUT_48"
 
-rm -rf "./build/tests/functional/homes/h48-$$"
+rm -rf "./build/tests/functional/work-$$/homes/h48-$$"
 
+fi
+
+if phase_wanted 49; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 49 — US-81: backward compat: old if-from shown as when in rules list
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 49: legacy flat fields auto-migrated to when (US-81) ---"
 
-H_49="./build/tests/functional/homes/h49-$$"
+H_49="./build/tests/functional/work-$$/homes/h49-$$"
 ACCT_49="w81b@test.local"
-make_home "$H_49" "$ACCT_49" 9993
+make_home "$H_49" "$ACCT_49" $IMAP1_PORT
 
 cat > "$H_49/.config/email-cli/accounts/$ACCT_49/rules.ini" <<'RINI49'
 [rule "Legacy AND"]
@@ -3182,16 +3450,19 @@ SAVED_49=$(cat "$H_49/.config/email-cli/accounts/$ACCT_49/rules.ini" 2>/dev/null
 check     "49.4 saved file: when field present after re-save"    "when ="       "$SAVED_49"
 check_not "49.5 saved file: no bare if-from in new format"       "^if-from"    "$SAVED_49"
 
-rm -rf "./build/tests/functional/homes/h49-$$"
+rm -rf "./build/tests/functional/work-$$/homes/h49-$$"
 
+fi
+
+if phase_wanted 50; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 50 — US-81: Thunderbird OR conditions → single when expression
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 50: Thunderbird OR conditions → when expression (US-81) ---"
 
-TB50_DIR="./build/tests/functional/homes/tb50-$$"
-H_50="./build/tests/functional/homes/h50-$$"
+TB50_DIR="./build/tests/functional/work-$$/homes/tb50-$$"
+H_50="./build/tests/functional/work-$$/homes/h50-$$"
 mkdir -p "$TB50_DIR/ImapMail/localhost"
 make_tb_prefs "$TB50_DIR" "localhost" "t50@test.local" "localhost"
 cat > "$TB50_DIR/ImapMail/localhost/msgFilterRules.dat" <<'TB50DAT'
@@ -3204,8 +3475,8 @@ actionValue="imap://user@imap.test.local/Reklam"
 TB50DAT
 
 mkdir -p "$H_50/.config/email-cli/accounts/t50@test.local"
-cat > "$H_50/.config/email-cli/accounts/t50@test.local/config.ini" <<'CFG50'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_50/.config/email-cli/accounts/t50@test.local/config.ini" <<CFG50
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=t50@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -3223,10 +3494,13 @@ check     "50.4 TB OR: third from pattern present"        "offers.io"           
 check     "50.5 TB OR: or keyword present in when"        " or "                 "$IR50"
 check     "50.6 TB OR: move-folder preserved"             "Reklam"               "$IR50"
 
-rm -rf "./build/tests/functional/homes/h50-$$"
-case "$TB50_DIR" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe TB50_DIR path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${TB50_DIR##./build/tests/functional/homes/}"
+rm -rf "./build/tests/functional/work-$$/homes/h50-$$"
+case "$TB50_DIR" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe TB50_DIR path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${TB50_DIR##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 51; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 51 — create-folder and delete-folder IMAP commands
 # ════════════════════════════════════════════════════════════════════════════
@@ -3251,6 +3525,9 @@ DF_NOARG=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CAC
     "$BIN_DIR/email-cli" delete-folder 2>&1 || true) )
 check     "51.6 delete-folder no arg: error"  "Error\|requires"  "$DF_NOARG"
 
+fi
+
+if phase_wanted 52; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 52 — mark-junk and mark-notjunk
 # ════════════════════════════════════════════════════════════════════════════
@@ -3271,15 +3548,18 @@ JUNK_NOARG=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_C
     "$BIN_DIR/email-cli" mark-junk 2>&1 || true) )
 check     "52.5 mark-junk no uid: error"      "Error\|requires"  "$JUNK_NOARG"
 
+fi
+
+if phase_wanted 53; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 53 — remove-account
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 53: remove-account ---"
 
-H_RM53="./build/tests/functional/homes/rm53-$$"
+H_RM53="./build/tests/functional/work-$$/homes/rm53-$$"
 ACCT_RM53="rm53@test.local"
-make_home "$H_RM53" "$ACCT_RM53" 9993
+make_home "$H_RM53" "$ACCT_RM53" $IMAP1_PORT
 
 RM_OUT=$( (export HOME="$H_RM53"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-cli" remove-account "$ACCT_RM53" 2>&1 || true) )
@@ -3293,8 +3573,11 @@ RM_NOARG=$( (export HOME="$H_RM53"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACH
     "$BIN_DIR/email-cli" remove-account 2>&1 || true) )
 check     "53.3 remove-account no arg: error"  "Error\|requires"  "$RM_NOARG"
 
-rm -rf "./build/tests/functional/homes/rm53-$$"
+rm -rf "./build/tests/functional/work-$$/homes/rm53-$$"
 
+fi
+
+if phase_wanted 54; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 54 — email-sync cron status / remove
 # ════════════════════════════════════════════════════════════════════════════
@@ -3315,6 +3598,9 @@ check     "54.3 cron help: usage shown"       "setup\|remove\|status"          "
 SYNC_HELP=$( "$BIN_DIR/email-sync" --help 2>&1 || true )
 check     "54.4 email-sync --help: shown"     "Usage"                          "$SYNC_HELP"
 
+fi
+
+if phase_wanted 55; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 55 — email-sync --rebuild-contacts
 # ════════════════════════════════════════════════════════════════════════════
@@ -3326,15 +3612,18 @@ RC_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE
 check_not "55.1 rebuild-contacts: no crash"   "Segmentation\|Abort"  "$RC_OUT"
 check_not "55.2 rebuild-contacts: no error"   "Error:"               "$RC_OUT"
 
+fi
+
+if phase_wanted 56; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 56 — rules apply with when= expression
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 56: rules apply with when= expression ---"
 
-H_56="./build/tests/functional/homes/h56-$$"
+H_56="./build/tests/functional/work-$$/homes/h56-$$"
 ACCT_56="w56@test.local"
-make_home "$H_56" "$ACCT_56" 9993
+make_home "$H_56" "$ACCT_56" $IMAP1_PORT
 
 # Pre-populate rules.ini with a when= expression rule
 mkdir -p "$H_56/.config/email-cli/accounts/$ACCT_56"
@@ -3359,8 +3648,11 @@ RL56=$( (export HOME="$H_56"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-cli" rules list 2>&1 || true) )
 check "56.3 rules list shows when field"  "when"  "$RL56"
 
-rm -rf "./build/tests/functional/homes/h56-$$"
+rm -rf "./build/tests/functional/work-$$/homes/h56-$$"
 
+fi
+
+if phase_wanted 57; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 57 — email-cli-ro extra commands: list-folders, list-attachments
 # ════════════════════════════════════════════════════════════════════════════
@@ -3375,6 +3667,9 @@ RO_ATT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE
     "$BIN_DIR/email-cli-ro" list-attachments 1 2>&1 || true) )
 check_not "57.2 email-cli-ro list-attachments: no crash" "Segmentation\|Abort" "$RO_ATT"
 
+fi
+
+if phase_wanted 58; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 58 — virtual flag views (__unread__, __flagged__)
 # ════════════════════════════════════════════════════════════════════════════
@@ -3405,6 +3700,9 @@ VF_FORWARDED=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG
     "$BIN_DIR/email-cli" --batch list --folder __forwarded__ 2>&1 || true) )
 check_not "58.6 list --folder __forwarded__: no crash" "Segmentation\|Abort" "$VF_FORWARDED"
 
+fi
+
+if phase_wanted 59; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 59 — cross-folder content search (__search__: prefix)
 # ════════════════════════════════════════════════════════════════════════════
@@ -3431,6 +3729,9 @@ SRCH_EMPTY=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_C
     "$BIN_DIR/email-cli" --batch list --folder "__search__:0:ZZZNOMATCH99" 2>&1 || true) )
 check_not "59.5 search no result: no crash"    "Segmentation\|Abort"  "$SRCH_EMPTY"
 
+fi
+
+if phase_wanted 60; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 60 — Gmail label write operations
 # ════════════════════════════════════════════════════════════════════════════
@@ -3438,15 +3739,15 @@ echo ""
 echo "--- Phase 60: Gmail label write operations ---"
 
 # Phase 60–66 use a dedicated Gmail mock + home (H_GMAIL was cleaned up in Phase 30).
-GMAIL60_PORT=10005
-GMAIL60_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail60.log"
+alloc_port GMAIL60_PORT
+GMAIL60_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail60.log"
 echo "Starting mock Gmail server for Phase 60-66 (port $GMAIL60_PORT)..."
 (MOCK_GMAIL_PORT=$GMAIL60_PORT MOCK_GMAIL_COUNT=20 \
     MOCK_GMAIL_EMAIL="gwrite60@gmail.com" \
     "$MOCK_GMAIL_BIN") >"$GMAIL60_LOG" 2>&1 &
 GMAIL60_PID=$!
 
-H_GMAIL60="./build/tests/functional/homes/gmail60-$$"
+H_GMAIL60="./build/tests/functional/work-$$/homes/gmail60-$$"
 ACCT_GMAIL60="gwrite60@gmail.com"
 mkdir -p "$H_GMAIL60/config/email-cli/accounts/$ACCT_GMAIL60"
 mkdir -p "$H_GMAIL60/data"
@@ -3532,6 +3833,9 @@ LL_IMAP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACH
     "$BIN_DIR/email-cli" --batch list-labels 2>&1 || true) )
 check "60.12 list-labels on IMAP: Gmail-only error" "Gmail\|folder" "$LL_IMAP"
 
+fi
+
+if phase_wanted 61; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 61 — Gmail vs IMAP mode mismatch errors
 # ════════════════════════════════════════════════════════════════════════════
@@ -3572,21 +3876,24 @@ check "61.7 create-label no args: error" "Error\|requires" "$CL_NOARGS"
 DL_NOARGS=$( run_gmail60_cli delete-label )
 check "61.8 delete-label no args: error" "Error\|requires" "$DL_NOARGS"
 
+fi
+
+if phase_wanted 62; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 62 — email-sync --reconcile (Gmail mock)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 62: email-sync --reconcile (Gmail) ---"
 
-GMAIL_RECONC_PORT=10001
-GMAIL_RECONC_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail_reconc.log"
+alloc_port GMAIL_RECONC_PORT
+GMAIL_RECONC_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_reconc.log"
 echo "Starting mock Gmail server for reconcile test (port $GMAIL_RECONC_PORT)..."
 (MOCK_GMAIL_PORT=$GMAIL_RECONC_PORT MOCK_GMAIL_COUNT=10 \
     MOCK_GMAIL_EMAIL="reconc62@gmail.com" \
     "$MOCK_GMAIL_BIN") >"$GMAIL_RECONC_LOG" 2>&1 &
 GMAIL_RECONC_PID=$!
 
-H_RECONC="./build/tests/functional/homes/reconc62-$$"
+H_RECONC="./build/tests/functional/work-$$/homes/reconc62-$$"
 ACCT_RECONC="reconc62@gmail.com"
 mkdir -p "$H_RECONC/config/email-cli/accounts/$ACCT_RECONC"
 mkdir -p "$H_RECONC/data"
@@ -3629,26 +3936,29 @@ LIST62=$( (export XDG_CONFIG_HOME="$H_RECONC/config"
 check "62.4 reconcile: messages present after reconcile" "Message" "$LIST62"
 
 kill "$GMAIL_RECONC_PID" 2>/dev/null || true
-case "$H_RECONC" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_RECONC path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_RECONC##./build/tests/functional/homes/}"
+case "$H_RECONC" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_RECONC path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_RECONC##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 63; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 63 — Gmail create-label + delete-label
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 63: Gmail create-label / delete-label ---"
 
-# Use a separate Gmail mock on port 10002 so POST /labels and DELETE /labels/{id}
+# Use a separate Gmail mock (its own port) so POST /labels and DELETE /labels/{id}
 # are handled independently of the Phase 26 server.
-GMAIL_LABEL_PORT=10002
-GMAIL_LABEL_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail_label.log"
+alloc_port GMAIL_LABEL_PORT
+GMAIL_LABEL_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_label.log"
 echo "Starting mock Gmail server for label CRUD (port $GMAIL_LABEL_PORT)..."
 (MOCK_GMAIL_PORT=$GMAIL_LABEL_PORT MOCK_GMAIL_COUNT=5 \
     MOCK_GMAIL_EMAIL="labeltest63@gmail.com" \
     "$MOCK_GMAIL_BIN") >"$GMAIL_LABEL_LOG" 2>&1 &
 GMAIL_LABEL_PID=$!
 
-H_LABEL="./build/tests/functional/homes/label63-$$"
+H_LABEL="./build/tests/functional/work-$$/homes/label63-$$"
 ACCT_LABEL="labeltest63@gmail.com"
 mkdir -p "$H_LABEL/config/email-cli/accounts/$ACCT_LABEL"
 mkdir -p "$H_LABEL/data"
@@ -3682,17 +3992,20 @@ check_not "63.3 delete-label: no crash" "Segmentation\|Abort" "$DL63"
 check_not "63.4 delete-label: no error" "Error:"              "$DL63"
 
 kill "$GMAIL_LABEL_PID" 2>/dev/null || true
-case "$H_LABEL" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_LABEL path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_LABEL##./build/tests/functional/homes/}"
+case "$H_LABEL" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_LABEL path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_LABEL##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 64; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 64 — IMAP CONDSTORE / QRESYNC sync
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 64: IMAP CONDSTORE/QRESYNC ---"
 
-QRESYNC_PORT=10003
-QRESYNC_LOG="$PROJECT_ROOT/build/tests/functional/mock_qresync.log"
+alloc_port QRESYNC_PORT
+QRESYNC_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_qresync.log"
 echo "Starting QRESYNC mock IMAP server (port $QRESYNC_PORT)..."
 (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$QRESYNC_PORT \
     MOCK_IMAP_SUBJECT="QresyncMsg" \
@@ -3702,7 +4015,7 @@ echo "Starting QRESYNC mock IMAP server (port $QRESYNC_PORT)..."
     "$MOCK_SERVER_BIN") >"$QRESYNC_LOG" 2>&1 &
 QRESYNC_PID=$!
 
-H_QRESYNC="./build/tests/functional/homes/qresync64-$$"
+H_QRESYNC="./build/tests/functional/work-$$/homes/qresync64-$$"
 ACCT_QRESYNC="qresync64@test.local"
 make_home "$H_QRESYNC" "$ACCT_QRESYNC" "$QRESYNC_PORT"
 
@@ -3725,9 +4038,12 @@ QR64_LIST=$( (export HOME="$H_QRESYNC"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_
 check "64.4 QRESYNC list: messages present" "QresyncMsg" "$QR64_LIST"
 
 kill "$QRESYNC_PID" 2>/dev/null || true
-case "$H_QRESYNC" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_QRESYNC path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_QRESYNC##./build/tests/functional/homes/}"
+case "$H_QRESYNC" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_QRESYNC path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_QRESYNC##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 65; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 65 — Gmail list-folders + mark-junk/notjunk on Gmail
 # ════════════════════════════════════════════════════════════════════════════
@@ -3751,6 +4067,9 @@ LF65_IMAP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CA
     "$BIN_DIR/email-cli" --batch list-folders 2>&1 || true) )
 check "65.4 list-folders IMAP --batch: INBOX present" "INBOX" "$LF65_IMAP"
 
+fi
+
+if phase_wanted 66; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 66 — email-cli-ro show with content check + Gmail list-labels via ro
 # ════════════════════════════════════════════════════════════════════════════
@@ -3782,6 +4101,9 @@ LA66=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_H
     "$BIN_DIR/email-cli-ro" list-accounts 2>&1 || true) )
 check "66.7 email-cli-ro list-accounts: account present" "alpha\|test" "$LA66"
 
+fi
+
+if phase_wanted 67; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 67 — IMAP advanced: mark-read --folder, mark-starred with folder
 # ════════════════════════════════════════════════════════════════════════════
@@ -3811,14 +4133,17 @@ MR67_BAD=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CAC
     "$BIN_DIR/email-cli" --batch mark-read not-a-uid 2>&1 || true) )
 check "67.4 mark-read invalid UID: error" "Error\|invalid\|UID" "$MR67_BAD"
 
+fi
+
+if phase_wanted 68; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 68 — Gmail incremental sync with history expired (full re-fetch)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 68: Gmail history expired → full re-fetch ---"
 
-GMAIL_EXPIRED_PORT=10004
-GMAIL_EXPIRED_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail_expired.log"
+alloc_port GMAIL_EXPIRED_PORT
+GMAIL_EXPIRED_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_expired.log"
 echo "Starting Gmail mock with expired history (port $GMAIL_EXPIRED_PORT)..."
 (MOCK_GMAIL_PORT=$GMAIL_EXPIRED_PORT MOCK_GMAIL_COUNT=6 \
     MOCK_GMAIL_EMAIL="expired68@gmail.com" \
@@ -3826,7 +4151,7 @@ echo "Starting Gmail mock with expired history (port $GMAIL_EXPIRED_PORT)..."
     "$MOCK_GMAIL_BIN") >"$GMAIL_EXPIRED_LOG" 2>&1 &
 GMAIL_EXPIRED_PID=$!
 
-H_EXPIRED="./build/tests/functional/homes/expired68-$$"
+H_EXPIRED="./build/tests/functional/work-$$/homes/expired68-$$"
 ACCT_EXPIRED="expired68@gmail.com"
 mkdir -p "$H_EXPIRED/config/email-cli/accounts/$ACCT_EXPIRED"
 mkdir -p "$H_EXPIRED/data"
@@ -3868,9 +4193,12 @@ LIST68=$( (export XDG_CONFIG_HOME="$H_EXPIRED/config"
 check "68.4 expired history: messages present in list" "Message" "$LIST68"
 
 kill "$GMAIL_EXPIRED_PID" 2>/dev/null || true
-case "$H_EXPIRED" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_EXPIRED path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_EXPIRED##./build/tests/functional/homes/}"
+case "$H_EXPIRED" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_EXPIRED path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_EXPIRED##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 69; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 69 — email-import-rules Thunderbird import
 # ════════════════════════════════════════════════════════════════════════════
@@ -3878,9 +4206,9 @@ echo ""
 echo "--- Phase 69: email-import-rules ---"
 
 # Build a minimal Thunderbird msgFilterRules.dat to test import
-H_IMPRT="./build/tests/functional/homes/imprt69-$$"
+H_IMPRT="./build/tests/functional/work-$$/homes/imprt69-$$"
 ACCT_IMPRT="imprt69@test.local"
-make_home "$H_IMPRT" "$ACCT_IMPRT" 9993
+make_home "$H_IMPRT" "$ACCT_IMPRT" $IMAP1_PORT
 
 TB_PROFILE="$H_IMPRT/.thunderbird/default-profile"
 TB_IMAP_DIR="$TB_PROFILE/ImapMail/imap.test.local"
@@ -3916,9 +4244,12 @@ check_not "69.2 import-rules --dry-run: no crash"   "Segmentation\|Abort" "$DRYR
 HELP69=$( "$BIN_DIR/email-import-rules" --help 2>&1 || true )
 check "69.3 import-rules --help: usage shown" "thunderbird\|Usage\|import" "$HELP69"
 
-case "$H_IMPRT" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_IMPRT path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_IMPRT##./build/tests/functional/homes/}"
+case "$H_IMPRT" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_IMPRT path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_IMPRT##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 70; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 70 — Additional send and help coverage
 # ════════════════════════════════════════════════════════════════════════════
@@ -3946,17 +4277,20 @@ check "70.4 second send: confirmation"  "sent\|Sent\|Message\|Saved" "$SEND70_OK
 
 # Cleanup Phase 60-65 Gmail server and home
 kill "${GMAIL60_PID:-}" 2>/dev/null || true
-case "$H_GMAIL60" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_GMAIL60 path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_GMAIL60##./build/tests/functional/homes/}"
+case "$H_GMAIL60" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_GMAIL60 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_GMAIL60##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 71; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 71 — QRESYNC VANISHED: exercises imap_uid_set_expand()
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 71: QRESYNC VANISHED (imap_uid_set_expand) ---"
 
-VANISHED_PORT=10004
-VANISHED_LOG="$PROJECT_ROOT/build/tests/functional/mock_vanished.log"
+alloc_port VANISHED_PORT
+VANISHED_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_vanished.log"
 (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$VANISHED_PORT \
     MOCK_IMAP_SUBJECT="VanishedMsg" \
     MOCK_IMAP_CAPS="QRESYNC" \
@@ -3966,7 +4300,7 @@ VANISHED_LOG="$PROJECT_ROOT/build/tests/functional/mock_vanished.log"
     "$MOCK_SERVER_BIN") >"$VANISHED_LOG" 2>&1 &
 VANISHED_PID=$!
 
-H_VANISHED="./build/tests/functional/homes/vanished71-$$"
+H_VANISHED="./build/tests/functional/work-$$/homes/vanished71-$$"
 ACCT_VANISHED="vanished71@test.local"
 make_home "$H_VANISHED" "$ACCT_VANISHED" "$VANISHED_PORT"
 
@@ -3985,18 +4319,21 @@ check_not "71.2 VANISHED second sync: no crash" "Segmentation\|Abort" "$VAN71_SY
 check_not "71.3 VANISHED second sync: no error" "Error:" "$VAN71_SYNC2"
 
 kill "$VANISHED_PID" 2>/dev/null || true
-case "$H_VANISHED" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_VANISHED path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_VANISHED##./build/tests/functional/homes/}"
+case "$H_VANISHED" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_VANISHED path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_VANISHED##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 72; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 72 — when_expr.c: AND/NOT, label, body, age condition coverage
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 72: when_expr AND/NOT/label/body/age coverage ---"
 
-H_WE="./build/tests/functional/homes/we72-$$"
+H_WE="./build/tests/functional/work-$$/homes/we72-$$"
 WE_ACCT="we72@test.local"
-make_home "$H_WE" "$WE_ACCT" 9993
+make_home "$H_WE" "$WE_ACCT" $IMAP1_PORT
 
 # Rules with various condition types to exercise when_eval() branches
 # Rule 1: AND + NOT — exercises parse_and(), parse_not(), WN_AND, WN_NOT
@@ -4049,24 +4386,27 @@ WE72_LIST=$( (export HOME="$H_WE"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE
 check_not "72.3 rules list: no crash"           "Segmentation\|Abort"   "$WE72_LIST"
 check     "72.4 rules list: AND-NOT rule shown" "AND-NOT\|CovAndNot"    "$WE72_LIST"
 
-case "$H_WE" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_WE path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_WE##./build/tests/functional/homes/}"
+case "$H_WE" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_WE path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_WE##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 73; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 73 — config show / config imap / config smtp
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 73: config show / config imap / config smtp ---"
 
-H_CFG73="./build/tests/functional/homes/cfg73-$$"
+H_CFG73="./build/tests/functional/work-$$/homes/cfg73-$$"
 ACCT_CFG73="cfg73@test.local"
 
 # Create a home with IMAP-only config (no SMTP) — SSL_NO_VERIFY not needed
 # because config imap/smtp/show don't connect to the server.
-case "$H_CFG73" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_CFG73 path" >&2; exit 1 ;; esac
+case "$H_CFG73" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_CFG73 path" >&2; exit 1 ;; esac
 mkdir -p "$H_CFG73/.config/email-cli/accounts/$ACCT_CFG73"
 cat > "$H_CFG73/.config/email-cli/accounts/$ACCT_CFG73/config.ini" <<CONFIG
-EMAIL_HOST=imaps://localhost:9993
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=$ACCT_CFG73
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -4148,9 +4488,9 @@ check "73.10 config imap user+pass update: saved" "IMAP configuration saved" "$C
 
 # 73.11: test with a config that has no smtp_host and no imaps:// IMAP host
 #   Covers setup_wizard_smtp line 310 (plain-hostname prompt when no derived URL).
-H_CFG73B="./build/tests/functional/homes/cfg73b-$$"
+H_CFG73B="./build/tests/functional/work-$$/homes/cfg73b-$$"
 ACCT_CFG73B="cfg73b@test.local"
-case "$H_CFG73B" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_CFG73B path" >&2; exit 1 ;; esac
+case "$H_CFG73B" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_CFG73B path" >&2; exit 1 ;; esac
 mkdir -p "$H_CFG73B/.config/email-cli/accounts/$ACCT_CFG73B"
 cat > "$H_CFG73B/.config/email-cli/accounts/$ACCT_CFG73B/config.ini" <<CONFIG73B
 EMAIL_USER=$ACCT_CFG73B
@@ -4161,12 +4501,15 @@ CFG73_SMTP11=$( (export HOME="$H_CFG73B"; unset XDG_DATA_HOME XDG_CONFIG_HOME XD
     printf "\n\n\n\n" | \
     "$BIN_DIR/email-cli" config smtp 2>&1 || true) )
 check_not "73.11 config smtp no-host: no crash" "Segmentation\|Abort" "$CFG73_SMTP11"
-case "$H_CFG73B" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_CFG73B path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_CFG73B##./build/tests/functional/homes/}"
+case "$H_CFG73B" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_CFG73B path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_CFG73B##./build/tests/functional/work-$$/homes/}"
 
-case "$H_CFG73" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_CFG73 path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_CFG73##./build/tests/functional/homes/}"
+case "$H_CFG73" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_CFG73 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_CFG73##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 74; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 74 — Help functions: main.c, main_ro.c, email-sync
 # ════════════════════════════════════════════════════════════════════════════
@@ -4358,6 +4701,9 @@ SYNC_BADOPT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_
     "$BIN_DIR/email-sync" --zzzbadopt 2>&1 || true) )
 check "74.38 email-sync --zzzbadopt: unknown option" "Unknown option" "$SYNC_BADOPT"
 
+fi
+
+if phase_wanted 75; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 75 — imap_utf7 decode (new folder names) és encode (nem-ASCII folder argumentumok)
 # ════════════════════════════════════════════════════════════════════════════
@@ -4386,6 +4732,9 @@ UTF7_EMOJI=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_C
     "$BIN_DIR/email-cli" list --folder "INBOX.😀" 2>&1 || true) )
 check_not "75.5 list --folder emoji encode: no crash"     "Segmentation\|Abort" "$UTF7_EMOJI"
 
+fi
+
+if phase_wanted 76; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 76 — initial setup wizard via add-account (piped stdin, non-TTY)
 #   PTY tests exercise the wizard in TTY mode but may not cover all paths.
@@ -4395,11 +4744,11 @@ check_not "75.5 list --folder emoji encode: no crash"     "Segmentation\|Abort" 
 echo ""
 echo "--- Phase 76: initial wizard via add-account (piped stdin) ---"
 
-H_WIZARD76="./build/tests/functional/homes/wizard76-$$"
-case "$H_WIZARD76" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_WIZARD76 path" >&2; exit 1 ;; esac
+H_WIZARD76="./build/tests/functional/work-$$/homes/wizard76-$$"
+case "$H_WIZARD76" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_WIZARD76 path" >&2; exit 1 ;; esac
 mkdir -p "$H_WIZARD76/.config/email-cli/accounts/base76@test.local"
 cat > "$H_WIZARD76/.config/email-cli/accounts/base76@test.local/config.ini" <<CONFIG76
-EMAIL_HOST=imaps://localhost:9993
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=base76@test.local
 EMAIL_PASS=testpass76
 EMAIL_FOLDER=INBOX
@@ -4456,9 +4805,12 @@ WIZARD76_BADSMTP=$( (export HOME="$H_WIZARD76"; unset XDG_DATA_HOME XDG_CONFIG_H
 check_not "76.7 add-account invalid SMTP proto: no crash"  "Segmentation\|Abort"     "$WIZARD76_BADSMTP"
 check     "76.7 add-account invalid SMTP proto: error shown" "unsupported protocol\|smtps://" "$WIZARD76_BADSMTP"
 
-case "$H_WIZARD76" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_WIZARD76 path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_WIZARD76##./build/tests/functional/homes/}"
+case "$H_WIZARD76" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_WIZARD76 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_WIZARD76##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 77; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 77 — email-cli-ro error/edge paths (main_ro.c coverage)
 # ════════════════════════════════════════════════════════════════════════════
@@ -4546,12 +4898,16 @@ RO77_BADATA=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_
 check "77.16 email-cli-ro list-attachments 0: bad UID error" "UID\|Error\|integer" "$RO77_BADATA"
 
 # 77.17: list-accounts with empty home → "No accounts configured" (lines 500-501)
-H_EMPTY77=$(mktemp -d "/tmp/email-cli-ft77-XXXXXX")
+H_EMPTY77=$(mktemp -d "$WORK_DIR/ft77-XXXXXX")
 RO77_NOACCTS=$( (export HOME="$H_EMPTY77"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-cli-ro" list-accounts 2>&1 || true) )
 check "77.17 email-cli-ro list-accounts empty home: no accounts" "No accounts\|configured" "$RO77_NOACCTS"
-case "$H_EMPTY77" in /tmp/email-cli-ft77-*) rm -rf "$H_EMPTY77" ;; esac
+case "$H_EMPTY77" in "$WORK_DIR"/ft77-*) ;; *) echo "ERROR: unsafe path '$H_EMPTY77'" >&2; exit 1 ;; esac
+rm -rf "$WORK_DIR/ft77-${H_EMPTY77##*/ft77-}"
 
+fi
+
+if phase_wanted 78; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 78 — email-cli error and help paths (main.c coverage)
 # ════════════════════════════════════════════════════════════════════════════
@@ -4640,20 +4996,22 @@ CLI78_SMISS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_
     "$BIN_DIR/email-cli" send --to test@example.com --subject hi 2>&1 || true) )
 check "78.16 email-cli send missing --body: required fields error" "required\|--body\|Error" "$CLI78_SMISS"
 
+fi
+
+if phase_wanted 79; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 79 — Compose: file attachment via --attach flag (US-84)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 79: email-cli send --attach (US-84) ---"
 
-H_ATTACH=$(mktemp -d "/tmp/email-ft-attach-$$-XXXXXX")
-trap 'rm -rf "/tmp/email-ft-attach-$$-"*' EXIT
+H_ATTACH=$(mktemp -d "$WORK_DIR/attach-XXXXXX")
 export HOME="$H_ATTACH"
 unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
 ATTACH_CFG="$H_ATTACH/.config/email-cli/accounts/testuser"
 mkdir -p "$ATTACH_CFG"
 cat > "$ATTACH_CFG/config.ini" <<INI
-EMAIL_HOST=imaps://localhost:9993
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=testuser@example.com
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -4664,9 +5022,9 @@ SMTP_PASS=testpass
 SSL_NO_VERIFY=1
 INI
 chmod 0600 "$ATTACH_CFG/config.ini"
-ATTACH_TXT=$(mktemp "/tmp/email-ft-attach-$$-file-XXXXXX.txt")
+ATTACH_TXT=$(mktemp "$WORK_DIR/attach-file-XXXXXX.txt")
 echo "Attachment content" > "$ATTACH_TXT"
-ATTACH_PDF=$(mktemp "/tmp/email-ft-attach-$$-file-XXXXXX.pdf")
+ATTACH_PDF=$(mktemp "$WORK_DIR/attach-file-XXXXXX.pdf")
 printf '%%PDF-1.4 stub\n' > "$ATTACH_PDF"
 
 # 79.1: send with --attach → succeeds (mock SMTP accepts)
@@ -4691,7 +5049,7 @@ OUT79_3=$("$BIN_DIR/email-cli" send \
     --to alice@example.com \
     --subject "Bad attach" \
     --body "body" \
-    --attach "/tmp/no-such-file-xyz-404.pdf" 2>&1 || true)
+    --attach "$WORK_DIR/no-such-file-xyz-404.pdf" 2>&1 || true)
 check "79.3 send --attach non-existent: error" "not found\|No such file\|Error" "$OUT79_3"
 
 # 79.4: --attach with directory path → error
@@ -4699,11 +5057,11 @@ OUT79_4=$("$BIN_DIR/email-cli" send \
     --to alice@example.com \
     --subject "Dir attach" \
     --body "body" \
-    --attach "/tmp/" 2>&1 || true)
+    --attach "$WORK_DIR/" 2>&1 || true)
 check "79.4 send --attach directory: error" "Not a file\|directory\|Error" "$OUT79_4"
 
 # 79.5: --attach exceeding 25 MB limit → error
-BIGFILE=$(mktemp "/tmp/email-ft-attach-$$-big-XXXXXX.bin")
+BIGFILE=$(mktemp "$WORK_DIR/attach-big-XXXXXX.bin")
 dd if=/dev/zero of="$BIGFILE" bs=1M count=26 2>/dev/null
 OUT79_5=$("$BIN_DIR/email-cli" send \
     --to alice@example.com \
@@ -4714,12 +5072,15 @@ check "79.5 send --attach >25MB: size error" "too large\|exceeds\|25\|Error" "$O
 rm -f "$BIGFILE" "$ATTACH_TXT" "$ATTACH_PDF"
 export HOME="$H_ALPHA"
 
+fi
+
+if phase_wanted 80; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 80: DMARC status in message list
 # ════════════════════════════════════════════════════════════════════════════
 echo "--- Phase 80: DMARC status in message list ---"
-DMARC_PORT=10080
-H_DMARC="./build/tests/functional/homes/dmarc"
+alloc_port DMARC_PORT
+H_DMARC="./build/tests/functional/work-$$/homes/dmarc"
 
 # 80.1: dmarc=pass — status column shows 'v'
 echo "Starting mock IMAP for Phase 80.1 (dmarc=pass, port $DMARC_PORT)..."
@@ -4771,17 +5132,20 @@ kill "$DMARC_PID" 2>/dev/null; wait "$DMARC_PID" 2>/dev/null || true
 
 export HOME="$H_ALPHA"
 
+fi
+
+if phase_wanted 81; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 81 — Forward: __forwarded__ virtual folder with pre-seeded manifests
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 81: forward virtual folder ---"
 
-H_FWD81="./build/tests/functional/homes/fwd81"
-rm -rf "./build/tests/functional/homes/fwd81"
+H_FWD81="./build/tests/functional/work-$$/homes/fwd81"
+rm -rf "./build/tests/functional/work-$$/homes/fwd81"
 mkdir -p "$H_FWD81/.config/email-cli/accounts/fwd81@test.local"
 cat > "$H_FWD81/.config/email-cli/accounts/fwd81@test.local/config.ini" <<CFG81
-EMAIL_HOST=imaps://localhost:19981
+EMAIL_HOST=imaps://localhost:$DEAD_PORT
 EMAIL_USER=fwd81@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -4805,17 +5169,20 @@ check_not "81.5 forwarded folder: unread-only not shown" "UnreadOnlySubj"      "
 
 export HOME="$H_ALPHA"
 
+fi
+
+if phase_wanted 82; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 82 — Dedup: same UID in multiple manifests appears only once
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 82: virtual folder dedup ---"
 
-H_DUP82="./build/tests/functional/homes/dup82"
-rm -rf "./build/tests/functional/homes/dup82"
+H_DUP82="./build/tests/functional/work-$$/homes/dup82"
+rm -rf "./build/tests/functional/work-$$/homes/dup82"
 mkdir -p "$H_DUP82/.config/email-cli/accounts/dup82@test.local"
 cat > "$H_DUP82/.config/email-cli/accounts/dup82@test.local/config.ini" <<CFG82
-EMAIL_HOST=imaps://localhost:19982
+EMAIL_HOST=imaps://localhost:$DEAD_PORT
 EMAIL_USER=dup82@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -4845,13 +5212,16 @@ check     "82.6 dedup flagged: DupSubj1 appears only once" "^1$" "$DUP82_CNT"
 
 export HOME="$H_ALPHA"
 
+fi
+
+if phase_wanted 83; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 83 — Trash: TRASH_FOLDER config field and Trash folder listing
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 83: trash folder listing ---"
 
-TRASH83_PORT=10083
+alloc_port TRASH83_PORT
 echo "Starting mock IMAP for Phase 83 (port $TRASH83_PORT)..."
 (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$TRASH83_PORT MOCK_IMAP_COUNT=2 \
     "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
@@ -4859,8 +5229,8 @@ TRASH83_PID=$!
 sleep 0.3
 
 # 83.1-83.3: TRASH_FOLDER=Trash config loaded → list Trash folder via mock IMAP
-H_TRASH83="./build/tests/functional/homes/trash83"
-rm -rf "./build/tests/functional/homes/trash83"
+H_TRASH83="./build/tests/functional/work-$$/homes/trash83"
+rm -rf "./build/tests/functional/work-$$/homes/trash83"
 mkdir -p "$H_TRASH83/.config/email-cli/accounts/trash83@test.local"
 cat > "$H_TRASH83/.config/email-cli/accounts/trash83@test.local/config.ini" <<CFG83
 EMAIL_HOST=imaps://localhost:$TRASH83_PORT
@@ -4877,8 +5247,8 @@ check_not "83.2 trash folder list: no connect error"  "Failed to connect"   "$OU
 check     "83.3 trash folder list: messages listed"   "message"             "$OUT83_1"
 
 # 83.4-83.6: custom TRASH_FOLDER=CustomTrash in config loads and lists without crash
-H_TRASH83B="./build/tests/functional/homes/trash83b"
-rm -rf "./build/tests/functional/homes/trash83b"
+H_TRASH83B="./build/tests/functional/work-$$/homes/trash83b"
+rm -rf "./build/tests/functional/work-$$/homes/trash83b"
 mkdir -p "$H_TRASH83B/.config/email-cli/accounts/trash83b@test.local"
 cat > "$H_TRASH83B/.config/email-cli/accounts/trash83b@test.local/config.ini" <<CFG83B
 EMAIL_HOST=imaps://localhost:$TRASH83_PORT
@@ -4899,17 +5269,20 @@ kill "$TRASH83_PID" 2>/dev/null; wait "$TRASH83_PID" 2>/dev/null || true
 export HOME="$H_ALPHA"
 
 
+fi
+
+if phase_wanted 84; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 84 — list filters (--from/--since/--before), __all__ and --json
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 84: list filters, __all__, JSON output ---"
 
-H_F84="./build/tests/functional/homes/f84"
-rm -rf "./build/tests/functional/homes/f84"
+H_F84="./build/tests/functional/work-$$/homes/f84"
+rm -rf "./build/tests/functional/work-$$/homes/f84"
 mkdir -p "$H_F84/.config/email-cli/accounts/f84@test.local"
 cat > "$H_F84/.config/email-cli/accounts/f84@test.local/config.ini" <<CFG84
-EMAIL_HOST=imaps://localhost:19984
+EMAIL_HOST=imaps://localhost:$DEAD_PORT
 EMAIL_USER=f84@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -5014,12 +5387,12 @@ check     "84.24 help documents --json"           "\-\-json"    "$OUT84_14"
 check     "84.25 help documents __all__"          "__all__"     "$OUT84_14"
 
 # --all-accounts: every configured account, each under its own heading
-H_F84B="./build/tests/functional/homes/f84b"
-rm -rf "./build/tests/functional/homes/f84b"
+H_F84B="./build/tests/functional/work-$$/homes/f84b"
+rm -rf "./build/tests/functional/work-$$/homes/f84b"
 for acct in first@test.local second@test.local; do
     mkdir -p "$H_F84B/.config/email-cli/accounts/$acct"
     cat > "$H_F84B/.config/email-cli/accounts/$acct/config.ini" <<CFGB
-EMAIL_HOST=imaps://localhost:19984
+EMAIL_HOST=imaps://localhost:$DEAD_PORT
 EMAIL_USER=$acct
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -5056,17 +5429,20 @@ check "84.32 help documents --all-accounts"       "\-\-all-accounts"  "$OUT84_18
 export HOME="$H_ALPHA"
 
 
+fi
+
+if phase_wanted 85; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 85 — body search decodes; show locates the folder itself
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 85: decoded body search, folder-less show ---"
 
-H_F85="./build/tests/functional/homes/f85"
-rm -rf "./build/tests/functional/homes/f85"
+H_F85="./build/tests/functional/work-$$/homes/f85"
+rm -rf "./build/tests/functional/work-$$/homes/f85"
 mkdir -p "$H_F85/.config/email-cli/accounts/f85@test.local"
 cat > "$H_F85/.config/email-cli/accounts/f85@test.local/config.ini" <<CFG85
-EMAIL_HOST=imaps://localhost:19985
+EMAIL_HOST=imaps://localhost:$DEAD_PORT
 EMAIL_USER=f85@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -5124,17 +5500,20 @@ check "85.9 send help documents --attach"   "\-\-attach"      "$OUT85_8"
 
 export HOME="$H_ALPHA"
 
+fi
+
+if phase_wanted 86; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 86 — one UID in several folders: no silent wrong answer
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 86: cross-folder UID ambiguity, folder column ---"
 
-H_F86="./build/tests/functional/homes/f86"
-rm -rf "./build/tests/functional/homes/f86"
+H_F86="./build/tests/functional/work-$$/homes/f86"
+rm -rf "./build/tests/functional/work-$$/homes/f86"
 mkdir -p "$H_F86/.config/email-cli/accounts/f86@test.local"
 cat > "$H_F86/.config/email-cli/accounts/f86@test.local/config.ini" <<CFG86
-EMAIL_HOST=imaps://localhost:19986
+EMAIL_HOST=imaps://localhost:$DEAD_PORT
 EMAIL_USER=f86@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=Archive
@@ -5217,6 +5596,9 @@ check_not "86.21 stdout free of the warning"            "Warning"   "$OUT86_7"
 
 export HOME="$H_ALPHA"
 
+fi
+
+if phase_wanted 87; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 87 — Gmail with a cron sync: the cache must actually be readable
 # ════════════════════════════════════════════════════════════════════════════
@@ -5228,17 +5610,17 @@ export HOME="$H_ALPHA"
 echo ""
 echo "--- Phase 87: Gmail cron-mode cache (list, show, search) ---"
 
-GMAIL_PORT_C=19987
+alloc_port GMAIL_PORT_C
 echo "Starting mock Gmail API server C (port $GMAIL_PORT_C, 30 messages)..."
 (MOCK_GMAIL_PORT=$GMAIL_PORT_C MOCK_GMAIL_COUNT=30 \
     MOCK_GMAIL_EMAIL="cron@gmail.com" \
     MOCK_GMAIL_SUBJECT_PREFIX="CronMail-" \
-    "$MOCK_GMAIL_BIN") >"./build/tests/functional/mock_gmail_cron.log" 2>&1 &
+    "$MOCK_GMAIL_BIN") >"$WORK_DIR/mock_gmail_cron.log" 2>&1 &
 GMAIL_SERVER_C_PID=$!
 sleep 0.5
 
-H_F87="./build/tests/functional/homes/f87"
-rm -rf "./build/tests/functional/homes/f87"
+H_F87="./build/tests/functional/work-$$/homes/f87"
+rm -rf "./build/tests/functional/work-$$/homes/f87"
 mkdir -p "$H_F87/config/email-cli/accounts/cron@gmail.com" "$H_F87/data"
 # SYNC_INTERVAL=5 is the whole point: a background syncer owns the network.
 cat > "$H_F87/config/email-cli/accounts/cron@gmail.com/config.ini" <<GCFG87
@@ -5321,6 +5703,9 @@ kill "$GMAIL_SERVER_C_PID" || echo "  (mock Gmail C had already exited)"
 
 export HOME="$H_ALPHA"
 
+fi
+
+if phase_wanted 88; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 88 — the credential field says what it did (EMAIL-9, EMAIL-5)
 # ════════════════════════════════════════════════════════════════════════════
@@ -5332,15 +5717,15 @@ export HOME="$H_ALPHA"
 echo ""
 echo "--- Phase 88: credential field feedback ---"
 
-H_F88="./build/tests/functional/homes/f88-$$"
-case "$H_F88" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F88 path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/f88-$$"
+H_F88="./build/tests/functional/work-$$/homes/f88-$$"
+case "$H_F88" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F88 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f88-$$"
 mkdir -p "$H_F88/.config/email-cli/accounts/f88@test.local"
 cat > "$H_F88/.config/email-cli/settings.ini" <<'SETTINGS'
 credential_obfuscation=false
 SETTINGS
-cat > "$H_F88/.config/email-cli/accounts/f88@test.local/config.ini" <<'CONFIG'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_F88/.config/email-cli/accounts/f88@test.local/config.ini" <<CONFIG
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=f88@test.local
 EMAIL_PASS=oldpass
 EMAIL_FOLDER=INBOX
@@ -5389,6 +5774,9 @@ check "88.13 and it exits zero"          "exit-code=0"                          
 OUT88_SMTP2=$(f88 smtp '\n\n\n\n')
 check "88.14 SMTP empty says unchanged"  "SMTP password unchanged"               "$OUT88_SMTP2"
 
+fi
+
+if phase_wanted 89; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 89 — changing only the credential, and being told whether it works
 # ════════════════════════════════════════════════════════════════════════════
@@ -5398,16 +5786,16 @@ check "88.14 SMTP empty says unchanged"  "SMTP password unchanged"              
 echo ""
 echo "--- Phase 89: config password / config reauth ---"
 
-H_F89="./build/tests/functional/homes/f89-$$"
-case "$H_F89" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F89 path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/f89-$$"
+H_F89="./build/tests/functional/work-$$/homes/f89-$$"
+case "$H_F89" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F89 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f89-$$"
 mkdir -p "$H_F89/.config/email-cli/accounts/f89@test.local"
 cat > "$H_F89/.config/email-cli/settings.ini" <<'SETTINGS'
 credential_obfuscation=false
 SETTINGS
-# Points at mock server 1, which answers on 9993 for the whole run.
-cat > "$H_F89/.config/email-cli/accounts/f89@test.local/config.ini" <<'CONFIG'
-EMAIL_HOST=imaps://localhost:9993
+# Points at mock server 1, which answers on its port for the whole run.
+cat > "$H_F89/.config/email-cli/accounts/f89@test.local/config.ini" <<CONFIG
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=f89@test.local
 EMAIL_PASS=oldpass
 EMAIL_FOLDER=INBOX
@@ -5419,9 +5807,9 @@ F89_INI="$H_F89/.config/email-cli/accounts/f89@test.local/config.ini"
 # gmail_auth behave as a build with no compiled-in credentials, so the
 # authorization refuses at once instead of opening a browser and waiting out
 # its 300-second timeout.
-H_F89G="./build/tests/functional/homes/f89g-$$"
-case "$H_F89G" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F89G path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/f89g-$$"
+H_F89G="./build/tests/functional/work-$$/homes/f89g-$$"
+case "$H_F89G" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F89G path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f89g-$$"
 mkdir -p "$H_F89G/.config/email-cli/accounts/f89@gmail.com"
 # Plaintext credentials, so the stored token can be read back as written:
 # with obfuscation on, merely loading the config re-encrypts it and the test
@@ -5455,12 +5843,12 @@ check "89.2 help lists 'reauth'"    "reauth    Renew a Gmail account"           
 OUT89_SET=$(f89 "$H_F89" password 'freshpw89\n')
 check "89.3 password acknowledged"   "password updated (9 characters)" "$OUT89_SET"
 check "89.4 password saved"          "Password saved"                  "$OUT89_SET"
-check "89.5 the connection is tried" "Checking the connection to imaps://localhost:9993" "$OUT89_SET"
+check "89.5 the connection is tried" "Checking the connection to imaps://localhost:$IMAP1_PORT" "$OUT89_SET"
 check "89.6 and the server took it"  "Connected: f89@test.local"       "$OUT89_SET"
 check "89.7 exits zero"              "exit-code=0"                     "$OUT89_SET"
 check "89.8 stored verbatim"         "EMAIL_PASS=freshpw89"            "$(cat "$F89_INI")"
 # Nothing but the password may move: that is the point of the subcommand.
-check "89.9 host untouched"          "EMAIL_HOST=imaps://localhost:9993" "$(cat "$F89_INI")"
+check "89.9 host untouched"          "EMAIL_HOST=imaps://localhost:$IMAP1_PORT" "$(cat "$F89_INI")"
 check "89.10 folder untouched"       "EMAIL_FOLDER=INBOX"                "$(cat "$F89_INI")"
 
 # An empty field keeps the stored password - and still answers the other half
@@ -5479,9 +5867,9 @@ check     "89.17 exits non-zero"       "exit-code=1"          "$OUT89_EOF"
 check     "89.18 nothing was written"  "EMAIL_PASS=freshpw89" "$(cat "$F89_INI")"
 
 # A server that is not there is reported as such, not as success.
-H_F89D="./build/tests/functional/homes/f89d-$$"
-case "$H_F89D" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F89D path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/f89d-$$"
+H_F89D="./build/tests/functional/work-$$/homes/f89d-$$"
+case "$H_F89D" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F89D path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f89d-$$"
 mkdir -p "$H_F89D/.config/email-cli/accounts/f89d@test.local"
 cat > "$H_F89D/.config/email-cli/accounts/f89d@test.local/config.ini" <<'CONFIG'
 EMAIL_HOST=imaps://localhost:9099
@@ -5517,6 +5905,9 @@ OUT89_RA_GMAIL=$(f89 "$H_F89G" reauth '')
 check "89.30 reauth runs on Gmail"   "OAuth2 credentials are not configured" "$OUT89_RA_GMAIL"
 check "89.31 and reports the failure" "was not completed"                    "$OUT89_RA_GMAIL"
 
+fi
+
+if phase_wanted 90; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 90 — config tells the truth about the account type (EMAIL-8)
 # ════════════════════════════════════════════════════════════════════════════
@@ -5527,9 +5918,9 @@ check "89.31 and reports the failure" "was not completed"                    "$O
 echo ""
 echo "--- Phase 90: config is account-type aware ---"
 
-H_F90G="./build/tests/functional/homes/f90g-$$"
-case "$H_F90G" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F90G path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/f90g-$$"
+H_F90G="./build/tests/functional/work-$$/homes/f90g-$$"
+case "$H_F90G" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F90G path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f90g-$$"
 mkdir -p "$H_F90G/.config/email-cli/accounts/f90@gmail.com"
 cat > "$H_F90G/.config/email-cli/settings.ini" <<'SETTINGS'
 credential_obfuscation=false
@@ -5562,9 +5953,9 @@ check_not "90.6 no masked password line"   "Password: \*\*\*\*"         "$OUT90_
 check     "90.7 exits zero"                "exit-code=0"                "$OUT90_SHOW"
 
 # A missing token is reported as missing, not as present.
-H_F90N="./build/tests/functional/homes/f90n-$$"
-case "$H_F90N" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F90N path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/f90n-$$"
+H_F90N="./build/tests/functional/work-$$/homes/f90n-$$"
+case "$H_F90N" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F90N path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f90n-$$"
 mkdir -p "$H_F90N/.config/email-cli/accounts/f90n@gmail.com"
 # The key must be present for the loader to accept gmail_mode at all; an
 # empty value is an account that was never authorized, or whose token was
@@ -5597,15 +5988,15 @@ check_not "90.20 no SMTP_HOST was written"   "SMTP_HOST"                  "$(cat
 
 # An IMAP account may not be pointed at Gmail through the sub-wizard either:
 # the first-run wizard has always refused that host.
-H_F90I="./build/tests/functional/homes/f90i-$$"
-case "$H_F90I" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F90I path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/f90i-$$"
+H_F90I="./build/tests/functional/work-$$/homes/f90i-$$"
+case "$H_F90I" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F90I path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f90i-$$"
 mkdir -p "$H_F90I/.config/email-cli/accounts/f90@test.local"
 cat > "$H_F90I/.config/email-cli/settings.ini" <<'SETTINGS'
 credential_obfuscation=false
 SETTINGS
-cat > "$H_F90I/.config/email-cli/accounts/f90@test.local/config.ini" <<'CONFIG'
-EMAIL_HOST=imaps://localhost:9993
+cat > "$H_F90I/.config/email-cli/accounts/f90@test.local/config.ini" <<CONFIG
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
 EMAIL_USER=f90@test.local
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -5621,6 +6012,9 @@ check_not "90.23 and it was not stored"     "EMAIL_HOST=imaps://imap.gmail.com" 
 # is still accepted.
 check     "90.24 the host prompt repeats"   "EMAIL_HOST=imaps://localhost" "$(cat "$F90I_INI")"
 
+fi
+
+if phase_wanted 91; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 91 — a rejected credential says so, and says what to do (EMAIL-10)
 # ════════════════════════════════════════════════════════════════════════════
@@ -5631,17 +6025,17 @@ check     "90.24 the host prompt repeats"   "EMAIL_HOST=imaps://localhost" "$(ca
 echo ""
 echo "--- Phase 91: a rejected login is explained ---"
 
-AUTH_PORT=19446
+alloc_port AUTH_PORT
 echo "Starting mock IMAP server with password enforcement (port $AUTH_PORT)..."
 (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$AUTH_PORT MOCK_IMAP_PASSWORD="rightpass91" \
     MOCK_IMAP_SUBJECT="AuthMsg" "$MOCK_SERVER_BIN") \
-    >"./build/tests/functional/mock_auth.log" 2>&1 &
+    >"$WORK_DIR/mock_auth.log" 2>&1 &
 AUTH_SERVER_PID=$!
 sleep 0.5
 
-H_F91="./build/tests/functional/homes/f91-$$"
-case "$H_F91" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_F91 path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/f91-$$"
+H_F91="./build/tests/functional/work-$$/homes/f91-$$"
+case "$H_F91" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F91 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f91-$$"
 mkdir -p "$H_F91/.config/email-cli/accounts/f91@test.local"
 cat > "$H_F91/.config/email-cli/settings.ini" <<'SETTINGS'
 credential_obfuscation=false
@@ -5689,6 +6083,9 @@ check "91.11 sync fails"               "exit-code=1"        "$OUT91_SYNC"
 
 kill "$AUTH_SERVER_PID" || echo "  (the password-enforcing mock had already exited)"
 
+fi
+
+if phase_wanted 92; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 92: the Claude skill (policies/cli-skill-model.md) agrees with the binary
 # ════════════════════════════════════════════════════════════════════════════
@@ -5723,6 +6120,9 @@ SEND92=$(echo "$RO92" | awk '/^  send /{n++} END{print n+0}')
 check "92.10 email-cli-ro help is non-empty" "Reading:" "$RO92"
 check "92.11 email-cli-ro lists no send" "^0$" "$SEND92"
 
+fi
+
+if phase_wanted 93; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 93: the licence is GPL-3.0-only everywhere it is stated (EMAIL-30)
 # ════════════════════════════════════════════════════════════════════════════
@@ -5742,15 +6142,17 @@ check "93.4 package licence field" 'CPACK_RPM_PACKAGE_LICENSE *"GPL-3.0-only"' \
       "$(cat "$PROJECT_ROOT/CMakeLists.txt")"
 check "93.5 README names the licence" "GPL-3.0-only" "$(cat "$PROJECT_ROOT/README.md")"
 
+fi
+
+if phase_wanted 94; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 94: a client that disconnects mid-response must not kill the mocks
 # (EMAIL-42: SIGPIPE ended the IMAP mock, and every later test timed out)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "=== Phase 94: the IMAP mock survives clients that vanish mid-response ==="
-P94=9960
-while ss -ltn | grep -q ":$P94 "; do P94=$((P94 + 1)); done
-LOG94="$PROJECT_ROOT/build/tests/functional/mock_sigpipe.log"
+alloc_port P94
+LOG94="$PROJECT_ROOT/build/tests/functional/work-$$/mock_sigpipe.log"
 (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$P94 MOCK_IMAP_COUNT=250 \
     "$MOCK_SERVER_BIN") >"$LOG94" 2>&1 &
 PID94=$!
@@ -5779,6 +6181,9 @@ GREET94=$( (printf 'a1 LOGOUT\r\n' | timeout 5 openssl s_client -quiet -connect 
 check "94.3 and still answers a new client" "OK" "$GREET94"
 kill "$PID94"
 
+fi
+
+if phase_wanted 95; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 95: the suite leaves no mock server behind (EMAIL-42)
 # ════════════════════════════════════════════════════════════════════════════
@@ -5788,25 +6193,27 @@ cleanup_mocks
 sleep 1
 LISTEN95=$(ss -ltn)
 check "95.1 the listener list is readable" "^State" "$LISTEN95"
-for p95 in 9993 9994 9995 9996 9998; do
+for p95 in $IMAP1_PORT $IMAP2_PORT $IMAP3_PORT $IMAP200_PORT $IMAP250_PORT; do
     check_not "95.2 port $p95 is free" ":$p95 " "$LISTEN95"
 done
 
+fi
+
+if phase_wanted 97; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 97: two mocks cannot share a port, and they listen on loopback only
 # (EMAIL-14: SO_REUSEPORT let a stale mock split connections with a new one)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "=== Phase 97: mock servers refuse a port that is taken ==="
-P97=9940
-while ss -ltn | grep -q ":$P97 "; do P97=$((P97 + 1)); done
+alloc_port P97
 for kind97 in gmail smtp; do
     if [ "$kind97" = gmail ]; then
         BIN97="$MOCK_GMAIL_BIN"; ENV97="MOCK_GMAIL_PORT=$P97"
     else
         BIN97="$MOCK_SMTP_BIN";  ENV97="MOCK_SMTP_PORT=$P97"
     fi
-    LOG97="$PROJECT_ROOT/build/tests/functional/mock_port97_$kind97"
+    LOG97="$PROJECT_ROOT/build/tests/functional/work-$$/mock_port97_$kind97"
     (cd "$PROJECT_ROOT/build" && env "$ENV97" "$BIN97") >"$LOG97.a.log" 2>&1 &
     A97=$!
     sleep 1
@@ -5827,20 +6234,23 @@ for kind97 in gmail smtp; do
     wait "$A97" && A97RC=0 || A97RC=$?    # SIGTERM status: not a verdict
 done
 
+fi
+
+if phase_wanted 98; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 98 — Gmail mail rules reach Google (EMAIL-20)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 98: Gmail rules push labels to the server (EMAIL-20) ---"
 
-GR98_PORT=10090
-GR98_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail_rules98.log"
+alloc_port GR98_PORT
+GR98_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_rules98.log"
 (MOCK_GMAIL_PORT=$GR98_PORT MOCK_GMAIL_COUNT=3 \
     MOCK_GMAIL_EMAIL="grules98@gmail.com" \
     "$MOCK_GMAIL_BIN") >"$GR98_LOG" 2>&1 &
 GR98_PID=$!
 
-H_GR98="./build/tests/functional/homes/grules98-$$"
+H_GR98="./build/tests/functional/work-$$/homes/grules98-$$"
 ACCT_GR98="grules98@gmail.com"
 mkdir -p "$H_GR98/config/email-cli/accounts/$ACCT_GR98"
 mkdir -p "$H_GR98/data"
@@ -5916,9 +6326,12 @@ else
 fi
 
 kill "$GR98_PID"
-case "$H_GR98" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_GR98 path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_GR98##./build/tests/functional/homes/}"
+case "$H_GR98" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_GR98 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_GR98##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 99; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 99 — Gmail flag changes made offline reach Google on the next sync
 #            (EMAIL-21)
@@ -5926,15 +6339,15 @@ rm -rf "./build/tests/functional/homes/${H_GR98##./build/tests/functional/homes/
 echo ""
 echo "--- Phase 99: Gmail offline flag change is queued and pushed (EMAIL-21) ---"
 
-GF99_PORT=10091
-GF99_DEAD_PORT=10092
-GF99_LOG="$PROJECT_ROOT/build/tests/functional/mock_gmail_flag99.log"
+alloc_port GF99_PORT
+alloc_port GF99_DEAD_PORT
+GF99_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_flag99.log"
 (MOCK_GMAIL_PORT=$GF99_PORT MOCK_GMAIL_COUNT=3 \
     MOCK_GMAIL_EMAIL="gflag99@gmail.com" \
     "$MOCK_GMAIL_BIN") >"$GF99_LOG" 2>&1 &
 GF99_PID=$!
 
-H_GF99="./build/tests/functional/homes/gflag99-$$"
+H_GF99="./build/tests/functional/work-$$/homes/gflag99-$$"
 ACCT_GF99="gflag99@gmail.com"
 mkdir -p "$H_GF99/config/email-cli/accounts/$ACCT_GF99"
 mkdir -p "$H_GF99/data"
@@ -6002,9 +6415,59 @@ else
 fi
 
 kill "$GF99_PID"
-case "$H_GF99" in ./build/tests/functional/homes/*) ;; *) echo "ERROR: unsafe H_GF99 path" >&2; exit 1 ;; esac
-rm -rf "./build/tests/functional/homes/${H_GF99##./build/tests/functional/homes/}"
+case "$H_GF99" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_GF99 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/${H_GF99##./build/tests/functional/work-$$/homes/}"
 
+fi
+
+if phase_wanted 100; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 100 — mocks take a kernel-picked port and say which (EMAIL-33)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 100: mock servers bind an ephemeral loopback port and publish it (EMAIL-33) ---"
+for kind100 in imap gmail smtp; do
+    case "$kind100" in
+        imap)  BIN100="$MOCK_SERVER_BIN"; PFX100=MOCK_IMAP ;;
+        gmail) BIN100="$MOCK_GMAIL_BIN";  PFX100=MOCK_GMAIL ;;
+        smtp)  BIN100="$MOCK_SMTP_BIN";   PFX100=MOCK_SMTP ;;
+    esac
+    PF100A="$WORK_DIR/port100-$kind100-a"
+    PF100B="$WORK_DIR/port100-$kind100-b"
+    # No port variable at all: the mock must not fall back to a fixed number.
+    (cd "$PROJECT_ROOT/build" && env -u ${PFX100}_PORT "${PFX100}_PORT_FILE=$PF100A" \
+        "$BIN100") >"$WORK_DIR/mock100-$kind100-a.log" 2>&1 &
+    PID100A=$!
+    (cd "$PROJECT_ROOT/build" && env -u ${PFX100}_PORT "${PFX100}_PORT_FILE=$PF100B" \
+        "$BIN100") >"$WORK_DIR/mock100-$kind100-b.log" 2>&1 &
+    PID100B=$!
+    for _ in $(seq 1 50); do
+        [ -s "$PF100A" ] && [ -s "$PF100B" ] && break
+        sleep 0.1
+    done
+    check "100.1 $kind100 mock publishes its port" "^[0-9][0-9]*$" "$(cat "$PF100A" 2>&1)"
+    PORT100A=$(cat "$PF100A"); PORT100B=$(cat "$PF100B")
+    check_not "100.2 $kind100 mock port is not the old fixed one" "^\(9993\|9025\|9997\)$" "$PORT100A"
+    check_not "100.3 two $kind100 mocks got different ports" "^$PORT100A$" "$PORT100B"
+    LISTEN100=$(ss -ltn)
+    check "100.4 $kind100 mock listens on loopback" "127.0.0.1:$PORT100A " "$LISTEN100"
+    check_not "100.5 $kind100 mock is not on all interfaces" "0.0.0.0:$PORT100A " "$LISTEN100"
+    kill "$PID100A" "$PID100B"
+    wait "$PID100A" && R100=0 || R100=$?     # SIGTERM status: not a verdict
+    wait "$PID100B" && R100=0 || R100=$?
+done
+
+# No test source names /tmp, and no mock is started on a literal port.  The
+# patterns are assembled so that this file does not match itself.
+T100="/t""mp"
+SRC100=$(grep -rIl -e "$T100" tests/unit tests/pty tests/integration tests/common \
+    tests/functional/mock_imap_server.c tests/functional/mock_gmail_api_server.c || true)
+check_empty "100.6 no test source uses $T100" "$SRC100"
+FIXED100=$(grep -rIn -E 'MOCK_[A-Z]+_PORT=[0-9]+|MOCK_[A-Z]+_PORT", *"[0-9]+' tests || true)
+check_empty "100.7 no mock is started on a literal port" "$FIXED100"
+fi
+
+if phase_wanted 96; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)
 # ════════════════════════════════════════════════════════════════════════════
@@ -6024,14 +6487,19 @@ check "96.5 check_empty fails on output" "expected no output" "$SELF96_CE"
 
 # The total is compared with a floor: a suite that stops early or loses
 # registration lines must not report "all passed".
+# (A selection of phases runs fewer assertions by design: no floor then.)
 ASSERT_FLOOR=980
 TOTAL96=$((PASSED + FAILED))
-if [ "$TOTAL96" -ge "$ASSERT_FLOOR" ]; then
+if [ "$FULL_RUN" = 0 ]; then
+    echo "  [SKIP] 96.6 assertion floor: only a selection of phases ran"
+elif [ "$TOTAL96" -ge "$ASSERT_FLOOR" ]; then
     echo "  [PASS] 96.6 assertion count $TOTAL96 >= floor $ASSERT_FLOOR"
     PASSED=$((PASSED + 1))
 else
     echo "  [FAIL] 96.6 assertion count $TOTAL96 is below the floor $ASSERT_FLOOR"
     FAILED=$((FAILED + 1))
+fi
+
 fi
 
 # ════════════════════════════════════════════════════════════════════════════

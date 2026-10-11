@@ -12,13 +12,15 @@
 #include <sys/time.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include "../common/mock_port.h"
 
 /**
  * @file mock_imap_server.c
  * @brief Minimal TLS IMAP server for integration testing.
  *
  * Environment variables:
- *   MOCK_IMAP_PORT    - TCP port to listen on (default 9993)
+ *   MOCK_IMAP_PORT    - TCP port to listen on (default 0: the kernel picks)
+ *   MOCK_IMAP_PORT_FILE - file the bound port is written to
  *   MOCK_IMAP_SUBJECT - Subject returned in FETCH responses (default "Test Message")
  *   MOCK_IMAP_COUNT   - Number of messages to simulate (default 1, backward compat)
  *
@@ -33,7 +35,7 @@
  *   - Messages where X % 10 == 0 have a notes_X.txt attachment
  */
 
-static int         g_port       = 9993;
+static int         g_port       = 0;
 static const char *g_subject    = "Test Message";
 static int         g_count      = 1;
 static const char *g_msg_prefix = "Message"; /* MOCK_IMAP_MSG_PREFIX */
@@ -803,8 +805,7 @@ int main(void) {
     setbuf(stdout, NULL);
 
     /* Configure port, subject, count, and message prefix from environment */
-    const char *port_env = getenv("MOCK_IMAP_PORT");
-    if (port_env && atoi(port_env) > 0) g_port = atoi(port_env);
+    g_port = mock_requested_port("MOCK_IMAP_PORT");   /* 0: the kernel picks */
     const char *subj_env = getenv("MOCK_IMAP_SUBJECT");
     if (subj_env && subj_env[0]) g_subject = subj_env;
     const char *count_env = getenv("MOCK_IMAP_COUNT");
@@ -886,7 +887,7 @@ int main(void) {
     }
 
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = htons((uint16_t)g_port);
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
@@ -903,6 +904,12 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
+    g_port = mock_publish_port(server_fd, "MOCK_IMAP_PORT_FILE");
+    if (g_port < 0) {
+        close(server_fd);
+        SSL_CTX_free(ctx);
+        exit(EXIT_FAILURE);
+    }
     printf("Mock IMAP Server (TLS) listening on port %d (subject: %s, count: %d)\n",
            g_port, g_subject, g_count);
 

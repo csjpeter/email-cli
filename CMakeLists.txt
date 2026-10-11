@@ -151,7 +151,7 @@ file(WRITE "${_changelog}"
   * Build ${EMAIL_CLI_VERSION}.  The history is the git log of the
     repository; every change carries the key of its ticket.
 
- -- Peter Csaszar <csjpeter@gmail.com>  ${_changelog_date}
+ -- Péter Császár <csjpeter@gmail.com>  ${_changelog_date}
 ")
 add_custom_command(
     OUTPUT  "${_changelog}.gz"
@@ -173,7 +173,7 @@ install(FILES claude/skills/email-cli/SKILL.md
 # ── CPack packaging (DEB + RPM) ────────────────────────────────────────────────
 set(CPACK_PACKAGE_NAME        "email-cli")
 set(CPACK_PACKAGE_VERSION     "${EMAIL_CLI_PACKAGE_VERSION}")
-set(CPACK_PACKAGE_CONTACT     "Peter Csaszar <csjpeter@gmail.com>")
+set(CPACK_PACKAGE_CONTACT     "Péter Császár <csjpeter@gmail.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "Terminal-based email client suite (IMAP + Gmail REST API)")
 set(CPACK_PACKAGE_DESCRIPTION

@@ -27,18 +27,25 @@ extern int g_tests_failed;
     } \
 } while(0)
 
-/* Optional substring filter and list mode, set by the runner's command line:
- * only the tests whose function name contains g_test_filter run. */
+/* Optional substring filter and list mode, set by the runner's command line.
+ * The filter selects at the level of the runner: a suite function whose name
+ * contains g_test_filter runs, with every test inside it.  Nested RUN_TEST
+ * calls are not filtered again. */
 extern const char *g_test_filter;
 extern int g_test_list_only;
 extern int g_tests_selected;
+extern int g_test_depth;
 
 #define RUN_TEST(test_func) do { \
-    if (g_test_filter && !strstr(#test_func, g_test_filter)) break; \
-    g_tests_selected++; \
-    if (g_test_list_only) { printf("%s\n", #test_func); break; } \
+    if (g_test_depth == 0) { \
+        if (g_test_filter && !strstr(#test_func, g_test_filter)) break; \
+        g_tests_selected++; \
+        if (g_test_list_only) { printf("%s\n", #test_func); break; } \
+    } \
     printf("Running %s...\n", #test_func); \
+    g_test_depth++; \
     test_func(); \
+    g_test_depth--; \
 } while(0)
 
 #endif // TEST_HELPERS_H

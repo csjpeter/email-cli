@@ -119,27 +119,31 @@ static void test_auth_code_extraction(void) {
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     ASSERT(listen_fd >= 0, "auth_code: socket created");
     int opt = 1;
-    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    ASSERT(setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == 0,
+           "SO_REUSEADDR set");
     struct timeval tv = {5, 0};
     setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(18765);
+    addr.sin_port = 0;   /* the kernel picks a free port */
     int bound = bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr));
     ASSERT(bound == 0, "auth_code: bind succeeded");
-    listen(listen_fd, 1);
+    ASSERT(listen(listen_fd, 1) == 0, "auth_code: listen succeeded");
+    socklen_t alen = sizeof(addr);
+    ASSERT(getsockname(listen_fd, (struct sockaddr *)&addr, &alen) == 0,
+           "auth_code: getsockname");
+    const uint16_t cb_port = ntohs(addr.sin_port);
 
     /* Fork child to simulate browser redirect */
     pid_t pid = fork();
     if (pid == 0) {
-        usleep(50000);
         int fd = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in ca = {0};
         ca.sin_family = AF_INET;
         ca.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        ca.sin_port = htons(18765);
+        ca.sin_port = htons(cb_port);
         connect(fd, (struct sockaddr *)&ca, sizeof(ca));
         const char *req =
             "GET /callback?code=test_code_abc&scope=x HTTP/1.1\r\n"
@@ -183,25 +187,30 @@ static void test_auth_code_denied(void) {
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     ASSERT(listen_fd >= 0, "denied: socket created");
     int opt = 1;
-    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    ASSERT(setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == 0,
+           "SO_REUSEADDR set");
     struct timeval tv = {5, 0};
     setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(18766);
-    bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr));
-    listen(listen_fd, 1);
+    addr.sin_port = 0;   /* the kernel picks a free port */
+    ASSERT(bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0,
+           "denied: bind succeeded");
+    ASSERT(listen(listen_fd, 1) == 0, "denied: listen succeeded");
+    socklen_t alen = sizeof(addr);
+    ASSERT(getsockname(listen_fd, (struct sockaddr *)&addr, &alen) == 0,
+           "denied: getsockname");
+    const uint16_t cb_port = ntohs(addr.sin_port);
 
     pid_t pid = fork();
     if (pid == 0) {
-        usleep(50000);
         int fd = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in ca = {0};
         ca.sin_family = AF_INET;
         ca.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        ca.sin_port = htons(18766);
+        ca.sin_port = htons(cb_port);
         connect(fd, (struct sockaddr *)&ca, sizeof(ca));
         const char *req =
             "GET /callback?error=access_denied HTTP/1.1\r\n"
@@ -249,6 +258,34 @@ static void test_wizard_rejects_gmail_imap(void) {
     free(cfg.host);
 }
 
+/* The listener of the next mock token server.  It is bound by the parent, to
+ * a port the kernel picks, *before* the fork: the child only accepts on it, and
+ * the test knows the port with no fixed number and no race on the bind. */
+static int g_mock_listen_fd = -1;
+
+static int mock_listen(void) {
+    if (g_mock_listen_fd >= 0) close(g_mock_listen_fd);
+    g_mock_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (g_mock_listen_fd < 0) { perror("mock_listen: socket"); exit(EXIT_FAILURE); }
+    int opt = 1;
+    if (setsockopt(g_mock_listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) != 0) {
+        perror("mock_listen: setsockopt");
+        exit(EXIT_FAILURE);
+    }
+    struct sockaddr_in addr = {0};
+    addr.sin_family      = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port        = 0;
+    socklen_t len = sizeof(addr);
+    if (bind(g_mock_listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        listen(g_mock_listen_fd, 1) != 0 ||
+        getsockname(g_mock_listen_fd, (struct sockaddr *)&addr, &len) != 0) {
+        perror("mock_listen: bind/listen");
+        exit(EXIT_FAILURE);
+    }
+    return ntohs(addr.sin_port);
+}
+
 /* ── Additional coverage tests ──────────────────────────────────────── */
 
 static void test_refresh_with_client_credentials(void) {
@@ -256,7 +293,7 @@ static void test_refresh_with_client_credentials(void) {
      * the request body built from them.  The token endpoint is the local mock
      * (GMAIL_TEST_TOKEN_URL): this test never leaves the machine, and it
      * checks what was sent as well as what came back. */
-    const int mock_port = 18775;
+    const int mock_port = mock_listen();
     const char *http_resp =
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
         "{\"access_token\":\"cred_access_tok\",\"token_type\":\"Bearer\"}";
@@ -278,7 +315,6 @@ static void test_refresh_with_client_credentials(void) {
     }
     close(report[1]);
     g_mock_report_fd = -1;
-    usleep(50000);   /* let the server bind */
 
     char url[64];
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
@@ -395,21 +431,11 @@ static void run_mock_token_server(int port, const char *response) {
  * `expect` list, so the parent can assert on what was actually sent. */
 static void run_mock_token_server_expect(int port, const char *response,
                                          const char *const *expect) {
-    int srv = socket(AF_INET, SOCK_STREAM, 0);
+    (void)port;   /* the listener was bound by mock_listen() before the fork */
+    int srv = g_mock_listen_fd;
     if (srv < 0) _exit(1);
-    int opt = 1;
-    setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     struct timeval tv = {5, 0};
     setsockopt(srv, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    struct sockaddr_in addr = {0};
-    addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port        = htons((uint16_t)port);
-    if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
-        listen(srv, 1) != 0) {
-        close(srv);
-        _exit(1);
-    }
     struct sockaddr_in cli = {0};
     socklen_t cli_len = sizeof(cli);
     int conn = accept(srv, (struct sockaddr *)&cli, &cli_len);
@@ -450,7 +476,7 @@ static void run_mock_token_server_expect(int port, const char *response,
 
 static void test_refresh_via_mock_server_200(void) {
     /* Covers lines 336-339: code==200 path in gmail_auth_refresh */
-    const int mock_port = 18770;
+    const int mock_port = mock_listen();
     const char *http_resp =
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
         "{\"access_token\":\"mock_access_tok\",\"token_type\":\"Bearer\"}";
@@ -459,7 +485,6 @@ static void test_refresh_via_mock_server_200(void) {
     if (pid == 0) {
         run_mock_token_server(mock_port, http_resp);
     }
-    usleep(50000); /* let server bind */
 
     char url[64];
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
@@ -481,7 +506,7 @@ static void test_refresh_via_mock_server_200(void) {
 
 static void test_refresh_via_mock_server_200_no_token(void) {
     /* Covers lines 290-293: code==200 but no access_token in response */
-    const int mock_port = 18771;
+    const int mock_port = mock_listen();
     const char *http_resp =
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
         "{\"token_type\":\"Bearer\"}"; /* no access_token field */
@@ -490,7 +515,6 @@ static void test_refresh_via_mock_server_200_no_token(void) {
     if (pid == 0) {
         run_mock_token_server(mock_port, http_resp);
     }
-    usleep(50000);
 
     char url[64];
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
@@ -509,7 +533,7 @@ static void test_refresh_via_mock_server_200_no_token(void) {
 static void test_refresh_via_mock_server_400_unknown_error(void) {
     /* Covers lines 351-352: non-200 with error that is neither invalid_grant
      * nor invalid_client */
-    const int mock_port = 18772;
+    const int mock_port = mock_listen();
     const char *http_resp =
         "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n"
         "{\"error\":\"unsupported_grant_type\"}";
@@ -518,7 +542,6 @@ static void test_refresh_via_mock_server_400_unknown_error(void) {
     if (pid == 0) {
         run_mock_token_server(mock_port, http_resp);
     }
-    usleep(50000);
 
     char url[64];
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
@@ -559,7 +582,7 @@ static void test_device_flow_full_mock(void) {
      * Child 1 simulates the browser redirect (code=xxx).
      * Child 2 is the mock token server that returns a valid access_token.
      * The function completes successfully → returns 0. */
-    const int mock_port = 18773;
+    const int mock_port = mock_listen();
     const char *token_resp =
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
         "{\"access_token\":\"dev_flow_tok\",\"refresh_token\":\"dev_flow_refresh\","
@@ -570,7 +593,6 @@ static void test_device_flow_full_mock(void) {
     if (srv_pid == 0) {
         run_mock_token_server(mock_port, token_resp);
     }
-    usleep(60000); /* let server bind */
 
     char url[64];
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
@@ -650,7 +672,7 @@ static void test_device_flow_with_code(void) {
  * whole behaviour under test.
  */
 static void test_refresh_invalid_grant_message(void) {
-    const int mock_port = 18774;
+    const int mock_port = mock_listen();
     const char *http_resp =
         "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n"
         "{\"error\":\"invalid_grant\"}";
@@ -658,7 +680,6 @@ static void test_refresh_invalid_grant_message(void) {
     pid_t pid = fork();
     if (pid == 0)
         run_mock_token_server(mock_port, http_resp);
-    usleep(50000);
 
     char url[64];
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);

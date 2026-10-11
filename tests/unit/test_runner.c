@@ -14,6 +14,7 @@ int g_tests_failed = 0;
 const char *g_test_filter = NULL;
 int g_test_list_only = 0;
 int g_tests_selected = 0;
+int g_test_depth = 0;
 
 // Forward declarations of test suites
 void test_fs_util(void);
@@ -72,8 +73,8 @@ void test_manifest_dmarc_flags(void);
 
 static void usage(const char *argv0) {
     printf("Usage: %s [--list] [FILTER]\n"
-           "  FILTER   run only the test functions whose name contains FILTER\n"
-           "  --list   print the names of the test functions and exit\n", argv0);
+           "  FILTER   run only the test suites whose name contains FILTER\n"
+           "  --list   print the names of the test suites and exit\n", argv0);
 }
 
 int main(int argc, char **argv) {
@@ -162,7 +163,7 @@ int main(int argc, char **argv) {
 
     if (g_test_list_only) return EXIT_SUCCESS;
     if (g_test_filter && g_tests_selected == 0) {
-        fprintf(stderr, "no test function matches '%s'\n", g_test_filter);
+        fprintf(stderr, "no test suite matches '%s'\n", g_test_filter);
         return EXIT_FAILURE;
     }
 

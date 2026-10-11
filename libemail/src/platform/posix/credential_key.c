@@ -9,8 +9,7 @@
  *   1. ~/.ssh/id_ed25519
  *   2. ~/.ssh/id_ecdsa
  *   3. ~/.ssh/id_rsa
- *   4. /etc/machine-id         (Linux)
- *   4. kern.uuid sysctl        (macOS)
+ *   4. /etc/machine-id
  *
  * Key derivation: HMAC-SHA256(key=<source bytes>, msg="email-cli:<user>:<email>")
  */
@@ -23,9 +22,6 @@
 #include <unistd.h>
 #include <pwd.h>
 #include <sys/types.h>
-#ifdef __APPLE__
-#include <sys/sysctl.h>
-#endif
 
 /* Read up to bufsize-1 bytes from path into buf. Returns bytes read, -1 on error. */
 static ssize_t read_source(const char *path, char *buf, size_t bufsize) {
@@ -74,19 +70,8 @@ int platform_derive_credential_key(const char *email, unsigned char key_out[32])
     }
 
     /* 2. Machine-specific fallback */
-#ifdef __APPLE__
-    if (source_len < 0) {
-        /* macOS: hardware UUID via kern.uuid sysctl (stable across reboots/updates) */
-        size_t len = sizeof(source) - 1;
-        if (sysctlbyname("kern.uuid", source, &len, NULL, 0) == 0) {
-            source[len] = '\0';
-            source_len = (ssize_t)len;
-        }
-    }
-#else
     if (source_len < 0)
         source_len = read_source("/etc/machine-id", source, sizeof(source));
-#endif
 
     if (source_len <= 0)
         return -1;

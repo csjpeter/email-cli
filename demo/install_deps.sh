@@ -5,7 +5,7 @@
 # Installs the dependencies of the demo video pipeline.
 
 # demo/install_deps.sh — Install all dependencies for the demo video pipeline.
-# Supports: Ubuntu 22.04 / 24.04 (x86_64, arm64), macOS (Homebrew)
+# Supports: Ubuntu 22.04 / 24.04 (x86_64, arm64)
 # Run: bash demo/install_deps.sh
 
 set -euo pipefail
@@ -37,32 +37,8 @@ echo ""
 
 OS="$(uname -s)"
 
-# ── macOS ────────────────────────────────────────────────────────────────────
-if [[ "$OS" == "Darwin" ]]; then
-    if ! command -v brew &>/dev/null; then
-        fail "Homebrew not found. Install it first: https://brew.sh"
-    fi
-
-    echo "--- macOS / Homebrew ---"
-
-    if command -v ffmpeg &>/dev/null; then
-        skip "ffmpeg already installed ($(ffmpeg -version 2>&1 | head -1 | awk '{print $3}'))"
-    else
-        info "Installing ffmpeg..."
-        brew install ffmpeg
-        ok "ffmpeg installed"
-    fi
-
-    if command -v vhs &>/dev/null; then
-        skip "vhs already installed ($(vhs --version 2>/dev/null || echo 'unknown version'))"
-    else
-        info "Installing vhs..."
-        brew install vhs
-        ok "vhs installed"
-    fi
-
 # ── Linux ────────────────────────────────────────────────────────────────────
-elif [[ "$OS" == "Linux" ]]; then
+if [[ "$OS" == "Linux" ]]; then
     need_sudo
 
     # Detect distro
@@ -207,7 +183,7 @@ else
     fail "Unsupported OS: $OS"
 fi
 
-# ── Python / edge-tts (all platforms) ───────────────────────────────────────
+# ── Python / edge-tts ───────────────────────────────────────────────
 echo ""
 echo "--- Python / edge-tts ---"
 
@@ -220,11 +196,7 @@ else
     # Prefer pipx (correct way on Ubuntu 24.04 PEP 668 systems)
     if ! command -v pipx &>/dev/null; then
         info "Installing pipx..."
-        if [[ "$OS" == "Darwin" ]]; then
-            brew install pipx
-        else
-            DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y pipx
-        fi
+        DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y pipx
         pipx ensurepath --quiet || true
         export PATH="$HOME/.local/bin:$PATH"
     fi

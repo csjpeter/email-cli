@@ -15,21 +15,12 @@ include_directories(
 
 # Platform-specific sources for tests
 # html_medium_stub.c replaces platform html_medium.c for deterministic tests
-if(WIN32)
-    set(TEST_PLATFORM_SOURCES
-        ../../libemail/src/platform/windows/terminal.c
-        ../../libemail/src/platform/windows/path.c
-        ../../libemail/src/platform/windows/process.c
-        ../../libemail/src/platform/windows/credential_key.c
-    )
-else()
-    set(TEST_PLATFORM_SOURCES
-        ../../libemail/src/platform/posix/terminal.c
-        ../../libemail/src/platform/posix/path.c
-        ../../libemail/src/platform/posix/process.c
-        ../../libemail/src/platform/posix/credential_key.c
-    )
-endif()
+set(TEST_PLATFORM_SOURCES
+    ../../libemail/src/platform/posix/terminal.c
+    ../../libemail/src/platform/posix/path.c
+    ../../libemail/src/platform/posix/process.c
+    ../../libemail/src/platform/posix/credential_key.c
+)
 
 set(TEST_SOURCES
     test_runner.c

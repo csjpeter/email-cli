@@ -29,6 +29,7 @@ See the project [README](../README.md) for installation, configuration, interact
 
 - [Testing](dev/testing.md) — unit, functional, integration tests; coverage requirements
 - [Logging](dev/logging.md) — log levels, rotation, IMAP traffic capture
+- [Portability](portability.md) — what binds the project to Linux
 - [Gmail milestones](dev/gmail-milestones.md) — GML-01 through GML-24 implementation log
 
 ## Architecture Decision Records

@@ -92,7 +92,6 @@ echo "=== Step 3: Record terminal session with VHS ==="
 if ! command -v vhs &>/dev/null; then
     echo "ERROR: vhs not found." >&2
     echo "  Ubuntu: snap install vhs  OR  go install github.com/charmbracelet/vhs@latest" >&2
-    echo "  macOS:  brew install vhs" >&2
     exit 1
 fi
 # VHS requires a relative Output path (absolute paths are rejected by the parser).

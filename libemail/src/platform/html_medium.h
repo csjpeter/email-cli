@@ -13,8 +13,8 @@
  *
  * The HTML renderer calls html_medium_char_width() to measure the
  * displayed column-width of Unicode codepoints.  The concrete
- * implementation is selected at compile/link time (platform/posix/,
- * platform/windows/, or tests/unit/html_medium_stub.c for unit tests).
+ * implementation is selected at compile/link time (platform/posix/
+ * or tests/unit/html_medium_stub.c for unit tests).
  *
  * This follows the same pattern as platform/terminal.h: the header
  * declares the interface; CMake links in the right implementation.

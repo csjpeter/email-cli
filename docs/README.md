@@ -40,5 +40,6 @@ See the project [README](../README.md) for installation, configuration, interact
 
 ## Issues
 
-- [Issues directory](issues/) — `BUG-nnn` defect reports and `TASK-nnn` work items.
-  Each file carries a `**Status:**` line (`OPEN`, `DONE`, or `FIXED`).
+Defects and work items live in the issue manager (`issue-cli`, project `EMAIL`),
+not in this repository. The former `BUG-nnn`/`TASK-nnn` files were migrated there
+(EMAIL-38); the titles of the migrated tickets keep the old ids.

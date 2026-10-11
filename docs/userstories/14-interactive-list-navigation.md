@@ -35,7 +35,7 @@ a folder in the folder browser).
 
 ## Status Bar Format
 ```
-  ↑↓=step  PgDn/PgUp=page  Enter=open  Backspace=folders  ESC=quit  c=compose  r=reply  n=new  f=flag  d=done  s=sync  R=refresh  [cursor/total]
+  ↑↓=step  PgDn/PgUp=page  Enter=open  Esc/q/BS=folders  c=compose  r=reply  n=new  f=flag  d=done  s=sync  R=refresh  [cursor/total]
 ```
 
 ## Empty Folder Layout
@@ -55,7 +55,7 @@ layout — it does **not** fall back to a plain-text message.
 
 Bottom status bar (same position as normal list):
 ```
-  ↑↓=step  PgDn/PgUp=page  Enter=open  Backspace=folders  ESC=quit  c=compose  r=reply  n=new  f=flag  d=done  s=sync  R=refresh  [0/0]
+  ↑↓=step  PgDn/PgUp=page  Enter=open  Esc/q/BS=folders  c=compose  r=reply  n=new  f=flag  d=done  s=sync  R=refresh  [0/0]
 ```
 
 ### Cron / no-cache variant

@@ -59,7 +59,8 @@ if cursor >= wstart + limit: wstart = cursor - limit + 1
 ```
 
 **Never auto-exits:** the loop runs until the user explicitly presses `q`, `Q`,
-Ctrl-C, or ESC.  Reaching the first or last row with cursor movement is a no-op
+Ctrl-C, or ESC (in the interactive TUI `q` and ESC go back one level and
+Ctrl-C quits at once, see `policies/tui-interface-model.md`).  Reaching the first or last row with cursor movement is a no-op
 (cursor clamps).
 
 **On each iteration:**
@@ -80,7 +81,8 @@ Ctrl-C, or ESC.  Reaching the first or last row with cursor movement is a no-op
 | PgDn / Space | `cursor += limit` (clamp at `show_count − 1`) |
 | PgUp / `p` / `P` / `b` | `cursor -= limit` (clamp at 0) |
 | Enter | Open `show_uid_interactive(uid[cursor])` |
-| `q` / `Q` / Ctrl-C / ESC | Exit list |
+| `q` / ESC | Back to the folder / label browser (a typed filter is cleared first) |
+| Ctrl-C | Quit at once |
 
 ### Status bar
 

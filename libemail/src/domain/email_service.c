@@ -727,6 +727,9 @@ static char *fetch_uid_headers_via(MailClient *mc, const char *folder, const cha
 
 /* ── Show helpers ────────────────────────────────────────────────────── */
 
+/* Header bar: bold white on blue (policies/tui-interface-model.md, Palette). */
+#define TUI_HDR_ON "\033[1;37;44m"
+
 #define SHOW_WIDTH 80
 #define SHOW_SEPARATOR \
     "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" \
@@ -879,7 +882,7 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
         fflush(stdout);
         char sb[160];
         snprintf(sb, sizeof(sb),
-                 "  \u2191\u2193=select  Enter=choose  Backspace=back  ESC=quit");
+                 "  \u2191\u2193=select  Enter=choose  Esc/q/BS=back");
         print_statusbar(trows, tcols, sb);
 
         TermKey key = terminal_read_key();
@@ -1074,25 +1077,25 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                     snprintf(sb, sizeof(sb),
                              "-- [%d/%d] \u2191\u2193=scroll  F=fwd  r=rm-label  d=rm  D=trash"
                              "  f=star  n=unread  a=arch  t=labels  A=save(%d)"
-                             "  /=search  %s  q=back  ESC=quit --",
+                             "  /=search  %s  Esc/q/BS=list --",
                              cur_page, total_pages, att_count, vtog);
                 } else {
                     snprintf(sb, sizeof(sb),
                              "-- [%d/%d] \u2191\u2193=scroll  F=fwd  r=rm-label  d=rm  D=trash"
                              "  f=star  n=unread  a=arch  t=labels"
-                             "  /=search  %s  q=back  ESC=quit --",
+                             "  /=search  %s  Esc/q/BS=list --",
                              cur_page, total_pages, vtog);
                 }
             } else if (att_count > 0) {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] \u2191\u2193=scroll  r=reply  F=fwd  f=star  n=unread"
                          "  d=done  D=trash  a=save  A=save-all(%d)"
-                         "  /=search  %s  BS=list  ESC=quit --",
+                         "  /=search  %s  Esc/q/BS=list --",
                          cur_page, total_pages, att_count, vtog);
             } else {
                 snprintf(sb, sizeof(sb),
                          "-- [%d/%d] \u2191\u2193=scroll  r=reply  F=fwd  f=star  n=unread"
-                         "  d=done  D=trash  /=search  %s  BS=list  ESC=quit --",
+                         "  d=done  D=trash  /=search  %s  Esc/q/BS=list --",
                          cur_page, total_pages, vtog);
             }
             print_statusbar(term_rows, term_cols, sb);
@@ -1104,11 +1107,11 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
 
         switch (key) {
         case TERM_KEY_BACK:
-        case TERM_KEY_QUIT:
-            result = 0;          /* back to list */
-            goto show_int_done;
         case TERM_KEY_ESC:
-            result = 1;          /* exit program */
+            result = 0;          /* back to list (Esc, q and Backspace alike) */
+            goto show_int_done;
+        case TERM_KEY_QUIT:
+            result = 1;          /* ctrl-c: leave the program at once */
             goto show_int_done;
         case TERM_KEY_NEXT_PAGE:
         {
@@ -2086,7 +2089,7 @@ static int list_empty_cache_view(const Config *cfg, const EmailListOpts *opts,
         snprintf(cl, sizeof(cl),
                  "  0 of 0 message(s) in %s (0 unread) [%s].  \u26a0 No cached data \u2014 run 'email-sync' or 's=sync'",
                  folder_display, cfg->user ? cfg->user : "?");
-        printf("\033[1;1H\033[7m%s", cl);
+        printf("\033[1;1H" TUI_HDR_ON "%s", cl);
         int used = visible_line_cols(cl, cl + strlen(cl));
         for (int p = used; p < tcols; p++) putchar(' ');
         printf("\033[0m");
@@ -2100,15 +2103,17 @@ static int list_empty_cache_view(const Config *cfg, const EmailListOpts *opts,
         char sb[256];
         snprintf(sb, sizeof(sb),
                  "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                 "  Backspace=%s  ESC=quit"
+                 "  Esc/q/BS=%s"
                  "  s=sync  U=refresh  l=rules  [0/0]",
                  cfg->gmail_mode ? "labels" : "folders");
         print_statusbar(trows, tcols, sb);
     }
     for (;;) {
         TermKey key = terminal_read_key();
-        if (key == TERM_KEY_BACK) return 1;
-        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
+        if (key == TERM_KEY_BACK || key == TERM_KEY_ESC ||
+            (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q'))
+            return 1;     /* back (Esc, q, Backspace) */
+        if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
         int ch = terminal_last_printable();
         if (ch == 's') { sync_start_background(); }
         if (ch == 'U') return 4; /* refresh: re-list */
@@ -2435,7 +2440,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 snprintf(cl, sizeof(cl),
                          "  0 of 0 message(s) in %s (0 unread) [%s].",
                          folder_display, cfg->user ? cfg->user : "?");
-                printf("\033[1;1H\033[7m%s", cl);
+                printf("\033[1;1H" TUI_HDR_ON "%s", cl);
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
                 printf("\033[0m");
@@ -2450,13 +2455,13 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if (cfg->gmail_mode) {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Backspace=labels  ESC=quit"
+                             "  Esc/q/BS=labels"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
                              "  s=sync  U=refresh  l=rules  [0/0]");
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Backspace=folders  ESC=quit"
+                             "  Esc/q/BS=folders"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
                              "  D=trash  s=sync  U=refresh  l=rules  [0/0]");
                 }
@@ -2464,8 +2469,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             }
             for (;;) {
                 TermKey key = terminal_read_key();
-                if (key == TERM_KEY_BACK)  return 1;
-                if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
+                if (key == TERM_KEY_BACK || key == TERM_KEY_ESC ||
+                    (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q'))
+                    return 1;     /* back (Esc, q, Backspace) */
+                if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
                 int ch = terminal_last_printable();
                 if (ch == 'c') return 2; /* compose */
                 if (ch == 's') { sync_start_background(); }
@@ -2520,7 +2527,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             snprintf(cl, sizeof(cl),
                      "  0 of 0 message(s) in %s (0 unread) [%s].",
                      folder_display, cfg->user ? cfg->user : "?");
-            printf("\033[1;1H\033[7m%s", cl);
+            printf("\033[1;1H" TUI_HDR_ON "%s", cl);
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
             printf("\033[0m");
@@ -2537,20 +2544,20 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if (in_trash_empty) {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Backspace=labels  ESC=quit"
+                             "  Esc/q/BS=labels"
                              "  D=del  u=restore  t=labels  n=unread  f=star"
                              "  s=sync  U=refresh  l=rules  [0/0]");
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Backspace=labels  ESC=quit"
+                             "  Esc/q/BS=labels"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
                              "  D=trash  s=sync  U=refresh  l=rules  [0/0]");
                 }
             } else {
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                         "  Backspace=folders  ESC=quit"
+                         "  Esc/q/BS=folders"
                          "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
                          "  D=trash  s=sync  U=refresh  l=rules  [0/0]");
             }
@@ -2558,8 +2565,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         }
         for (;;) {
             TermKey key = terminal_read_key();
-            if (key == TERM_KEY_BACK)  return 1;
-            if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) return 0;
+            if (key == TERM_KEY_BACK || key == TERM_KEY_ESC ||
+                (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q'))
+                return 1;     /* back (Esc, q, Backspace) */
+            if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
             int ch = terminal_last_printable();
             if (ch == 'c') return 2; /* compose */
             if (ch == 's') { sync_start_background(); }
@@ -2771,7 +2780,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             }
             if (opts->pager) {
                 /* TUI mode: reverse-video status bar pinned to row 1 */
-                printf("\033[1;1H\033[7m%s", cl);
+                printf("\033[1;1H" TUI_HDR_ON "%s", cl);
                 int used = visible_line_cols(cl, cl + strlen(cl));
                 for (int p = used; p < tcols; p++) putchar(' ');
                 printf("\033[0m");
@@ -2814,10 +2823,12 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN};
                     if (poll(&pfd, 1, 0) > 0) {
                         TermKey key = terminal_read_key();
-                        if (key == TERM_KEY_BACK) {
+                        if (key == TERM_KEY_BACK || key == TERM_KEY_ESC ||
+                            (key == TERM_KEY_IGNORE &&
+                             terminal_last_printable() == 'q')) {
                             list_result = 1; load_interrupted = 1; break;
                         }
-                        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) {
+                        if (key == TERM_KEY_QUIT) {
                             list_result = 0; load_interrupted = 1; break;
                         }
                     }
@@ -3070,14 +3081,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if (in_trash) {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Backspace=labels  ESC=quit"
+                             "  Esc/q/BS=labels"
                              "  D=del  u=restore  t=labels  n=unread  f=star"
                              "  s=sync  U=refresh  l=rules  [%d/%d]",
                              show_count > 0 ? cursor + 1 : 0, show_count);
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Backspace=labels  ESC=quit"
+                             "  Esc/q/BS=labels"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star  a=archive"
                              "  d=rm-label  D=trash  t=labels  s=sync  U=refresh  l=rules  [%d/%d]",
                              show_count > 0 ? cursor + 1 : 0, show_count);
@@ -3087,7 +3098,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 int imap_in_trash = (strcmp(folder, imap_trf) == 0);
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                         "  Backspace=folders  ESC=quit"
+                         "  Esc/q/BS=folders"
                          "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
                          "  %s  s=sync  U=refresh  l=rules  [%d/%d]",
                          imap_in_trash ? "D=del" : "D=trash",
@@ -3137,6 +3148,12 @@ read_key_again: ;
             goto read_key_again;
         }
 
+        /* q is Esc (go back); it never quits.  While a filter is being typed
+         * it is just a character. */
+        if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q' &&
+            !filter_input)
+            key = TERM_KEY_ESC;
+
         switch (key) {
         case TERM_KEY_BACK:
             if (filter_input) {
@@ -3152,10 +3169,10 @@ read_key_again: ;
             list_result = 1;
             goto list_done;
         case TERM_KEY_QUIT:
-            goto list_done;
+            goto list_done;          /* ctrl-c: list_result 0 = quit at once */
         case TERM_KEY_ESC:
             if (filter_active) {
-                /* First ESC clears the filter; second ESC quits */
+                /* First Esc clears the filter; the next goes back */
                 filter_active   = 0;
                 filter_input    = 0;
                 filter_scanning = 0;
@@ -3166,6 +3183,7 @@ read_key_again: ;
                 cursor = 0;
                 break;
             }
+            list_result = 1;         /* back to the folder / label browser */
             goto list_done;
         case TERM_KEY_ENTER:
             if (filter_input) {
@@ -3921,7 +3939,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
                          cfg->user ? cfg->user : "?",
                          display_count);
             /* Explicit row 1: avoids pending-wrap shifting layout when title fills the row */
-            printf("\033[1;1H\033[7m%s", cl);
+            printf("\033[1;1H" TUI_HDR_ON "%s", cl);
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols_f; p++) putchar(' ');
             printf("\033[0m");
@@ -4005,23 +4023,25 @@ char *email_service_list_folders_interactive(const Config *cfg,
             if (!tree_mode && current_prefix[0])
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
-                         "  t=tree  Backspace=up  ESC=quit  [%d/%d]",
+                         "  t=tree  Esc/q/BS=up  [%d/%d]",
                          display_count > 0 ? cursor + 1 : 0, display_count);
             else
                 snprintf(sb, sizeof(sb),
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
-                         "  t=%s  Backspace=back  ESC=quit  [%d/%d]",
+                         "  t=%s  Esc/q/BS=back  [%d/%d]",
                          tree_mode ? "flat" : "tree",
                          display_count > 0 ? cursor + 1 : 0, display_count);
             print_statusbar(trows_f, tcols_f, sb);
         }
 
         TermKey key = terminal_read_key();
+        if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q')
+            key = TERM_KEY_ESC;      /* q is Esc: back, never quit */
 
         switch (key) {
-        case TERM_KEY_QUIT:
-        case TERM_KEY_ESC:
+        case TERM_KEY_QUIT:          /* ctrl-c: out at once, no go_up */
             goto folders_int_done;
+        case TERM_KEY_ESC:
         case TERM_KEY_BACK:
             if (!tree_mode && current_prefix[0]) {
                 /* navigate up one level */
@@ -4579,18 +4599,22 @@ char *email_service_list_labels_interactive(const Config *cfg,
             char _cl[256];
             snprintf(_cl, sizeof(_cl), "  Labels \u2014 %s  (0)",
                      cfg->user ? cfg->user : "?");
-            printf("\033[7m%s", _cl);
+            printf(TUI_HDR_ON "%s", _cl);
             int _used = visible_line_cols(_cl, _cl + strlen(_cl));
             for (int _p = _used; _p < _tc; _p++) putchar(' ');
             printf("\033[0m\n\n");
         }
         printf("  No labels synced yet. Run 'email-sync' to populate.\n");
         fflush(stdout);
-        print_statusbar(_tr, _tc, "  Backspace=back  ESC=quit");
+        print_statusbar(_tr, _tc, "  Esc/q/BS=back");
         for (;;) {
             TermKey _k = terminal_read_key();
-            if (_k == TERM_KEY_BACK) { if (go_up) *go_up = 1; return NULL; }
-            if (_k == TERM_KEY_QUIT || _k == TERM_KEY_ESC) return NULL;
+            if (_k == TERM_KEY_BACK || _k == TERM_KEY_ESC ||
+                (_k == TERM_KEY_IGNORE && terminal_last_printable() == 'q')) {
+                if (go_up) *go_up = 1;
+                return NULL;
+            }
+            if (_k == TERM_KEY_QUIT) return NULL;
         }
     }
 
@@ -4659,7 +4683,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
             snprintf(cl, sizeof(cl), "  Labels \u2014 %s  (%d)",
                      cfg->user ? cfg->user : "?", lbl_count);
             /* Explicit row 1: avoids pending-wrap shifting layout when title fills the row */
-            printf("\033[1;1H\033[7m%s", cl);
+            printf("\033[1;1H" TUI_HDR_ON "%s", cl);
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
             printf("\033[0m");
@@ -4703,7 +4727,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
         {
             char sb[256];
             snprintf(sb, sizeof(sb),
-                     "  \u2191\u2193=select  Enter=open  c=create  d=delete  Backspace=accounts  ESC=quit"
+                     "  \u2191\u2193=select  Enter=open  c=create  d=delete  Esc/q/BS=accounts"
                      "  h=help  [%d/%d]",
                      cursor + 1, lbl_count);
             print_statusbar(trows, tcols, sb);
@@ -4711,13 +4735,15 @@ char *email_service_list_labels_interactive(const Config *cfg,
 
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K"); fflush(stderr);
+        if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q')
+            key = TERM_KEY_ESC;      /* q is Esc: back, never quit */
 
         switch (key) {
         case TERM_KEY_BACK:
+        case TERM_KEY_ESC:
             if (go_up) *go_up = 1;
             goto labels_done;
-        case TERM_KEY_QUIT:
-        case TERM_KEY_ESC:
+        case TERM_KEY_QUIT:          /* ctrl-c: out at once */
             goto labels_done;
         case TERM_KEY_HOME:
             cursor = 0; wstart = 0;
@@ -5051,7 +5077,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
         {
             char cl[128];
             snprintf(cl, sizeof(cl), "  Email Accounts (%d)", count);
-            printf("\033[7m%s", cl);
+            printf(TUI_HDR_ON "%s", cl);
             int used = visible_line_cols(cl, cl + strlen(cl));
             for (int p = used; p < tcols; p++) putchar(' ');
             printf("\033[0m\n\n");

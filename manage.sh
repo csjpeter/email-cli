@@ -27,8 +27,12 @@ show_help() {
     echo "  run            Build and run the application"
     echo "  test [FILTER]  Build and run unit tests (with ASAN); FILTER runs only the"
     echo "                 test suites whose name contains it"
-    echo "  functional     Build and run the functional test suite"
-    echo "  pty            Build and run all PTY (terminal) test suites"
+    echo "  functional [PHASES]  Build and run the functional test suite; PHASES is a list"
+    echo "                 such as 7,60-62 (see tests/functional/run_functional.sh --list)"
+    echo "  pty [SUITE [FILTER]]  Build and run the PTY (terminal) test suites; SUITE is one"
+    echo "                 of views gmail-tui mail-rules compose-dialog attachment"
+    echo "                 send-local input-line compose ptytest, FILTER selects tests"
+    echo "                 by name"
     echo "  valgrind       Build and run unit tests with Valgrind"
     echo "  headers [DIR]  Fail on a source file or script without the source header"
     echo "  check          Run every gate (headers, test, functional, pty, valgrind) and summarise"
@@ -181,23 +185,6 @@ PTY_TARGETS="test-pty-views test-pty-gmail-tui test-pty-mail-rules \
 
 JOBS=$(nproc)
 
-# Stops mock servers an interrupted run left behind.  pkill exits 1 when
-# nothing matched, which is the normal case and is handled explicitly; any
-# other status is a real failure and is shown.  The fixed mock ports that make
-# this necessary are EMAIL-33's to remove.
-stop_stale_mocks() {
-    local pat rc
-    for pat in mock_imap_server mock-imap-server mock_gmail_api_server \
-               mock-gmail-server mock_smtp_server mock-smtp-server; do
-        pkill -f "$pat" && rc=0 || rc=$?
-        if [ "$rc" -gt 1 ]; then
-            echo "ERROR: pkill -f $pat failed with status $rc" >&2
-            exit 1
-        fi
-    done
-}
-
-
 cmake_build() {
     cmake --build "$BUILD_DIR" -- -j"$JOBS"
     mkdir -p "$BIN_DIR"
@@ -276,7 +263,7 @@ case "$1" in
     functional)
         echo "Running functional tests..."
         build_release
-        ./tests/functional/run_functional.sh
+        ./tests/functional/run_functional.sh ${2:+--phase "$2"}
         ;;
     pty)
         echo "Running PTY tests..."
@@ -284,24 +271,32 @@ case "$1" in
         cmake --build "$BUILD_DIR" --target $PTY_TARGETS -- -j"$JOBS"
         ABS_BUILD="$(realpath "$BUILD_DIR")"
         ABS_BIN="$(realpath "$BIN_DIR")"
-        # Mock servers bind fixed ports.  A previous interrupted run can leave
-        # one behind, and the next suite then talks to a stale server with
-        # different contents — which looks exactly like a product regression.
-        stop_stale_mocks
-        sleep 1
+        # ./manage.sh pty [SUITE [FILTER]]: SUITE is a label from
+        # for_each_pty_suite, FILTER is passed on as TEST_FILTER and selects
+        # the tests of that suite whose function name contains it.
+        pty_suite="$2"
+        if [ -n "$3" ]; then export TEST_FILTER="$3"; fi
         pty_rc=0
+        pty_ran=0
         run_pty_strict() {  # run_pty_strict <label> <binary> [args…]
             local label="$1"; shift
+            if [ -n "$pty_suite" ] && [ "$pty_suite" != "$label" ]; then
+                return 0
+            fi
+            pty_ran=$((pty_ran + 1))
             echo "--- PTY: $label ---"
-            # Each suite binds fixed mock-server ports; run them sequentially
-            # and let the ports settle in between.
+            # Every mock binds a port the kernel picks and every fixture lives
+            # under build/ with the pid in its name, so suites share nothing.
             if ! (cd "$ABS_BUILD" && "$@"); then
                 echo "  [FAILED] $label"
                 pty_rc=1
             fi
-            sleep 2
         }
         for_each_pty_suite run_pty_strict "$ABS_BIN"
+        if [ -n "$pty_suite" ] && [ "$pty_ran" -eq 0 ]; then
+            echo "ERROR: no PTY suite is called '$pty_suite'" >&2
+            exit 1
+        fi
         exit $pty_rc
         ;;
     valgrind)
@@ -320,9 +315,6 @@ case "$1" in
 
         # Pass 1 — functional suite + PTY tests (fresh .gcda) → functional badge
         find "$BUILD_DIR" -name "*.gcda" -delete
-        # Kill any lingering mock server processes by process name (not by -f to avoid self-kill)
-        stop_stale_mocks
-        sleep 0.3
         # The report is still produced when the suite fails, but the failure is
         # the verdict of this run: it is kept and returned at the end.
         functional_rc=0
@@ -331,16 +323,6 @@ case "$1" in
         echo "Running PTY tests for coverage..."
         ABS_BUILD="$(realpath "$BUILD_DIR")"
         ABS_BIN="$(realpath "$BIN_DIR")"
-        # The functional suite above runs a mock on port 9993 — the same fixed
-        # port three PTY suites use, and the mock's own default.  Any server it
-        # leaves behind answers the next suite's connect probe, which then
-        # tests against a mailbox belonging to someone else: that is how
-        # mail-rules came to assert over messages titled "AlphaAccountMsg".
-        # `./manage.sh pty` has cleared these since the same bug bit it; the
-        # coverage path needs it just as much, because here the functional run
-        # immediately precedes the PTY run.
-        stop_stale_mocks
-        sleep 1
         # Every suite contributes to the measured coverage.  Failures are
         # tolerated here on purpose — the report must still be produced — but
         # they are reported, and `./manage.sh pty` (which CI runs) fails on them.
@@ -358,7 +340,6 @@ case "$1" in
                 echo "    (full output: $log)"
                 pty_cov_rc=1
             fi
-            sleep 2
         }
         for_each_pty_suite run_pty_lenient "$ABS_BIN"
         # One definition of "product code" for every report: the program's own

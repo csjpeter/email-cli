@@ -53,7 +53,7 @@ Working through the approved tickets of this project by itself is the
 ./manage.sh help       # Show available commands
 ```
 
-There is no Makefile — `manage.sh` calls CMake directly. There is no mechanism to run a single test in isolation; all unit tests run together via `build/tests/unit/test-runner`.
+There is no Makefile — `manage.sh` calls CMake directly. A single unit suite runs with `./manage.sh test <name-part>`, a functional phase with `./manage.sh functional <phases>`, a PTY suite with `./manage.sh pty <suite> [<name-part>]` (see `docs/dev/testing.md`).
 
 The functional suite has no dedicated `manage.sh` target; run it directly with
 `./tests/functional/run_functional.sh` after a build (it drives the mock IMAP /

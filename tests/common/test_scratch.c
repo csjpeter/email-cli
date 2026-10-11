@@ -5,12 +5,19 @@
 #include "test_scratch.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <ftw.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <signal.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifndef TEST_BUILD_DIR
@@ -69,12 +76,28 @@ int test_rmtree(const char *path)
     return nftw(path, nftw_cb, 32, FTW_DEPTH | FTW_PHYS);
 }
 
+static int g_filter_selected;
+static int g_filter_set;
+static pid_t g_filter_owner;
+
 /* Runs in forked children too: only the process that made the directory
- * removes it. */
-static void remove_at_exit(void)
+ * removes it, and only the process that read the filter judges it. */
+static void at_exit_handler(void)
 {
-    if (g_owner != getpid() || g_root[0] == '\0') return;
-    (void)test_rmtree(g_root);
+    if (g_owner == getpid() && g_root[0] != '\0') (void)test_rmtree(g_root);
+    if (g_filter_set && g_filter_owner == getpid() && g_filter_selected == 0) {
+        fprintf(stderr, "TEST_FILTER='%s' matched no test\n",
+                getenv("TEST_FILTER"));
+        _exit(EXIT_FAILURE);
+    }
+}
+
+static void register_at_exit(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+    atexit(at_exit_handler);
 }
 
 const char *test_scratch_dir(void)
@@ -88,7 +111,7 @@ const char *test_scratch_dir(void)
                     g_root, strerror(errno));
             exit(EXIT_FAILURE);
         }
-        atexit(remove_at_exit);
+        register_at_exit();
     }
     return g_root;
 }
@@ -130,4 +153,107 @@ void test_set_home(const char *home)
     setenv("XDG_DATA_HOME", p, 1);
     snprintf(p, sizeof(p), "%s/.cache", home);
     setenv("XDG_CACHE_HOME", p, 1);
+}
+
+static int read_file(const char *path, char *buf, size_t n)
+{
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return -1;
+    ssize_t r = read(fd, buf, n - 1);
+    close(fd);
+    if (r <= 0) return -1;
+    buf[r] = '\0';
+    return 0;
+}
+
+pid_t test_spawn_mock(const char *bin, const char *prefix, int want_port,
+                      int *port_out)
+{
+    static int seq;
+    char portfile[PATH_MAX], logfile[PATH_MAX], var[128], num[16];
+    int n = ++seq;
+    snprintf(portfile, sizeof(portfile), "%s/mock-%s-%d.port",
+             test_scratch_dir(), prefix, n);
+    snprintf(logfile, sizeof(logfile), "%s/mock-%s-%d.log",
+             test_scratch_dir(), prefix, n);
+    if (unlink(portfile) != 0 && errno != ENOENT) {
+        fprintf(stderr, "test_spawn_mock: %s: %s\n", portfile, strerror(errno));
+        return -1;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) { perror("fork"); return -1; }
+    if (pid == 0) {
+        snprintf(var, sizeof(var), "%s_PORT_FILE", prefix);
+        setenv(var, portfile, 1);
+        snprintf(var, sizeof(var), "%s_PORT", prefix);
+        if (want_port > 0) {
+            snprintf(num, sizeof(num), "%d", want_port);
+            setenv(var, num, 1);
+        } else {
+            unsetenv(var);
+        }
+        int lfd = open(logfile, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (lfd < 0) _exit(126);
+        dup2(lfd, 1);
+        dup2(lfd, 2);
+        close(lfd);
+        execl(bin, bin, (char *)NULL);
+        _exit(127);
+    }
+
+    for (int i = 0; i < 200; i++) {                  /* up to 10 s */
+        char buf[32];
+        if (read_file(portfile, buf, sizeof(buf)) == 0) {
+            int p = atoi(buf);
+            if (p > 0) {
+                if (port_out) *port_out = p;
+                return pid;
+            }
+        }
+        int st;
+        if (waitpid(pid, &st, WNOHANG) == pid) {
+            char log[2048] = "";
+            (void)read_file(logfile, log, sizeof(log));
+            fprintf(stderr, "test_spawn_mock: %s exited before it listened:\n%s\n",
+                    bin, log);
+            return -1;
+        }
+        struct timespec ts = {0, 50 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+    }
+    fprintf(stderr, "test_spawn_mock: %s did not publish a port in 10 s\n", bin);
+    kill(pid, SIGKILL);
+    waitpid(pid, NULL, 0);
+    return -1;
+}
+
+int test_unused_port(void)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    struct sockaddr_in a = {0};
+    a.sin_family      = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t len = sizeof(a);
+    int port = -1;
+    if (bind(fd, (struct sockaddr *)&a, sizeof(a)) == 0 &&
+        getsockname(fd, (struct sockaddr *)&a, &len) == 0)
+        port = ntohs(a.sin_port);
+    close(fd);
+    return port;
+}
+
+int test_selected(const char *name)
+{
+    const char *f = getenv("TEST_FILTER");
+    if (!f || !f[0]) return 1;
+    if (!g_filter_set) {
+        g_filter_set = 1;
+        g_filter_owner = getpid();
+        register_at_exit();
+    }
+    if (!strstr(name, f)) return 0;
+    g_filter_selected++;
+    return 1;
 }

@@ -14,6 +14,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "test_scratch.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +33,8 @@ int g_tests_failed = 0;
 /* ── Test infrastructure ─────────────────────────────────────────────── */
 
 static pid_t g_mock_pid = -1;
+static int   g_imap_port = 0;    /* the mock's port, picked by the kernel */
+static int   g_dead_port = 0;    /* a port nobody listens on (SMTP is not mocked here) */
 static char  g_test_home[256];
 static char  g_cli_bin[512];
 static char  g_cli_ro_bin[512];
@@ -61,12 +64,13 @@ static void write_config(void) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
         "SSL_NO_VERIFY=1\n"     /* TLS with self-signed cert */
-        "SMTP_HOST=smtps://localhost:9465\n"); /* dummy SMTP — avoids blocking prompt */
+        "SMTP_HOST=smtps://localhost:%d\n", /* dummy SMTP — avoids blocking prompt */
+        g_imap_port, g_dead_port);
     fclose(fp);
     chmod(path, 0600);
 }
@@ -86,65 +90,49 @@ static void write_config_with_interval(int interval) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
         "SSL_NO_VERIFY=1\n"   /* TLS with self-signed cert */
-        "SYNC_INTERVAL=%d\n", interval);
+        "SYNC_INTERVAL=%d\n", g_imap_port, interval);
     fclose(fp);
     chmod(path, 0600);
 }
 
+/* Type a host line holding the mock's port into the wizard. */
+static void send_host(PtySession *s, const char *fmt) {
+    char line[128];
+    snprintf(line, sizeof(line), fmt, g_imap_port);
+    pty_send_str(s, line);
+}
+
 static int start_mock_server(void) {
-    /* Retry rather than give up on the first failure: a mock killed moments
-     * ago can still hold the port briefly, and at that instant it looks
-     * exactly like a foreign server squatting on it.  Only a conflict that
-     * outlives several attempts is worth reporting — and it must be reported,
-     * because the connect probe cannot tell our server from a stranger's, and
-     * testing against someone else's mailbox is how this stayed hidden. */
-    for (int attempt = 0; attempt < 15; attempt++) {
-        g_mock_pid = fork();
-        if (g_mock_pid < 0) return -1;
-        if (g_mock_pid == 0) {
-            int devnull = open("/dev/null", O_WRONLY);
-            if (devnull >= 0) { dup2(devnull, 1); dup2(devnull, 2); close(devnull); }
-            execl(g_mock_bin, "mock_imap_server", (char *)NULL);
-            _exit(127);
-        }
-        usleep(attempt == 0 ? 800000 : 200000);
-
-        int _st = 0;
-        if (waitpid(g_mock_pid, &_st, WNOHANG) != g_mock_pid)
-            return 0;               /* still running: the port is ours */
-        g_mock_pid = -1;               /* bind failed; wait and try again */
+    /* The first start lets the kernel pick the port; a restart asks for the
+     * same one, because the configs written so far name it.  The port is
+     * known when test_spawn_mock() returns: the mock has bound it and said
+     * so, so no probe and no fixed number is needed. */
+    int port = 0;
+    g_mock_pid = test_spawn_mock(g_mock_bin, "MOCK_IMAP", g_imap_port, &port);
+    if (g_mock_pid < 0) {
+        fprintf(stderr, "views: the mock IMAP server did not start\n");
+        return -1;
     }
-    fprintf(stderr, "views: mock server could not bind its port after "
-                    "15 attempts - it is held by another process. "
-                    "Refusing to test against it.\n");
-    return -1;
+    g_imap_port = port;
+    return 0;
 }
 
-static int probe_server(void) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
-    struct sockaddr_in addr = { .sin_family = AF_INET,
-        .sin_port = htons(9993), .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
-    int ret = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    close(fd);
-    return ret;
-}
-
-static void restart_mock(void) {
+static void stop_mock_for_restart(void) {
     if (g_mock_pid > 0) {
         kill(g_mock_pid, SIGKILL);
         waitpid(g_mock_pid, NULL, 0);
         g_mock_pid = -1;
     }
-    usleep(200000);
-    start_mock_server();
-    for (int i = 0; i < 30 && probe_server() != 0; i++)
-        usleep(100000);
+}
+
+static void restart_mock(void) {
+    stop_mock_for_restart();
+    if (start_mock_server() != 0) { g_tests_failed++; }
 }
 
 static void stop_mock_server(void) {
@@ -1621,7 +1609,7 @@ static void test_wizard_complete(void) {
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_str(s, "imaps://localhost:9993\n");   /* explicit correct protocol */
+    send_host(s, "imaps://localhost:%d\n");   /* explicit correct protocol */
     ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
     pty_send_str(s, "\n");  /* accept default 993 */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
@@ -1652,7 +1640,7 @@ static void test_wizard_host_autocomplete(void) {
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_str(s, "localhost:9993\n");            /* no protocol → auto imaps:// */
+    send_host(s, "localhost:%d\n");            /* no protocol → auto imaps:// */
     ASSERT_WAIT_FOR(s, "imaps://", WAIT_MS);        /* confirmation line printed */
     ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
     pty_send_str(s, "\n");   /* accept default 993 */
@@ -1684,10 +1672,10 @@ static void test_wizard_bad_protocol_rejected(void) {
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_str(s, "imap://localhost:9993\n");     /* wrong protocol */
+    send_host(s, "imap://localhost:%d\n");     /* wrong protocol */
     ASSERT_WAIT_FOR(s, "unsupported protocol", WAIT_MS);
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);       /* re-prompted */
-    pty_send_str(s, "imaps://localhost:9993\n");    /* now correct */
+    send_host(s, "imaps://localhost:%d\n");    /* now correct */
     ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
     pty_send_str(s, "\n");   /* accept default 993 */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
@@ -1713,7 +1701,7 @@ static void test_wizard_with_smtp(void) {
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");                           /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_str(s, "localhost:9993\n");               /* plain name → imaps:// prepended */
+    send_host(s, "localhost:%d\n");               /* plain name → imaps:// prepended */
     ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
     pty_send_str(s, "\n");                            /* accept default 993 */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
@@ -2118,11 +2106,11 @@ static void write_second_account(const char *name) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=%s\n"
         "EMAIL_PASS=pass2\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SSL_NO_VERIFY=1\n", name);  /* TLS with self-signed cert */
+        "SSL_NO_VERIFY=1\n", g_imap_port, name);  /* TLS with self-signed cert */
     fclose(fp);
     chmod(path, 0600);
 }
@@ -2481,10 +2469,10 @@ static void write_config_no_ssl_verify_imap(void) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imap://localhost:9993\n"
+        "EMAIL_HOST=imap://localhost:%d\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
-        "EMAIL_FOLDER=INBOX\n");
+        "EMAIL_FOLDER=INBOX\n", g_imap_port);
     /* No SSL_NO_VERIFY=1 — insecure URL must be rejected */
     fclose(fp);
     chmod(path, 0600);
@@ -2510,14 +2498,14 @@ static void write_config_no_ssl_verify_smtp(void) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SMTP_HOST=smtp://localhost:9025\n"
-        "SMTP_PORT=9025\n"
+        "SMTP_HOST=smtp://localhost:%d\n"
+        "SMTP_PORT=%d\n"
         "SMTP_USER=testuser\n"
-        "SMTP_PASS=testpass\n");
+        "SMTP_PASS=testpass\n", g_imap_port, g_dead_port, g_dead_port);
     /* No SSL_NO_VERIFY=1 — insecure smtp:// URL must be rejected */
     fclose(fp);
     chmod(path, 0600);
@@ -2591,9 +2579,9 @@ static void test_tui_list_reply_key(void) {
     /* US-20: 'r' in TUI list launches reply; editor clears To: → abort → back to list */
     restart_mock();
     /* Write an editor script that blanks To: so compose aborts cleanly */
-    char editor_script[256];
+    char editor_script[512];
     snprintf(editor_script, sizeof(editor_script),
-             "/tmp/test_reply_list_editor_%d.sh", (int)getpid());
+             "%s/test_reply_list_editor.sh", test_scratch_dir());
     FILE *ef = fopen(editor_script, "w");
     if (ef) {
         fprintf(ef, "#!/bin/sh\n");
@@ -4196,7 +4184,7 @@ static void test_tui_rules_edit_form_esc_cancel(void) {
 
 /* ── Main ────────────────────────────────────────────────────────────── */
 
-#define RUN_TEST(fn) do { printf("  %s...\n", #fn); fn(); } while(0)
+#define RUN_TEST(fn) do { if (!test_selected(#fn)) break; printf("  %s...\n", #fn); fn(); } while(0)
 
 int main(int argc, char *argv[]) {
     printf("--- email-cli PTY View Tests ---\n\n");
@@ -4215,12 +4203,20 @@ int main(int argc, char *argv[]) {
     const char *home = getenv("HOME");
     if (home) snprintf(g_old_home, sizeof(g_old_home), "%s", home);
 
-    snprintf(g_test_home, sizeof(g_test_home),
-             "/tmp/email-cli-pty-test-%d", getpid());
+    snprintf(g_test_home, sizeof(g_test_home), "%s", TP("home"));
     setenv("HOME", g_test_home, 1);
     unsetenv("XDG_CONFIG_HOME");
     unsetenv("XDG_CACHE_HOME");
     unsetenv("XDG_DATA_HOME");
+
+    /* The mock first: the configs written next name its port. */
+    g_dead_port = test_unused_port();
+    printf("--- Starting mock IMAP server ---\n");
+    if (start_mock_server() != 0 || g_dead_port < 0) {
+        fprintf(stderr, "FATAL: cannot start mock server\n");
+        g_tests_failed++;           /* a fixture that cannot start is a failure */
+        goto done;
+    }
     write_config();
 
     printf("--- Help pages ---\n");
@@ -4231,12 +4227,6 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_help_sync);
     RUN_TEST(test_help_cron);
 
-    printf("\n--- Starting mock IMAP server ---\n");
-    if (start_mock_server() != 0) {
-        fprintf(stderr, "FATAL: cannot start mock server\n");
-        g_tests_failed++;           /* a fixture that cannot start is a failure */
-        goto done;
-    }
 
     printf("\n--- Batch mode ---\n");
     RUN_TEST(test_batch_list);

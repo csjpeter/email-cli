@@ -9,8 +9,36 @@
 ./manage.sh integration # End-to-end against Dockerized Dovecot (requires Docker)
 ```
 
-There is no mechanism to run a single test in isolation — all unit tests run
-together via `build/tests/unit/test-runner`.
+### Running one test
+
+```bash
+./manage.sh test test_mime              # unit suites whose name contains "test_mime"
+build/tests/unit/test-runner --list     # the suite names
+./manage.sh functional 60-62            # functional phases (ranges and lists)
+tests/functional/run_functional.sh --list
+./manage.sh pty compose                 # one PTY suite (views gmail-tui mail-rules
+                                        #   compose-dialog attachment send-local
+                                        #   input-line compose ptytest)
+./manage.sh pty compose test_password   # ... and only its tests whose name contains it
+```
+
+A functional selection pulls in the phases it needs (`PHASE_NEEDS` in the
+script: phase 29 uses helpers defined by 26-28, and so on).  A filter that
+matches nothing fails the run.
+
+### Where tests keep their files, and which ports they use
+
+No test uses `/tmp` and no test has a fixed port.
+
+- Every fixture is under `build/tests/<category>/work-<pid>/`, removed when the
+  process ends (the unit and PTY suites through `tests/common/test_scratch.h`,
+  the functional and integration scripts through their exit trap).  A killed run
+  leaves its directory under `build/`, and `./manage.sh clean` takes it.
+- Every mock binds a loopback port the kernel picks (`MOCK_*_PORT` unset or 0)
+  and writes the port it got to the file named by `MOCK_*_PORT_FILE`; the unit
+  tests bind port 0 before they fork; the Docker integration container publishes
+  its ports on kernel-picked loopback ports.
+- Every suite sets `HOME` to a fixture and unsets the three `XDG_*` variables.
 
 ## Unit Tests (`tests/unit/`)
 
@@ -102,8 +130,9 @@ correct value that arrives after a five-minute timeout is not the same answer.
 
 ## Functional Tests (`tests/functional/`)
 
-The mock IMAP server (`mock_imap_server.c`) listens on TCP port 9993 and
-implements a minimal IMAP state machine:
+The mock IMAP server (`mock_imap_server.c`) listens on a loopback TCP port the
+kernel picks (see `MOCK_IMAP_PORT_FILE`) and implements a minimal IMAP state
+machine:
 
 - Accepts multiple sequential connections (SEARCH uses one connection,
   each FETCH uses a separate connection).
@@ -132,7 +161,7 @@ under `umask 002`, and a `lintian` finding (a stub first on `PATH`) makes
 
 Run via `./tests/functional/run_functional.sh`. The script:
 1. Compiles and starts the mock server in background.
-2. Runs `email-cli` with a temporary config pointing at `imap://localhost:9993`.
+2. Runs `email-cli` with a temporary config pointing at the port the mock got.
 3. Checks 5 assertions on the output.
 4. Kills the server on exit (via trap).
 

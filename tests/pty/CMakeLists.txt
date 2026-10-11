@@ -6,12 +6,12 @@
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/libptytest libptytest)
 
 # Every path a PTY test uses is under build/tests/pty/work-<pid>
-# (tests/common/test_scratch.h); never /tmp.
+# (tests/common/test_scratch.h); never the shared system temp directory.
 include_directories(${CMAKE_SOURCE_DIR}/tests/common)
 add_compile_definitions(TEST_BUILD_DIR="${CMAKE_BINARY_DIR}" TEST_CATEGORY="pty")
 
 # ── email-cli view tests (require mock IMAP server) ───────────────────
-add_executable(test-pty-views test_pty_views.c)
+add_executable(test-pty-views test_pty_views.c ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c)
 target_link_libraries(test-pty-views ptytest)
 if(NOT APPLE)
     target_link_libraries(test-pty-views util)
@@ -69,6 +69,7 @@ target_link_libraries(input-line-harness OpenSSL::SSL OpenSSL::Crypto)
 # ── InputLine / PathComplete PTY tests ───────────────────────────────
 add_executable(test-pty-input-line EXCLUDE_FROM_ALL
     test_input_line_pty.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
 target_include_directories(test-pty-input-line PRIVATE
     ${CMAKE_SOURCE_DIR}/libs/libptytest
@@ -87,6 +88,7 @@ add_executable(mock-gmail-server EXCLUDE_FROM_ALL
 # ── Gmail TUI PTY tests ───────────────────────────────────────────────
 add_executable(test-pty-gmail-tui EXCLUDE_FROM_ALL
     test_pty_gmail_tui.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
 target_include_directories(test-pty-gmail-tui PRIVATE
     ${CMAKE_SOURCE_DIR}/libs/libptytest
@@ -117,6 +119,7 @@ target_link_libraries(mock-smtp-server OpenSSL::SSL OpenSSL::Crypto)
 # ── Compose / send PTY tests ──────────────────────────────────────────
 add_executable(test-pty-compose EXCLUDE_FROM_ALL
     test_compose_pty.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
 target_include_directories(test-pty-compose PRIVATE
     ${CMAKE_SOURCE_DIR}/libs/libptytest
@@ -140,6 +143,7 @@ add_custom_target(run-pty-compose
 # ── Mail rules PTY tests ──────────────────────────────────────────────
 add_executable(test-pty-mail-rules EXCLUDE_FROM_ALL
     test_pty_mail_rules.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
 target_include_directories(test-pty-mail-rules PRIVATE
     ${CMAKE_SOURCE_DIR}/libs/libptytest
@@ -163,6 +167,7 @@ add_custom_target(run-pty-mail-rules
 # ── Pre-compose dialog PTY tests ──────────────────────────────────────
 add_executable(test-pty-compose-dialog EXCLUDE_FROM_ALL
     test_pty_compose_dialog.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
 target_include_directories(test-pty-compose-dialog PRIVATE
     ${CMAKE_SOURCE_DIR}/libs/libptytest
@@ -186,6 +191,7 @@ add_custom_target(run-pty-compose-dialog
 # ── Local-first send PTY tests (US-SL-01 … US-SL-04) ─────────────────
 add_executable(test-pty-send-local EXCLUDE_FROM_ALL
     test_pty_send_local.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
 target_include_directories(test-pty-send-local PRIVATE
     ${CMAKE_SOURCE_DIR}/libs/libptytest
@@ -211,6 +217,7 @@ add_custom_target(run-pty-send-local
 # NOTE: These tests FAIL until US-84 and US-85 are implemented (TDD spec).
 add_executable(test-pty-attachment EXCLUDE_FROM_ALL
     test_pty_attachment.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
 target_include_directories(test-pty-attachment PRIVATE
     ${CMAKE_SOURCE_DIR}/libs/libptytest

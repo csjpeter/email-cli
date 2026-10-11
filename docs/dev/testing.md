@@ -152,6 +152,12 @@ of `./manage.sh check`: it fails, naming the file, on any `.c`, `.h`, `.sh`,
 purpose lines. `./tests/functional/run_source_header.sh` tests the gate itself
 against a scratch tree under `build/`.
 
+`./manage.sh names [DIR]` is the private-names gate (EMAIL-40): it fails, naming
+the file, when a tracked file contains the owner's private domain; the pattern is
+built from parts so the script passes its own check.
+`./tests/functional/run_private_names.sh` tests the gate in a scratch repository
+under `build/`.
+
 `./tests/functional/run_package_policy.sh` checks the package itself (EMAIL-16):
 `lintian` reports nothing, `Depends` is discovered (libc6 present, no
 hand-written or exact versions), man pages and changelog are gzipped, the

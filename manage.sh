@@ -35,7 +35,8 @@ show_help() {
     echo "                 by name"
     echo "  valgrind       Build and run unit tests with Valgrind"
     echo "  headers [DIR]  Fail on a source file or script without the source header"
-    echo "  check          Run every gate (headers, test, functional, pty, valgrind) and summarise"
+    echo "  names [DIR]    Fail when a tracked file names the owner's private domain"
+    echo "  check          Run every gate (headers, names, test, functional, pty, valgrind) and summarise"
     echo "  coverage       Run tests and generate coverage report"
     echo "  integration    Run integration test against Dovecot IMAP container"
     echo "  integration-local  Run APPEND integration test with local Dovecot (no Docker)"
@@ -89,6 +90,21 @@ check_source_headers() {
                  \( -name '*.c' -o -name '*.h' -o -name '*.sh' -o -name '*.cmake' -o -name CMakeLists.txt \) -print | sort)
     echo "header: $total files checked, $bad without a valid header"
     [ "$bad" -eq 0 ]
+}
+
+# The owner's private domain appears in no tracked file (private-names policy).
+# The pattern is built from two parts so that this script does not contain the
+# name in one piece and fail its own check.  Prints each offending file.
+check_private_names() {
+    local root="${1:-.}" part_a="csasz" part_b="ar" part_c="\\.em" part_d="ail" found rc=0
+    found=$(git -C "$root" grep -I -l -i -E "${part_a}${part_b}${part_c}${part_d}") || rc=$?
+    case $rc in
+        0) printf '%s\n' "$found" | sed 's/^/names: private domain in /' >&2
+           echo "names: $(printf '%s\n' "$found" | wc -l) tracked files name the private domain" >&2
+           return 1 ;;
+        1) echo "names: no tracked file names the private domain"; return 0 ;;
+        *) echo "names: git grep failed in $root" >&2; return 2 ;;
+    esac
 }
 
 install_deps() {
@@ -430,12 +446,15 @@ case "$1" in
     headers)
         check_source_headers "${2:-.}"
         ;;
+    names)
+        check_private_names "${2:-.}"
+        ;;
     check)
         # Every gate, each in its own run, one summary to compare with CI.
         # Coverage joins when it has a threshold that fails (EMAIL-15).
         check_rc=0
         check_summary=""
-        for gate in headers test functional pty valgrind; do
+        for gate in headers names test functional pty valgrind; do
             echo "=== check: $gate ==="
             if "$0" "$gate"; then
                 check_summary="${check_summary}  $(printf '%-12s' "$gate") PASS"$'\n'

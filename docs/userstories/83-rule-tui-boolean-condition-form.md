@@ -27,7 +27,7 @@ within one rule,
 ## Form layout sketch
 
 ```
-Edit rule for peter@csaszar.email
+Edit rule for user@example.org
 Rule name: misina
 
 Action groups (2):

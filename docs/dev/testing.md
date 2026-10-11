@@ -158,6 +158,16 @@ built from parts so the script passes its own check.
 `./tests/functional/run_private_names.sh` tests the gate in a scratch repository
 under `build/`.
 
+`./manage.sh timing [KEY-N]` and the timing log (EMAIL-76): every verb that does
+work (`build`, `debug`, `test`, `coverage`, `valgrind`, `functional`, `pty`,
+`integration`, `integration-local`, `headers`, `names`, `check`, `package`,
+`install`) appends `<UTC time> <verb> <s>s <ok|fail>` to `build/timing.log`,
+success or failure. `timing` prints `Gate: <total>s (check .., package ..,
+install ..)` from the latest run of each, leaves out a part that never ran, and
+prints `Gate: not measured` with a non-zero status when there is none; with a
+key it comments the line on the ticket. `./tests/functional/run_timing.sh`
+tests the log and the line against a log under `build/`.
+
 `./tests/functional/run_package_policy.sh` checks the package itself (EMAIL-16):
 `lintian` reports nothing, `Depends` is discovered (libc6 present, no
 hand-written or exact versions), man pages and changelog are gzipped, the

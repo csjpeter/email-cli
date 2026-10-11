@@ -45,6 +45,7 @@ show_help() {
     echo "  install        Build (release) and install binaries to ~/.local/bin"
     echo "  uninstall      Remove installed binaries from ~/.local/bin"
     echo "  package [deb|rpm|all]  Build release and create package(s) in build/packages/"
+    echo "  timing [KEY-N] Print the Gate line from build/timing.log; with a key, comment it on the ticket"
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
@@ -253,6 +254,49 @@ do_uninstall() {
     echo "Uninstall complete."
 }
 
+# Every verb that does work times itself (manage-sh-model.md): the verb is re-run
+# by this script under MANAGE_TIMED=1 and one line "<UTC time> <verb> <s>s <ok|fail>"
+# is appended to the timing log, whatever the outcome.  MANAGE_TIMING_LOG
+# overrides the log path (the tests keep theirs under build/).
+TIMING_LOG="${MANAGE_TIMING_LOG:-$BUILD_DIR/timing.log}"
+case "$1" in
+    build|debug|test|coverage|valgrind|functional|pty|integration|integration-local|headers|names|check|package|install)
+        if [ -z "${MANAGE_TIMED:-}" ]; then
+            timed_start=$(date +%s)
+            timed_rc=0
+            MANAGE_TIMED=1 "$0" "$@" || timed_rc=$?
+            timed_end=$(date +%s)
+            timed_res=ok
+            [ "$timed_rc" -eq 0 ] || timed_res=fail
+            mkdir -p "$(dirname "$TIMING_LOG")" || exit 1
+            printf '%s %s %ss %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" \
+                "$((timed_end - timed_start))" "$timed_res" >> "$TIMING_LOG" || exit 1
+            exit "$timed_rc"
+        fi
+        ;;
+esac
+
+# Prints the gate line from the latest run of each of check, package and install
+# in the log.  A part that never ran through this script is left out; with none
+# of them the line is "Gate: not measured" and the status is non-zero.
+gate_line() {
+    local verb secs total=0 parts="" n=0
+    if [ -s "$TIMING_LOG" ]; then
+        for verb in check package install; do
+            secs=$(awk -v v="$verb" '$2 == v { s = $3 } END { sub(/s$/, "", s); print s }' "$TIMING_LOG")
+            [ -n "$secs" ] || continue
+            total=$((total + secs))
+            parts="${parts:+$parts, }$verb ${secs}s"
+            n=$((n + 1))
+        done
+    fi
+    if [ "$n" -eq 0 ]; then
+        echo "Gate: not measured"
+        return 1
+    fi
+    echo "Gate: ${total}s ($parts)"
+}
+
 case "$1" in
     deps)
         install_deps
@@ -456,7 +500,8 @@ case "$1" in
         check_summary=""
         for gate in headers names test functional pty valgrind; do
             echo "=== check: $gate ==="
-            if "$0" "$gate"; then
+            # MANAGE_TIMED is cleared so every gate logs its own time.
+            if MANAGE_TIMED= "$0" "$gate"; then
                 check_summary="${check_summary}  $(printf '%-12s' "$gate") PASS"$'\n'
             else
                 check_summary="${check_summary}  $(printf '%-12s' "$gate") FAIL"$'\n'
@@ -530,6 +575,13 @@ case "$1" in
         ;;
     uninstall)
         do_uninstall
+        ;;
+    timing)
+        line=$(gate_line) || { echo "$line"; exit 1; }
+        echo "$line"
+        if [ -n "$2" ]; then
+            issue-cli issue comment "$2" "$line"
+        fi
         ;;
     clean-logs)
         if [ -f "$BIN_PATH" ]; then

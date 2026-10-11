@@ -57,9 +57,9 @@ The following cursor positions are persisted to `~/.local/share/email-cli/ui.ini
 ## Navigation Hierarchy
 ```
 Accounts screen  (Enter=folder browser, n=add, d=delete, i=IMAP, e=SMTP, ESC=quit)
-  └─ Folder browser  (Enter=message list, Backspace=accounts, ESC=quit)
-       └─ Message list  (Backspace=folder browser, c=compose, r=reply, s=sync, ESC=quit)
-            └─ Message reader  (r=reply, Backspace=list, ESC=quit)
+  └─ Folder browser  (Enter=message list, Esc/q/Backspace=accounts)
+       └─ Message list  (Esc/q/Backspace=folder browser, c=compose, r=reply, s=sync)
+            └─ Message reader  (r=reply, Esc/q/Backspace=list)
 ```
 
 ## Commands

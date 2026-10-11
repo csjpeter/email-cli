@@ -507,22 +507,76 @@ static void test_interactive_list_statusbar(void) {
     ASSERT(sb >= 0, "list sb: found row with 'step'");
     if (sb >= 0) {
         ASSERT(pty_row_contains(s, sb, "Enter=open"), "list sb: Enter=open");
-        ASSERT(pty_row_contains(s, sb, "Backspace=folders"), "list sb: Backspace");
-        ASSERT(pty_row_contains(s, sb, "ESC=quit"), "list sb: ESC=quit");
+        ASSERT(pty_row_contains(s, sb, "Esc/q/BS=folders"), "list sb: Esc/q/BS=folders");
+        ASSERT(!pty_row_contains(s, sb, "ESC=quit"), "list sb: no longer says ESC=quit");
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
     }
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
 
+/* policies/tui-interface-model.md: Esc goes back one level, q is Esc, ctrl-c
+ * quits at once; Esc on the top level (accounts) quits with status 0. */
 static void test_interactive_list_esc_quit(void) {
     restart_mock();
     PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list ESC: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_ESC);
-    pty_settle(s, SETTLE_MS); /* program exits quietly — no output to wait for */
+    pty_send_key(s, PTY_KEY_ESC);                      /* list -> folders */
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);                      /* folders -> accounts */
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);                      /* top level: quits */
+    ASSERT(pty_wait_exit(s, 5000) == 0, "list ESC x3: program exits with status 0");
+    pty_close(s);
+}
+
+static void test_interactive_list_q_goes_back(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "list q: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");                              /* q is Esc: back */
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");                              /* top level: q never quits */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    pty_send_key(s, PTY_KEY_CTRL_C);                   /* ctrl-c quits at once */
+    ASSERT(pty_wait_exit(s, 5000) == 0, "accounts ctrl-c: program exits with status 0");
+    pty_close(s);
+}
+
+static void test_interactive_list_ctrl_c_quits_at_once(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "list ctrl-c: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "list ctrl-c: program exits with status 0");
+    pty_close(s);
+}
+
+/* The header bar is bold white on blue, not reverse video (palette). */
+static void test_interactive_header_bar_palette(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "header palette: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 0, "message(s) in");
+    ASSERT_CELL_ATTR(s, 0, 2, PTY_ATTR_BOLD);
+    ASSERT(!(pty_cell_attr(s, 0, 2) & PTY_ATTR_REVERSE), "header bar is not reverse video");
+    ASSERT(pty_cell_fg(s, 0, 2) == 37, "header bar foreground is white");
+    pty_send_key(s, PTY_KEY_CTRL_C);
     pty_close(s);
 }
 
@@ -687,12 +741,11 @@ static void test_interactive_show_backspace(void) {
 
 /*
  * ══════════════════════════════════════════════════════════════════════
- * US-RD-05: As a user reading a message, pressing ESC exits the program
- *           immediately; Backspace returns to the message list.
+ * US-RD-05: As a user reading a message, pressing Esc, q or Backspace
+ *           returns to the message list; ctrl-c leaves the program at once.
  * Acceptance criteria:
- *   - ESC in reader: program terminates, list NOT shown.
- *   - Backspace in reader: list view shown again.
- *   - 'q' in reader: list view shown again.
+ *   - Esc, q, Backspace in reader: list view shown again.
+ *   - ctrl-c in reader: program terminates with status 0.
  * ══════════════════════════════════════════════════════════════════════
  */
 static void test_interactive_show_esc_exits(void) {
@@ -705,11 +758,19 @@ static void test_interactive_show_esc_exits(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* ESC from reader exits the program (does NOT return to list) */
+    /* Esc from the reader goes back to the list, like q and Backspace */
     pty_send_key(s, PTY_KEY_ESC);
-    pty_settle(s, SETTLE_MS * 2);
-    int r = pty_wait_for(s, "message(s) in", 1500);
-    ASSERT(r != 0, "show ESC: does NOT return to list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);                   /* ctrl-c quits at once */
+    ASSERT(pty_wait_exit(s, 5000) == 0, "show ctrl-c: program exits with status 0");
     pty_close(s);
 }
 
@@ -1085,13 +1146,13 @@ static void test_interactive_folders_flat_navigate_up(void) {
     /* Flat view at root shows only top-level list-folders (no '.' in name) */
     ASSERT_SCREEN_CONTAINS(s, "INBOX");
     pty_send_key(s, PTY_KEY_ENTER);           /* navigate into INBOX */
-    ASSERT_WAIT_FOR(s, "Backspace=up", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS=up", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     /* Header shows "Folders: INBOX/ (3)"; flat mode shows last component only */
     ASSERT_SCREEN_CONTAINS(s, "INBOX/");
     ASSERT_SCREEN_CONTAINS(s, "Sent");
     pty_send_key(s, PTY_KEY_BACK);            /* navigate up to root */
-    ASSERT_WAIT_FOR(s, "Backspace=back", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS=back", WAIT_MS);
     pty_send_str(s, "t");                     /* toggle back to tree mode */
     ASSERT_WAIT_FOR(s, "t=flat", WAIT_MS);   /* tree mode shows "t=flat" hint */
     pty_send_key(s, PTY_KEY_ESC);
@@ -1099,7 +1160,7 @@ static void test_interactive_folders_flat_navigate_up(void) {
 }
 
 static void test_interactive_folders_esc_quit(void) {
-    /* ESC from folder browser quits the entire application */
+    /* ESC from the folder browser goes back to the accounts screen */
     restart_mock();
     PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list-folders ESC quit: opens");
@@ -1108,9 +1169,10 @@ static void test_interactive_folders_esc_quit(void) {
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* ESC exits the application from the folder browser */
     pty_send_key(s, PTY_KEY_ESC);
-    pty_settle(s, SETTLE_MS);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "folders ESC x2: program exits with status 0");
     pty_close(s);
 }
 
@@ -1171,7 +1233,7 @@ static void test_interactive_empty_folder(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Subject");
     ASSERT_SCREEN_CONTAINS(s, "(empty)");
-    ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
+    ASSERT_SCREEN_CONTAINS(s, "Esc/q/BS=folders");
 
     /* Backspace returns to folder browser */
     pty_send_key(s, PTY_KEY_BACK);
@@ -1201,7 +1263,7 @@ static void test_interactive_empty_folder_cron(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "(empty)");
     ASSERT_SCREEN_CONTAINS(s, "No cached data");
-    ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
+    ASSERT_SCREEN_CONTAINS(s, "Esc/q/BS=folders");
     /* Restore folder cursor to INBOX so subsequent tests open INBOX */
     pty_send_key(s, PTY_KEY_BACK);          /* back to folder browser */
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
@@ -1980,11 +2042,15 @@ static void test_tui_show_esc_exits(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* ESC exits the program, not back to list */
+    /* Esc goes back to the list (and on up the stack) */
     pty_send_key(s, PTY_KEY_ESC);
-    pty_settle(s, SETTLE_MS * 2);
-    int r = pty_wait_for(s, "message(s) in", 1500);
-    ASSERT(r != 0, "tui show ESC: does NOT return to list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "tui show ESC x4: program exits with status 0");
     pty_close(s);
 }
 
@@ -2128,14 +2194,18 @@ static void test_tui_accounts_screen_shows(void) {
 }
 
 static void test_tui_accounts_esc_quit(void) {
-    /* US-21: ESC/q from accounts screen exits the TUI */
+    /* US-21: Esc on the accounts screen (the top level) exits the TUI with
+     * status 0; q does not (it only goes back, and there is nowhere to go). */
     restart_mock();
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "accounts ESC quit: opens");
     ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_str(s, "q");
     pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "accounts ESC: program exits with status 0");
     pty_close(s);
 }
 
@@ -4260,6 +4330,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_list_separator);
     RUN_TEST(test_interactive_list_statusbar);
     RUN_TEST(test_interactive_list_esc_quit);
+    RUN_TEST(test_interactive_list_q_goes_back);
+    RUN_TEST(test_interactive_list_ctrl_c_quits_at_once);
+    RUN_TEST(test_interactive_header_bar_palette);
     RUN_TEST(test_interactive_list_nav);
     RUN_TEST(test_interactive_list_flags);
     RUN_TEST(test_tui_list_search_filter);

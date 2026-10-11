@@ -184,7 +184,7 @@ after a key is pressed.
 Printed to **stdout** below the table (dim style `\033[2m … \033[0m`):
 
 ```
-  ↑↓=step  PgDn/PgUp=page  Enter=open  ESC=quit  [<cursor+1>/<total>]
+  ↑↓=step  PgDn/PgUp=page  Enter=open  Esc/q/BS=folders  [<cursor+1>/<total>]
 ```
 
 ## Status bar — interactive `show` (opened from list)
@@ -204,7 +204,7 @@ Printed to **stderr** in reverse video:
 | ↑ (Up-arrow) | Cursor up one row | Scroll up one line | Scroll up one line |
 | ↓ (Down-arrow) | Cursor down one row | Scroll down one line | Scroll down one line |
 | Enter | Open message | Next page | Next page (stays at last page) |
-| ESC | Quit list | Quit | Return to list |
+| ESC / q | Back to the folder or label browser | Quit | Return to list |
 | Ctrl-C | Quit entirely | Quit | Quit entirely |
 | Left / Right arrows | No-op (ignored) | No-op | No-op |
 

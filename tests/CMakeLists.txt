@@ -65,7 +65,7 @@ set(PTY_LIBS ptytest::ptytest_static util)
 set(PTY_INCLUDES ${CMAKE_SOURCE_DIR}/tests/common)
 set(SCRATCH ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c)
 
-project_test(unit test-runner SOURCES ${UNIT_TEST_SOURCES} INCLUDES ${UNIT_TEST_INCLUDES} LINK OpenSSL::SSL OpenSSL::Crypto CURL::libcurl NEEDS test-tls-certs
+project_test(unit test-runner SOURCES ${UNIT_TEST_SOURCES} INCLUDES ${UNIT_TEST_INCLUDES} LINK OpenSSL::SSL OpenSSL::Crypto CURL::libcurl tuikit::tuikit_static NEEDS test-tls-certs
     DEFINES TEST_CERT_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.crt" TEST_KEY_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.key")
 
 project_test(functional run_functional SCRIPT functional/run_functional.sh)

@@ -53,7 +53,7 @@ Working through the approved tickets of this project by itself is the
 ./manage.sh help       # Show available commands
 ```
 
-The tree has a git submodule (`libs/libptytest`): clone with
+The tree has git submodules (`libs/libptytest`, `libs/libtuikit`): clone with
 `git clone --recurse-submodules`, or run `git submodule update --init` in an
 existing checkout, before building.
 
@@ -122,6 +122,13 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libssl (OpenSSL), and libcurl (SMTP only, in libwrite).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
+The one library of the workspace used at run time is **libtuikit**
+(`libs/libtuikit`, a git submodule pinned to a release tag, now v0.4.3), linked
+**statically**: the binaries carry no run-time dependency on it, and the
+package declares none.  It replaces this project's own terminal code module by
+module (EMAIL-28); until a module is migrated, the old code stays authoritative.
+`libs/libptytest` is the PTY test harness, test-only.
+
 ## Platform
 
 **The target platform is Linux (Debian).** A release for, or support of, macOS,
@@ -147,6 +154,7 @@ docs/
   adr/                    ← Architecture Decision Records (CLEAN arch, RAII, test framework)
   userstories/            ← numbered user stories (US-1 …), one file each
 libs/
+  libtuikit/              ← terminal toolkit (git submodule, linked statically)
   libptytest/             ← PTY-based terminal test library (git submodule, pinned to a release tag)
 ```
 

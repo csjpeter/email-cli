@@ -217,7 +217,7 @@ static void test_edit_after_cycle_triggers_fresh_scan(void) {
     il.tab_fn(&il); /* first match: car.txt (alphabetical) */
 
     /* Simulate user editing the buffer back to the original prefix */
-    snprintf(il.buf, il.bufsz, "%s/ca", td);
+    snprintf(il.buf, il.size, "%s/ca", td);
     il.len = strlen(il.buf);
     il.cur = il.len;
 

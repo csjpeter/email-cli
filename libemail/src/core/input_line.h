@@ -1,67 +1,59 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
 /* Created: 2026-04-12 */
-/* Interface of the single-line input widget. */
+/* Interface of the single-line input widget: libtuikit's line editor. */
 #ifndef CORE_INPUT_LINE_H
 #define CORE_INPUT_LINE_H
 
-#include <stddef.h>
+#include <tuikit/lineedit.h>
+#include <stdlib.h>
+#include <string.h>
 
 /**
  * @file input_line.h
- * @brief Single-line interactive text-input widget for terminal TUI.
+ * @brief Single-line interactive text-input widget for the terminal UI.
  *
- * Features:
- *   ← / →        move cursor left / right (by UTF-8 code point)
- *   Home / End   jump to start / end
- *   Backspace    delete character before cursor
- *   Delete       delete character at cursor
- *   Tab          calls optional tab_fn field (e.g. path completion)
- *   Shift+Tab    calls optional shift_tab_fn field (reverse completion)
- *   Enter        confirm → returns 1
- *   ESC / Ctrl-C cancel → returns 0
+ * The widget is libtuikit's tui_lineedit (EMAIL-28); this header keeps the
+ * program's names for it.  Keys: left/right, Home/End, Backspace, Delete,
+ * Tab (tab_fn hook, e.g. path completion), Shift+Tab (shift_tab_fn), Enter
+ * confirms, Esc/Ctrl-C cancel; the library adds the readline-style editing
+ * keys (Ctrl-A/E/K/U/W/Y ...).
  *
- * The widget renders on a single terminal row using the real terminal
- * cursor (no reverse-video block).  The caller supplies the buffer and
- * an optional tab-completion callback.
+ * The editor draws on one terminal row with the real terminal cursor.  The
+ * caller supplies the buffer and optional hooks (render_below, tab_fn,
+ * shift_tab_fn), set on the fields of the editor after input_line_init().
  */
 
-typedef struct InputLine InputLine;
-
-struct InputLine {
-    char  *buf;   /**< External buffer owned by the caller.        */
-    size_t bufsz; /**< Capacity of buf including NUL terminator.   */
-    size_t len;   /**< Current string length in bytes.             */
-    size_t cur;   /**< Cursor byte offset (0 … len).               */
-    int    trow;  /**< Terminal row (1-based); set by run().        */
-    /** Optional hook called after each standard render (e.g. for
-     *  drawing a completion list below the input row).  May be NULL. */
-    void (*render_below)(const struct InputLine *);
-    /** Callback for Tab key (forward completion).  May be NULL. */
-    void (*tab_fn)(struct InputLine *);
-    /** Callback for Shift+Tab (reverse completion).  May be NULL. */
-    void (*shift_tab_fn)(struct InputLine *);
-};
+/** The editor: the fields buf, size, len, cur, trow and the hooks. */
+typedef tui_lineedit InputLine;
 
 /**
- * @brief Initialise an InputLine with an optional initial string.
+ * @brief Initialise an editor with an optional initial string.
  *
- * @param il           Widget to initialise.
+ * @param il           Editor to initialise.
  * @param buf          Caller-owned character buffer.
  * @param bufsz        Size of buf in bytes (including NUL).
- * @param initial_text Initial content (may be NULL or "").
+ * @param initial_text Initial content (may be NULL or ""); cursor at the end.
  */
-void input_line_init(InputLine *il, char *buf, size_t bufsz,
-                     const char *initial_text);
+static inline void input_line_init(InputLine *il, char *buf, size_t bufsz,
+                                   const char *initial_text) {
+    /* Callers edit a value in place and pass the buffer itself as the initial
+     * text; the library clears the buffer before inserting, so that text is
+     * kept aside first. */
+    char *own = (initial_text && buf && initial_text == buf) ? strdup(buf) : NULL;
+    tui_lineedit_init(il, buf, bufsz, own ? own : initial_text);
+    free(own);
+}
 
 /**
- * @brief Run the interactive input loop.
+ * @brief Run the interactive input loop on terminal row @p trow (1-based).
  *
- * Renders at terminal row @p trow (1-based).  @p prompt is printed
- * before the editable text.  Completion callbacks are taken from
- * il->tab_fn, il->shift_tab_fn, and il->render_below (all may be NULL).
+ * @p prompt is printed after a two-column indent, before the editable text.
+ * The terminal must be in raw mode.  Keys typed ahead of the one that ends
+ * the loop stay in the input.
  *
- * @return 1 if confirmed (Enter), 0 if cancelled (ESC / Ctrl-C).
+ * @return 1 if confirmed (Enter), 0 if cancelled (Esc / Ctrl-C) or when the
+ *         input ended.
  */
 int input_line_run(InputLine *il, int trow, const char *prompt);
 

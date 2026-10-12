@@ -2749,7 +2749,9 @@ static void test_wizard_gmail_type_selection(void) {
 
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "wizard gmail: opens");
-    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    /* The menu arrives in several writes: wait for its last line (the
+     * prompt), not for the first, before looking at the others. */
+    ASSERT_WAIT_FOR(s, "Choice [1]", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "IMAP");
     ASSERT_SCREEN_CONTAINS(s, "Gmail");
     pty_send_str(s, "2\n");  /* Gmail */

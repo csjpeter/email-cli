@@ -4,99 +4,57 @@
 /* POSIX terminal control with termios and ioctl. */
 /**
  * POSIX terminal implementation.
- * Uses termios(3), ioctl TIOCGWINSZ, wcwidth(3).
+ *
+ * Size, raw mode, key decoding and character width are libtuikit's
+ * (tui_tty_*, tui_cp_width), reached through the interface of terminal.h so
+ * that no caller changes.  The masked password prompt stays here: libtuikit
+ * has no masked prompt (see terminal_read_password).
  */
 #include "../terminal.h"
+#include <tuikit/tty.h>
+#include <tuikit/text.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <termios.h>
-#include <sys/ioctl.h>
-#include <wchar.h>
 
 /** Opaque saved terminal state. Definition lives here (hidden from header). */
 struct TermRawState {
-    struct termios saved;
-    int            active;
+    tui_tty_raw *raw;
 };
 
 int terminal_cols(void) {
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
-        return (int)ws.ws_col;
-    return 80;
+    return tui_tty_cols(STDOUT_FILENO);
 }
 
 int terminal_rows(void) {
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0)
-        return (int)ws.ws_row;
-    return 0;
+    return tui_tty_rows(STDOUT_FILENO);
 }
 
 int terminal_is_tty(int fd) {
-    return isatty(fd);
+    return tui_tty_is(fd);
 }
 
 TermRawState *terminal_raw_enter(void) {
     TermRawState *state = malloc(sizeof(TermRawState));
     if (!state) return NULL;
-
-    if (tcgetattr(STDIN_FILENO, &state->saved) != 0) {
+    /* No signal keys and no flow control: Ctrl-C arrives as a key, and
+     * Ctrl-S cannot stop the terminal's output.  The library reads the mode
+     * back and leaves it unchanged when the terminal did not take it. */
+    state->raw = tui_tty_raw_enter(STDIN_FILENO, 0);
+    if (!state->raw) {
         free(state);
         return NULL;
     }
-
-    struct termios raw = state->saved;
-    raw.c_lflag &= ~(unsigned)(ICANON | ECHO | ISIG);
-    /* Flow control off: with IXON set the line discipline swallows Ctrl-S
-     * and stops the terminal's output until Ctrl-Q, which looks like a hang. */
-    raw.c_iflag &= ~(unsigned)(IXON | IXOFF);
-    raw.c_cc[VMIN]  = 1;
-    raw.c_cc[VTIME] = 0;
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
-        free(state);
-        return NULL;
-    }
-    /* tcsetattr() reports success if any part of the change took: read the
-     * mode back and refuse a terminal that is not actually raw. */
-    struct termios now;
-    if (tcgetattr(STDIN_FILENO, &now) != 0 ||
-        (now.c_lflag & (ICANON | ECHO | ISIG)) != 0 ||
-        (now.c_iflag & IXON) != 0) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &state->saved);
-        free(state);
-        return NULL;
-    }
-    state->active = 1;
     return state;
 }
 
 void terminal_raw_exit(TermRawState **state) {
     if (!state || !*state) return;
-    if ((*state)->active)
-        tcsetattr(STDIN_FILENO, TCSANOW, &(*state)->saved);
+    tui_tty_raw_exit(&(*state)->raw);
     free(*state);
     *state = NULL;
-}
-
-/**
- * Read one byte from STDIN_FILENO via read(2) — NOT via getchar()/stdio.
- *
- * Rationale: getchar() uses the C stdio buffer.  When getchar() calls
- * read(2) with VMIN=0 VTIME=1 and gets a 0-byte return (timeout for bare
- * ESC), stdio marks the FILE* EOF flag.  All subsequent getchar() calls
- * then return EOF immediately without blocking, causing an infinite
- * redraw loop in the TUI.  Using read(2) directly bypasses the stdio
- * layer entirely and avoids the EOF flag problem.
- *
- * Returns the byte value [0..255], or -1 on error/timeout.
- */
-static int read_byte(void) {
-    unsigned char c;
-    ssize_t n = read(STDIN_FILENO, &c, 1);
-    return (n == 1) ? (int)c : -1;
 }
 
 static int  g_last_printable  = 0;
@@ -105,142 +63,59 @@ static char g_last_utf8[5]    = "";
 int         terminal_last_printable(void) { return g_last_printable; }
 const char *terminal_last_utf8(void)      { return g_last_utf8; }
 
+/** Map a decoded key of libtuikit to the program's TermKey.  A key with a
+ *  modifier that this program has no meaning for is ignored; Alt+character is
+ *  the ESC it has always been (the character is consumed with it). */
 TermKey terminal_read_key(void) {
-    /* The terminal must already be in raw mode (VMIN=1, VTIME=0). */
     g_last_printable = 0;
     g_last_utf8[0]   = '\0';
-    int c = read_byte();
-    TermKey result = TERM_KEY_IGNORE;   /* unknown input → silent no-op */
 
-    if (c == '\033') {
-        /* Temporarily switch to VMIN=0 VTIME=1 (100 ms timeout) to drain
-         * the escape sequence without blocking if it is a bare ESC. */
-        struct termios t = {0};
-        tcgetattr(STDIN_FILENO, &t);
-        struct termios drain = t;
-        drain.c_cc[VMIN]  = 0;
-        drain.c_cc[VTIME] = 1;
-        tcsetattr(STDIN_FILENO, TCSANOW, &drain);
+    tui_event ev;
+    int rc = tui_tty_read_key(STDIN_FILENO, &ev);
+    if (rc <= 0 || ev.type != TUI_EV_KEY)
+        return TERM_KEY_IGNORE;                 /* end of input, error, paste */
 
-        int c2 = read_byte();
-        if (c2 == '[') {
-            /* CSI: parameter bytes (digits and ';') up to a final byte in
-             * 0x40..0x7E.  The whole sequence is always consumed, so no part
-             * of it can be read later as typed characters.  A parameter list
-             * with ';' carries a modifier (ESC[1;5A is Ctrl+Up): such a key
-             * is dropped rather than mistaken for the plain one. */
-            char params[16];
-            size_t np = 0;
-            int fin = read_byte();
-            while (fin != -1 && ((fin >= '0' && fin <= '9') || fin == ';' ||
-                                 fin == ':' || fin == '<' || fin == '=' ||
-                                 fin == '>' || fin == '?')) {
-                if (np + 1 < sizeof(params)) params[np++] = (char)fin;
-                fin = read_byte();
-            }
-            params[np] = '\0';
-            int modified = (strchr(params, ';') != NULL);
-            int num = atoi(params);
-
-            if (fin == -1 || modified) {
-                result = TERM_KEY_IGNORE;
-            } else {
-                switch (fin) {
-                case 'A': result = TERM_KEY_PREV_LINE; break;  /* ESC[A — Up          */
-                case 'B': result = TERM_KEY_NEXT_LINE; break;  /* ESC[B — Down        */
-                case 'C': result = TERM_KEY_RIGHT;     break;  /* ESC[C — Right       */
-                case 'D': result = TERM_KEY_LEFT;      break;  /* ESC[D — Left        */
-                case 'H': result = TERM_KEY_HOME;      break;  /* ESC[H — Home        */
-                case 'F': result = TERM_KEY_END;       break;  /* ESC[F — End         */
-                case 'Z': result = TERM_KEY_SHIFT_TAB; break;  /* ESC[Z — Shift+Tab   */
-                case '~':
-                    switch (num) {
-                    case 1: case 7: result = TERM_KEY_HOME;      break; /* Home   */
-                    case 3:         result = TERM_KEY_DELETE;    break; /* Delete */
-                    case 4: case 8: result = TERM_KEY_END;       break; /* End    */
-                    case 5:         result = TERM_KEY_PREV_PAGE; break; /* PgUp   */
-                    case 6:         result = TERM_KEY_NEXT_PAGE; break; /* PgDn   */
-                    default:        result = TERM_KEY_IGNORE;    break; /* Ins, F5-F12 */
-                    }
-                    break;
-                default: result = TERM_KEY_IGNORE; break;
-                }
-            }
-        } else if (c2 == 'O') {
-            /* SS3: ESC O <final>.  F1-F4 are P/Q/R/S; terminals in
-             * application cursor mode send the arrows and Home/End this way. */
-            int c3 = read_byte();
-            switch (c3) {
-            case 'A': result = TERM_KEY_PREV_LINE; break;
-            case 'B': result = TERM_KEY_NEXT_LINE; break;
-            case 'C': result = TERM_KEY_RIGHT;     break;
-            case 'D': result = TERM_KEY_LEFT;      break;
-            case 'H': result = TERM_KEY_HOME;      break;
-            case 'F': result = TERM_KEY_END;       break;
-            default:  result = TERM_KEY_IGNORE;    break;  /* F1-F4 and the rest */
-            }
-        } else {
-            result = TERM_KEY_ESC;   /* bare ESC — go back */
+    if (ev.key == TUI_KEY_CHAR) {
+        if (ev.mods & TUI_MOD_CTRL)
+            return (ev.cp == 'c' && !(ev.mods & ~(unsigned)TUI_MOD_CTRL))
+                       ? TERM_KEY_QUIT : TERM_KEY_IGNORE;
+        if (ev.mods & TUI_MOD_ALT)
+            return TERM_KEY_ESC;
+        /* A printable character is reported as "ignored" with the text in
+         * terminal_last_utf8(); ASCII also in terminal_last_printable(). */
+        if (ev.cp >= 32 && ev.cp != 127 && !(ev.cp >= 0x80 && ev.cp <= 0x9F)) {
+            snprintf(g_last_utf8, sizeof(g_last_utf8), "%s", ev.utf8);
+            g_last_printable = (ev.cp <= 126) ? (int)ev.cp : 1;
         }
-
-        /* Restore VMIN=1 VTIME=0 raw mode. */
-        t.c_cc[VMIN]  = 1;
-        t.c_cc[VTIME] = 0;
-        tcsetattr(STDIN_FILENO, TCSANOW, &t);
-    } else if (c == '\n' || c == '\r') {
-        result = TERM_KEY_ENTER;
-    } else if (c == 3 /* Ctrl-C */) {
-        result = TERM_KEY_QUIT;
-    } else if (c == 127 || c == 8 /* DEL / Backspace */) {
-        result = TERM_KEY_BACK;
-    } else if (c == '\t') {
-        result = TERM_KEY_TAB;
-    } else if (c >= 32 && c <= 126) {
-        g_last_printable = c;
-        g_last_utf8[0] = (char)c;
-        g_last_utf8[1] = '\0';
-        result = TERM_KEY_IGNORE;
-    } else if ((c & 0xE0) == 0xC0) {
-        /* 2-byte UTF-8 sequence (U+0080..U+07FF, covers all Latin accented chars) */
-        int c2 = read_byte();
-        if ((c2 & 0xC0) == 0x80) {
-            g_last_utf8[0] = (char)c;
-            g_last_utf8[1] = (char)c2;
-            g_last_utf8[2] = '\0';
-            g_last_printable = 1;
-            result = TERM_KEY_IGNORE;
-        }
-    } else if ((c & 0xF0) == 0xE0) {
-        /* 3-byte UTF-8 sequence (U+0800..U+FFFF) */
-        int c2 = read_byte(), c3 = read_byte();
-        if ((c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80) {
-            g_last_utf8[0] = (char)c;
-            g_last_utf8[1] = (char)c2;
-            g_last_utf8[2] = (char)c3;
-            g_last_utf8[3] = '\0';
-            g_last_printable = 1;
-            result = TERM_KEY_IGNORE;
-        }
-    } else if ((c & 0xF8) == 0xF0) {
-        /* 4-byte UTF-8 sequence (U+10000..U+10FFFF) */
-        int c2 = read_byte(), c3 = read_byte(), c4 = read_byte();
-        if ((c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80 && (c4 & 0xC0) == 0x80) {
-            g_last_utf8[0] = (char)c;
-            g_last_utf8[1] = (char)c2;
-            g_last_utf8[2] = (char)c3;
-            g_last_utf8[3] = (char)c4;
-            g_last_utf8[4] = '\0';
-            g_last_printable = 1;
-            result = TERM_KEY_IGNORE;
-        }
+        return TERM_KEY_IGNORE;
     }
-    /* c == -1 (read error/timeout) → result stays TERM_KEY_IGNORE */
 
-    return result;
+    /* Any modifier but Shift on Tab makes another key than the one this
+     * program knows: it is dropped, not mistaken for the plain key. */
+    if (ev.mods && !(ev.key == TUI_KEY_TAB && ev.mods == TUI_MOD_SHIFT))
+        return TERM_KEY_IGNORE;
+
+    switch (ev.key) {
+    case TUI_KEY_ENTER:     return TERM_KEY_ENTER;
+    case TUI_KEY_ESC:       return TERM_KEY_ESC;
+    case TUI_KEY_BACKSPACE: return TERM_KEY_BACK;
+    case TUI_KEY_TAB:       return (ev.mods & TUI_MOD_SHIFT) ? TERM_KEY_SHIFT_TAB
+                                                             : TERM_KEY_TAB;
+    case TUI_KEY_UP:        return TERM_KEY_PREV_LINE;
+    case TUI_KEY_DOWN:      return TERM_KEY_NEXT_LINE;
+    case TUI_KEY_LEFT:      return TERM_KEY_LEFT;
+    case TUI_KEY_RIGHT:     return TERM_KEY_RIGHT;
+    case TUI_KEY_HOME:      return TERM_KEY_HOME;
+    case TUI_KEY_END:       return TERM_KEY_END;
+    case TUI_KEY_PGUP:      return TERM_KEY_PREV_PAGE;
+    case TUI_KEY_PGDN:      return TERM_KEY_NEXT_PAGE;
+    case TUI_KEY_DELETE:    return TERM_KEY_DELETE;
+    default:                return TERM_KEY_IGNORE;  /* Insert, F1-F12 */
+    }
 }
 
 int terminal_wcwidth(uint32_t cp) {
-    int w = wcwidth((wchar_t)cp);
+    int w = tui_cp_width(cp);
     return (w < 0) ? 0 : w;
 }
 

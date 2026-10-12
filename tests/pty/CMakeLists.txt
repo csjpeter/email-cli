@@ -44,4 +44,4 @@ target_include_directories(input-line-harness PRIVATE
     ${CMAKE_SOURCE_DIR}/libemail/src/core
     ${CMAKE_SOURCE_DIR}/libemail/src/platform
 )
-target_link_libraries(input-line-harness OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(input-line-harness OpenSSL::SSL OpenSSL::Crypto tuikit::tuikit_static)

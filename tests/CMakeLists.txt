@@ -84,6 +84,7 @@ project_test(pty test-pty-compose-dialog SOURCES pty/test_pty_compose_dialog.c $
 project_test(pty test-pty-attachment SOURCES pty/test_pty_attachment.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-tui mock-imap-server mock-smtp-server)
 project_test(pty test-pty-send-local SOURCES pty/test_pty_send_local.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-tui email-sync mock-imap-server mock-smtp-server)
 project_test(pty test-pty-input-line SOURCES pty/test_input_line_pty.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS input-line-harness)
+project_test(pty test-pty-screens SOURCES pty/test_pty_screens.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-tui mock-imap-server)
 project_test(pty test-pty-compose SOURCES pty/test_compose_pty.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-tui email-cli mock-smtp-server)
 
 project_test(integration run_integration SCRIPT integration/run_integration.sh TIMEOUT 1800)

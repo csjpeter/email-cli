@@ -31,7 +31,7 @@ show_help() {
     echo "                 such as 7,60-62 (see tests/functional/run_functional.sh --list)"
     echo "  pty [SUITE [FILTER]]  Build and run the PTY (terminal) test suites; SUITE is one"
     echo "                 of views gmail-tui mail-rules compose-dialog attachment"
-    echo "                 send-local input-line compose, FILTER selects tests"
+    echo "                 send-local input-line compose screens, FILTER selects tests"
     echo "                 by name"
     echo "  valgrind       Build and run unit tests with Valgrind"
     echo "  headers [DIR]  Fail on a source file or script without the source header"
@@ -231,6 +231,8 @@ for_each_pty_suite() {
                           ./tests/pty/mock-smtp-server
     "$run" input-line     ./tests/pty/bin/test-pty-input-line \
                           ./tests/pty/input-line-harness
+    "$run" screens        ./tests/pty/bin/test-pty-screens "$B/email-tui" \
+                          ./tests/pty/mock-imap-server
     "$run" compose        ./tests/pty/bin/test-pty-compose "$B/email-tui" \
                           ./tests/pty/mock-smtp-server "$B/email-cli"
     # The PTY harness is a git submodule (libs/libptytest) with its own test

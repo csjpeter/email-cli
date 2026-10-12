@@ -81,6 +81,23 @@ All five binaries share the same configuration and local message cache.
                     #         bin/email-import-rules
 ```
 
+### The workspace libraries: two ways
+
+`libtuikit` (terminal toolkit) and `libptytest` (PTY test library) come in one
+of two ways, selected by `WORKSPACE_LIBS`:
+
+| `WORKSPACE_LIBS` | How |
+|---|---|
+| `bundled` (**default**) | git submodules under `deps/`, pinned to release tags and linked statically; `./manage.sh build` fetches them itself |
+| `system` | the installed `libtuikit-dev` / `libptytest-dev` packages, linked dynamically |
+| `auto` | the installed package when present, else the submodule |
+
+```bash
+WORKSPACE_LIBS=system ./manage.sh build
+```
+
+Both ways are built and tested (`tests/functional/run_workspace_libs.sh`).
+
 Run:
 
 ```bash

@@ -6143,7 +6143,7 @@ TRACKED93=$(git -C "$PROJECT_ROOT" ls-files)
 check "93.1 the file list is not empty" "^LICENSE$" "$TRACKED93"
 # Every tracked text file except the licence text itself (whose standard
 # paragraphs discuss later versions) and the submodules.
-OR_LATER93=$(cd "$PROJECT_ROOT" && echo "$TRACKED93" | grep -v -e '^LICENSE$' -e '^libs/' -e '^tests/functional/run_functional.sh$' \
+OR_LATER93=$(cd "$PROJECT_ROOT" && echo "$TRACKED93" | grep -v -e '^LICENSE$' -e '^deps/' -e '^tests/functional/run_functional.sh$' \
     | xargs grep -n -I -i -E 'GPL-3\.0-or-later|GPL-3\.0\+|or \(at your option\) any later|GPLv3\+|or later' \
     | awk 'END{print NR}')
 check "93.2 nothing says 'or later'" "^0$" "$OR_LATER93"

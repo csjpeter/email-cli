@@ -51,12 +51,12 @@ printf 'cmake_minimum_required(VERSION 3.10)\n' > "$T/CMakeLists.txt"
 run
 [ "$rc" -ne 0 ] && echo "$out" | grep -q "CMakeLists.txt" && ok "2.9 an unheaded CMakeLists.txt fails" || bad "2.9 (rc=$rc: $out)"
 
-# 3. a submodule under libs/ is its own project's to check (EMAIL-26).
+# 3. a submodule under deps/ is its own project's to check (EMAIL-26).
 rm -f "$T/CMakeLists.txt"
-mkdir -p "$T/libs/libx/src"
-printf 'int unheaded;\n' > "$T/libs/libx/src/x.c"
+mkdir -p "$T/deps/libx/src"
+printf 'int unheaded;\n' > "$T/deps/libx/src/x.c"
 run
-[ "$rc" -eq 0 ] && ok "3.1 an unheaded file under libs/ is not looked at" || bad "3.1 (rc=$rc: $out)"
+[ "$rc" -eq 0 ] && ok "3.1 an unheaded file under deps/ is not looked at" || bad "3.1 (rc=$rc: $out)"
 
 case "$WORK" in
     "$ROOT"/build/source-header-test-*) ;;

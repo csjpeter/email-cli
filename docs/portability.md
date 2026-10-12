@@ -24,7 +24,7 @@ no code branch for a platform nobody builds on.
 | `/proc/<pid>/comm`, `kill(pid, 0)` for PID-file liveness | `libemail/src/platform/posix/process.c` | a per-OS process-identity query behind `platform/process.h` |
 | `/etc/machine-id`, `~/.ssh/id_*` as credential key source | `libemail/src/platform/posix/credential_key.c` | a per-OS machine identifier behind `platform/credential_key.h` |
 | `open_memstream(3)` | `libemail/src/platform/posix/html_medium.c` | a `tmpfile`-based replacement |
-| `forkpty`/`<pty.h>`, `-lutil` | `libs/libptytest/`, `tests/pty/` | a ConPTY or per-OS pty layer (test harness only) |
+| `forkpty`/`<pty.h>`, `-lutil` | `deps/libptytest/`, `tests/pty/` | a ConPTY or per-OS pty layer (test harness only) |
 | `crontab` via `popen` (scheduled sync) | `libemail/src/domain/email_service.c` | a per-OS scheduler (launchd, Task Scheduler) |
 | `system()` with `$EDITOR`, `xdg-open` | `src/main_tui.c`, `libemail/src/infrastructure/gmail_auth.c` | a per-OS editor and URL launcher |
 | `fork`, `mkdir(path, mode)`, `rename` over an existing file, `strptime`, `timegm`, `strcasecmp`, `asprintf`, `iconv(3)` | `libemail/src/core/`, `infrastructure/` | shims or libraries on a non-POSIX or non-glibc libc |

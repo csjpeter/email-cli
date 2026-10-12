@@ -47,4 +47,4 @@ target_include_directories(libemail PUBLIC
 
 find_package(CURL REQUIRED)
 target_link_libraries(libemail PUBLIC OpenSSL::SSL OpenSSL::Crypto CURL::libcurl
-                                        tuikit::tuikit_static)
+                                        ${EMAIL_TUIKIT_LIB})

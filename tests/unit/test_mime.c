@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-26 */
+/* Unit tests of the header and MIME utilities. */
 #include "test_helpers.h"
 #include "mime_util.h"
 #include "raii.h"
@@ -766,8 +770,8 @@ void test_mime_util(void) {
         MimeAttachment *list3 = mime_list_attachments(mime3, &cnt3);
         ASSERT(cnt3 == 1, "save_attachment: list count=1");
         if (list3 && cnt3 > 0) {
-            char tmpdir[] = "/tmp/mime_test_XXXXXX";
-            char *dir = mkdtemp(tmpdir);
+            char tmpdir[PATH_MAX];
+            char *dir = test_mkdtemp(tmpdir, sizeof(tmpdir), "mime_test");
             ASSERT(dir != NULL, "save_attachment: mkdtemp succeeded");
             if (dir) {
                 char path[256];
@@ -785,7 +789,7 @@ void test_mime_util(void) {
     /* ── mime_save_attachment: NULL inputs ───────────────────────────── */
 
     {
-        int rc_null = mime_save_attachment(NULL, "/tmp/irrelevant");
+        int rc_null = mime_save_attachment(NULL, TP("irrelevant"));
         ASSERT(rc_null == -1, "save_attachment: NULL att returns -1");
     }
 

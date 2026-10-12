@@ -9,8 +9,36 @@
 ./manage.sh integration # End-to-end against Dockerized Dovecot (requires Docker)
 ```
 
-There is no mechanism to run a single test in isolation — all unit tests run
-together via `build/tests/unit/test-runner`.
+### Running one test
+
+```bash
+./manage.sh test test_mime              # unit suites whose name contains "test_mime"
+build/tests/unit/bin/test-runner --list     # the suite names
+./manage.sh functional 60-62            # functional phases (ranges and lists)
+tests/functional/run_functional.sh --list
+./manage.sh pty compose                 # one PTY suite (views gmail-tui mail-rules
+                                        #   compose-dialog attachment send-local
+                                        #   input-line compose)
+./manage.sh pty compose test_password   # ... and only its tests whose name contains it
+```
+
+A functional selection pulls in the phases it needs (`PHASE_NEEDS` in the
+script: phase 29 uses helpers defined by 26-28, and so on).  A filter that
+matches nothing fails the run.
+
+### Where tests keep their files, and which ports they use
+
+No test uses `/tmp` and no test has a fixed port.
+
+- Every fixture is under `build/tests/<category>/work-<pid>/`, removed when the
+  process ends (the unit and PTY suites through `tests/common/test_scratch.h`,
+  the functional and integration scripts through their exit trap).  A killed run
+  leaves its directory under `build/`, and `./manage.sh clean` takes it.
+- Every mock binds a loopback port the kernel picks (`MOCK_*_PORT` unset or 0)
+  and writes the port it got to the file named by `MOCK_*_PORT_FILE`; the unit
+  tests bind port 0 before they fork; the Docker integration container publishes
+  its ports on kernel-picked loopback ports.
+- Every suite sets `HOME` to a fixture and unsets the three `XDG_*` variables.
 
 ## Unit Tests (`tests/unit/`)
 
@@ -100,10 +128,32 @@ A test that waits for a network peer must also assert *how long* the answer
 took when the point of the branch is that it answers without waiting.  A
 correct value that arrives after a five-minute timeout is not the same answer.
 
+## How a test is declared, built and found (EMAIL-19)
+
+Every test is one `project_test(<category> <name> ...)` line in
+`tests/CMakeLists.txt` (`unit`, `functional`, `pty`, `integration`) and is built
+into `build/tests/<category>/bin/<name>`: a compiled binary, or for a script a
+symlink to it (scripts resolve their own location with `readlink -f`).  Helpers
+that are not tests (the mock servers, the input-line harness) stay in
+`build/tests/<category>/`, outside `bin/`.
+
+```bash
+cmake --build build --target tests          # every declared test
+cmake --build build --target tests-pty      # one category
+./manage.sh declared                        # build them and run the gate
+```
+
+`./manage.sh declared [TESTS_CMAKELISTS [BUILD_TESTS_DIR]]` is the third gate of
+`./manage.sh check`: it fails, naming the test, when a declared test has no
+executable in its `bin/` or an executable there is not declared.
+`./tests/functional/run_declared.sh` tests the gate against a scratch tree under
+`build/`.
+
 ## Functional Tests (`tests/functional/`)
 
-The mock IMAP server (`mock_imap_server.c`) listens on TCP port 9993 and
-implements a minimal IMAP state machine:
+The mock IMAP server (`mock_imap_server.c`) listens on a loopback TCP port the
+kernel picks (see `MOCK_IMAP_PORT_FILE`) and implements a minimal IMAP state
+machine:
 
 - Accepts multiple sequential connections (SEARCH uses one connection,
   each FETCH uses a separate connection).
@@ -111,9 +161,44 @@ implements a minimal IMAP state machine:
 - Returns `* SEARCH 1` (one message exists).
 - Returns a hardcoded test email body on FETCH.
 
+`./tests/functional/run_package_dir.sh` is a separate script (it performs its own
+release build, so it is not part of the coverage run): it checks that
+`./manage.sh package deb` leaves exactly one run's packages in `build/packages/`
+and an empty directory with a non-zero exit when packaging fails (a stub
+`cpack` first on `PATH` provides the failure).
+
+`./manage.sh headers [DIR]` is the source-header gate (EMAIL-29), the first gate
+of `./manage.sh check`: it fails, naming the file, on any `.c`, `.h`, `.sh`,
+`.cmake` or `CMakeLists.txt` without the licence, copyright, `Created:` date and
+purpose lines. `./tests/functional/run_source_header.sh` tests the gate itself
+against a scratch tree under `build/`.
+
+`./manage.sh names [DIR]` is the private-names gate (EMAIL-40): it fails, naming
+the file, when a tracked file contains the owner's private domain; the pattern is
+built from parts so the script passes its own check.
+`./tests/functional/run_private_names.sh` tests the gate in a scratch repository
+under `build/`.
+
+`./manage.sh timing [KEY-N]` and the timing log (EMAIL-76): every verb that does
+work (`build`, `debug`, `test`, `coverage`, `valgrind`, `functional`, `pty`,
+`integration`, `integration-local`, `headers`, `names`, `check`, `package`,
+`install`) appends `<UTC time> <verb> <s>s <ok|fail>` to `build/timing.log`,
+success or failure. `timing` prints `Gate: <total>s (check .., package ..,
+install ..)` from the latest run of each, leaves out a part that never ran, and
+prints `Gate: not measured` with a non-zero status when there is none; with a
+key it comments the line on the ticket. `./tests/functional/run_timing.sh`
+tests the log and the line against a log under `build/`.
+
+`./tests/functional/run_package_policy.sh` checks the package itself (EMAIL-16):
+`lintian` reports nothing, `Depends` is discovered (libc6 present, no
+hand-written or exact versions), man pages and changelog are gzipped, the
+copyright file is installed, every directory is 0755 although the build runs
+under `umask 002`, and a `lintian` finding (a stub first on `PATH`) makes
+`package deb` exit non-zero with `build/packages/` empty.
+
 Run via `./tests/functional/run_functional.sh`. The script:
 1. Compiles and starts the mock server in background.
-2. Runs `email-cli` with a temporary config pointing at `imap://localhost:9993`.
+2. Runs `email-cli` with a temporary config pointing at the port the mock got.
 3. Checks 5 assertions on the output.
 4. Kills the server on exit (via trap).
 
@@ -152,17 +237,18 @@ and inspects a virtual screen buffer.
 ### Where the library comes from
 
 `libs/libptytest` is a **git submodule** pinned to a release tag of the
-libptytest repository, not a copy.  Clone with `--recurse-submodules`, or run
-`git submodule update --init` in an existing checkout.  It is built through
-`add_subdirectory()` (library only) and the PTY suites link the static target
-`ptytest::ptytest_static`, so they carry no run-time dependency on it.
+libptytest repository (now v0.1.5), not a copy.  Clone with
+`--recurse-submodules`, or run `git submodule update --init` in an existing
+checkout.  It is built through `add_subdirectory()` (library only) and the PTY
+suites link the static target `ptytest::ptytest_static`, so they carry no
+run-time dependency on it.
 
 The library's own test suite and release gates run in its repository
 (`./manage.sh check` there), not in this one.  To move to a newer release:
 
 ```bash
 git -C libs/libptytest fetch --tags
-git -C libs/libptytest checkout v0.1.3
+git -C libs/libptytest checkout v0.1.6      # the release tag
 git add libs/libptytest && git commit
 ```
 
@@ -199,8 +285,22 @@ ASSERT_WAIT_FOR(s, "text", timeout_ms);
 
 ## Coverage Requirements
 
-| Scope | Target |
-|-------|--------|
+`./manage.sh coverage` measures **line coverage of product code only**
+(`src/`, `libemail/src/`, `libwrite/src/`; never `tests/`, never libptytest or
+other libraries) with one definition for every report, and fails the run
+below the policy floors (policies/testing-model.md, *Coverage*):
+
+| Figure | Measured from | Requirement |
+|--------|---------------|-------------|
+| Unit tests alone | fresh counters, `test-runner` only | at least 80% (gate) |
+| Functional + PTY together | the black-box suites on the instrumented binaries | at least 80% (gate) |
+| Everything combined | unit on top of the above | target above 90% (reported, not a gate) |
+
+The published badges are the combined figure and the functional + PTY figure,
+both line coverage over the same code.
+
+| Scope | Expectation |
+|-------|-------------|
 | `libemail/src/core/` + `libemail/src/infrastructure/` combined | >90% line coverage |
 | `libemail/src/domain/` | best-effort |
 | `src/main.c` | best-effort (wiring code) |
@@ -208,3 +308,10 @@ ASSERT_WAIT_FOR(s, "text", timeout_ms);
 Known uncoverable lines in `setup_wizard.c`: TTY manipulation branches
 (`tcgetattr`/`tcsetattr` inside `hide && is_tty`) require a PTY to test.
 These 6 lines are excluded from the >90% target by convention.
+
+## CI and the library submodules
+
+The workflows in `.github/workflows/` check out with `submodules: recursive`.
+libtuikit and libptytest are public (GPL-3.0), so the default `GITHUB_TOKEN`
+fetches them and no deploy key or secret is needed. Functional phase 101 fails
+when a workflow's checkout step lacks the option.

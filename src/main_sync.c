@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-13 */
+/* Entry point of email-sync: background synchronisation and cron management. */
 /**
  * @file main_sync.c
  * @brief Entry point for email-sync — background sync binary with cron management.

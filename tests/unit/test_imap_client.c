@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-10 */
+/* Unit tests of the IMAP client. */
 #include "test_helpers.h"
 #include "imap_client.h"
 #include <stdlib.h>
@@ -303,7 +307,8 @@ void test_imap_connect_login_rejected(void) {
 
     /* The message is half the behaviour: a rejected credential that reports
      * itself as a generic failure leaves the user with nothing to change. */
-    char errfile[] = "/tmp/email-cli-login-reject-XXXXXX";
+    char errfile[PATH_MAX];
+    snprintf(errfile, sizeof(errfile), "%s/login-reject-XXXXXX", test_scratch_dir());
     int efd = mkstemp(errfile);
     ASSERT(efd >= 0, "login rejected: temp file for stderr");
     int saved = dup(2);

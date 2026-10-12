@@ -25,6 +25,8 @@ to the implicit AND of separate flat fields.
 | 4 | Precedence: `!` binds tightest, then `and`, then `or`; parentheses override. |
 | 5 | An empty `when` (or absent) is treated as always-true (matches every message). |
 | 6 | A syntactically invalid `when` causes the rule to be skipped and a `[warn]` is emitted. |
+| 8 | A pattern is a bare word that ends at whitespace, `(` or `)`, or a double-quoted string that may hold spaces and parentheses; inside quotes `\"` is a literal quote and `\\` a literal backslash. `subject:"*Message 1*"` matches the subject `Message 1`. An unterminated quote is a syntax error. |
+| 9 | A legacy flat field with a space (`if-subject = *Message 1*`) is converted to the quoted form, so it matches the same way; the expression builders quote a pattern that holds whitespace, a parenthesis, a quote or a backslash. |
 | 7 | The evaluator produces the same result as the current flat-field AND chain for any expression that only uses `from:`, `to:`, `subject:`, `label:`, `body:`, `age-gt:`, `age-lt:` ANDed together. |
 
 ---
@@ -39,6 +41,8 @@ from:*@gmail.com or to:*@gmail.com
 (from:*alice* or from:*bob*) and !label:UNREAD
 
 from:*boss@corp.com and subject:*urgent* and age-lt:2
+
+subject:"*Weekly report 2*" and !from:*noreply*
 ```
 
 ---

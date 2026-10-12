@@ -1,0 +1,8 @@
+# The build's date and commit travel in XB- control fields rather than in the
+# Version field, whose one job is telling apt which of two packages is newer.
+# XB- is the Debian-sanctioned prefix for extra binary-package fields, and
+# they survive into the apt Packages index because apt-ftparchive copies
+# unknown fields through. Required by policies/packaging-and-release-model.md,
+# "Identifying a build".
+email-cli: unknown-field XB-Git-Commit
+email-cli: unknown-field XB-Build-Date

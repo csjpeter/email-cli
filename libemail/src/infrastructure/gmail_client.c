@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-17 */
+/* Gmail REST API v1 client over libcurl. */
 #include "gmail_client.h"
 #include "gmail_auth.h"
 #include "json_util.h"

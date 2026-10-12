@@ -1,20 +1,15 @@
-if(WIN32)
-    set(LIBEMAIL_PLATFORM_SOURCES
-        src/platform/windows/terminal.c
-        src/platform/windows/path.c
-        src/platform/windows/html_medium.c
-        src/platform/windows/process.c
-        src/platform/windows/credential_key.c
-    )
-else()
-    set(LIBEMAIL_PLATFORM_SOURCES
-        src/platform/posix/terminal.c
-        src/platform/posix/path.c
-        src/platform/posix/html_medium.c
-        src/platform/posix/process.c
-        src/platform/posix/credential_key.c
-    )
-endif()
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-04-13
+# Build rules of libemail: core, platform, domain and infrastructure sources.
+
+set(LIBEMAIL_PLATFORM_SOURCES
+    src/platform/posix/terminal.c
+    src/platform/posix/path.c
+    src/platform/posix/html_medium.c
+    src/platform/posix/process.c
+    src/platform/posix/credential_key.c
+)
 
 add_library(libemail STATIC
     src/core/logger.c
@@ -51,5 +46,4 @@ target_include_directories(libemail PUBLIC
 )
 
 find_package(CURL REQUIRED)
-target_link_libraries(libemail PUBLIC OpenSSL::SSL OpenSSL::Crypto CURL::libcurl
-                                        tuikit::tuikit_static)
+target_link_libraries(libemail PUBLIC OpenSSL::SSL OpenSSL::Crypto CURL::libcurl)

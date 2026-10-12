@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-05-08 */
+/* PTY tests of file attachments in compose. */
 /**
  * @file test_pty_attachment.c
  * @brief PTY tests for file attachment support in compose (US-84)
@@ -18,6 +22,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "test_scratch.h"
 
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -48,6 +53,8 @@ static char g_attach_file2[600];  /* notes.txt */
 
 static pid_t g_imap_pid = -1;
 static pid_t g_smtp_pid = -1;
+static int   g_imap_port = 0;   /* both ports are picked by the kernel */
+static int   g_smtp_port = 0;
 
 #define WAIT_MS   6000
 #define SETTLE_MS  400
@@ -57,7 +64,8 @@ static pid_t g_smtp_pid = -1;
 #define SHIFT_TAB "\x1b[Z"   /* Shift-Tab escape sequence */
 
 #define RUN_TEST(fn) \
-    do { printf("  %s...\n", #fn); fflush(stdout); fn(); } while (0)
+    do { if (!test_selected(#fn)) break; printf("  %s...\n", #fn); \
+         fflush(stdout); fn(); } while (0)
 
 /* ── Fake editor ────────────────────────────────────────────────────── */
 
@@ -100,17 +108,21 @@ static void write_config(void)
     snprintf(path, sizeof(path),
              "%s/.config/email-cli/accounts/testuser/config.ini", g_test_home);
     FILE *fp = fopen(path, "w");
-    if (!fp) return;
+    if (!fp) {                       /* a fixture that cannot be made fails the run */
+        fprintf(stderr, "attachment: cannot write %s\n", path);
+        g_tests_failed++;
+        return;
+    }
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser@example.com\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SMTP_HOST=smtps://localhost:9025\n"
-        "SMTP_PORT=9025\n"
+        "SMTP_HOST=smtps://localhost:%d\n"
+        "SMTP_PORT=%d\n"
         "SMTP_USER=testuser@example.com\n"
         "SMTP_PASS=testpass\n"
-        "SSL_NO_VERIFY=1\n");
+        "SSL_NO_VERIFY=1\n", g_imap_port, g_smtp_port, g_smtp_port);
     fclose(fp);
     chmod(path, 0600);
 }
@@ -145,10 +157,20 @@ static void write_contacts_tsv(void)
 
 /* ── Mock server management ─────────────────────────────────────────── */
 
-static void start_server(const char *bin, pid_t *pid)
+/* *port is 0 the first time (the kernel picks) and the previous instance's
+ * port on a restart, because the config names it.  Returns once the mock has
+ * bound the port and published it. */
+static void start_server(const char *bin, const char *prefix, pid_t *pid,
+                         int *port)
 {
-    *pid = fork();
-    if (*pid == 0) { execl(bin, bin, NULL); _exit(1); }
+    int bound = 0;
+    *pid = test_spawn_mock(bin, prefix, *port, &bound);
+    if (*pid < 0) {
+        fprintf(stderr, "attachment: %s did not start\n", bin);
+        g_tests_failed++;
+        return;
+    }
+    *port = bound;
 }
 
 static void stop_server(pid_t *pid)
@@ -156,28 +178,12 @@ static void stop_server(pid_t *pid)
     if (*pid > 0) { kill(*pid, SIGTERM); waitpid(*pid, NULL, 0); *pid = -1; }
 }
 
-static int probe_port(int port)
-{
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
-    struct sockaddr_in sa = {
-        .sin_family = AF_INET,
-        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
-        .sin_port = htons((uint16_t)port),
-    };
-    int rc = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
-    close(fd);
-    return rc;
-}
-
 static void restart_servers(void)
 {
     stop_server(&g_imap_pid);
     stop_server(&g_smtp_pid);
-    start_server(g_imap_bin, &g_imap_pid);
-    start_server(g_smtp_bin, &g_smtp_pid);
-    for (int i = 0; i < 30 && probe_port(9993) != 0; i++) usleep(100000);
-    for (int i = 0; i < 30 && probe_port(9025) != 0; i++) usleep(100000);
+    start_server(g_imap_bin, "MOCK_IMAP", &g_imap_pid, &g_imap_port);
+    start_server(g_smtp_bin, "MOCK_SMTP", &g_smtp_pid, &g_smtp_port);
 }
 
 /* ── TUI session helpers ─────────────────────────────────────────────── */
@@ -241,9 +247,11 @@ static void test_attach_field_tab_from_subject(void)
     pty_send_str(s, "c");
     ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
     nav_to_attach_field(s);
-    pty_send_str(s, "/tmp");
+    char dir[700];
+    snprintf(dir, sizeof(dir), "%s/attachments", g_test_home);
+    pty_send_str(s, dir);
     pty_settle(s, 200);
-    ASSERT_SCREEN_CONTAINS(s, "/tmp");
+    ASSERT_SCREEN_CONTAINS(s, "attachments");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -313,7 +321,9 @@ static void test_attach_nonexistent_shows_error(void)
     pty_send_str(s, "c");
     ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
     nav_to_attach_field(s);
-    pty_send_str(s, "/tmp/does-not-exist-xyz-404.pdf");
+    char missing[700];
+    snprintf(missing, sizeof(missing), "%s/does-not-exist-xyz-404.pdf", g_test_home);
+    pty_send_str(s, missing);
     pty_send_key(s, PTY_KEY_ENTER);
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "File not found");
@@ -730,9 +740,8 @@ int main(int argc, char *argv[])
     snprintf(g_imap_bin, sizeof(g_imap_bin), "%s", argv[2]);
     snprintf(g_smtp_bin, sizeof(g_smtp_bin), "%s", argv[3]);
 
-    snprintf(g_test_home, sizeof(g_test_home),
-             "/tmp/email-pty-attach-%d", (int)getpid());
-    mkdir(g_test_home, 0700);
+    snprintf(g_test_home, sizeof(g_test_home), "%s", TP("home"));
+    if (mkdir(g_test_home, 0700) != 0) { perror("mkdir home"); return EXIT_FAILURE; }
 
     if (getenv("HOME"))
         snprintf(g_old_home, sizeof(g_old_home), "%s", getenv("HOME"));
@@ -740,6 +749,10 @@ int main(int argc, char *argv[])
     unsetenv("XDG_DATA_HOME");
     unsetenv("XDG_CONFIG_HOME");
     unsetenv("XDG_CACHE_HOME");
+
+    /* The mocks first: the config written next names their ports. */
+    restart_servers();
+    if (g_imap_pid < 0 || g_smtp_pid < 0) return EXIT_FAILURE;
 
     write_config();
     write_attach_files();

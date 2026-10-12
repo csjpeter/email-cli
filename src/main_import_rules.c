@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-23 */
+/* Entry point of email-import-rules: imports Thunderbird filters as mail rules. */
 /**
  * @file main_import_rules.c
  * @brief Import mail sorting rules from Thunderbird into email-cli rules.ini format.
@@ -408,7 +412,7 @@ typedef struct {
     char dir[256];      /* dirname under ImapMail/, e.g. "imap.gmail.com" */
 } TBAccountEntry;
 
-/* Extract hostname from URL like "imaps://box.csaszar.email:993".
+/* Extract hostname from URL like "imaps://mail.example.org:993".
  * Writes into buf[buflen]; returns buf on success, NULL on failure. */
 static const char *extract_hostname(const char *url, char *buf, size_t buflen) {
     if (!url || !buf || buflen == 0) return NULL;

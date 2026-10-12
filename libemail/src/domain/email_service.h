@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-24 */
+/* Interface of the high-level mail service. */
 #ifndef EMAIL_SERVICE_H
 #define EMAIL_SERVICE_H
 

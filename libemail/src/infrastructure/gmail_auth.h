@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-17 */
+/* Interface of the Gmail OAuth2 authentication. */
 #ifndef GMAIL_AUTH_H
 #define GMAIL_AUTH_H
 

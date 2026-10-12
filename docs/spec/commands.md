@@ -209,11 +209,11 @@ cursor:
 - The visible window scrolls automatically to keep the cursor on screen.
 - The cursor starts at the position implied by `--offset` (default: first row).
 - **The loop never exits automatically** when the cursor reaches the first or
-  last row; the user must press `q` or `ESC` to quit.
+  last row; the user must press `q`, `ESC` or Ctrl-C to leave it.
 - Pressing **Enter** opens the selected message with `show_uid_interactive()`.
-  - If the user presses `q` inside the message view, the list also exits.
-  - If the user presses `ESC` inside the message view, control returns to the
-    list at the same cursor position.
+  - If the user presses `q`, `ESC` or Backspace inside the message view,
+    control returns to the list at the same cursor position; Ctrl-C quits
+    the program at once.
 - A **status bar** is printed below the table on every redraw with minimal
   key binding hints and the current position (`[cursor+1 / total]`).
 

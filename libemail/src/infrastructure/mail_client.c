@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-17 */
+/* Dispatch layer that routes mail operations to the IMAP or Gmail backend. */
 #include "mail_client.h"
 #include "imap_client.h"
 #include "gmail_client.h"

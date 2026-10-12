@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-04-18
+# Fills the section placeholders of a tape template.
+
 # demo/gen_tape.sh — Replace __SECTION_NAME__ placeholders in a tape template.
 #
 # Usage:

@@ -1,4 +1,8 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-03-24
+# Build, test, package and install management script of email-cli.
 
 # email-cli management script
 # A user-friendly interface for building, testing, and running the project
@@ -21,10 +25,19 @@ show_help() {
     echo "  build          Build the project in Release mode"
     echo "  debug          Build the project in Debug mode (with ASAN)"
     echo "  run            Build and run the application"
-    echo "  test           Build and run unit tests (with ASAN)"
-    echo "  functional     Build and run the functional test suite"
-    echo "  pty            Build and run all PTY (terminal) test suites"
+    echo "  test [FILTER]  Build and run unit tests (with ASAN); FILTER runs only the"
+    echo "                 test suites whose name contains it"
+    echo "  functional [PHASES]  Build and run the functional test suite; PHASES is a list"
+    echo "                 such as 7,60-62 (see tests/functional/run_functional.sh --list)"
+    echo "  pty [SUITE [FILTER]]  Build and run the PTY (terminal) test suites; SUITE is one"
+    echo "                 of views gmail-tui mail-rules compose-dialog attachment"
+    echo "                 send-local input-line compose, FILTER selects tests"
+    echo "                 by name"
     echo "  valgrind       Build and run unit tests with Valgrind"
+    echo "  headers [DIR]  Fail on a source file or script without the source header"
+    echo "  names [DIR]    Fail when a tracked file names the owner's private domain"
+    echo "  declared       Fail when a declared test is not built or a built test is not declared"
+    echo "  check          Run every gate (headers, names, declared, test, functional, pty, valgrind) and summarise"
     echo "  coverage       Run tests and generate coverage report"
     echo "  integration    Run integration test against Dovecot IMAP container"
     echo "  integration-local  Run APPEND integration test with local Dovecot (no Docker)"
@@ -32,10 +45,110 @@ show_help() {
     echo "  imap-clean     Remove integration test container and volume"
     echo "  install        Build (release) and install binaries to ~/.local/bin"
     echo "  uninstall      Remove installed binaries from ~/.local/bin"
-    echo "  package [deb|rpm|all]  Build release and create distribution package(s)"
+    echo "  package [deb|rpm|all]  Build release and create package(s) in build/packages/"
+    echo "  timing [KEY-N] Print the Gate line from build/timing.log; with a key, comment it on the ticket"
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
+}
+
+# Every source file and script starts with the header of the source-header
+# policy: an SPDX licence tag that agrees with LICENSE, a copyright line with
+# the holder's name, a Created date that is valid and not in the future, and a
+# purpose line.  A shebang may precede it.  Prints each offender and fails.
+check_source_headers() {
+    local root="${1:-.}" today bad=0 total=0 f head_lines line
+    today=$(date +%F)
+    while IFS= read -r f; do
+        total=$((total + 1))
+        head_lines=$(head -n 8 "$f")
+        line=$(printf '%s\n' "$head_lines" | grep -m1 -E 'SPDX-License-Identifier: ') || line=""
+        line="${line##*SPDX-License-Identifier: }"
+        if [ "${line%% *}" != "GPL-3.0-only" ]; then
+            echo "header: $f: missing or wrong SPDX-License-Identifier (want GPL-3.0-only)" >&2
+            bad=$((bad + 1)); continue
+        fi
+        if ! printf '%s\n' "$head_lines" | grep -q -E 'Copyright \(c\) [0-9]{4} Peter Csaszar \(Császár Péter\)'; then
+            echo "header: $f: missing copyright line naming the holder" >&2
+            bad=$((bad + 1)); continue
+        fi
+        line=$(printf '%s\n' "$head_lines" | grep -m1 -E 'Created: [0-9]{4}-[0-9]{2}-[0-9]{2}') || line=""
+        created=$(printf '%s\n' "$line" | grep -o -E '[0-9]{4}-[0-9]{2}-[0-9]{2}') || created=""
+        if [ -z "$created" ] || [ "$(date -d "$created" +%F 2>&1)" != "$created" ]; then
+            echo "header: $f: missing or invalid Created: date" >&2
+            bad=$((bad + 1)); continue
+        fi
+        if [[ "$created" > "$today" ]]; then
+            echo "header: $f: Created: $created is in the future" >&2
+            bad=$((bad + 1)); continue
+        fi
+        # The purpose line is the line right after Created:, a non-empty comment.
+        if ! printf '%s\n' "$head_lines" | grep -A1 -E 'Created: [0-9]{4}-' | tail -n 1 \
+                | grep -q -E '^(/\* |# ).*[A-Za-z]'; then
+            echo "header: $f: missing purpose line after Created:" >&2
+            bad=$((bad + 1)); continue
+        fi
+    done < <(find "$root" \( -name .git -o -name 'build*' -o -name bin -o -name tmp \) -prune -o -type f \
+                 \( -name '*.c' -o -name '*.h' -o -name '*.sh' -o -name '*.cmake' -o -name CMakeLists.txt \) -print | sort)
+    echo "header: $total files checked, $bad without a valid header"
+    [ "$bad" -eq 0 ]
+}
+
+# The owner's private domain appears in no tracked file (private-names policy).
+# The pattern is built from two parts so that this script does not contain the
+# name in one piece and fail its own check.  Prints each offending file.
+check_private_names() {
+    local root="${1:-.}" part_a="csasz" part_b="ar" part_c="\\.em" part_d="ail" found rc=0
+    found=$(git -C "$root" grep -I -l -i -E "${part_a}${part_b}${part_c}${part_d}") || rc=$?
+    case $rc in
+        0) printf '%s\n' "$found" | sed 's/^/names: private domain in /' >&2
+           echo "names: $(printf '%s\n' "$found" | wc -l) tracked files name the private domain" >&2
+           return 1 ;;
+        1) echo "names: no tracked file names the private domain"; return 0 ;;
+        *) echo "names: git grep failed in $root" >&2; return 2 ;;
+    esac
+}
+
+# Every test is declared in tests/CMakeLists.txt and built into
+# build/tests/<category>/bin/<name> (testing-model.md): a declared test with no
+# executable there, or an executable there that is not declared, is a failure
+# of the project.  Usage: check_declared_tests <tests/CMakeLists.txt> <build/tests>
+check_declared_tests() {
+    local decl="$1" tests_dir="$2" rc=0 cat name line
+    local want have
+    want=$(sed -n 's/^project_test(\([A-Za-z0-9_-]*\)[[:space:]]\{1,\}\([A-Za-z0-9_.-]*\).*/\1 \2/p' "$decl" | sort -u) || return 2
+    if [ -z "$want" ]; then
+        echo "declared: no project_test() line in $decl" >&2
+        return 1
+    fi
+    have=""
+    for d in "$tests_dir"/*/bin; do
+        [ -d "$d" ] || continue
+        cat=$(basename "$(dirname "$d")")
+        for f in "$d"/*; do
+            [ -e "$f" ] || continue
+            have="${have}${cat} $(basename "$f")"$'\n'
+        done
+    done
+    have=$(printf '%s' "$have" | sort -u)
+    while read -r cat name; do
+        [ -n "$cat" ] || continue
+        if ! printf '%s\n' "$have" | grep -qx "$cat $name"; then
+            echo "declared: $cat/$name is declared but has no executable in $tests_dir/$cat/bin" >&2
+            rc=1
+        fi
+    done <<< "$want"
+    while read -r cat name; do
+        [ -n "$cat" ] || continue
+        if ! printf '%s\n' "$want" | grep -qx "$cat $name"; then
+            echo "declared: $tests_dir/$cat/bin/$name is not declared in $decl" >&2
+            rc=1
+        fi
+    done <<< "$have"
+    if [ "$rc" -eq 0 ]; then
+        echo "declared: $(printf '%s\n' "$want" | wc -l) declared tests, all built, none undeclared"
+    fi
+    return $rc
 }
 
 install_deps() {
@@ -100,43 +213,40 @@ cmake_configure() {
 for_each_pty_suite() {
     local run="$1"
     local B="$2"   # absolute bin dir
-    "$run" views          ./tests/pty/test-pty-views "$B/email-cli" \
+    "$run" views          ./tests/pty/bin/test-pty-views "$B/email-cli" \
                           ./tests/pty/mock-imap-server "$B/email-cli-ro" \
                           "$B/email-sync" "$B/email-tui"
-    "$run" gmail-tui      ./tests/pty/test-pty-gmail-tui "$B/email-tui" \
+    "$run" gmail-tui      ./tests/pty/bin/test-pty-gmail-tui "$B/email-tui" \
                           "$B/email-sync" ./tests/pty/mock-gmail-server
-    "$run" mail-rules     ./tests/pty/test-pty-mail-rules "$B/email-sync" \
+    "$run" mail-rules     ./tests/pty/bin/test-pty-mail-rules "$B/email-sync" \
                           "$B/email-tui" ./tests/pty/mock-imap-server
-    "$run" compose-dialog ./tests/pty/test-pty-compose-dialog "$B/email-tui" \
+    "$run" compose-dialog ./tests/pty/bin/test-pty-compose-dialog "$B/email-tui" \
                           ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
-    "$run" attachment     ./tests/pty/test-pty-attachment "$B/email-tui" \
+    "$run" attachment     ./tests/pty/bin/test-pty-attachment "$B/email-tui" \
                           ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
-    "$run" send-local     ./tests/pty/test-pty-send-local "$B/email-tui" \
+    "$run" send-local     ./tests/pty/bin/test-pty-send-local "$B/email-tui" \
                           "$B/email-sync" ./tests/pty/mock-imap-server \
                           ./tests/pty/mock-smtp-server
-    "$run" input-line     ./tests/pty/test-pty-input-line \
+    "$run" input-line     ./tests/pty/bin/test-pty-input-line \
                           ./tests/pty/input-line-harness
-    "$run" compose        ./tests/pty/test-pty-compose "$B/email-tui" \
+    "$run" compose        ./tests/pty/bin/test-pty-compose "$B/email-tui" \
                           ./tests/pty/mock-smtp-server "$B/email-cli"
     # The PTY harness is a git submodule (libs/libptytest) with its own test
     # suite and release gates; they run in its repository, not here.
 }
 
-PTY_TARGETS="test-pty-views test-pty-gmail-tui test-pty-mail-rules \
-             test-pty-compose-dialog test-pty-attachment test-pty-send-local \
-             test-pty-compose test-pty-input-line \
-             mock-imap-server mock-gmail-server mock-smtp-server \
-             input-line-harness"
+PTY_TARGETS="tests-pty"
 
 JOBS=$(nproc)
 
 cmake_build() {
     cmake --build "$BUILD_DIR" -- -j"$JOBS"
-    cp "$BUILD_DIR/$PROJECT_NAME" "$BIN_DIR/"
-    cp "$BUILD_DIR/${PROJECT_NAME}-ro" "$BIN_DIR/" 2>/dev/null || true
-    cp "$BUILD_DIR/email-sync"         "$BIN_DIR/" 2>/dev/null || true
-    cp "$BUILD_DIR/email-tui"          "$BIN_DIR/" 2>/dev/null || true
-    cp "$BUILD_DIR/email-import-rules" "$BIN_DIR/" 2>/dev/null || true
+    mkdir -p "$BIN_DIR"
+    # A copy that fails must fail the build: otherwise the next suite tests the
+    # binary left over from an earlier build (testing-model.md).
+    for b in "$PROJECT_NAME" "${PROJECT_NAME}-ro" email-sync email-tui email-import-rules; do
+        cp "$BUILD_DIR/$b" "$BIN_DIR/" || exit 1
+    done
 }
 
 build_release() {
@@ -152,7 +262,7 @@ build_debug() {
 }
 
 build_test_runner() {
-    cmake --build "$BUILD_DIR" --target test-runner -- -j"$JOBS"
+    cmake --build "$BUILD_DIR" --target tests-unit -- -j"$JOBS"
 }
 
 do_install() {
@@ -181,6 +291,49 @@ do_uninstall() {
     echo "Uninstall complete."
 }
 
+# Every verb that does work times itself (manage-sh-model.md): the verb is re-run
+# by this script under MANAGE_TIMED=1 and one line "<UTC time> <verb> <s>s <ok|fail>"
+# is appended to the timing log, whatever the outcome.  MANAGE_TIMING_LOG
+# overrides the log path (the tests keep theirs under build/).
+TIMING_LOG="${MANAGE_TIMING_LOG:-$BUILD_DIR/timing.log}"
+case "$1" in
+    build|debug|test|coverage|valgrind|functional|pty|integration|integration-local|headers|names|declared|check|package|install)
+        if [ -z "${MANAGE_TIMED:-}" ]; then
+            timed_start=$(date +%s)
+            timed_rc=0
+            MANAGE_TIMED=1 "$0" "$@" || timed_rc=$?
+            timed_end=$(date +%s)
+            timed_res=ok
+            [ "$timed_rc" -eq 0 ] || timed_res=fail
+            mkdir -p "$(dirname "$TIMING_LOG")" || exit 1
+            printf '%s %s %ss %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" \
+                "$((timed_end - timed_start))" "$timed_res" >> "$TIMING_LOG" || exit 1
+            exit "$timed_rc"
+        fi
+        ;;
+esac
+
+# Prints the gate line from the latest run of each of check, package and install
+# in the log.  A part that never ran through this script is left out; with none
+# of them the line is "Gate: not measured" and the status is non-zero.
+gate_line() {
+    local verb secs total=0 parts="" n=0
+    if [ -s "$TIMING_LOG" ]; then
+        for verb in check package install; do
+            secs=$(awk -v v="$verb" '$2 == v { s = $3 } END { sub(/s$/, "", s); print s }' "$TIMING_LOG")
+            [ -n "$secs" ] || continue
+            total=$((total + secs))
+            parts="${parts:+$parts, }$verb ${secs}s"
+            n=$((n + 1))
+        done
+    fi
+    if [ "$n" -eq 0 ]; then
+        echo "Gate: not measured"
+        return 1
+    fi
+    echo "Gate: ${total}s ($parts)"
+}
+
 case "$1" in
     deps)
         install_deps
@@ -200,12 +353,15 @@ case "$1" in
         echo "Running unit tests with ASAN..."
         build_debug
         build_test_runner
-        (cd "$BUILD_DIR" && ./tests/unit/test-runner)
+        # An optional second argument runs only the test suites whose name
+        # contains it: ./manage.sh test test_mime
+        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner ${2:+"$2"})
         ;;
     functional)
         echo "Running functional tests..."
         build_release
-        ./tests/functional/run_functional.sh
+        cmake --build "$BUILD_DIR" --target tests-functional -- -j"$JOBS"
+        "$BUILD_DIR/tests/functional/bin/run_functional" ${2:+--phase "$2"}
         ;;
     pty)
         echo "Running PTY tests..."
@@ -213,29 +369,32 @@ case "$1" in
         cmake --build "$BUILD_DIR" --target $PTY_TARGETS -- -j"$JOBS"
         ABS_BUILD="$(realpath "$BUILD_DIR")"
         ABS_BIN="$(realpath "$BIN_DIR")"
-        # Mock servers bind fixed ports.  A previous interrupted run can leave
-        # one behind, and the next suite then talks to a stale server with
-        # different contents — which looks exactly like a product regression.
-        pkill -f "mock_imap_server"  2>/dev/null || true
-        pkill -f "mock-imap-server"  2>/dev/null || true
-        pkill -f "mock_gmail_api_server" 2>/dev/null || true
-        pkill -f "mock-gmail-server" 2>/dev/null || true
-        pkill -f "mock_smtp_server"  2>/dev/null || true
-        pkill -f "mock-smtp-server"  2>/dev/null || true
-        sleep 1
+        # ./manage.sh pty [SUITE [FILTER]]: SUITE is a label from
+        # for_each_pty_suite, FILTER is passed on as TEST_FILTER and selects
+        # the tests of that suite whose function name contains it.
+        pty_suite="$2"
+        if [ -n "$3" ]; then export TEST_FILTER="$3"; fi
         pty_rc=0
+        pty_ran=0
         run_pty_strict() {  # run_pty_strict <label> <binary> [args…]
             local label="$1"; shift
+            if [ -n "$pty_suite" ] && [ "$pty_suite" != "$label" ]; then
+                return 0
+            fi
+            pty_ran=$((pty_ran + 1))
             echo "--- PTY: $label ---"
-            # Each suite binds fixed mock-server ports; run them sequentially
-            # and let the ports settle in between.
+            # Every mock binds a port the kernel picks and every fixture lives
+            # under build/ with the pid in its name, so suites share nothing.
             if ! (cd "$ABS_BUILD" && "$@"); then
                 echo "  [FAILED] $label"
                 pty_rc=1
             fi
-            sleep 2
         }
         for_each_pty_suite run_pty_strict "$ABS_BIN"
+        if [ -n "$pty_suite" ] && [ "$pty_ran" -eq 0 ]; then
+            echo "ERROR: no PTY suite is called '$pty_suite'" >&2
+            exit 1
+        fi
         exit $pty_rc
         ;;
     valgrind)
@@ -243,40 +402,25 @@ case "$1" in
         build_release
         build_test_runner
         (cd "$BUILD_DIR" && valgrind --leak-check=full --error-exitcode=1 \
-            --child-silent-after-fork=yes ./tests/unit/test-runner)
+            --child-silent-after-fork=yes ./tests/unit/bin/test-runner)
         ;;
     coverage)
         cmake_configure Debug "-DENABLE_COVERAGE=ON"
         cmake_build
         build_test_runner
         echo "Building PTY test binaries..."
-        cmake --build "$BUILD_DIR" --target $PTY_TARGETS -- -j"$JOBS"
+        cmake --build "$BUILD_DIR" --target $PTY_TARGETS tests-functional -- -j"$JOBS"
 
         # Pass 1 — functional suite + PTY tests (fresh .gcda) → functional badge
         find "$BUILD_DIR" -name "*.gcda" -delete
-        # Kill any lingering mock server processes by process name (not by -f to avoid self-kill)
-        pkill "mock_imap_server" 2>/dev/null || true
-        pkill "mock-imap-server" 2>/dev/null || true
-        sleep 0.3
-        ./tests/functional/run_functional.sh || true
+        # The report is still produced when the suite fails, but the failure is
+        # the verdict of this run: it is kept and returned at the end.
+        functional_rc=0
+        "$BUILD_DIR/tests/functional/bin/run_functional" || functional_rc=$?
+        pty_cov_rc=0
         echo "Running PTY tests for coverage..."
         ABS_BUILD="$(realpath "$BUILD_DIR")"
         ABS_BIN="$(realpath "$BIN_DIR")"
-        # The functional suite above runs a mock on port 9993 — the same fixed
-        # port three PTY suites use, and the mock's own default.  Any server it
-        # leaves behind answers the next suite's connect probe, which then
-        # tests against a mailbox belonging to someone else: that is how
-        # mail-rules came to assert over messages titled "AlphaAccountMsg".
-        # `./manage.sh pty` has cleared these since the same bug bit it; the
-        # coverage path needs it just as much, because here the functional run
-        # immediately precedes the PTY run.
-        pkill -f "mock_imap_server"  2>/dev/null || true
-        pkill -f "mock-imap-server"  2>/dev/null || true
-        pkill -f "mock_gmail_api_server" 2>/dev/null || true
-        pkill -f "mock-gmail-server" 2>/dev/null || true
-        pkill -f "mock_smtp_server"  2>/dev/null || true
-        pkill -f "mock-smtp-server"  2>/dev/null || true
-        sleep 1
         # Every suite contributes to the measured coverage.  Failures are
         # tolerated here on purpose — the report must still be produced — but
         # they are reported, and `./manage.sh pty` (which CI runs) fails on them.
@@ -292,45 +436,80 @@ case "$1" in
                 echo "  [warn] PTY suite '$label' reported failures (coverage run continues):"
                 grep -E "\[FAIL\]|ASSERT|Segmentation|Assertion" "$log" | head -20 | sed 's/^/    /'
                 echo "    (full output: $log)"
+                pty_cov_rc=1
             fi
-            sleep 2
         }
         for_each_pty_suite run_pty_lenient "$ABS_BIN"
-        echo "Capturing functional coverage..."
-        (cd "$BUILD_DIR" && lcov --capture --directory . \
-             --output-file coverage-functional-raw.info && \
-         lcov --remove coverage-functional-raw.info \
-              --ignore-errors unused \
-              '/usr/include/*' \
-              '*/src/main_tui.c' \
-              '*/tests/unit/*' \
-              --output-file coverage-functional.info)
+        # One definition of "product code" for every report: the program's own
+        # sources.  Test code, the PTY library and the system headers are not
+        # measured (policies/testing-model.md, Coverage).
+        ROOT_ABS="$(pwd)"
+        capture_product() {  # capture_product <raw.info> <product.info>
+            (cd "$BUILD_DIR" && lcov --capture --directory . --output-file "$1" && \
+             lcov --extract "$1" --ignore-errors unused \
+                  "$ROOT_ABS/src/*" "$ROOT_ABS/libemail/src/*" "$ROOT_ABS/libwrite/src/*" \
+                  --output-file "$2")
+        }
+        line_pct() {         # line_pct <product.info> -> "91.8"
+            lcov --summary "$BUILD_DIR/$1" 2>&1 | grep 'lines' | grep -oP '[0-9]+\.[0-9]+(?=%)' | head -1
+        }
 
-        # Pass 2 — run unit suite ON TOP of existing functional .gcda → combined badge
-        # (LCOV 2.x --add-tracefile intersects lines instead of unioning; running both
-        # test suites in sequence and capturing once gives the correct union.)
-        (cd "$BUILD_DIR" && ./tests/unit/test-runner)
-        echo "Capturing combined (unit + functional) coverage..."
-        (cd "$BUILD_DIR" && lcov --capture --directory . \
-             --output-file coverage-raw.info && \
-         lcov --remove coverage-raw.info \
-              --ignore-errors unused \
-              '/usr/include/*' \
-              '*/src/main_tui.c' \
-              --output-file coverage.info)
+        # External suites alone: functional + PTY (black-box, instrumented binaries).
+        echo "Capturing external (functional + PTY) coverage..."
+        capture_product coverage-functional-raw.info coverage-functional.info
+
+        # Unit tests on top of the same .gcda give the union of everything.
+        # (LCOV 2.x --add-tracefile intersects lines instead of unioning; running
+        # both kinds in sequence and capturing once gives the correct union.)
+        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner)
+        echo "Capturing combined coverage..."
+        capture_product coverage-raw.info coverage.info
+
+        # Unit tests alone, from fresh counters: they have to stand on their own.
+        find "$BUILD_DIR" -name "*.gcda" -delete
+        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner)
+        echo "Capturing unit-only coverage..."
+        capture_product coverage-unit-raw.info coverage-unit.info
 
         echo "Generating coverage reports..."
         (cd "$BUILD_DIR" && \
          genhtml coverage.info --output-directory coverage_report && \
          genhtml coverage-functional.info --output-directory coverage_functional_report)
-        FUNC_SUMMARY=$(lcov --summary "$BUILD_DIR/coverage-functional.info" 2>&1 | grep 'functions')
-        FUNC_PCT=$(echo "$FUNC_SUMMARY" | grep -oP '[0-9]+\.[0-9]+(?=%)')
-        LINE_SUMMARY=$(lcov --summary "$BUILD_DIR/coverage.info" 2>&1 | grep 'functions')
-        LINE_PCT=$(echo "$LINE_SUMMARY" | grep -oP '[0-9]+\.[0-9]+(?=%)')
-        echo "Functional badge: ${FUNC_PCT}%  (function coverage)"
-        echo "Combined badge:   ${LINE_PCT}%  (function coverage, unit+functional)"
-        echo "Combined coverage:    $BUILD_DIR/coverage_report/index.html"
-        echo "Functional coverage:  $BUILD_DIR/coverage_functional_report/index.html"
+
+        UNIT_PCT=$(line_pct coverage-unit.info)
+        EXT_PCT=$(line_pct coverage-functional.info)
+        ALL_PCT=$(line_pct coverage.info)
+        COVERAGE_MIN=80      # policy floor for unit alone and for the external suites
+        COVERAGE_TARGET=90   # policy target for everything together (not a gate)
+        echo ""
+        echo "Line coverage of product code (src/, libemail/src/, libwrite/src/):"
+        echo "  unit tests alone            ${UNIT_PCT}%   (minimum ${COVERAGE_MIN}%)"
+        echo "  functional + PTY together   ${EXT_PCT}%   (minimum ${COVERAGE_MIN}%)"
+        echo "  everything combined         ${ALL_PCT}%   (target ${COVERAGE_TARGET}%)"
+        echo "Combined report:  $BUILD_DIR/coverage_report/index.html"
+        echo "External report:  $BUILD_DIR/coverage_functional_report/index.html"
+        coverage_gate_rc=0
+        for pair in "unit tests alone:$UNIT_PCT" "functional + PTY:$EXT_PCT"; do
+            label="${pair%%:*}"; pct="${pair##*:}"
+            if [ -z "$pct" ]; then
+                echo "ERROR: no coverage figure for '$label'." >&2
+                coverage_gate_rc=1
+            elif awk -v p="$pct" -v m="$COVERAGE_MIN" 'BEGIN{exit !(p+0 < m+0)}'; then
+                echo "ERROR: coverage of '$label' is ${pct}%, below the ${COVERAGE_MIN}% minimum." >&2
+                coverage_gate_rc=1
+            fi
+        done
+        if awk -v p="$ALL_PCT" -v m="$COVERAGE_TARGET" 'BEGIN{exit !(p+0 < m+0)}'; then
+            echo "note: the combined figure is below the ${COVERAGE_TARGET}% target (not a gate)."
+        fi
+        if [ "$functional_rc" -ne 0 ] || [ "$pty_cov_rc" -ne 0 ]; then
+            echo "ERROR: coverage run failed: functional suite status $functional_rc," \
+                 "PTY suites status $pty_cov_rc (reports above were still produced)." >&2
+            exit 1
+        fi
+        if [ "$coverage_gate_rc" -ne 0 ]; then
+            exit 1
+        fi
         ;;
     integration)
         build_release
@@ -345,6 +524,45 @@ case "$1" in
         ;;
     imap-clean)
         ./tests/integration/run_integration.sh --clean
+        ;;
+    headers)
+        check_source_headers "${2:-.}"
+        ;;
+    names)
+        check_private_names "${2:-.}"
+        ;;
+    declared)
+        # ./manage.sh declared [TESTS_CMAKELISTS [BUILD_TESTS_DIR]]
+        if [ $# -lt 2 ]; then
+            build_release
+            cmake --build "$BUILD_DIR" --target tests -- -j"$JOBS"
+        fi
+        check_declared_tests "${2:-tests/CMakeLists.txt}" "${3:-$BUILD_DIR/tests}"
+        ;;
+    check)
+        # Every gate, each in its own run, one summary to compare with CI.
+        # Coverage joins when it has a threshold that fails (EMAIL-15).
+        check_rc=0
+        check_summary=""
+        for gate in headers names declared test functional pty valgrind; do
+            echo "=== check: $gate ==="
+            # MANAGE_TIMED is cleared so every gate logs its own time.
+            if MANAGE_TIMED= "$0" "$gate"; then
+                check_summary="${check_summary}  $(printf '%-12s' "$gate") PASS"$'\n'
+            else
+                check_summary="${check_summary}  $(printf '%-12s' "$gate") FAIL"$'\n'
+                check_rc=1
+            fi
+        done
+        echo ""
+        echo "=== check: summary ==="
+        printf '%s' "$check_summary"
+        if [ "$check_rc" -ne 0 ]; then
+            echo "check FAILED" >&2
+        else
+            echo "check passed"
+        fi
+        exit $check_rc
         ;;
     install)
         do_install
@@ -362,12 +580,54 @@ case "$1" in
                 ;;
         esac
         echo "Creating package(s): $generators"
-        (cd "$BUILD_DIR" && cpack -G "$generators" --config CPackConfig.cmake)
-        echo "Package(s) written to $BUILD_DIR/"
-        ls -lh "$BUILD_DIR"/email-cli_*.deb "$BUILD_DIR"/email-cli-*.rpm 2>/dev/null || true
+        # build/packages/ holds exactly the packages of this run: it is emptied
+        # first, and left empty when the run fails (packaging policy, "Where
+        # the output goes").  The cd is checked so the rm can only act there.
+        PKG_DIR="$(cd "$BUILD_DIR" && pwd)/packages"
+        mkdir -p "$PKG_DIR" || exit 1
+        ( cd "$PKG_DIR" && rm -f -- ./*.deb ./*.rpm && rm -rf _CPack_Packages ) || exit 1
+        # umask 022: CPack copies the caller's umask into the directory modes
+        # of the package (packaging policy, "The umask leak").
+        if ! ( umask 022; cd "$BUILD_DIR" && cpack -G "$generators" --config CPackConfig.cmake -B "$PKG_DIR" ); then
+            ( cd "$PKG_DIR" && rm -f -- ./*.deb ./*.rpm && rm -rf _CPack_Packages )
+            echo "ERROR: packaging failed; $PKG_DIR is left empty." >&2
+            exit 1
+        fi
+        # CPack's staging tree is not a package; the directory is the packages.
+        ( cd "$PKG_DIR" && rm -rf _CPack_Packages ) || exit 1
+        # One package per requested generator, or the run is not a result.
+        built=$(find "$PKG_DIR" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)
+        if [ "$built" -lt 1 ]; then
+            echo "ERROR: cpack reported success but $PKG_DIR holds no package." >&2
+            exit 1
+        fi
+        # A package that is not lintian-clean is not a result (packaging policy,
+        # "The package passes lintian"): the packages are removed and the run fails.
+        for deb in "$PKG_DIR"/*.deb; do
+            [ -e "$deb" ] || continue
+            if ! command -v lintian >/dev/null; then
+                echo "ERROR: lintian is not installed; cannot check $deb." >&2
+                ( cd "$PKG_DIR" && rm -f -- ./*.deb ./*.rpm )
+                exit 1
+            fi
+            if ! lintian --fail-on error,warning "$deb"; then
+                echo "ERROR: lintian findings in $deb; $PKG_DIR is left empty." >&2
+                ( cd "$PKG_DIR" && rm -f -- ./*.deb ./*.rpm )
+                exit 1
+            fi
+        done
+        echo "Package(s) written to $PKG_DIR/"
+        ls -lh "$PKG_DIR"
         ;;
     uninstall)
         do_uninstall
+        ;;
+    timing)
+        line=$(gate_line) || { echo "$line"; exit 1; }
+        echo "$line"
+        if [ -n "$2" ]; then
+            issue-cli issue comment "$2" "$line"
+        fi
         ;;
     clean-logs)
         if [ -f "$BIN_PATH" ]; then

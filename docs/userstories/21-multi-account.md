@@ -19,7 +19,7 @@
 | 7 | Pressing **Backspace** from the folder-root level returns to the Accounts screen. |
 | 8 | Each account's IMAP local-store is isolated (`email-tui` re-initialises the store when switching). |
 | 9 | Pressing **h** or **?** shows the accounts keyboard shortcuts overlay. |
-| 10 | **Backspace** on the Accounts screen itself is ignored (does not quit). Only **ESC** / **q** / Ctrl-C exit the program from the top level. |
+| 10 | **Backspace** on the Accounts screen itself is ignored (does not quit). **ESC** and Ctrl-C exit the program from the top level; **q** never quits (it only goes back, and there is nowhere to go). |
 | 11 | When returning to the Accounts screen (after navigating into an account and back), the cursor is positioned on the account that was previously open, not on the first one. |
 | 12 | The **Unread** and **Flagged** counts are read from local manifests (no network required) and reflect the totals across all folders for each account. |
 | 13 | Pressing **i** opens the IMAP wizard for the selected account; the updated config is saved if the wizard completes successfully. |
@@ -29,7 +29,7 @@
 ## Navigation hierarchy
 
 ```
-Accounts screen  (ESC/q → quit; Backspace → ignored)
+Accounts screen  (ESC / Ctrl-C → quit; q and Backspace → ignored)
     └─ Folder browser  (Backspace at root → Accounts)
            └─ Message list  (Backspace → Folder browser)
                   └─ Message reader  (Backspace → Message list)
@@ -61,8 +61,8 @@ Accounts screen  (ESC/q → quit; Backspace → ignored)
 | d | Delete selected account |
 | i | Edit IMAP settings for selected account |
 | e | Edit SMTP settings for selected account |
-| ESC / q | Quit |
-| Backspace | Ignored (no action at top level) |
+| ESC / Ctrl-C | Quit (top level) |
+| q / Backspace | Ignored (no action at top level) |
 | h / ? | Show help overlay |
 
 ---

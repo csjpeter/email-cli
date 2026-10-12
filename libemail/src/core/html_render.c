@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-29 */
+/* Renders a parsed HTML tree as terminal or plain text. */
 #include "html_render.h"
 #include "html_parser.h"
 #include "html_medium.h"

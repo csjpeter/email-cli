@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-17 */
+/* OAuth2 authorisation and token refresh for the Gmail API. */
 #include "gmail_auth.h"
 #include "json_util.h"
 #include "logger.h"
@@ -259,8 +263,8 @@ int gmail_auth_device_flow(Config *cfg) {
      * On headless CI/servers this exits quickly; on desktops the browser opens. */
     RAII_STRING char *browser_cmd = NULL;
     if (asprintf(&browser_cmd,
-                 "(xdg-open '%s' || open '%s' || start '%s') >/dev/null 2>&1 &",
-                 auth_url, auth_url, auth_url) != -1) {
+                 "xdg-open '%s' >/dev/null 2>&1 &",
+                 auth_url) != -1) {
         int rc = system(browser_cmd);
         (void)rc;
     }

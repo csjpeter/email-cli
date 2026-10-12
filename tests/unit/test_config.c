@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-25 */
+/* Unit tests of the account configuration. */
 #include "test_helpers.h"
 #include "config_store.h"
 #include "fs_util.h"
@@ -19,12 +23,12 @@ static void config_cleanup(void *ptr) {
 void test_config_store(void) {
     char *old_home = getenv("HOME");
     char *old_xdg  = getenv("XDG_CONFIG_HOME");
-    setenv("HOME", "/tmp/email-cli-test-home", 1);
+    setenv("HOME", TP("email-cli-test-home"), 1);
     unsetenv("XDG_CONFIG_HOME");
     /* Pre-clean: remove any leftover account from previous test runs */
-    unlink("/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
-    rmdir("/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com");
-    rmdir("/tmp/email-cli-test-home/.config/email-cli/accounts");
+    unlink(TP("email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini"));
+    rmdir(TP("email-cli-test-home/.config/email-cli/accounts/test@test.com"));
+    rmdir(TP("email-cli-test-home/.config/email-cli/accounts"));
 
     // 1. Test Save
     {
@@ -55,7 +59,7 @@ void test_config_store(void) {
     // 3. Test Load - incomplete config (missing host) → should return NULL
     {
         const char *acct_path =
-            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+            TP("email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
         FILE *fp = fopen(acct_path, "w");
         if (fp) {
             fprintf(fp, "EMAIL_USER=test@test.com\n");
@@ -68,7 +72,7 @@ void test_config_store(void) {
 
     // 4. Test Load - no config file → should return NULL
     {
-        unlink("/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
+        unlink(TP("email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini"));
         RAII_WITH_CLEANUP(config_cleanup) Config *loaded = config_load_from_store();
         ASSERT(loaded == NULL, "config_load_from_store should return NULL when file is missing");
     }
@@ -98,7 +102,7 @@ void test_config_store(void) {
     // 6. Test Load - host without protocol prefix → should return NULL with error
     {
         const char *acct_path =
-            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+            TP("email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
         FILE *fp = fopen(acct_path, "w");
         if (fp) {
             fprintf(fp, "EMAIL_HOST=box.example.com\n");
@@ -117,9 +121,9 @@ void test_config_store(void) {
     // 8. config_save_to_store fails: fs_mkdir_p fails
     // Make .config directory non-writable so subdirectory creation fails
     {
-        setenv("HOME", "/tmp/email-cli-test-home-fail", 1);
-        fs_mkdir_p("/tmp/email-cli-test-home-fail/.config", 0700);
-        chmod("/tmp/email-cli-test-home-fail/.config", 0000);
+        setenv("HOME", TP("email-cli-test-home-fail"), 1);
+        fs_mkdir_p(TP("email-cli-test-home-fail/.config"), 0700);
+        chmod(TP("email-cli-test-home-fail/.config"), 0000);
 
         Config cfg_fail = {0};
         cfg_fail.host   = strdup("imaps://imap.test.com");
@@ -130,7 +134,7 @@ void test_config_store(void) {
         int res = config_save_to_store(&cfg_fail);
         ASSERT(res == -1, "config_save_to_store: mkdir fail should return -1");
 
-        chmod("/tmp/email-cli-test-home-fail/.config", 0700);
+        chmod(TP("email-cli-test-home-fail/.config"), 0700);
         free(cfg_fail.host);
         free(cfg_fail.user);
         free(cfg_fail.pass);
@@ -140,11 +144,11 @@ void test_config_store(void) {
     // 9. config_save_to_store fails: fopen fails
     // Create account dir, then place a directory at the config.ini path
     {
-        setenv("HOME", "/tmp/email-cli-test-home-fopen", 1);
-        fs_mkdir_p("/tmp/email-cli-test-home-fopen/.config/email-cli/accounts/test@test.com",
+        setenv("HOME", TP("email-cli-test-home-fopen"), 1);
+        fs_mkdir_p(TP("email-cli-test-home-fopen/.config/email-cli/accounts/test@test.com"),
                    0700);
         // Create a directory at the config file path to make fopen("w") fail
-        mkdir("/tmp/email-cli-test-home-fopen/.config/email-cli/accounts/test@test.com/config.ini",
+        mkdir(TP("email-cli-test-home-fopen/.config/email-cli/accounts/test@test.com/config.ini"),
               0700);
 
         Config cfg_fopen = {0};
@@ -156,7 +160,7 @@ void test_config_store(void) {
         int res = config_save_to_store(&cfg_fopen);
         ASSERT(res == -1, "config_save_to_store: fopen on dir should return -1");
 
-        rmdir("/tmp/email-cli-test-home-fopen/.config/email-cli/accounts/test@test.com/config.ini");
+        rmdir(TP("email-cli-test-home-fopen/.config/email-cli/accounts/test@test.com/config.ini"));
         free(cfg_fopen.host);
         free(cfg_fopen.user);
         free(cfg_fopen.pass);
@@ -165,9 +169,9 @@ void test_config_store(void) {
 
     // 10. SMTP fields round-trip (covers lines 79-82 in config_store.c)
     {
-        setenv("HOME", "/tmp/email-cli-test-home", 1);
+        setenv("HOME", TP("email-cli-test-home"), 1);
         const char *acct_path =
-            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+            TP("email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
         FILE *fp = fopen(acct_path, "w");
         if (fp) {
             fprintf(fp, "EMAIL_HOST=imaps://imap.test.com\n");
@@ -195,9 +199,9 @@ void test_config_store(void) {
 
     // 11. Gmail mode config load (covers lines 83-86 in config_store.c)
     {
-        setenv("HOME", "/tmp/email-cli-test-home", 1);
+        setenv("HOME", TP("email-cli-test-home"), 1);
         const char *acct_path =
-            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+            TP("email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
         FILE *fp = fopen(acct_path, "w");
         if (fp) {
             fprintf(fp, "EMAIL_USER=gmailuser@gmail.com\n");
@@ -226,9 +230,9 @@ void test_config_store(void) {
 
     // 12. Gmail mode: missing refresh token → NULL (covers line 92)
     {
-        setenv("HOME", "/tmp/email-cli-test-home", 1);
+        setenv("HOME", TP("email-cli-test-home"), 1);
         const char *acct_path =
-            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+            TP("email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
         FILE *fp = fopen(acct_path, "w");
         if (fp) {
             fprintf(fp, "EMAIL_USER=gmailuser@gmail.com\n");
@@ -244,9 +248,9 @@ void test_config_store(void) {
 
     // 13. SMTP host without smtps:// prefix → rejected (covers lines 110-118)
     {
-        setenv("HOME", "/tmp/email-cli-test-home", 1);
+        setenv("HOME", TP("email-cli-test-home"), 1);
         const char *acct_path =
-            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+            TP("email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
         FILE *fp = fopen(acct_path, "w");
         if (fp) {
             fprintf(fp, "EMAIL_HOST=imaps://imap.test.com\n");
@@ -264,9 +268,9 @@ void test_config_store(void) {
     // 14. ssl_no_verify=1 with non-TLS host and SMTP → warnings logged
     //     (covers lines 124 and 128-129)
     {
-        setenv("HOME", "/tmp/email-cli-test-home", 1);
+        setenv("HOME", TP("email-cli-test-home"), 1);
         const char *acct_path =
-            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+            TP("email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
         FILE *fp = fopen(acct_path, "w");
         if (fp) {
             fprintf(fp, "EMAIL_HOST=imap.insecure.com\n");
@@ -288,11 +292,11 @@ void test_config_store(void) {
     // 15. config_delete_account: non-empty dir → rmdir fails, returns -1
     //     (covers lines 194-195)
     {
-        setenv("HOME", "/tmp/email-cli-test-home", 1);
+        setenv("HOME", TP("email-cli-test-home"), 1);
         const char *dir =
-            "/tmp/email-cli-test-home/.config/email-cli/accounts/nodelete@test.com";
+            TP("email-cli-test-home/.config/email-cli/accounts/nodelete@test.com");
         const char *extra_file =
-            "/tmp/email-cli-test-home/.config/email-cli/accounts/nodelete@test.com/extra.txt";
+            TP("email-cli-test-home/.config/email-cli/accounts/nodelete@test.com/extra.txt");
         fs_mkdir_p(dir, 0700);
         FILE *fp = fopen(extra_file, "w");
         if (fp) { fprintf(fp, "extra\n"); fclose(fp); }
@@ -307,10 +311,10 @@ void test_config_store(void) {
 
     // 16. Multiple accounts → sorting path exercised (covers lines 243-264)
     {
-        setenv("HOME", "/tmp/email-cli-test-multiacct", 1);
+        setenv("HOME", TP("email-cli-test-multiacct"), 1);
         unsetenv("XDG_CONFIG_HOME");
         const char *base =
-            "/tmp/email-cli-test-multiacct/.config/email-cli/accounts";
+            TP("email-cli-test-multiacct/.config/email-cli/accounts");
 
         /* Account 1: bob@beta.com — different domain */
         char path[256];
@@ -373,21 +377,21 @@ void test_config_store(void) {
         config_free_account_list(list, count);
 
         /* cleanup */
-        unlink("/tmp/email-cli-test-multiacct/.config/email-cli/accounts/bob@beta.com/config.ini");
-        rmdir("/tmp/email-cli-test-multiacct/.config/email-cli/accounts/bob@beta.com");
-        unlink("/tmp/email-cli-test-multiacct/.config/email-cli/accounts/alice@alpha.com/config.ini");
-        rmdir("/tmp/email-cli-test-multiacct/.config/email-cli/accounts/alice@alpha.com");
-        unlink("/tmp/email-cli-test-multiacct/.config/email-cli/accounts/zara@alpha.com/config.ini");
-        rmdir("/tmp/email-cli-test-multiacct/.config/email-cli/accounts/zara@alpha.com");
+        unlink(TP("email-cli-test-multiacct/.config/email-cli/accounts/bob@beta.com/config.ini"));
+        rmdir(TP("email-cli-test-multiacct/.config/email-cli/accounts/bob@beta.com"));
+        unlink(TP("email-cli-test-multiacct/.config/email-cli/accounts/alice@alpha.com/config.ini"));
+        rmdir(TP("email-cli-test-multiacct/.config/email-cli/accounts/alice@alpha.com"));
+        unlink(TP("email-cli-test-multiacct/.config/email-cli/accounts/zara@alpha.com/config.ini"));
+        rmdir(TP("email-cli-test-multiacct/.config/email-cli/accounts/zara@alpha.com"));
     }
 
     // 17. config_list_accounts realloc path: create 9 accounts (cap starts at
     //     8, so the 9th triggers realloc) — covers lines 227-230
     {
-        setenv("HOME", "/tmp/email-cli-test-manyacct", 1);
+        setenv("HOME", TP("email-cli-test-manyacct"), 1);
         unsetenv("XDG_CONFIG_HOME");
         const char *base =
-            "/tmp/email-cli-test-manyacct/.config/email-cli/accounts";
+            TP("email-cli-test-manyacct/.config/email-cli/accounts");
 
         /* usernames chosen to produce a valid IMAP host pattern */
         const char *users[] = {
@@ -418,21 +422,21 @@ void test_config_store(void) {
         /* cleanup */
         for (int i = 0; i < nacct; i++) {
             snprintf(path, sizeof(path),
-                     "/tmp/email-cli-test-manyacct/.config/email-cli/accounts/%s/config.ini",
-                     users[i]);
+                     "%s/email-cli-test-manyacct/.config/email-cli/accounts/%s/config.ini",
+                     test_scratch_dir(), users[i]);
             unlink(path);
             snprintf(path, sizeof(path),
-                     "/tmp/email-cli-test-manyacct/.config/email-cli/accounts/%s",
-                     users[i]);
+                     "%s/email-cli-test-manyacct/.config/email-cli/accounts/%s",
+                     test_scratch_dir(), users[i]);
             rmdir(path);
         }
     }
 
     // 18. TRASH_FOLDER round-trip (covers TRASH_FOLDER save/load paths)
     {
-        setenv("HOME", "/tmp/email-cli-test-home", 1);
+        setenv("HOME", TP("email-cli-test-home"), 1);
         const char *acct_path =
-            "/tmp/email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini";
+            TP("email-cli-test-home/.config/email-cli/accounts/test@test.com/config.ini");
         FILE *fp = fopen(acct_path, "w");
         if (fp) {
             fprintf(fp, "EMAIL_HOST=imaps://imap.test.com\n");
@@ -461,7 +465,7 @@ void test_config_store(void) {
 void test_config_settings(void) {
     char *old_home = getenv("HOME");
     char *old_xdg  = getenv("XDG_CONFIG_HOME");
-    setenv("HOME", "/tmp/email-cli-settings-test", 1);
+    setenv("HOME", TP("email-cli-settings-test"), 1);
     unsetenv("XDG_CONFIG_HOME");
 
     int rc = app_settings_set_obfuscation(0);
@@ -482,7 +486,7 @@ void test_config_settings(void) {
 void test_config_load_account(void) {
     char *old_home = getenv("HOME");
     char *old_xdg  = getenv("XDG_CONFIG_HOME");
-    setenv("HOME", "/tmp/email-cli-load-acct-test", 1);
+    setenv("HOME", TP("email-cli-load-acct-test"), 1);
     unsetenv("XDG_CONFIG_HOME");
 
     Config cfg = {0};
@@ -519,7 +523,7 @@ void test_config_load_account(void) {
 void test_config_migrate(void) {
     char *old_home = getenv("HOME");
     char *old_xdg  = getenv("XDG_CONFIG_HOME");
-    setenv("HOME", "/tmp/email-cli-migrate-test", 1);
+    setenv("HOME", TP("email-cli-migrate-test"), 1);
     unsetenv("XDG_CONFIG_HOME");
 
     Config cfg = {0};
@@ -534,7 +538,7 @@ void test_config_migrate(void) {
     ASSERT(rc == 0, "config_migrate_credentials: returns 0");
 
     /* No accounts → also returns 0 */
-    setenv("HOME", "/tmp/email-cli-migrate-empty-test", 1);
+    setenv("HOME", TP("email-cli-migrate-empty-test"), 1);
     rc = config_migrate_credentials();
     ASSERT(rc == 0, "config_migrate_credentials: empty home returns 0");
 

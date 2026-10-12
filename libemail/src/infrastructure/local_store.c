@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-26 */
+/* Local message storage with reverse digit bucketing and text indexes. */
 #include "local_store.h"
 #include "fs_util.h"
 #include "mime_util.h"
@@ -1301,6 +1305,64 @@ void local_pending_flag_clear(const char *folder) {
     if (path) remove(path);
 }
 
+/* ── Pending Gmail label changes ──────────────────────────────────────── */
+
+static char *pending_label_path(void) {
+    if (!g_account_base[0]) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/pending_labels.tsv", g_account_base) == -1)
+        return NULL;
+    return path;
+}
+
+int local_pending_label_add(const char *uid, const char *label, int add) {
+    if (!uid || !label || !label[0] || strpbrk(label, "\t\n")) return -1;
+    RAII_STRING char *path = pending_label_path();
+    if (!path) return -1;
+    fs_mkdir_p(g_account_base, 0700);
+    RAII_FILE FILE *fp = fopen(path, "a");
+    if (!fp) return -1;
+    fprintf(fp, "%s\t%s\t%d\n", uid, label, add ? 1 : 0);
+    return 0;
+}
+
+PendingLabel *local_pending_label_load(int *count_out) {
+    *count_out = 0;
+    RAII_STRING char *path = pending_label_path();
+    if (!path) return NULL;
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+
+    int cap = 16, count = 0;
+    PendingLabel *arr = malloc((size_t)cap * sizeof(PendingLabel));
+    if (!arr) return NULL;
+
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        int add_val;
+        char uid_str[17], label[256];
+        if (sscanf(line, "%16[^\t]\t%255[^\t]\t%d", uid_str, label, &add_val) != 3)
+            continue;
+        if (count == cap) {
+            cap *= 2;
+            PendingLabel *tmp = realloc(arr, (size_t)cap * sizeof(PendingLabel));
+            if (!tmp) break;
+            arr = tmp;
+        }
+        snprintf(arr[count].uid, sizeof(arr[count].uid), "%s", uid_str);
+        snprintf(arr[count].label, sizeof(arr[count].label), "%s", label);
+        arr[count].add = add_val;
+        count++;
+    }
+    *count_out = count;
+    return arr;
+}
+
+void local_pending_label_clear(void) {
+    RAII_STRING char *path = pending_label_path();
+    if (path) remove(path);
+}
+
 /* ── Pending folder moves ─────────────────────────────────────────────── */
 
 static char *pending_move_path(const char *folder) {
@@ -2173,8 +2235,8 @@ void local_pending_append_remove(const char *folder, const char *uid) {
         fputs(line, wfp);
     }
 
-    /* Close both handles before renaming: the write must be flushed, and on
-     * Windows a rename over an open file fails. */
+    /* Close both handles before renaming: the write must be flushed before
+     * the rename. */
     fclose(wfp); wfp = NULL;
     fclose(rfp); rfp = NULL;
 

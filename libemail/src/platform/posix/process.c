@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-09 */
+/* POSIX process identity helpers. */
 #include "../process.h"
 #include <unistd.h>
 #include <signal.h>
@@ -9,11 +13,10 @@ pid_t platform_getpid(void) {
 }
 
 int platform_pid_is_program(pid_t pid, const char *progname) {
-    /* Check liveness with signal 0 (POSIX — Linux, macOS, Android) */
+    /* Check liveness with signal 0 (POSIX) */
     if (kill(pid, 0) != 0)
         return 0;
 
-#ifdef __linux__
     /* Verify executable name via /proc/<pid>/comm */
     char path[64];
     snprintf(path, sizeof(path), "/proc/%d/comm", (int)pid);
@@ -31,11 +34,4 @@ int platform_pid_is_program(pid_t pid, const char *progname) {
     }
     fclose(f);
     return 1; /* can't verify — conservatively assume it matches */
-#else
-    /* macOS / Android: process exists, assume it's our program.
-     * A stale PID file from a crashed previous run is handled by the
-     * caller checking the file's age or by the mismatch being rare. */
-    (void)progname;
-    return 1;
-#endif
 }

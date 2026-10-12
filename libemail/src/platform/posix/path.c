@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-27 */
+/* POSIX home, config and cache directories from HOME and XDG variables. */
 /**
  * POSIX path implementation.
  * Uses $HOME / $XDG_CACHE_HOME / $XDG_CONFIG_HOME / $XDG_DATA_HOME,
@@ -10,9 +14,6 @@
 #include <pwd.h>
 #include <unistd.h>
 #include <sys/types.h>
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#endif
 
 static char g_home[4096];
 static char g_cache[8192];
@@ -68,18 +69,7 @@ const char *platform_data_dir(void) {
 
 int platform_executable_path(char *buf, size_t size) {
     if (!buf || size == 0) return -1;
-#ifdef __linux__
     ssize_t n = readlink("/proc/self/exe", buf, size - 1);
     if (n > 0) { buf[n] = '\0'; return 0; }
     return -1;
-#elif defined(__APPLE__)
-    uint32_t len = (uint32_t)size;
-    if (_NSGetExecutablePath(buf, &len) == 0) return 0;
-    return -1;
-#else
-    /* Generic POSIX fallback: try /proc/curproc/file (FreeBSD) */
-    ssize_t n = readlink("/proc/curproc/file", buf, size - 1);
-    if (n > 0) { buf[n] = '\0'; return 0; }
-    return -1;
-#endif
 }

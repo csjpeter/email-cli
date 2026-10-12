@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-19 */
+/* PTY tests of the Gmail interactions of the TUI. */
 /**
  * @file test_pty_gmail_tui.c
  * @brief PTY tests for Gmail TUI interactions.
@@ -7,7 +11,7 @@
  *
  * Usage: test-pty-gmail-tui <email-tui> <email-sync> <mock-gmail-server>
  *
- * The mock Gmail API server is started on GMAIL_PTY_PORT; the environment
+ * The mock Gmail API server is started on a port the kernel picks; the environment
  * variable GMAIL_API_BASE_URL is set so that both email-sync and email-tui
  * talk to the mock instead of the real Gmail API.
  *
@@ -23,6 +27,8 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "test_scratch.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,11 +43,10 @@
 int g_tests_run    = 0;
 int g_tests_failed = 0;
 
-#define RUN_TEST(fn) do { printf("  %s...\n", #fn); fn(); } while(0)
+#define RUN_TEST(fn) do { if (!test_selected(#fn)) break; printf("  %s...\n", #fn); fn(); } while(0)
 
 /* ── Configuration ───────────────────────────────────────────────────── */
 
-#define GMAIL_PTY_PORT   9096
 #define GMAIL_PTY_COUNT  5
 #define GMAIL_TEST_EMAIL "ptygtest@gmail.com"
 /* Top-most message in the list (sorted by UID descending, same date) */
@@ -57,6 +62,7 @@ int g_tests_failed = 0;
 /* ── Global state ────────────────────────────────────────────────────── */
 
 static pid_t g_mock_pid = -1;
+static int   g_mock_port = 0;   /* picked by the kernel, published by the mock */
 static char  g_test_home[256];
 static char  g_tui_bin[512];
 static char  g_sync_bin[512];
@@ -95,35 +101,16 @@ static void write_gmail_config(void) {
 }
 
 static int start_gmail_mock(void) {
-    g_mock_pid = fork();
-    if (g_mock_pid < 0) return -1;
-    if (g_mock_pid == 0) {
-        char port_str[16], count_str[16];
-        snprintf(port_str,  sizeof(port_str),  "%d", GMAIL_PTY_PORT);
-        snprintf(count_str, sizeof(count_str), "%d", GMAIL_PTY_COUNT);
-        setenv("MOCK_GMAIL_PORT",           port_str,          1);
-        setenv("MOCK_GMAIL_COUNT",          count_str,         1);
-        setenv("MOCK_GMAIL_EMAIL",          GMAIL_TEST_EMAIL,  1);
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) { dup2(devnull, 1); dup2(devnull, 2); close(devnull); }
-        execl(g_mock_bin, "mock_gmail_api_server", (char *)NULL);
-        _exit(127);
-    }
-    /* Poll until the server accepts connections (max 3 s) */
-    for (int i = 0; i < 30; i++) {
-        usleep(100000);
-        int fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (fd < 0) continue;
-        struct sockaddr_in addr = {
-            .sin_family      = AF_INET,
-            .sin_port        = htons(GMAIL_PTY_PORT),
-            .sin_addr.s_addr = htonl(INADDR_LOOPBACK)
-        };
-        int rc = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-        close(fd);
-        if (rc == 0) return 0;
-    }
-    return -1;
+    /* The mock's scenario is its environment; the port is the kernel's pick,
+     * read back from the file the mock publishes it in. */
+    char count_str[16];
+    snprintf(count_str, sizeof(count_str), "%d", GMAIL_PTY_COUNT);
+    setenv("MOCK_GMAIL_COUNT", count_str, 1);
+    setenv("MOCK_GMAIL_EMAIL", GMAIL_TEST_EMAIL, 1);
+    g_mock_pid = test_spawn_mock(g_mock_bin, "MOCK_GMAIL", 0, &g_mock_port);
+    unsetenv("MOCK_GMAIL_COUNT");
+    unsetenv("MOCK_GMAIL_EMAIL");
+    return g_mock_pid < 0 ? -1 : 0;
 }
 
 static void stop_gmail_mock(void) {
@@ -178,19 +165,25 @@ static void write_folder_pref(const char *folder) {
  */
 static int reset_and_sync(void) {
     /* Remove the per-account local store */
-    char cmd[600];
-    snprintf(cmd, sizeof(cmd),
-             "rm -rf '/tmp/email-cli-gmail-pty-%d/.local/share/email-cli/accounts/%s'",
-             (int)getpid(), GMAIL_TEST_EMAIL);
-    int _rc1 = system(cmd);  (void)_rc1;  /* test-only, path is controlled */
+    char store[600];
+    snprintf(store, sizeof(store), "%s/.local/share/email-cli/accounts/%s",
+             g_test_home, GMAIL_TEST_EMAIL);
+    if (test_rmtree(store) != 0) {
+        fprintf(stderr, "gmail-tui: cannot wipe %s\n", store);
+        g_tests_failed++;
+        return -1;
+    }
 
     /* Also clear the shared UI prefs file (it remembers the last-used folder
      * cursor; stale entries would make subsequent tests open the wrong label). */
-    char cmd2[600];
-    snprintf(cmd2, sizeof(cmd2),
-             "rm -f '%s/.local/share/email-cli/ui.ini'",
+    char ui_ini[600];
+    snprintf(ui_ini, sizeof(ui_ini), "%s/.local/share/email-cli/ui.ini",
              g_test_home);
-    int _rc2 = system(cmd2);  (void)_rc2;
+    if (unlink(ui_ini) != 0 && errno != ENOENT) {
+        fprintf(stderr, "gmail-tui: cannot remove %s: %s\n", ui_ini, strerror(errno));
+        g_tests_failed++;
+        return -1;
+    }
 
     /* Pin the folder cursor to INBOX.  Without a saved preference email-tui
      * opens the __unread__ virtual label instead, and navigate_to_inbox()
@@ -486,6 +479,102 @@ static void test_label_picker_shows_unread(void) {
     ASSERT_SCREEN_CONTAINS(s, "UNREAD");
 
     pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  Label browser: cross-folder search ('/') and label creation ('c')
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static PtySession *open_label_browser(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    if (!s) return NULL;
+    if (pty_run(s, args) != 0 ||
+        pty_wait_for(s, "Email Accounts", WAIT_MS) != 0) {
+        pty_close(s);
+        return NULL;
+    }
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "Labels", WAIT_MS) != 0) {
+        pty_close(s);
+        return NULL;
+    }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+static void test_label_browser_search_prompt_and_scopes(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label browser: reaches the label list");
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]:", WAIT_MS);
+    pty_send_str(s, "abc");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Search [Subject]: abc");
+    pty_send_key(s, PTY_KEY_BACK);                 /* Backspace removes one */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Search [Subject]: ab");
+    pty_send_key(s, PTY_KEY_TAB);                  /* Tab cycles the scope */
+    ASSERT_WAIT_FOR(s, "Search [From]:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [To]:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [Body]:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [Subject]:", WAIT_MS);   /* wraps around */
+    pty_send_key(s, PTY_KEY_ESC);                  /* cancel: back in the browser */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Labels");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_label_browser_search_runs(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label browser: reaches the label list");
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]:", WAIT_MS);
+    pty_send_str(s, "Message");
+    pty_send_key(s, PTY_KEY_ENTER);
+    /* A search is a listing of the cached messages that match. */
+    ASSERT_WAIT_FOR(s, "message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Search");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_label_browser_create_label_prompt(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label browser: reaches the label list");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
+    pty_send_str(s, "PtyMade");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "New label name: PtyMade");
+    pty_send_key(s, PTY_KEY_ESC);                  /* cancel: nothing is created */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Labels");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_label_browser_create_label_confirmed(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label browser: reaches the label list");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
+    pty_send_str(s, "PtyMade");
+    pty_send_key(s, PTY_KEY_ENTER);
+    /* The browser redraws with the label list rebuilt; it is still the
+     * label browser, and the new name is among the labels. */
+    ASSERT_WAIT_FOR(s, "PtyMade", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Labels");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -1579,15 +1668,15 @@ static void test_feedback_t_label_added(void) {
 
 /** Clear account local store without running a sync. */
 static void clear_gmail_local_store(void) {
-    char cmd[640];
-    snprintf(cmd, sizeof(cmd),
-             "rm -rf '/tmp/email-cli-gmail-pty-%d/.local/share/email-cli/accounts/%s'",
-             (int)getpid(), GMAIL_TEST_EMAIL);
-    int _rc1 = system(cmd);  (void)_rc1;
-    char cmd2[640];
-    snprintf(cmd2, sizeof(cmd2),
-             "rm -f '%s/.local/share/email-cli/ui.ini'", g_test_home);
-    int _rc2 = system(cmd2); (void)_rc2;
+    char store[640], ui_ini[640];
+    snprintf(store, sizeof(store), "%s/.local/share/email-cli/accounts/%s",
+             g_test_home, GMAIL_TEST_EMAIL);
+    snprintf(ui_ini, sizeof(ui_ini), "%s/.local/share/email-cli/ui.ini",
+             g_test_home);
+    if (test_rmtree(store) != 0 || (unlink(ui_ini) != 0 && errno != ENOENT)) {
+        fprintf(stderr, "gmail-tui: cannot clear the local store\n");
+        g_tests_failed++;
+    }
 }
 
 /** Run email-sync and capture stdout + stderr into out_buf. */
@@ -1793,16 +1882,12 @@ int main(int argc, char *argv[]) {
     snprintf(g_tui_bin,  sizeof(g_tui_bin),  "%s", argv[1]);
     snprintf(g_sync_bin, sizeof(g_sync_bin), "%s", argv[2]);
     snprintf(g_mock_bin, sizeof(g_mock_bin), "%s", argv[3]);
-    snprintf(g_api_url,  sizeof(g_api_url),
-             "http://localhost:%d/gmail/v1/users/me", GMAIL_PTY_PORT);
 
     /* Redirect the test to a private HOME so it never touches the real inbox */
     const char *old_home = getenv("HOME");
-    snprintf(g_test_home, sizeof(g_test_home),
-             "/tmp/email-cli-gmail-pty-%d", getpid());
+    snprintf(g_test_home, sizeof(g_test_home), "%s", TP("home"));
 
     setenv("HOME",               g_test_home,     1);
-    setenv("GMAIL_API_BASE_URL", g_api_url,        1);
     setenv("GMAIL_TEST_TOKEN",   "test_fake_token", 1);
     unsetenv("XDG_CONFIG_HOME");
     unsetenv("XDG_CACHE_HOME");
@@ -1810,12 +1895,16 @@ int main(int argc, char *argv[]) {
 
     write_gmail_config();
 
-    printf("--- Starting mock Gmail API server (port %d, %d messages) ---\n",
-           GMAIL_PTY_PORT, GMAIL_PTY_COUNT);
+    printf("--- Starting mock Gmail API server (%d messages) ---\n",
+           GMAIL_PTY_COUNT);
     if (start_gmail_mock() != 0) {
         fprintf(stderr, "FATAL: cannot start mock Gmail API server\n");
+        g_tests_failed++;           /* a fixture that cannot start is a failure */
         goto done;
     }
+    snprintf(g_api_url, sizeof(g_api_url),
+             "http://localhost:%d/gmail/v1/users/me", g_mock_port);
+    setenv("GMAIL_API_BASE_URL", g_api_url, 1);
 
     /* Reset and re-populate the cache before each test so every test
      * starts from the same clean state (all 5 messages in INBOX). */
@@ -1829,6 +1918,10 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_d_key_row_stays_visible);
+    RUN_TEST(test_label_browser_search_prompt_and_scopes);
+    RUN_TEST(test_label_browser_search_runs);
+    RUN_TEST(test_label_browser_create_label_prompt);
+    RUN_TEST(test_label_browser_create_label_confirmed);
 
     printf("--- Fresh sync (test 2) ---\n");
     if (reset_and_sync() != 0) {

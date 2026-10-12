@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-24 */
+/* Entry point of email-tui: the full-screen interactive client. */
 /**
  * @file main_tui.c
  * @brief Entry point for email-tui — interactive full-screen TUI email client.
@@ -1636,6 +1640,22 @@ typedef struct {
     int  scroll;
 } WhenAtomList;
 
+/** Find the next " or " that is not inside a double-quoted pattern. */
+static const char *when_find_or(const char *p) {
+    int in_quote = 0;
+    for (; *p; p++) {
+        if (in_quote) {
+            if (*p == '\\' && p[1]) p++;
+            else if (*p == '"') in_quote = 0;
+        } else if (*p == '"') {
+            in_quote = 1;
+        } else if (strncmp(p, " or ", 4) == 0) {
+            return p;
+        }
+    }
+    return NULL;
+}
+
 static void when_list_split(WhenAtomList *wl, const char *expr) {
     wl->count = 0; wl->cursor = 0; wl->scroll = 0;
     if (!expr || !expr[0]) return;
@@ -1643,7 +1663,7 @@ static void when_list_split(WhenAtomList *wl, const char *expr) {
     while (*p) {
         while (*p == ' ') p++;
         if (!*p) break;
-        const char *next = strstr(p, " or ");
+        const char *next = when_find_or(p);
         size_t len = next ? (size_t)(next - p) : strlen(p);
         while (len > 0 && p[len-1] == ' ') len--;
         if (len > 0 && wl->count < WHEN_MAX_ATOMS) {

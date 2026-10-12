@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-05-05 */
+/* Parser, evaluator and builder of the boolean conditions of mail rules. */
 /**
  * @file when_expr.c
  * @brief Boolean condition expression parser, evaluator and builder (US-81).
@@ -62,14 +66,29 @@ static Tok lex_read(Lex *l) {
     memcpy(t.field, ws, wlen);
     t.field[wlen] = '\0';
 
-    /* Pattern: until whitespace, ')', '(', or EOF */
-    const char *ps = l->p;
-    while (*l->p && *l->p != ' ' && *l->p != '\t' &&
-           *l->p != ')' && *l->p != '(')
+    /* Pattern: either a double-quoted string ("..." with \" and \\ escapes,
+     * which may hold spaces and parentheses) or a bare word that ends at
+     * whitespace, ')', '(' or EOF. */
+    size_t plen = 0;
+    if (*l->p == '"') {
         l->p++;
-    size_t plen = (size_t)(l->p - ps);
-    if (plen >= sizeof(t.pat)) plen = sizeof(t.pat) - 1;
-    memcpy(t.pat, ps, plen);
+        while (*l->p && *l->p != '"') {
+            if (*l->p == '\\' && (l->p[1] == '"' || l->p[1] == '\\'))
+                l->p++;
+            if (plen < sizeof(t.pat) - 1) t.pat[plen++] = *l->p;
+            l->p++;
+        }
+        if (*l->p != '"') { t.type = T_ERR; return t; }   /* unterminated */
+        l->p++;
+    } else {
+        const char *ps = l->p;
+        while (*l->p && *l->p != ' ' && *l->p != '\t' &&
+               *l->p != ')' && *l->p != '(')
+            l->p++;
+        plen = (size_t)(l->p - ps);
+        if (plen >= sizeof(t.pat)) plen = sizeof(t.pat) - 1;
+        memcpy(t.pat, ps, plen);
+    }
     t.pat[plen] = '\0';
 
     t.type = T_ATOM;
@@ -253,6 +272,25 @@ int when_eval(const WhenNode *n,
 
 /* ── Expression builders ───────────────────────────────────────────── */
 
+/* Append a pattern; quote it when a bare word could not carry it. */
+static void buf_append_pattern(char *buf, size_t cap, const char *pattern) {
+    size_t used = strlen(buf);
+    int quote = pattern[0] == '"';
+    for (const char *q = pattern; *q && !quote; q++)
+        if (*q == ' ' || *q == '\t' || *q == '(' || *q == ')') quote = 1;
+    if (!quote) {
+        strncat(buf, pattern, cap - used - 1);
+        return;
+    }
+    if (used + 1 < cap) buf[used++] = '"';
+    for (const char *q = pattern; *q && used + 3 < cap; q++) {
+        if (*q == '"' || *q == '\\') buf[used++] = '\\';
+        buf[used++] = *q;
+    }
+    if (used + 1 < cap) buf[used++] = '"';
+    buf[used] = '\0';
+}
+
 /* Append an atom "field:pattern" (optionally negated) to a buffer. */
 static void buf_append_atom(char *buf, size_t cap,
                             const char *field, const char *pattern,
@@ -271,7 +309,7 @@ static void buf_append_atom(char *buf, size_t cap,
     used = strlen(buf);
     strncat(buf, ":", cap - used - 1);
     used = strlen(buf);
-    strncat(buf, pattern, cap - used - 1);
+    buf_append_pattern(buf, cap, pattern);
     *first = 0;
 }
 
@@ -329,7 +367,7 @@ char *when_from_conds(const WhenCond *conds, int nconds, int is_or) {
         used = strlen(buf);
         strncat(buf, ":", cap - used - 1);
         used = strlen(buf);
-        strncat(buf, c->pattern, cap - used - 1);
+        buf_append_pattern(buf, cap, c->pattern);
     }
 
     return buf[0] ? strdup(buf) : NULL;

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-04-18
+# Builds the demo video of one scenario.
+
 # demo/pipeline.sh — Per-scenario YouTube demo video builder.
 #
 # Dependencies:
@@ -87,7 +92,6 @@ echo "=== Step 3: Record terminal session with VHS ==="
 if ! command -v vhs &>/dev/null; then
     echo "ERROR: vhs not found." >&2
     echo "  Ubuntu: snap install vhs  OR  go install github.com/charmbracelet/vhs@latest" >&2
-    echo "  macOS:  brew install vhs" >&2
     exit 1
 fi
 # VHS requires a relative Output path (absolute paths are rejected by the parser).

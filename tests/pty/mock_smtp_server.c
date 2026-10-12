@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-13 */
+/* Mock TLS SMTP server for the compose and send tests. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -9,17 +13,18 @@
 #include <signal.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include "../common/mock_port.h"
 
 /**
  * @file mock_smtp_server.c
  * @brief Minimal TLS SMTP server for compose/send integration testing.
  *
- * Listens on port 9025 (configurable via MOCK_SMTP_PORT env var).
+ * Listens on a port the kernel picks (or MOCK_SMTP_PORT) and writes it to
+ * the file named by MOCK_SMTP_PORT_FILE.
  * Accepts one SMTP exchange, prints "RECEIVED" + message headers to stdout,
  * then accepts further connections until killed.
  */
 
-#define DEFAULT_PORT 9025
 
 static int readline_crlf_ssl(SSL *ssl, char *buf, int len) {
     int n = 0;
@@ -128,8 +133,7 @@ static void handle_client(SSL *ssl) {
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
 
-    const char *port_env = getenv("MOCK_SMTP_PORT");
-    int port = port_env ? atoi(port_env) : DEFAULT_PORT;
+    int port = mock_requested_port("MOCK_SMTP_PORT");   /* 0: the kernel picks */
 
     /* Load TLS certificate and key */
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
@@ -154,13 +158,22 @@ int main(void) {
     int srv = socket(AF_INET, SOCK_STREAM, 0);
     if (srv < 0) { perror("socket"); SSL_CTX_free(ctx); return 1; }
 
+    /* SO_REUSEADDR only, never SO_REUSEPORT: with it a second mock binds a
+     * port a stale one still holds and the kernel splits the connections
+     * between them at random, so a suite can read another fixture's data.
+     * Two mocks on one port must fail loudly (see mock_imap_server.c).  The
+     * return value is checked: an option that silently failed to apply is
+     * indistinguishable from one never set.  Loopback only. */
     int opt = 1;
-    setsockopt(srv, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+    if (setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) != 0) {
+        perror("setsockopt SO_REUSEADDR");
+        close(srv); SSL_CTX_free(ctx); return 1;
+    }
 
     struct sockaddr_in addr = {
         .sin_family      = AF_INET,
         .sin_port        = htons((uint16_t)port),
-        .sin_addr.s_addr = INADDR_ANY
+        .sin_addr.s_addr = htonl(INADDR_LOOPBACK)
     };
 
     if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
@@ -170,6 +183,8 @@ int main(void) {
         perror("listen"); close(srv); SSL_CTX_free(ctx); return 1;
     }
 
+    port = mock_publish_port(srv, "MOCK_SMTP_PORT_FILE");
+    if (port < 0) { close(srv); SSL_CTX_free(ctx); return 1; }
     printf("Mock SMTP server (TLS) listening on port %d\n", port);
     fflush(stdout);
 

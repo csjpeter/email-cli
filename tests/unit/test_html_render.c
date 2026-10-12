@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-29 */
+/* Unit tests of the HTML renderer. */
 #include "test_helpers.h"
 #include "html_render.h"
 #include <string.h>

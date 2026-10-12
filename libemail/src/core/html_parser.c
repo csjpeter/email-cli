@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-29 */
+/* HTML tokenizer and tree builder. */
 #include "html_parser.h"
 #include <stdio.h>
 #include <stdlib.h>

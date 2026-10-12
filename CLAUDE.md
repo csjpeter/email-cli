@@ -2,6 +2,34 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workspace policies
+
+This project follows the workspace policies in `../policies/` (GitHub
+`csjpeter/policies`, private). They stand above this project. **Before changing
+anything, read the ones that touch your task**; start from
+`../policies/README.md`, which lists them all. When this file and a policy
+disagree, stop and tell the owner; do not choose silently.
+
+The ones that bind every task:
+
+- `change-flow-model.md` and `issue-tracking-model.md`: every change has a
+  ticket in the issue manager and a branch named exactly after its key; commit
+  messages carry the key; a finished ticket goes to `READY`, and the owner closes.
+- `project-boundaries-model.md`: this project writes only inside its own
+  directory. **It never writes into `policies/`**; a finding about a policy or
+  another project is filed as a ticket under the key that owns it.
+- `testing-model.md`: every behaviour has a test that fails without the change;
+  tests keep every path under `build/` and never use `/tmp`.
+- `manage-sh-model.md`, `packaging-and-release-model.md`,
+  `dependencies-model.md`: build, package and link the way they say.
+- `source-header-model.md`, `licensing-model.md`: every source and script
+  carries the header; the licence is the project's own.
+- `platform-scope-model.md`, `private-names-model.md`: Linux only for now; the
+  owner's private domain appears in no file.
+
+Working through the approved tickets of this project by itself is the
+`work-on-tickets` skill; the supervisor may ask for one ticket by key.
+
 ## Build Commands
 
 ```bash
@@ -25,11 +53,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./manage.sh help       # Show available commands
 ```
 
-The tree has git submodules (`libs/libptytest`, `libs/libtuikit`): clone with
+The tree has a git submodule (`libs/libptytest`): clone with
 `git clone --recurse-submodules`, or run `git submodule update --init` in an
 existing checkout, before building.
 
-There is no Makefile — `manage.sh` calls CMake directly. There is no mechanism to run a single test in isolation; all unit tests run together via `build/tests/unit/test-runner`.
+There is no Makefile — `manage.sh` calls CMake directly. A single unit suite runs with `./manage.sh test <name-part>`, a functional phase with `./manage.sh functional <phases>`, a PTY suite with `./manage.sh pty <suite> [<name-part>]` (see `docs/dev/testing.md`).
 
 The functional suite has no dedicated `manage.sh` target; run it directly with
 `./tests/functional/run_functional.sh` after a build (it drives the mock IMAP /
@@ -48,8 +76,7 @@ Infrastructure →  libemail/src/infrastructure/{config_store,local_store,imap_c
 Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_parser,html_render,
                                      imap_util,input_line,path_complete,json_util}.c + raii.h
 Platform       →  libemail/src/platform/{terminal,path,process,credential_key}.h + html_medium.h
-                    libemail/src/platform/posix/{terminal,path,process,credential_key,html_medium}.c    (Linux/macOS/Android)
-                    libemail/src/platform/windows/{terminal,path,process,credential_key,html_medium}.c  (MinGW-w64)
+                    libemail/src/platform/posix/{terminal,path,process,credential_key,html_medium}.c    (Linux)
 Write library  →  libwrite/src/{smtp_adapter,compose_service}.c
 ```
 
@@ -95,109 +122,20 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libssl (OpenSSL), and libcurl (SMTP only, in libwrite).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
-The one library of the workspace used at run time is **libtuikit**
-(`libs/libtuikit`, a git submodule pinned to a release tag), linked
-**statically**: the binaries carry no run-time dependency on it, and the
-package declares none.  It replaces this project's own terminal code module by
-module (EMAIL-28); until a module is migrated, the old code stays authoritative.
-`libs/libptytest` is the PTY test harness, test-only.
+## Platform
 
-## Portability
+**The target platform is Linux (Debian).** A release for, or support of, macOS,
+iOS, Android or Windows is not a goal and nothing in this project may claim it
+(see `../policies/platform-scope-model.md`).  What binds the project to Linux is
+listed in `docs/portability.md`; keep that file current when a new Linux-specific
+dependency is added.
 
-**Target platforms: Linux (primary), macOS, Windows, Android.**
-
-Prefer standard C11 / POSIX interfaces.  Where platform-specific APIs are
-unavoidable, isolate them behind thin abstraction layers (e.g. a `platform/`
-module) so each target only needs to implement a small, well-defined surface.
-
-Known portability gaps that need shims before non-Linux builds work:
-
-| API / feature | macOS | Android (NDK) | Windows |
-|---|---|---|---|
-| `termios.h` raw mode | ✅ | ✅ | ❌ needs `GetConsoleMode`/`SetConsoleMode` |
-| `ioctl TIOCGWINSZ` | ✅ | ✅ | ❌ needs `GetConsoleScreenBufferInfo` |
-| `wcwidth(3)` | ✅ | ✅ | ❌ needs bundled implementation |
-| `asprintf` | ✅ | ✅ | ❌ needs a thin wrapper (available in MinGW) |
-| `iconv(3)` | ✅ | ⚠️ limited (NDK r23+) | ❌ needs libiconv or `WideCharToMultiByte` |
-| `__attribute__((cleanup(...)))` (RAII) | ✅ GCC / Apple Clang | ✅ Clang NDK | ✅ MinGW-w64 (GCC) |
-| Home dir (`$HOME`) | ✅ | ⚠️ use app data dir | ❌ use `%USERPROFILE%` |
-| Cache/config paths (`~/.cache`, `~/.config`) | ✅ | ❌ use app-specific dirs | ❌ use `%APPDATA%` |
-| `fork`/`waitpid` (process.h) | ✅ | ✅ | ❌ needs `CreateProcess` |
-| `open_memstream` (html_medium.h) | ✅ | ✅ | ❌ needs shim or tmpfile |
-
-**Compiler policy: GCC (or Clang) on every platform — MSVC is out of scope.**
-
-| Platform | Toolchain |
-|----------|-----------|
-| Linux | GCC |
-| macOS | GCC (Homebrew) or Apple Clang |
-| Windows | MinGW-w64 (GCC) |
-| Android | NDK Clang |
-
-`__attribute__((cleanup(...)))` is supported by all of the above and is the
-canonical RAII mechanism for this project.  MSVC is explicitly not a target.
-
-**Rules for new code:**
-- Never add a new POSIX/platform-specific call without noting it in the table above.
-- Platform differences are resolved by the **build system, not `#ifdef` macros**.
-  See the Platform Abstraction section below.
-- Android TUI works only inside a terminal emulator; non-interactive (batch) mode must always be functional.
-
-## Platform Abstraction
-
-Platform-specific behaviour is isolated in `libemail/src/platform/`.  The layer
-exposes a thin C header with a single canonical interface; each platform provides
-its own implementation file.  CMake selects the right source file at configure
-time — **no `#ifdef` guards in shared code**.
-
-```
-libemail/src/platform/
-  terminal.h          ← canonical interface (get_cols, set_raw, restore, …)
-  posix/terminal.c    ← termios + ioctl  (Linux, macOS, Android)
-  windows/terminal.c  ← GetConsoleMode + GetConsoleScreenBufferInfo
-
-  path.h              ← home_dir(), cache_dir(), config_dir()
-  posix/path.c        ← $HOME / XDG
-  windows/path.c      ← %USERPROFILE% / %APPDATA%
-
-  process.h           ← run_pager(), spawn child process
-  posix/process.c     ← fork + exec + waitpid
-  windows/process.c   ← CreateProcess
-
-  credential_key.h    ← per-account key derivation for credential obfuscation
-  posix/credential_key.c   ← ~/.ssh private key, else machine-id
-  windows/credential_key.c ← %USERPROFILE%\.ssh key, else registry MachineGuid
-
-  html_medium.h       ← HTML rendering backend (image handling)
-  posix/html_medium.c ← open_memstream-based
-  windows/html_medium.c ← tmpfile-based
-```
-
-CMakeLists.txt pattern (in `libemail/CMakeLists.txt`):
-
-```cmake
-if(WIN32)
-    set(LIBEMAIL_PLATFORM_SOURCES
-        src/platform/windows/terminal.c
-        src/platform/windows/path.c
-        src/platform/windows/html_medium.c
-        src/platform/windows/process.c
-        src/platform/windows/credential_key.c)
-else()
-    set(LIBEMAIL_PLATFORM_SOURCES
-        src/platform/posix/terminal.c
-        src/platform/posix/path.c
-        src/platform/posix/html_medium.c
-        src/platform/posix/process.c
-        src/platform/posix/credential_key.c)
-endif()
-
-add_library(libemail STATIC ... ${LIBEMAIL_PLATFORM_SOURCES})
-```
-
-**Allowed `#ifdef` use:** only inside a platform implementation file itself
-(e.g. to distinguish Linux vs macOS within the POSIX backend), never in
-`core/`, `domain/`, `infrastructure/`, or `main.c`.
+Platform-specific behaviour is isolated in `libemail/src/platform/`: a thin C
+header per concern (`terminal.h`, `path.h`, `process.h`, `credential_key.h`,
+`html_medium.h`) and its implementation in `platform/posix/`, chosen by CMake.
+No `#ifdef` platform guards in shared code, and none written for a platform
+nobody builds on.  Prefer standard C11 / POSIX where the portable form is no
+harder to write; GCC is the compiler.
 
 ## Documentation
 
@@ -208,9 +146,7 @@ docs/
   dev/                    ← developer guides (testing, logging)
   adr/                    ← Architecture Decision Records (CLEAN arch, RAII, test framework)
   userstories/            ← numbered user stories (US-1 …), one file each
-  issues/                 ← open work items: BUG-nnn (defects), TASK-nnn (tasks)
 libs/
-  libtuikit/              ← terminal toolkit (git submodule, linked statically)
   libptytest/             ← PTY-based terminal test library (git submodule, pinned to a release tag)
 ```
 
@@ -221,5 +157,5 @@ libs/
 - Prefer direct edits over exploratory agents when the change location is known.
 - Do **not** keep a persistent project-memory store (e.g. `.claude/memory/`).
   The authoritative project state lives in the repository itself: `docs/spec/`
-  for behaviour, `docs/adr/` for decisions, `docs/issues/` for open work, and
-  the git history for what has been done.
+  for behaviour, `docs/adr/` for decisions, the issue manager (`issue-cli`, project `EMAIL`) for
+  open work and defects, and the git history for what has been done.

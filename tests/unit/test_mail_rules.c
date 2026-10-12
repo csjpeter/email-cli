@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-23 */
+/* Unit tests of the mail rules engine. */
 #include "test_helpers.h"
 #include "mail_rules.h"
 #include <fcntl.h>
@@ -353,7 +357,8 @@ static void test_negation_combined_with_positive(void) {
 
 static void test_load_utf7_folder_name(void) {
     /* Write a temp rules.ini with a then-move-folder in IMAP modified UTF-7 */
-    char tmppath[] = "/tmp/test-mail-rules-XXXXXX";
+    char tmppath[PATH_MAX];
+    snprintf(tmppath, sizeof(tmppath), "%s/test-mail-rules-XXXXXX", test_scratch_dir());
     int fd = mkstemp(tmppath);
     ASSERT(fd >= 0, "utf7 load: mkstemp failed");
     const char *ini =
@@ -379,7 +384,8 @@ static void test_load_utf7_folder_name(void) {
 
 static void test_rules_parse_file_features(void) {
     /* Rules file with unnamed rule, when=, then-add/remove-label, then-forward-to */
-    char tmppath[] = "/tmp/test-mail-rules-features-XXXXXX";
+    char tmppath[PATH_MAX];
+    snprintf(tmppath, sizeof(tmppath), "%s/test-mail-rules-features-XXXXXX", test_scratch_dir());
     int fd = mkstemp(tmppath);
     ASSERT(fd >= 0, "parse features: mkstemp failed");
 
@@ -408,6 +414,35 @@ static void test_rules_parse_file_features(void) {
     ASSERT(r->rules[0].then_forward_to != NULL, "parse features: then_forward_to set");
     ASSERT(strcmp(r->rules[0].then_forward_to, "fwd@example.com") == 0,
            "parse features: then_forward_to value");
+    mail_rules_free(r);
+}
+
+static void test_rules_space_in_glob_fires(void) {
+    /* EMAIL-45: both spellings of a subject glob with a space must fire */
+    char tmppath[PATH_MAX];
+    snprintf(tmppath, sizeof(tmppath), "%s/test-mail-rules-space-XXXXXX", test_scratch_dir());
+    int fd = mkstemp(tmppath);
+    ASSERT(fd >= 0, "space glob: mkstemp failed");
+    const char *ini =
+        "[rule \"flat\"]\n"
+        "if-subject = *Message 1*\n"
+        "then-add-label = L1\n"
+        "[rule \"quoted\"]\n"
+        "when = subject:\"*Message 1*\"\n"
+        "then-add-label = L2\n";
+    ssize_t w = write(fd, ini, strlen(ini)); (void)w;
+    close(fd);
+    MailRules *r = mail_rules_load_path(tmppath);
+    unlink(tmppath);
+    ASSERT(r != NULL && r->count == 2, "space glob: 2 rules loaded");
+    if (r && r->count == 2) {
+        ASSERT(mail_rule_matches(&r->rules[0], "a@x", "Message 1", "", "", NULL, 0) == 1,
+               "space glob: if-subject = *Message 1* fires");
+        ASSERT(mail_rule_matches(&r->rules[1], "a@x", "Message 1", "", "", NULL, 0) == 1,
+               "space glob: when = subject:\"*Message 1*\" fires");
+        ASSERT(mail_rule_matches(&r->rules[0], "a@x", "Message 2", "", "", NULL, 0) == 0,
+               "space glob: flat rule does not match another subject");
+    }
     mail_rules_free(r);
 }
 
@@ -465,7 +500,7 @@ static void test_rules_then_move_folder(void) {
 static void test_rules_save_load_account(void) {
     char *old_home = getenv("HOME");
     char *old_xdg  = getenv("XDG_CONFIG_HOME");
-    setenv("HOME", "/tmp/email-cli-rules-acct-test", 1);
+    setenv("HOME", TP("email-cli-rules-acct-test"), 1);
     unsetenv("XDG_CONFIG_HOME");
 
     MailRules *r = make_rules();
@@ -522,6 +557,7 @@ void test_mail_rules(void) {
     RUN_TEST(test_load_utf7_folder_name);
     RUN_TEST(test_rules_parse_file_features);
     RUN_TEST(test_rules_when_expression);
+    RUN_TEST(test_rules_space_in_glob_fires);
     RUN_TEST(test_rules_then_move_folder);
     RUN_TEST(test_rules_save_load_account);
 }

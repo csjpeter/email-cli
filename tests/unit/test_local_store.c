@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-30 */
+/* Unit tests of the local store. */
 #include "test_helpers.h"
 #include "local_store.h"
 #include "fs_util.h"
@@ -20,14 +24,14 @@ static void setup_test_env(const char *home) {
 
 void test_local_msg_store(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-store-test");
+    setup_test_env(TP("email-cli-store-test"));
 
     const char *folder = "INBOX";
     const char *uid    = "0000000000000137";
 
     /* Pre-clean */
-    unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser/store/INBOX/7/3/0000000000000137.eml");
+    unlink(TP("email-cli-store-test/.local/share/email-cli/accounts/"
+           "testuser/store/INBOX/7/3/0000000000000137.eml"));
 
     /* 1. Not stored initially */
     ASSERT(local_msg_exists(folder, uid) == 0,
@@ -65,12 +69,12 @@ void test_local_msg_store(void) {
            "local_msg_exists: UID 5 after save (bucket 5/0)");
 
     /* Cleanup */
-    unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser/store/INBOX/7/3/0000000000000137.eml");
-    unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser/store/INBOX/2/4/0000000000000042.eml");
-    unlink("/tmp/email-cli-store-test/.local/share/email-cli/accounts/"
-           "testuser/store/INBOX/5/0/0000000000000005.eml");
+    unlink(TP("email-cli-store-test/.local/share/email-cli/accounts/"
+           "testuser/store/INBOX/7/3/0000000000000137.eml"));
+    unlink(TP("email-cli-store-test/.local/share/email-cli/accounts/"
+           "testuser/store/INBOX/2/4/0000000000000042.eml"));
+    unlink(TP("email-cli-store-test/.local/share/email-cli/accounts/"
+           "testuser/store/INBOX/5/0/0000000000000005.eml"));
 
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
@@ -80,7 +84,7 @@ void test_local_msg_store(void) {
 
 void test_local_hdr_evict(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-hdr-evict-test");
+    setup_test_env(TP("email-cli-hdr-evict-test"));
 
     const char *folder = "INBOX";
 
@@ -107,7 +111,7 @@ void test_local_hdr_evict(void) {
 
 void test_local_index(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-index-test");
+    setup_test_env(TP("email-cli-index-test"));
 
     const char *msg =
         "From: noreply@github.com\r\n"
@@ -119,8 +123,8 @@ void test_local_index(void) {
 
     /* Verify from index exists */
     const char *from_path =
-        "/tmp/email-cli-index-test/.local/share/email-cli/accounts/"
-        "testuser/index/from/github.com/noreply";
+        TP("email-cli-index-test/.local/share/email-cli/accounts/"
+        "testuser/index/from/github.com/noreply");
     {
         RAII_FILE FILE *fp = fopen(from_path, "r");
         ASSERT(fp != NULL, "from index file should exist");
@@ -135,8 +139,8 @@ void test_local_index(void) {
 
     /* Verify date index exists */
     const char *date_path =
-        "/tmp/email-cli-index-test/.local/share/email-cli/accounts/"
-        "testuser/index/date/2026/03/15";
+        TP("email-cli-index-test/.local/share/email-cli/accounts/"
+        "testuser/index/date/2026/03/15");
     {
         RAII_FILE FILE *fp = fopen(date_path, "r");
         ASSERT(fp != NULL, "date index file should exist");
@@ -171,11 +175,11 @@ void test_local_index(void) {
 
 void test_manifest(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-manifest-test");
+    setup_test_env(TP("email-cli-manifest-test"));
 
     /* Pre-clean */
-    unlink("/tmp/email-cli-manifest-test/.local/share/email-cli/"
-           "accounts/testuser/manifests/INBOX.tsv");
+    unlink(TP("email-cli-manifest-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/INBOX.tsv"));
 
     /* 1. Load non-existent manifest returns NULL */
     Manifest *m = manifest_load("INBOX");
@@ -255,9 +259,9 @@ void test_manifest(void) {
 
 void test_ui_prefs(void) {
     char *old_home = getenv("HOME");
-    setenv("HOME", "/tmp/email-cli-ui-pref-test-home", 1);
+    setenv("HOME", TP("email-cli-ui-pref-test-home"), 1);
     unsetenv("XDG_DATA_HOME");
-    unlink("/tmp/email-cli-ui-pref-test-home/.local/share/email-cli/ui.ini");
+    unlink(TP("email-cli-ui-pref-test-home/.local/share/email-cli/ui.ini"));
 
     ASSERT(ui_pref_get_int("folder_view_mode", 1) == 1,
            "ui_pref_get_int: missing key should return default 1");
@@ -284,7 +288,7 @@ void test_ui_prefs(void) {
     ASSERT(ui_pref_get_int("no_such_key", 7) == 7,
            "ui_pref_get_int: unknown key should return default");
 
-    unlink("/tmp/email-cli-ui-pref-test-home/.local/share/email-cli/ui.ini");
+    unlink(TP("email-cli-ui-pref-test-home/.local/share/email-cli/ui.ini"));
 
     /* ui_pref_get_str / ui_pref_set_str */
     ASSERT(ui_pref_get_str("str_key") == NULL,
@@ -321,7 +325,7 @@ void test_ui_prefs(void) {
     ASSERT(ui_pref_get_str("no_such_str_key") == NULL,
            "ui_pref_get_str: unknown key returns NULL");
 
-    unlink("/tmp/email-cli-ui-pref-test-home/.local/share/email-cli/ui.ini");
+    unlink(TP("email-cli-ui-pref-test-home/.local/share/email-cli/ui.ini"));
 
     if (old_home) setenv("HOME", old_home, 1);
     else unsetenv("HOME");
@@ -331,7 +335,7 @@ void test_ui_prefs(void) {
 
 void test_local_msg_delete(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-delete-test");
+    setup_test_env(TP("email-cli-delete-test"));
 
     const char *folder = "INBOX";
     const char *uid    = "0000000000001000";
@@ -364,7 +368,7 @@ void test_local_msg_delete(void) {
 
 void test_local_index_email_extraction(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-email-extract-test");
+    setup_test_env(TP("email-cli-email-extract-test"));
 
     /* "Name <user@domain>" format */
     {
@@ -376,8 +380,8 @@ void test_local_index_email_extraction(void) {
         ASSERT(rc == 0, "email_extraction: Name<email> index_update returns 0");
 
         const char *from_path =
-            "/tmp/email-cli-email-extract-test/.local/share/email-cli/accounts/"
-            "testuser/index/from/example.com/alice";
+            TP("email-cli-email-extract-test/.local/share/email-cli/accounts/"
+            "testuser/index/from/example.com/alice");
         RAII_FILE FILE *fp = fopen(from_path, "r");
         ASSERT(fp != NULL, "email_extraction: Name<email> from index created");
         if (fp) {
@@ -399,8 +403,8 @@ void test_local_index_email_extraction(void) {
         ASSERT(rc == 0, "email_extraction: <email> index_update returns 0");
 
         const char *from_path2 =
-            "/tmp/email-cli-email-extract-test/.local/share/email-cli/accounts/"
-            "testuser/index/from/test.org/bob";
+            TP("email-cli-email-extract-test/.local/share/email-cli/accounts/"
+            "testuser/index/from/test.org/bob");
         RAII_FILE FILE *fp2 = fopen(from_path2, "r");
         ASSERT(fp2 != NULL, "email_extraction: <email> from index created");
     }
@@ -415,8 +419,8 @@ void test_local_index_email_extraction(void) {
         ASSERT(rc == 0, "email_extraction: plain email index_update returns 0");
 
         const char *from_path3 =
-            "/tmp/email-cli-email-extract-test/.local/share/email-cli/accounts/"
-            "testuser/index/from/sample.net/carol";
+            TP("email-cli-email-extract-test/.local/share/email-cli/accounts/"
+            "testuser/index/from/sample.net/carol");
         RAII_FILE FILE *fp3 = fopen(from_path3, "r");
         ASSERT(fp3 != NULL, "email_extraction: plain email from index created");
     }
@@ -439,7 +443,7 @@ void test_local_index_email_extraction(void) {
 
 void test_local_trash_labels(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-trash-labels-test");
+    setup_test_env(TP("email-cli-trash-labels-test"));
 
     const char *uid = "0000000000002000";
     const char *labels = "INBOX,Work,Important";
@@ -472,11 +476,11 @@ void test_local_trash_labels(void) {
 
 void test_local_gmail_history(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-gmail-history-test");
+    setup_test_env(TP("email-cli-gmail-history-test"));
 
     /* Pre-clean any leftover history file from previous runs */
-    unlink("/tmp/email-cli-gmail-history-test/.local/share/email-cli/accounts/"
-           "testuser/gmail_history_id");
+    unlink(TP("email-cli-gmail-history-test/.local/share/email-cli/accounts/"
+           "testuser/gmail_history_id"));
 
     /* Load when missing returns NULL */
     RAII_STRING char *none = local_gmail_history_load();
@@ -510,7 +514,7 @@ void test_local_gmail_history(void) {
 
 void test_local_hdr_get_labels(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-hdr-labels-test");
+    setup_test_env(TP("email-cli-hdr-labels-test"));
 
     const char *folder = "";  /* Gmail flat store uses empty folder */
     const char *uid    = "0000000000003000";
@@ -543,13 +547,13 @@ void test_local_hdr_get_labels(void) {
 
 void test_local_flag_search(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-flag-search-test");
+    setup_test_env(TP("email-cli-flag-search-test"));
 
     /* Pre-clean */
-    unlink("/tmp/email-cli-flag-search-test/.local/share/email-cli/"
-           "accounts/testuser/manifests/INBOX.tsv");
-    unlink("/tmp/email-cli-flag-search-test/.local/share/email-cli/"
-           "accounts/testuser/manifests/Sent.tsv");
+    unlink(TP("email-cli-flag-search-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/INBOX.tsv"));
+    unlink(TP("email-cli-flag-search-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/Sent.tsv"));
 
     /* Build two manifests across two folders */
     Manifest *inbox = calloc(1, sizeof(Manifest));
@@ -652,11 +656,11 @@ void test_local_flag_search(void) {
 
 void test_manifest_count_after_flag_update(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-count-update-test");
+    setup_test_env(TP("email-cli-count-update-test"));
 
     /* Pre-clean */
-    unlink("/tmp/email-cli-count-update-test/.local/share/email-cli/"
-           "accounts/testuser/manifests/INBOX.tsv");
+    unlink(TP("email-cli-count-update-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/INBOX.tsv"));
 
     /* Build a manifest with 3 unread messages */
     Manifest *m = calloc(1, sizeof(Manifest));
@@ -707,14 +711,10 @@ void test_manifest_count_after_flag_update(void) {
 
 void test_flag_search_folder_isolation(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-flag-iso-test");
+    setup_test_env(TP("email-cli-flag-iso-test"));
 
-    /* Pre-clean: remove all TSV files (stale files from other test runs
-     * would otherwise inflate cnt and make the count assertion fragile) */
-    int _clean_rc = system(
-        "find '/tmp/email-cli-flag-iso-test/.local/share/email-cli/"
-        "accounts/testuser/manifests' -name '*.tsv' -delete 2>/dev/null");
-    (void)_clean_rc;   /* best-effort pre-clean; the directory may not exist yet */
+    /* The scratch directory is new for this process, so no TSV file from an
+     * earlier run can inflate cnt. */
 
     /* Same UID in two different folders: verify that dedup returns it only once */
     Manifest *inbox = calloc(1, sizeof(Manifest));
@@ -752,7 +752,7 @@ void test_flag_search_folder_isolation(void) {
 /* ── local_contacts_update tests ─────────────────────────────────────── */
 
 #define CONTACTS_PATH \
-    "/tmp/email-cli-contacts-test/.local/share/email-cli/accounts/testuser/contacts.tsv"
+    TP("email-cli-contacts-test/.local/share/email-cli/accounts/testuser/contacts.tsv")
 
 static void contacts_cleanup(void) { unlink(CONTACTS_PATH); }
 
@@ -816,7 +816,7 @@ static char *contacts_get_name(const char *addr) {
 
 void test_local_contacts_update(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-contacts-test");
+    setup_test_env(TP("email-cli-contacts-test"));
     contacts_cleanup();
 
     /* 1. Bare address in From creates entry with freq=1 */
@@ -909,7 +909,7 @@ void test_local_contacts_update(void) {
 
 void test_local_search(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-search-test");
+    setup_test_env(TP("email-cli-search-test"));
 
     /* Build a manifest with two messages */
     Manifest *m = calloc(1, sizeof(Manifest));
@@ -969,7 +969,7 @@ void test_local_search(void) {
 
 void test_local_contacts_rebuild(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-rebuild-test");
+    setup_test_env(TP("email-cli-rebuild-test"));
 
     /* Save a message header with From/To so rebuild can extract contacts */
     const char *hdr = "From: Carol <carol@rebuild.test>\r\nTo: dave@rebuild.test\r\n"
@@ -986,7 +986,7 @@ void test_local_contacts_rebuild(void) {
     /* Check the contacts file at the correct path for this test (not CONTACTS_PATH
      * which is hardcoded to the contacts-update test directory). */
     const char *ctacts_file =
-        "/tmp/email-cli-rebuild-test/.local/share/email-cli/accounts/testuser/contacts.tsv";
+        TP("email-cli-rebuild-test/.local/share/email-cli/accounts/testuser/contacts.tsv");
     FILE *cf = fopen(ctacts_file, "r");
     ASSERT(cf != NULL, "contacts_rebuild: contacts file created");
     int found = 0;
@@ -1005,9 +1005,9 @@ void test_local_contacts_rebuild(void) {
 
 void test_local_pending_append(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-pending-append-test");
+    setup_test_env(TP("email-cli-pending-append-test"));
     /* Remove leftover from previous test runs */
-    unlink("/tmp/email-cli-pending-append-test/.local/share/email-cli/accounts/testuser/pending_appends.tsv");
+    unlink(TP("email-cli-pending-append-test/.local/share/email-cli/accounts/testuser/pending_appends.tsv"));
 
     int rc1 = local_pending_append_add("Sent",   "0000000000000042");
     int rc2 = local_pending_append_add("Drafts", "0000000000000043");
@@ -1043,7 +1043,7 @@ void test_local_pending_append(void) {
 
 void test_local_pending_fetch(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-pending-fetch-test");
+    setup_test_env(TP("email-cli-pending-fetch-test"));
 
     ASSERT(local_pending_fetch_count() == 0, "pending_fetch: initially 0");
 
@@ -1073,9 +1073,9 @@ void test_local_pending_fetch(void) {
 
 void test_local_save_outgoing(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-outgoing-test");
+    setup_test_env(TP("email-cli-outgoing-test"));
     /* Remove leftover from previous test runs */
-    unlink("/tmp/email-cli-outgoing-test/.local/share/email-cli/accounts/testuser/pending_appends.tsv");
+    unlink(TP("email-cli-outgoing-test/.local/share/email-cli/accounts/testuser/pending_appends.tsv"));
 
     const char *msg = "From: me@test.local\r\nTo: you@test.local\r\n"
                       "Subject: test outgoing\r\n\r\nHello!\r\n";
@@ -1100,10 +1100,10 @@ void test_local_save_outgoing(void) {
 
 void test_manifest_dmarc_flags(void) {
     char *old_home = getenv("HOME");
-    setup_test_env("/tmp/email-cli-dmarc-manifest-test");
+    setup_test_env(TP("email-cli-dmarc-manifest-test"));
 
-    unlink("/tmp/email-cli-dmarc-manifest-test/.local/share/email-cli/"
-           "accounts/testuser/manifests/INBOX.tsv");
+    unlink(TP("email-cli-dmarc-manifest-test/.local/share/email-cli/"
+           "accounts/testuser/manifests/INBOX.tsv"));
 
     Manifest *m = calloc(1, sizeof(Manifest));
     ASSERT(m != NULL, "dmarc manifest: calloc");
@@ -1178,8 +1178,8 @@ void test_manifest_dmarc_flags(void) {
  * mirror what a real sync produces. */
 static void ff_add(const char *folder, const char *uid, const char *body) {
     local_msg_save(folder, uid, body, strlen(body));
-    const char *base = "/tmp/email-cli-find-folders-test/.local/share/"
-                       "email-cli/accounts/testuser/manifests";
+    const char *base = TP("email-cli-find-folders-test/.local/share/"
+                       "email-cli/accounts/testuser/manifests");
     fs_mkdir_p(base, 0700);
     char path[512];
     snprintf(path, sizeof(path), "%s/%s.tsv", base, folder);
@@ -1192,10 +1192,8 @@ static void ff_add(const char *folder, const char *uid, const char *body) {
 }
 
 void test_local_msg_find_folders(void) {
-    /* Start from a clean tree: leftovers from an earlier run would change the
-     * folder counts asserted below. */
-    if (system("rm -rf '/tmp/email-cli-find-folders-test'") != 0) { /* best effort */ }
-    setup_test_env("/tmp/email-cli-find-folders-test");
+    /* The scratch directory is new for this process: the tree starts empty. */
+    setup_test_env(TP("email-cli-find-folders-test"));
 
     const char *uid  = "0000000000000837";
     const char *body = "From: a@x\r\nSubject: S\r\n\r\nb";
@@ -1249,8 +1247,7 @@ void test_local_msg_find_folders(void) {
 /* ── local_search: the Gmail cache has no manifests to walk ───────────── */
 
 void test_local_search_gmail(void) {
-    if (system("rm -rf '/tmp/email-cli-gsearch-test'") != 0) { /* best effort */ }
-    setup_test_env("/tmp/email-cli-gsearch-test");
+    setup_test_env(TP("email-cli-gsearch-test"));
 
     /* What gmail_sync leaves on disk: one .eml per message in the flat store
      * (empty folder name) and a TSV .hdr record beside it —

@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-19 */
+/* Plain-HTTP mock Gmail REST API server for the functional tests. */
 /**
  * @file mock_gmail_api_server.c
  * @brief Minimal plain-HTTP mock Gmail REST API server for functional testing.
@@ -6,7 +10,8 @@
  * Single-threaded: accepts one connection at a time.
  *
  * Environment variables:
- *   MOCK_GMAIL_PORT  - TCP port to listen on (default 9997)
+ *   MOCK_GMAIL_PORT  - TCP port to listen on (default 0: the kernel picks)
+ *   MOCK_GMAIL_PORT_FILE - file the bound port is written to
  *   MOCK_GMAIL_COUNT - Number of messages to simulate (default 200)
  *
  * Message layout (N = message number, 1-indexed):
@@ -27,16 +32,18 @@
  */
 
 #include <stdio.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include "../common/mock_port.h"
 
 /* ── Configuration ────────────────────────────────────────────────── */
 
-static int  g_port    = 9997;
+static int  g_port    = 0;
 static int  g_count   = 200;
 static char g_prefix[64]  = "";   /* MOCK_GMAIL_SUBJECT_PREFIX  */
 static char g_email[128]  = "test@gmail.com"; /* MOCK_GMAIL_EMAIL */
@@ -505,6 +512,36 @@ static void handle_history(int fd) {
     send_json(fd, body);
 }
 
+/**
+ * Log the JSON body of a users.messages.modify request, so tests can see
+ * which label IDs the client asked to add or remove.  The headers are
+ * already in buf; the body is read up to Content-Length.
+ */
+static void log_modify_body(int fd, char *buf, int buf_len,
+                            const char *id, int id_len) {
+    const char *cl = strstr(buf, "Content-Length:");
+    if (!cl) cl = strstr(buf, "content-length:");
+    int want = cl ? atoi(cl + 15) : 0;
+    char *hend = strstr(buf, "\r\n\r\n");
+    char body[2048] = {0};
+    int have = 0;
+    if (hend) {
+        hend += 4;
+        have = buf_len - (int)(hend - buf);
+        if (have < 0) have = 0;
+        if (have > (int)sizeof(body) - 1) have = (int)sizeof(body) - 1;
+        memcpy(body, hend, (size_t)have);
+    }
+    while (have < want && have < (int)sizeof(body) - 1) {
+        ssize_t n = read(fd, body + have, (size_t)((int)sizeof(body) - 1 - have));
+        if (n <= 0) break;
+        have += (int)n;
+    }
+    body[have] = '\0';
+    printf("Mock Gmail: MODIFY %.*s %s\n", id_len, id, body);
+    fflush(stdout);
+}
+
 /* ── Request dispatcher ───────────────────────────────────────────── */
 
 /**
@@ -512,7 +549,8 @@ static void handle_history(int fd) {
  */
 static void handle_connection(int fd) {
     char buf[8192];
-    if (read_request(fd, buf, (int)sizeof(buf)) <= 0) return;
+    int buf_len = read_request(fd, buf, (int)sizeof(buf));
+    if (buf_len <= 0) return;
 
     /* Extract request line: "GET /path?query HTTP/1.x" */
     char method[8] = {0};
@@ -570,6 +608,9 @@ static void handle_connection(int fd) {
             /* Check for sub-path (modify / trash / untrash) */
             if (*id_end == '/') {
                 /* POST .../modify, .../trash, .../untrash → accept, return {} */
+                if (strncmp(id_end, "/modify", 7) == 0)
+                    log_modify_body(fd, buf, buf_len, id_start,
+                                    (int)(id_end - id_start));
                 send_json(fd, "{}");
                 return;
             }
@@ -595,8 +636,10 @@ static void handle_connection(int fd) {
 /* ── Main ─────────────────────────────────────────────────────────── */
 
 int main(void) {
-    const char *port_env   = getenv("MOCK_GMAIL_PORT");
-    if (port_env  && atoi(port_env)  > 0) g_port  = atoi(port_env);
+    /* A client that goes away mid-response must not kill the server (EMAIL-42). */
+    signal(SIGPIPE, SIG_IGN);
+
+    g_port = mock_requested_port("MOCK_GMAIL_PORT");   /* 0: the kernel picks */
     const char *count_env  = getenv("MOCK_GMAIL_COUNT");
     if (count_env && atoi(count_env) > 0) g_count = atoi(count_env);
     const char *prefix_env = getenv("MOCK_GMAIL_SUBJECT_PREFIX");
@@ -624,13 +667,23 @@ int main(void) {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) { perror("socket"); return 1; }
 
+    /* SO_REUSEADDR only, never SO_REUSEPORT: with it a second mock binds a
+     * port a stale one still holds and the kernel splits the connections
+     * between them at random, so a suite can read another fixture's data.
+     * Two mocks on one port must fail loudly (see mock_imap_server.c).  The
+     * return value is checked: an option that silently failed to apply is
+     * indistinguishable from one never set.  Loopback only, so the mock is
+     * not reachable from the network while a suite runs. */
     int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT,
-               &opt, sizeof(opt));
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) != 0) {
+        perror("setsockopt SO_REUSEADDR");
+        close(server_fd);
+        return 1;
+    }
 
     struct sockaddr_in addr = {0};
     addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port        = htons((uint16_t)g_port);
 
     if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
@@ -645,6 +698,8 @@ int main(void) {
         return 1;
     }
 
+    g_port = mock_publish_port(server_fd, "MOCK_GMAIL_PORT_FILE");
+    if (g_port < 0) { close(server_fd); return 1; }
     printf("Mock Gmail API server listening on port %d (count: %d, prefix: '%s', email: %s, histid: %s, extra: %d, expired: %d)\n",
            g_port, g_count, g_prefix, g_email, g_histid, g_extra_count, g_history_expired);
     fflush(stdout);

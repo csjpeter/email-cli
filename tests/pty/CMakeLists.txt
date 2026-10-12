@@ -4,10 +4,12 @@
 # Helpers the PTY tests drive: the mock servers and the input-line harness.
 # The tests themselves are declared in tests/CMakeLists.txt.
 
-# libptytest is a git submodule (libs/libptytest, pinned to a release tag).
+# libptytest is a git submodule (deps/libptytest, pinned to a release tag).
 # Used through add_subdirectory() it builds only the library; the static target
 # is linked so the PTY suites carry no run-time dependency on it.
-add_subdirectory(${CMAKE_SOURCE_DIR}/libs/libptytest libptytest)
+if(EMAIL_PTYTEST_LIB_WAY STREQUAL "bundled")
+    add_subdirectory(${CMAKE_SOURCE_DIR}/deps/libptytest libptytest)
+endif()
 
 add_executable(mock-imap-server EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/tests/functional/mock_imap_server.c
@@ -44,4 +46,4 @@ target_include_directories(input-line-harness PRIVATE
     ${CMAKE_SOURCE_DIR}/libemail/src/core
     ${CMAKE_SOURCE_DIR}/libemail/src/platform
 )
-target_link_libraries(input-line-harness OpenSSL::SSL OpenSSL::Crypto tuikit::tuikit_static)
+target_link_libraries(input-line-harness OpenSSL::SSL OpenSSL::Crypto ${EMAIL_TUIKIT_LIB})

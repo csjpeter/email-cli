@@ -50,13 +50,18 @@ show_help() {
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
+    echo ""
+    echo "Environment:"
+    echo "  WORKSPACE_LIBS=bundled|system|auto  how libtuikit and libptytest come in:"
+    echo "                 bundled = git submodules under deps/, static (default);"
+    echo "                 system = installed -dev packages; auto = installed if present"
 }
 
 # Every source file and script starts with the header of the source-header
 # policy: an SPDX licence tag that agrees with LICENSE, a copyright line with
 # the holder's name, a Created date that is valid and not in the future, and a
 # purpose line.  A shebang may precede it.  Prints each offender and fails.
-# libs/ holds the git submodules: their sources are their own projects' to check.
+# deps/ holds the git submodules: their sources are their own projects' to check.
 check_source_headers() {
     local root="${1:-.}" today bad=0 total=0 f head_lines line
     today=$(date +%F)
@@ -90,7 +95,7 @@ check_source_headers() {
             bad=$((bad + 1)); continue
         fi
     done < <(find "$root" \( -name .git -o -name 'build*' -o -name bin -o -name tmp \
-                              -o -path "$root/libs" \) -prune -o -type f \
+                              -o -path "$root/deps" \) -prune -o -type f \
                  \( -name '*.c' -o -name '*.h' -o -name '*.sh' -o -name '*.cmake' -o -name CMakeLists.txt \) -print | sort)
     echo "header: $total files checked, $bad without a valid header"
     [ "$bad" -eq 0 ]
@@ -153,6 +158,54 @@ check_declared_tests() {
     return $rc
 }
 
+# The workspace's own libraries come in bundled (git submodules under deps/,
+# linked statically) or system (the installed -dev packages); WORKSPACE_LIBS
+# selects bundled (the default), system or auto (policies/dependencies-model.md).
+# For the bundled way the submodules are fetched here, so nobody types a
+# `git submodule` command: a missing or out-of-pin submodule is updated, and a
+# pin that is not a release tag (vX.Y.Z) fails the run.
+WORKSPACE_LIBS="${WORKSPACE_LIBS:-bundled}"
+
+ensure_workspace_libs() {
+    case "$WORKSPACE_LIBS" in
+        bundled|system|auto) ;;
+        *) echo "ERROR: WORKSPACE_LIBS='$WORKSPACE_LIBS': use bundled, system or auto." >&2
+           return 1 ;;
+    esac
+    [ "$WORKSPACE_LIBS" = system ] && return 0
+    local paths path name pin have tag
+    if [ ! -f .gitmodules ]; then
+        echo "ERROR: no .gitmodules: cannot fetch the bundled libraries;" \
+             "install the -dev packages and use WORKSPACE_LIBS=system." >&2
+        return 1
+    fi
+    paths=$(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}') || return 1
+    for path in $paths; do
+        name=$(basename "$path")
+        # auto: an installed package wins, the submodule is not needed.
+        if [ "$WORKSPACE_LIBS" = auto ] && pkg-config --exists "$name" 2>/dev/null; then
+            continue
+        fi
+        pin=$(git ls-files -s -- "$path" | awk '{print $2}')
+        have=$(git -C "$path" rev-parse HEAD 2>/dev/null) || have=""
+        if [ -z "$have" ] || [ "$have" != "$pin" ]; then
+            echo "Fetching submodule $path (pin ${pin:0:12})..."
+            if ! git submodule update --init --recursive -- "$path"; then
+                echo "ERROR: cannot fetch $path (no network or no access?)." >&2
+                echo "       Fetch it by hand, or use the installed -dev package: WORKSPACE_LIBS=system." >&2
+                return 1
+            fi
+            have=$(git -C "$path" rev-parse HEAD) || return 1
+        fi
+        tag=$(git -C "$path" tag --points-at "$have" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+        if [ -z "$tag" ]; then
+            echo "ERROR: $path is pinned to ${have:0:12}, which is not a release tag (vX.Y.Z)." >&2
+            return 1
+        fi
+        echo "$path: $tag (${have:0:12})"
+    done
+}
+
 install_deps() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
@@ -192,6 +245,7 @@ install_deps() {
 cmake_configure() {
     local build_type="$1"
     local extra_flags="${2:-}"
+    ensure_workspace_libs || exit 1
     mkdir -p "$BUILD_DIR" "$BIN_DIR"
     cd "$BUILD_DIR"
     # Coverage is a per-invocation choice, not a sticky cache entry.  Without an
@@ -201,6 +255,7 @@ cmake_configure() {
     # last so the coverage target can still turn it back on.
     cmake -DCMAKE_BUILD_TYPE="$build_type" \
           -DENABLE_COVERAGE=OFF \
+          -DWORKSPACE_LIBS="$WORKSPACE_LIBS" \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
           $extra_flags ..
     cd ..
@@ -235,7 +290,7 @@ for_each_pty_suite() {
                           ./tests/pty/mock-imap-server
     "$run" compose        ./tests/pty/bin/test-pty-compose "$B/email-tui" \
                           ./tests/pty/mock-smtp-server "$B/email-cli"
-    # The PTY harness is a git submodule (libs/libptytest) with its own test
+    # The PTY harness is a git submodule (deps/libptytest) with its own test
     # suite and release gates; they run in its repository, not here.
 }
 
@@ -341,6 +396,7 @@ gate_line() {
 case "$1" in
     deps)
         install_deps
+        ensure_workspace_libs
         ;;
     build)
         build_release

@@ -94,11 +94,16 @@ add_custom_command(
 )
 add_custom_target(test-tls-certs DEPENDS ${TEST_CERT} ${TEST_KEY})
 
-# libtuikit is a git submodule (libs/libtuikit, pinned to a release tag) and is
-# linked statically: the binaries carry no run-time dependency on it.  Used
-# through add_subdirectory() it builds only the library; EXCLUDE_FROM_ALL keeps
-# the shared flavour (which nothing here links) out of the default build.
-add_subdirectory(libs/libtuikit EXCLUDE_FROM_ALL)
+# The workspace's own libraries: a pinned submodule linked statically, or the
+# installed -dev package (cmake/workspace_libs.cmake, WORKSPACE_LIBS).
+include(cmake/workspace_libs.cmake)
+workspace_lib(libtuikit tuikit deps/libtuikit tuikit::tuikit tuikit::tuikit_static
+              EMAIL_TUIKIT_LIB)
+workspace_lib(libptytest ptytest deps/libptytest ptytest::ptytest ptytest::ptytest_static
+              EMAIL_PTYTEST_LIB)
+if(EMAIL_TUIKIT_LIB_WAY STREQUAL "bundled")
+    add_subdirectory(deps/libtuikit EXCLUDE_FROM_ALL)
+endif()
 add_subdirectory(libemail)
 add_subdirectory(libwrite)
 

@@ -48,6 +48,7 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/test_smtp_adapter.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_when_expr.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_mail_rules.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_tuikit_link.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/when_expr.c
     ${CMAKE_SOURCE_DIR}/libwrite/src/compose_service.c
     ${CMAKE_SOURCE_DIR}/libwrite/src/smtp_adapter.c

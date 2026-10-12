@@ -56,6 +56,7 @@ show_help() {
 # policy: an SPDX licence tag that agrees with LICENSE, a copyright line with
 # the holder's name, a Created date that is valid and not in the future, and a
 # purpose line.  A shebang may precede it.  Prints each offender and fails.
+# libs/ holds the git submodules: their sources are their own projects' to check.
 check_source_headers() {
     local root="${1:-.}" today bad=0 total=0 f head_lines line
     today=$(date +%F)
@@ -88,7 +89,8 @@ check_source_headers() {
             echo "header: $f: missing purpose line after Created:" >&2
             bad=$((bad + 1)); continue
         fi
-    done < <(find "$root" \( -name .git -o -name 'build*' -o -name bin -o -name tmp \) -prune -o -type f \
+    done < <(find "$root" \( -name .git -o -name 'build*' -o -name bin -o -name tmp \
+                              -o -path "$root/libs" \) -prune -o -type f \
                  \( -name '*.c' -o -name '*.h' -o -name '*.sh' -o -name '*.cmake' -o -name CMakeLists.txt \) -print | sort)
     echo "header: $total files checked, $bad without a valid header"
     [ "$bad" -eq 0 ]

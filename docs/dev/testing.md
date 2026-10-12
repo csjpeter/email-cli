@@ -252,6 +252,24 @@ git -C libs/libptytest checkout v0.1.6      # the release tag
 git add libs/libptytest && git commit
 ```
 
+### Whole-screen tests of the TUI (EMAIL-34)
+
+`test-pty-screens` (`./manage.sh pty screens`) reaches each view of `email-tui`
+through the keys a user would press and compares the whole screen with a
+picture of the text and a style map (attributes, foreground and background
+colour per cell), plus the cursor.  The inventory of the views is
+`docs/spec/tui-elements.md`.  To add or change a view, add a `VIEW(...)` line
+to `tests/pty/test_pty_screens.c`, record it with
+
+```bash
+cd build && SCREENS_RECORD=$PWD/screens-record.txt ./tests/pty/bin/test-pty-screens \
+    $PWD/../bin/email-tui ./tests/pty/mock-imap-server
+```
+
+review the picture against the specification, and put it into
+`tests/pty/screens_expected.h`.  A recorded picture is a snapshot, not a
+verdict: it must be read before it is accepted.
+
 ### Key API
 
 ```c

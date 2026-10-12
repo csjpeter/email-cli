@@ -407,6 +407,29 @@ static void print_infoline(int trows, int width, const char *text) {
     fflush(stderr);
 }
 
+/** Write @p s to stderr cut or padded to exactly @p width display columns
+ *  (whole characters only; the width of a character is the terminal's). */
+static void put_cols(const char *s, int width) {
+    int used = 0;
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p && used < width) {
+        uint32_t cp;
+        int n;
+        if (*p < 0x80)                 { cp = *p; n = 1; }
+        else if ((*p & 0xE0) == 0xC0)  { cp = *p & 0x1F; n = 2; }
+        else if ((*p & 0xF0) == 0xE0)  { cp = *p & 0x0F; n = 3; }
+        else                           { cp = *p & 0x07; n = 4; }
+        for (int i = 1; i < n && p[i]; i++) cp = (cp << 6) | (p[i] & 0x3F);
+        int w = terminal_wcwidth(cp);
+        if (w < 1) w = 1;
+        if (used + w > width) break;
+        fwrite(p, 1, (size_t)n, stderr);
+        used += w;
+        p += n;
+    }
+    for (; used < width; used++) fputc(' ', stderr);
+}
+
 /**
  * Show a two-column help popup overlay and wait for any key to dismiss.
  *
@@ -448,7 +471,7 @@ static void show_help_popup(const char *title,
 
         /* Title row */
         fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 1, col0);
-        int tlen      = (int)strlen(title);
+        int tlen      = visible_line_cols(title, title + strlen(title));
         int pad_left  = (box_w - 4 - tlen) / 2;
         int pad_right = (box_w - 4 - tlen) - pad_left;
         for (int i = 0; i < pad_left;  i++) fputc(' ', stderr);
@@ -465,9 +488,10 @@ static void show_help_popup(const char *title,
         for (int i = 0; i < visible_n; i++) {
             int ri = scroll + i;
             fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 3 + i, col0);
-            fprintf(stderr, "\033[1m%-*.*s\033[22m", key_col_w, key_col_w, rows[ri][0]);
-            fprintf(stderr, "  ");
-            fprintf(stderr, "%-*.*s", desc_col_w, desc_col_w, rows[ri][1]);
+            fprintf(stderr, "\033[1m");
+            put_cols(rows[ri][0], key_col_w);
+            fprintf(stderr, "\033[22m  ");
+            put_cols(rows[ri][1], desc_col_w);
             fprintf(stderr, " \u2502\033[0m");
         }
 
@@ -480,7 +504,7 @@ static void show_help_popup(const char *title,
         const char *footer = (n > visible_n)
             ? " \u2191\u2193/j/k=scroll  any other key=close "
             : " Press any key to close ";
-        int flen = (int)strlen(footer);
+        int flen = visible_line_cols(footer, footer + strlen(footer));
         if (flen < box_w - 2) {
             int fc = col0 + (box_w - flen) / 2;
             fprintf(stderr, "\033[%d;%dH\033[2m%s\033[0m",
@@ -1211,8 +1235,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                         { "v",              "Toggle rendered / raw source view"         },
                         { "/",              "Search in message body"                    },
                         { "n / N",          "Next / previous search match"             },
-                        { "q / Backspace",  "Back to message list"                     },
-                        { "ESC",            "Exit program"                              },
+                        { "Esc / q / BS",   "Back to message list"                      },
                         { "h / ?",          "Show this help"                            },
                     };
                     show_help_popup("Message reader shortcuts (Gmail)",
@@ -1233,8 +1256,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                         { "v",              "Toggle rendered / raw source view"         },
                         { "/",              "Search in message body"                    },
                         { "n / N",          "Next / previous search match"             },
-                        { "Backspace / q",  "Back to message list"                     },
-                        { "ESC",            "Exit program"                              },
+                        { "Esc / q / BS",  "Back to message list"                      },
                         { "h / ?",          "Show this help"                            },
                     };
                     show_help_popup("Message reader shortcuts",
@@ -3345,8 +3367,7 @@ read_key_again: ;
                         { "s",                 "Start background sync"           },
                         { "U",                 "Refresh after sync"              },
                         { "l",                 "Open rules editor"               },
-                        { "Backspace",         "Open label browser"              },
-                        { "ESC / q",           "Quit"                            },
+                        { "Esc / q / BS",        "Back to the label browser"      },
                         { "h / ?",             "Show this help"                  },
                         { "────────────",      "──────────────────────────────" },
                         { "Sts col 1:",        "P=phish  J=junk  N=unread  -"   },
@@ -3375,8 +3396,7 @@ read_key_again: ;
                         { "s",                 "Start background sync"           },
                         { "U",                 "Refresh after sync"              },
                         { "l",                 "Open rules editor"               },
-                        { "Backspace",         "Open folder browser"             },
-                        { "ESC / q",           "Quit"                            },
+                        { "Esc / q / BS",        "Back to the folder browser"      },
                         { "h / ?",             "Show this help"                  },
                         { "────────────",      "──────────────────────────────" },
                         { "Sts col 1:",        "P=phish  J=junk  N=unread  -"   },
@@ -4183,8 +4203,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
                     { "/",                 "Cross-folder content search"             },
                     { "c",                 "Compose new message"                     },
                     { "t",                 "Toggle tree / flat view"                 },
-                    { "Backspace",         "Go up one level (or back to accounts)"   },
-                    { "ESC / q",           "Quit"                                    },
+                    { "Esc / q / BS",        "Up one level (accounts at the top)"      },
                     { "h / ?",             "Show this help"                          },
                 };
                 show_help_popup("Folder browser shortcuts",
@@ -4831,8 +4850,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
                     { "/",                 "Cross-folder content search"},
                     { "c",                 "Create new label"           },
                     { "d",                 "Delete selected label"      },
-                    { "Backspace",         "Back to accounts"           },
-                    { "ESC / q",           "Quit"                       },
+                    { "Esc / q / BS",        "Back to accounts"           },
                     { "h / ?",             "Show this help"             },
                 };
                 show_help_popup("Label browser shortcuts",
@@ -5159,7 +5177,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
                 { "d",               "Delete selected account"     },
                 { "i",               "Edit IMAP for account"       },
                 { "e",               "Edit SMTP for account"       },
-                { "ESC / q",         "Quit"                        },
+                { "Esc",             "Quit"                        },
                 { "h / ?",           "Show this help"              },
             };
             show_help_popup("Accounts shortcuts",

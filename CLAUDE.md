@@ -126,7 +126,12 @@ The one library of the workspace used at run time is **libtuikit**
 (`libs/libtuikit`, a git submodule pinned to a release tag, now v0.4.3), linked
 **statically**: the binaries carry no run-time dependency on it, and the
 package declares none.  It replaces this project's own terminal code module by
-module (EMAIL-28); until a module is migrated, the old code stays authoritative.
+module (EMAIL-28).  Migrated: terminal size, raw mode, key decoding and
+character width (`platform/posix/terminal.c` is an adapter over `tui_tty_*` and
+`tui_cp_width`), and the line editor (`core/input_line.c` runs libtuikit's
+`tui_lineedit` one byte at a time).  Not migrated: the masked password prompt
+(libtuikit has no mask) and the full-screen drawing, which stays printf-based;
+until a module is migrated, the old code stays authoritative.
 `libs/libptytest` is the PTY test harness, test-only.
 
 ## Platform

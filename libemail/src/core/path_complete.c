@@ -88,9 +88,9 @@ static void render_completions(const InputLine *il) {
 static void apply_comp(InputLine *il) {
     char head[4096];
     snprintf(head, sizeof(head), "%s%s", g_comp.dir, g_comp.names[g_comp.idx]);
-    snprintf(il->buf, il->bufsz, "%s%s", head, g_comp.suffix);
-    il->len = strlen(il->buf);
-    il->cur = strlen(head);
+    /* The text before the cursor becomes the head; the cursor lands after it
+     * and the text after the cursor is untouched (the stored suffix). */
+    tui_lineedit_replace(il, 0, il->cur, head);
     snprintf(g_comp.expected, sizeof(g_comp.expected), "%s", head);
 }
 

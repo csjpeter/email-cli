@@ -86,7 +86,7 @@ void test_input_line(void) {
     InputLine il;
     input_line_init(&il, buf, sizeof(buf), NULL);
     ASSERT(il.buf   == buf,       "buf pointer set");
-    ASSERT(il.bufsz == sizeof(buf), "bufsz set");
+    ASSERT(il.size == sizeof(buf), "bufsz set");
     ASSERT(il.len   == 0,         "len 0 for NULL initial");
     ASSERT(il.cur   == 0,         "cur 0 for NULL initial");
     ASSERT(buf[0]   == '\0',      "buf NUL-terminated");
@@ -177,6 +177,26 @@ void test_input_line(void) {
         int res = run_with_keys(&ril, 5, "> ", "hi\r", 3);
         ASSERT(res == 1, "input_line_run: typing then Enter returns 1");
         ASSERT(strcmp(rbuf, "hi") == 0, "input_line_run: typed chars in buffer");
+    }
+
+    /* 12b. Keys typed ahead of Enter stay in the input (EMAIL-28): the loop
+     * must not swallow what follows the key that ends it. */
+    {
+        char rbuf[64];
+        InputLine ril;
+        input_line_init(&ril, rbuf, sizeof(rbuf), NULL);
+        int saved_stdin;
+        ASSERT(stdin_push("hi\rxy", 5, &saved_stdin) == 0, "type-ahead: stdin injected");
+        int saved_out, saved_err;
+        output_suppress(&saved_out, &saved_err);
+        int res = input_line_run(&ril, 5, "> ");
+        output_restore(saved_out, saved_err);
+        char rest[8] = {0};
+        ssize_t nrest = read(STDIN_FILENO, rest, sizeof(rest) - 1);
+        stdin_pop(saved_stdin);
+        ASSERT(res == 1 && strcmp(rbuf, "hi") == 0, "type-ahead: Enter ends the line");
+        ASSERT(nrest == 2 && strcmp(rest, "xy") == 0,
+               "type-ahead: keys typed after Enter are left in the input");
     }
 
     /* 13. Backspace deletes last character */

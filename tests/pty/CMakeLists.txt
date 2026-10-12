@@ -3,6 +3,9 @@
 # Created: 2026-03-31
 # Build rules of the PTY tests.
 
+# libptytest is a git submodule (libs/libptytest, pinned to a release tag).
+# Used through add_subdirectory() it builds only the library; the static target
+# is linked so the PTY suites carry no run-time dependency on it.
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/libptytest libptytest)
 
 # Every path a PTY test uses is under build/tests/pty/work-<pid>
@@ -12,7 +15,7 @@ add_compile_definitions(TEST_BUILD_DIR="${CMAKE_BINARY_DIR}" TEST_CATEGORY="pty"
 
 # ── email-cli view tests (require mock IMAP server) ───────────────────
 add_executable(test-pty-views test_pty_views.c ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c)
-target_link_libraries(test-pty-views ptytest)
+target_link_libraries(test-pty-views ptytest::ptytest_static)
 target_link_libraries(test-pty-views util)
 
 # ── Mock IMAP server (built inline for PTY tests) ─────────────────────
@@ -62,10 +65,7 @@ add_executable(test-pty-input-line EXCLUDE_FROM_ALL
     test_input_line_pty.c
     ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_include_directories(test-pty-input-line PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-input-line ptytest)
+target_link_libraries(test-pty-input-line ptytest::ptytest_static)
 target_link_libraries(test-pty-input-line util)
 add_dependencies(test-pty-input-line input-line-harness)
 
@@ -79,10 +79,7 @@ add_executable(test-pty-gmail-tui EXCLUDE_FROM_ALL
     test_pty_gmail_tui.c
     ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_include_directories(test-pty-gmail-tui PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-gmail-tui ptytest)
+target_link_libraries(test-pty-gmail-tui ptytest::ptytest_static)
 target_link_libraries(test-pty-gmail-tui util)
 add_dependencies(test-pty-gmail-tui email-tui email-sync mock-gmail-server)
 
@@ -108,10 +105,7 @@ add_executable(test-pty-compose EXCLUDE_FROM_ALL
     test_compose_pty.c
     ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_include_directories(test-pty-compose PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-compose ptytest)
+target_link_libraries(test-pty-compose ptytest::ptytest_static)
 target_link_libraries(test-pty-compose util)
 add_dependencies(test-pty-compose email-tui mock-smtp-server email-cli)
 
@@ -130,10 +124,7 @@ add_executable(test-pty-mail-rules EXCLUDE_FROM_ALL
     test_pty_mail_rules.c
     ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_include_directories(test-pty-mail-rules PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-mail-rules ptytest)
+target_link_libraries(test-pty-mail-rules ptytest::ptytest_static)
 target_link_libraries(test-pty-mail-rules util)
 add_dependencies(test-pty-mail-rules email-sync email-tui mock-imap-server)
 
@@ -152,10 +143,7 @@ add_executable(test-pty-compose-dialog EXCLUDE_FROM_ALL
     test_pty_compose_dialog.c
     ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_include_directories(test-pty-compose-dialog PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-compose-dialog ptytest)
+target_link_libraries(test-pty-compose-dialog ptytest::ptytest_static)
 target_link_libraries(test-pty-compose-dialog util)
 add_dependencies(test-pty-compose-dialog email-tui mock-imap-server mock-smtp-server)
 
@@ -174,10 +162,7 @@ add_executable(test-pty-send-local EXCLUDE_FROM_ALL
     test_pty_send_local.c
     ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_include_directories(test-pty-send-local PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-send-local ptytest)
+target_link_libraries(test-pty-send-local ptytest::ptytest_static)
 target_link_libraries(test-pty-send-local util)
 add_dependencies(test-pty-send-local email-tui email-sync mock-imap-server mock-smtp-server)
 
@@ -198,10 +183,7 @@ add_executable(test-pty-attachment EXCLUDE_FROM_ALL
     test_pty_attachment.c
     ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_include_directories(test-pty-attachment PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/libptytest
-)
-target_link_libraries(test-pty-attachment ptytest)
+target_link_libraries(test-pty-attachment ptytest::ptytest_static)
 target_link_libraries(test-pty-attachment util)
 add_dependencies(test-pty-attachment email-tui mock-imap-server mock-smtp-server)
 

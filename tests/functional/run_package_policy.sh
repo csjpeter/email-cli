@@ -49,6 +49,19 @@ bdate=$(dpkg-deb -f "$deb" XB-Build-Date)
 echo "$bdate" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' && ok "1.12 XB-Build-Date is $bdate" || bad "1.12 XB-Build-Date '$bdate'"
 [ "$(dpkg-deb -f "$deb" Version)" = "$(dpkg-deb -f "$deb" Version | tr -d '+ ')" ] && ok "1.13 Version carries no build metadata" || bad "1.13 Version polluted"
 
+# 1c. The dynamic dependency set is minimal (EMAIL-36): the shipped binaries
+# need only libc, OpenSSL and libcurl; the own libraries are linked statically.
+# Depends names no package outside those, and no library of ours.
+tmp="$ROOT/build/package-policy-extract-$$"
+mkdir -p "$tmp" && dpkg-deb -x "$deb" "$tmp" || { bad "1.14 cannot unpack $deb"; }
+needed=$(for b in "$tmp"/usr/bin/*; do readelf -d "$b" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'; done | sort -u)
+extra=$(echo "$needed" | grep -v -E '^(libc\.so\.6|libm\.so\.6|libssl\.so\.3|libcrypto\.so\.3|libcurl\.so\.4|ld-linux-x86-64\.so\.2)$')
+[ -z "$extra" ] && ok "1.14 binaries need only libc, OpenSSL and libcurl" || bad "1.14 extra shared libraries: $extra"
+echo "$needed" | grep -q -i -E 'tuikit|ptytest' && bad "1.15 an own library is linked dynamically" || ok "1.15 own libraries are static"
+deps_extra=$(echo "$deps" | tr ',' '\n' | sed 's/ *(.*//; s/^ *//' | grep -v -E '^(libc6|libssl3t64|libssl3|libcurl4t64|libcurl4)$')
+[ -z "$deps_extra" ] && ok "1.16 Depends lists only libc6, libssl and libcurl" || bad "1.16 extra Depends: $deps_extra"
+( cd "$tmp" && rm -rf usr ) && rmdir "$tmp"
+
 # 2. A lintian finding fails the run and leaves build/packages/ empty.
 mkdir -p "$STUBS" || exit 1
 printf '#!/bin/sh\necho "stub lintian: E: invented-finding" >&2\nexit 1\n' > "$STUBS/lintian"

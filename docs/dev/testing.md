@@ -278,3 +278,10 @@ both line coverage over the same code.
 Known uncoverable lines in `setup_wizard.c`: TTY manipulation branches
 (`tcgetattr`/`tcsetattr` inside `hide && is_tty`) require a PTY to test.
 These 6 lines are excluded from the >90% target by convention.
+
+## CI and the library submodules
+
+The workflows in `.github/workflows/` check out with `submodules: recursive`.
+libtuikit and libptytest are public (GPL-3.0), so the default `GITHUB_TOKEN`
+fetches them and no deploy key or secret is needed. Functional phase 101 fails
+when a workflow's checkout step lacks the option.

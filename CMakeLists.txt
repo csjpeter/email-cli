@@ -3,7 +3,7 @@
 # Created: 2026-03-24
 # Top-level CMake build: options, shared flags and the sub-projects of email-cli.
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20)
 project(email-cli VERSION 0.3.0 LANGUAGES C)
 
 # Version string: prefer "git describe", fall back to project version.

@@ -1,0 +1,3 @@
+[submodule "libs/libptytest"]
+	path = libs/libptytest
+	url = https://github.com/csjpeter/libptytest.git

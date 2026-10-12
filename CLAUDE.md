@@ -53,6 +53,10 @@ Working through the approved tickets of this project by itself is the
 ./manage.sh help       # Show available commands
 ```
 
+The tree has a git submodule (`libs/libptytest`): clone with
+`git clone --recurse-submodules`, or run `git submodule update --init` in an
+existing checkout, before building.
+
 There is no Makefile — `manage.sh` calls CMake directly. A single unit suite runs with `./manage.sh test <name-part>`, a functional phase with `./manage.sh functional <phases>`, a PTY suite with `./manage.sh pty <suite> [<name-part>]` (see `docs/dev/testing.md`).
 
 The functional suite has no dedicated `manage.sh` target; run it directly with
@@ -143,7 +147,7 @@ docs/
   adr/                    ← Architecture Decision Records (CLEAN arch, RAII, test framework)
   userstories/            ← numbered user stories (US-1 …), one file each
 libs/
-  libptytest/             ← PTY-based terminal test library (self-contained)
+  libptytest/             ← PTY-based terminal test library (git submodule, pinned to a release tag)
 ```
 
 ## Claude Code Usage Guidelines

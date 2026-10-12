@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-31 */
+/* PTY tests of every view and mode of the clients. */
 /**
  * @file test_pty_views.c
  * @brief PTY-based tests for all email-cli views and modes.
@@ -10,6 +14,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "test_scratch.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +33,8 @@ int g_tests_failed = 0;
 /* ── Test infrastructure ─────────────────────────────────────────────── */
 
 static pid_t g_mock_pid = -1;
+static int   g_imap_port = 0;    /* the mock's port, picked by the kernel */
+static int   g_dead_port = 0;    /* a port nobody listens on (SMTP is not mocked here) */
 static char  g_test_home[256];
 static char  g_cli_bin[512];
 static char  g_cli_ro_bin[512];
@@ -57,12 +64,13 @@ static void write_config(void) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
         "SSL_NO_VERIFY=1\n"     /* TLS with self-signed cert */
-        "SMTP_HOST=smtps://localhost:9465\n"); /* dummy SMTP — avoids blocking prompt */
+        "SMTP_HOST=smtps://localhost:%d\n", /* dummy SMTP — avoids blocking prompt */
+        g_imap_port, g_dead_port);
     fclose(fp);
     chmod(path, 0600);
 }
@@ -82,65 +90,49 @@ static void write_config_with_interval(int interval) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
         "SSL_NO_VERIFY=1\n"   /* TLS with self-signed cert */
-        "SYNC_INTERVAL=%d\n", interval);
+        "SYNC_INTERVAL=%d\n", g_imap_port, interval);
     fclose(fp);
     chmod(path, 0600);
 }
 
+/* Type a host line holding the mock's port into the wizard. */
+static void send_host(PtySession *s, const char *fmt) {
+    char line[128];
+    snprintf(line, sizeof(line), fmt, g_imap_port);
+    pty_send_str(s, line);
+}
+
 static int start_mock_server(void) {
-    /* Retry rather than give up on the first failure: a mock killed moments
-     * ago can still hold the port briefly, and at that instant it looks
-     * exactly like a foreign server squatting on it.  Only a conflict that
-     * outlives several attempts is worth reporting — and it must be reported,
-     * because the connect probe cannot tell our server from a stranger's, and
-     * testing against someone else's mailbox is how this stayed hidden. */
-    for (int attempt = 0; attempt < 15; attempt++) {
-        g_mock_pid = fork();
-        if (g_mock_pid < 0) return -1;
-        if (g_mock_pid == 0) {
-            int devnull = open("/dev/null", O_WRONLY);
-            if (devnull >= 0) { dup2(devnull, 1); dup2(devnull, 2); close(devnull); }
-            execl(g_mock_bin, "mock_imap_server", (char *)NULL);
-            _exit(127);
-        }
-        usleep(attempt == 0 ? 800000 : 200000);
-
-        int _st = 0;
-        if (waitpid(g_mock_pid, &_st, WNOHANG) != g_mock_pid)
-            return 0;               /* still running: the port is ours */
-        g_mock_pid = -1;               /* bind failed; wait and try again */
+    /* The first start lets the kernel pick the port; a restart asks for the
+     * same one, because the configs written so far name it.  The port is
+     * known when test_spawn_mock() returns: the mock has bound it and said
+     * so, so no probe and no fixed number is needed. */
+    int port = 0;
+    g_mock_pid = test_spawn_mock(g_mock_bin, "MOCK_IMAP", g_imap_port, &port);
+    if (g_mock_pid < 0) {
+        fprintf(stderr, "views: the mock IMAP server did not start\n");
+        return -1;
     }
-    fprintf(stderr, "views: mock server could not bind its port after "
-                    "15 attempts - it is held by another process. "
-                    "Refusing to test against it.\n");
-    return -1;
+    g_imap_port = port;
+    return 0;
 }
 
-static int probe_server(void) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
-    struct sockaddr_in addr = { .sin_family = AF_INET,
-        .sin_port = htons(9993), .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
-    int ret = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    close(fd);
-    return ret;
-}
-
-static void restart_mock(void) {
+static void stop_mock_for_restart(void) {
     if (g_mock_pid > 0) {
         kill(g_mock_pid, SIGKILL);
         waitpid(g_mock_pid, NULL, 0);
         g_mock_pid = -1;
     }
-    usleep(200000);
-    start_mock_server();
-    for (int i = 0; i < 30 && probe_server() != 0; i++)
-        usleep(100000);
+}
+
+static void restart_mock(void) {
+    stop_mock_for_restart();
+    if (start_mock_server() != 0) { g_tests_failed++; }
 }
 
 static void stop_mock_server(void) {
@@ -515,22 +507,76 @@ static void test_interactive_list_statusbar(void) {
     ASSERT(sb >= 0, "list sb: found row with 'step'");
     if (sb >= 0) {
         ASSERT(pty_row_contains(s, sb, "Enter=open"), "list sb: Enter=open");
-        ASSERT(pty_row_contains(s, sb, "Backspace=folders"), "list sb: Backspace");
-        ASSERT(pty_row_contains(s, sb, "ESC=quit"), "list sb: ESC=quit");
+        ASSERT(pty_row_contains(s, sb, "Esc/q/BS=folders"), "list sb: Esc/q/BS=folders");
+        ASSERT(!pty_row_contains(s, sb, "ESC=quit"), "list sb: no longer says ESC=quit");
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
     }
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
 
+/* policies/tui-interface-model.md: Esc goes back one level, q is Esc, ctrl-c
+ * quits at once; Esc on the top level (accounts) quits with status 0. */
 static void test_interactive_list_esc_quit(void) {
     restart_mock();
     PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list ESC: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_ESC);
-    pty_settle(s, SETTLE_MS); /* program exits quietly — no output to wait for */
+    pty_send_key(s, PTY_KEY_ESC);                      /* list -> folders */
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);                      /* folders -> accounts */
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);                      /* top level: quits */
+    ASSERT(pty_wait_exit(s, 5000) == 0, "list ESC x3: program exits with status 0");
+    pty_close(s);
+}
+
+static void test_interactive_list_q_goes_back(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "list q: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");                              /* q is Esc: back */
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");                              /* top level: q never quits */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    pty_send_key(s, PTY_KEY_CTRL_C);                   /* ctrl-c quits at once */
+    ASSERT(pty_wait_exit(s, 5000) == 0, "accounts ctrl-c: program exits with status 0");
+    pty_close(s);
+}
+
+static void test_interactive_list_ctrl_c_quits_at_once(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "list ctrl-c: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "list ctrl-c: program exits with status 0");
+    pty_close(s);
+}
+
+/* The header bar is bold white on blue, not reverse video (palette). */
+static void test_interactive_header_bar_palette(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "header palette: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 0, "message(s) in");
+    ASSERT_CELL_ATTR(s, 0, 2, PTY_ATTR_BOLD);
+    ASSERT(!(pty_cell_attr(s, 0, 2) & PTY_ATTR_REVERSE), "header bar is not reverse video");
+    ASSERT(pty_cell_fg(s, 0, 2) == 37, "header bar foreground is white");
+    pty_send_key(s, PTY_KEY_CTRL_C);
     pty_close(s);
 }
 
@@ -695,12 +741,11 @@ static void test_interactive_show_backspace(void) {
 
 /*
  * ══════════════════════════════════════════════════════════════════════
- * US-RD-05: As a user reading a message, pressing ESC exits the program
- *           immediately; Backspace returns to the message list.
+ * US-RD-05: As a user reading a message, pressing Esc, q or Backspace
+ *           returns to the message list; ctrl-c leaves the program at once.
  * Acceptance criteria:
- *   - ESC in reader: program terminates, list NOT shown.
- *   - Backspace in reader: list view shown again.
- *   - 'q' in reader: list view shown again.
+ *   - Esc, q, Backspace in reader: list view shown again.
+ *   - ctrl-c in reader: program terminates with status 0.
  * ══════════════════════════════════════════════════════════════════════
  */
 static void test_interactive_show_esc_exits(void) {
@@ -713,11 +758,19 @@ static void test_interactive_show_esc_exits(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* ESC from reader exits the program (does NOT return to list) */
+    /* Esc from the reader goes back to the list, like q and Backspace */
     pty_send_key(s, PTY_KEY_ESC);
-    pty_settle(s, SETTLE_MS * 2);
-    int r = pty_wait_for(s, "message(s) in", 1500);
-    ASSERT(r != 0, "show ESC: does NOT return to list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);                   /* ctrl-c quits at once */
+    ASSERT(pty_wait_exit(s, 5000) == 0, "show ctrl-c: program exits with status 0");
     pty_close(s);
 }
 
@@ -1093,13 +1146,13 @@ static void test_interactive_folders_flat_navigate_up(void) {
     /* Flat view at root shows only top-level list-folders (no '.' in name) */
     ASSERT_SCREEN_CONTAINS(s, "INBOX");
     pty_send_key(s, PTY_KEY_ENTER);           /* navigate into INBOX */
-    ASSERT_WAIT_FOR(s, "Backspace=up", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS=up", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     /* Header shows "Folders: INBOX/ (3)"; flat mode shows last component only */
     ASSERT_SCREEN_CONTAINS(s, "INBOX/");
     ASSERT_SCREEN_CONTAINS(s, "Sent");
     pty_send_key(s, PTY_KEY_BACK);            /* navigate up to root */
-    ASSERT_WAIT_FOR(s, "Backspace=back", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS=back", WAIT_MS);
     pty_send_str(s, "t");                     /* toggle back to tree mode */
     ASSERT_WAIT_FOR(s, "t=flat", WAIT_MS);   /* tree mode shows "t=flat" hint */
     pty_send_key(s, PTY_KEY_ESC);
@@ -1107,7 +1160,7 @@ static void test_interactive_folders_flat_navigate_up(void) {
 }
 
 static void test_interactive_folders_esc_quit(void) {
-    /* ESC from folder browser quits the entire application */
+    /* ESC from the folder browser goes back to the accounts screen */
     restart_mock();
     PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "list-folders ESC quit: opens");
@@ -1116,9 +1169,10 @@ static void test_interactive_folders_esc_quit(void) {
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* ESC exits the application from the folder browser */
     pty_send_key(s, PTY_KEY_ESC);
-    pty_settle(s, SETTLE_MS);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "folders ESC x2: program exits with status 0");
     pty_close(s);
 }
 
@@ -1179,7 +1233,7 @@ static void test_interactive_empty_folder(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Subject");
     ASSERT_SCREEN_CONTAINS(s, "(empty)");
-    ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
+    ASSERT_SCREEN_CONTAINS(s, "Esc/q/BS=folders");
 
     /* Backspace returns to folder browser */
     pty_send_key(s, PTY_KEY_BACK);
@@ -1209,7 +1263,7 @@ static void test_interactive_empty_folder_cron(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "(empty)");
     ASSERT_SCREEN_CONTAINS(s, "No cached data");
-    ASSERT_SCREEN_CONTAINS(s, "Backspace=folders");
+    ASSERT_SCREEN_CONTAINS(s, "Esc/q/BS=folders");
     /* Restore folder cursor to INBOX so subsequent tests open INBOX */
     pty_send_key(s, PTY_KEY_BACK);          /* back to folder browser */
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
@@ -1617,7 +1671,7 @@ static void test_wizard_complete(void) {
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_str(s, "imaps://localhost:9993\n");   /* explicit correct protocol */
+    send_host(s, "imaps://localhost:%d\n");   /* explicit correct protocol */
     ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
     pty_send_str(s, "\n");  /* accept default 993 */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
@@ -1648,7 +1702,7 @@ static void test_wizard_host_autocomplete(void) {
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_str(s, "localhost:9993\n");            /* no protocol → auto imaps:// */
+    send_host(s, "localhost:%d\n");            /* no protocol → auto imaps:// */
     ASSERT_WAIT_FOR(s, "imaps://", WAIT_MS);        /* confirmation line printed */
     ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
     pty_send_str(s, "\n");   /* accept default 993 */
@@ -1680,10 +1734,10 @@ static void test_wizard_bad_protocol_rejected(void) {
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");  /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_str(s, "imap://localhost:9993\n");     /* wrong protocol */
+    send_host(s, "imap://localhost:%d\n");     /* wrong protocol */
     ASSERT_WAIT_FOR(s, "unsupported protocol", WAIT_MS);
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);       /* re-prompted */
-    pty_send_str(s, "imaps://localhost:9993\n");    /* now correct */
+    send_host(s, "imaps://localhost:%d\n");    /* now correct */
     ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
     pty_send_str(s, "\n");   /* accept default 993 */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
@@ -1709,7 +1763,7 @@ static void test_wizard_with_smtp(void) {
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
     pty_send_str(s, "1\n");                           /* IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_str(s, "localhost:9993\n");               /* plain name → imaps:// prepended */
+    send_host(s, "localhost:%d\n");               /* plain name → imaps:// prepended */
     ASSERT_WAIT_FOR(s, "Port", WAIT_MS);
     pty_send_str(s, "\n");                            /* accept default 993 */
     ASSERT_WAIT_FOR(s, "sername", WAIT_MS);
@@ -1988,11 +2042,15 @@ static void test_tui_show_esc_exits(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* ESC exits the program, not back to list */
+    /* Esc goes back to the list (and on up the stack) */
     pty_send_key(s, PTY_KEY_ESC);
-    pty_settle(s, SETTLE_MS * 2);
-    int r = pty_wait_for(s, "message(s) in", 1500);
-    ASSERT(r != 0, "tui show ESC: does NOT return to list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "tui show ESC x4: program exits with status 0");
     pty_close(s);
 }
 
@@ -2114,11 +2172,11 @@ static void write_second_account(const char *name) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=%s\n"
         "EMAIL_PASS=pass2\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SSL_NO_VERIFY=1\n", name);  /* TLS with self-signed cert */
+        "SSL_NO_VERIFY=1\n", g_imap_port, name);  /* TLS with self-signed cert */
     fclose(fp);
     chmod(path, 0600);
 }
@@ -2136,14 +2194,18 @@ static void test_tui_accounts_screen_shows(void) {
 }
 
 static void test_tui_accounts_esc_quit(void) {
-    /* US-21: ESC/q from accounts screen exits the TUI */
+    /* US-21: Esc on the accounts screen (the top level) exits the TUI with
+     * status 0; q does not (it only goes back, and there is nowhere to go). */
     restart_mock();
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "accounts ESC quit: opens");
     ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_str(s, "q");
     pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "accounts ESC: program exits with status 0");
     pty_close(s);
 }
 
@@ -2477,10 +2539,10 @@ static void write_config_no_ssl_verify_imap(void) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imap://localhost:9993\n"
+        "EMAIL_HOST=imap://localhost:%d\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
-        "EMAIL_FOLDER=INBOX\n");
+        "EMAIL_FOLDER=INBOX\n", g_imap_port);
     /* No SSL_NO_VERIFY=1 — insecure URL must be rejected */
     fclose(fp);
     chmod(path, 0600);
@@ -2506,14 +2568,14 @@ static void write_config_no_ssl_verify_smtp(void) {
     FILE *fp = fopen(path, "w");
     if (!fp) return;
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SMTP_HOST=smtp://localhost:9025\n"
-        "SMTP_PORT=9025\n"
+        "SMTP_HOST=smtp://localhost:%d\n"
+        "SMTP_PORT=%d\n"
         "SMTP_USER=testuser\n"
-        "SMTP_PASS=testpass\n");
+        "SMTP_PASS=testpass\n", g_imap_port, g_dead_port, g_dead_port);
     /* No SSL_NO_VERIFY=1 — insecure smtp:// URL must be rejected */
     fclose(fp);
     chmod(path, 0600);
@@ -2587,9 +2649,9 @@ static void test_tui_list_reply_key(void) {
     /* US-20: 'r' in TUI list launches reply; editor clears To: → abort → back to list */
     restart_mock();
     /* Write an editor script that blanks To: so compose aborts cleanly */
-    char editor_script[256];
+    char editor_script[512];
     snprintf(editor_script, sizeof(editor_script),
-             "/tmp/test_reply_list_editor_%d.sh", (int)getpid());
+             "%s/test_reply_list_editor.sh", test_scratch_dir());
     FILE *ef = fopen(editor_script, "w");
     if (ef) {
         fprintf(ef, "#!/bin/sh\n");
@@ -4138,6 +4200,24 @@ static void test_tui_rules_edit_form_prefill(void) {
     remove_rules_ini();
 }
 
+/* EMAIL-2 / EMAIL-3: function keys and modified cursor keys are no keys at
+ * all.  F1 (ESC O P) used to act as Esc ("go back") and leave a typed 'P'. */
+static void test_tui_function_and_modified_keys_do_nothing(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "unknown keys: reaches the message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "\033OP");          /* F1 */
+    pty_send_str(s, "\033[1;5A");       /* Ctrl+Up */
+    pty_send_str(s, "\033[15~");        /* F5 */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");   /* still in the list */
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+
 static void test_tui_rules_edit_form_esc_cancel(void) {
     /* US-80 AC3: ESC in step 1 of the edit form cancels without modifying the rule */
     remove_rules_ini();
@@ -4157,9 +4237,11 @@ static void test_tui_rules_edit_form_esc_cancel(void) {
     ASSERT_WAIT_FOR(s, "conditions (step 1/2)", WAIT_MS); /* step 1 opens */
     pty_send_key(s, PTY_KEY_ESC);                          /* cancel — no change */
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);            /* still in detail view */
+    pty_settle(s, SETTLE_MS);                              /* let the redraw finish */
     ASSERT_SCREEN_CONTAINS(s, "SpamFilter");               /* rule unchanged */
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "SpamFilter");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
@@ -4172,7 +4254,7 @@ static void test_tui_rules_edit_form_esc_cancel(void) {
 
 /* ── Main ────────────────────────────────────────────────────────────── */
 
-#define RUN_TEST(fn) do { printf("  %s...\n", #fn); fn(); } while(0)
+#define RUN_TEST(fn) do { if (!test_selected(#fn)) break; printf("  %s...\n", #fn); fn(); } while(0)
 
 int main(int argc, char *argv[]) {
     printf("--- email-cli PTY View Tests ---\n\n");
@@ -4191,12 +4273,20 @@ int main(int argc, char *argv[]) {
     const char *home = getenv("HOME");
     if (home) snprintf(g_old_home, sizeof(g_old_home), "%s", home);
 
-    snprintf(g_test_home, sizeof(g_test_home),
-             "/tmp/email-cli-pty-test-%d", getpid());
+    snprintf(g_test_home, sizeof(g_test_home), "%s", TP("home"));
     setenv("HOME", g_test_home, 1);
     unsetenv("XDG_CONFIG_HOME");
     unsetenv("XDG_CACHE_HOME");
     unsetenv("XDG_DATA_HOME");
+
+    /* The mock first: the configs written next name its port. */
+    g_dead_port = test_unused_port();
+    printf("--- Starting mock IMAP server ---\n");
+    if (start_mock_server() != 0 || g_dead_port < 0) {
+        fprintf(stderr, "FATAL: cannot start mock server\n");
+        g_tests_failed++;           /* a fixture that cannot start is a failure */
+        goto done;
+    }
     write_config();
 
     printf("--- Help pages ---\n");
@@ -4207,11 +4297,6 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_help_sync);
     RUN_TEST(test_help_cron);
 
-    printf("\n--- Starting mock IMAP server ---\n");
-    if (start_mock_server() != 0) {
-        fprintf(stderr, "FATAL: cannot start mock server\n");
-        goto done;
-    }
 
     printf("\n--- Batch mode ---\n");
     RUN_TEST(test_batch_list);
@@ -4245,6 +4330,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_list_separator);
     RUN_TEST(test_interactive_list_statusbar);
     RUN_TEST(test_interactive_list_esc_quit);
+    RUN_TEST(test_interactive_list_q_goes_back);
+    RUN_TEST(test_interactive_list_ctrl_c_quits_at_once);
+    RUN_TEST(test_interactive_header_bar_palette);
     RUN_TEST(test_interactive_list_nav);
     RUN_TEST(test_interactive_list_flags);
     RUN_TEST(test_tui_list_search_filter);
@@ -4523,6 +4611,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_tui_rules_edit_form_opens);
     RUN_TEST(test_tui_rules_edit_form_prefill);
     RUN_TEST(test_tui_rules_edit_form_esc_cancel);
+    RUN_TEST(test_tui_function_and_modified_keys_do_nothing);
 
 done:
     stop_mock_server();

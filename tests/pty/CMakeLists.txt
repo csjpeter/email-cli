@@ -1,14 +1,19 @@
-# libptytest is a git submodule (libs/libptytest, pinned to a release tag).
-# Used through add_subdirectory() it builds only the library; the static target
-# is linked so the PTY suites carry no run-time dependency on it.
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-03-31
+# Build rules of the PTY tests.
+
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/libptytest libptytest)
 
+# Every path a PTY test uses is under build/tests/pty/work-<pid>
+# (tests/common/test_scratch.h); never the shared system temp directory.
+include_directories(${CMAKE_SOURCE_DIR}/tests/common)
+add_compile_definitions(TEST_BUILD_DIR="${CMAKE_BINARY_DIR}" TEST_CATEGORY="pty")
+
 # ── email-cli view tests (require mock IMAP server) ───────────────────
-add_executable(test-pty-views test_pty_views.c)
-target_link_libraries(test-pty-views ptytest::ptytest_static)
-if(NOT APPLE)
-    target_link_libraries(test-pty-views util)
-endif()
+add_executable(test-pty-views test_pty_views.c ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c)
+target_link_libraries(test-pty-views ptytest)
+target_link_libraries(test-pty-views util)
 
 # ── Mock IMAP server (built inline for PTY tests) ─────────────────────
 add_executable(mock-imap-server EXCLUDE_FROM_ALL
@@ -31,17 +36,10 @@ add_custom_target(run-pty-views
 )
 
 # ── Platform sources for harness (same selection as main build) ───────
-if(WIN32)
-    set(HARNESS_PLATFORM_SOURCES
-        ${CMAKE_SOURCE_DIR}/libemail/src/platform/windows/terminal.c
-        ${CMAKE_SOURCE_DIR}/libemail/src/platform/windows/path.c
-    )
-else()
-    set(HARNESS_PLATFORM_SOURCES
-        ${CMAKE_SOURCE_DIR}/libemail/src/platform/posix/terminal.c
-        ${CMAKE_SOURCE_DIR}/libemail/src/platform/posix/path.c
-    )
-endif()
+set(HARNESS_PLATFORM_SOURCES
+    ${CMAKE_SOURCE_DIR}/libemail/src/platform/posix/terminal.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/platform/posix/path.c
+)
 
 # ── InputLine / PathComplete harness ─────────────────────────────────
 add_executable(input-line-harness EXCLUDE_FROM_ALL
@@ -62,11 +60,13 @@ target_link_libraries(input-line-harness OpenSSL::SSL OpenSSL::Crypto)
 # ── InputLine / PathComplete PTY tests ───────────────────────────────
 add_executable(test-pty-input-line EXCLUDE_FROM_ALL
     test_input_line_pty.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_link_libraries(test-pty-input-line ptytest::ptytest_static)
-if(NOT APPLE)
-    target_link_libraries(test-pty-input-line util)
-endif()
+target_include_directories(test-pty-input-line PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-input-line ptytest)
+target_link_libraries(test-pty-input-line util)
 add_dependencies(test-pty-input-line input-line-harness)
 
 # ── Mock Gmail API server ─────────────────────────────────────────────
@@ -77,11 +77,13 @@ add_executable(mock-gmail-server EXCLUDE_FROM_ALL
 # ── Gmail TUI PTY tests ───────────────────────────────────────────────
 add_executable(test-pty-gmail-tui EXCLUDE_FROM_ALL
     test_pty_gmail_tui.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_link_libraries(test-pty-gmail-tui ptytest::ptytest_static)
-if(NOT APPLE)
-    target_link_libraries(test-pty-gmail-tui util)
-endif()
+target_include_directories(test-pty-gmail-tui PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-gmail-tui ptytest)
+target_link_libraries(test-pty-gmail-tui util)
 add_dependencies(test-pty-gmail-tui email-tui email-sync mock-gmail-server)
 
 add_custom_target(run-pty-gmail-tui
@@ -104,11 +106,13 @@ target_link_libraries(mock-smtp-server OpenSSL::SSL OpenSSL::Crypto)
 # ── Compose / send PTY tests ──────────────────────────────────────────
 add_executable(test-pty-compose EXCLUDE_FROM_ALL
     test_compose_pty.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_link_libraries(test-pty-compose ptytest::ptytest_static)
-if(NOT APPLE)
-    target_link_libraries(test-pty-compose util)
-endif()
+target_include_directories(test-pty-compose PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-compose ptytest)
+target_link_libraries(test-pty-compose util)
 add_dependencies(test-pty-compose email-tui mock-smtp-server email-cli)
 
 add_custom_target(run-pty-compose
@@ -124,11 +128,13 @@ add_custom_target(run-pty-compose
 # ── Mail rules PTY tests ──────────────────────────────────────────────
 add_executable(test-pty-mail-rules EXCLUDE_FROM_ALL
     test_pty_mail_rules.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_link_libraries(test-pty-mail-rules ptytest::ptytest_static)
-if(NOT APPLE)
-    target_link_libraries(test-pty-mail-rules util)
-endif()
+target_include_directories(test-pty-mail-rules PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-mail-rules ptytest)
+target_link_libraries(test-pty-mail-rules util)
 add_dependencies(test-pty-mail-rules email-sync email-tui mock-imap-server)
 
 add_custom_target(run-pty-mail-rules
@@ -144,11 +150,13 @@ add_custom_target(run-pty-mail-rules
 # ── Pre-compose dialog PTY tests ──────────────────────────────────────
 add_executable(test-pty-compose-dialog EXCLUDE_FROM_ALL
     test_pty_compose_dialog.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_link_libraries(test-pty-compose-dialog ptytest::ptytest_static)
-if(NOT APPLE)
-    target_link_libraries(test-pty-compose-dialog util)
-endif()
+target_include_directories(test-pty-compose-dialog PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-compose-dialog ptytest)
+target_link_libraries(test-pty-compose-dialog util)
 add_dependencies(test-pty-compose-dialog email-tui mock-imap-server mock-smtp-server)
 
 add_custom_target(run-pty-compose-dialog
@@ -164,11 +172,13 @@ add_custom_target(run-pty-compose-dialog
 # ── Local-first send PTY tests (US-SL-01 … US-SL-04) ─────────────────
 add_executable(test-pty-send-local EXCLUDE_FROM_ALL
     test_pty_send_local.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_link_libraries(test-pty-send-local ptytest::ptytest_static)
-if(NOT APPLE)
-    target_link_libraries(test-pty-send-local util)
-endif()
+target_include_directories(test-pty-send-local PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-send-local ptytest)
+target_link_libraries(test-pty-send-local util)
 add_dependencies(test-pty-send-local email-tui email-sync mock-imap-server mock-smtp-server)
 
 add_custom_target(run-pty-send-local
@@ -186,11 +196,13 @@ add_custom_target(run-pty-send-local
 # NOTE: These tests FAIL until US-84 and US-85 are implemented (TDD spec).
 add_executable(test-pty-attachment EXCLUDE_FROM_ALL
     test_pty_attachment.c
+    ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
 )
-target_link_libraries(test-pty-attachment ptytest::ptytest_static)
-if(NOT APPLE)
-    target_link_libraries(test-pty-attachment util)
-endif()
+target_include_directories(test-pty-attachment PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/libptytest
+)
+target_link_libraries(test-pty-attachment ptytest)
+target_link_libraries(test-pty-attachment util)
 add_dependencies(test-pty-attachment email-tui mock-imap-server mock-smtp-server)
 
 add_custom_target(run-pty-attachment

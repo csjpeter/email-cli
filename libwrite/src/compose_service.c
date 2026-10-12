@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-13 */
+/* Builds RFC 2822 messages and extracts reply and forward metadata. */
 #include "compose_service.h"
 #include "mime_util.h"
 #include <stdio.h>

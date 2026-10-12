@@ -168,8 +168,8 @@ a message is either in one or more label views, or in Archive, never both.
 |-----------|--------|
 | ↑ / ↓    | Move cursor |
 | Enter     | Open: show messages with this label |
-| Backspace | Return to accounts screen |
-| ESC / q   | Quit |
+| Backspace / ESC / q | Return to accounts screen |
+| Ctrl-C    | Quit at once |
 
 ---
 

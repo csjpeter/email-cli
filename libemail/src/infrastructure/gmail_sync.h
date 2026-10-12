@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-17 */
+/* Interface of the Gmail synchronisation. */
 #ifndef GMAIL_SYNC_H
 #define GMAIL_SYNC_H
 
@@ -29,6 +33,21 @@
  * @return 0 on success, -1 on error.
  */
 int gmail_sync(GmailClient *gc);
+
+/**
+ * @brief Pushes the queued label changes (mail rules) to Google.
+ *
+ * Reads pending_labels.tsv, resolves each label name to a Gmail label ID
+ * (creating a missing user label on add), and sends one users.messages.modify
+ * per message.  Entries that did not get through stay queued.  Rule-local
+ * pseudo labels without a Gmail counterpart (e.g. _done) are dropped.
+ * gmail_sync() calls this before and after pulling.
+ *
+ * @param gc  Connected Gmail client.
+ * @return 0 when everything was pushed (or nothing was queued), -1 when
+ *         some entries remain queued.
+ */
+int gmail_sync_flush_pending_labels(GmailClient *gc);
 
 /**
  * @brief Full sync: reconcile + fetch all missing messages.

@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-03-24
+# Build rules of the unit test runner.
+
 include_directories(
     ../../libemail/src
     ../../libemail/src/core
@@ -10,24 +15,16 @@ include_directories(
 
 # Platform-specific sources for tests
 # html_medium_stub.c replaces platform html_medium.c for deterministic tests
-if(WIN32)
-    set(TEST_PLATFORM_SOURCES
-        ../../libemail/src/platform/windows/terminal.c
-        ../../libemail/src/platform/windows/path.c
-        ../../libemail/src/platform/windows/process.c
-        ../../libemail/src/platform/windows/credential_key.c
-    )
-else()
-    set(TEST_PLATFORM_SOURCES
-        ../../libemail/src/platform/posix/terminal.c
-        ../../libemail/src/platform/posix/path.c
-        ../../libemail/src/platform/posix/process.c
-        ../../libemail/src/platform/posix/credential_key.c
-    )
-endif()
+set(TEST_PLATFORM_SOURCES
+    ../../libemail/src/platform/posix/terminal.c
+    ../../libemail/src/platform/posix/path.c
+    ../../libemail/src/platform/posix/process.c
+    ../../libemail/src/platform/posix/credential_key.c
+)
 
 set(TEST_SOURCES
     test_runner.c
+    ../common/test_scratch.c
     test_platform.c
     test_fs_util.c
     test_config.c
@@ -85,6 +82,8 @@ add_dependencies(test-runner test-tls-certs)
 target_compile_definitions(test-runner PRIVATE
     TEST_CERT_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.crt"
     TEST_KEY_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.key"
+    TEST_BUILD_DIR="${CMAKE_BINARY_DIR}"
+    TEST_CATEGORY="unit"
 )
 
 add_test(NAME UnitTests COMMAND test-runner)

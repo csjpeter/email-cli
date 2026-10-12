@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-18 */
+/* Interface of the per-account credential obfuscation key derivation. */
 #ifndef PLATFORM_CREDENTIAL_KEY_H
 #define PLATFORM_CREDENTIAL_KEY_H
 

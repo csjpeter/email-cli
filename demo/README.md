@@ -19,7 +19,6 @@ Automated pipeline that produces a YouTube-ready demo video with **zero on-camer
 
 ```bash
 # VHS (terminal recorder)
-brew install vhs           # macOS
 sudo apt install vhs       # Ubuntu (Charm apt repo)
 
 # FFmpeg

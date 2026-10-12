@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-13 */
+/* Interface of the SMTP adapter. */
 #ifndef SMTP_ADAPTER_H
 #define SMTP_ADAPTER_H
 

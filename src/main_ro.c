@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-24 */
+/* Entry point of email-cli-ro: the read-only, non-interactive client. */
 /**
  * @file main_ro.c
  * @brief Entry point for email-cli-ro — read-only, non-interactive CLI.

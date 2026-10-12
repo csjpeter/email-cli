@@ -1,4 +1,9 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-03-25
+# Integration test of email-cli against a real Dovecot IMAP server over TLS.
+
 # Integration test: email-cli against a real Dovecot IMAP server over TLS 1.2+.
 #
 # Acceptance criteria:
@@ -24,7 +29,9 @@ COMPOSE="docker compose -f $SCRIPT_DIR/docker-compose.yml"
 CONTAINER="email-cli-imap-test"
 
 # TLS connection – self-signed cert, so verify is disabled
-IMAP_HOST="imaps://localhost:993"
+# The container's IMAPS port is published on a loopback port the kernel picks
+# (docker-compose.yml); ensure_env_running leaves it in IMAP_HOST.
+IMAP_HOST=""
 IMAP_USER="testuser"
 IMAP_PASS="testpass"
 IMAP_FOLDER="INBOX"
@@ -40,7 +47,7 @@ start_env() {
 wait_for_imaps() {
     echo "Waiting for IMAPS on port 993..."
     for i in $(seq 1 30); do
-        if docker exec "$CONTAINER" nc -z localhost 993 2>/dev/null; then
+        if docker exec "$CONTAINER" nc -z localhost 993; then
             echo "IMAPS server is ready."
             return 0
         fi
@@ -94,9 +101,26 @@ fi
 # 2. Start or reuse the IMAP/TLS server
 ensure_env_running
 
-# 3. Write temporary config pointing at the TLS server
-TEST_HOME="$(mktemp -d /tmp/email-cli-itest-XXXXXX)"
-trap 'rm -rf "/tmp/email-cli-itest-${TEST_HOME##*/tmp/email-cli-itest-}"' EXIT
+# 3. Write temporary config pointing at the TLS server.  The home lives under
+#    build/ with this shell's pid in its name; nothing is written to the system temp directory.
+HOST_MAPPING="$(docker port "$CONTAINER" 993/tcp | head -n 1)"
+IMAP_PORT="${HOST_MAPPING##*:}"
+case "$IMAP_PORT" in
+    ''|*[!0-9]*) echo "ERROR: no published IMAPS port for $CONTAINER ('$HOST_MAPPING')" >&2; exit 1 ;;
+esac
+IMAP_HOST="imaps://localhost:$IMAP_PORT"
+echo "IMAPS is published on $IMAP_HOST"
+
+TEST_HOME="$PROJECT_ROOT/build/tests/integration/work-$$"
+mkdir -p "$TEST_HOME"
+cleanup_home() {
+    case "$TEST_HOME" in
+        "$PROJECT_ROOT"/build/tests/integration/work-*) ;;
+        *) echo "ERROR: refusing unsafe path '$TEST_HOME'" >&2; return 1 ;;
+    esac
+    rm -rf "$PROJECT_ROOT/build/tests/integration/work-${TEST_HOME##*/work-}"
+}
+trap cleanup_home EXIT
 mkdir -p "$TEST_HOME/.config/email-cli"
 cat > "$TEST_HOME/.config/email-cli/config.ini" <<EOF
 EMAIL_HOST=$IMAP_HOST

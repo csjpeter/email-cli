@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-13 */
+/* libcurl-based SMTP sender of RFC 2822 messages. */
 #include "smtp_adapter.h"
 #include "logger.h"
 #include <curl/curl.h>

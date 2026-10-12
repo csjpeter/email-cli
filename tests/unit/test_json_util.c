@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-16 */
+/* Unit tests of the JSON parser. */
 #include "test_helpers.h"
 #include "json_util.h"
 #include <stdlib.h>

@@ -96,7 +96,7 @@ All header fields are editable.  Additional standard headers (e.g. `Cc:`,
 
 Message list:
 ```
-  ↑↓=step  PgDn/PgUp=page  Enter=open  Backspace=folders  ESC=quit
+  ↑↓=step  PgDn/PgUp=page  Enter=open  Esc/q/BS=folders
   c=compose  r=reply  n=new  f=flag  d=done  s=sync  R=refresh  [N/M]
 ```
 

@@ -15,7 +15,8 @@ Pressing Backspace in the interactive message list opens the folder browser.
 | PgUp / PgDn | Scroll the folder list one page up / down |
 | Enter | Select the highlighted folder and open its message list |
 | Backspace | In flat view with subfolder prefix: navigate up one level. At root: return to the Accounts screen. |
-| ESC / q | Exit the application |
+| ESC / q | Back: up one level, at the root to the Accounts screen (same as Backspace) |
+| Ctrl-C | Exit the application at once |
 | `t` | Toggle between tree view and flat view |
 
 ## Columns
@@ -51,5 +52,5 @@ In tree mode all folders are always visible, so each row shows only its own coun
 
 ## Status Bar Format (tree mode)
 ```
-  ↑↓=step  PgDn/PgUp=page  Enter=open/select  t=flat  Backspace=back  ESC=quit
+  ↑↓=step  PgDn/PgUp=page  Enter=open/select  t=flat  Esc/q/BS=back
 ```

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 Peter Csaszar (Császár Péter)
+# Created: 2026-04-18
+# Builds the whole demo video, end to end.
+
 # demo/make_demo.sh — Master script: build the full YouTube demo video end-to-end.
 #
 # Steps:

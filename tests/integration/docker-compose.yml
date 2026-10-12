@@ -5,8 +5,11 @@ services:
       dockerfile: Dockerfile
     container_name: email-cli-imap-test
     ports:
-      - "143:143"
-      - "993:993"
+      # Loopback only, and a host port the kernel picks: a fixed 143/993 is
+      # taken by any IMAP server the machine already runs.  The scripts read
+      # the port back with `docker port`.
+      - "127.0.0.1::143"
+      - "127.0.0.1::993"
     volumes:
       - maildata:/home/testuser/Maildir
     healthcheck:

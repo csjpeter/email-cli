@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-04-13 */
+/* PTY tests of the compose, reply and send commands of email-tui. */
 /**
  * @file test_compose_pty.c
  * @brief PTY tests for email-tui compose/reply/send commands.
@@ -7,6 +11,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "test_scratch.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,9 +39,12 @@ static char g_cli_bin[512];
 static char g_smtp_mock_bin[512];
 static char g_test_home[512];
 static pid_t g_smtp_pid = -1;
+static int   g_smtp_port = 0;   /* picked by the kernel, published by the mock */
+static int   g_imap_port = 0;   /* nothing listens here: IMAP is not mocked */
 
 #define RUN_TEST(fn) \
     do { \
+        if (!test_selected(#fn)) break; \
         fprintf(stdout, "  %s...\n", #fn); \
         fflush(stdout); \
         fn(); \
@@ -57,46 +65,40 @@ static void write_config(void) {
     mkdir(d4, 0700);
     snprintf(path, sizeof(path), "%s/config.ini", d4);
     FILE *fp = fopen(path, "w");
-    if (!fp) return;
+    if (!fp) {                       /* a fixture that cannot be made fails the run */
+        fprintf(stderr, "compose: cannot write %s\n", path);
+        g_tests_failed++;
+        return;
+    }
     fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:9993\n"
+        "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser\n"
         "EMAIL_PASS=testpass\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SMTP_HOST=smtps://localhost:9025\n"
-        "SMTP_PORT=9025\n"
+        "SMTP_HOST=smtps://localhost:%d\n"
+        "SMTP_PORT=%d\n"
         "SMTP_USER=testuser\n"
         "SMTP_PASS=testpass\n"
-        "SSL_NO_VERIFY=1\n");   /* permit self-signed cert from mock server */
+        "SSL_NO_VERIFY=1\n",   /* permit self-signed cert from mock server */
+        g_imap_port, g_smtp_port, g_smtp_port);
     fclose(fp);
     chmod(path, 0600);
 }
 
 /* ── Mock SMTP server management ──────────────────────────────────────── */
 
-static int probe_smtp(void) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port   = htons(9025),
-        .sin_addr.s_addr = htonl(INADDR_LOOPBACK)
-    };
-    int ret = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    close(fd);
-    return ret;
-}
-
 static void start_smtp_server(void) {
-    g_smtp_pid = fork();
-    if (g_smtp_pid < 0) return;
-    if (g_smtp_pid == 0) {
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) { dup2(devnull, 2); close(devnull); }
-        execl(g_smtp_mock_bin, "mock_smtp_server", (char *)NULL);
-        _exit(127);
+    /* The first start lets the kernel pick the port; a restart asks for the
+     * same one, because the config names it.  test_spawn_mock() returns when
+     * the mock has bound the port and said which, so nothing is probed. */
+    int port = 0;
+    g_smtp_pid = test_spawn_mock(g_smtp_mock_bin, "MOCK_SMTP", g_smtp_port, &port);
+    if (g_smtp_pid < 0) {
+        fprintf(stderr, "compose: the mock SMTP server did not start\n");
+        g_tests_failed++;
+        return;
     }
-    usleep(600000);
+    g_smtp_port = port;
 }
 
 static void restart_smtp(void) {
@@ -105,10 +107,7 @@ static void restart_smtp(void) {
         waitpid(g_smtp_pid, NULL, 0);
         g_smtp_pid = -1;
     }
-    usleep(200000);
     start_smtp_server();
-    for (int i = 0; i < 30 && probe_smtp() != 0; i++)
-        usleep(100000);
 }
 
 static void stop_smtp_server(void) {
@@ -232,11 +231,12 @@ static void test_send_no_smtp_config(void) {
     FILE *fp = fopen(path, "w");
     if (fp) {
         fprintf(fp,
-            "EMAIL_HOST=imaps://localhost:9993\n"
+            "EMAIL_HOST=imaps://localhost:%d\n"
             "EMAIL_USER=testuser\n"
             "EMAIL_PASS=testpass\n"
             "EMAIL_FOLDER=INBOX\n"
-            "SSL_NO_VERIFY=1\n");  /* permit non-TLS mock server in tests */
+            "SSL_NO_VERIFY=1\n",  /* permit non-TLS mock server in tests */
+            g_imap_port);
         fclose(fp);
         chmod(path, 0600);
     }
@@ -257,12 +257,12 @@ static void test_send_no_smtp_config(void) {
  * complete message and returns.  Sets $EDITOR to that script path.
  * Returns the script path (caller must unlink when done).
  */
-static char g_editor_script[256];
+static char g_editor_script[512];
 
 static void setup_editor_mock(const char *from, const char *to,
                               const char *subject, const char *body) {
     snprintf(g_editor_script, sizeof(g_editor_script),
-             "/tmp/test_editor_%d.sh", (int)getpid());
+             "%s/test_editor.sh", test_scratch_dir());
     FILE *ef = fopen(g_editor_script, "w");
     if (!ef) return;
     fprintf(ef, "#!/bin/sh\n");
@@ -350,13 +350,13 @@ static void test_reply_no_cr_in_quote(void) {
     restart_smtp();
 
     /* Editor mock: capture draft to a known path, then fill in a valid reply */
-    char capture_path[256];
+    char capture_path[512];
     snprintf(capture_path, sizeof(capture_path),
-             "/tmp/draft_capture_%d.txt", (int)getpid());
+             "%s/draft_capture.txt", test_scratch_dir());
 
-    char editor_script[300];
+    char editor_script[512];
     snprintf(editor_script, sizeof(editor_script),
-             "/tmp/test_editor_cr_%d.sh", (int)getpid());
+             "%s/test_editor_cr.sh", test_scratch_dir());
     FILE *ef = fopen(editor_script, "w");
     if (ef) {
         fprintf(ef, "#!/bin/sh\n");
@@ -677,7 +677,10 @@ static void test_config_password_only(void) {
     ASSERT(strstr(cfgbuf, "EMAIL_PASS=onlypass1\n") != NULL,
            "config password: exactly the typed password was stored");
     /* The fields it never asked about must be exactly as they were. */
-    ASSERT(strstr(cfgbuf, "EMAIL_HOST=imaps://localhost:9993") != NULL,
+    char want_host[64];
+    snprintf(want_host, sizeof(want_host), "EMAIL_HOST=imaps://localhost:%d",
+             g_imap_port);
+    ASSERT(strstr(cfgbuf, want_host) != NULL,
            "config password: the host was left alone");
     ASSERT(strstr(cfgbuf, "EMAIL_FOLDER=INBOX") != NULL,
            "config password: the folder was left alone");
@@ -696,16 +699,17 @@ int main(int argc, char *argv[]) {
     snprintf(g_cli_bin,       sizeof(g_cli_bin),        "%s", argv[3]);
 
     /* Isolated HOME for tests */
-    snprintf(g_test_home, sizeof(g_test_home), "/tmp/email_cli_compose_test_%d", getpid());
-    mkdir(g_test_home, 0700);
+    snprintf(g_test_home, sizeof(g_test_home), "%s", TP("home"));
+    if (mkdir(g_test_home, 0700) != 0) { perror("mkdir home"); return 1; }
     setenv("HOME", g_test_home, 1);
     unsetenv("XDG_CONFIG_HOME");
     unsetenv("XDG_CACHE_HOME");
     unsetenv("XDG_DATA_HOME");
 
+    g_imap_port = test_unused_port();
+    start_smtp_server();             /* first: the config names its port */
+    if (g_smtp_pid < 0 || g_imap_port < 0) return 1;
     write_config();
-    start_smtp_server();
-    for (int i = 0; i < 30 && probe_smtp() != 0; i++) usleep(100000);
 
     printf("\n--- Compose/send: help pages ---\n");
     RUN_TEST(test_help_compose);

@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-05-05 */
+/* Interface of the rule condition expressions. */
 /**
  * @file when_expr.h
  * @brief Boolean condition expression parser and evaluator for mail rules (US-81).

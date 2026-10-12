@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
+/* Created: 2026-03-27 */
+/* Unit tests of the mail service. */
 #include "test_helpers.h"
 #include <string.h>
 #include <stdlib.h>
@@ -762,8 +766,8 @@ void test_email_service(void) {
         dup2(saved_stdout, STDOUT_FILENO); close(saved_stdout);
         dup2(saved_stderr, STDERR_FILENO); close(saved_stderr);
 
-        /* ESC → returns 1 (exit program); "not found in INBOX" → returns -1 */
-        ASSERT(sf_ret == 1,
+        /* ESC → returns 0 (back to the list); "not found in INBOX" → returns -1 */
+        ASSERT(sf_ret == 0,
                "show_uid_interactive: uses correct folder (not cfg->folder)");
 
         skip_subfolder_test:;
@@ -1193,9 +1197,9 @@ void test_email_service(void) {
         Config sv_cfg = {0};
         sv_cfg.folder = (char *)sv_folder;
 
-        /* Use /tmp as output dir to avoid touching $HOME */
+        /* Use the scratch directory as output dir to avoid touching $HOME */
         char sv_dest[256];
-        snprintf(sv_dest, sizeof(sv_dest), "/tmp/email_cli_test_%d", (int)getpid());
+        snprintf(sv_dest, sizeof(sv_dest), "%s/save-attachment-%d", test_scratch_dir(), (int)getpid());
         mkdir(sv_dest, 0700);
 
         /* Capture stdout (prints "Saved: ...") */
@@ -1243,7 +1247,7 @@ void test_email_service(void) {
         if (null_sf2 >= 0) { dup2(null_sf2, STDERR_FILENO); close(null_sf2); }
 
         int rc_sf2 = email_service_save_attachment(&sf2_cfg, sf2_uid,
-                                                    "nonexistent.txt", "/tmp");
+                                                    "nonexistent.txt", TP(""));
 
         fflush(stderr);
         dup2(saved_sf2_err, STDERR_FILENO); close(saved_sf2_err);
@@ -1262,7 +1266,7 @@ void test_email_service(void) {
         if (null_sf3 >= 0) { dup2(null_sf3, STDERR_FILENO); close(null_sf3); }
 
         int rc_sf3 = email_service_save_attachment(&sf3_cfg, "0000000000009998",
-                                                    "any.txt", "/tmp");
+                                                    "any.txt", TP(""));
 
         fflush(stderr);
         dup2(saved_sf3_err, STDERR_FILENO); close(saved_sf3_err);
@@ -2218,7 +2222,18 @@ void test_email_service(void) {
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         ASSERT(sel == NULL, "email_service_list_folders_interactive cached+ESC: NULL");
-        ASSERT(go_up == 0,  "email_service_list_folders_interactive cached+ESC: go_up=0");
+        ASSERT(go_up == 1,  "email_service_list_folders_interactive cached+ESC: go_up=1 (back)");
+        free(sel);
+
+        /* ctrl-c quits at once: no selection, no go_up */
+        go_up = 0;
+        INJECT_STDIN("\003", 1, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        sel = email_service_list_folders_interactive(&ficfg2, "INBOX", &go_up);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(sel == NULL, "email_service_list_folders_interactive cached+ctrl-c: NULL");
+        ASSERT(go_up == 0,  "email_service_list_folders_interactive cached+ctrl-c: go_up=0 (quit)");
         free(sel);
 
         local_store_init("imaps://test.example.com", "testuser");
@@ -2323,7 +2338,7 @@ void test_email_service(void) {
         int cpr = email_service_list(&cpcfg, &cpopts);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
-        ASSERT(cpr == 0, "email_service_list cron pager empty+ESC: returns 0");
+        ASSERT(cpr == 1, "email_service_list cron pager empty+ESC: returns 1 (back)");
     }
 
     /* ── email_service_list (cron pager empty, Backspace → 1) ─────────── */
@@ -2363,14 +2378,14 @@ void test_email_service(void) {
 
         int saved_stdin;
         /* 'x' → TERM_KEY_IGNORE, ch='x' → neither 's' nor 'R' → loop
-         * Then ESC → returns 0 */
+         * Then ESC → returns 1 (back) */
         INJECT_STDIN("x\033x", 3, saved_stdin);
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
         int cpxr = email_service_list(&cpxcfg, &cpxopts);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
-        ASSERT(cpxr == 0, "email_service_list cron pager+x+ESC: returns 0");
+        ASSERT(cpxr == 1, "email_service_list cron pager+x+ESC: returns 1 (back)");
     }
 
     /* ── email_service_list (Gmail offline, sync_interval=0) ──────────── */

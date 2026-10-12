@@ -10,7 +10,7 @@
 # lintian finding makes `manage.sh package deb` fail and leave nothing behind.
 # Run from anywhere; it does its own release build.
 set -u
-cd "$(dirname "$0")/../.." || exit 1
+cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
 PKG="$ROOT/build/packages"
 STUBS="$ROOT/build/package-policy-stubs-$$"

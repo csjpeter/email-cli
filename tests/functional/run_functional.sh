@@ -37,7 +37,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
 if [ "$LIST_ONLY" = 1 ]; then

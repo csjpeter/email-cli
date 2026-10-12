@@ -114,8 +114,7 @@ target_link_libraries(email-import-rules libemail)
 
 # Test Build
 enable_testing()
-add_subdirectory(tests/unit EXCLUDE_FROM_ALL)
-add_subdirectory(tests/pty EXCLUDE_FROM_ALL)
+add_subdirectory(tests EXCLUDE_FROM_ALL)
 
 # ── Install targets ────────────────────────────────────────────────────────────
 install(TARGETS email-cli email-cli-ro email-sync email-tui email-import-rules

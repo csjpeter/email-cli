@@ -9,7 +9,7 @@
 # line from the latest run of check, package and install, or "Gate: not
 # measured" with a non-zero status.  Everything lives under build/.
 set -u
-cd "$(dirname "$0")/../.." || exit 1
+cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
 WORK="$ROOT/build/timing-test-$$"
 PASSED=0; FAILED=0

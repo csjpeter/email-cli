@@ -9,7 +9,7 @@
 # the script swallows an error.  Runs a copy of manage.sh in a scratch tree
 # under build/ with a stub cmake first on PATH, so it needs no real build.
 set -u
-cd "$(dirname "$0")/../.." || exit 1
+cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
 WORK="$ROOT/build/manage-sh-test-$$"
 PASSED=0; FAILED=0

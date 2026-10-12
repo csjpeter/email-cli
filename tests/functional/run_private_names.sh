@@ -9,7 +9,7 @@
 # Works in a scratch repository under build/.  The name is built from parts so
 # that this file does not contain it either.
 set -u
-cd "$(dirname "$0")/../.." || exit 1
+cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
 WORK="$ROOT/build/private-names-test-$$"
 PASSED=0; FAILED=0

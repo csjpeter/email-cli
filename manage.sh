@@ -36,7 +36,8 @@ show_help() {
     echo "  valgrind       Build and run unit tests with Valgrind"
     echo "  headers [DIR]  Fail on a source file or script without the source header"
     echo "  names [DIR]    Fail when a tracked file names the owner's private domain"
-    echo "  check          Run every gate (headers, names, test, functional, pty, valgrind) and summarise"
+    echo "  declared       Fail when a declared test is not built or a built test is not declared"
+    echo "  check          Run every gate (headers, names, declared, test, functional, pty, valgrind) and summarise"
     echo "  coverage       Run tests and generate coverage report"
     echo "  integration    Run integration test against Dovecot IMAP container"
     echo "  integration-local  Run APPEND integration test with local Dovecot (no Docker)"
@@ -108,6 +109,48 @@ check_private_names() {
     esac
 }
 
+# Every test is declared in tests/CMakeLists.txt and built into
+# build/tests/<category>/bin/<name> (testing-model.md): a declared test with no
+# executable there, or an executable there that is not declared, is a failure
+# of the project.  Usage: check_declared_tests <tests/CMakeLists.txt> <build/tests>
+check_declared_tests() {
+    local decl="$1" tests_dir="$2" rc=0 cat name line
+    local want have
+    want=$(sed -n 's/^project_test(\([A-Za-z0-9_-]*\)[[:space:]]\{1,\}\([A-Za-z0-9_.-]*\).*/\1 \2/p' "$decl" | sort -u) || return 2
+    if [ -z "$want" ]; then
+        echo "declared: no project_test() line in $decl" >&2
+        return 1
+    fi
+    have=""
+    for d in "$tests_dir"/*/bin; do
+        [ -d "$d" ] || continue
+        cat=$(basename "$(dirname "$d")")
+        for f in "$d"/*; do
+            [ -e "$f" ] || continue
+            have="${have}${cat} $(basename "$f")"$'\n'
+        done
+    done
+    have=$(printf '%s' "$have" | sort -u)
+    while read -r cat name; do
+        [ -n "$cat" ] || continue
+        if ! printf '%s\n' "$have" | grep -qx "$cat $name"; then
+            echo "declared: $cat/$name is declared but has no executable in $tests_dir/$cat/bin" >&2
+            rc=1
+        fi
+    done <<< "$want"
+    while read -r cat name; do
+        [ -n "$cat" ] || continue
+        if ! printf '%s\n' "$want" | grep -qx "$cat $name"; then
+            echo "declared: $tests_dir/$cat/bin/$name is not declared in $decl" >&2
+            rc=1
+        fi
+    done <<< "$have"
+    if [ "$rc" -eq 0 ]; then
+        echo "declared: $(printf '%s\n' "$want" | wc -l) declared tests, all built, none undeclared"
+    fi
+    return $rc
+}
+
 install_deps() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
@@ -170,33 +213,29 @@ cmake_configure() {
 for_each_pty_suite() {
     local run="$1"
     local B="$2"   # absolute bin dir
-    "$run" views          ./tests/pty/test-pty-views "$B/email-cli" \
+    "$run" views          ./tests/pty/bin/test-pty-views "$B/email-cli" \
                           ./tests/pty/mock-imap-server "$B/email-cli-ro" \
                           "$B/email-sync" "$B/email-tui"
-    "$run" gmail-tui      ./tests/pty/test-pty-gmail-tui "$B/email-tui" \
+    "$run" gmail-tui      ./tests/pty/bin/test-pty-gmail-tui "$B/email-tui" \
                           "$B/email-sync" ./tests/pty/mock-gmail-server
-    "$run" mail-rules     ./tests/pty/test-pty-mail-rules "$B/email-sync" \
+    "$run" mail-rules     ./tests/pty/bin/test-pty-mail-rules "$B/email-sync" \
                           "$B/email-tui" ./tests/pty/mock-imap-server
-    "$run" compose-dialog ./tests/pty/test-pty-compose-dialog "$B/email-tui" \
+    "$run" compose-dialog ./tests/pty/bin/test-pty-compose-dialog "$B/email-tui" \
                           ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
-    "$run" attachment     ./tests/pty/test-pty-attachment "$B/email-tui" \
+    "$run" attachment     ./tests/pty/bin/test-pty-attachment "$B/email-tui" \
                           ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
-    "$run" send-local     ./tests/pty/test-pty-send-local "$B/email-tui" \
+    "$run" send-local     ./tests/pty/bin/test-pty-send-local "$B/email-tui" \
                           "$B/email-sync" ./tests/pty/mock-imap-server \
                           ./tests/pty/mock-smtp-server
-    "$run" input-line     ./tests/pty/test-pty-input-line \
+    "$run" input-line     ./tests/pty/bin/test-pty-input-line \
                           ./tests/pty/input-line-harness
-    "$run" compose        ./tests/pty/test-pty-compose "$B/email-tui" \
+    "$run" compose        ./tests/pty/bin/test-pty-compose "$B/email-tui" \
                           ./tests/pty/mock-smtp-server "$B/email-cli"
     # The PTY harness is a git submodule (libs/libptytest) with its own test
     # suite and release gates; they run in its repository, not here.
 }
 
-PTY_TARGETS="test-pty-views test-pty-gmail-tui test-pty-mail-rules \
-             test-pty-compose-dialog test-pty-attachment test-pty-send-local \
-             test-pty-compose test-pty-input-line \
-             mock-imap-server mock-gmail-server mock-smtp-server \
-             input-line-harness"
+PTY_TARGETS="tests-pty"
 
 JOBS=$(nproc)
 
@@ -223,7 +262,7 @@ build_debug() {
 }
 
 build_test_runner() {
-    cmake --build "$BUILD_DIR" --target test-runner -- -j"$JOBS"
+    cmake --build "$BUILD_DIR" --target tests-unit -- -j"$JOBS"
 }
 
 do_install() {
@@ -258,7 +297,7 @@ do_uninstall() {
 # overrides the log path (the tests keep theirs under build/).
 TIMING_LOG="${MANAGE_TIMING_LOG:-$BUILD_DIR/timing.log}"
 case "$1" in
-    build|debug|test|coverage|valgrind|functional|pty|integration|integration-local|headers|names|check|package|install)
+    build|debug|test|coverage|valgrind|functional|pty|integration|integration-local|headers|names|declared|check|package|install)
         if [ -z "${MANAGE_TIMED:-}" ]; then
             timed_start=$(date +%s)
             timed_rc=0
@@ -316,12 +355,13 @@ case "$1" in
         build_test_runner
         # An optional second argument runs only the test suites whose name
         # contains it: ./manage.sh test test_mime
-        (cd "$BUILD_DIR" && ./tests/unit/test-runner ${2:+"$2"})
+        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner ${2:+"$2"})
         ;;
     functional)
         echo "Running functional tests..."
         build_release
-        ./tests/functional/run_functional.sh ${2:+--phase "$2"}
+        cmake --build "$BUILD_DIR" --target tests-functional -- -j"$JOBS"
+        "$BUILD_DIR/tests/functional/bin/run_functional" ${2:+--phase "$2"}
         ;;
     pty)
         echo "Running PTY tests..."
@@ -362,21 +402,21 @@ case "$1" in
         build_release
         build_test_runner
         (cd "$BUILD_DIR" && valgrind --leak-check=full --error-exitcode=1 \
-            --child-silent-after-fork=yes ./tests/unit/test-runner)
+            --child-silent-after-fork=yes ./tests/unit/bin/test-runner)
         ;;
     coverage)
         cmake_configure Debug "-DENABLE_COVERAGE=ON"
         cmake_build
         build_test_runner
         echo "Building PTY test binaries..."
-        cmake --build "$BUILD_DIR" --target $PTY_TARGETS -- -j"$JOBS"
+        cmake --build "$BUILD_DIR" --target $PTY_TARGETS tests-functional -- -j"$JOBS"
 
         # Pass 1 — functional suite + PTY tests (fresh .gcda) → functional badge
         find "$BUILD_DIR" -name "*.gcda" -delete
         # The report is still produced when the suite fails, but the failure is
         # the verdict of this run: it is kept and returned at the end.
         functional_rc=0
-        ./tests/functional/run_functional.sh || functional_rc=$?
+        "$BUILD_DIR/tests/functional/bin/run_functional" || functional_rc=$?
         pty_cov_rc=0
         echo "Running PTY tests for coverage..."
         ABS_BUILD="$(realpath "$BUILD_DIR")"
@@ -421,13 +461,13 @@ case "$1" in
         # Unit tests on top of the same .gcda give the union of everything.
         # (LCOV 2.x --add-tracefile intersects lines instead of unioning; running
         # both kinds in sequence and capturing once gives the correct union.)
-        (cd "$BUILD_DIR" && ./tests/unit/test-runner)
+        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner)
         echo "Capturing combined coverage..."
         capture_product coverage-raw.info coverage.info
 
         # Unit tests alone, from fresh counters: they have to stand on their own.
         find "$BUILD_DIR" -name "*.gcda" -delete
-        (cd "$BUILD_DIR" && ./tests/unit/test-runner)
+        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner)
         echo "Capturing unit-only coverage..."
         capture_product coverage-unit-raw.info coverage-unit.info
 
@@ -491,12 +531,20 @@ case "$1" in
     names)
         check_private_names "${2:-.}"
         ;;
+    declared)
+        # ./manage.sh declared [TESTS_CMAKELISTS [BUILD_TESTS_DIR]]
+        if [ $# -lt 2 ]; then
+            build_release
+            cmake --build "$BUILD_DIR" --target tests -- -j"$JOBS"
+        fi
+        check_declared_tests "${2:-tests/CMakeLists.txt}" "${3:-$BUILD_DIR/tests}"
+        ;;
     check)
         # Every gate, each in its own run, one summary to compare with CI.
         # Coverage joins when it has a threshold that fails (EMAIL-15).
         check_rc=0
         check_summary=""
-        for gate in headers names test functional pty valgrind; do
+        for gate in headers names declared test functional pty valgrind; do
             echo "=== check: $gate ==="
             # MANAGE_TIMED is cleared so every gate logs its own time.
             if MANAGE_TIMED= "$0" "$gate"; then

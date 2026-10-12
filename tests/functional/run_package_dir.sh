@@ -8,7 +8,7 @@
 # build/packages/ and nothing there when the run fails (EMAIL-18).
 # Run from anywhere after a build; it does its own release build.
 set -u
-cd "$(dirname "$0")/../.." || exit 1
+cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
 PKG="$ROOT/build/packages"
 STUBS="$ROOT/build/package-test-stubs-$$"

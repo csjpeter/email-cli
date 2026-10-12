@@ -8,7 +8,7 @@
 # header and fails, naming the file, on each kind of defective header.  Works
 # in a scratch tree under build/, so it needs no real build.
 set -u
-cd "$(dirname "$0")/../.." || exit 1
+cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
 WORK="$ROOT/build/source-header-test-$$"
 PASSED=0; FAILED=0

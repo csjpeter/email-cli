@@ -13,7 +13,7 @@
 
 ```bash
 ./manage.sh test test_mime              # unit suites whose name contains "test_mime"
-build/tests/unit/test-runner --list     # the suite names
+build/tests/unit/bin/test-runner --list     # the suite names
 ./manage.sh functional 60-62            # functional phases (ranges and lists)
 tests/functional/run_functional.sh --list
 ./manage.sh pty compose                 # one PTY suite (views gmail-tui mail-rules
@@ -127,6 +127,27 @@ meaning of every later test in the same process.
 A test that waits for a network peer must also assert *how long* the answer
 took when the point of the branch is that it answers without waiting.  A
 correct value that arrives after a five-minute timeout is not the same answer.
+
+## How a test is declared, built and found (EMAIL-19)
+
+Every test is one `project_test(<category> <name> ...)` line in
+`tests/CMakeLists.txt` (`unit`, `functional`, `pty`, `integration`) and is built
+into `build/tests/<category>/bin/<name>`: a compiled binary, or for a script a
+symlink to it (scripts resolve their own location with `readlink -f`).  Helpers
+that are not tests (the mock servers, the input-line harness) stay in
+`build/tests/<category>/`, outside `bin/`.
+
+```bash
+cmake --build build --target tests          # every declared test
+cmake --build build --target tests-pty      # one category
+./manage.sh declared                        # build them and run the gate
+```
+
+`./manage.sh declared [TESTS_CMAKELISTS [BUILD_TESTS_DIR]]` is the third gate of
+`./manage.sh check`: it fails, naming the test, when a declared test has no
+executable in its `bin/` or an executable there is not declared.
+`./tests/functional/run_declared.sh` tests the gate against a scratch tree under
+`build/`.
 
 ## Functional Tests (`tests/functional/`)
 

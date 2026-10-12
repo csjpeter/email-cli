@@ -50,7 +50,7 @@ static inline void input_line_init(InputLine *il, char *buf, size_t bufsz,
  *
  * @p prompt is printed after a two-column indent, before the editable text.
  * The terminal must be in raw mode.  Keys typed ahead of the one that ends
- * the loop stay in the input.
+ * the loop stay in the input (libtuikit reads one byte at a time).
  *
  * @return 1 if confirmed (Enter), 0 if cancelled (Esc / Ctrl-C) or when the
  *         input ended.

@@ -123,15 +123,16 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libssl (OpenSSL), and libcurl (SMTP only, in libwrite).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
 The one library of the workspace used at run time is **libtuikit**
-(`deps/libtuikit`, a git submodule pinned to a release tag, now v0.4.3), linked
+(`deps/libtuikit`, a git submodule pinned to a release tag, now v0.5.0), linked
 **statically**: the binaries carry no run-time dependency on it, and the
 package declares none.  It replaces this project's own terminal code module by
 module (EMAIL-28).  Migrated: terminal size, raw mode, key decoding and
 character width (`platform/posix/terminal.c` is an adapter over `tui_tty_*` and
-`tui_cp_width`), and the line editor (`core/input_line.c` runs libtuikit's
-`tui_lineedit` one byte at a time).  Not migrated: the masked password prompt
-(libtuikit has no mask) and the full-screen drawing, which stays printf-based;
-until a module is migrated, the old code stays authoritative.
+`tui_cp_width`), the masked password prompt on a terminal
+(`tui_tty_read_password_masked`) and the line editor (`core/input_line.c` is a
+thin call of `tui_lineedit_run`).  Not migrated: the full-screen drawing, which
+stays printf-based; until a module is migrated, the old code stays
+authoritative.
 `deps/libptytest` is the PTY test harness, test-only.
 
 ## Platform

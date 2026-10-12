@@ -6478,6 +6478,23 @@ FIXED100=$(grep -rIn -E 'MOCK_[A-Z]+_PORT=[0-9]+|MOCK_[A-Z]+_PORT", *"[0-9]+' te
 check_empty "100.7 no mock is started on a literal port" "$FIXED100"
 fi
 
+if phase_wanted 101; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 101 — CI checks the library submodules out (EMAIL-27)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 101: every CI workflow checks out submodules recursively (EMAIL-27) ---"
+for wf101 in "$PROJECT_ROOT"/.github/workflows/*.yml; do
+    n101=$(basename "$wf101")
+    if grep -A2 'actions/checkout@' "$wf101" | grep -q 'submodules: recursive'; then
+        check "101.1 $n101: checkout fetches submodules recursively" "recursive" "submodules: recursive"
+    else
+        check "101.1 $n101: checkout fetches submodules recursively" "recursive" "missing"
+    fi
+done
+
+fi
+
 if phase_wanted 96; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)

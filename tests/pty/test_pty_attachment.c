@@ -429,7 +429,7 @@ static void test_attach_shown_in_review(void)
     /* Confirm: opens editor (fake), then review screen */
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Review", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "report.pdf");
+    ASSERT_WAIT_FOR(s, "report.pdf", WAIT_MS);
     pty_send_str(s, "q");
     pty_send_str(s, "y");
     pty_close(s);
@@ -692,7 +692,7 @@ static void test_review_empty_to_disables_send(void)
     pty_send_str(s, "No-To test");
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Review", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "To:");
+    ASSERT_WAIT_FOR(s, "To:", WAIT_MS);
     /* [s] should not send; error about empty To expected */
     pty_send_str(s, "s");
     pty_settle(s, 300);

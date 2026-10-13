@@ -687,6 +687,84 @@ void test_mime_util(void) {
         mime_free_attachments(list, count);
     }
 
+    /* ── EMAIL-78: later sub-parts keep their first header lines ─────── */
+
+    {
+        /* Long boundary, three parts: the second and third part must be
+         * parsed from their first header line.  "/9j/4A==" is the base64 of
+         * the JPEG magic FF D8 FF E0. */
+        const char *mime =
+            "MIME-Version: 1.0\r\n"
+            "Content-Type: multipart/mixed; boundary=\"EdoMail6acdce82_327b23c6_736d\"\r\n"
+            "\r\n"
+            "--EdoMail6acdce82_327b23c6_736d\r\n"
+            "Content-Type: multipart/alternative; boundary=\"ALT\"\r\n"
+            "\r\n"
+            "--ALT\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            "\r\n"
+            "plain\r\n"
+            "--ALT\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "\r\n"
+            "<p>html</p>\r\n"
+            "--ALT--\r\n"
+            "--EdoMail6acdce82_327b23c6_736d\r\n"
+            "Content-Type: image/jpeg; name=\"IMG_1.jpg\"\r\n"
+            "Content-Transfer-Encoding: base64\r\n"
+            "Content-Disposition: attachment; filename=\"IMG_1.jpg\"\r\n"
+            "\r\n"
+            "/9j/4A==\r\n"
+            "--EdoMail6acdce82_327b23c6_736d\r\n"
+            "Content-Type: application/pdf; name=\"doc.pdf\"\r\n"
+            "Content-Transfer-Encoding: base64\r\n"
+            "Content-Disposition: attachment; filename=\"doc.pdf\"\r\n"
+            "\r\n"
+            "dGVzdA==\r\n"
+            "--EdoMail6acdce82_327b23c6_736d--\r\n";
+
+        int count = 0;
+        MimeAttachment *list = mime_list_attachments(mime, &count);
+        ASSERT(count == 2, "EMAIL-78: two attachments after the first part");
+        if (list && count == 2) {
+            ASSERT(strcmp(list[0].filename, "IMG_1.jpg") == 0,
+                   "EMAIL-78: first attachment name kept");
+            ASSERT(strncmp(list[0].content_type, "image/jpeg", 10) == 0,
+                   "EMAIL-78: content type of later part kept");
+            ASSERT(list[0].size == 4 &&
+                   memcmp(list[0].data, "\xff\xd8\xff\xe0", 4) == 0,
+                   "EMAIL-78: base64 of later part is decoded");
+            ASSERT(strcmp(list[1].filename, "doc.pdf") == 0 &&
+                   list[1].size == 4 &&
+                   memcmp(list[1].data, "test", 4) == 0,
+                   "EMAIL-78: third part decoded too");
+        }
+        mime_free_attachments(list, count);
+    }
+
+    {
+        /* Text body in the second part, long boundary: the part's own
+         * Content-Type line must not be dropped. */
+        const char *mime =
+            "MIME-Version: 1.0\r\n"
+            "Content-Type: multipart/mixed; boundary=\"EdoMail6acdce82_327b23c6_736d\"\r\n"
+            "\r\n"
+            "--EdoMail6acdce82_327b23c6_736d\r\n"
+            "Content-Type: application/octet-stream\r\n"
+            "Content-Transfer-Encoding: base64\r\n"
+            "\r\n"
+            "dGVzdA==\r\n"
+            "--EdoMail6acdce82_327b23c6_736d\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            "Content-Transfer-Encoding: base64\r\n"
+            "\r\n"
+            "SGVsbG8gd29ybGQ=\r\n"
+            "--EdoMail6acdce82_327b23c6_736d--\r\n";
+        RAII_STRING char *text = mime_get_text_body(mime);
+        ASSERT(text != NULL && strstr(text, "Hello world") != NULL,
+               "EMAIL-78: text body of a later part is decoded");
+    }
+
     /* ── mime_list_attachments: NULL input ───────────────────────────── */
 
     {

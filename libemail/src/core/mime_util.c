@@ -285,7 +285,8 @@ static char *text_from_multipart_info(const char *msg, const char *ctype,
     size_t dlen = strlen(delim);
 
     const char *p = strstr(msg, delim);
-    while (p) {
+    while (p) {   /* p always points at a delimiter here */
+        if (p[dlen] == '-' && p[dlen + 1] == '-') break; /* end boundary */
         p = strchr(p + dlen, '\n');
         if (!p) break;
         p++;
@@ -300,10 +301,7 @@ static char *text_from_multipart_info(const char *msg, const char *ctype,
         free(part);
         if (result) return result;
 
-        p = next + dlen;
-        if (p[0] == '-' && p[1] == '-') break;
-        p = strchr(p, '\n');
-        if (p) p++;
+        p = next;   /* next delimiter: skipped past its line at loop top */
     }
     return NULL;
 }
@@ -725,7 +723,8 @@ static void collect_multipart_attachments(const char *msg, const char *ctype,
     size_t dlen = strlen(delim);
 
     const char *p = strstr(msg, delim);
-    while (p) {
+    while (p) {   /* p always points at a delimiter here */
+        if (p[dlen] == '-' && p[dlen + 1] == '-') break; /* end boundary */
         p = strchr(p + dlen, '\n');
         if (!p) break;
         p++;
@@ -739,10 +738,7 @@ static void collect_multipart_attachments(const char *msg, const char *ctype,
         collect_parts(part, al, idx);
         free(part);
 
-        p = next + dlen;
-        if (p[0] == '-' && p[1] == '-') break;
-        p = strchr(p, '\n');
-        if (p) p++;
+        p = next;   /* next delimiter: skipped past its line at loop top */
     }
 }
 

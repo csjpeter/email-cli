@@ -24,7 +24,7 @@
 # the descriptors it inherits and changes a regular file on them to root:0600, so
 # every call gets a pipe for output and /dev/null (or a pipe) for input.
 #
-# Paths: everything is under build/tests/e2e/; nothing is written to /tmp.
+# Paths: everything is under build/tests/e2e/; the system temp directory is not used.
 
 TESTENV_PROJECT="email-cli"
 TESTENV_ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"

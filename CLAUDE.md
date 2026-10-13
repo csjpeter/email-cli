@@ -42,6 +42,7 @@ Working through the approved tickets of this project by itself is the
 ./manage.sh clean      # Remove build artifacts
 ./manage.sh integration # Integration test against real Dovecot IMAP (Docker required)
 ./manage.sh integration-local # APPEND integration test against a local Dovecot (no Docker)
+./manage.sh e2e        # Build the package, run tests/e2e in LXC containers (sudo lxc-*)
 ./manage.sh imap-down  # Stop integration container (volume preserved)
 ./manage.sh imap-clean # Remove integration container and volume
 ./manage.sh deps       # Install system dependencies (Ubuntu 24.04 / Rocky 9)

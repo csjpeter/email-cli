@@ -228,6 +228,38 @@ Requires Docker. Runs a real Dovecot IMAP server with:
 ./manage.sh imap-clean    # stop + remove volume
 ```
 
+## End-to-end Tests (`tests/e2e/`, EMAIL-35)
+
+An end-to-end test uses real server software in an LXC container the test
+creates itself, and installs the product from its package.  `smtp_delivery`:
+Postfix (Debian package) listens for implicit TLS with a certificate the
+container's CA store trusts; the `email-cli` .deb built from this tree is
+installed next to it; `email-cli send` delivers a plain message and one with an
+attachment into a local mailbox, which the test reads.  It also checks that a
+certificate for another host name and a closed port are refused.  Nothing
+leaves the container, and no `SSL_NO_VERIFY` is set.
+
+```bash
+./manage.sh e2e                  # build the package, run every tests/e2e test
+./manage.sh e2e smtp_delivery    # one test
+build/tests/e2e/bin/smtp_delivery   # by itself, with a package under build/packages
+```
+
+Needs LXC and `sudo` for `lxc-*` on the container the run creates
+(`email-cli-<purpose>-<pid>`; `tests/common/testenv.sh` has the five
+functions `testenv_create/install/push/exec/destroy`, the container is removed
+by the test's `trap`, also on failure).  A missing tool is a failure.  The
+test is not part of `./manage.sh check`: it needs a package and a container.
+
+**What has no end-to-end test: Gmail.**  The Gmail branch talks to Google's API,
+there is no Gmail to run in a container and no test may use a public service
+(`../policies/testing-model.md`); it is covered by the functional suite against
+`mock-gmail-server`, and that is all it is: "tested against a mock", not
+"tested end to end".  The environment variables `GMAIL_TEST_NO_CLIENT_ID`,
+`GMAIL_TEST_TOKEN_URL`, `GMAIL_TEST_TOKEN` and `GMAIL_API_BASE_URL` are test
+hooks that ship in the product so the functional and PTY suites can point it at
+the mock; the e2e tests do not use them.
+
 ## PTY-based TUI Tests (`libs/libptytest`, submodule)
 
 `libptytest` is a reusable C library for automated testing of terminal programs.

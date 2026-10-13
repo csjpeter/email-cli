@@ -41,6 +41,7 @@ show_help() {
     echo "  coverage       Run tests and generate coverage report"
     echo "  integration    Run integration test against Dovecot IMAP container"
     echo "  integration-local  Run APPEND integration test with local Dovecot (no Docker)"
+    echo "  e2e            Build the package, run tests/e2e in LXC containers (sudo lxc-*)"
     echo "  imap-down      Stop integration test container (preserves emails volume)"
     echo "  imap-clean     Remove integration test container and volume"
     echo "  install        Build (release) and install binaries to ~/.local/bin"
@@ -356,7 +357,7 @@ do_uninstall() {
 # overrides the log path (the tests keep theirs under build/).
 TIMING_LOG="${MANAGE_TIMING_LOG:-$BUILD_DIR/timing.log}"
 case "$1" in
-    build|debug|test|coverage|valgrind|functional|pty|integration|integration-local|headers|names|declared|check|package|install)
+    build|debug|test|coverage|valgrind|functional|pty|integration|integration-local|e2e|headers|names|declared|check|package|install)
         if [ -z "${MANAGE_TIMED:-}" ]; then
             timed_start=$(date +%s)
             timed_rc=0
@@ -578,6 +579,26 @@ case "$1" in
     integration-local)
         build_release
         ./tests/integration/run_local_dovecot.sh
+        ;;
+    e2e)
+        # End-to-end tests (tests/e2e): they install the package into an LXC
+        # container they create themselves, so the package is built first.
+        ./manage.sh package deb || exit 1
+        cmake --build "$BUILD_DIR" --target tests-e2e -- -j"$JOBS" || exit 1
+        e2e_rc=0
+        e2e_ran=0
+        for e2e_test in "$BUILD_DIR"/tests/e2e/bin/*; do
+            [ -x "$e2e_test" ] || continue
+            if [ -n "${2:-}" ] && [ "$(basename "$e2e_test")" != "$2" ]; then continue; fi
+            e2e_ran=$((e2e_ran + 1))
+            echo "--- e2e: $(basename "$e2e_test") ---"
+            "$e2e_test" || e2e_rc=1
+        done
+        if [ "$e2e_ran" -eq 0 ]; then
+            echo "ERROR: no e2e test ran${2:+ (no test named $2)}" >&2
+            exit 1
+        fi
+        exit "$e2e_rc"
         ;;
     imap-down)
         ./tests/integration/run_integration.sh --down

@@ -6495,6 +6495,19 @@ done
 
 fi
 
+if phase_wanted 102; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 102 — the container helper refuses what it must (EMAIL-35)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 102: tests/common/testenv.sh guards, no container needed (EMAIL-35) ---"
+OUT102=$(bash "$PROJECT_ROOT/tests/functional/run_testenv.sh" 2>&1)
+RC102=$?
+check "102.1 testenv guards pass (exit status)" "rc=0" "rc=$RC102"
+check "102.2 testenv guards: no failure reported" "0 failed" "$OUT102"
+
+fi
+
 if phase_wanted 96; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)

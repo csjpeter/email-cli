@@ -1462,4 +1462,59 @@ static const char *const sty_compose_empty_to[] = {
 };
 static const int cur_compose_empty_to[3] = { 2, 13, 1 };
 
+static const char *const exp_account_delete_ask[] = {
+    "  Email Accounts (1)",
+    "",
+    "  Unread Flagged Account                          Type  Server                 Send via",
+    "  ══════ ═══════ ════════════════════════════════ ═════ ══════════════════════ ═════════════════════",
+    "~>                testuser                         IMAP  …aps://localhost:# …ps://localhost:#",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "  Delete account testuser? (y/N)",
+    NULL
+};
+static const char *const sty_account_delete_ask[] = {
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "                                                                                                    ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "                                                                                                    ",
+    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    NULL
+};
+static const int cur_account_delete_ask[3] = { 22, 99, 0 };
+
 #endif /* TEST_PTY_SCREENS_EXPECTED_H */

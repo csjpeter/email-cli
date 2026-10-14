@@ -14,7 +14,7 @@
 | 2 | The Accounts screen lists every configured account with **Unread**, **Flagged**, **Account** and **Server** columns. |
 | 3 | Pressing **Enter** on an account opens its inbox (message list). |
 | 4 | Pressing **n** starts the **Setup Wizard** to add a new account; the wizard saves to `~/.config/email-cli/accounts/<email>/config.ini`. |
-| 5 | Pressing **d** deletes the selected account's profile directory (non-legacy accounts only). |
+| 5 | Pressing **d** asks `Delete account NAME? (y/N)`; only **y** or **Y** deletes the selected account's profile directory (non-legacy accounts only), any other key keeps it (EMAIL-84). |
 | 6 | Pressing **e** opens the SMTP wizard for the selected account and saves the result. |
 | 7 | Pressing **Backspace** from the folder-root level returns to the Accounts screen. |
 | 8 | Each account's IMAP local-store is isolated (`email-tui` re-initialises the store when switching). |
@@ -58,7 +58,7 @@ Accounts screen  (ESC / Ctrl-C → quit; q and Backspace → ignored)
 | ↑ / ↓ | Move cursor |
 | Enter | Open selected account |
 | n | Add new account (runs Setup Wizard) |
-| d | Delete selected account |
+| d | Delete selected account (asks y/N first) |
 | i | Edit IMAP settings for selected account |
 | e | Edit SMTP settings for selected account |
 | ESC / Ctrl-C | Quit (top level) |

@@ -2947,6 +2947,43 @@ static void test_tui_accounts_new_key(void) {
     pty_close(s);
 }
 
+/* EMAIL-84: any answer but y keeps the account, and says so. */
+static void test_tui_accounts_delete_declined(void) {
+    write_second_account("keepme@example.com");
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts delete declined: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "Delete account keepme@example.com? (y/N)", WAIT_MS);
+    pty_send_str(s, "n");
+    ASSERT_WAIT_FOR(s, "Account keepme@example.com kept.", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "keepme@example.com");
+
+    /* Enter and Esc decline as well */
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "Delete account keepme@example.com? (y/N)", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Account keepme@example.com kept.", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "keepme@example.com");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    /* the account is still on disk: remove the fixture */
+    char path[500];
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/keepme@example.com/config.ini", g_test_home);
+    unlink(path);
+    snprintf(path, sizeof(path),
+             "%s/.config/email-cli/accounts/keepme@example.com", g_test_home);
+    rmdir(path);
+}
+
 static void test_tui_accounts_delete_key(void) {
     /* US-21 AC5: 'd' deletes the selected account; it disappears from the list */
     write_second_account("todelete@example.com");
@@ -2961,6 +2998,10 @@ static void test_tui_accounts_delete_key(void) {
     pty_send_key(s, PTY_KEY_HOME);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "Delete account todelete@example.com? (y/N)", WAIT_MS);
+    /* nothing is deleted before the answer */
+    ASSERT_SCREEN_CONTAINS(s, "todelete@example.com");
+    pty_send_str(s, "y");
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_screen_contains(s, "todelete@example.com") == 0,
            "accounts delete: account removed from list");
@@ -4611,6 +4652,7 @@ int main(int argc, char *argv[]) {
     restart_mock();
     RUN_TEST(test_tui_accounts_new_key);
     RUN_TEST(test_tui_accounts_delete_key);
+    RUN_TEST(test_tui_accounts_delete_declined);
     RUN_TEST(test_tui_accounts_imap_edit_key);
 
     printf("\n--- email-sync: account filter (US-25) ---\n");

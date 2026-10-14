@@ -2986,14 +2986,47 @@ void test_email_service(void) {
         Config *acc_d = NULL;
         int cursorD = 0;
         int saved_stdin;
-        /* 'd' deletes account → loop re-renders with count=0 → ESC exits */
-        INJECT_STDIN("d\033x", 3, saved_stdin);
+        /* 'd' asks, 'y' confirms → account deleted → loop re-renders with
+         * count=0 → ESC exits */
+        INJECT_STDIN("dy\033x", 4, saved_stdin);
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
         int aretD = email_service_account_interactive(&acc_d, &cursorD, NULL);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
-        ASSERT(aretD == 0, "email_service_account_interactive: d+ESC → 0");
+        ASSERT(aretD == 0, "email_service_account_interactive: d,y,ESC → 0");
+        {
+            int n = 0;
+            AccountEntry *left = config_list_accounts(&n);
+            int found = 0;
+            for (int i = 0; i < n; i++)
+                if (left[i].name && strcmp(left[i].name, "acctest-del@gmail.com") == 0)
+                    found = 1;
+            config_free_account_list(left, n);
+            ASSERT(!found, "email_service_account_interactive: y deletes the account");
+        }
+
+        /* EMAIL-84: anything but y keeps the account */
+        config_save_account(&acc_del);
+        Config *acc_k = NULL;
+        int cursorK = 0;
+        INJECT_STDIN("dn\033x", 4, saved_stdin);
+        SUPPRESS_OUT(sout, serr);
+        int aretK = email_service_account_interactive(&acc_k, &cursorK, NULL);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(aretK == 0, "email_service_account_interactive: d,n,ESC → 0");
+        {
+            int n = 0;
+            AccountEntry *left = config_list_accounts(&n);
+            int found = 0;
+            for (int i = 0; i < n; i++)
+                if (left[i].name && strcmp(left[i].name, "acctest-del@gmail.com") == 0)
+                    found = 1;
+            config_free_account_list(left, n);
+            ASSERT(found, "email_service_account_interactive: n keeps the account");
+        }
+        config_delete_account("acctest-del@gmail.com");
 
         local_store_init("imaps://test.example.com", "testuser");
     }

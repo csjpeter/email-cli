@@ -5223,6 +5223,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
     (void)tui_raw;
 
     int cursor = (cursor_inout && *cursor_inout > 0) ? *cursor_inout : 0;
+    char flash_note[600] = "";
 
     for (;;) {
         /* Reload account list on every iteration (list may change after add/delete) */
@@ -5345,6 +5346,25 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
         }
         if (ch == 'd' && count > 0) {
             const char *name = accounts[cursor].name;
+
+            /* Deleting an account takes a confirmation: y or Y deletes, any
+             * other key keeps it. */
+            {
+                char ask[512];
+                snprintf(ask, sizeof(ask), "  Delete account %s? (y/N)",
+                         name ? name : "?");
+                print_infoline(trows, tcols, ask);
+                TermKey ck = terminal_read_key();
+                int cch = terminal_last_printable();
+                fprintf(stderr, "\r\033[K"); fflush(stderr);
+                if (!(ck == TERM_KEY_IGNORE && (cch == 'y' || cch == 'Y'))) {
+                    snprintf(flash_note, sizeof(flash_note),
+                             "  Account %s kept.", name ? name : "?");
+                    flash_msg = flash_note;
+                    ACC_FREE();
+                    continue;
+                }
+            }
 
             /* Compute local data directory (NOT deleted) */
             const char *data_base = platform_data_dir();

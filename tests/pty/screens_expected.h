@@ -432,7 +432,7 @@ static const char *const sty_rule_add_when[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_rule_add_when[3] = { 1, 62, 0 };
+static const int cur_rule_add_when[3] = { 2, 38, 0 };
 
 static const char *const exp_rule_add_actions[] = {
     "Add new rule for testuser — step 2/2: actions",
@@ -1377,7 +1377,7 @@ static const char *const sty_rule_edit_form[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_rule_edit_form[3] = { 1, 62, 0 };
+static const int cur_rule_edit_form[3] = { 2, 99, 0 };
 
 static const char *const exp_compose_typed[] = {
     "  New Message",

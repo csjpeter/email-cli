@@ -1159,6 +1159,43 @@ static void test_interactive_folders_flat_navigate_up(void) {
     pty_close(s);
 }
 
+/* EMAIL-82: inside a folder that has subfolders the flat view lists the
+ * folder itself first, so that its own messages can still be opened. */
+static void test_interactive_folders_flat_parent_openable(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "flat parent: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "t=tree", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);           /* into INBOX/ */
+    ASSERT_WAIT_FOR(s, "Esc/q/BS=up", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* the first row under the column heads is INBOX itself, cursor on it */
+    int row = find_row(s, "Sent");
+    ASSERT(row > 0, "flat parent: the subfolders are listed");
+    int self = -1;
+    for (int r = 0; r < ROWS && self < 0; r++) {
+        char buf[256];
+        pty_row_text(s, r, buf, sizeof(buf));
+        /* a row ending in the folder name without a slash or tree glyph */
+        if (strstr(buf, "INBOX") && !strstr(buf, "INBOX/") && !strstr(buf, "Folders"))
+            self = r;
+    }
+    ASSERT(self >= 0, "flat parent: the folder itself is listed");
+    if (self >= 0 && row > 0)
+        ASSERT(self < row, "flat parent: the folder itself comes before its subfolders");
+    pty_send_key(s, PTY_KEY_ENTER);           /* open INBOX itself */
+    ASSERT_WAIT_FOR(s, "message(s) in INBOX", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 static void test_interactive_folders_esc_quit(void) {
     /* ESC from the folder browser goes back to the accounts screen */
     restart_mock();
@@ -4399,6 +4436,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_folders_nav);
     RUN_TEST(test_interactive_folders_back_to_list);
     RUN_TEST(test_interactive_folders_flat_navigate_up);
+    RUN_TEST(test_interactive_folders_flat_parent_openable);
     RUN_TEST(test_interactive_folders_esc_quit);
     RUN_TEST(test_tui_folder_browser_search);
 

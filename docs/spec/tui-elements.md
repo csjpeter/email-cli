@@ -56,7 +56,9 @@ defect or inconsistency the pictures make visible, left for the owner to ticket.
 2. Folder browser, tree: an empty row followed the entries with wide
    characters (`中`, `😀`); the rows below were shifted.  Gone since the
    folders are a `tui_table` view (EMAIL-79); EMAIL-81 pins it with a test.
-3. Folder browser, flat view (`t`): only `INBOX/` is listed, not its subfolders.
+3. Folder browser, flat view (`t`): only `INBOX/` is listed, and inside it
+   only the subfolders, so INBOX's own messages could not be opened.  Fixed
+   with EMAIL-82: inside a folder the folder itself is the first row.
 4. Header bar: the rules editor, rule detail, rule add/edit steps and the
    compose dialog do not use the bold white-on-blue header bar of
    `policies/tui-interface-model.md`; the compose dialog's top row is reverse

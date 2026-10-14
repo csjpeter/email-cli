@@ -286,6 +286,21 @@ static PtySession *at_reader(void) {
     return s;
 }
 
+/* The default mock message: a multipart with two attachments (notes.txt,
+ * data.bin).  The suite's count of 3 is lifted for these views. */
+static PtySession *at_attach_reader(void) {
+    unsetenv("MOCK_IMAP_COUNT");
+    restart_mock();
+    setenv("MOCK_IMAP_COUNT", "3", 1);
+    write_account_config();
+    PtySession *s = at_list();
+    if (!s) return NULL;
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "A=save-all", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
 static PtySession *at_rules(void) {
     PtySession *s = at_list();
     if (!s) return NULL;
@@ -318,6 +333,12 @@ static const PtyStyleKey LEGEND[] = {
     { 'E', PTY_ATTR_BOLD,                    91,             PTY_COLOR_IDX(17) },
     { 'y', PTY_ATTR_BOLD,                    PTY_FG_YELLOW,  PTY_BG_DEFAULT },
     { 'Z', PTY_ATTR_NONE,                    PTY_FG_YELLOW,  PTY_BG_DEFAULT },
+    /* The rendered HTML body of the attachment message. */
+    { 'x', PTY_ATTR_BOLD,                    PTY_COLOR_RGB(255, 0, 0), PTY_BG_DEFAULT },
+    { 'X', PTY_ATTR_BOLD | PTY_ATTR_ITALIC,  PTY_COLOR_RGB(255, 0, 0), PTY_BG_DEFAULT },
+    { 'i', PTY_ATTR_ITALIC,                  PTY_FG_DEFAULT, PTY_BG_DEFAULT },
+    { 'u', PTY_ATTR_UNDERLINE,               PTY_FG_DEFAULT, PTY_BG_DEFAULT },
+    { 'k', PTY_ATTR_UNDERLINE | PTY_ATTR_STRIKE, PTY_FG_DEFAULT, PTY_BG_DEFAULT },
     { 'e', PTY_ATTR_BOLD,                    PTY_FG_RED,     PTY_BG_DEFAULT },
     { 0 }
 };
@@ -358,7 +379,8 @@ static void record_view(const char *name, PtySession *s) {
  *  screen rows (the path of the message file, which wraps differently on every
  *  machine): the screen is searched for the row that follows it and the rest
  *  is compared from there.  A golden row starting with '~' is compared with
- *  its digit runs read as one '#' (a port number). */
+ *  its digit runs read as one '#' (a port number); one starting with '%' is
+ *  compared by its start only (a path), and its style is not compared. */
 static void check_view(PtySession *s, const char *const exp[],
                        const char *const sty[], const int cur[3]) {
     int n = 0;
@@ -396,6 +418,17 @@ static void check_view(PtySession *s, const char *const exp[],
          * compared as one region each. */
         int t = i;
         while (t < j) {
+            if (exp[t][0] == '%') {
+                /* A path that differs on every machine: only its start is
+                 * compared (and the style of its row is not). */
+                char row[COLS * 4 + 4];
+                pty_row_text(s, t + offset, row, sizeof(row));
+                size_t pl = strlen(exp[t] + 1);
+                ASSERT(strncmp(row, exp[t] + 1, pl) == 0,
+                       "row with a variable path starts as in its picture");
+                t++;
+                continue;
+            }
             if (exp[t][0] == '~') {
                 char row[COLS * 4 + 4], norm[COLS * 4 + 4];
                 pty_row_text(s, t + offset, row, sizeof(row));
@@ -414,7 +447,7 @@ static void check_view(PtySession *s, const char *const exp[],
                 continue;
             }
             int u = t;
-            while (u < j && exp[u][0] != '~') u++;
+            while (u < j && exp[u][0] != '~' && exp[u][0] != '%') u++;
             const char *part[ROWS + 1];
             int pk = 0;
             for (int r = t; r < u; r++) part[pk++] = exp[r];
@@ -422,7 +455,19 @@ static void check_view(PtySession *s, const char *const exp[],
             ASSERT_REGION_EQ(s, PTY_REGION(t + offset, 0, u - t, cols), part);
             t = u;
         }
-        ASSERT_REGION_STYLE(s, PTY_REGION(i + offset, 0, j - i, cols), srows, LEGEND);
+        /* Styles, except of the rows whose path is machine-specific. */
+        for (int a = i; a < j;) {
+            if (exp[a][0] == '%') { a++; continue; }
+            int b = a;
+            while (b < j && exp[b][0] != '%') b++;
+            const char *seg[ROWS + 1];
+            int sk = 0;
+            for (int r = a; r < b; r++) seg[sk++] = sty[r];
+            seg[sk] = NULL;
+            ASSERT_REGION_STYLE(s, PTY_REGION(a + offset, 0, b - a, cols), seg, LEGEND);
+            a = b;
+        }
+        (void)srows;
         i = j;
     }
     int r = -1, c = -1;
@@ -560,6 +605,24 @@ VIEW(list_bulk_done,    at_list(),
      (pty_send_str(s, " "), pty_send_str(s, "m"), pty_wait_for(s, "Esc=cancel", WAIT_MS),
       pty_send_str(s, "f"), pty_wait_for(s, "starred", WAIT_MS), pty_settle(s, SETTLE_MS)))
 
+VIEW(att_reader,        at_attach_reader(), (void)0)
+VIEW(att_picker,        at_attach_reader(),
+     (pty_send_str(s, "a"), pty_wait_for(s, "Attachments", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(att_picker_second, at_attach_reader(),
+     (pty_send_str(s, "a"), pty_wait_for(s, "Attachments", WAIT_MS),
+      pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+VIEW(att_save_prompt,   at_attach_reader(),
+     (pty_send_str(s, "a"), pty_wait_for(s, "Attachments", WAIT_MS), pty_settle(s, 200),
+      pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Save as:", WAIT_MS),
+      pty_settle(s, SETTLE_MS)))
+VIEW(att_saved,         at_attach_reader(),
+     (pty_send_str(s, "a"), pty_wait_for(s, "Attachments", WAIT_MS), pty_settle(s, 200),
+      pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Save as:", WAIT_MS), pty_settle(s, 200),
+      pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Saved:", WAIT_MS),
+      pty_settle(s, SETTLE_MS)))
+VIEW(att_save_all,      at_attach_reader(),
+     (pty_send_str(s, "A"), pty_settle(s, SETTLE_MS)))
+
 VIEW(body_editor,       at_list(), (to_editor(s), (void)0))
 VIEW(body_editor_typed, at_list(), (editor_typed(s), (void)0))
 VIEW(review,            at_list(), (to_review(s), (void)0))
@@ -695,6 +758,12 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_body_editor_typed);
     RUN_TEST(test_screen_review);
     RUN_TEST(test_screen_review_discard_ask);
+    RUN_TEST(test_screen_att_reader);
+    RUN_TEST(test_screen_att_picker);
+    RUN_TEST(test_screen_att_picker_second);
+    RUN_TEST(test_screen_att_save_prompt);
+    RUN_TEST(test_screen_att_saved);
+    RUN_TEST(test_screen_att_save_all);
     RUN_TEST(test_screen_list_marked);
     RUN_TEST(test_screen_list_marked_two);
     RUN_TEST(test_screen_list_bulk_prompt);

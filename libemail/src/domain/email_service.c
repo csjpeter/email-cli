@@ -920,7 +920,7 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
         tui_table_select(&atbl, cursor);
         char title[64];
         snprintf(title, sizeof(title), "  Attachments (%d):", count);
-        tui_frame_draw_table(title, &atbl, trows, tcols, TUI_FRAME_PLAIN_TITLE, NULL, NULL);
+        tui_frame_draw_table(title, &atbl, trows, tcols, 0, NULL, NULL);
         char sb[160];
         snprintf(sb, sizeof(sb),
                  "  \u2191\u2193=select  Enter=choose  Esc/q/BS=back");

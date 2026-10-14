@@ -259,7 +259,7 @@ static const char *const exp_rules_empty[] = {
     NULL
 };
 static const char *const sty_rules_empty[] = {
-    "                                                                                                    ",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -315,7 +315,7 @@ static const char *const exp_rules_list[] = {
     NULL
 };
 static const char *const sty_rules_list[] = {
-    "                                                                                                    ",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
     "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                                                                                                    ",
@@ -371,7 +371,7 @@ static const char *const exp_rule_detail[] = {
     NULL
 };
 static const char *const sty_rule_detail[] = {
-    "                                                                                                    ",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -406,7 +406,7 @@ static const char *const exp_rule_add_when[] = {
     NULL
 };
 static const char *const sty_rule_add_when[] = {
-    "                                                                                                    ",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -449,7 +449,7 @@ static const char *const exp_rule_add_actions[] = {
     NULL
 };
 static const char *const sty_rule_add_actions[] = {
-    "                                                                                                    ",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -490,7 +490,7 @@ static const char *const exp_compose_dialog[] = {
     NULL
 };
 static const char *const sty_compose_dialog[] = {
-    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
     "bbbbbbbbbbbbb                                                                                       ",
     "ddddddddddddd                                                                                       ",
@@ -1316,7 +1316,7 @@ static const char *const exp_rules_second[] = {
     NULL
 };
 static const char *const sty_rules_second[] = {
-    "                                                                                                    ",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
     "                                                                                                    ",
     "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
@@ -1351,7 +1351,7 @@ static const char *const exp_rule_edit_form[] = {
     NULL
 };
 static const char *const sty_rule_edit_form[] = {
-    "                                                                                                    ",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
     "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                                                                                                    ",
@@ -1392,7 +1392,7 @@ static const char *const exp_compose_typed[] = {
     NULL
 };
 static const char *const sty_compose_typed[] = {
-    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
     "bbbbbbbbbbbbb                                                                                       ",
     "ddddddddddddd                                                                                       ",
@@ -1434,7 +1434,7 @@ static const char *const exp_compose_empty_to[] = {
     NULL
 };
 static const char *const sty_compose_empty_to[] = {
-    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
     "bbbbbbbbbbbbb                                                                                       ",
     "ddddddddddddd                                                                                       ",

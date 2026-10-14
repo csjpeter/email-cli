@@ -333,6 +333,9 @@ static const PtyStyleKey LEGEND[] = {
     { 'E', PTY_ATTR_BOLD,                    91,             PTY_COLOR_IDX(17) },
     { 'y', PTY_ATTR_BOLD,                    PTY_FG_YELLOW,  PTY_BG_DEFAULT },
     { 'Z', PTY_ATTR_NONE,                    PTY_FG_YELLOW,  PTY_BG_DEFAULT },
+    /* The address drop-down's marker: cyan, reverse on the chosen row. */
+    { 'c', PTY_ATTR_NONE,                    PTY_FG_CYAN,    PTY_BG_DEFAULT },
+    { 'C', PTY_ATTR_REVERSE,                 PTY_FG_CYAN,    PTY_BG_DEFAULT },
     /* The rendered HTML body of the attachment message. */
     { 'x', PTY_ATTR_BOLD,                    PTY_COLOR_RGB(255, 0, 0), PTY_BG_DEFAULT },
     { 'X', PTY_ATTR_BOLD | PTY_ATTR_ITALIC,  PTY_COLOR_RGB(255, 0, 0), PTY_BG_DEFAULT },
@@ -537,6 +540,52 @@ static void to_review_full(PtySession *s, const char *to) {
     pty_settle(s, SETTLE_MS);
 }
 
+/* Contacts for the address drop-down: seven "ann..." (more than the five the
+ * list shows), one "bart..." and one with a wide-character name. */
+static void write_contacts(void) {
+    char dir[600], path[700];
+    snprintf(dir, sizeof(dir), "%s/.local", g_home);                       mkdir(dir, 0700);
+    snprintf(dir, sizeof(dir), "%s/.local/share", g_home);                 mkdir(dir, 0700);
+    snprintf(dir, sizeof(dir), "%s/.local/share/email-cli", g_home);       mkdir(dir, 0700);
+    snprintf(dir, sizeof(dir), "%s/.local/share/email-cli/accounts", g_home); mkdir(dir, 0700);
+    snprintf(dir, sizeof(dir), "%s/.local/share/email-cli/accounts/testuser", g_home); mkdir(dir, 0700);
+    snprintf(path, sizeof(path), "%s/contacts.tsv", dir);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    for (int i = 1; i <= 7; i++)
+        fprintf(fp, "ann%d@example.org\tAnn Number %d\t%d\n", i, i, 10 - i);
+    fprintf(fp, "bart@example.org\tBart Simpson\t3\n");
+    fprintf(fp, "yamada@example.org\t\xe5\xb1\xb1\xe7\x94\xb0 \xe5\xa4\xaa\xe9\x83\x8e\t2\n");
+    fclose(fp);
+}
+
+static void compose_type_to(PtySession *s, const char *text) {
+    write_contacts();
+    pty_send_str(s, "c");
+    pty_wait_for(s, "New Message", WAIT_MS);
+    pty_send_str(s, text);
+    pty_settle(s, SETTLE_MS);
+}
+
+/* Files for path completion under the view's home. */
+static void compose_type_path(PtySession *s, const char *prefix) {
+    char dir[600], path[700];
+    snprintf(dir, sizeof(dir), "%s/att_dir", g_home);
+    mkdir(dir, 0700);
+    const char *names[] = { "alpha.txt", "alpha2.txt", "beta.bin" };
+    for (int i = 0; i < 3; i++) {
+        snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
+        FILE *fp = fopen(path, "w");
+        if (fp) { fputs("x", fp); fclose(fp); }
+    }
+    pty_send_str(s, "c");
+    pty_wait_for(s, "New Message", WAIT_MS);
+    for (int i = 0; i < 4; i++) pty_send_key(s, PTY_KEY_TAB);   /* To → Attach */
+    snprintf(path, sizeof(path), "%s/att_dir/%s", g_home, prefix);
+    pty_send_str(s, path);
+    pty_settle(s, SETTLE_MS);
+}
+
 #define VIEW(name, open_expr, setup) \
     static void test_screen_##name(void) { \
         restart_mock(); \
@@ -664,6 +713,18 @@ VIEW(review_attach_removed, at_list(),
 VIEW(review_send_failed, at_list(),
      (to_review_full(s, "ann@example.org"), pty_send_str(s, "s"),
       pty_wait_for(s, "Saved to Drafts", WAIT_MS), pty_settle(s, SETTLE_MS)))
+
+VIEW(dd_many,           at_list(), (compose_type_to(s, "ann"), (void)0))
+VIEW(dd_one,            at_list(), (compose_type_to(s, "bart"), (void)0))
+VIEW(dd_second,         at_list(),
+     (compose_type_to(s, "ann"), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+VIEW(dd_none,           at_list(), (compose_type_to(s, "zzz"), (void)0))
+VIEW(dd_wide,           at_list(), (compose_type_to(s, "yam"), (void)0))
+VIEW(dd_accepted,       at_list(),
+     (compose_type_to(s, "ann"), pty_send_key(s, PTY_KEY_DOWN), pty_send_key(s, PTY_KEY_ENTER),
+      pty_settle(s, SETTLE_MS)))
+VIEW(path_many,         at_list(), (compose_type_path(s, "al"), (void)0))
+VIEW(path_one,          at_list(), (compose_type_path(s, "be"), (void)0))
 
 VIEW(body_editor,       at_list(), (to_editor(s), (void)0))
 VIEW(body_editor_typed, at_list(), (editor_typed(s), (void)0))
@@ -800,6 +861,14 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_body_editor_typed);
     RUN_TEST(test_screen_review);
     RUN_TEST(test_screen_review_discard_ask);
+    RUN_TEST(test_screen_dd_many);
+    RUN_TEST(test_screen_dd_one);
+    RUN_TEST(test_screen_dd_second);
+    RUN_TEST(test_screen_dd_none);
+    RUN_TEST(test_screen_dd_wide);
+    RUN_TEST(test_screen_dd_accepted);
+    RUN_TEST(test_screen_path_many);
+    RUN_TEST(test_screen_path_one);
     RUN_TEST(test_screen_review_full);
     RUN_TEST(test_screen_review_long_to);
     RUN_TEST(test_screen_review_attach_ask);

@@ -2318,8 +2318,20 @@ static void test_tui_accounts_cursor_restored(void) {
     pty_settle(s, SETTLE_MS);
     /* Selection arrow must be visible and second account must be on screen */
     ASSERT_SCREEN_CONTAINS(s, "second@example.com");
-    /* The → arrow (UTF-8: \xe2\x86\x92) and second account must both appear */
-    ASSERT_SCREEN_CONTAINS(s, "\xe2\x86\x92");
+    /* The ">" marker (column 0) stands on the second row of the list, the
+     * account that was opened (the accounts sort domain-first, so that is
+     * testuser, below second@example.com). */
+    {
+        int row = find_row(s, "testuser");
+        ASSERT(row >= 0, "cursor restore: opened account row found");
+        if (row >= 0)
+            ASSERT(strcmp(pty_cell_text(s, row, 0), ">") == 0,
+                   "cursor restore: > marks the account that was opened");
+        int first = find_row(s, "second@example.com");
+        if (first >= 0)
+            ASSERT(strcmp(pty_cell_text(s, first, 0), ">") != 0,
+                   "cursor restore: the first account is not marked");
+    }
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
     /* cleanup */

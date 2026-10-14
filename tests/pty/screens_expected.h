@@ -12,9 +12,9 @@
 static const char *const exp_accounts[] = {
     "  Email Accounts (1)",
     "",
-    "    Unread  Flagged  Account                           Type   Server              Send via",
-    "    ══════  ═══════  ════════════════════════════════  ═════  ══════════════════  ══════════════════",
-    "  →                  testuser                          IMAP   imaps://localhost:  smtps://localhost:",
+    "  Unread Flagged Account                          Type  Server                 Send via",
+    "  ══════ ═══════ ════════════════════════════════ ═════ ══════════════════════ ═════════════════════",
+    "~>                testuser                         IMAP  imaps://localhost:#… smtps://localhost:#…",
     "",
     "",
     "",
@@ -39,9 +39,9 @@ static const char *const exp_accounts[] = {
 static const char *const sty_accounts[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
-    "                                                                                                    ",
-    "  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -63,30 +63,30 @@ static const char *const sty_accounts[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_accounts[3] = { 23, 99, 1 };
+static const int cur_accounts[3] = { 23, 99, 0 };
 
 static const char *const exp_folders[] = {
     "  Folders — testuser  (16)",
     "",
-    "  Unread  Flagged  Folder                                                                      Total",
-    "  ══════  ═══════  ════════════════════════════════════════════════════════════════════════  ═══════",
-    "  ── Tags / Flags ───────────────────────────────────────────────────────────────────────────────",
-    "       0        -  Unread",
-    "       0        -  Flagged                                                                         -",
-    "       0        -  Junk                                                                            -",
-    "       0        -  Phishing                                                                        -",
-    "       0        -  Answered                                                                        -",
-    "       0        -  Forwarded                                                                       -",
-    "  ── Folders ────────────────────────────────────────────────────────────────────────────────────",
-    "                   └── INBOX",
-    "                       ├── AT&T",
-    "                       ├── Empty",
-    "                       ├── Sent",
-    "                       ├── Trash",
-    "                       ├── Träger",
-    "                       ├── 中",
+    "  Unread Flagged Folder                                                                        Total",
+    "  ══════ ═══════ ═══════════════════════════════════════════════════════════════════════════ ═══════",
+    "  Tags / Flags ─────────────────────────────────────────────────────────────────────────────────────",
+    ">      0       - Unread                                                                            -",
+    "       0       - Flagged                                                                           -",
+    "       0       - Junk                                                                              -",
+    "       0       - Phishing                                                                          -",
+    "       0       - Answered                                                                          -",
+    "       0       - Forwarded                                                                         -",
+    "  Folders ──────────────────────────────────────────────────────────────────────────────────────────",
+    "                 └── INBOX",
+    "                     ├── AT&T",
+    "                     ├── Empty",
+    "                     ├── Sent",
+    "                     ├── Trash",
+    "                     ├── Träger",
+    "                     ├── 中",
+    "                     └── 😀",
     "",
-    "                       └── 😀",
     "",
     "",
     "  ↑↓=step  PgDn/PgUp=page  Enter=open/select  t=flat  Esc/q/BS=back  [2/16]",
@@ -95,40 +95,40 @@ static const char *const exp_folders[] = {
 static const char *const sty_folders[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "                                                                                                    ",
+    "  dddddddddddd ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "       d       d ddddddd                                                                           d",
+    "       d       d dddd                                                                              d",
+    "       d       d dddddddd                                                                          d",
+    "       d       d dddddddd                                                                          d",
+    "       d       d ddddddddd                                                                         d",
+    "  ddddddd dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "                 ddddddddd                                                                          ",
+    "                 dddddddddddd                                                                       ",
+    "                 ddddddddddddd                                                                      ",
+    "                 dddddddddddd                                                                       ",
+    "                 ddddddddddddd                                                                      ",
+    "                 dddddddddddddd                                                                     ",
+    "                 dddddddddd                                                                         ",
+    "                 dddddddddd                                                                         ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd   ",
-    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd   ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "d                                                                                                   ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "d                                                                                                   ",
     "                                                                                                    ",
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_folders[3] = { 23, 99, 1 };
+static const int cur_folders[3] = { 23, 99, 0 };
 
 static const char *const exp_list[] = {
     "  1-3 of 3 message(s) in INBOX (3 unread) [testuser].",
     "",
-    "  Date              Sts     Subject                                     From",
-    "  ════════════════  ══════  ══════════════════════════════════════════  ════════════════════════════",
-    "  2020-01-03 12:00  N-----  Message 3                                   Sender 3 <sender3@example.c",
-    "  2020-01-02 12:00  N-----  Message 2                                   Sender 2 <sender2@example.co",
-    "  2020-01-01 12:00  N-----  Message 1                                   Sender 1 <sender1@example.co",
+    "  Date             Sts    Subject                                   From",
+    "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
+    "> 2020-01-03 12:00 N----- Message 3                                 Sender 3 <sender3@example.com>",
+    "  2020-01-02 12:00 N----- Message 2                                 Sender 2 <sender2@example.com>",
+    "  2020-01-01 12:00 N----- Message 1                                 Sender 1 <sender1@example.com>",
     "",
     "",
     "",
@@ -151,11 +151,11 @@ static const char *const exp_list[] = {
 static const char *const sty_list[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
-    "                                                                                                    ",
-    "rrrrrrrrrrrrrrrrrrrrgGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG ",
-    "                    g                                                                               ",
-    "                    g                                                                               ",
+    "ASSSSSSSSSSSSSSSSSSnSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                   g                                                                                ",
+    "                   g                                                                                ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -175,7 +175,7 @@ static const char *const sty_list[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_list[3] = { 23, 99, 1 };
+static const int cur_list[3] = { 23, 99, 0 };
 
 static const char *const exp_reader[] = {
     "From:    Sender 3 <sender3@example.com>",
@@ -229,12 +229,12 @@ static const char *const sty_reader[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_reader[3] = { 22, 99, 1 };
+static const int cur_reader[3] = { 22, 99, 0 };
 
 static const char *const exp_rules_empty[] = {
     "Rules for testuser (0 rules)",
     "",
-    "  (no rules -- press 'a' to add one)",
+    "(no rules -- press 'a' to add one)",
     "",
     "",
     "",
@@ -285,13 +285,13 @@ static const char *const sty_rules_empty[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_rules_empty[3] = { 23, 55, 1 };
+static const int cur_rules_empty[3] = { 23, 55, 0 };
 
 static const char *const exp_rules_list[] = {
     "Rules for testuser (2 rules)",
     "",
-    "   SpamFilter",
-    "    Newsletters",
+    "> SpamFilter",
+    "  Newsletters",
     "",
     "",
     "",
@@ -317,7 +317,7 @@ static const char *const exp_rules_list[] = {
 static const char *const sty_rules_list[] = {
     "                                                                                                    ",
     "                                                                                                    ",
-    "  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                                        ",
+    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -341,7 +341,7 @@ static const char *const sty_rules_list[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_rules_list[3] = { 23, 55, 1 };
+static const int cur_rules_list[3] = { 23, 55, 0 };
 
 static const char *const exp_rule_detail[] = {
     "Rule: SpamFilter",
@@ -402,8 +402,7 @@ static const int cur_rule_detail[3] = { 23, 30, 1 };
 static const char *const exp_rule_add_when[] = {
     "Add new rule for testuser — conditions (step 1/2)",
     "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  ESC=cancel",
-    "",
-    "  (empty — press 'a' to add a condition)",
+    "(empty — press 'a' to add a condition)",
     NULL
 };
 static const char *const sty_rule_add_when[] = {
@@ -433,7 +432,7 @@ static const char *const sty_rule_add_when[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_rule_add_when[3] = { 4, 0, 1 };
+static const int cur_rule_add_when[3] = { 1, 62, 0 };
 
 static const char *const exp_rule_add_actions[] = {
     "Add new rule for testuser — step 2/2: actions",
@@ -522,9 +521,9 @@ static const int cur_compose_dialog[3] = { 2, 13, 1 };
 static const char *const exp_accounts_help[] = {
     "  Email Accounts (1)",
     "",
-    "    Unread  Flagged  Account                           Type   Server              Send via",
-    "    ══════  ═══════  ════════════════════════════════  ═════  ══════════════════  ══════════════════",
-    "  →                  testuser                          IMAP   imaps://localhost:  smtps://localhost:",
+    "  Unread Flagged Account                          Type  Server                 Send via",
+    "  ══════ ═══════ ════════════════════════════════ ═════ ══════════════════════ ═════════════════════",
+    "~>                testuser                         IMAP  imaps://localhost:#… smtps://localhost:#…",
     "                  ┌────────────────────────────────────────────────────────────┐",
     "                  │                     Accounts shortcuts                     │",
     "                  ├────────────────────────────────────────────────────────────┤",
@@ -543,9 +542,9 @@ static const char *const exp_accounts_help[] = {
 static const char *const sty_accounts_help[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
-    "                                                                                                    ",
-    "  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
     "                  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
     "                  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
@@ -567,30 +566,30 @@ static const char *const sty_accounts_help[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_accounts_help[3] = { 17, 61, 1 };
+static const int cur_accounts_help[3] = { 17, 61, 0 };
 
 static const char *const exp_folders_help[] = {
     "  Folders — testuser  (16)",
     "",
-    "  Unread  Flagged  Folder                                                                      Total",
-    "  ══════  ═══════  ════════════════════════════════════════════════════════════════════════  ═══════",
-    "  ── Tags / Flags ───────────────────────────────────────────────────────────────────────────────",
-    "       0        - ┌────────────────────────────────────────────────────────────┐",
-    "       0        - │                  Folder browser shortcuts                  │                   -",
-    "       0        - ├────────────────────────────────────────────────────────────┤                   -",
-    "       0        - │ ↑ / ↓         Move cursor up / down                        │                   -",
-    "       0        - │ PgUp / PgDn   Move cursor one page up / down               │                   -",
-    "       0        - │ Enter         Open folder / navigate into subfolder        │                   -",
-    "  ── Folders ─────│ /             Cross-folder content search                  │─────────────────",
-    "                  │ c             Compose new message                          │",
+    "  Unread Flagged Folder                                                                        Total",
+    "  ══════ ═══════ ═══════════════════════════════════════════════════════════════════════════ ═══════",
+    "  Tags / Flags ─────────────────────────────────────────────────────────────────────────────────────",
+    ">      0       - U┌────────────────────────────────────────────────────────────┐                   -",
+    "       0       - F│                  Folder browser shortcuts                  │                   -",
+    "       0       - J├────────────────────────────────────────────────────────────┤                   -",
+    "       0       - P│ ↑ / ↓         Move cursor up / down                        │                   -",
+    "       0       - A│ PgUp / PgDn   Move cursor one page up / down               │                   -",
+    "       0       - F│ Enter         Open folder / navigate into subfolder        │                   -",
+    "  Folders ────────│ /             Cross-folder content search                  │────────────────────",
+    "                 └│ c             Compose new message                          │",
     "                  │ t             Toggle tree / flat view                      │",
     "                  │ Esc / q / BS  Up one level (accounts at the top)           │",
     "                  │ h / ?         Show this help                               │",
     "                  └────────────────────────────────────────────────────────────┘",
-    "                       ├── Träger     Press any key to close",
-    "                       ├── 中",
+    "                     ├── Träger       Press any key to close",
+    "                     ├── 中",
+    "                     └── 😀",
     "",
-    "                       └── 😀",
     "",
     "",
     "  ↑↓=step  PgDn/PgUp=page  Enter=open/select  t=flat  Esc/q/BS=back  [2/16]",
@@ -599,40 +598,40 @@ static const char *const exp_folders_help[] = {
 static const char *const sty_folders_help[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "                                                                                                    ",
+    "  dddddddddddd ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "ASSSSSSSSSSSSSSSSSrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrSSSSSSSSSSSSSSSSSSSS",
+    "       d       d drrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                   d",
+    "       d       d drrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                   d",
+    "       d       d drrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                   d",
+    "       d       d drrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                   d",
+    "       d       d drrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                   d",
+    "  ddddddd ddddddddrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
+    "                 drrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
+    "                 drrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
+    "                 drrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
+    "                 drrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
+    "                 drrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
+    "                 dddddddddddddd      dddddddddddddddddddddddd                                       ",
+    "                 dddddddddd                                                                         ",
+    "                 dddddddddd                                                                         ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd   ",
-    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr ",
-    "ddddddddddddddddddrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
-    "ddddddddddddddddddrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
-    "ddddddddddddddddddrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
-    "ddddddddddddddddddrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
-    "ddddddddddddddddddrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
-    "  ddddddddddddddddrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrddddddddddddddddd   ",
-    "ddddddddddddddddddrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
-    "ddddddddddddddddddrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
-    "ddddddddddddddddddrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
-    "ddddddddddddddddddrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
-    "ddddddddddddddddddrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrdddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "d                                                                                                   ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "d                                                                                                   ",
     "                                                                                                    ",
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_folders_help[3] = { 17, 61, 1 };
+static const int cur_folders_help[3] = { 17, 61, 0 };
 
 static const char *const exp_list_help[] = {
     "  1-3 of 3 message┌────────────────────────────────────────────────────────────┐",
     "                  │                   Message list shortcuts                   │",
     "  Date            ├────────────────────────────────────────────────────────────┤",
     "  ════════════════│ ↑ / ↓         Move cursor up / down                        │════════════════════",
-    "  2020-01-03 12:00│ PgUp / PgDn   Page up / down                               │ <sender3@example.c",
-    "  2020-01-02 12:00│ Enter         Open selected message                        │ <sender2@example.co",
-    "  2020-01-01 12:00│ r             Reply to selected message                    │ <sender1@example.co",
+    "> 2020-01-03 12:00│ PgUp / PgDn   Page up / down                               │nder3@example.com>",
+    "  2020-01-02 12:00│ Enter         Open selected message                        │nder2@example.com>",
+    "  2020-01-01 12:00│ r             Reply to selected message                    │nder1@example.com>",
     "                  │ A             Reply-all to selected message                │",
     "                  │ F             Forward selected message                     │",
     "                  │ c             Compose new message                          │",
@@ -655,9 +654,9 @@ static const char *const exp_list_help[] = {
 static const char *const sty_list_help[] = {
     "HHHHHHHHHHHHHHHHHHrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrHHHHHHHHHHHHHHHHHHHH",
     "                  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
-    "                  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
+    "bbbbbbbbbbbbbbbbbbrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrbbbbbbbbbbbbbbbbbbbb",
     "                  rrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
-    "rrrrrrrrrrrrrrrrrrrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrGGGGGGGGGGGGGGGGGGG ",
+    "ASSSSSSSSSSSSSSSSSrrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrSSSSSSSSSSSSSSSSSSSS",
     "                  rrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
     "                  rrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
     "                  rrBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                    ",
@@ -679,7 +678,7 @@ static const char *const sty_list_help[] = {
     "                               dddddddddddddddddddddddddddddddddddd                                 ",
     NULL
 };
-static const int cur_list_help[3] = { 23, 67, 1 };
+static const int cur_list_help[3] = { 23, 67, 0 };
 
 static const char *const exp_reader_help[] = {
     "From:    Sender 3 <sender3@example.com>",
@@ -731,16 +730,16 @@ static const char *const sty_reader_help[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_reader_help[3] = { 20, 61, 1 };
+static const int cur_reader_help[3] = { 20, 61, 0 };
 
 static const char *const exp_list_search[] = {
     "  Showing 3 of 3  [filter:Subject]  INBOX (3 unread) [testuser].",
     "",
-    "  Date              Sts     Subject                                     From",
-    "  ════════════════  ══════  ══════════════════════════════════════════  ════════════════════════════",
-    "  2020-01-03 12:00  N-----  Message 3                                   Sender 3 <sender3@example.c",
-    "  2020-01-02 12:00  N-----  Message 2                                   Sender 2 <sender2@example.co",
-    "  2020-01-01 12:00  N-----  Message 1                                   Sender 1 <sender1@example.co",
+    "  Date             Sts    Subject                                   From",
+    "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
+    "> 2020-01-03 12:00 N----- Message 3                                 Sender 3 <sender3@example.com>",
+    "  2020-01-02 12:00 N----- Message 2                                 Sender 2 <sender2@example.com>",
+    "  2020-01-01 12:00 N----- Message 1                                 Sender 1 <sender1@example.com>",
     "  ────────────────────────────────────────────────────────────────────────────────────────────────",
     "  Filter [Subject|From|To|Body]: _  Showing 3 of 3",
     "",
@@ -763,11 +762,11 @@ static const char *const exp_list_search[] = {
 static const char *const sty_list_search[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
-    "                                                                                                    ",
-    "rrrrrrrrrrrrrrrrrrrrgGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG ",
-    "                    g                                                                               ",
-    "                    g                                                                               ",
+    "ASSSSSSSSSSSSSSSSSSnSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                   g                                                                                ",
+    "                   g                                                                                ",
     "                                                                                                    ",
     "          rrrrrrr                                                                                   ",
     "                                                                                                    ",
@@ -787,7 +786,7 @@ static const char *const sty_list_search[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_list_search[3] = { 23, 99, 1 };
+static const int cur_list_search[3] = { 23, 99, 0 };
 
 static const char *const exp_wizard_type[] = {
     "",
@@ -848,7 +847,7 @@ static const int cur_wizard_type[3] = { 23, 12, 1 };
 static const char *const exp_account_delete[] = {
     "  Email Accounts (0)",
     "",
-    "  No accounts configured.",
+    "No accounts configured.",
     "",
     "",
     "",
@@ -899,16 +898,16 @@ static const char *const sty_account_delete[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_account_delete[3] = { 23, 99, 1 };
+static const int cur_account_delete[3] = { 23, 99, 0 };
 
 static const char *const exp_list_second_row[] = {
     "  1-3 of 3 message(s) in INBOX (3 unread) [testuser].",
     "",
-    "  Date              Sts     Subject                                     From",
-    "  ════════════════  ══════  ══════════════════════════════════════════  ════════════════════════════",
-    "  2020-01-03 12:00  N-----  Message 3                                   Sender 3 <sender3@example.co",
-    "  2020-01-02 12:00  N-----  Message 2                                   Sender 2 <sender2@example.c",
-    "  2020-01-01 12:00  N-----  Message 1                                   Sender 1 <sender1@example.co",
+    "  Date             Sts    Subject                                   From",
+    "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
+    "  2020-01-03 12:00 N----- Message 3                                 Sender 3 <sender3@example.com>",
+    "> 2020-01-02 12:00 N----- Message 2                                 Sender 2 <sender2@example.com>",
+    "  2020-01-01 12:00 N----- Message 1                                 Sender 1 <sender1@example.com>",
     "",
     "",
     "",
@@ -931,11 +930,11 @@ static const char *const exp_list_second_row[] = {
 static const char *const sty_list_second_row[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
-    "                                                                                                    ",
-    "                    g                                                                               ",
-    "rrrrrrrrrrrrrrrrrrrrgGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG ",
-    "                    g                                                                               ",
+    "                   g                                                                                ",
+    "ASSSSSSSSSSSSSSSSSSnSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                   g                                                                                ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -955,16 +954,16 @@ static const char *const sty_list_second_row[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_list_second_row[3] = { 23, 99, 1 };
+static const int cur_list_second_row[3] = { 23, 99, 0 };
 
 static const char *const exp_list_narrow[] = {
     "  1-3 of 3 message(s) in INBOX (3 unread) [testuser].",
     "",
-    "  Date              Sts     Subject                         From",
-    "  ════════════════  ══════  ══════════════════════════════  ════════════════════",
-    "  2020-01-03 12:00  N-----  Message 3                       Sender 3 <sender3@e",
-    "  2020-01-02 12:00  N-----  Message 2                       Sender 2 <sender2@ex",
-    "  2020-01-01 12:00  N-----  Message 1                       Sender 1 <sender1@ex",
+    "  Date             Sts    Subject                       From",
+    "  ════════════════ ══════ ═════════════════════════════ ════════════════════════",
+    "> 2020-01-03 12:00 N----- Message 3                     Sender 3 <sender3@examp…",
+    "  2020-01-02 12:00 N----- Message 2                     Sender 2 <sender2@examp…",
+    "  2020-01-01 12:00 N----- Message 1                     Sender 1 <sender1@examp…",
     "",
     "",
     "",
@@ -987,11 +986,11 @@ static const char *const exp_list_narrow[] = {
 static const char *const sty_list_narrow[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                ",
-    "                                                                                ",
-    "rrrrrrrrrrrrrrrrrrrrgGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG ",
-    "                    g                                                           ",
-    "                    g                                                           ",
+    "ASSSSSSSSSSSSSSSSSSnSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                   g                                                            ",
+    "                   g                                                            ",
     "                                                                                ",
     "                                                                                ",
     "                                                                                ",
@@ -1011,7 +1010,7 @@ static const char *const sty_list_narrow[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_list_narrow[3] = { 23, 79, 1 };
+static const int cur_list_narrow[3] = { 23, 79, 0 };
 
 static const char *const exp_list_empty[] = {
     "  0 of 0 message(s) in INBOX.Empty (0 unread) [testuser].",
@@ -1072,17 +1071,17 @@ static const int cur_list_empty[3] = { 23, 99, 1 };
 static const char *const exp_folders_flat[] = {
     "  Folders — testuser  (9)",
     "",
-    "  Unread  Flagged  Folder                                                                      Total",
-    "  ══════  ═══════  ════════════════════════════════════════════════════════════════════════  ═══════",
-    "  ── Tags / Flags ───────────────────────────────────────────────────────────────────────────────",
-    "       0        -  Unread                                                                          -",
-    "       0        -  Flagged                                                                         -",
-    "       0        -  Junk                                                                            -",
-    "       0        -  Phishing                                                                        -",
-    "       0        -  Answered                                                                        -",
-    "       0        -  Forwarded                                                                       -",
-    "  ── Folders ────────────────────────────────────────────────────────────────────────────────────",
-    "                   INBOX/",
+    "  Unread Flagged Folder                                                                        Total",
+    "  ══════ ═══════ ═══════════════════════════════════════════════════════════════════════════ ═══════",
+    "  Tags / Flags ─────────────────────────────────────────────────────────────────────────────────────",
+    "       0       - Unread                                                                            -",
+    "       0       - Flagged                                                                           -",
+    "       0       - Junk                                                                              -",
+    "       0       - Phishing                                                                          -",
+    "       0       - Answered                                                                          -",
+    "       0       - Forwarded                                                                         -",
+    "  Folders ──────────────────────────────────────────────────────────────────────────────────────────",
+    ">                INBOX/",
     "",
     "",
     "",
@@ -1099,17 +1098,17 @@ static const char *const exp_folders_flat[] = {
 static const char *const sty_folders_flat[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
-    "                                                                                                    ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd   ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd   ",
-    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr ",
+    "  dddddddddddd ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "       d       d dddddd                                                                            d",
+    "       d       d ddddddd                                                                           d",
+    "       d       d dddd                                                                              d",
+    "       d       d dddddddd                                                                          d",
+    "       d       d dddddddd                                                                          d",
+    "       d       d ddddddddd                                                                         d",
+    "  ddddddd dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -1123,30 +1122,30 @@ static const char *const sty_folders_flat[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_folders_flat[3] = { 23, 99, 1 };
+static const int cur_folders_flat[3] = { 23, 99, 0 };
 
 static const char *const exp_folders_search[] = {
     "  Folders — testuser  (16)",
     "",
-    "  Unread  Flagged  Folder                                                                      Total",
-    "  ══════  ═══════  ════════════════════════════════════════════════════════════════════════  ═══════",
-    "  ── Tags / Flags ───────────────────────────────────────────────────────────────────────────────",
-    "       0        -  Unread",
-    "       0        -  Flagged                                                                         -",
-    "       0        -  Junk                                                                            -",
-    "       0        -  Phishing                                                                        -",
-    "       0        -  Answered                                                                        -",
-    "       0        -  Forwarded                                                                       -",
-    "  ── Folders ────────────────────────────────────────────────────────────────────────────────────",
-    "                   └── INBOX",
-    "                       ├── AT&T",
-    "                       ├── Empty",
-    "                       ├── Sent",
-    "                       ├── Trash",
-    "                       ├── Träger",
-    "                       ├── 中",
+    "  Unread Flagged Folder                                                                        Total",
+    "  ══════ ═══════ ═══════════════════════════════════════════════════════════════════════════ ═══════",
+    "  Tags / Flags ─────────────────────────────────────────────────────────────────────────────────────",
+    ">      0       - Unread                                                                            -",
+    "       0       - Flagged                                                                           -",
+    "       0       - Junk                                                                              -",
+    "       0       - Phishing                                                                          -",
+    "       0       - Answered                                                                          -",
+    "       0       - Forwarded                                                                         -",
+    "  Folders ──────────────────────────────────────────────────────────────────────────────────────────",
+    "                 └── INBOX",
+    "                     ├── AT&T",
+    "                     ├── Empty",
+    "                     ├── Sent",
+    "                     ├── Trash",
+    "                     ├── Träger",
+    "                     ├── 中",
+    "                     └── 😀",
     "",
-    "                       └── 😀",
     "",
     "  Search [Subject]: _",
     "  ↑↓=step  PgDn/PgUp=page  Enter=open/select  t=flat  Esc/q/BS=back  [2/16]",
@@ -1155,31 +1154,31 @@ static const char *const exp_folders_search[] = {
 static const char *const sty_folders_search[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "                                                                                                    ",
+    "  dddddddddddd ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "       d       d ddddddd                                                                           d",
+    "       d       d dddd                                                                              d",
+    "       d       d dddddddd                                                                          d",
+    "       d       d dddddddd                                                                          d",
+    "       d       d ddddddddd                                                                         d",
+    "  ddddddd dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "                 ddddddddd                                                                          ",
+    "                 dddddddddddd                                                                       ",
+    "                 ddddddddddddd                                                                      ",
+    "                 dddddddddddd                                                                       ",
+    "                 ddddddddddddd                                                                      ",
+    "                 dddddddddddddd                                                                     ",
+    "                 dddddddddd                                                                         ",
+    "                 dddddddddd                                                                         ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd   ",
-    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd   ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "d                                                                                                   ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "d                                                                                                   ",
     "                                                                                                    ",
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_folders_search[3] = { 22, 21, 1 };
+static const int cur_folders_search[3] = { 22, 21, 0 };
 
 static const char *const exp_reader_source[] = {
     "From:    Sender 3 <sender3@example.com>",
@@ -1233,7 +1232,7 @@ static const char *const sty_reader_source[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_reader_source[3] = { 22, 99, 1 };
+static const int cur_reader_source[3] = { 22, 99, 0 };
 
 static const char *const exp_reader_search[] = {
     "From:    Sender 3 <sender3@example.com>",
@@ -1287,13 +1286,13 @@ static const char *const sty_reader_search[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_reader_search[3] = { 22, 1, 1 };
+static const int cur_reader_search[3] = { 22, 1, 0 };
 
 static const char *const exp_rules_second[] = {
     "Rules for testuser (2 rules)",
     "",
-    "    SpamFilter",
-    "   Newsletters",
+    "  SpamFilter",
+    "> Newsletters",
     "",
     "",
     "",
@@ -1320,7 +1319,7 @@ static const char *const sty_rules_second[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr                                        ",
+    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -1343,18 +1342,18 @@ static const char *const sty_rules_second[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_rules_second[3] = { 23, 55, 1 };
+static const int cur_rules_second[3] = { 23, 55, 0 };
 
 static const char *const exp_rule_edit_form[] = {
     "Edit rule \"SpamFilter\" for testuser — conditions (step 1/2)",
     "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  ESC=cancel",
-    "    1. from:*@spam.example.com",
+    ">   1. from:*@spam.example.com",
     NULL
 };
 static const char *const sty_rule_edit_form[] = {
     "                                                                                                    ",
     "                                                                                                    ",
-    "  rrrrrrrrrrrrrrrrrrrrrrrrrrrr                                                                      ",
+    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -1378,7 +1377,7 @@ static const char *const sty_rule_edit_form[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_rule_edit_form[3] = { 3, 0, 1 };
+static const int cur_rule_edit_form[3] = { 1, 62, 0 };
 
 static const char *const exp_compose_typed[] = {
     "  New Message",

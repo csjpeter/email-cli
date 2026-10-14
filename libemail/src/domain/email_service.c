@@ -5,6 +5,7 @@
 #include "email_service.h"
 #include "config_store.h"
 #include "input_line.h"
+#include "tui_frame.h"
 #include "path_complete.h"
 #include "imap_client.h"
 #include "mail_client.h"
@@ -735,6 +736,28 @@ static char *fetch_uid_headers_cached(const Config *cfg, const char *folder,
     return hdrs;
 }
 
+/* Model of the attachment picker's table: name, content type, size. */
+typedef struct { const MimeAttachment *atts; } AttachModel;
+
+static void attach_cell(void *ctx, int i, int col, tui_table_cell *c) {
+    const AttachModel *m = ctx;
+    const MimeAttachment *a = &m->atts[i];
+    char buf[256];
+    if (col == 0) {
+        tui_table_cell_put(c, a->filename ? a->filename : "(no name)", TUI_STYLE_DEFAULT);
+    } else if (col == 1) {
+        tui_table_cell_put(c, a->content_type ? a->content_type : "", TUI_STYLE_DEFAULT);
+    } else {
+        if (a->size >= 1024 * 1024)
+            snprintf(buf, sizeof(buf), "%.1f MB", (double)a->size / (1024.0 * 1024.0));
+        else if (a->size >= 1024)
+            snprintf(buf, sizeof(buf), "%.0f KB", (double)a->size / 1024.0);
+        else
+            snprintf(buf, sizeof(buf), "%zu B", a->size);
+        tui_table_cell_put(c, buf, TUI_STYLE_DEFAULT);
+    }
+}
+
 /**
  * Like fetch_uid_headers_cached but uses an already-connected and folder-selected
  * MailClient instead of opening a new connection.  Falls back to the cache first.
@@ -883,27 +906,21 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
                                   int tcols, int trows) {
     int cursor = 0;
     for (;;) {
-        printf("\033[0m\033[H\033[2J");
-        printf("  Attachments (%d):\n\n", count);
-        for (int i = 0; i < count; i++) {
-            const char *name  = atts[i].filename     ? atts[i].filename     : "(no name)";
-            const char *ctype = atts[i].content_type ? atts[i].content_type : "";
-            char sz[32];
-            if (atts[i].size >= 1024 * 1024)
-                snprintf(sz, sizeof(sz), "%.1f MB",
-                         (double)atts[i].size / (1024.0 * 1024.0));
-            else if (atts[i].size >= 1024)
-                snprintf(sz, sizeof(sz), "%.0f KB",
-                         (double)atts[i].size / 1024.0);
-            else
-                snprintf(sz, sizeof(sz), "%zu B", atts[i].size);
-
-            if (i == cursor)
-                printf("  \033[7m> %-36s  %-28s  %8s\033[0m\n", name, ctype, sz);
-            else
-                printf("    %-36s  %-28s  %8s\n", name, ctype, sz);
-        }
-        fflush(stdout);
+        AttachModel am = { atts };
+        static const tui_table_col acols[] = {
+            { "Name", 20, 3, TUI_ALIGN_LEFT,  0, 0, 0 },
+            { "Type", 12, 2, TUI_ALIGN_LEFT,  0, 0, 0 },
+            { "Size",  8, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+        };
+        tui_table_model amod = { NULL, attach_cell, &am };
+        tui_table atbl;
+        tui_table_init(&atbl, acols, 3, &amod);
+        atbl.flags |= TUI_TABLE_NO_HEADER;
+        tui_table_set_count(&atbl, count);
+        tui_table_select(&atbl, cursor);
+        char title[64];
+        snprintf(title, sizeof(title), "  Attachments (%d):", count);
+        tui_frame_draw_table(title, &atbl, trows, tcols, TUI_FRAME_PLAIN_TITLE, NULL, NULL);
         char sb[160];
         snprintf(sb, sizeof(sb),
                  "  \u2191\u2193=select  Enter=choose  Esc/q/BS=back");
@@ -1890,67 +1907,126 @@ static int build_flat_view(char **names, int count, char sep,
     return vcount;
 }
 
-/** Print one folder item with its tree/flat prefix and optional selection highlight. */
-/* Flat mode column layout: Unread | Flagged | Folder | Total
- * name_w: width of the folder name column (ignored in tree mode).
- * flagged: number of flagged messages (0 = blank cell). */
-static void print_folder_item(char **names, int count, int i, char sep,
-                               int tree_mode, int selected, int has_kids,
-                               int messages, int unseen, int flagged, int name_w) {
-    if (selected)
-        printf("\033[7m");
-    else if (messages == 0)
-        printf("\033[2m");          /* dim: empty folder */
+/* Model of the folder browser's table (tui_table): the rows are the virtual
+ * prefix rows (two section headings and the six tag/flag views) followed by
+ * the folders, as a tree or as one level of the flat view.  Columns: Unread,
+ * Flagged, Folder, Total. */
+enum { FB_HDR_FLAGS = 0, FB_UNREAD = 1, FB_FLAGGED = 2, FB_JUNK = 3, FB_PHISHING = 4,
+       FB_ANSWERED = 5, FB_FORWARDED = 6, FB_HDR_FOLD = 7, FB_PREFIX = 8 };
 
-    if (tree_mode) {
-        /* Build "tree-prefix + component-name" into name_buf for column layout */
-        char name_buf[512];
-        int pos = 0;
-        int depth = 0;
-        for (const char *p = names[i]; *p; p++)
-            if (*p == sep) depth++;
-        for (int lv = 0; lv < depth; lv++) {
-            int anc_last = ancestor_is_last(names, count, i, lv, sep);
-            const char *branch = anc_last ? "    " : "\u2502   ";
-            int blen = (int)strlen(branch);
-            if (pos + blen < (int)sizeof(name_buf) - 1) {
-                memcpy(name_buf + pos, branch, blen);
-                pos += blen;
-            }
-        }
-        int last = is_last_sibling(names, count, i, sep);
-        const char *conn = last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ";
-        int clen = (int)strlen(conn);
-        if (pos + clen < (int)sizeof(name_buf) - 1) {
-            memcpy(name_buf + pos, conn, clen);
-            pos += clen;
-        }
-        const char *comp = strrchr(names[i], sep);
-        snprintf(name_buf + pos, sizeof(name_buf) - pos, "%s",
-                 comp ? comp + 1 : names[i]);
-        char u[16], f[16], t[16];
-        fmt_thou(u, sizeof(u), unseen);
-        fmt_thou(f, sizeof(f), flagged);
-        fmt_thou(t, sizeof(t), messages);
-        printf("  %6s  %7s  %-*s  %7s", u, f,
-               name_w + utf8_extra_bytes(name_buf), name_buf, t);
-    } else {
-        /* Flat mode: Unread | Flagged | Folder | Total */
-        const char *comp    = strrchr(names[i], sep);
-        const char *display = comp ? comp + 1 : names[i];
-        char name_buf[256];
-        snprintf(name_buf, sizeof(name_buf), "%s%s", display, has_kids ? "/" : "");
-        char u[16], f[16], t[16];
-        fmt_thou(u, sizeof(u), unseen);
-        fmt_thou(f, sizeof(f), flagged);
-        fmt_thou(t, sizeof(t), messages);
-        printf("  %6s  %7s  %-*s  %7s", u, f,
-               name_w + utf8_extra_bytes(name_buf), name_buf, t);
+typedef struct {
+    char               **names;
+    int                  count;
+    char                 sep;
+    const FolderStatus  *statuses;
+    int                  tree;        /* 1 tree, 0 flat */
+    const int           *vis;         /* flat: indexes into names[] */
+    int                  vf[FB_PREFIX]; /* counts of the virtual rows */
+    int                  selected;    /* the cursor row: never dimmed */
+} FolderModel;
+
+/* Index into names[] of table row @p i (>= FB_PREFIX). */
+static int fm_name_index(const FolderModel *m, int i) {
+    return m->tree ? i - FB_PREFIX : m->vis[i - FB_PREFIX];
+}
+
+/* Totals of a real folder row: own counts, or the subtree's in the flat view
+ * when the folder has children. */
+static void fm_counts(const FolderModel *m, int ni, int *msgs, int *unseen,
+                      int *flagged, int *has_kids) {
+    *has_kids = 0;
+    if (!m->tree && folder_has_children(m->names, m->count, m->names[ni], m->sep)) {
+        *has_kids = 1;
+        sum_subtree(m->names, m->count, m->sep, m->names[ni], m->statuses,
+                    msgs, unseen, flagged);
+        return;
     }
+    *msgs   = m->statuses ? m->statuses[ni].messages : 0;
+    *unseen = m->statuses ? m->statuses[ni].unseen   : 0;
+    *flagged= m->statuses ? m->statuses[ni].flagged  : 0;
+}
 
-    if (selected) printf("\033[K\033[0m");
-    else if (messages == 0) printf("\033[0m");
-    printf("\n");
+static void folders_row(void *ctx, int i, tui_table_row *r) {
+    const FolderModel *m = ctx;
+    if (i == FB_HDR_FLAGS || i == FB_HDR_FOLD) {
+        tui_table_row_kind(r, TUI_ROW_SECTION);
+        tui_table_row_text(r, i == FB_HDR_FLAGS ? "Tags / Flags" : "Folders");
+        tui_table_row_style(r, tui_style_attrs(TUI_ATTR_DIM));
+        return;
+    }
+    if (i < FB_PREFIX) {
+        tui_style st = TUI_STYLE_DEFAULT;
+        if (m->vf[i] == 0) {
+            if (i != m->selected) st = tui_style_attrs(TUI_ATTR_DIM);
+        } else switch (i) {
+            case FB_UNREAD:    st.fg = TUI_GREEN;  break;
+            case FB_FLAGGED:
+            case FB_JUNK:      st.fg = TUI_YELLOW; break;
+            case FB_PHISHING:  st.fg = TUI_RED;    break;
+            default:           st.fg = TUI_CYAN;   break;   /* answered, forwarded */
+        }
+        tui_table_row_style(r, st);
+        return;
+    }
+    int msgs, unseen, flagged, kids;
+    fm_counts(m, fm_name_index(m, i), &msgs, &unseen, &flagged, &kids);
+    if (msgs == 0 && i != m->selected)
+        tui_table_row_style(r, tui_style_attrs(TUI_ATTR_DIM));
+}
+
+static void folders_cell(void *ctx, int i, int col, tui_table_cell *c) {
+    const FolderModel *m = ctx;
+    char buf[512];
+    if (i < FB_PREFIX) {
+        static const char *const vname[FB_PREFIX] = {
+            "", "Unread", "Flagged", "Junk", "Phishing", "Answered", "Forwarded", "" };
+        switch (col) {
+        case 0: fmt_thou(buf, sizeof(buf), m->vf[i]);
+                if (m->vf[i] == 0) snprintf(buf, sizeof(buf), "0");
+                break;
+        case 1: snprintf(buf, sizeof(buf), "-"); break;
+        case 2: snprintf(buf, sizeof(buf), "%s", vname[i]); break;
+        default: snprintf(buf, sizeof(buf), "-"); break;
+        }
+        tui_table_cell_put(c, buf, TUI_STYLE_DEFAULT);
+        return;
+    }
+    int ni = fm_name_index(m, i);
+    int msgs, unseen, flagged, kids;
+    fm_counts(m, ni, &msgs, &unseen, &flagged, &kids);
+    const char *comp = strrchr(m->names[ni], m->sep);
+    comp = comp ? comp + 1 : m->names[ni];
+    switch (col) {
+    case 0: fmt_thou(buf, sizeof(buf), unseen);  break;
+    case 1: fmt_thou(buf, sizeof(buf), flagged); break;
+    case 3: fmt_thou(buf, sizeof(buf), msgs);    break;
+    default:
+        if (m->tree) {
+            /* Tree glyphs are a prefix that is never cut. */
+            char pre[512];
+            int pos = 0, depth = 0;
+            for (const char *p = m->names[ni]; *p; p++)
+                if (*p == m->sep) depth++;
+            for (int lv = 0; lv < depth; lv++) {
+                const char *br = ancestor_is_last(m->names, m->count, ni, lv, m->sep)
+                                 ? "    " : "\u2502   ";
+                int bl = (int)strlen(br);
+                if (pos + bl < (int)sizeof(pre) - 1) { memcpy(pre + pos, br, (size_t)bl); pos += bl; }
+            }
+            const char *cn = is_last_sibling(m->names, m->count, ni, m->sep)
+                             ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ";
+            int cl = (int)strlen(cn);
+            if (pos + cl < (int)sizeof(pre) - 1) { memcpy(pre + pos, cn, (size_t)cl); pos += cl; }
+            pre[pos] = '\0';
+            tui_table_cell_prefix(c, pre, TUI_STYLE_DEFAULT);
+            tui_table_cell_put(c, comp, TUI_STYLE_DEFAULT);
+        } else {
+            snprintf(buf, sizeof(buf), "%s%s", comp, kids ? "/" : "");
+            tui_table_cell_put(c, buf, TUI_STYLE_DEFAULT);
+        }
+        return;
+    }
+    tui_table_cell_put(c, buf, TUI_STYLE_DEFAULT);
 }
 
 static void render_folder_tree(char **names, int count, char sep,
@@ -2141,6 +2217,93 @@ static int list_empty_cache_view(const Config *cfg, const EmailListOpts *opts,
         if (ch == 'U') return 4; /* refresh: re-list */
         if (ch == 'l') return 7; /* rules editor */
     }
+}
+
+/* Model of the message list's table (tui_table) in the TUI: the rows are the
+ * entries shown (through the filter map when a filter is active).  Columns:
+ * Date, Sts, Subject, From.  A row with a pending operation carries a mark
+ * ("D" red trash, "d" yellow label removed / archived, "u" green restore) and
+ * its own colour. */
+typedef struct {
+    const MsgEntry *entries;
+    const int      *fentries;   /* display index -> entries[] index, or NULL */
+    Manifest       *manifest;
+    const int      *pend_remove;
+    const int      *pend_label;
+    const int      *pend_restore;
+} MsgListModel;
+
+static int mlm_index(const MsgListModel *m, int i) {
+    return m->fentries ? m->fentries[i] : i;
+}
+
+static void msglist_row(void *ctx, int i, tui_table_row *r) {
+    const MsgListModel *m = ctx;
+    int ei = mlm_index(m, i);
+    if (m->pend_remove && m->pend_remove[ei]) {
+        tui_table_row_mark(r, "D", TUI_STYLE_ERROR);
+        tui_table_row_style(r, (tui_style){ TUI_RED, TUI_COLOR_DEFAULT, 0 });
+    } else if (m->pend_label && m->pend_label[ei]) {
+        tui_table_row_mark(r, "d", (tui_style){ TUI_YELLOW, TUI_COLOR_DEFAULT, TUI_ATTR_BOLD });
+        tui_table_row_style(r, (tui_style){ TUI_YELLOW, TUI_COLOR_DEFAULT, 0 });
+    } else if (m->pend_restore && m->pend_restore[ei]) {
+        tui_table_row_mark(r, "u", TUI_STYLE_OK);
+        tui_table_row_style(r, (tui_style){ TUI_GREEN, TUI_COLOR_DEFAULT, 0 });
+    }
+}
+
+static void msglist_cell(void *ctx, int i, int col, tui_table_cell *c) {
+    const MsgListModel *m = ctx;
+    int ei = mlm_index(m, i);
+    const MsgEntry *e = &m->entries[ei];
+    ManifestEntry *me = manifest_find(m->manifest, e->uid);
+    if (col == 0) {
+        tui_table_cell_put(c, (me && me->date) ? me->date : "", TUI_STYLE_DEFAULT);
+        return;
+    }
+    if (col == 2) {
+        tui_table_cell_put(c, (me && me->subject && me->subject[0]) ? me->subject
+                                                                    : "(no subject)",
+                           TUI_STYLE_DEFAULT);
+        return;
+    }
+    if (col == 3) {
+        tui_table_cell_put(c, (me && me->from && me->from[0]) ? me->from : "(no from)",
+                           TUI_STYLE_DEFAULT);
+        return;
+    }
+    /* Status column (6 cells): [P/J/N/-][star/-][D/-][A/-][R/F/-][v/x/-];
+     * the status letters carry their colour only while no operation is
+     * pending on the row (the row's own colour shows that instead). */
+    int computed = MSG_FLAG_ATTACH | MSG_FLAG_ATTACH_CHECKED |
+                   MSG_FLAG_DMARC_PASS | MSG_FLAG_DMARC_FAIL;
+    int f = e->flags | (me ? (me->flags & computed) : 0);
+    int pending = (m->pend_remove && m->pend_remove[ei]) ||
+                  (m->pend_label && m->pend_label[ei]) ||
+                  (m->pend_restore && m->pend_restore[ei]);
+    tui_style plain = TUI_STYLE_DEFAULT;
+    tui_style red = { TUI_RED, TUI_COLOR_DEFAULT, TUI_ATTR_BOLD };
+    tui_style yel = { TUI_YELLOW, TUI_COLOR_DEFAULT, 0 };
+    tui_style grn = { TUI_GREEN, TUI_COLOR_DEFAULT, 0 };
+    tui_style cya = { TUI_CYAN, TUI_COLOR_DEFAULT, 0 };
+    if (pending) { red = yel = grn = cya = plain; }
+    if      (f & MSG_FLAG_PHISHING) tui_table_cell_put(c, "P", red);
+    else if (f & MSG_FLAG_JUNK)     tui_table_cell_put(c, "J", yel);
+    else if (f & MSG_FLAG_UNSEEN)   tui_table_cell_put(c, "N", grn);
+    else                            tui_table_cell_put(c, "-", plain);
+    if (f & MSG_FLAG_FLAGGED) tui_table_cell_put(c, pending ? "*" : "\xe2\x98\x85", yel);
+    else                      tui_table_cell_put(c, "-", plain);
+    tui_table_cell_put(c, (f & MSG_FLAG_DONE)   ? "D" : "-", plain);
+    tui_table_cell_put(c, (f & MSG_FLAG_ATTACH) ? "A" : "-", plain);
+    if      (f & MSG_FLAG_ANSWERED)  tui_table_cell_put(c, "R", cya);
+    else if (f & MSG_FLAG_FORWARDED) tui_table_cell_put(c, "F", cya);
+    else                             tui_table_cell_put(c, "-", plain);
+    if (f & MSG_FLAG_DMARC_PASS)
+        tui_table_cell_put(c, pending ? "v" : "\xe2\x9c\x93", grn);
+    else if (f & MSG_FLAG_DMARC_FAIL)
+        tui_table_cell_put(c, pending ? "x" : "\xe2\x9c\x97", red);
+    else
+        tui_table_cell_put(c, "-", plain);
 }
 
 int email_service_list(const Config *cfg, EmailListOpts *opts) {
@@ -2771,7 +2934,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             from_w = 0; /* From is the last column — no right-padding needed */
         }
 
-        if (opts->pager) printf("\033[H\033[2J");
+        char pager_hdr[512] = "";
 
         /* Count / status line — suppressed in JSON mode, where stdout must be
          * a single parseable document and nothing else. */
@@ -2801,19 +2964,15 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                          cfg->user ? cfg->user : "?", suffix);
             }
             if (opts->pager) {
-                /* TUI mode: reverse-video status bar pinned to row 1 */
-                printf("\033[1;1H" TUI_HDR_ON "%s", cl);
-                int used = visible_line_cols(cl, cl + strlen(cl));
-                for (int p = used; p < tcols; p++) putchar(' ');
-                printf("\033[0m");
+                /* TUI mode: the header bar is drawn with the table */
+                snprintf(pager_hdr, sizeof(pager_hdr), "%s", cl);
             } else {
                 printf("%s\n\n", cl);
             }
         }
         if (opts->json) {
             printf("[");
-        } else {
-        if (opts->pager) printf("\033[3;1H");
+        } else if (!opts->pager) {
         if (show_uid && show_folder)
             printf("  %-16s  %-16s  %-6s  %-20s  %-*s  %s\n",
                    "UID", "Date", "Sts", "Folder", subj_w, "Subject", "From");
@@ -2831,6 +2990,27 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         print_dbar(subj_w > 0 ? subj_w : 30); printf("  ");
         print_dbar(from_w > 0 ? from_w : 40); printf("\n");
         }
+
+        /* TUI: the rows are drawn by the table, one frame per fetched row so a
+         * slow fetch shows progress, and a last frame when the window is full. */
+        static const tui_table_col list_cols[] = {
+            { "Date",    16, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
+            { "Sts",      6, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
+            { "Subject", 10, 3, TUI_ALIGN_LEFT, 0, 0, 0 },
+            { "From",    10, 2, TUI_ALIGN_LEFT, 0, 0, 0 },
+        };
+        MsgListModel lmodel = { entries, (filter_active && fentries) ? fentries : NULL,
+                                manifest, pending_remove, pending_label,
+                                pending_restore };
+        tui_table_model ltmodel = { msglist_row, msglist_cell, &lmodel };
+        tui_table ltbl;
+        tui_table_init(&ltbl, list_cols, 4, &ltmodel);
+        ltbl.flags |= TUI_TABLE_RULER;
+        int pager_frame = opts->pager && !opts->json;
+        int pager_rows = terminal_rows();
+        int pager_cols = terminal_cols();
+        if (pager_rows <= 0) pager_rows = 24;
+        if (pager_cols <= 0) pager_cols = 80;
 
         /* Data rows: fetch-on-demand + immediate render per row */
         int load_interrupted = 0;
@@ -2925,6 +3105,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                     cached_me->flags = merged;
                     manifest_dirty = 1;
                 }
+            }
+
+            if (pager_frame) {
+                tui_table_set_count(&ltbl, i + 1);
+                tui_table_select(&ltbl, cursor);
+                ltbl.lv.scroll_top = wstart;
+                if (!cached_me) tui_frame_draw_table(pager_hdr, &ltbl, pager_rows, pager_cols, 0, NULL, NULL);
+                continue;
             }
 
             /* Render this row immediately */
@@ -3059,6 +3247,12 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         }
         if (manifest_dirty && !is_virtual_flags && !is_virtual_search) manifest_save(folder, manifest);
         if (load_interrupted) goto list_done;
+        if (pager_frame) {
+            tui_table_set_count(&ltbl, wend);
+            tui_table_select(&ltbl, cursor);
+            ltbl.lv.scroll_top = wstart;
+            tui_frame_draw_table(pager_hdr, &ltbl, pager_rows, pager_cols, 0, NULL, NULL);
+        }
 
         if (opts->json) {
             printf("\n]\n");
@@ -3075,6 +3269,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         /* Filter bar — shown when filter is active (separator + input = 2 rows) */
         if (filter_active) {
             static const char *scope_names[] = {"Subject","From","To","Body"};
+            printf("\033[%d;1H", 5 + (wend - wstart));
             printf("  \xe2\x94\x80"); /* ─ */
             for (int _p = 3; _p < tcols - 2; _p++) printf("\xe2\x94\x80");
             printf("\n  Filter [");
@@ -3870,8 +4065,9 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
     /* Virtual prefix rows: [0] "Tags / Flags" header, [1] Unread,
      *                      [2] Flagged,              [3] "Folders" header */
-    enum { VP_HDR_FLAGS=0, VP_UNREAD=1, VP_FLAGGED=2, VP_JUNK=3, VP_PHISHING=4,
-           VP_ANSWERED=5, VP_FORWARDED=6, VP_HDR_FOLD=7, VPREFIX=8 };
+    enum { VP_HDR_FLAGS = FB_HDR_FLAGS, VP_UNREAD = FB_UNREAD, VP_FLAGGED = FB_FLAGGED,
+           VP_JUNK = FB_JUNK, VP_PHISHING = FB_PHISHING, VP_ANSWERED = FB_ANSWERED,
+           VP_FORWARDED = FB_FORWARDED, VP_HDR_FOLD = FB_HDR_FOLD, VPREFIX = FB_PREFIX };
     int vf_unread=0, vf_flagged=0, vf_junk=0, vf_phishing=0, vf_answered=0, vf_forwarded=0;
     manifest_count_all_flags(&vf_unread, &vf_flagged, &vf_junk, &vf_phishing,
                              &vf_answered, &vf_forwarded);
@@ -3941,13 +4137,28 @@ char *email_service_list_folders_interactive(const Config *cfg,
         int wend = wstart + limit;
         if (wend > display_count) wend = display_count;
 
-        /* Compute name column width for flat mode */
         int tcols_f = terminal_cols();
-        /* Fixed: "  " + 6 (unread) + "  " + 7 (flagged) + "  " + name_w + "  " + 7 (total) = name_w + 28 */
-        int name_w = tcols_f - 28;
-        if (name_w < 20) name_w = 20;
+        if (tcols_f <= 0) tcols_f = 80;
+        int trows_d = terminal_rows();
+        if (trows_d <= 0) trows_d = 24;
 
-        printf("\033[H\033[2J");
+        FolderModel fmodel = { folders, count, sep, statuses, tree_mode, vis,
+                               { 0, vf_unread, vf_flagged, vf_junk, vf_phishing,
+                                 vf_answered, vf_forwarded, 0 }, cursor };
+        static const tui_table_col fcols[] = {
+            { "Unread",  6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+            { "Flagged", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+            { "Folder", 20, 1, TUI_ALIGN_LEFT,  0, 0, 0 },
+            { "Total",   7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+        };
+        tui_table_model tmodel = { folders_row, folders_cell, &fmodel };
+        tui_table tbl;
+        tui_table_init(&tbl, fcols, 4, &tmodel);
+        tbl.flags |= TUI_TABLE_RULER;
+        tui_table_set_count(&tbl, display_count);
+        tui_table_select(&tbl, cursor);
+        tbl.lv.scroll_top = wstart;
+
         {
             char cl[1024];
             if (!tree_mode && current_prefix[0])
@@ -3958,80 +4169,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 snprintf(cl, sizeof(cl), "  Folders \u2014 %s  (%d)",
                          cfg->user ? cfg->user : "?",
                          display_count);
-            /* Explicit row 1: avoids pending-wrap shifting layout when title fills the row */
-            printf("\033[1;1H" TUI_HDR_ON "%s", cl);
-            int used = visible_line_cols(cl, cl + strlen(cl));
-            for (int p = used; p < tcols_f; p++) putchar(' ');
-            printf("\033[0m");
-        }
-
-        /* Column header and separator pinned at rows 3 and 4 */
-        printf("\033[3;1H  %6s  %7s  %-*s  %7s\n", "Unread", "Flagged", name_w, "Folder", "Total");
-        printf("  \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
-        print_dbar(name_w);
-        printf("  \u2550\u2550\u2550\u2550\u2550\u2550\u2550\n");
-
-        for (int i = wstart; i < wend; i++) {
-            /* Virtual prefix rows */
-            if (i < VPREFIX) {
-                if (i == VP_HDR_FLAGS || i == VP_HDR_FOLD) {
-                    const char *htitle = (i == VP_HDR_FLAGS) ? "Tags / Flags" : "Folders";
-                    printf("  \033[2m\u2500\u2500 %s ", htitle);
-                    int used = 6 + (int)strlen(htitle) + 1;
-                    for (int s = used; s < name_w + 28 - 2; s++) fputs("\u2500", stdout);
-                    printf("\033[0m\n");
-                } else {
-                    const char *vname, *vcolor;
-                    int vc;
-                    switch (i) {
-                        case VP_UNREAD:    vc=vf_unread;    vname="Unread";    vcolor="\033[32m"; break;
-                        case VP_FLAGGED:   vc=vf_flagged;   vname="Flagged";   vcolor="\033[33m"; break;
-                        case VP_JUNK:      vc=vf_junk;      vname="Junk";      vcolor="\033[33m"; break;
-                        case VP_PHISHING:  vc=vf_phishing;  vname="Phishing";  vcolor="\033[31m"; break;
-                        case VP_ANSWERED:  vc=vf_answered;  vname="Answered";  vcolor="\033[36m"; break;
-                        case VP_FORWARDED: vc=vf_forwarded; vname="Forwarded"; vcolor="\033[36m"; break;
-                        default:           vc=0; vname="?"; vcolor=""; break;
-                    }
-                    char cnt[16];
-                    /* Virtual rows always show the count, even when zero */
-                    if (vc == 0) snprintf(cnt, sizeof(cnt), "0");
-                    else fmt_thou(cnt, sizeof(cnt), vc);
-                    if (i == cursor) printf("\033[7m");
-                    else if (vc == 0) printf("\033[2m");
-                    else printf("%s", vcolor);
-                    printf("  %6s  %7s  %-*s  %7s",
-                           cnt, "-", name_w, vname, "-");
-                    if (i == cursor) printf("\033[K\033[0m");
-                    else printf("\033[0m");
-                    printf("\n");
-                }
-                continue;
-            }
-            /* Real folder rows (offset by VPREFIX) */
-            int ri = i - VPREFIX;
-            if (tree_mode) {
-                int msgs = statuses ? statuses[ri].messages : 0;
-                int unsn = statuses ? statuses[ri].unseen   : 0;
-                int flgd = statuses ? statuses[ri].flagged  : 0;
-                print_folder_item(folders, count, ri, sep, 1, i == cursor, 0,
-                                  msgs, unsn, flgd, name_w);
-            } else {
-                int fi = vis[ri];
-                int hk = folder_has_children(folders, count, folders[fi], sep);
-                int msgs, unsn, flgd;
-                if (hk) {
-                    /* Aggregate own + all descendant counts so the user can see
-                     * total unread/flagged even when children are not expanded. */
-                    sum_subtree(folders, count, sep, folders[fi], statuses,
-                                &msgs, &unsn, &flgd);
-                } else {
-                    msgs = statuses ? statuses[fi].messages : 0;
-                    unsn = statuses ? statuses[fi].unseen   : 0;
-                    flgd = statuses ? statuses[fi].flagged  : 0;
-                }
-                print_folder_item(folders, count, fi, sep, 0, i == cursor, hk,
-                                  msgs, unsn, flgd, name_w);
-            }
+            tui_frame_draw_table(cl, &tbl, trows_d, tcols_f, 0, NULL, NULL);
         }
 
         fflush(stdout);
@@ -4479,6 +4617,41 @@ static const struct { const char *id; const char *name; } gmail_special_labels[]
 };
 #define GMAIL_SPECIAL_COUNT ((int)(sizeof(gmail_special_labels)/sizeof(gmail_special_labels[0])))
 
+/* Model of the Gmail label browser's table: rows are labels, section
+ * headings (group headers) and rules (vrow[i] == -1). */
+typedef struct {
+    char **ids;
+    char **names;
+    const int *hdr;
+    const int *vrow;
+} LabelModel;
+
+static void labels_row(void *ctx, int i, tui_table_row *r) {
+    const LabelModel *m = ctx;
+    int li = m->vrow[i];
+    if (li < 0) {
+        tui_table_row_kind(r, TUI_ROW_SECTION);
+        tui_table_row_text(r, "");
+        tui_table_row_style(r, tui_style_attrs(TUI_ATTR_DIM));
+    } else if (m->hdr[li]) {
+        tui_table_row_kind(r, TUI_ROW_SECTION);
+        tui_table_row_text(r, m->names[li]);
+        tui_table_row_style(r, tui_style_attrs(TUI_ATTR_DIM));
+    }
+}
+
+static void labels_cell(void *ctx, int i, int col, tui_table_cell *c) {
+    const LabelModel *m = ctx;
+    int li = m->vrow[i];
+    char buf[16];
+    if (col == 0) {
+        fmt_thou(buf, sizeof(buf), label_idx_count(m->ids[li]));
+        tui_table_cell_put(c, buf, TUI_STYLE_DEFAULT);
+    } else {
+        tui_table_cell_put(c, m->names[li], TUI_STYLE_DEFAULT);
+    }
+}
+
 /* Build a flat label display list.  Returns count.
  * Layout: "── Tags / Flags ──" header, UNREAD+STARRED, user labels,
  *         "── Folders ──" header, INBOX+SENT+DRAFTS, categories, special.
@@ -4658,7 +4831,6 @@ char *email_service_list_labels_interactive(const Config *cfg,
         int tcols = terminal_cols();
         if (trows <= 0) trows = 24;
         if (tcols <= 0) tcols = 80;
-        int wend = 0;  /* computed below, after avail is known */
         /* Name column width: "  " + 6(count) + "  " + name_w = name_w + 10 */
         int name_w = tcols - 12;
         if (name_w < 20) name_w = 20;
@@ -4686,61 +4858,35 @@ char *email_service_list_labels_interactive(const Config *cfg,
             wstart++;
         }
 
-        /* Compute actual wend given avail rows */
-        int rows_counted = 0;
-        wend = wstart;
-        for (int i = wstart; i < lbl_count; i++) {
-            int extra = (lbl_seps[i] && i > wstart) ? 1 : 0;
-            if (rows_counted + extra + 1 > avail) break;
-            rows_counted += extra + 1;
-            wend = i + 1;
+        /* The table's rows: every label, a section heading for a group header
+         * and a rule where a group starts after other labels. */
+        int *vrow = malloc(((size_t)lbl_count * 2 + 1) * sizeof(int));
+        int nvrow = 0, cursor_vrow = 0;
+        for (int i = 0; vrow && i < lbl_count; i++) {
+            if (!lbl_hdr[i] && lbl_seps[i] && nvrow > 0 &&
+                !(vrow[nvrow - 1] >= 0 && lbl_hdr[vrow[nvrow - 1]]))
+                vrow[nvrow++] = -1;
+            if (i == cursor) cursor_vrow = nvrow;
+            vrow[nvrow++] = i;
         }
-
-        printf("\033[H\033[2J");
+        LabelModel lmod = { lbl_ids, lbl_names, lbl_hdr, vrow };
+        static const tui_table_col lcols[] = {
+            { "Count",  6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+            { "Label", 20, 1, TUI_ALIGN_LEFT,  0, 0, 0 },
+        };
+        tui_table_model lt = { labels_row, labels_cell, &lmod };
+        tui_table ltb;
+        tui_table_init(&ltb, lcols, 2, &lt);
+        ltb.flags |= TUI_TABLE_RULER;
+        tui_table_set_count(&ltb, nvrow);
+        tui_table_select(&ltb, cursor_vrow);
         {
             char cl[512];
             snprintf(cl, sizeof(cl), "  Labels \u2014 %s  (%d)",
                      cfg->user ? cfg->user : "?", lbl_count);
-            /* Explicit row 1: avoids pending-wrap shifting layout when title fills the row */
-            printf("\033[1;1H" TUI_HDR_ON "%s", cl);
-            int used = visible_line_cols(cl, cl + strlen(cl));
-            for (int p = used; p < tcols; p++) putchar(' ');
-            printf("\033[0m");
+            tui_frame_draw_table(cl, &ltb, trows, tcols, 0, NULL, NULL);
         }
-
-        /* Column header and separator pinned at rows 3 and 4 */
-        printf("\033[3;1H  %6s  %-*s\n", "Count", name_w, "Label");
-        printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
-        print_dbar(name_w);
-        printf("\n");
-
-        for (int i = wstart; i < wend; i++) {
-            /* Section header row */
-            if (lbl_hdr[i]) {
-                printf("  \033[2m\u2500\u2500 %s ", lbl_names[i]);
-                int used = 6 + (int)strlen(lbl_names[i]) + 1;
-                for (int s = used; s < tcols - 2; s++) fputs("\u2500", stdout);
-                printf("\033[0m\n");
-                continue;
-            }
-            /* Thin separator before certain groups (not before the first visible item) */
-            if (lbl_seps[i] && i > wstart) {
-                printf("  \033[2m");
-                for (int s = 0; s < tcols - 2; s++) fputs("\u2504", stdout);
-                printf("\033[0m\n");
-            }
-
-            int cnt = label_idx_count(lbl_ids[i]);
-            char cnt_buf[16];
-            fmt_thou(cnt_buf, sizeof(cnt_buf), cnt);
-
-            int sel = (i == cursor);
-            if (sel) printf("\033[7m");
-            printf("  %6s  ", cnt_buf);
-            print_padded_col(lbl_names[i], name_w);
-            if (sel) printf("\033[K\033[0m");
-            printf("\n");
-        }
+        free(vrow);
         fflush(stdout);
 
         {
@@ -4999,60 +5145,60 @@ static void fmt_url_with_port(const char *url, int defport, char *out, size_t si
     }
 }
 
-static void print_account_row(const Config *cfg, int cursor,
-                               int unseen, int flagged,
-                               int imap_w, int smtp_w) {
-    const char *user = cfg->user ? cfg->user : "(unknown)";
-    const char *type = cfg->gmail_mode ? "Gmail" : "IMAP";
-
+/* The Server and Send-via texts of an account row.  *smtp_configured is 0
+ * when an IMAP account has no SMTP host (the cell is shown dim). */
+static void account_server_texts(const Config *cfg, char *server, size_t server_sz,
+                                 char *smtp, size_t smtp_sz, int *smtp_configured) {
     /* Server: Gmail shows "Gmail API", IMAP shows host:port */
-    char server_buf[256];
     if (cfg->gmail_mode) {
-        snprintf(server_buf, sizeof(server_buf), "Gmail API");
-    } else {
-        fmt_url_with_port(cfg->host, 993, server_buf, sizeof(server_buf));
+        snprintf(server, server_sz, "Gmail API");
+        snprintf(smtp, smtp_sz, "Gmail API");
+        *smtp_configured = 1;
+        return;
     }
+    fmt_url_with_port(cfg->host, 993, server, server_sz);
+    *smtp_configured = cfg->smtp_host && cfg->smtp_host[0];
+    if (!*smtp_configured) {
+        snprintf(smtp, smtp_sz, "\u2014");
+    } else if (cfg->smtp_port) {
+        const char *proto_end = strstr(cfg->smtp_host, "://");
+        const char *smtp_host_part = proto_end ? proto_end + 3 : cfg->smtp_host;
+        if (strchr(smtp_host_part, ':'))
+            snprintf(smtp, smtp_sz, "%s", cfg->smtp_host);
+        else
+            snprintf(smtp, smtp_sz, "%s:%d", cfg->smtp_host, cfg->smtp_port);
+    } else {
+        int defport = (strncmp(cfg->smtp_host, "smtps://", 8) == 0) ? 465 : 587;
+        fmt_url_with_port(cfg->smtp_host, defport, smtp, smtp_sz);
+    }
+}
 
-    /* Build SMTP display string (no ANSI — safe to truncate with %.*s) */
-    char smtp_buf[256];
+/* Model of the accounts table (tui_table): the rows are the accounts. */
+typedef struct {
+    const AccountEntry *accounts;
+    const int          *unseen;
+    const int          *flagged;
+} AccountsModel;
+
+static void accounts_cell(void *ctx, int i, int col, tui_table_cell *cell) {
+    const AccountsModel *m = ctx;
+    const Config *cfg = m->accounts[i].cfg;
+    char buf[256], server[256], smtp[256];
     int smtp_configured;
-    if (cfg->gmail_mode) {
-        snprintf(smtp_buf, sizeof(smtp_buf), "Gmail API");
-        smtp_configured = 1;
-    } else {
-        smtp_configured = cfg->smtp_host && cfg->smtp_host[0];
-        if (smtp_configured) {
-            if (cfg->smtp_port) {
-                const char *proto_end = strstr(cfg->smtp_host, "://");
-                const char *smtp_host_part = proto_end ? proto_end + 3 : cfg->smtp_host;
-                if (strchr(smtp_host_part, ':'))
-                    snprintf(smtp_buf, sizeof(smtp_buf), "%s", cfg->smtp_host);
-                else
-                    snprintf(smtp_buf, sizeof(smtp_buf), "%s:%d",
-                             cfg->smtp_host, cfg->smtp_port);
-            } else {
-                int defport = (strncmp(cfg->smtp_host, "smtps://", 8) == 0) ? 465 : 587;
-                fmt_url_with_port(cfg->smtp_host, defport, smtp_buf, sizeof(smtp_buf));
-            }
-        } else {
-            snprintf(smtp_buf, sizeof(smtp_buf), "\u2014");
-        }
+    account_server_texts(cfg, server, sizeof(server), smtp, sizeof(smtp),
+                         &smtp_configured);
+    switch (col) {
+    case 0: fmt_thou(buf, sizeof(buf), m->unseen[i]);  break;
+    case 1: fmt_thou(buf, sizeof(buf), m->flagged[i]); break;
+    case 2: snprintf(buf, sizeof(buf), "%s", cfg->user ? cfg->user : "(unknown)"); break;
+    case 3: snprintf(buf, sizeof(buf), "%s", cfg->gmail_mode ? "Gmail" : "IMAP"); break;
+    case 4: snprintf(buf, sizeof(buf), "%s", server); break;
+    default: snprintf(buf, sizeof(buf), "%s", smtp);
+        tui_table_cell_put(cell, buf,
+            smtp_configured ? TUI_STYLE_DEFAULT : tui_style_attrs(TUI_ATTR_DIM));
+        return;
     }
-
-    char u[16], f[16];
-    fmt_thou(u, sizeof(u), unseen);
-    fmt_thou(f, sizeof(f), flagged);
-
-    if (cursor) {
-        printf("  \033[1m\u2192 %6s  %7s  %-32.32s  %-5s  %-*.*s  %.*s\033[0m\n",
-               u, f, user, type, imap_w, imap_w, server_buf, smtp_w, smtp_buf);
-    } else if (!smtp_configured) {
-        printf("    %6s  %7s  %-32.32s  %-5s  %-*.*s  \033[2m%.*s\033[0m\n",
-               u, f, user, type, imap_w, imap_w, server_buf, smtp_w, smtp_buf);
-    } else {
-        printf("    %6s  %7s  %-32.32s  %-5s  %-*.*s  %.*s\n",
-               u, f, user, type, imap_w, imap_w, server_buf, smtp_w, smtp_buf);
-    }
+    tui_table_cell_put(cell, buf, TUI_STYLE_DEFAULT);
 }
 
 int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
@@ -5080,45 +5226,27 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
         for (int i = 0; i < count; i++)
             get_account_totals(accounts[i].cfg, &acc_unseen[i], &acc_flagged[i]);
 
-        /* Column widths:
-         * Fixed overhead: 4(indent) + 6(unread) + 2 + 7(flagged) + 2
-         *                 + 32(account) + 2 + 5(type) + 2 + 2(sep) = 64
-         * Remaining split evenly between Server and SMTP columns. */
-        int avail = tcols - 64;
-        if (avail < 0) avail = 0;
-        int imap_w = avail / 2;
-        int smtp_w = avail - imap_w;
-        if (imap_w < 10) imap_w = 10;
-        if (smtp_w <  8) smtp_w =  8;
+        static const tui_table_col acc_cols[] = {
+            { "Unread",   6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+            { "Flagged",  7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+            { "Account", 32, 0, TUI_ALIGN_LEFT,  0, 0, 0 },
+            { "Type",     5, 0, TUI_ALIGN_LEFT,  0, 0, 0 },
+            { "Server",  10, 1, TUI_ALIGN_LEFT,  0, 0, 0 },
+            { "Send via", 8, 1, TUI_ALIGN_LEFT,  0, 0, 0 },
+        };
+        AccountsModel am = { accounts, acc_unseen, acc_flagged };
+        tui_table_model model = { NULL, accounts_cell, &am };
+        tui_table tbl;
+        tui_table_init(&tbl, acc_cols, 6, &model);
+        tbl.flags |= TUI_TABLE_RULER;
+        tui_table_set_count(&tbl, count);
+        tui_table_select(&tbl, cursor);
+        if (count == 0)
+            tui_table_set_message(&tbl, "No accounts configured.", TUI_STYLE_DEFAULT);
 
-        printf("\033[H\033[2J");
-        {
-            char cl[128];
-            snprintf(cl, sizeof(cl), "  Email Accounts (%d)", count);
-            printf(TUI_HDR_ON "%s", cl);
-            int used = visible_line_cols(cl, cl + strlen(cl));
-            for (int p = used; p < tcols; p++) putchar(' ');
-            printf("\033[0m\n\n");
-        }
-
-        if (count == 0) {
-            printf("  No accounts configured.\n");
-        } else {
-            printf("    %6s  %7s  %-32s  %-5s  %-*s  %s\n",
-                   "Unread", "Flagged", "Account", "Type", imap_w, "Server", "Send via");
-            printf("    \u2550\u2550\u2550\u2550\u2550\u2550  \u2550\u2550\u2550\u2550\u2550\u2550\u2550  ");
-            print_dbar(32);
-            printf("  \u2550\u2550\u2550\u2550\u2550  ");
-            print_dbar(imap_w);
-            printf("  ");
-            print_dbar(smtp_w);
-            printf("\n");
-            for (int i = 0; i < count; i++)
-                print_account_row(accounts[i].cfg, i == cursor,
-                                  acc_unseen[i], acc_flagged[i],
-                                  imap_w, smtp_w);
-        }
-        fflush(stdout);
+        char cl[128];
+        snprintf(cl, sizeof(cl), "  Email Accounts (%d)", count);
+        tui_frame_draw_table(cl, &tbl, trows, tcols, 0, NULL, NULL);
 
         char sb[256];
         snprintf(sb, sizeof(sb),

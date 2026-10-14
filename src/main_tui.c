@@ -38,6 +38,7 @@
 #include "html_render.h"
 #include "mail_client.h"
 #include "input_line.h"
+#include "tui_frame.h"
 #include "mail_rules.h"
 
 /* Number of non-data lines printed around the message table */
@@ -1689,22 +1690,36 @@ static void when_list_join(const WhenAtomList *wl, char *buf, size_t bufsz) {
     }
 }
 
+/* Model of the condition list's table: "N. atom". */
+static void when_list_cell(void *ctx, int i, int col, tui_table_cell *c) {
+    const WhenAtomList *wl = ctx;
+    char buf[WHEN_ATOM_MAX + 16];
+    (void)col;
+    snprintf(buf, sizeof(buf), "%3d. %s", i + 1, wl->atoms[i]);
+    tui_table_cell_put(c, buf, TUI_STYLE_DEFAULT);
+}
+
 static void when_list_render(const WhenAtomList *wl, int vis_rows, const char *title) {
-    printf("\033[2J\033[H");
-    printf("%s\n", title);
-    printf("j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  ESC=cancel\n");
-    if (wl->count == 0) {
-        printf("\n  (empty — press 'a' to add a condition)\n");
-        fflush(stdout);
-        return;
-    }
-    for (int i = wl->scroll; i < wl->count && i < wl->scroll + vis_rows; i++) {
-        if (i == wl->cursor)
-            printf("  \033[7m%3d. %s\033[m\n", i + 1, wl->atoms[i]);
-        else
-            printf("       %3d. %s\n", i + 1, wl->atoms[i]);
-    }
-    fflush(stdout);
+    (void)vis_rows;
+    static const tui_table_col wcols[] = {
+        { NULL, 20, 1, TUI_ALIGN_LEFT, 0, 0, 0 },
+    };
+    tui_table_model wm = { NULL, when_list_cell, (void *)wl };
+    tui_table wt;
+    tui_table_init(&wt, wcols, 1, &wm);
+    wt.flags |= TUI_TABLE_NO_HEADER;
+    tui_table_set_count(&wt, wl->count);
+    tui_table_select(&wt, wl->cursor);
+    wt.lv.scroll_top = wl->scroll;
+    if (wl->count == 0)
+        tui_table_set_message(&wt, "(empty \xe2\x80\x94 press 'a' to add a condition)",
+                              TUI_STYLE_DEFAULT);
+    int rows = terminal_rows(), cols = terminal_cols();
+    if (rows <= 0) rows = 24;
+    if (cols <= 0) cols = 80;
+    tui_frame_draw_table(title, &wt, rows, cols, TUI_FRAME_PLAIN_TITLE,
+                         "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  ESC=cancel",
+                         NULL);
 }
 
 static void when_list_do_add(WhenAtomList *wl, int vis_rows, const char *title) {
@@ -2052,6 +2067,16 @@ static void tui_rules_detail(const char *account, int idx)
     }
 }
 
+/* Model of the rules editor's table: one column, the rule's name. */
+typedef struct { const MailRules *rules; } RulesModel;
+
+static void rules_cell(void *ctx, int i, int col, tui_table_cell *c) {
+    const RulesModel *m = ctx;
+    (void)col;
+    const char *name = m->rules->rules[i].name ? m->rules->rules[i].name : "(unnamed)";
+    tui_table_cell_put(c, name, TUI_STYLE_DEFAULT);
+}
+
 /**
  * Full-screen rules list with cursor navigation.
  * Keys: j/k/↑/↓=navigate  Enter=open detail  a=add  d=delete  ESC/q=back
@@ -2061,7 +2086,6 @@ static void tui_rules_editor(const Config *cfg)
     if (!cfg || !cfg->user) return;
     const char *account = cfg->user;
     int cursor = 0;
-    int scroll = 0;
 
     for (;;) {
         MailRules *rules = mail_rules_load(account);
@@ -2072,36 +2096,27 @@ static void tui_rules_editor(const Config *cfg)
 
         int rows = terminal_rows();
         if (rows < 5) rows = 24;
-        int list_start = 3;
-        int list_rows  = rows - 3;
-        if (list_rows < 1) list_rows = 1;
+        int cols = terminal_cols();
+        if (cols <= 0) cols = 80;
 
-        if (cursor < scroll) scroll = cursor;
-        if (cursor >= scroll + list_rows) scroll = cursor - list_rows + 1;
-
-        printf("\033[2J\033[H");
-        printf("Rules for %s (%d rule%s)\n\n",
-               account, count, count == 1 ? "" : "s");
-
-        for (int i = 0; i < list_rows; i++) {
-            int ri = scroll + i;
-            printf("\033[%d;1H\033[2K", list_start + i);
-            if (ri < count) {
-                const char *name = rules->rules[ri].name
-                                 ? rules->rules[ri].name : "(unnamed)";
-                if (ri == cursor)
-                    printf("  \033[7m %-56s \033[m", name);
-                else
-                    printf("    %-56s", name);
-            }
-        }
+        RulesModel rm = { rules };
+        static const tui_table_col rcols[] = {
+            { NULL, 20, 1, TUI_ALIGN_LEFT, 0, 0, 0 },
+        };
+        tui_table_model rt = { NULL, rules_cell, &rm };
+        tui_table rtbl;
+        tui_table_init(&rtbl, rcols, 1, &rt);
+        rtbl.flags |= TUI_TABLE_NO_HEADER;
+        tui_table_set_count(&rtbl, count);
+        tui_table_select(&rtbl, cursor);
         if (count == 0)
-            printf("\033[3;1H\033[2K  (no rules -- press 'a' to add one)");
-
-        printf("\033[%d;1H\033[2K"
-               "  j/k=navigate  Enter=open  a=add  d=delete  ESC/q=back",
-               rows);
-        fflush(stdout);
+            tui_table_set_message(&rtbl, "(no rules -- press 'a' to add one)",
+                                  TUI_STYLE_DEFAULT);
+        char title[512];
+        snprintf(title, sizeof(title), "Rules for %s (%d rule%s)",
+                 account, count, count == 1 ? "" : "s");
+        tui_frame_draw_table(title, &rtbl, rows, cols, TUI_FRAME_PLAIN_TITLE, NULL,
+                             "  j/k=navigate  Enter=open  a=add  d=delete  ESC/q=back");
 
         TermKey key;
         int ch;

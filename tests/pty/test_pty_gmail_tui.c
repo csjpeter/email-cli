@@ -61,6 +61,13 @@ int g_tests_failed = 0;
 
 /* ── Global state ────────────────────────────────────────────────────── */
 
+/* The selected row is drawn by the table widget with the bright variant of a
+ * colour (hue kept, bold added): a colour matches in either form. */
+static int fg_is(int fg, int base) { return fg == base || fg == base + 60; }
+
+/* The cursor row: ">" in column 0 on the dark blue selection background. */
+#define SELECTION_BG PTY_COLOR_IDX(17)
+
 static pid_t g_mock_pid = -1;
 static int   g_mock_port = 0;   /* picked by the kernel, published by the mock */
 static char  g_test_home[256];
@@ -338,7 +345,7 @@ static void test_d_key_row_strikethrough(void) {
 
     /* Check that the cursor row does NOT have a pending marker BEFORE pressing 'd' */
     if (row_before >= 0) {
-        ASSERT(strcmp(pty_cell_text(s, row_before, 0), " ") == 0,
+        ASSERT(strcmp(pty_cell_text(s, row_before, 1), " ") == 0,
                "d-strike: no marker before d");
     }
 
@@ -352,7 +359,7 @@ static void test_d_key_row_strikethrough(void) {
 
     if (row_after >= 0) {
         /* The pending-remove row is rendered with a yellow 'd' marker at col 0. */
-        ASSERT(strcmp(pty_cell_text(s, row_after, 0), "d") == 0,
+        ASSERT(strcmp(pty_cell_text(s, row_after, 1), "d") == 0,
                "d-strike: cursor row has 'd' marker after d");
     }
 
@@ -367,7 +374,7 @@ static void test_d_key_row_strikethrough(void) {
 /**
  * After pressing 'd', the cursor row is rendered with a yellow 'd' marker
  * AND inverse-video so the cursor position remains clearly visible.
- * PTY_ATTR_REVERSE must be set on the row's cells alongside the pending marker.
+ * The selection background (palette 17) must stay on the row alongside the pending marker.
  *
  * The cursor starts on GMAIL_TOP_MSG ("Message 5").
  */
@@ -383,11 +390,11 @@ static void test_d_key_cursor_row_has_reverse(void) {
     int row_before = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row_before >= 0, "d-rev: " GMAIL_TOP_MSG " present before d");
 
-    /* Before 'd': cursor row must have REVERSE, must NOT have a pending marker */
+    /* Before 'd': cursor row has the selection background, no pending marker */
     if (row_before >= 0) {
-        int attr = pty_cell_attr(s, row_before, 4);
-        ASSERT(attr & PTY_ATTR_REVERSE,  "d-rev: cursor row has REVERSE before d");
-        ASSERT(strcmp(pty_cell_text(s, row_before, 0), " ") == 0,
+        ASSERT(pty_cell_bg(s, row_before, 4) == SELECTION_BG,
+               "d-rev: cursor row has the selection background before d");
+        ASSERT(strcmp(pty_cell_text(s, row_before, 1), " ") == 0,
                "d-rev: no marker before d");
     }
 
@@ -397,11 +404,11 @@ static void test_d_key_cursor_row_has_reverse(void) {
     int row_after = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row_after >= 0, "d-rev: " GMAIL_TOP_MSG " still present after d");
 
-    /* After 'd': cursor row must have REVERSE and the 'd' pending marker */
+    /* After 'd': cursor row keeps the selection background and has the 'd' marker */
     if (row_after >= 0) {
-        int attr = pty_cell_attr(s, row_after, 1);
-        ASSERT(attr & PTY_ATTR_REVERSE, "d-rev: cursor row has REVERSE after d");
-        ASSERT(strcmp(pty_cell_text(s, row_after, 0), "d") == 0,
+        ASSERT(pty_cell_bg(s, row_after, 4) == SELECTION_BG,
+               "d-rev: cursor row has the selection background after d");
+        ASSERT(strcmp(pty_cell_text(s, row_after, 1), "d") == 0,
                "d-rev: cursor row has 'd' marker after d");
     }
 
@@ -598,7 +605,7 @@ static void test_archive_row_has_strikethrough(void) {
     int row_before = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row_before >= 0, "arch-strike: " GMAIL_TOP_MSG " present before a");
     if (row_before >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row_before, 0), " ") == 0,
+        ASSERT(strcmp(pty_cell_text(s, row_before, 1), " ") == 0,
                "arch-strike: no pending marker before a");
 
     pty_send_str(s, "a");
@@ -607,7 +614,7 @@ static void test_archive_row_has_strikethrough(void) {
     int row_after = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row_after >= 0, "arch-strike: " GMAIL_TOP_MSG " still visible after a");
     if (row_after >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row_after, 0), "d") == 0,
+        ASSERT(strcmp(pty_cell_text(s, row_after, 1), "d") == 0,
                "arch-strike: 'd' pending marker set after a");
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -821,7 +828,7 @@ static void test_D_key_row_has_strikethrough(void) {
     int row_before = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row_before >= 0, "D-strike: " GMAIL_TOP_MSG " present before D");
     if (row_before >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row_before, 0), " ") == 0,
+        ASSERT(strcmp(pty_cell_text(s, row_before, 1), " ") == 0,
                "D-strike: no pending marker before D");
 
     pty_send_str(s, "D");
@@ -830,7 +837,7 @@ static void test_D_key_row_has_strikethrough(void) {
     int row_after = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row_after >= 0, "D-strike: " GMAIL_TOP_MSG " still visible after D");
     if (row_after >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row_after, 0), "D") == 0,
+        ASSERT(strcmp(pty_cell_text(s, row_after, 1), "D") == 0,
                "D-strike: 'D' pending marker set after D");
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -876,7 +883,7 @@ static void test_u_key_row_has_strikethrough(void) {
         int row_before = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row_before >= 0, "u-strike: " GMAIL_TOP_MSG " in Trash before u");
         if (row_before >= 0)
-            ASSERT(strcmp(pty_cell_text(s, row_before, 0), " ") == 0,
+            ASSERT(strcmp(pty_cell_text(s, row_before, 1), " ") == 0,
                    "u-strike: no pending marker before u");
 
         pty_send_str(s, "u");   /* restore from trash */
@@ -885,7 +892,7 @@ static void test_u_key_row_has_strikethrough(void) {
         int row_after = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row_after >= 0, "u-strike: " GMAIL_TOP_MSG " still visible after u");
         if (row_after >= 0)
-            ASSERT(strcmp(pty_cell_text(s, row_after, 0), "u") == 0,
+            ASSERT(strcmp(pty_cell_text(s, row_after, 1), "u") == 0,
                    "u-strike: 'u' pending marker at col 0 after u (green restore marker)");
 
         pty_send_key(s, PTY_KEY_ESC);
@@ -1019,9 +1026,9 @@ static void test_d_row_yellow_fg(void) {
     row = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row >= 0, "d-yellow: row still visible after d");
     if (row >= 0) {
-        int fg = pty_cell_fg(s, row, 0);
-        ASSERT(strcmp(pty_cell_text(s, row, 0), "d") == 0, "d-yellow: 'd' marker set");
-        ASSERT(fg == PTY_FG_YELLOW, "d-yellow: fg is yellow (33), not red");
+        int fg = pty_cell_fg(s, row, 1);
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "d") == 0, "d-yellow: 'd' marker set");
+        ASSERT(fg_is(fg, PTY_FG_YELLOW), "d-yellow: fg is yellow (33), not red");
     }
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -1053,9 +1060,9 @@ static void test_D_row_red_fg(void) {
     row = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row >= 0, "D-red: row still visible after D");
     if (row >= 0) {
-        int fg = pty_cell_fg(s, row, 0);
-        ASSERT(strcmp(pty_cell_text(s, row, 0), "D") == 0, "D-red: 'D' marker set");
-        ASSERT(fg == PTY_FG_RED, "D-red: fg is red (31)");
+        int fg = pty_cell_fg(s, row, 1);
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "D") == 0, "D-red: 'D' marker set");
+        ASSERT(fg_is(fg, PTY_FG_RED), "D-red: fg is red (31)");
     }
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -1087,9 +1094,9 @@ static void test_a_row_yellow_fg(void) {
     row = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row >= 0, "a-yellow: row still visible after a");
     if (row >= 0) {
-        int fg = pty_cell_fg(s, row, 0);
-        ASSERT(strcmp(pty_cell_text(s, row, 0), "d") == 0, "a-yellow: 'd' marker set");
-        ASSERT(fg == PTY_FG_YELLOW, "a-yellow: fg is yellow (33), not red");
+        int fg = pty_cell_fg(s, row, 1);
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "d") == 0, "a-yellow: 'd' marker set");
+        ASSERT(fg_is(fg, PTY_FG_YELLOW), "a-yellow: fg is yellow (33), not red");
     }
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -1146,7 +1153,7 @@ static void test_a_in_archive_no_strikethrough(void) {
         row = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row >= 0, "a-noop: row still present after a");
         if (row >= 0) {
-            ASSERT(strcmp(pty_cell_text(s, row, 0), " ") == 0,
+            ASSERT(strcmp(pty_cell_text(s, row, 1), " ") == 0,
                    "a-noop: no pending marker in Archive view (already archived)");
         }
 
@@ -1212,10 +1219,10 @@ static void test_label_picker_unarchive_green_fg(void) {
         row = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row >= 0, "unarch-green: row still visible after picker");
         if (row >= 0) {
-            int fg = pty_cell_fg(s, row, 0);
-            ASSERT(strcmp(pty_cell_text(s, row, 0), "u") == 0,
+            int fg = pty_cell_fg(s, row, 1);
+            ASSERT(strcmp(pty_cell_text(s, row, 1), "u") == 0,
                    "unarch-green: 'u' pending marker at col 0");
-            ASSERT(fg == PTY_FG_GREEN, "unarch-green: fg is green (32)");
+            ASSERT(fg_is(fg, PTY_FG_GREEN), "unarch-green: fg is green (32)");
         }
 
         pty_send_key(s, PTY_KEY_ESC);
@@ -1274,9 +1281,9 @@ static void test_label_picker_untrash_green_fg(void) {
         row = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row >= 0, "untrash-green: row still visible after picker");
         if (row >= 0) {
-            ASSERT(strcmp(pty_cell_text(s, row, 0), "u") == 0,
+            ASSERT(strcmp(pty_cell_text(s, row, 1), "u") == 0,
                    "untrash-green: 'u' pending marker at col 0");
-            ASSERT(pty_cell_fg(s, row, 0) == PTY_FG_GREEN,
+            ASSERT(fg_is(pty_cell_fg(s, row, 1), PTY_FG_GREEN),
                    "untrash-green: fg is green (32)");
         }
 
@@ -1334,7 +1341,7 @@ static void test_D_permanent_delete_in_trash_view(void) {
         row = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row >= 0, "D-perm: row still present after D");
         if (row >= 0)
-            ASSERT(strcmp(pty_cell_text(s, row, 0), "D") == 0,
+            ASSERT(strcmp(pty_cell_text(s, row, 1), "D") == 0,
                    "D-perm: 'D' pending marker in Trash view after D");
         ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Permanently deleted"),
                "D-perm: feedback shows 'Permanently deleted'");
@@ -1365,7 +1372,7 @@ static void test_D_D_undo_clears_strikethrough(void) {
     row = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row >= 0, "D-undo: row visible after first D");
     if (row >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row, 0), "D") == 0,
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "D") == 0,
                "D-undo: 'D' marker after first D");
 
     /* Second D: undo trash */
@@ -1374,7 +1381,7 @@ static void test_D_D_undo_clears_strikethrough(void) {
     row = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row >= 0, "D-undo: row still visible after undo");
     if (row >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row, 0), " ") == 0,
+        ASSERT(strcmp(pty_cell_text(s, row, 1), " ") == 0,
                "D-undo: no pending marker after second D (undo)");
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -1421,10 +1428,10 @@ static void test_D_then_d_shows_yellow(void) {
     int row = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row >= 0, "D-d-yellow: row still visible");
     if (row >= 0) {
-        int fg = pty_cell_fg(s, row, 0);
-        ASSERT(strcmp(pty_cell_text(s, row, 0), "d") == 0,
+        int fg = pty_cell_fg(s, row, 1);
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "d") == 0,
                "D-d-yellow: 'd' marker set after d overrides D");
-        ASSERT(fg == PTY_FG_YELLOW, "D-d-yellow: fg is yellow after d overrides D");
+        ASSERT(fg_is(fg, PTY_FG_YELLOW), "D-d-yellow: fg is yellow after d overrides D");
     }
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);

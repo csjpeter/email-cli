@@ -218,6 +218,12 @@ static const PtyStyleKey LEGEND[] = {
     { 'g', PTY_ATTR_NONE,                    PTY_FG_GREEN,   PTY_BG_DEFAULT },
     { 'G', PTY_ATTR_REVERSE,                 PTY_FG_GREEN,   PTY_BG_DEFAULT },
     { 'R', PTY_ATTR_NONE,                    PTY_FG_RED,     PTY_BG_DEFAULT },
+    /* The selection of a tui_table: dark blue background (palette 17), the
+     * text bright white; the '>' bold; a coloured cell keeps its hue as the
+     * bright variant plus bold. */
+    { 'S', PTY_ATTR_NONE,                    97,             PTY_COLOR_IDX(17) },
+    { 'A', PTY_ATTR_BOLD,                    97,             PTY_COLOR_IDX(17) },
+    { 'n', PTY_ATTR_BOLD,                    92,             PTY_COLOR_IDX(17) },
     { 0 }
 };
 
@@ -256,7 +262,8 @@ static void record_view(const char *name, PtySession *s) {
  *  the cursor.  A golden row that is "@@" stands for a block of any number of
  *  screen rows (the path of the message file, which wraps differently on every
  *  machine): the screen is searched for the row that follows it and the rest
- *  is compared from there. */
+ *  is compared from there.  A golden row starting with '~' is compared with
+ *  its digit runs read as one '#' (a port number). */
 static void check_view(PtySession *s, const char *const exp[],
                        const char *const sty[], const int cur[3]) {
     int n = 0;
@@ -284,11 +291,42 @@ static void check_view(PtySession *s, const char *const exp[],
         }
         int j = i;
         while (j < n && strcmp(exp[j], "@@") != 0) j++;
-        const char *rows[ROWS + 1], *srows[ROWS + 1];
+        const char *srows[ROWS + 1];
         int k = 0;
-        for (int r = i; r < j; r++, k++) { rows[k] = exp[r]; srows[k] = sty[r]; }
-        rows[k] = NULL; srows[k] = NULL;
-        ASSERT_REGION_EQ(s, PTY_REGION(i + offset, 0, j - i, cols), rows);
+        for (int r = i; r < j; r++, k++) srows[k] = sty[r];
+        srows[k] = NULL;
+        /* Text: a golden row starting with '~' holds a port number or the like
+         * (a different one on every run); on the screen every run of digits is
+         * read as one '#' before the comparison.  The rows around it are
+         * compared as one region each. */
+        int t = i;
+        while (t < j) {
+            if (exp[t][0] == '~') {
+                char row[COLS * 4 + 4], norm[COLS * 4 + 4];
+                pty_row_text(s, t + offset, row, sizeof(row));
+                size_t o = 0;
+                for (const char *q = row; *q && o + 1 < sizeof(norm); q++) {
+                    if (*q >= '0' && *q <= '9') {
+                        if (o == 0 || norm[o - 1] != '#') norm[o++] = '#';
+                    } else {
+                        norm[o++] = *q;
+                    }
+                }
+                norm[o] = '\0';
+                ASSERT(strcmp(norm, exp[t] + 1) == 0,
+                       "row with a variable number matches its picture");
+                t++;
+                continue;
+            }
+            int u = t;
+            while (u < j && exp[u][0] != '~') u++;
+            const char *part[ROWS + 1];
+            int pk = 0;
+            for (int r = t; r < u; r++) part[pk++] = exp[r];
+            part[pk] = NULL;
+            ASSERT_REGION_EQ(s, PTY_REGION(t + offset, 0, u - t, cols), part);
+            t = u;
+        }
         ASSERT_REGION_STYLE(s, PTY_REGION(i + offset, 0, j - i, cols), srows, LEGEND);
         i = j;
     }

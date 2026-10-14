@@ -20,7 +20,8 @@ runs are read as `#`.
 |---|---|---|---|
 | Accounts (`accounts`) | start | header bar with count; column heads Unread, Flagged, Account, Type, Server, Send via; ruler; one row per account, `>` and the dark blue selection on the cursor row; status bar | ↑↓ Enter n d i e Esc |
 | Accounts help (`accounts_help`) | `h` on accounts | boxed overlay, title, key/description rows, footer "Press any key to close" | any key |
-| Account deleted (`account_delete`) | `d` on accounts | "No accounts configured." | n |
+| Delete asked (`account_delete_ask`) | `d` on accounts | information line `Delete account NAME? (y/N)`, the list unchanged | y, any other key |
+| Account deleted (`account_delete`) | `d`, `y` on accounts | "No accounts configured." | n |
 | Wizard type (`wizard_type`) | `n` on accounts | plain prompt: account type menu, `Choice [1]:` | 1, 2 |
 | Folder browser (`folders`, `folders_flat`) | Enter on an account | header bar with count; heads Unread, Flagged, Folder, Total; "Tags / Flags" section (dim, 6 virtual rows) and "Folders" tree; cursor row selected (dark blue, `>`); status bar with `[n/N]` | ↑↓ PgUp/PgDn Enter t / h Esc q BS |
 | Folder help (`folders_help`) | `h` | overlay | any key |
@@ -64,7 +65,9 @@ defect or inconsistency the pictures make visible, left for the owner to ticket.
    `policies/tui-interface-model.md`; the compose dialog's top row was reverse
    video, the others plain.  Fixed with EMAIL-83: these screens, the review
    screen and the attachment picker draw the bar (`H` in the style maps).
-5. Accounts: `d` deletes the account at once, with no confirmation.
+5. Accounts: `d` deleted the account at once, with no confirmation.  Fixed
+   with EMAIL-84: the information line asks `Delete account NAME? (y/N)`;
+   only `y` or `Y` deletes (`account_delete_ask`).
 6. Message list: the From column is cut in the middle of the address
    (`<sender3@example.c`) at 100 columns.
 7. Help overlays (fixed with EMAIL-34): rows were padded by bytes, so rows

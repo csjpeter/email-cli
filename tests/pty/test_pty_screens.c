@@ -381,7 +381,10 @@ VIEW(list_search,      at_list(),
 VIEW(wizard_type,      at_accounts(),
      (pty_send_str(s, "n"), pty_wait_for(s, "Account type", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(account_delete,   at_accounts(),
-     (pty_send_str(s, "d"), pty_settle(s, SETTLE_MS)))
+     (pty_send_str(s, "d"), pty_wait_for(s, "(y/N)", WAIT_MS),
+      pty_send_str(s, "y"), pty_settle(s, SETTLE_MS)))
+VIEW(account_delete_ask, at_accounts(),
+     (pty_send_str(s, "d"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_settle(s, SETTLE_MS)))
 
 VIEW(list_second_row,  at_list(), (pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
 VIEW(list_narrow,      at_narrow_list(), (void)0)
@@ -444,6 +447,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_list_search);
     RUN_TEST(test_screen_wizard_type);
     RUN_TEST(test_screen_account_delete);
+    RUN_TEST(test_screen_account_delete_ask);
     RUN_TEST(test_screen_list_second_row);
     RUN_TEST(test_screen_list_narrow);
     RUN_TEST(test_screen_list_empty);

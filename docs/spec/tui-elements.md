@@ -50,8 +50,9 @@ their element-level assertions in the other PTY suites.
 Behaviour as it is today is what the pictures encode; each item below is a
 defect or inconsistency the pictures make visible, left for the owner to ticket.
 
-1. Accounts: the Server column cuts the address after the colon
-   (`imaps://localhost:`), the port is never visible.
+1. Accounts: the Server column cut the address after the colon, the port was
+   never visible.  Fixed with EMAIL-80: the Server and Send via cells are cut
+   at their start (`…aps://localhost:41145`), so the port stays.
 2. Folder browser, tree: an empty row follows the entries with wide
    characters (`中`, `😀`); the rows below are shifted.
 3. Folder browser, flat view (`t`): only `INBOX/` is listed, not its subfolders.

@@ -5231,8 +5231,9 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             { "Flagged",  7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
             { "Account", 32, 0, TUI_ALIGN_LEFT,  0, 0, 0 },
             { "Type",     5, 0, TUI_ALIGN_LEFT,  0, 0, 0 },
-            { "Server",  10, 1, TUI_ALIGN_LEFT,  0, 0, 0 },
-            { "Send via", 8, 1, TUI_ALIGN_LEFT,  0, 0, 0 },
+            /* host:port is cut at the start, so the port stays visible */
+            { "Server",  10, 1, TUI_ALIGN_LEFT,  0, 0, TUI_COL_CUT_START },
+            { "Send via", 8, 1, TUI_ALIGN_LEFT,  0, 0, TUI_COL_CUT_START },
         };
         AccountsModel am = { accounts, acc_unseen, acc_flagged };
         tui_table_model model = { NULL, accounts_cell, &am };

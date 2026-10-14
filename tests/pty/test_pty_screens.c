@@ -541,6 +541,25 @@ VIEW(compose_empty_to, at_list(),
       pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "To: is empty", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
 
+VIEW(list_marked,       at_list(), (pty_send_str(s, " "), pty_settle(s, SETTLE_MS)))
+VIEW(list_marked_two,   at_list(),
+     (pty_send_str(s, " "), pty_send_str(s, " "), pty_settle(s, SETTLE_MS)))
+VIEW(list_bulk_prompt,  at_list(),
+     (pty_send_str(s, " "), pty_send_str(s, "m"), pty_wait_for(s, "Esc=cancel", WAIT_MS),
+      pty_settle(s, SETTLE_MS)))
+VIEW(list_bulk_cursor_prompt, at_list(),
+     (pty_send_str(s, "m"), pty_wait_for(s, "Esc=cancel", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(list_move_prompt,  at_list(),
+     (pty_send_str(s, " "), pty_send_str(s, "m"), pty_wait_for(s, "Esc=cancel", WAIT_MS),
+      pty_send_str(s, "m"), pty_wait_for(s, "Move to folder", WAIT_MS),
+      pty_send_str(s, "Archive"), pty_settle(s, SETTLE_MS)))
+VIEW(list_delete_ask,   at_list(),
+     (pty_send_str(s, " "), pty_send_str(s, "m"), pty_wait_for(s, "Esc=cancel", WAIT_MS),
+      pty_send_str(s, "D"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(list_bulk_done,    at_list(),
+     (pty_send_str(s, " "), pty_send_str(s, "m"), pty_wait_for(s, "Esc=cancel", WAIT_MS),
+      pty_send_str(s, "f"), pty_wait_for(s, "starred", WAIT_MS), pty_settle(s, SETTLE_MS)))
+
 VIEW(body_editor,       at_list(), (to_editor(s), (void)0))
 VIEW(body_editor_typed, at_list(), (editor_typed(s), (void)0))
 VIEW(review,            at_list(), (to_review(s), (void)0))
@@ -596,6 +615,20 @@ GVIEW(gmail_label_user, at_gmail_entry(2),
       (gmail_add_work_label(s), (void)0))
 GVIEW(gmail_user_label, at_gmail_entry(2),
       (gmail_add_work_label(s), gmail_open_entry(s, 2)))
+
+GVIEW(gmail_picker,       at_gmail_entry(2),
+      (pty_send_str(s, "t"), pty_wait_for(s, "Toggle Labels", WAIT_MS), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_picker_second, at_gmail_entry(2),
+      (pty_send_str(s, "t"), pty_wait_for(s, "Toggle Labels", WAIT_MS),
+       pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_picker_toggled, at_gmail_entry(2),
+      (pty_send_str(s, "t"), pty_wait_for(s, "Toggle Labels", WAIT_MS),
+       pty_send_key(s, PTY_KEY_DOWN), pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_picker_done,  at_gmail_entry(2),
+      (pty_send_str(s, "t"), pty_wait_for(s, "Toggle Labels", WAIT_MS),
+       pty_send_key(s, PTY_KEY_DOWN), pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, 200),
+       pty_send_key(s, PTY_KEY_ESC), pty_wait_for(s, "Label removed", WAIT_MS),
+       pty_settle(s, SETTLE_MS)))
 
 GVIEW(gmail_archive,    at_gmail_entry(5), (void)0)
 GVIEW(gmail_trash,      at_gmail_entry(7), (void)0)
@@ -662,6 +695,13 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_body_editor_typed);
     RUN_TEST(test_screen_review);
     RUN_TEST(test_screen_review_discard_ask);
+    RUN_TEST(test_screen_list_marked);
+    RUN_TEST(test_screen_list_marked_two);
+    RUN_TEST(test_screen_list_bulk_prompt);
+    RUN_TEST(test_screen_list_bulk_cursor_prompt);
+    RUN_TEST(test_screen_list_move_prompt);
+    RUN_TEST(test_screen_list_delete_ask);
+    RUN_TEST(test_screen_list_bulk_done);
     RUN_TEST(test_screen_gmail_labels);
     RUN_TEST(test_screen_gmail_unread);
     RUN_TEST(test_screen_gmail_flagged);
@@ -672,6 +712,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_gmail_inbox_archive_mark);
     RUN_TEST(test_screen_gmail_inbox_marked);
     RUN_TEST(test_screen_gmail_archive);
+    RUN_TEST(test_screen_gmail_picker);
+    RUN_TEST(test_screen_gmail_picker_second);
+    RUN_TEST(test_screen_gmail_picker_toggled);
+    RUN_TEST(test_screen_gmail_picker_done);
     RUN_TEST(test_screen_gmail_inbox_d_off);
     RUN_TEST(test_screen_gmail_inbox_trash_off);
     RUN_TEST(test_screen_gmail_inbox_archive_off);

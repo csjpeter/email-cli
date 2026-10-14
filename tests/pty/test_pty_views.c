@@ -1192,6 +1192,14 @@ static void test_interactive_folders_flat_parent_openable(void) {
         ASSERT(self < row, "flat parent: the folder itself comes before its subfolders");
     pty_send_key(s, PTY_KEY_ENTER);           /* open INBOX itself */
     ASSERT_WAIT_FOR(s, "message(s) in INBOX", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* back to the folder browser, and the view mode back to the tree: the
+     * mode is a stored preference the other tests rely on */
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "t=flat", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }

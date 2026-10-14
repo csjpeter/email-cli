@@ -442,7 +442,7 @@ static void test_d_key_toggle_undo(void) {
     int row1 = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row1 >= 0, "d-undo: " GMAIL_TOP_MSG " present after first d");
     if (row1 >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row1, 0), "d") == 0,
+        ASSERT(strcmp(pty_cell_text(s, row1, 1), "d") == 0,
                "d-undo: 'd' marker set after first d");
 
     /* Second 'd': undo */
@@ -452,7 +452,7 @@ static void test_d_key_toggle_undo(void) {
     int row2 = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row2 >= 0, "d-undo: " GMAIL_TOP_MSG " still present after second d");
     if (row2 >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row2, 0), " ") == 0,
+        ASSERT(strcmp(pty_cell_text(s, row2, 1), " ") == 0,
                "d-undo: marker cleared after second d");
 
     /* Refresh — row must survive (label was restored) */

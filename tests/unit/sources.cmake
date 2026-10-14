@@ -37,6 +37,7 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/test_html_parser.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_html_render.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_input_line.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_tui_frame.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_path_complete.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_json_util.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_gmail_auth.c
@@ -60,6 +61,7 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/libemail/src/core/html_render.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/imap_util.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/input_line.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/core/tui_frame.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/path_complete.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/json_util.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/gmail_auth.c

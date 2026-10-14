@@ -1745,43 +1745,156 @@ void test_email_service(void) {
         }
     }
 
-    /* ── print_account_row ───────────────────────────────────────────── */
+    /* ── accounts table model (EMAIL-79) ─────────────────────────────── */
     {
-        Config pcfg = {0};
-        pcfg.user   = "test@example.com";
-        pcfg.host   = "imaps://imap.example.com";
-        pcfg.gmail_mode = 0;
-
-        int sout, serr;
-        SUPPRESS_OUT(sout, serr);
-        print_account_row(&pcfg, 0, 3, 1, 30, 20);  /* not selected */
-        print_account_row(&pcfg, 1, 3, 1, 30, 20);  /* selected (cursor=1) */
-        /* SMTP configured branch */
-        pcfg.smtp_host = (char *)"smtps://smtp.example.com";
-        pcfg.smtp_port = 465;
-        print_account_row(&pcfg, 0, 0, 0, 30, 20);
-        /* Gmail mode */
-        pcfg.gmail_mode = 1;
-        print_account_row(&pcfg, 0, 5, 2, 30, 20);
-        RESTORE_OUT(sout, serr);
-        ASSERT(1, "print_account_row: no crash");
+        Config c1 = {0}, c2 = {0}, c3 = {0};
+        c1.user = "test@example.com";  c1.host = "imaps://imap.example.com";
+        c2.user = "other@example.com"; c2.host = "imap.example.org";
+        c2.smtp_host = (char *)"smtps://smtp.example.org"; c2.smtp_port = 465;
+        c3.user = "g@example.com"; c3.gmail_mode = 1;
+        AccountEntry ents[3] = { { (char *)"a", &c1 }, { (char *)"b", &c2 },
+                                 { (char *)"c", &c3 } };
+        int unseen[3] = { 3, 0, 5 }, flagged[3] = { 1, 0, 2 };
+        AccountsModel am = { ents, unseen, flagged };
+        tui_table_col cols[6] = {
+            { "Unread", 6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 }, { "Flagged", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+            { "Account", 32, 0, TUI_ALIGN_LEFT, 0, 0, 0 }, { "Type", 5, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
+            { "Server", 10, 1, TUI_ALIGN_LEFT, 0, 0, 0 }, { "Send via", 8, 1, TUI_ALIGN_LEFT, 0, 0, 0 },
+        };
+        tui_table_model tm = { NULL, accounts_cell, &am };
+        tui_table t;
+        tui_table_init(&t, cols, 6, &tm);
+        tui_table_set_count(&t, 3);
+        char row[512];
+        tui_table_format_row(&t, 0, 0, row, sizeof(row));
+        ASSERT(strstr(row, "test@example.com") && strstr(row, "IMAP") &&
+               strstr(row, "imaps://imap.example.com:993"),
+               "accounts model: account, type and server with the default port");
+        ASSERT(strstr(row, "\xe2\x80\x94") != NULL,
+               "accounts model: no SMTP host shows a dash");
+        tui_table_format_row(&t, 0, 1, row, sizeof(row));
+        ASSERT(strstr(row, "smtps://smtp.example.org:465") != NULL,
+               "accounts model: SMTP host and port");
+        tui_table_format_row(&t, 0, 2, row, sizeof(row));
+        ASSERT(strstr(row, "Gmail API") != NULL && strstr(row, "Gmail") != NULL,
+               "accounts model: a Gmail account shows Gmail API");
     }
 
-    /* ── print_folder_item ───────────────────────────────────────────── */
+    /* ── folder browser table model (EMAIL-79) ───────────────────────── */
     {
-        char *names[] = { (char*)"INBOX", (char*)"INBOX.Sent", (char*)"Trash" };
-        int sout, serr;
-        SUPPRESS_OUT(sout, serr);
-        /* tree mode, not selected, has kids */
-        print_folder_item(names, 3, 0, '.', 1, 0, 1, 5, 2, 0, 20);
-        /* tree mode, selected */
-        print_folder_item(names, 3, 0, '.', 1, 1, 1, 5, 2, 0, 20);
-        /* flat mode */
-        print_folder_item(names, 3, 0, '.', 0, 0, 0, 0, 0, 0, 20);
-        /* empty folder (messages=0) */
-        print_folder_item(names, 3, 2, '.', 0, 0, 0, 0, 0, 0, 20);
-        RESTORE_OUT(sout, serr);
-        ASSERT(1, "print_folder_item: no crash");
+        char *names[] = { (char *)"INBOX", (char *)"INBOX.Sent", (char *)"Trash" };
+        FolderStatus st[3] = { { 5, 2, 1 }, { 3, 0, 0 }, { 0, 0, 0 } };
+        int vis[3] = { 0, 2, 0 };
+        FolderModel fm = { names, 3, '.', st, 1, vis,
+                           { 0, 4, 0, 0, 0, 0, 0, 0 }, FB_PREFIX };
+        tui_table_col cols[4] = {
+            { "Unread", 6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 }, { "Flagged", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+            { "Folder", 20, 1, TUI_ALIGN_LEFT, 0, 0, 0 }, { "Total", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+        };
+        tui_table_model tm = { folders_row, folders_cell, &fm };
+        tui_table t;
+        tui_table_init(&t, cols, 4, &tm);
+        tui_table_set_count(&t, FB_PREFIX + 3);
+        char row[512];
+        tui_table_format_row(&t, 0, FB_HDR_FLAGS, row, sizeof(row));
+        ASSERT(strstr(row, "Tags / Flags") != NULL, "folder model: section heading");
+        tui_table_format_row(&t, 0, FB_UNREAD, row, sizeof(row));
+        ASSERT(strstr(row, "Unread") && strstr(row, "4") && strstr(row, "-"),
+               "folder model: virtual row with its count and dashes");
+        tui_table_format_row(&t, 0, FB_FLAGGED, row, sizeof(row));
+        ASSERT(strstr(row, "Flagged") && strstr(row, "0"),
+               "folder model: a virtual row shows a zero count");
+        tui_table_format_row(&t, 0, FB_PREFIX + 1, row, sizeof(row));
+        ASSERT(strstr(row, "Sent") && strstr(row, "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80"),
+               "folder model: tree row with its connector");
+        fm.tree = 0;
+        tui_table_format_row(&t, 0, FB_PREFIX + 0, row, sizeof(row));
+        ASSERT(strstr(row, "INBOX/") != NULL,
+               "folder model: flat view marks a folder with children");
+        ASSERT(strstr(row, "8") != NULL,
+               "folder model: flat view sums the subtree total");
+    }
+
+    /* ── message list table model (EMAIL-79) ─────────────────────────── */
+    {
+        Manifest *mf = calloc(1, sizeof(*mf));
+        manifest_upsert(mf, "u1", strdup("Alice <a@example.org>"),
+                        strdup("Hello there"), strdup("2020-01-03 12:00"),
+                        MSG_FLAG_UNSEEN);
+        manifest_upsert(mf, "u2", strdup("Bob <b@example.org>"),
+                        strdup("Second"), strdup("2020-01-02 12:00"), 0);
+        MsgEntry me[2];
+        memset(me, 0, sizeof(me));
+        strcpy(me[0].uid, "u1"); me[0].flags = MSG_FLAG_UNSEEN | MSG_FLAG_FLAGGED;
+        strcpy(me[1].uid, "u2"); me[1].flags = MSG_FLAG_DONE | MSG_FLAG_ATTACH;
+        int pend_remove[2] = { 0, 1 };
+        MsgListModel lm = { me, NULL, mf, pend_remove, NULL, NULL };
+        tui_table_col cols[4] = {
+            { "Date", 16, 0, TUI_ALIGN_LEFT, 0, 0, 0 }, { "Sts", 6, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
+            { "Subject", 10, 3, TUI_ALIGN_LEFT, 0, 0, 0 }, { "From", 10, 2, TUI_ALIGN_LEFT, 0, 0, 0 },
+        };
+        tui_table_model tm = { msglist_row, msglist_cell, &lm };
+        tui_table t;
+        tui_table_init(&t, cols, 4, &tm);
+        tui_table_set_count(&t, 2);
+        char row[512];
+        tui_table_format_row(&t, 0, 0, row, sizeof(row));
+        ASSERT(strstr(row, "2020-01-03 12:00") && strstr(row, "Hello there") &&
+               strstr(row, "Alice <a@example.org>"),
+               "list model: date, subject and from");
+        ASSERT(strstr(row, "N\xe2\x98\x85") != NULL,
+               "list model: unread letter and the flag star");
+        tui_table_format_row(&t, 0, 1, row, sizeof(row));
+        ASSERT(strstr(row, "-" "-DA--") != NULL,
+               "list model: done and attachment letters");
+        lm.fentries = NULL;
+        pend_remove[0] = 1;
+        tui_table_format_row(&t, 0, 0, row, sizeof(row));
+        ASSERT(strstr(row, "N*") != NULL,
+               "list model: a pending row shows the plain star");
+        manifest_free(mf);
+    }
+
+    /* ── attachment picker and label browser models (EMAIL-79) ───────── */
+    {
+        MimeAttachment atts[2];
+        memset(atts, 0, sizeof(atts));
+        atts[0].filename = (char *)"a.pdf"; atts[0].content_type = (char *)"application/pdf";
+        atts[0].size = 2048;
+        atts[1].size = 12;
+        AttachModel am = { atts };
+        tui_table_col cols[3] = {
+            { "Name", 20, 3, TUI_ALIGN_LEFT, 0, 0, 0 }, { "Type", 12, 2, TUI_ALIGN_LEFT, 0, 0, 0 },
+            { "Size", 8, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
+        };
+        tui_table_model tm = { NULL, attach_cell, &am };
+        tui_table t;
+        tui_table_init(&t, cols, 3, &tm);
+        tui_table_set_count(&t, 2);
+        char row[256];
+        tui_table_format_row(&t, 0, 0, row, sizeof(row));
+        ASSERT(strstr(row, "a.pdf") && strstr(row, "application/pdf") && strstr(row, "2 KB"),
+               "attachment model: name, type and size in KB");
+        tui_table_format_row(&t, 0, 1, row, sizeof(row));
+        ASSERT(strstr(row, "(no name)") && strstr(row, "12 B"),
+               "attachment model: unnamed attachment and bytes");
+
+        char *ids[] = { (char *)"HDR", (char *)"Work", (char *)"Home" };
+        char *lnames[] = { (char *)"User labels", (char *)"Work", (char *)"Home" };
+        int hdr[3] = { 1, 0, 0 };
+        int vrow[4] = { 0, 1, -1, 2 };
+        LabelModel lmod = { ids, lnames, hdr, vrow };
+        tui_table_col lc[2] = {
+            { "Count", 6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 }, { "Label", 20, 1, TUI_ALIGN_LEFT, 0, 0, 0 },
+        };
+        tui_table_model lt = { labels_row, labels_cell, &lmod };
+        tui_table t2;
+        tui_table_init(&t2, lc, 2, &lt);
+        tui_table_set_count(&t2, 4);
+        tui_table_format_row(&t2, 0, 0, row, sizeof(row));
+        ASSERT(strstr(row, "User labels") != NULL, "label model: group heading row");
+        tui_table_format_row(&t2, 0, 1, row, sizeof(row));
+        ASSERT(strstr(row, "Work") != NULL, "label model: label row");
     }
 
     /* ── pager_prompt via stdin injection ───────────────────────────── */

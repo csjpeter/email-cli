@@ -333,8 +333,12 @@ static void check_view(PtySession *s, const char *const exp[],
     int r = -1, c = -1;
     int vis = pty_cursor(s, &r, &c);
     int want_row = cur[0] + ((marker >= 0 && cur[0] > marker) ? offset : 0);
-    ASSERT(r == want_row && c == cur[1] && vis == cur[2],
-           "cursor position and visibility");
+    char why[160];
+    snprintf(why, sizeof(why),
+             "cursor position and visibility: row %d col %d %s, want row %d col %d %s",
+             r, c, vis ? "visible" : "hidden", want_row, cur[1],
+             cur[2] ? "visible" : "hidden");
+    ASSERT(r == want_row && c == cur[1] && vis == cur[2], why);
 }
 
 #define VIEW(name, open_expr, setup) \

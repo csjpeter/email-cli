@@ -1836,7 +1836,7 @@ void test_email_service(void) {
         strcpy(me[0].uid, "u1"); me[0].flags = MSG_FLAG_UNSEEN | MSG_FLAG_FLAGGED;
         strcpy(me[1].uid, "u2"); me[1].flags = MSG_FLAG_DONE | MSG_FLAG_ATTACH;
         int pend_remove[2] = { 0, 1 };
-        MsgListModel lm = { me, NULL, mf, pend_remove, NULL, NULL };
+        MsgListModel lm = { me, NULL, mf, pend_remove, NULL, NULL, 0 };
         tui_table_col cols[4] = {
             { "Date", 16, 0, TUI_ALIGN_LEFT, 0, 0, 0 }, { "Sts", 6, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
             { "Subject", 10, 3, TUI_ALIGN_LEFT, 0, 0, 0 }, { "From", 10, 2, TUI_ALIGN_LEFT, 0, 0, 0 },
@@ -1860,6 +1860,15 @@ void test_email_service(void) {
         tui_table_format_row(&t, 0, 0, row, sizeof(row));
         ASSERT(strstr(row, "N*") != NULL,
                "list model: a pending row shows the plain star");
+        /* EMAIL-85: a From column too narrow for "Name <address>" shows the name */
+        lm.from_w = 20;
+        tui_table_format_row(&t, 0, 0, row, sizeof(row));
+        ASSERT(strstr(row, "Alice") != NULL && strstr(row, "a@example.org") == NULL,
+               "list model: a narrow From column shows the name, not a cut address");
+        lm.from_w = 40;
+        tui_table_format_row(&t, 0, 0, row, sizeof(row));
+        ASSERT(strstr(row, "Alice <a@example.org>") != NULL,
+               "list model: a wide From column shows name and address");
         manifest_free(mf);
     }
 

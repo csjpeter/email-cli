@@ -68,8 +68,10 @@ defect or inconsistency the pictures make visible, left for the owner to ticket.
 5. Accounts: `d` deleted the account at once, with no confirmation.  Fixed
    with EMAIL-84: the information line asks `Delete account NAME? (y/N)`;
    only `y` or `Y` deletes (`account_delete_ask`).
-6. Message list: the From column is cut in the middle of the address
-   (`<sender3@example.c`) at 100 columns.
+6. Message list: the From column was cut in the middle of the address
+   (`<sender3@example.c`) at 100 columns.  Fixed with EMAIL-79/85: the column
+   is a table cell cut with an ellipsis, and where it is too narrow for
+   `Name <address>` it shows the name alone (`list_narrow`).
 7. Help overlays (fixed with EMAIL-34): rows were padded by bytes, so rows
    with `↑ / ↓` were misaligned and a multi-byte cut was possible; the
    key rows still said `ESC / q  Quit` and `Backspace` after EMAIL-37.

@@ -6,6 +6,7 @@
 #include "config_store.h"
 #include "input_line.h"
 #include "tui_frame.h"
+#include <tuikit/text.h>
 #include "path_complete.h"
 #include "imap_client.h"
 #include "mail_client.h"
@@ -2240,6 +2241,7 @@ typedef struct {
     const int      *pend_remove;
     const int      *pend_label;
     const int      *pend_restore;
+    int             from_w;     /* cells the From column has, 0 when unknown */
 } MsgListModel;
 
 static int mlm_index(const MsgListModel *m, int i) {
@@ -2277,8 +2279,26 @@ static void msglist_cell(void *ctx, int i, int col, tui_table_cell *c) {
         return;
     }
     if (col == 3) {
-        tui_table_cell_put(c, (me && me->from && me->from[0]) ? me->from : "(no from)",
-                           TUI_STYLE_DEFAULT);
+        const char *from = (me && me->from && me->from[0]) ? me->from : "(no from)";
+        /* A column too narrow for "Name <address>" shows the name alone: a
+         * cut address is unreadable, a whole name is not. */
+        if (m->from_w > 0 && tui_str_width(from) > m->from_w) {
+            const char *lt = strstr(from, " <");
+            if (lt && lt > from) {
+                char name[256];
+                size_t n = (size_t)(lt - from);
+                if (n >= sizeof(name)) n = sizeof(name) - 1;
+                memcpy(name, from, n);
+                name[n] = '\0';
+                /* strip the quotes of "Doe, John" <j@example.org> */
+                char *q = name;
+                size_t ql = strlen(q);
+                if (ql >= 2 && q[0] == '"' && q[ql - 1] == '"') { q[ql - 1] = '\0'; q++; }
+                tui_table_cell_put(c, q, TUI_STYLE_DEFAULT);
+                return;
+            }
+        }
+        tui_table_cell_put(c, from, TUI_STYLE_DEFAULT);
         return;
     }
     /* Status column (6 cells): [P/J/N/-][star/-][D/-][A/-][R/F/-][v/x/-];
@@ -3010,7 +3030,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         };
         MsgListModel lmodel = { entries, (filter_active && fentries) ? fentries : NULL,
                                 manifest, pending_remove, pending_label,
-                                pending_restore };
+                                pending_restore, 0 };
         tui_table_model ltmodel = { msglist_row, msglist_cell, &lmodel };
         tui_table ltbl;
         tui_table_init(&ltbl, list_cols, 4, &ltmodel);
@@ -3020,6 +3040,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         int pager_cols = terminal_cols();
         if (pager_rows <= 0) pager_rows = 24;
         if (pager_cols <= 0) pager_cols = 80;
+        {
+            int lw[4] = { 0, 0, 0, 0 };
+            tui_table_widths(&ltbl, pager_cols, lw);
+            lmodel.from_w = lw[3];
+        }
 
         /* Data rows: fetch-on-demand + immediate render per row */
         int load_interrupted = 0;

@@ -54,6 +54,12 @@ TermRawState *terminal_raw_enter(void) {
 void terminal_raw_exit(TermRawState **state) {
     if (!state || !*state) return;
     tui_tty_raw_exit(&(*state)->raw);
+    /* The table frames (tui_frame) hide the cursor; give it back with the terminal. */
+    if (tui_tty_is(STDOUT_FILENO)) {
+        static const char show[] = "\033[?25h";
+        ssize_t n = write(STDOUT_FILENO, show, sizeof(show) - 1);
+        (void)n;
+    }
     free(*state);
     *state = NULL;
 }

@@ -7,18 +7,22 @@ terminal of 100x24, `TZ=UTC`, a mock IMAP server with three messages and a
 fresh home per view are fixed, so every picture is reproducible.
 
 Style legend of the maps: `H` bold white on blue (header bar), `r` reverse
-(status bar, selection), `B` bold+reverse, `b` bold, `d` dim, `g` green,
-`G` reverse green, `R` red, space default.
+(status bar), `B` bold+reverse, `b` bold, `d` dim, `g` green, `G` reverse
+green, `R` red, space default.  The selection of a table (EMAIL-79, libtuikit
+`tui_table`) is a dark blue background (palette 17) with a `>` in column 0:
+`S` bright white text on it, `A` the bold `>`, `n` a green cell kept as bright
+green and bold.  A golden row starting with `~` holds a port number: its digit
+runs are read as `#`.
 
 ## Views
 
 | View (test) | Reached by | Elements | Keys named on the screen |
 |---|---|---|---|
-| Accounts (`accounts`) | start | header bar with count; column heads Unread, Flagged, Account, Type, Server, Send via; ruler; one row per account, `→` on the cursor row, bold; status bar | ↑↓ Enter n d i e Esc |
+| Accounts (`accounts`) | start | header bar with count; column heads Unread, Flagged, Account, Type, Server, Send via; ruler; one row per account, `>` and the dark blue selection on the cursor row; status bar | ↑↓ Enter n d i e Esc |
 | Accounts help (`accounts_help`) | `h` on accounts | boxed overlay, title, key/description rows, footer "Press any key to close" | any key |
 | Account deleted (`account_delete`) | `d` on accounts | "No accounts configured." | n |
 | Wizard type (`wizard_type`) | `n` on accounts | plain prompt: account type menu, `Choice [1]:` | 1, 2 |
-| Folder browser (`folders`, `folders_flat`) | Enter on an account | header bar with count; heads Unread, Flagged, Folder, Total; "Tags / Flags" section (dim, 6 virtual rows) and "Folders" tree; cursor row reverse; status bar with `[n/N]` | ↑↓ PgUp/PgDn Enter t / h Esc q BS |
+| Folder browser (`folders`, `folders_flat`) | Enter on an account | header bar with count; heads Unread, Flagged, Folder, Total; "Tags / Flags" section (dim, 6 virtual rows) and "Folders" tree; cursor row selected (dark blue, `>`); status bar with `[n/N]` | ↑↓ PgUp/PgDn Enter t / h Esc q BS |
 | Folder help (`folders_help`) | `h` | overlay | any key |
 | Folder search (`folders_search`) | `/` | filter prompt line | text, Enter, Esc |
 | Message list (`list`, `list_second_row`, `list_narrow`) | Enter on INBOX | header bar "1-3 of 3 message(s) in INBOX (3 unread) [account]."; heads Date, Sts, Subject, From; ruler; rows with status column (`N` green = unread); status bar | ↑↓ PgUp/PgDn Enter c r F A n f j d D s U l / h Esc q BS |
@@ -27,7 +31,7 @@ Style legend of the maps: `H` bold white on blue (header bar), `r` reverse
 | List search (`list_search`) | `/` | filter line "Filter [Subject|From|To|Body]: _  Showing n of N" | text, Tab, Enter, Esc |
 | Message reader (`reader`, `reader_source`, `reader_search`) | Enter on a message | header block From, Subject, Date, UID, File, DMARC; rule; body; status line "-- [1/1] …" with the keys | ↑↓ PgUp/PgDn Home End r F f n d D a A v / h Esc q BS |
 | Reader help (`reader_help`) | `h` | overlay | any key |
-| Rules editor (`rules_empty`, `rules_list`, `rules_second`) | `l` on the list | title "Rules for account (n rules)"; "(no rules …)" or one row per rule, reverse on the cursor; hint line | j k ↑↓ Enter a d Esc q |
+| Rules editor (`rules_empty`, `rules_list`, `rules_second`) | `l` on the list | title "Rules for account (n rules)"; "(no rules …)" or one row per rule, `>` and the selection on the cursor; hint line | j k ↑↓ Enter a d Esc q |
 | Rule detail (`rule_detail`) | Enter on a rule | "Rule:", "Account:", `when:` and the `then-*` rows; hint line | e d Esc q |
 | Rule edit (`rule_edit_form`) | `e` on a rule | condition list editor step 1/2 prefilled | j k Enter e a d q Esc |
 | Rule add, conditions (`rule_add_when`) | `a` in the rules editor | step 1/2 title, hint, "(empty — press 'a' …)" | a q Esc |

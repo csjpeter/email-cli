@@ -135,7 +135,6 @@ static PtySession *tui_open(void) {
     pty_setenv(s, "XDG_CONFIG_HOME", NULL);
     pty_setenv(s, "XDG_DATA_HOME", NULL);
     pty_setenv(s, "XDG_CACHE_HOME", NULL);
-    pty_setenv(s, "EDITOR", "true");
     if (pty_run(s, args) != 0) { pty_close(s); return NULL; }
     return s;
 }
@@ -341,6 +340,33 @@ static void check_view(PtySession *s, const char *const exp[],
     ASSERT(r == want_row && c == cur[1] && vis == cur[2], why);
 }
 
+/* The compose flow up to the body editor: the dialog filled, Enter. */
+static void to_editor(PtySession *s) {
+    pty_send_str(s, "c");
+    pty_wait_for(s, "New Message", WAIT_MS);
+    pty_send_str(s, "ann@example.org");
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_str(s, "Hello");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "Esc=save and continue", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+}
+
+static void editor_typed(PtySession *s) {
+    to_editor(s);
+    pty_send_str(s, "Dear Ann,\r\rWide: \xe4\xbd\xa0\xe5\xa5\xbd caf\xc3\xa9");
+    pty_settle(s, SETTLE_MS);
+}
+
+static void to_review(PtySession *s) {
+    editor_typed(s);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_wait_for(s, "[s] Send", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+}
+
 #define VIEW(name, open_expr, setup) \
     static void test_screen_##name(void) { \
         restart_mock(); \
@@ -406,6 +432,13 @@ VIEW(compose_empty_to, at_list(),
       pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "To: is empty", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
 
+VIEW(body_editor,       at_list(), (to_editor(s), (void)0))
+VIEW(body_editor_typed, at_list(), (editor_typed(s), (void)0))
+VIEW(review,            at_list(), (to_review(s), (void)0))
+VIEW(review_discard_ask, at_list(),
+     (to_review(s), pty_send_str(s, "q"), pty_wait_for(s, "Discard draft?", WAIT_MS),
+      pty_settle(s, SETTLE_MS)))
+
 int main(int argc, char *argv[]) {
     printf("--- email-tui screens (cell-exact) ---\n\n");
     if (argc < 3) {
@@ -459,6 +492,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_rule_edit_form);
     RUN_TEST(test_screen_compose_typed);
     RUN_TEST(test_screen_compose_empty_to);
+    RUN_TEST(test_screen_body_editor);
+    RUN_TEST(test_screen_body_editor_typed);
+    RUN_TEST(test_screen_review);
+    RUN_TEST(test_screen_review_discard_ask);
 
     if (g_record) fclose(g_record);
     if (g_mock_pid > 0) { kill(g_mock_pid, SIGKILL); waitpid(g_mock_pid, NULL, 0); }

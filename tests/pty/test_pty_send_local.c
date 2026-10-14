@@ -23,6 +23,7 @@
 #include "ptytest.h"
 #include "pty_assert.h"
 #include "test_scratch.h"
+#include "pty_editor.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -48,7 +49,6 @@ static char g_smtp_bin[512];
 
 static char g_test_home[512];
 static char g_old_home[512];
-static char g_editor_script[600];
 
 static pid_t g_imap_pid = -1;
 static pid_t g_smtp_pid = -1;
@@ -64,19 +64,6 @@ static int   g_smtp_port = 0;
 
 /* Account directory under test HOME (username-based path) */
 #define ACCOUNT_DIR  "/.local/share/email-cli/accounts/testuser@example.com"
-
-/* ── Fake editor ─────────────────────────────────────────────────────── */
-
-static void write_editor_script(void) {
-    snprintf(g_editor_script, sizeof(g_editor_script),
-             "%s/.fake_editor.sh", g_test_home);
-    FILE *f = fopen(g_editor_script, "w");
-    if (!f) return;
-    fprintf(f, "#!/bin/sh\necho 'Test body' >> \"$1\"\n");
-    fclose(f);
-    chmod(g_editor_script, 0755);
-    setenv("EDITOR", g_editor_script, 1);
-}
 
 /* ── Directory setup ──────────────────────────────────────────────────── */
 
@@ -146,11 +133,13 @@ static void stop_server(pid_t *pid_out) {
 }
 
 static void restart_imap(void) {
+    pty_editor_forget_draft(g_test_home);
     stop_server(&g_imap_pid);
     (void)start_server(g_imap_bin, "MOCK_IMAP", &g_imap_pid, &g_imap_port);
 }
 
 static void restart_smtp(void) {
+    pty_editor_forget_draft(g_test_home);
     stop_server(&g_smtp_pid);
     (void)start_server(g_smtp_bin, "MOCK_SMTP", &g_smtp_pid, &g_smtp_port);
 }
@@ -256,7 +245,6 @@ static void pending_reset(void) {
 static void test_successful_send_saves_locally(void) {
     pending_reset();
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "TC-SL-01: reached inbox");
 
@@ -276,6 +264,7 @@ static void test_successful_send_saves_locally(void) {
     /* Wait for send confirmation prompt, confirm, then check result */
     /* US-85: the post-compose review screen replaced the old "Send? [y/n]"
      * prompt; 's' sends from there. */
+    ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
     pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
@@ -296,7 +285,6 @@ static void test_failed_send_saves_to_drafts(void) {
     pending_reset();
     restart_imap();
     stop_server(&g_smtp_pid);       /* nothing listens on its port now */
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "TC-SL-02: reached inbox");
 
@@ -314,6 +302,7 @@ static void test_failed_send_saves_to_drafts(void) {
     /* Wait for send confirmation, confirm, then check failure path */
     /* US-85: the post-compose review screen replaced the old "Send? [y/n]"
      * prompt; 's' sends from there. */
+    ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
     pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
@@ -333,7 +322,6 @@ static void test_sync_uploads_pending_and_clears_queue(void) {
     /* Seed pending_appends.tsv via a successful send first */
     pending_reset();
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "TC-SL-03 setup: reached inbox");
 
@@ -348,6 +336,7 @@ static void test_sync_uploads_pending_and_clears_queue(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     /* US-85: the post-compose review screen replaced the old "Send? [y/n]"
      * prompt; 's' sends from there. */
+    ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
     pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
@@ -373,7 +362,6 @@ static void test_pending_queue_survives_restart(void) {
     /* Seed via a successful send */
     pending_reset();
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "TC-SL-04 setup: reached inbox");
 
@@ -388,6 +376,7 @@ static void test_pending_queue_survives_restart(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     /* US-85: the post-compose review screen replaced the old "Send? [y/n]"
      * prompt; 's' sends from there. */
+    ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
     pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
@@ -438,7 +427,6 @@ int main(int argc, char **argv) {
 
     mkdirs();
     write_config();
-    write_editor_script();
 
     printf("--- US-SL-01: Successful send saves locally ---\n");
     RUN_TEST(test_successful_send_saves_locally);

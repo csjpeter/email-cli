@@ -15,6 +15,7 @@
 #include "ptytest.h"
 #include "pty_assert.h"
 #include "test_scratch.h"
+#include "pty_editor.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,6 +132,7 @@ static void stop_mock_for_restart(void) {
 }
 
 static void restart_mock(void) {
+    pty_editor_forget_draft(g_test_home);
     stop_mock_for_restart();
     if (start_mock_server() != 0) { g_tests_failed++; }
 }
@@ -2833,6 +2835,7 @@ static void test_tui_list_compose_key(void) {
     ASSERT_WAIT_FOR(s, "Subject is empty", WAIT_MS);
     pty_send_str(s, "y");
     /* US-85: the editor runs, then the review screen appears; 'q' discards. */
+    ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS);
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
@@ -2846,21 +2849,13 @@ static void test_tui_list_compose_key(void) {
 }
 
 static void test_tui_list_reply_key(void) {
-    /* US-20: 'r' in TUI list launches reply; editor clears To: → abort → back to list */
+    /* US-20: 'r' in TUI list launches reply: dialog, body editor holding the
+     * quote (no CR in it), review; discarding returns to the list. */
     restart_mock();
-    /* Write an editor script that blanks To: so compose aborts cleanly */
-    char editor_script[512];
-    snprintf(editor_script, sizeof(editor_script),
-             "%s/test_reply_list_editor.sh", test_scratch_dir());
-    FILE *ef = fopen(editor_script, "w");
-    if (ef) {
-        fprintf(ef, "#!/bin/sh\n");
-        fprintf(ef,
-            "printf 'From: test@x.com\\nTo: \\nSubject: Re\\n\\nbody\\n' > \"$1\"\n");
-        fclose(ef);
-        chmod(editor_script, 0755);
-    }
-    setenv("EDITOR", editor_script, 1);
+    char draft_path[600];
+    snprintf(draft_path, sizeof(draft_path),
+             "%s/.local/share/email-cli/compose-draft", g_test_home);
+    unlink(draft_path);
     PtySession *s = tui_open_to_list();
     ASSERT(s != NULL, "tui list reply key: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
@@ -2871,7 +2866,21 @@ static void test_tui_list_reply_key(void) {
     pty_send_key(s, PTY_KEY_ENTER);  /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);  /* Subject → submit */
     /* US-85: the editor blanks To:, then the review screen appears; 'q' discards. */
+    ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
+    {
+        /* Leaving the editor saved the draft: it holds the quote, no CR. */
+        FILE *fp = fopen(draft_path, "r");
+        ASSERT(fp != NULL, "reply: the editor saved a draft");
+        if (fp) {
+            char txt[8192];
+            size_t n = fread(txt, 1, sizeof(txt) - 1, fp);
+            fclose(fp);
+            txt[n] = '\0';
+            ASSERT(strstr(txt, "\n> ") != NULL, "reply: the draft holds the quote");
+            ASSERT(strchr(txt, '\r') == NULL, "reply: no CR in the quoted body");
+        }
+    }
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
     pty_send_str(s, "y");
@@ -2881,7 +2890,7 @@ static void test_tui_list_reply_key(void) {
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
-    unlink(editor_script);
+    ASSERT(access(draft_path, F_OK) != 0, "reply: discarding removed the draft");
 }
 
 /* ══════════════════════════════════════════════════════════════════════

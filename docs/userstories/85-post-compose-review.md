@@ -18,7 +18,7 @@ attachments I forgot during the header phase.
 | 4 | The key-binding bar shows: `[s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove attachment  [q] Cancel`. |
 | 5 | Pressing `s` sends the message immediately (no further prompt). |
 | 6 | Pressing `e` reopens the pre-compose dialog (US-CD-1) pre-filled with the current To, Cc, Bcc, Subject, and attachment list. After confirming the dialog the editor does **not** reopen; the review screen is shown again with updated headers. |
-| 7 | Pressing `b` reopens the editor (`$EDITOR`) with the current draft. After saving and exiting the review screen is shown again with the updated body line count. |
+| 7 | Pressing `b` reopens the built-in body editor (US-87) with the current text. After Esc the review screen is shown again with the updated body line count. |
 | 8 | Pressing `a` opens an attachment picker (the same file-browser field from US-84) overlaid on the review screen. The picked file is appended to the attachment list and the review screen is redisplayed. |
 | 9 | Pressing `d` removes the last attachment from the list and redisplays the review screen. If there are no attachments `d` is a no-op (no error). |
 | 10 | Pressing `q` or `Esc` asks `Discard message? [y/n]` and cancels on `y`. |
@@ -62,9 +62,9 @@ Error state (To empty):
 compose_dialog() confirmed
         │
         ▼
-  $EDITOR opens (draft file)
+  body editor opens (US-87)
         │
-  user saves & exits editor
+  user leaves it with Esc (draft saved)
         │
         ▼
   post_compose_review() ◄────────────────────────────────────┐
@@ -76,7 +76,7 @@ compose_dialog() confirmed
    └────┬────┴───┬────┴──┬───────┴──┬───────┴──────────┘     │
         │        │       │          │                          │
         ▼        ▼       ▼          ▼                          │
-     smtp_  compose_  $EDITOR   file_       update list ──────┘
+     smtp_  compose_  body      file_       update list ──────┘
      send()  dialog()           browser()
         │        │       │
         │        └───────┴──► review again (no re-send of editor)

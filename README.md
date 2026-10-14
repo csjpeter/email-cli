@@ -182,24 +182,23 @@ email-tui          # Opens the accounts screen; navigate with keyboard
 
 **Subcommands** (direct command-line invocation):
 ```bash
-email-tui compose                     # Open $EDITOR to compose a new message
-email-tui reply <uid>                 # Open $EDITOR to reply to a message by UID
+email-tui compose                     # Compose a new message (form + built-in body editor)
+email-tui reply <uid>                 # Reply to a message by UID
 email-tui send --to <addr> \          # Send a message non-interactively
                --subject <text> \
                --body <text>
 ```
 
-When composing or replying, `email-tui` writes a draft to a temp file, opens `$EDITOR`,
-and after you save and quit asks:
+When composing or replying, `email-tui` shows a form for the headers, then its own
+body editor (Esc saves and continues, Ctrl-S saves; the text is autosaved as a draft that
+the next compose offers again), then a review screen where `s` sends and `q` discards:
 
 ```
-  Send to: alice@example.com
+  Review: Message
+  To:      alice@example.com
   Subject: Re: Meeting
-
-  Send? [y/n]
+  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard
 ```
-
-Press `y` to send, `n` (or `ESC`) to discard the draft without sending.
 
 The other binaries (`email-cli`, `email-cli-ro`, `email-sync`) are batch-only.
 
@@ -315,9 +314,8 @@ Labels (8)
 | `c` | Open compose window for a new message |
 | `r` | Open reply window for the selected message |
 
-Both actions open `$EDITOR` (falls back to `vim`) with a pre-filled draft file containing
-editable `From:`, `To:`, `Subject:`, and body fields. After saving and quitting the editor,
-a send confirmation prompt appears. Press `y` to send, `n` or `ESC` to discard the draft.
+Both actions open a form for the headers and then the built-in body editor. Esc leaves the
+editor and saves the draft; the review screen then sends (`s`) or discards (`q`, asks first).
 
 #### Background sync
 

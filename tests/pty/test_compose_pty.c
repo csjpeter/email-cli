@@ -12,6 +12,7 @@
 #include "ptytest.h"
 #include "pty_assert.h"
 #include "test_scratch.h"
+#include "pty_editor.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -102,6 +103,7 @@ static void start_smtp_server(void) {
 }
 
 static void restart_smtp(void) {
+    pty_editor_forget_draft(g_test_home);
     if (g_smtp_pid > 0) {
         kill(g_smtp_pid, SIGKILL);
         waitpid(g_smtp_pid, NULL, 0);
@@ -257,26 +259,16 @@ static void test_send_no_smtp_config(void) {
  * complete message and returns.  Sets $EDITOR to that script path.
  * Returns the script path (caller must unlink when done).
  */
-static char g_editor_script[512];
-
-static void setup_editor_mock(const char *from, const char *to,
-                              const char *subject, const char *body) {
-    snprintf(g_editor_script, sizeof(g_editor_script),
-             "%s/test_editor.sh", test_scratch_dir());
-    FILE *ef = fopen(g_editor_script, "w");
-    if (!ef) return;
-    fprintf(ef, "#!/bin/sh\n");
-    fprintf(ef,
-            "printf 'From: %s\\nTo: %s\\nSubject: %s\\n\\n%s\\n' > \"$1\"\n",
-            from, to, subject, body);
-    fclose(ef);
-    chmod(g_editor_script, 0755);
-    setenv("EDITOR", g_editor_script, 1);
-}
-
-static void cleanup_editor_mock(void) {
-    unlink(g_editor_script);
-    g_editor_script[0] = '\0';
+/* The compose subcommand: the dialog collects the headers, the body editor
+ * (EMAIL-87) the text, and the review screen follows. */
+static void compose_fill_dialog(PtySession *s, const char *to, const char *subject) {
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS * 2);
+    pty_send_str(s, to);
+    pty_send_key(s, PTY_KEY_TAB);   /* To → Cc */
+    pty_send_key(s, PTY_KEY_TAB);   /* Cc → Bcc */
+    pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
+    pty_send_str(s, subject);
+    pty_send_key(s, PTY_KEY_ENTER);
 }
 
 /**
@@ -284,12 +276,13 @@ static void cleanup_editor_mock(void) {
  */
 static void test_compose_abort_no_to(void) {
     write_config();
-    setenv("EDITOR", "true", 1);  /* no-op editor: exits without saving */
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_open_size(120, 50, a);
     ASSERT(s != NULL, "compose abort no-to: opens");
     /* US-85: the editor is followed by the review screen, not an immediate
      * "Aborted"; discarding there is what ends the compose. */
+    compose_fill_dialog(s, "recipient@example.com", "Abort test");
+    ASSERT(pty_editor_type_and_leave(s, NULL) == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS);
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
@@ -304,16 +297,15 @@ static void test_compose_abort_no_to(void) {
 static void test_compose_editor_send(void) {
     write_config();
     restart_smtp();
-    setup_editor_mock("testuser@example.com", "recipient@example.com",
-                      "PTY test subject", "Hello from editor mock test");
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_run(a);
     ASSERT(s != NULL, "compose editor send: opens");
+    compose_fill_dialog(s, "recipient@example.com", "PTY test subject");
+    ASSERT(pty_editor_type_and_leave(s, "Hello from editor mock test") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
     pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Message sent", WAIT_MS);
     pty_close(s);
-    cleanup_editor_mock();
 }
 
 /**
@@ -322,77 +314,17 @@ static void test_compose_editor_send(void) {
 static void test_compose_confirm_cancel(void) {
     write_config();
     restart_smtp();
-    setup_editor_mock("testuser@example.com", "recipient@example.com",
-                      "Cancelled test subject", "Body of cancelled message");
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_run(a);
     ASSERT(s != NULL, "compose confirm cancel: opens");
+    compose_fill_dialog(s, "recipient@example.com", "Cancelled test subject");
+    ASSERT(pty_editor_type_and_leave(s, "Body of cancelled message") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
     pty_send_str(s, "y");
-    ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Cancelled. Draft discarded.", WAIT_MS);
     pty_close(s);
-    cleanup_editor_mock();
-}
-
-/**
- * \r stripping (US-20): reply quote must not contain carriage-return bytes.
- *
- * We set up an editor that captures the draft to a temp file for inspection.
- * The mock IMAP server delivers messages with CRLF line endings (RFC 2822);
- * after quote extraction those CRs must be stripped before the draft is
- * written.  The editor mock simply outputs a fixed reply so the send
- * completes; we inspect the captured draft file instead of the sent message.
- */
-static void test_reply_no_cr_in_quote(void) {
-    write_config();
-    restart_smtp();
-
-    /* Editor mock: capture draft to a known path, then fill in a valid reply */
-    char capture_path[512];
-    snprintf(capture_path, sizeof(capture_path),
-             "%s/draft_capture.txt", test_scratch_dir());
-
-    char editor_script[512];
-    snprintf(editor_script, sizeof(editor_script),
-             "%s/test_editor_cr.sh", test_scratch_dir());
-    FILE *ef = fopen(editor_script, "w");
-    if (ef) {
-        fprintf(ef, "#!/bin/sh\n");
-        /* Copy draft to capture path for inspection */
-        fprintf(ef, "cp \"$1\" '%s'\n", capture_path);
-        /* Fill valid To: so compose sends */
-        fprintf(ef,
-            "printf 'From: testuser@example.com\\n"
-            "To: recipient@example.com\\n"
-            "Subject: Re: Test\\n\\nReply body\\n' > \"$1\"\n");
-        fclose(ef);
-        chmod(editor_script, 0755);
-    }
-    setenv("EDITOR", editor_script, 1);
-
-    /* Launch as batch reply UID 1 (mock server has message UID 1) */
-    const char *a[] = {"reply", "1", NULL};
-    PtySession *s = tui_run(a);
-    ASSERT(s != NULL, "no CR in quote: opens");
-    /* Wait until the editor has run and the draft was captured */
-    pty_settle(s, WAIT_MS);
-    pty_close(s);
-
-    /* Inspect captured draft: must not contain \r */
-    FILE *fp = fopen(capture_path, "r");
-    if (fp) {
-        int found_cr = 0;
-        int c;
-        while ((c = fgetc(fp)) != EOF)
-            if (c == '\r') { found_cr = 1; break; }
-        fclose(fp);
-        ASSERT(!found_cr, "no CR in quoted body: draft must not contain \\r");
-        unlink(capture_path);
-    }
-    /* cleanup */
-    unlink(editor_script);
 }
 
 /**
@@ -415,16 +347,15 @@ static void test_reply_missing_uid(void) {
 static void test_compose_sent_folder(void) {
     write_config();
     restart_smtp();
-    setup_editor_mock("testuser@example.com", "recipient@example.com",
-                      "Sent folder test", "Body for sent folder test");
     const char *a[] = {"compose", NULL};
     PtySession *s = tui_run(a);
     ASSERT(s != NULL, "compose sent folder: opens");
+    compose_fill_dialog(s, "recipient@example.com", "Sent folder test");
+    ASSERT(pty_editor_type_and_leave(s, "Body for sent folder test") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
     pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
     pty_close(s);
-    cleanup_editor_mock();
 }
 
 /* ── Config command tests (US-24) ────────────────────────────────────── */
@@ -727,7 +658,6 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_compose_confirm_cancel);
     RUN_TEST(test_compose_sent_folder);
     RUN_TEST(test_reply_missing_uid);
-    RUN_TEST(test_reply_no_cr_in_quote);
 
     printf("\n--- Config command (US-24) ---\n");
     RUN_TEST(test_config_show);

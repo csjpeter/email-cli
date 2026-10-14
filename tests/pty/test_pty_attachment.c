@@ -23,6 +23,7 @@
 #include "ptytest.h"
 #include "pty_assert.h"
 #include "test_scratch.h"
+#include "pty_editor.h"
 
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -46,7 +47,6 @@ static char g_smtp_bin[512];
 
 static char g_test_home[512];
 static char g_old_home[512];
-static char g_editor_script[600];
 
 static char g_attach_file1[600];  /* report.pdf (stub) */
 static char g_attach_file2[600];  /* notes.txt */
@@ -67,19 +67,6 @@ static int   g_smtp_port = 0;
     do { if (!test_selected(#fn)) break; printf("  %s...\n", #fn); \
          fflush(stdout); fn(); } while (0)
 
-/* ── Fake editor ────────────────────────────────────────────────────── */
-
-static void write_editor_script(void)
-{
-    snprintf(g_editor_script, sizeof(g_editor_script),
-             "%s/.fake_editor.sh", g_test_home);
-    FILE *f = fopen(g_editor_script, "w");
-    if (!f) return;
-    fprintf(f, "#!/bin/sh\necho 'Test body' >> \"$1\"\n");
-    fclose(f);
-    chmod(g_editor_script, 0755);
-    setenv("EDITOR", g_editor_script, 1);
-}
 
 /* ── Config / directory helpers ─────────────────────────────────────── */
 
@@ -180,6 +167,7 @@ static void stop_server(pid_t *pid)
 
 static void restart_servers(void)
 {
+    pty_editor_forget_draft(g_test_home);
     stop_server(&g_imap_pid);
     stop_server(&g_smtp_pid);
     start_server(g_imap_bin, "MOCK_IMAP", &g_imap_pid, &g_imap_port);
@@ -426,8 +414,9 @@ static void test_attach_shown_in_review(void)
     pty_send_str(s, g_attach_file1);
     pty_send_key(s, PTY_KEY_ENTER);
     pty_settle(s, 200);
-    /* Confirm: opens editor (fake), then review screen */
+    /* Confirm: opens the body editor, then the review screen */
     pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review", WAIT_MS);
     ASSERT_WAIT_FOR(s, "report.pdf", WAIT_MS);
     pty_send_str(s, "q");
@@ -455,6 +444,7 @@ static PtySession *compose_to_review(const char *to, const char *subject)
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_str(s, subject);
     pty_send_key(s, PTY_KEY_ENTER); /* confirm → editor → review */
+    if (pty_editor_type_and_leave(s, "Test body") != 0) { pty_close(s); return NULL; }
     /* Wait for the footer, which pcr_render() prints last — waiting for the
      * title alone can return while the body/attachment lines are still being
      * written. */
@@ -517,7 +507,7 @@ static void test_review_shows_body_lines(void)
     restart_servers();
     PtySession *s = compose_to_review("alice@example.com", "Body count test");
     ASSERT(s != NULL, "TC-PCR-05: review screen reached");
-    /* Fake editor appended one line → "1 line" or "1 lines" */
+    /* The test typed one line → "1 line" */
     ASSERT_SCREEN_CONTAINS(s, "line");
     pty_send_str(s, "q");
     pty_send_str(s, "y");
@@ -568,9 +558,11 @@ static void test_review_b_reopens_editor(void)
     PtySession *s = compose_to_review("alice@example.com", "Edit body test");
     ASSERT(s != NULL, "TC-PCR-09: review screen reached");
     pty_send_str(s, "b");
-    /* Fake editor appends another "Test body" line → 2 lines total.
+    /* The editor holds "Test body"; a new first line makes 2 lines total.
+     * (Typed Enter is a newline in the editor.)
      * Wait for the new count, not for "Review" — that string is still on
      * screen from the previous render and would match immediately. */
+    ASSERT(pty_editor_type_and_leave(s, "first\r") == 0, "body editor reopens");
     ASSERT_WAIT_FOR(s, "2 lines", WAIT_MS);
     pty_send_str(s, "q");
     pty_send_str(s, "y");
@@ -662,45 +654,19 @@ static void test_review_esc_asks_discard_confirm(void)
     pty_close(s);
 }
 
-/* TC-PCR-15: Empty To in draft disables [s] and shows error */
+/* TC-PCR-15: an empty To never reaches the review: the dialog refuses it
+ * (the editor holds the body only, so no header can be blanked there). */
 static void test_review_empty_to_disables_send(void)
 {
-    /* Use a custom editor that strips the To: line from the draft */
     restart_servers();
-    char strip_editor[700];
-    snprintf(strip_editor, sizeof(strip_editor),
-             "%s/.strip_to_editor.sh", g_test_home);
-    FILE *ef = fopen(strip_editor, "w");
-    if (ef) {
-        fprintf(ef, "#!/bin/sh\n"
-                    "grep -v '^To:' \"$1\" > \"$1.tmp\"\n"
-                    "mv \"$1.tmp\" \"$1\"\n"
-                    "echo 'body' >> \"$1\"\n");
-        fclose(ef);
-        chmod(strip_editor, 0755);
-    }
-    setenv("EDITOR", strip_editor, 1);
-
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "TC-PCR-15: inbox opens");
     pty_send_str(s, "c");
     ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
-    pty_send_str(s, "alice@example.com");
-    pty_send_key(s, PTY_KEY_TAB);
-    pty_send_key(s, PTY_KEY_TAB);
-    pty_send_key(s, PTY_KEY_TAB);
-    pty_send_str(s, "No-To test");
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "Review", WAIT_MS);
-    ASSERT_WAIT_FOR(s, "To:", WAIT_MS);
-    /* [s] should not send; error about empty To expected */
-    pty_send_str(s, "s");
-    pty_settle(s, 300);
-    ASSERT_SCREEN_CONTAINS(s, "Review");
-    pty_send_str(s, "q");
-    pty_send_str(s, "y");
-
-    setenv("EDITOR", g_editor_script, 1);
+    ASSERT_WAIT_FOR(s, "To: is empty", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Review: Message");
+    pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
 
@@ -716,6 +682,7 @@ static void test_review_reply_uses_review_screen(void)
     pty_send_str(s, "r");
     ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT(pty_editor_type_and_leave(s, NULL) == 0, "TC-PCR-16: body editor opens");
     ASSERT_WAIT_FOR(s, "Review", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Review");
     ASSERT_SCREEN_NOT_CONTAINS(s, "Send? [y/n]");
@@ -757,7 +724,6 @@ int main(int argc, char *argv[])
     write_config();
     write_attach_files();
     write_contacts_tsv();
-    write_editor_script();
 
     /* ── TC-AT: Attach field ─────────────────────────────────────────── */
     printf("\n--- TC-AT: Attachment field in compose dialog (US-84) ---\n");

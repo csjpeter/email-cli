@@ -21,6 +21,8 @@ add_library(libemail STATIC
     src/core/imap_util.c
     src/core/input_line.c
     src/core/tui_frame.c
+    src/core/body_editor.c
+    src/core/compose_draft.c
     src/core/path_complete.c
     src/core/json_util.c
     src/infrastructure/config_store.c

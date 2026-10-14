@@ -39,6 +39,8 @@
 #include "mail_client.h"
 #include "input_line.h"
 #include "tui_frame.h"
+#include "body_editor.h"
+#include "compose_draft.h"
 #include "mail_rules.h"
 
 /* Number of non-data lines printed around the message table */
@@ -796,7 +798,7 @@ static void pcr_render(const char *from, const char *to, const char *cc,
     if (status_msg && status_msg[0])
         printf("  \033[31m%s\033[0m\n\n", status_msg);
 
-    printf("  \033[2m[s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Cancel\033[0m\n");
+    printf("  \033[2m[s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard\033[0m\n");
     fflush(stdout);
 }
 
@@ -948,7 +950,13 @@ static int post_compose_review(const char *from, const char *to,
 
         if (ch == 'q' || key == TERM_KEY_ESC || key == TERM_KEY_QUIT) {
             printf("\033[2J\033[H");
-            printf("  Discard draft? [y/n] ");
+            {
+                int nl = 0;
+                for (const char *p = body; p && *p; p++) if (*p == '\n') nl++;
+                if (body && body[0] && body[strlen(body) - 1] != '\n') nl++;
+                printf("\n  Discard draft? To: %s, Subject: %s, %d line(s), %d attachment(s) [y/n] ",
+                       to ? to : "", subject ? subject : "", nl, *attach_count);
+            }
             fflush(stdout);
             TermKey k2 = terminal_read_key();
             int ch2 = (k2 == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
@@ -1003,9 +1011,34 @@ static const char *from_address(const Config *cfg) {
     return cfg->smtp_user ? cfg->smtp_user : cfg->user;
 }
 
+/* The compose state the autosave writes out (EMAIL-87). */
+typedef struct {
+    const char *to, *cc, *bcc, *subj, *msgid;
+    char (*attach)[CD_ATTACH_PATH_SZ];
+    const int *attach_count;
+} DraftCtx;
+
+static void draft_autosave_cb(const char *text, void *ctx) {
+    const DraftCtx *dc = ctx;
+    ComposeDraft d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.to, sizeof(d.to), "%s", dc->to);
+    snprintf(d.cc, sizeof(d.cc), "%s", dc->cc);
+    snprintf(d.bcc, sizeof(d.bcc), "%s", dc->bcc);
+    snprintf(d.subject, sizeof(d.subject), "%s", dc->subj);
+    snprintf(d.in_reply_to, sizeof(d.in_reply_to), "%s", dc->msgid);
+    for (int i = 0; i < *dc->attach_count && i < 16; i++) {
+        snprintf(d.attach[i], sizeof(d.attach[i]), "%s", dc->attach[i]);
+        d.attach_count++;
+    }
+    d.body = (char *)text;
+    compose_draft_save(&d);
+}
+
 /**
- * @brief Interactive compose form — opens $EDITOR on a draft temp file,
- *        then shows a post-compose review screen (US-85).
+ * @brief Interactive compose form — the built-in body editor (tui_textedit,
+ *        autosaved draft, EMAIL-87), then the post-compose review screen
+ *        (US-85).
  *
  * Supports iterative editing: 's' sends, 'b' reopens editor, 'e' reopens
  * header dialog, 'a'/'d' manage attachments, 'q' discards.
@@ -1048,97 +1081,52 @@ static int cmd_compose_interactive(Config *cfg,
         attach_count = init_cd->attach_count;
     }
 
-    /* Create temp file for body editing */
-    char tmppath[] = "/tmp/email-tui-XXXXXX";
-    int fd = mkstemp(tmppath);
-    if (fd < 0) { perror("email-tui: mkstemp"); return -1; }
-    close(fd);
-
-    const char *editor = getenv("EDITOR");
-    if (!editor || !editor[0]) editor = "vim";
-
+    /* An unsent draft left by an earlier compose (EMAIL-87): offer it. */
     char *body = NULL;
-    size_t body_len = 0;
     int first_write = 1;
     int need_edit = 1;
     int send_rc = -1;
+    {
+        ComposeDraft old;
+        if (compose_draft_load(&old) == 0) {
+            printf("\033[2J\033[H\n  Unsent draft found (To: %s, Subject: %s).\n"
+                   "  Resume it? [y/N] ", old.to, old.subject);
+            fflush(stdout);
+            RAII_TERM_RAW TermRawState *rawq = terminal_raw_enter();
+            TermKey qk = terminal_read_key();
+            int qc = (qk == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
+            if (qc == 'y' || qc == 'Y') {
+                snprintf(to_buf, sizeof(to_buf), "%s", old.to);
+                snprintf(cc_buf, sizeof(cc_buf), "%s", old.cc);
+                snprintf(bcc_buf, sizeof(bcc_buf), "%s", old.bcc);
+                snprintf(subj_buf, sizeof(subj_buf), "%s", old.subject);
+                snprintf(msgid_buf, sizeof(msgid_buf), "%s", old.in_reply_to);
+                attach_count = 0;
+                for (int i = 0; i < old.attach_count && i < CD_MAX_ATTACH; i++) {
+                    snprintf(attach_paths[i], CD_ATTACH_PATH_SZ, "%s", old.attach[i]);
+                    attach_count++;
+                }
+                body = old.body ? strdup(old.body) : NULL;
+                first_write = 0;
+            }
+            compose_draft_free(&old);
+        }
+    }
 
     for (;;) {
         if (need_edit) {
-            /* Write draft to tmppath */
-            {
-                FILE *f = fopen(tmppath, "w");
-                if (!f) { free(body); unlink(tmppath); return -1; }
-                const char *fb = from_buf[0] ? from_buf : (from ? from : "");
-                fprintf(f, "From: %s\n",    fb);
-                fprintf(f, "To: %s\n",      to_buf);
-                if (cc_buf[0])    fprintf(f, "Cc: %s\n",          cc_buf);
-                if (bcc_buf[0])   fprintf(f, "Bcc: %s\n",         bcc_buf);
-                fprintf(f, "Subject: %s\n", subj_buf);
-                if (msgid_buf[0]) fprintf(f, "In-Reply-To: %s\n", msgid_buf);
-                fprintf(f, "\n");
-                if (body && body_len > 0) {
-                    fprintf(f, "%s", body);
-                } else if (first_write && prefill_body && prefill_body[0]) {
-                    fprintf(f, "%s", prefill_body);
-                }
-                first_write = 0;
-                fclose(f);
-            }
-
-            /* Restore cursor, then launch $EDITOR */
-            printf("\033[?25h");
-            fflush(stdout);
-            fflush(stderr);
-            {
-                char cmd_buf[1024];
-                snprintf(cmd_buf, sizeof(cmd_buf), "%s %s", editor, tmppath);
-                int rc = system(cmd_buf);
-                (void)rc;
-            }
-
-            /* Read back edited draft */
-            free(body); body = NULL; body_len = 0;
-            {
-                FILE *rf = fopen(tmppath, "r");
-                if (!rf) {
-                    fprintf(stderr, "Error: Could not read draft after editing.\n");
-                    unlink(tmppath);
-                    return -1;
-                }
-                /* Reset headers — re-parse from what editor saved */
-                from_buf[0] = to_buf[0] = cc_buf[0] = bcc_buf[0] = subj_buf[0] = '\0';
-                char line[4096];
-                int in_body = 0;
-                while (fgets(line, sizeof(line), rf)) {
-                    size_t ll = strlen(line);
-                    while (ll > 0 && (line[ll-1] == '\n' || line[ll-1] == '\r'))
-                        line[--ll] = '\0';
-                    if (!in_body) {
-                        if (ll == 0) { in_body = 1; continue; }
-#define HCOPY(dst, src) do { \
-    size_t _hl = strlen(src); \
-    if (_hl >= sizeof(dst)) _hl = sizeof(dst) - 1; \
-    memcpy((dst), (src), _hl); (dst)[_hl] = '\0'; } while (0)
-                        if      (strncasecmp(line, "From: ",        6) == 0) { HCOPY(from_buf,  line+6);  }
-                        else if (strncasecmp(line, "To: ",          4) == 0) { HCOPY(to_buf,    line+4);  }
-                        else if (strncasecmp(line, "Cc: ",          4) == 0) { HCOPY(cc_buf,    line+4);  }
-                        else if (strncasecmp(line, "Bcc: ",         5) == 0) { HCOPY(bcc_buf,   line+5);  }
-                        else if (strncasecmp(line, "Subject: ",     9) == 0) { HCOPY(subj_buf,  line+9);  }
-                        else if (strncasecmp(line, "In-Reply-To: ",13) == 0) { HCOPY(msgid_buf, line+13); }
-#undef HCOPY
-                    } else {
-                        size_t add = ll + 1;
-                        char *nb = realloc(body, body_len + add + 1);
-                        if (!nb) break;
-                        body = nb;
-                        memcpy(body + body_len, line, ll);
-                        body_len += ll;
-                        body[body_len++] = '\n';
-                        body[body_len]   = '\0';
-                    }
-                }
-                fclose(rf);
+            if (first_write && !body && prefill_body && prefill_body[0])
+                body = strdup(prefill_body);
+            first_write = 0;
+            DraftCtx dc = { to_buf, cc_buf, bcc_buf, subj_buf, msgid_buf,
+                            attach_paths, &attach_count };
+            char hdr[1100];
+            snprintf(hdr, sizeof(hdr), "  Message body — To: %s  Subject: %s",
+                     to_buf, subj_buf);
+            if (body_editor_run(&body, hdr, draft_autosave_cb, &dc) != 0) {
+                fprintf(stderr, "Error: Could not open the editor.\n");
+                free(body);
+                return -1;
             }
             need_edit = 0;
         }
@@ -1180,10 +1168,14 @@ static int cmd_compose_interactive(Config *cfg,
             if (cfg->gmail_mode) {
                 RAII_MAIL MailClient *mc = mail_client_connect((Config *)cfg);
                 send_rc = mc ? mail_client_append(mc, NULL, msg, msg_len) : -1;
-                if (send_rc == 0) printf("  Message sent.\n");
+                if (send_rc == 0) {
+                    compose_draft_remove();
+                    printf("  Message sent.\n");
+                }
             } else {
                 send_rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
                 if (send_rc == 0) {
+                    compose_draft_remove();   /* before anything can be cut short */
                     printf("  Message sent.\n");
                     fflush(stdout);
                     if (email_service_save_sent(cfg, msg, msg_len) == 0)
@@ -1193,8 +1185,10 @@ static int cmd_compose_interactive(Config *cfg,
                 } else {
                     printf("  Send failed. Saving to Drafts...\n");
                     fflush(stdout);
-                    if (email_service_save_draft(cfg, msg, msg_len) == 0)
+                    if (email_service_save_draft(cfg, msg, msg_len) == 0) {
+                        compose_draft_remove();
                         printf("  Saved to Drafts (will retry on next sync).\n");
+                    }
                     else
                         fprintf(stderr, "  Warning: could not save to local Drafts folder.\n");
                 }
@@ -1205,7 +1199,8 @@ static int cmd_compose_interactive(Config *cfg,
         }
 
         if (action == PCR_CANCEL) {
-            printf("  Cancelled. Draft discarded.\n");
+            compose_draft_remove();
+            printf("\n  Cancelled. Draft discarded.\n");
             fflush(stdout);
             send_rc = -1;
             break;
@@ -1238,7 +1233,6 @@ static int cmd_compose_interactive(Config *cfg,
         }
     }
 
-    unlink(tmppath);
     free(body);
     return send_rc;
 }
@@ -2184,16 +2178,13 @@ static void help_compose(void) {
     printf(
         "Usage: email-tui compose\n"
         "\n"
-        "Open $EDITOR to compose a new message.\n"
+        "Compose a new message: a form for To, Cc, Bcc, Subject and attachments,\n"
+        "then the built-in body editor.\n"
         "\n"
-        "After saving and exiting the editor, you will be asked to confirm\n"
-        "before the message is sent.\n"
-        "\n"
-        "Draft file headers:\n"
-        "  From:    sender address\n"
-        "  To:      recipient (required)\n"
-        "  Subject: message subject\n"
-        "  Cc:, Bcc: carbon copy recipients\n"
+        "Esc leaves the editor and saves the draft; Ctrl-S saves and stays.\n"
+        "The text is also saved after a few idle seconds, so nothing is lost\n"
+        "if the terminal dies; the next compose offers the draft again.  The\n"
+        "review screen then sends (s), edits (e, b, a, d) or discards (q).\n"
         "\n"
         "Options:\n"
         "  --help, -h   Show this help message\n"
@@ -2227,8 +2218,8 @@ static void help_reply(void) {
         "Arguments:\n"
         "  <uid>  Message UID to reply to (required)\n"
         "\n"
-        "Opens $EDITOR with a quoted draft. After saving and exiting the editor,\n"
-        "you will be asked to confirm before the reply is sent.\n"
+        "Opens the form, then the built-in body editor with the quoted message.\n"
+        "Esc leaves the editor and saves the draft; the review screen sends it.\n"
         "\n"
         "Options:\n"
         "  --help, -h   Show this help message\n"
@@ -2348,7 +2339,13 @@ int main(int argc, char *argv[]) {
         int rc = EXIT_FAILURE;
 
         if (strcmp(subcmd, "compose") == 0) {
-            int cr = cmd_compose_interactive(cfg, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+            /* The headers are the dialog's; the editor holds the body only. */
+            CDResult dlg;
+            memset(&dlg, 0, sizeof(dlg));
+            int cr = -1;
+            if (compose_dialog(cfg, "New Message", NULL, NULL, NULL, &dlg))
+                cr = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc,
+                                             dlg.subj, NULL, NULL, &dlg);
             rc = (cr == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
         } else if (strcmp(subcmd, "send") == 0) {

@@ -80,23 +80,23 @@ File location: `~/.local/share/email-cli/accounts/<user>/contacts.tsv`
 | `;` | Commit current token and start new address in same field |
 | Backspace | Delete last char; if field is empty, remove last address |
 
-### Editor integration
+### Body editor and the autosaved draft (EMAIL-87, US-87)
 
-After the dialog is confirmed the editor is opened with a temp file that
-already has all headers pre-filled:
+After the dialog is confirmed the body is written in the built-in editor
+(`libemail/src/core/body_editor.c`, libtuikit `tui_textedit`); no external
+editor or temporary file is involved.  The headers stay in the dialog (and are
+edited again with `e` in the review screen).  The editor's title bar shows
+To and Subject; the bottom line reads `Esc=save and continue  Ctrl-S=save`.
 
-```
-From: me@example.com
-To: alice@example.com; bob.smith@acme.com
-Cc: carol@example.org
-Bcc: hidden@example.com
-Subject: Meeting tomorrow
-In-Reply-To: <msgid>   ← only for replies
-
-<cursor here>
-```
-
-The user writes the body and saves.  Bcc is stripped before sending.
+* Esc leaves the editor and saves; Ctrl-S saves and stays; a changed text is
+  saved after `BODY_EDITOR_AUTOSAVE_MS` (3 s) without input.  Nothing is asked
+  when leaving.
+* The draft is `<data dir>/email-cli/compose-draft` (mode 0600): the lines
+  `To:`, `Cc:`, `Bcc:`, `Subject:`, `In-Reply-To:`, one `Attach:` per file,
+  a blank line, the body (`libemail/src/core/compose_draft.c`).
+* A later compose finds it and asks `Resume it? [y/N]`.
+* The draft is removed by sending, by a send that was kept in Drafts, and by
+  the review screen's confirmed discard.  Bcc is stripped before sending.
 
 ### Empty-To guard
 

@@ -2093,6 +2093,124 @@ static void test_tui_list_content(void) {
     pty_close(s);
 }
 
+/* ── EMAIL-86: marks and bulk actions on the message list ───────────── */
+
+static void test_tui_list_space_marks(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "marks: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    pty_send_str(s, " ");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
+    /* one message: the cursor stays on it, so Space toggles the mark off */
+    pty_send_str(s, " ");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    pty_send_str(s, " ");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
+    pty_send_str(s, "x");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_list_esc_clears_marks(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "marks esc: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, " ");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_list_bulk_star_marked(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "bulk star: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, " ");
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "m");
+    ASSERT_WAIT_FOR(s, "1 marked message(s)", WAIT_MS);
+    pty_send_str(s, "f");
+    ASSERT_WAIT_FOR(s, "1 message(s) starred", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_list_bulk_cursor_row(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "bulk cursor: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "m");
+    ASSERT_WAIT_FOR(s, "1 message(s):", WAIT_MS);
+    pty_send_str(s, "u");
+    ASSERT_WAIT_FOR(s, "1 message(s) marked unread", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_list_bulk_cancel(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "bulk cancel: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, " ");
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "m");
+    ASSERT_WAIT_FOR(s, "Esc=cancel", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Esc=cancel");
+    ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_tui_list_bulk_delete_confirm(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "bulk delete: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, " ");
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "m");
+    ASSERT_WAIT_FOR(s, "Esc=cancel", WAIT_MS);
+    pty_send_str(s, "D");
+    ASSERT_WAIT_FOR(s, "1 message(s)? (y/N)", WAIT_MS);
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "(y/N)");
+    ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
+    pty_send_str(s, "m");
+    ASSERT_WAIT_FOR(s, "Esc=cancel", WAIT_MS);
+    pty_send_str(s, "D");
+    ASSERT_WAIT_FOR(s, "(y/N)", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "1 message(s) deleted", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 static void test_tui_list_esc_quit(void) {
     restart_mock();
     PtySession *s = tui_open_to_list();
@@ -4596,6 +4714,12 @@ int main(int argc, char *argv[]) {
 
     printf("\n--- email-tui: interactive ---\n");
     RUN_TEST(test_tui_list_content);
+    RUN_TEST(test_tui_list_space_marks);
+    RUN_TEST(test_tui_list_esc_clears_marks);
+    RUN_TEST(test_tui_list_bulk_star_marked);
+    RUN_TEST(test_tui_list_bulk_cursor_row);
+    RUN_TEST(test_tui_list_bulk_cancel);
+    RUN_TEST(test_tui_list_bulk_delete_confirm);
     RUN_TEST(test_tui_list_esc_quit);
     RUN_TEST(test_tui_show_esc_exits);
 

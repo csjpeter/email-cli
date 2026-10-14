@@ -63,6 +63,13 @@ static int   g_shown_cols = COLS;   /* width of the session being recorded */
 
 /* ── Fixture ─────────────────────────────────────────────────────────── */
 
+/* What a view changes in the account: another port or password, TLS
+ * verification left on, a sync interval (cron mode).  Reset by use_home(). */
+static int         g_cfg_port = 0;
+static const char *g_cfg_pass = "testpass";
+static int         g_cfg_verify = 0;
+static int         g_cfg_interval = 0;
+
 static void write_account_config(void) {
     char dir[400], path[450];
     snprintf(dir, sizeof(dir), "%s/.config", g_home);            mkdir(g_home, 0700); mkdir(dir, 0700);
@@ -75,10 +82,13 @@ static void write_account_config(void) {
     fprintf(fp,
         "EMAIL_HOST=imaps://localhost:%d\n"
         "EMAIL_USER=testuser\n"
-        "EMAIL_PASS=testpass\n"
+        "EMAIL_PASS=%s\n"
         "EMAIL_FOLDER=INBOX\n"
-        "SSL_NO_VERIFY=1\n"
-        "SMTP_HOST=smtps://localhost:%d\n", g_imap_port, g_dead_port);
+        "%s"
+        "SMTP_HOST=smtps://localhost:%d\n",
+        g_cfg_port ? g_cfg_port : g_imap_port, g_cfg_pass,
+        g_cfg_verify ? "" : "SSL_NO_VERIFY=1\n", g_dead_port);
+    if (g_cfg_interval) fprintf(fp, "SYNC_INTERVAL=%d\n", g_cfg_interval);
     fclose(fp);
     chmod(path, 0600);
 }
@@ -109,6 +119,7 @@ static void remove_rules(void) {
 /** Every view starts from its own home: no saved cursor or preference of an
  *  earlier view is read (the folder browser remembers its last position). */
 static void use_home(const char *view) {
+    g_cfg_port = 0; g_cfg_pass = "testpass"; g_cfg_verify = 0; g_cfg_interval = 0;
     snprintf(g_home, sizeof(g_home), "%s", TP("h-"));
     size_t n = strlen(g_home);
     snprintf(g_home + n, sizeof(g_home) - n, "%s", view);
@@ -299,6 +310,45 @@ static PtySession *at_attach_reader(void) {
     if (pty_wait_for(s, "A=save-all", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
     return s;
+}
+
+/* An account that cannot be used: kind 1 connect (a dead port), 2 login (the
+ * server wants another password), 3 TLS (the self-signed certificate is
+ * verified).  The view is the folder browser's attempt after Enter. */
+static PtySession *at_error(int kind) {
+    if (kind == 1) g_cfg_port = g_dead_port;
+    if (kind == 3) g_cfg_verify = 1;
+    if (kind == 2) {
+        setenv("MOCK_IMAP_PASSWORD", "the-right-password", 1);
+        restart_mock();
+        unsetenv("MOCK_IMAP_PASSWORD");
+    }
+    write_account_config();
+    PtySession *s = at_accounts();
+    if (!s) return NULL;
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS * 4);
+    return s;
+}
+
+/* Cron mode: the list is read from the local cache, a background sync can
+ * run beside it.  The cache is filled by one email-sync run first. */
+static PtySession *at_cron_list(void) {
+    g_cfg_interval = 5;
+    write_account_config();
+    if (g_sync_bin[0]) {
+        setenv("HOME", g_home, 1);
+        unsetenv("XDG_DATA_HOME");
+        unsetenv("XDG_CONFIG_HOME");
+        unsetenv("XDG_CACHE_HOME");
+        pid_t pid = fork();
+        if (pid == 0) {
+            execl(g_sync_bin, "email-sync", (char *)NULL);
+            _exit(127);
+        }
+        if (pid > 0) waitpid(pid, NULL, 0);
+    }
+    return at_list();
 }
 
 static PtySession *at_rules(void) {
@@ -726,6 +776,18 @@ VIEW(dd_accepted,       at_list(),
 VIEW(path_many,         at_list(), (compose_type_path(s, "al"), (void)0))
 VIEW(path_one,          at_list(), (compose_type_path(s, "be"), (void)0))
 
+VIEW(err_connect,       at_error(1), (void)0)
+VIEW(err_login,         at_error(2), (void)0)
+VIEW(err_tls,           at_error(3), (void)0)
+VIEW(list_syncing,      at_cron_list(),
+     (pty_send_str(s, "s"), pty_wait_for(s, "syncing", WAIT_MS), pty_settle(s, 100)))
+VIEW(list_new_mail,     at_cron_list(),
+     (pty_send_str(s, "s"), pty_wait_for(s, "syncing", WAIT_MS), pty_settle(s, 3000),
+      pty_send_key(s, PTY_KEY_DOWN), pty_wait_for(s, "New mail", WAIT_MS),
+      pty_settle(s, SETTLE_MS)))
+VIEW(list_star_feedback, at_list(),
+     (pty_send_str(s, "f"), pty_settle(s, SETTLE_MS)))
+
 VIEW(body_editor,       at_list(), (to_editor(s), (void)0))
 VIEW(body_editor_typed, at_list(), (editor_typed(s), (void)0))
 VIEW(review,            at_list(), (to_review(s), (void)0))
@@ -861,6 +923,12 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_body_editor_typed);
     RUN_TEST(test_screen_review);
     RUN_TEST(test_screen_review_discard_ask);
+    RUN_TEST(test_screen_err_connect);
+    RUN_TEST(test_screen_err_login);
+    RUN_TEST(test_screen_err_tls);
+    RUN_TEST(test_screen_list_syncing);
+    RUN_TEST(test_screen_list_new_mail);
+    RUN_TEST(test_screen_list_star_feedback);
     RUN_TEST(test_screen_dd_many);
     RUN_TEST(test_screen_dd_one);
     RUN_TEST(test_screen_dd_second);

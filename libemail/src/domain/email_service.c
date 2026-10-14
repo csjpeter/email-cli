@@ -4801,7 +4801,7 @@ static void show_label_picker(MailClient *mc, const char *uid,
             else     fprintf(stderr, "\033[7m");
             fprintf(stderr, "\u2502 [%c] %-*.*s \u2502",
                     pick_on[i] ? 'x' : ' ',
-                    inner_w - 5, inner_w - 5,
+                    inner_w - 4, inner_w - 4,
                     pick_names[i]);
             fprintf(stderr, "\033[0m");
         }
@@ -4811,7 +4811,7 @@ static void show_label_picker(MailClient *mc, const char *uid,
         fprintf(stderr, "\u2518\033[0m");
 
         const char *foot = " \u2191\u2193=move  Enter=toggle  ESC=done ";
-        int flen = (int)strlen(foot);
+        int flen = tui_str_width(foot);
         if (flen < box_w) {
             int fc = col0 + (box_w - flen) / 2;
             fprintf(stderr, "\033[%d;%dH\033[2m%s\033[0m",

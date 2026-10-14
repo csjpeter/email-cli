@@ -1242,6 +1242,31 @@ static void test_interactive_empty_folder(void) {
     pty_close(s);
 }
 
+/* EMAIL-81: a folder whose name has wide characters takes one row, and the
+ * rows under it are not shifted: the folders with CJK and emoji names sit
+ * directly one under the other. */
+static void test_folder_tree_wide_characters_one_row_each(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "wide names: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    int umlaut = find_row(s, "Tr\xc3\xa4ger");
+    int cjk    = find_row(s, "\xe4\xb8\xad");
+    int emoji  = find_row(s, "\xf0\x9f\x98\x80");
+    ASSERT(umlaut >= 0 && cjk >= 0 && emoji >= 0, "wide names: all three folders shown");
+    if (umlaut >= 0 && cjk >= 0 && emoji >= 0) {
+        ASSERT(cjk == umlaut + 1, "wide names: the CJK folder is the row under the umlaut one");
+        ASSERT(emoji == cjk + 1, "wide names: the emoji folder is the row under the CJK one");
+    }
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 static void test_interactive_empty_folder_cron(void) {
     /* Cron mode: navigate to INBOX.Empty — cron config triggers ⚠ no-cache view */
     write_config_with_interval(15);
@@ -4388,6 +4413,7 @@ int main(int argc, char *argv[]) {
 
     printf("\n--- Empty folder ---\n");
     RUN_TEST(test_interactive_empty_folder);
+    RUN_TEST(test_folder_tree_wide_characters_one_row_each);
     RUN_TEST(test_interactive_empty_folder_cron);
 
     /* Remaining sections use batch commands — restore email-cli */

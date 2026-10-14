@@ -3708,3 +3708,220 @@ static const char *const sty_att_save_all[] = {
     NULL
 };
 static const int cur_att_save_all[3] = { 21, 95, 1 };
+
+static const char *const exp_review_full[] = {
+    "  Review: Message",
+    "",
+    "  From:    testuser",
+    "  To:      ann@example.org",
+    "  Cc:      cc@example.org",
+    "  Bcc:     bcc@example.org",
+    "  Subject: Quarterly report",
+    "  Body:    1 line",
+    "  Attach:  report.pdf",
+    "",
+    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    NULL
+};
+static const char *const sty_review_full[] = {
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "                                                                                                    ",
+    "  ddddd                                                                                             ",
+    "  ddd                                                                                               ",
+    "  ddd                                                                                               ",
+    "  dddd                                                                                              ",
+    "  dddddddd                                                                                          ",
+    "  ddddd                                                                                             ",
+    "  ddddddd                                                                                           ",
+    "                                                                                                    ",
+    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd       ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    NULL
+};
+static const int cur_review_full[3] = { 11, 0, 1 };
+
+static const char *const exp_review_long_to[] = {
+    "  Review: Message",
+    "",
+    "  From:    testuser",
+    "  To:      annabelle.longname@example.org;  bartholomew.longname@example.org;  cornelia.longname@exa",
+    "mple.org;  dominic.longname@example.org",
+    "  Cc:      cc@example.org",
+    "  Bcc:     bcc@example.org",
+    "  Subject: Quarterly report",
+    "  Body:    1 line",
+    "  Attach:  report.pdf",
+    "",
+    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    NULL
+};
+static const char *const sty_review_long_to[] = {
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "                                                                                                    ",
+    "  ddddd                                                                                             ",
+    "  ddd                                                                                               ",
+    "                                                                                                    ",
+    "  ddd                                                                                               ",
+    "  dddd                                                                                              ",
+    "  dddddddd                                                                                          ",
+    "  ddddd                                                                                             ",
+    "  ddddddd                                                                                           ",
+    "                                                                                                    ",
+    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd       ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    NULL
+};
+static const int cur_review_long_to[3] = { 12, 0, 1 };
+
+static const char *const exp_review_attach_ask[] = {
+    "  Add Attachment",
+    "",
+    "  Path:",
+    "",
+    "  Tab=complete  Enter=add  ESC=cancel",
+    NULL
+};
+static const char *const sty_review_attach_ask[] = {
+    "rrrrrrrrrrrrrrrr                                                                                    ",
+    "                                                                                                    ",
+    "  bbbbb                                                                                             ",
+    "                                                                                                    ",
+    "ddddddddddddddddddddddddddddddddddddd                                                               ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    NULL
+};
+static const int cur_review_attach_ask[3] = { 2, 8, 1 };
+
+static const char *const exp_review_attach_removed[] = {
+    "  Review: Message",
+    "",
+    "  From:    testuser",
+    "  To:      ann@example.org",
+    "  Cc:      cc@example.org",
+    "  Bcc:     bcc@example.org",
+    "  Subject: Quarterly report",
+    "  Body:    1 line",
+    "  Attach:  (none)",
+    "",
+    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    NULL
+};
+static const char *const sty_review_attach_removed[] = {
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "                                                                                                    ",
+    "  ddddd                                                                                             ",
+    "  ddd                                                                                               ",
+    "  ddd                                                                                               ",
+    "  dddd                                                                                              ",
+    "  dddddddd                                                                                          ",
+    "  ddddd                                                                                             ",
+    "  ddddddd                                                                                           ",
+    "                                                                                                    ",
+    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd       ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    NULL
+};
+static const int cur_review_attach_removed[3] = { 11, 0, 1 };
+
+static const char *const exp_review_send_failed[] = {
+    "  Review: Message",
+    "",
+    "  From:    testuser",
+    "  To:      ann@example.org",
+    "  Cc:      cc@example.org",
+    "  Bcc:     bcc@example.org",
+    "  Subject: Quarterly report",
+    "  Body:    1 line",
+    "  Attach:  report.pdf",
+    "",
+    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    "  Sending...",
+    "smtp_send: Could not connect to server",
+    "ERROR: smtp_send failed: Could not connect to server",
+    "  Send failed. Saving to Drafts...",
+    "  Saved to Drafts (will retry on next sync).",
+    "",
+    "  [Press any key to return to inbox]",
+    NULL
+};
+static const char *const sty_review_send_failed[] = {
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "                                                                                                    ",
+    "  ddddd                                                                                             ",
+    "  ddd                                                                                               ",
+    "  ddd                                                                                               ",
+    "  dddd                                                                                              ",
+    "  dddddddd                                                                                          ",
+    "  ddddd                                                                                             ",
+    "  ddddddd                                                                                           ",
+    "                                                                                                    ",
+    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd       ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    NULL
+};
+static const int cur_review_send_failed[3] = { 18, 0, 1 };

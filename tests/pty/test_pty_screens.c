@@ -508,6 +508,35 @@ static void to_review(PtySession *s) {
     pty_settle(s, SETTLE_MS);
 }
 
+/* The compose flow to the review screen with Cc, Bcc and an attachment. */
+static void to_review_full(PtySession *s, const char *to) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/report.pdf", g_home);
+    FILE *fp = fopen(path, "w");
+    if (fp) { fputs("%PDF", fp); fclose(fp); }
+    pty_send_str(s, "c");
+    pty_wait_for(s, "New Message", WAIT_MS);
+    pty_send_str(s, to);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_str(s, "cc@example.org");
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_str(s, "bcc@example.org");
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_str(s, "Quarterly report");
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_str(s, path);
+    pty_send_key(s, PTY_KEY_ENTER);   /* adds the attachment */
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);   /* confirms the dialog */
+    pty_wait_for(s, "Esc=save and continue", WAIT_MS);
+    pty_settle(s, 200);
+    pty_send_str(s, "Please find the report attached.");
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_wait_for(s, "[s] Send", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+}
+
 #define VIEW(name, open_expr, setup) \
     static void test_screen_##name(void) { \
         restart_mock(); \
@@ -622,6 +651,19 @@ VIEW(att_saved,         at_attach_reader(),
       pty_settle(s, SETTLE_MS)))
 VIEW(att_save_all,      at_attach_reader(),
      (pty_send_str(s, "A"), pty_settle(s, SETTLE_MS)))
+
+VIEW(review_full,       at_list(), (to_review_full(s, "ann@example.org"), (void)0))
+VIEW(review_long_to,    at_list(),
+     (to_review_full(s, "annabelle.longname@example.org; bartholomew.longname@example.org; "
+                        "cornelia.longname@example.org; dominic.longname@example.org"), (void)0))
+VIEW(review_attach_ask, at_list(),
+     (to_review_full(s, "ann@example.org"), pty_send_str(s, "a"),
+      pty_wait_for(s, "Add Attachment", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(review_attach_removed, at_list(),
+     (to_review_full(s, "ann@example.org"), pty_send_str(s, "d"), pty_settle(s, SETTLE_MS)))
+VIEW(review_send_failed, at_list(),
+     (to_review_full(s, "ann@example.org"), pty_send_str(s, "s"),
+      pty_wait_for(s, "Saved to Drafts", WAIT_MS), pty_settle(s, SETTLE_MS)))
 
 VIEW(body_editor,       at_list(), (to_editor(s), (void)0))
 VIEW(body_editor_typed, at_list(), (editor_typed(s), (void)0))
@@ -758,6 +800,11 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_body_editor_typed);
     RUN_TEST(test_screen_review);
     RUN_TEST(test_screen_review_discard_ask);
+    RUN_TEST(test_screen_review_full);
+    RUN_TEST(test_screen_review_long_to);
+    RUN_TEST(test_screen_review_attach_ask);
+    RUN_TEST(test_screen_review_attach_removed);
+    RUN_TEST(test_screen_review_send_failed);
     RUN_TEST(test_screen_att_reader);
     RUN_TEST(test_screen_att_picker);
     RUN_TEST(test_screen_att_picker_second);

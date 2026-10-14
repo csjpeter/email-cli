@@ -2229,6 +2229,162 @@ static int list_empty_cache_view(const Config *cfg, const EmailListOpts *opts,
     }
 }
 
+/* ── Bulk actions on the marked messages of the TUI list (EMAIL-86) ─────
+ *
+ * The marked rows are the table's marks (Space marks and steps down); the
+ * action menu (m) applies one change to every marked message, or to the
+ * message under the cursor when none is marked.  Each function does what the
+ * single-message key does for one entry, and returns 0 or -1; a failure is
+ * counted and the rest are still done. */
+typedef struct {
+    const Config *cfg;
+    MailClient   *mc;               /* may be NULL (offline: queued for sync) */
+    Manifest     *manifest;
+    MsgEntry     *entries;
+    const char   *folder;
+    int           is_gmail;
+    int           is_virtual_flags;
+    int           is_virtual_search;
+    int          *pend_remove;      /* may be NULL */
+    int          *pend_label;       /* may be NULL */
+} BulkCtx;
+
+static const char *bulk_folder(const BulkCtx *b, int ei) {
+    return b->entries[ei].folder[0] ? b->entries[ei].folder : b->folder;
+}
+
+/* Writes the entry's flags to the manifest(s) like the single-key handlers. */
+static void bulk_save_flags(BulkCtx *b, int ei) {
+    const char *uid = b->entries[ei].uid;
+    const char *efolder = bulk_folder(b, ei);
+    ManifestEntry *me = manifest_find(b->manifest, uid);
+    if (me) me->flags = b->entries[ei].flags;
+    if (b->is_virtual_flags) {
+        Manifest *fm = manifest_load(efolder);
+        if (fm) {
+            ManifestEntry *fme = manifest_find(fm, uid);
+            if (fme) { fme->flags = b->entries[ei].flags; manifest_save(efolder, fm); }
+            manifest_free(fm);
+        }
+    } else if (!b->is_virtual_search) {
+        manifest_save(efolder, b->manifest);
+    }
+}
+
+/** Sets (@p want_bit 1) or clears (0) one flag bit of entry @p ei; the
+ *  server's \Seen goes the other way round for MSG_FLAG_UNSEEN. */
+static int bulk_set_flag(BulkCtx *b, int ei, int bit, const char *flag_name,
+                         int want_bit) {
+    MsgEntry *e = &b->entries[ei];
+    int currently = (e->flags & bit) != 0;
+    if (currently == (want_bit != 0)) return 0;
+    const char *uid = e->uid;
+    const char *efolder = bulk_folder(b, ei);
+    int add_flag = (bit == MSG_FLAG_UNSEEN) ? !want_bit : want_bit;
+
+    local_pending_flag_add(efolder, uid, flag_name, add_flag);
+    e->flags ^= bit;
+    bulk_save_flags(b, ei);
+
+    int rc = 0;
+    if (b->is_gmail) {
+        const char *lbl = (bit == MSG_FLAG_UNSEEN)  ? "UNREAD"
+                        : (bit == MSG_FLAG_FLAGGED) ? "STARRED" : NULL;
+        if (lbl) {
+            if (want_bit) {
+                label_idx_add(lbl, uid);
+                local_hdr_update_labels("", uid, &lbl, 1, NULL, 0);
+            } else {
+                label_idx_remove(lbl, uid);
+                local_hdr_update_labels("", uid, NULL, 0, &lbl, 1);
+            }
+        } else {
+            local_hdr_update_flags("", uid, e->flags);
+        }
+        flag_push_background(b->cfg, uid, flag_name, add_flag);
+    } else if (b->mc) {
+        rc = mail_client_set_flag(b->mc, uid, flag_name, add_flag);
+    }
+    return rc == 0 ? 0 : -1;
+}
+
+/** Adds (@p on 1) or removes (0) a Gmail label on entry @p ei. */
+static int bulk_label(BulkCtx *b, int ei, const char *label, int on) {
+    const char *uid = b->entries[ei].uid;
+    int rc = 0;
+    if (b->mc) rc = mail_client_modify_label(b->mc, uid, label, on);
+    if (on) {
+        label_idx_add(label, uid);
+        local_hdr_update_labels("", uid, &label, 1, NULL, 0);
+    } else {
+        label_idx_remove(label, uid);
+        local_hdr_update_labels("", uid, NULL, 0, &label, 1);
+    }
+    return rc == 0 ? 0 : -1;
+}
+
+/** Moves entry @p ei to folder @p target (IMAP) or to the label @p target
+ *  taking the current label away (Gmail). */
+static int bulk_move(BulkCtx *b, int ei, const char *target) {
+    const char *uid = b->entries[ei].uid;
+    const char *efolder = bulk_folder(b, ei);
+    int rc = 0;
+    if (b->is_gmail) {
+        if (efolder[0] != '_' && strcmp(efolder, target) != 0)
+            rc |= bulk_label(b, ei, efolder, 0);
+        rc |= bulk_label(b, ei, target, 1);
+        if (b->pend_label && efolder[0] != '_') b->pend_label[ei] = 1;
+        return rc == 0 ? 0 : -1;
+    }
+    if (b->mc) rc = mail_client_move_to_folder(b->mc, uid, target);
+    if (rc == 0) {
+        manifest_remove(b->manifest, uid);
+        if (b->pend_remove) b->pend_remove[ei] = 1;
+        if (!b->is_virtual_flags && !b->is_virtual_search)
+            manifest_save(efolder, b->manifest);
+    }
+    return rc == 0 ? 0 : -1;
+}
+
+/** Trash (or, in the trash, delete for good) entry @p ei. */
+static int bulk_delete(BulkCtx *b, int ei) {
+    const char *uid = b->entries[ei].uid;
+    const char *efolder = bulk_folder(b, ei);
+    int rc = 0;
+    if (b->is_gmail) {
+        int in_trash = strcmp(b->folder, "_trash") == 0;
+        if (in_trash) {
+            if (b->mc) rc = mail_client_delete(b->mc, uid);
+            label_idx_remove("_trash", uid);
+        } else {
+            if (b->mc) rc = mail_client_trash(b->mc, uid);
+            char **all_labels = NULL;
+            int all_count = 0;
+            label_idx_list(&all_labels, &all_count);
+            for (int j = 0; j < all_count; j++) {
+                label_idx_remove(all_labels[j], uid);
+                free(all_labels[j]);
+            }
+            free(all_labels);
+            label_idx_add("_trash", uid);
+        }
+    } else {
+        const char *trf = b->cfg->trash_folder ? b->cfg->trash_folder : "Trash";
+        if (strcmp(efolder, trf) == 0) {
+            if (b->mc) rc = mail_client_delete(b->mc, uid);
+        } else {
+            if (b->mc) rc = mail_client_move_to_folder(b->mc, uid, trf);
+        }
+    }
+    if (rc == 0) {
+        manifest_remove(b->manifest, uid);
+        if (b->pend_remove) b->pend_remove[ei] = 1;
+        if (!b->is_virtual_flags && !b->is_virtual_search)
+            manifest_save(efolder, b->manifest);
+    }
+    return rc == 0 ? 0 : -1;
+}
+
 /* Model of the message list's table (tui_table) in the TUI: the rows are the
  * entries shown (through the filter map when a filter is active).  Columns:
  * Date, Sts, Subject, From.  A row with a pending operation carries a mark
@@ -2334,6 +2490,19 @@ static void msglist_cell(void *ctx, int i, int col, tui_table_cell *c) {
     else
         tui_table_cell_put(c, "-", plain);
 }
+/* Identity of a table row for the marks: the entry's UID, so the marks stay
+ * with the message when a filter hides or reorders rows. */
+static uint64_t msglist_row_id(void *ctx, int index) {
+    const MsgListModel *m = ctx;
+    const char *uid = m->entries[mlm_index(m, index)].uid;
+    uint64_t h = 1469598103934665603ULL;            /* FNV-1a */
+    for (const unsigned char *p = (const unsigned char *)uid; *p; p++) {
+        h ^= *p;
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
 
 int email_service_list(const Config *cfg, EmailListOpts *opts) {
     /* Always re-initialise the local store so the correct account's manifests
@@ -2846,6 +3015,21 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                                           ? terminal_raw_enter()
                                           : NULL;
 
+    /* The TUI's table: columns, model and the marks of Space (EMAIL-86). */
+    static const tui_table_col list_cols[] = {
+        { "Date",    16, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
+        { "Sts",      6, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
+        { "Subject", 10, 3, TUI_ALIGN_LEFT, 0, 0, 0 },
+        { "From",    10, 2, TUI_ALIGN_LEFT, 0, 0, 0 },
+    };
+    MsgListModel lmodel = { entries, NULL, manifest, pending_remove, pending_label,
+                            pending_restore, 0 };
+    tui_table_model ltmodel = { msglist_row, msglist_cell, &lmodel };
+    tui_table ltbl;
+    tui_table_init(&ltbl, list_cols, 4, &ltmodel);
+    ltbl.flags |= TUI_TABLE_RULER | TUI_TABLE_MARKS;
+    tui_table_set_row_id(&ltbl, msglist_row_id, &lmodel);
+
     for (;;) {
         /* Number of rows visible under current filter (= show_count when no filter) */
         int disp_count = filter_active ? fcount : show_count;
@@ -2994,6 +3178,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             }
             if (opts->pager) {
                 /* TUI mode: the header bar is drawn with the table */
+                int nm = tui_table_marked_count(&ltbl);
+                if (nm > 0) {
+                    size_t cl_len = strlen(cl);
+                    snprintf(cl + cl_len, sizeof(cl) - cl_len, "  [%d marked]", nm);
+                }
                 snprintf(pager_hdr, sizeof(pager_hdr), "%s", cl);
             } else {
                 printf("%s\n\n", cl);
@@ -3021,20 +3210,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         }
 
         /* TUI: the rows are drawn by the table, one frame per fetched row so a
-         * slow fetch shows progress, and a last frame when the window is full. */
-        static const tui_table_col list_cols[] = {
-            { "Date",    16, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
-            { "Sts",      6, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
-            { "Subject", 10, 3, TUI_ALIGN_LEFT, 0, 0, 0 },
-            { "From",    10, 2, TUI_ALIGN_LEFT, 0, 0, 0 },
-        };
-        MsgListModel lmodel = { entries, (filter_active && fentries) ? fentries : NULL,
-                                manifest, pending_remove, pending_label,
-                                pending_restore, 0 };
-        tui_table_model ltmodel = { msglist_row, msglist_cell, &lmodel };
-        tui_table ltbl;
-        tui_table_init(&ltbl, list_cols, 4, &ltmodel);
-        ltbl.flags |= TUI_TABLE_RULER;
+         * slow fetch shows progress, and a last frame when the window is full.
+         * The table itself (its marks) lives across the iterations. */
+        lmodel.fentries = (filter_active && fentries) ? fentries : NULL;
         int pager_frame = opts->pager && !opts->json;
         int pager_rows = terminal_rows();
         int pager_cols = terminal_cols();
@@ -3334,14 +3512,14 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Esc/q/BS=labels"
                              "  D=del  u=restore  t=labels  n=unread  f=star"
-                             "  s=sync  U=refresh  l=rules  [%d/%d]",
+                             "  s=sync  U=refresh  l=rules  Space=mark  m=bulk  [%d/%d]",
                              show_count > 0 ? cursor + 1 : 0, show_count);
                 } else {
                     snprintf(sb, sizeof(sb),
                              "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                              "  Esc/q/BS=labels"
                              "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star  a=archive"
-                             "  d=rm-label  D=trash  t=labels  s=sync  U=refresh  l=rules  [%d/%d]",
+                             "  d=rm-label  D=trash  t=labels  s=sync  U=refresh  l=rules  Space=mark  m=bulk  [%d/%d]",
                              show_count > 0 ? cursor + 1 : 0, show_count);
                 }
             } else {
@@ -3351,7 +3529,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                          "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
                          "  Esc/q/BS=folders"
                          "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                         "  %s  s=sync  U=refresh  l=rules  [%d/%d]",
+                         "  %s  s=sync  U=refresh  l=rules  Space=mark  m=bulk  [%d/%d]",
                          imap_in_trash ? "D=del" : "D=trash",
                          cursor + 1, show_count);
             }
@@ -3422,6 +3600,11 @@ read_key_again: ;
         case TERM_KEY_QUIT:
             goto list_done;          /* ctrl-c: list_result 0 = quit at once */
         case TERM_KEY_ESC:
+            if (tui_table_marked_count(&ltbl) > 0) {
+                /* First Esc drops the marks; the next goes on */
+                tui_table_clear_marks(&ltbl);
+                break;
+            }
             if (filter_active) {
                 /* First Esc clears the filter; the next goes back */
                 filter_active   = 0;
@@ -3536,6 +3719,106 @@ read_key_again: ;
                 break;
             }
 
+            /* ── Marks (EMAIL-86): Space marks and steps down, x clears ──── */
+            if (ch == ' ' && !filter_input && disp_count > 0) {
+                tui_table_set_marked(&ltbl, cursor, !tui_table_marked(&ltbl, cursor));
+                if (cursor < disp_count - 1) cursor++;
+                break;
+            }
+            if (ch == 'x' && !filter_input) {
+                tui_table_clear_marks(&ltbl);
+                break;
+            }
+            if (ch == 'm' && !filter_input && disp_count > 0) {
+                /* Action menu on the marked messages (or the one under the
+                 * cursor).  One key chooses; Esc leaves. */
+                int *targets = malloc((size_t)disp_count * sizeof(int));
+                int nt = 0;
+                for (int di = 0; targets && di < disp_count; di++)
+                    if (tui_table_marked(&ltbl, di))
+                        targets[nt++] = (filter_active && fentries) ? fentries[di] : di;
+                int on_marked = nt > 0;
+                if (targets && nt == 0)
+                    targets[nt++] = (filter_active && fentries) ? fentries[cursor] : cursor;
+                int trows_m = terminal_rows();
+                if (trows_m <= 0) trows_m = 24;
+                int tcols_m = terminal_cols();
+                if (tcols_m <= 0) tcols_m = 80;
+                BulkCtx bctx = { cfg, list_mc, manifest, entries, folder, is_gmail,
+                                 is_virtual_flags, is_virtual_search,
+                                 pending_remove, pending_label };
+                char ask[400];
+                snprintf(ask, sizeof(ask),
+                         "  %d %smessage(s): r=read u=unread f=star F=unstar %sm=move D=%s  Esc=cancel",
+                         nt, on_marked ? "marked " : "",
+                         is_gmail ? "l=+label L=-label " : "",
+                         is_gmail && strcmp(folder, "_trash") == 0 ? "delete" : "trash");
+                print_infoline(trows_m, tcols_m, ask);
+                TermKey mk = terminal_read_key();
+                int mc2 = terminal_last_printable();
+                fprintf(stderr, "\r\033[K"); fflush(stderr);
+                int done = 0, failed = 0;
+                const char *what = NULL;
+                char argbuf[256] = "";
+                int act = 0;   /* 1 flags, 2 label add, 3 label rm, 4 move, 5 delete */
+                if (targets && mk == TERM_KEY_IGNORE) {
+                    if (mc2 == 'r' || mc2 == 'u' || mc2 == 'f' || mc2 == 'F') act = 1;
+                    else if (mc2 == 'l' && is_gmail) act = 2;
+                    else if (mc2 == 'L' && is_gmail) act = 3;
+                    else if (mc2 == 'm') act = 4;
+                    else if (mc2 == 'D') act = 5;
+                }
+                if (act == 2 || act == 3 || act == 4) {
+                    InputLine il = {0};
+                    input_line_init(&il, argbuf, sizeof(argbuf), NULL);
+                    const char *prompt = act == 2 ? "Add label: "
+                                       : act == 3 ? "Remove label: "
+                                       : is_gmail ? "Move to label: " : "Move to folder: ";
+                    if (!input_line_run(&il, trows_m - 1, prompt) || !argbuf[0]) act = 0;
+                }
+                if (act == 5) {
+                    int in_trash = is_gmail ? strcmp(folder, "_trash") == 0
+                                            : strcmp(cfg->trash_folder ? cfg->trash_folder
+                                                                       : "Trash", folder) == 0;
+                    char q[300];
+                    snprintf(q, sizeof(q), "  %s %d message(s)? (y/N)",
+                             in_trash ? "Delete for good" : "Move to Trash", nt);
+                    print_infoline(trows_m, tcols_m, q);
+                    TermKey ck = terminal_read_key();
+                    int cch = terminal_last_printable();
+                    fprintf(stderr, "\r\033[K"); fflush(stderr);
+                    if (!(ck == TERM_KEY_IGNORE && (cch == 'y' || cch == 'Y'))) act = 0;
+                }
+                for (int ti = 0; act && ti < nt; ti++) {
+                    int rc = 0;
+                    int ei = targets[ti];
+                    switch (act) {
+                    case 1:
+                        if (mc2 == 'r')      { rc = bulk_set_flag(&bctx, ei, MSG_FLAG_UNSEEN,  "\\Seen",    0); what = "marked read"; }
+                        else if (mc2 == 'u') { rc = bulk_set_flag(&bctx, ei, MSG_FLAG_UNSEEN,  "\\Seen",    1); what = "marked unread"; }
+                        else if (mc2 == 'f') { rc = bulk_set_flag(&bctx, ei, MSG_FLAG_FLAGGED, "\\Flagged", 1); what = "starred"; }
+                        else                 { rc = bulk_set_flag(&bctx, ei, MSG_FLAG_FLAGGED, "\\Flagged", 0); what = "unstarred"; }
+                        break;
+                    case 2: rc = bulk_label(&bctx, ei, argbuf, 1); what = "labelled"; break;
+                    case 3: rc = bulk_label(&bctx, ei, argbuf, 0); what = "label removed from"; break;
+                    case 4: rc = bulk_move(&bctx, ei, argbuf); what = "moved"; break;
+                    case 5: rc = bulk_delete(&bctx, ei); what = "deleted"; break;
+                    }
+                    if (rc == 0) done++; else failed++;
+                }
+                if (act) {
+                    if (failed)
+                        snprintf(feedback_msg, sizeof(feedback_msg),
+                                 "%d message(s) %s, %d failed", done, what, failed);
+                    else
+                        snprintf(feedback_msg, sizeof(feedback_msg),
+                                 "%d message(s) %s", done, what);
+                    tui_table_clear_marks(&ltbl);
+                }
+                free(targets);
+                break;
+            }
+
             /* ── Normal action keys ─────────────────────────────────────── */
             int ei_cur = (filter_active && fentries) ? fentries[cursor] : cursor;
             const char *efolder = entries[ei_cur].folder[0] ? entries[ei_cur].folder : folder;
@@ -3586,6 +3869,9 @@ read_key_again: ;
                         { "A",                 "Reply-all to selected message"   },
                         { "F",                 "Forward selected message"        },
                         { "c",                 "Compose new message"             },
+                        { "Space",             "Mark / unmark and step down"     },
+                        { "x",                 "Clear all marks"                 },
+                        { "m",                 "Actions on the marked messages"  },
                         { "n",                 "Toggle Unread label"             },
                         { "f",                 "Toggle Starred label"            },
                         { "a",                 "Archive (remove INBOX label)"    },
@@ -3617,6 +3903,9 @@ read_key_again: ;
                         { "A",                 "Reply-all to selected message"   },
                         { "F",                 "Forward selected message"        },
                         { "c",                 "Compose new message"             },
+                        { "Space",             "Mark / unmark and step down"     },
+                        { "x",                 "Clear all marks"                 },
+                        { "m",                 "Actions on the marked messages"  },
                         { "n",                 "Toggle New (unread) flag"        },
                         { "f",                 "Toggle Flagged (starred) flag"   },
                         { "j",                 "Toggle Junk (spam) flag"         },
@@ -3977,6 +4266,7 @@ read_key_again: ;
         }
     }
 list_done:
+    tui_table_free(&ltbl);
     free(pending_remove);
     free(pending_label);
     free(pending_restore);

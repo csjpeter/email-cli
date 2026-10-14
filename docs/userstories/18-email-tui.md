@@ -31,8 +31,8 @@ email-tui [--batch] [command] [options]
 
 ### Message List (reached from folder browser)
 13. The message list behaves identically to `email-cli`, plus additional write-capable keys:
-    - `c` — compose a new message (opens `$EDITOR`; see [US-20](20-compose-reply.md)).
-    - `r` — reply to the selected message (opens `$EDITOR` with quoted body).
+    - `c` — compose a new message (form, then the built-in body editor; see [US-20](20-compose-reply.md), [US-87](87-body-editor-autosave.md)).
+    - `r` — reply to the selected message (built-in body editor with the quoted body).
     - `s` — start background sync (see US-19).
     - `R` — refresh the list from local cache.
     - `n` / `f` / `d` — set IMAP keyword flags on the selected message.

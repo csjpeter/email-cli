@@ -22,6 +22,7 @@
 #include "ptytest.h"
 #include "pty_assert.h"
 #include "test_scratch.h"
+#include "pty_editor.h"
 
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -49,7 +50,6 @@ static char g_smtp_bin[512];
 
 static char g_test_home[512];
 static char g_old_home[512];
-static char g_editor_script[600]; /* path to fake editor script */
 
 static pid_t g_imap_pid = -1;
 static pid_t g_smtp_pid = -1;
@@ -62,24 +62,6 @@ static int   g_smtp_port = 0;
 #define COLS 120
 
 #define RUN_TEST(fn) do { if (!test_selected(#fn)) break; printf("  %s...\n", #fn); fflush(stdout); fn(); } while(0)
-
-/* ── Fake editor ─────────────────────────────────────────────────────── */
-
-/*
- * Write a tiny shell script that appends "Test body\n" to the first
- * argument (the draft file) then exits 0.  This lets us simulate the
- * user writing a body without actually launching vim.
- */
-static void write_editor_script(void) {
-    snprintf(g_editor_script, sizeof(g_editor_script),
-             "%s/.fake_editor.sh", g_test_home);
-    FILE *f = fopen(g_editor_script, "w");
-    if (!f) return;
-    fprintf(f, "#!/bin/sh\necho 'Test body' >> \"$1\"\n");
-    fclose(f);
-    chmod(g_editor_script, 0755);
-    setenv("EDITOR", g_editor_script, 1);
-}
 
 /* ── Config helpers ──────────────────────────────────────────────────── */
 
@@ -199,11 +181,13 @@ static void stop_server(pid_t *pid_out) {
 }
 
 static void restart_imap(void) {
+    pty_editor_forget_draft(g_test_home);
     stop_server(&g_imap_pid);
     (void)start_server(g_imap_bin, "MOCK_IMAP", &g_imap_pid, &g_imap_port);
 }
 
 static void restart_smtp(void) {
+    pty_editor_forget_draft(g_test_home);
     stop_server(&g_smtp_pid);
     (void)start_server(g_smtp_bin, "MOCK_SMTP", &g_smtp_pid, &g_smtp_port);
 }
@@ -233,8 +217,31 @@ static PtySession *tui_run(const char **extra_args) {
 /* US-85: submitting the compose dialog runs $EDITOR and then shows the
  * post-compose review screen.  Press 's' there to actually send. */
 static void pcr_send(PtySession *s) {
+    if (pty_editor_type_and_leave(s, "Test body") != 0)
+        printf("  [WARN] pcr_send: editor did not appear\n");
     if (pty_wait_for(s, "Review: Message", WAIT_MS) != 0)
         printf("  [WARN] pcr_send: review screen did not appear\n");
+    pty_send_str(s, "s");
+}
+
+/* The same, but copies the autosaved compose draft to @p capture first, so a
+ * test can look at what the editor held (headers and the body text). */
+static void pcr_send_capture(PtySession *s, const char *capture) {
+    if (pty_editor_type_and_leave(s, "Test body") != 0)
+        printf("  [WARN] pcr_send_capture: editor did not appear\n");
+    if (pty_wait_for(s, "Review: Message", WAIT_MS) != 0)
+        printf("  [WARN] pcr_send_capture: review screen did not appear\n");
+    char src[700];
+    snprintf(src, sizeof(src), "%s/.local/share/email-cli/compose-draft", g_test_home);
+    FILE *in = fopen(src, "r");
+    FILE *out = fopen(capture, "w");
+    if (in && out) {
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, n, out);
+    }
+    if (in) fclose(in);
+    if (out) fclose(out);
     pty_send_str(s, "s");
 }
 
@@ -418,10 +425,225 @@ static void test_compose_empty_subject_y_opens_editor(void) {
     pty_close(s);
 }
 
+/* ── EMAIL-87: the body editor (tui_textedit) and the autosaved draft ──── */
+
+static void draft_file(char *buf, size_t size) {
+    snprintf(buf, size, "%s/.local/share/email-cli/compose-draft", g_test_home);
+}
+
+static int draft_contains(const char *needle) {
+    char path[700], txt[16384];
+    draft_file(path, sizeof(path));
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    size_t n = fread(txt, 1, sizeof(txt) - 1, f);
+    fclose(f);
+    txt[n] = '\0';
+    return strstr(txt, needle) != NULL;
+}
+
+static void draft_clear(void) {
+    char path[700];
+    draft_file(path, sizeof(path));
+    unlink(path);
+}
+
+/* Inbox, `c`, a filled dialog, Enter: the body editor is on screen. */
+static PtySession *open_body_editor(const char *subject) {
+    PtySession *s = tui_open_to_inbox();
+    if (!s) return NULL;
+    pty_send_str(s, "c");
+    if (pty_wait_for(s, "New Message", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_send_str(s, "alice@example.com");
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_str(s, subject);
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, PTY_EDITOR_MARK, WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, 150);
+    return s;
+}
+
+static void test_body_editor_type_and_esc_saves(void) {
+    restart_imap(); restart_smtp(); draft_clear();
+    PtySession *s = open_body_editor("Editor basics");
+    ASSERT(s != NULL, "body editor: opens after the dialog");
+    pty_send_str(s, "first line\rsecond line");
+    ASSERT_WAIT_FOR(s, "second line", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "first line");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Body:    2 lines", WAIT_MS);
+    ASSERT(draft_contains("first line\nsecond line"), "body editor: Esc saved the draft");
+    ASSERT(draft_contains("Subject: Editor basics"), "body editor: the draft holds the headers");
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Editor basics");
+    pty_send_str(s, "n");              /* declined: still in review, draft kept */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[s] Send");
+    ASSERT(draft_contains("second line"), "body editor: declining keeps the draft");
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Cancelled. Draft discarded.", WAIT_MS);
+    pty_close(s);
+    ASSERT(!draft_contains("Subject:"), "body editor: discarding removed the draft");
+}
+
+static void test_body_editor_autosave_while_typing(void) {
+    restart_imap(); restart_smtp(); draft_clear();
+    PtySession *s = open_body_editor("Autosave");
+    ASSERT(s != NULL, "autosave: opens");
+    pty_send_str(s, "typed, never left with Esc");
+    ASSERT_WAIT_FOR(s, "autosaved", 8000);
+    ASSERT(draft_contains("typed, never left with Esc"), "autosave: the idle edit is on disk");
+    pty_close(s);                       /* killed: the text survives */
+    ASSERT(draft_contains("typed, never left with Esc"), "autosave: it survives a kill");
+    draft_clear();
+}
+
+static void test_body_editor_reopen_restores(void) {
+    restart_imap(); restart_smtp(); draft_clear();
+    PtySession *s = open_body_editor("Come back");
+    ASSERT(s != NULL, "restore: opens");
+    pty_send_str(s, "kept across sessions");
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    pty_close(s);                       /* the review is left without sending */
+
+    s = tui_open_to_inbox();
+    ASSERT(s != NULL, "restore: second session reaches the inbox");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_send_str(s, "bob@example.org");
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_str(s, "Another");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Unsent draft found", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Come back");
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, PTY_EDITOR_MARK, WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "kept across sessions");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "alice@example.com");
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
+static void test_body_editor_resume_declined(void) {
+    restart_imap(); restart_smtp(); draft_clear();
+    PtySession *s = open_body_editor("Old one");
+    ASSERT(s != NULL, "resume n: opens");
+    pty_send_str(s, "old text");
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    pty_close(s);
+
+    s = tui_open_to_inbox();
+    ASSERT(s != NULL, "resume n: second session reaches the inbox");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_send_str(s, "bob@example.org");
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_str(s, "New one");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Unsent draft found", WAIT_MS);
+    pty_send_str(s, "n");
+    ASSERT_WAIT_FOR(s, PTY_EDITOR_MARK, WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "old text");
+    ASSERT_SCREEN_CONTAINS(s, "New one");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
+static void test_body_editor_paste_and_wide(void) {
+    restart_imap(); restart_smtp(); draft_clear();
+    PtySession *s = open_body_editor("Paste");
+    ASSERT(s != NULL, "paste: opens");
+    /* bracketed paste of three lines, then wide and accented characters */
+    pty_send_str(s, "\033[200~one\ntwo\nthree\033[201~");
+    pty_send_str(s, " \xe4\xbd\xa0\xe5\xa5\xbd caf\xc3\xa9");
+    ASSERT_WAIT_FOR(s, "caf", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "one");
+    ASSERT_SCREEN_CONTAINS(s, "three");
+    ASSERT_SCREEN_CONTAINS(s, "\xe4\xbd\xa0\xe5\xa5\xbd");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Body:    3 lines", WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
+static void test_body_editor_long_line_scrolls(void) {
+    restart_imap(); restart_smtp(); draft_clear();
+    PtySession *s = open_body_editor("Long");
+    ASSERT(s != NULL, "long line: opens");
+    char line[400];
+    memset(line, 'x', sizeof(line));
+    memcpy(line + 190, "END", 3);
+    line[193] = '\0';
+    pty_send_str(s, line);
+    ASSERT_WAIT_FOR(s, "END", WAIT_MS);   /* scrolled horizontally to the cursor */
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT(draft_contains("END"), "long line: the whole line was saved");
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
+static void test_body_editor_ctrl_s_saves_and_stays(void) {
+    restart_imap(); restart_smtp(); draft_clear();
+    PtySession *s = open_body_editor("Ctrl-S");
+    ASSERT(s != NULL, "ctrl-s: opens");
+    pty_send_str(s, "text one");
+    pty_send_str(s, "\x13");
+    ASSERT_WAIT_FOR(s, "Ctrl-S=save   saved", WAIT_MS);
+    ASSERT(draft_contains("text one"), "ctrl-s: written");
+    ASSERT_SCREEN_CONTAINS(s, PTY_EDITOR_MARK);      /* still in the editor */
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
+static void test_send_removes_draft(void) {
+    restart_imap(); restart_smtp(); draft_clear();
+    PtySession *s = open_body_editor("Send removes");
+    ASSERT(s != NULL, "send: opens");
+    pty_send_str(s, "to be sent");
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT(draft_contains("to be sent"), "send: the draft exists before sending");
+    pty_send_str(s, "s");
+    ASSERT_WAIT_FOR(s, "Message sent", WAIT_MS);
+    pty_settle(s, 200);
+    ASSERT(!draft_contains("Subject:"), "send: the draft is gone after sending");
+    pty_close(s);
+}
+
 static void test_compose_opens_editor_with_to(void) {
     /* TC-CD-04: filling To + Subject and pressing Enter opens editor */
     restart_imap(); restart_smtp();
-    write_editor_script(); /* ensures EDITOR is set */
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "opens editor: reached inbox");
 
@@ -589,7 +811,6 @@ static void test_compose_backspace_removes_address(void) {
 static void test_compose_cc_written_to_tempfile(void) {
     /* TC-CD-16: Cc address appears as Cc: header in the editor temp file */
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "cc header: reached inbox");
 
@@ -616,7 +837,6 @@ static void test_compose_cc_written_to_tempfile(void) {
 static void test_compose_bcc_written_to_tempfile(void) {
     /* TC-CD-17: Bcc address appears in Bcc: header in the editor temp file */
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "bcc header: reached inbox");
 
@@ -981,7 +1201,6 @@ static void test_reply_esc_cancels(void) {
 static void test_reply_can_add_cc(void) {
     /* TC-CD-33: can add Cc before opening editor */
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "reply cc: reached inbox");
 
@@ -1014,17 +1233,6 @@ static void test_reply_editor_opens_with_quoted_body(void) {
     char draft_capture[600];
     snprintf(draft_capture, sizeof(draft_capture),
              "%s/.draft_capture", g_test_home);
-    char editor_script[600];
-    snprintf(editor_script, sizeof(editor_script),
-             "%s/.capture_editor.sh", g_test_home);
-    FILE *f = fopen(editor_script, "w");
-    if (f) {
-        fprintf(f, "#!/bin/sh\ncp \"$1\" '%s'\necho 'Test body' >> \"$1\"\n",
-                draft_capture);
-        fclose(f);
-        chmod(editor_script, 0755);
-        setenv("EDITOR", editor_script, 1);
-    }
 
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "reply body: reached inbox");
@@ -1037,7 +1245,7 @@ static void test_reply_editor_opens_with_quoted_body(void) {
     pty_send_key(s, PTY_KEY_TAB);   /* Cc → Bcc */
     pty_send_key(s, PTY_KEY_TAB);   /* Bcc → Subject */
     pty_send_key(s, PTY_KEY_ENTER);
-    pcr_send(s);
+    pcr_send_capture(s, draft_capture);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     pty_close(s);
 
@@ -1050,8 +1258,6 @@ static void test_reply_editor_opens_with_quoted_body(void) {
         fclose(cap);
         ASSERT(strstr(buf, "> ") != NULL, "reply body: quoted lines with '> '");
     }
-
-    write_editor_script(); /* restore normal fake editor */
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1233,7 +1439,6 @@ static void test_forward_empty_to_error(void) {
 static void test_forward_fill_to_opens_editor(void) {
     /* TC-CD-49: filling To + Enter opens editor with Fwd: subject */
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "forward editor: reached inbox");
 
@@ -1260,17 +1465,6 @@ static void test_forward_body_has_original(void) {
     char draft_capture[600];
     snprintf(draft_capture, sizeof(draft_capture),
              "%s/.fwd_draft", g_test_home);
-    char editor_script[600];
-    snprintf(editor_script, sizeof(editor_script),
-             "%s/.fwd_editor.sh", g_test_home);
-    FILE *f = fopen(editor_script, "w");
-    if (f) {
-        fprintf(f, "#!/bin/sh\ncp \"$1\" '%s'\necho 'Fwd body' >> \"$1\"\n",
-                draft_capture);
-        fclose(f);
-        chmod(editor_script, 0755);
-        setenv("EDITOR", editor_script, 1);
-    }
 
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "forward body: reached inbox");
@@ -1284,7 +1478,7 @@ static void test_forward_body_has_original(void) {
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_key(s, PTY_KEY_ENTER);
-    pcr_send(s);
+    pcr_send_capture(s, draft_capture);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     pty_close(s);
 
@@ -1299,8 +1493,6 @@ static void test_forward_body_has_original(void) {
                "forward body: forwarded separator present");
         ASSERT(strstr(buf, "Fwd:") != NULL, "forward body: Fwd: subject present");
     }
-
-    write_editor_script();
 }
 
 static void test_forward_autocomplete_works(void) {
@@ -1406,7 +1598,6 @@ static void test_compose_folder_esc_returns_to_folders(void) {
 static void test_compose_folder_fill_opens_editor(void) {
     /* TC-CD-56: fill To + Subject in folder-browser compose → editor opens */
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_folders();
     ASSERT(s != NULL, "folder compose editor: opened folders");
 
@@ -1522,8 +1713,6 @@ static void test_cc_in_smtp_envelope(void) {
     /* The mock SMTP server logs the message; verify Cc: header present.
      * (This test verifies the integration; the mock keeps the received data
      * in its log under the scratch directory.) */
-
-    write_editor_script();
 }
 
 static void test_bcc_not_in_message_headers(void) {
@@ -1533,16 +1722,6 @@ static void test_bcc_not_in_message_headers(void) {
     char draft_capture[600];
     snprintf(draft_capture, sizeof(draft_capture),
              "%s/.bcc_draft", g_test_home);
-    char editor_script[600];
-    snprintf(editor_script, sizeof(editor_script),
-             "%s/.bcc_test_editor.sh", g_test_home);
-    FILE *f = fopen(editor_script, "w");
-    if (f) {
-        fprintf(f, "#!/bin/sh\ncp \"$1\" '%s'\necho 'Body' >> \"$1\"\n",
-                draft_capture);
-        fclose(f); chmod(editor_script, 0755);
-        setenv("EDITOR", editor_script, 1);
-    }
 
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "bcc stripped: reached inbox");
@@ -1558,7 +1737,7 @@ static void test_bcc_not_in_message_headers(void) {
     pty_send_key(s, PTY_KEY_TAB);           /* → Subject */
     pty_send_str(s, "Bcc strip test");
     pty_send_key(s, PTY_KEY_ENTER);
-    pcr_send(s);
+    pcr_send_capture(s, draft_capture);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     pty_close(s);
 
@@ -1576,8 +1755,6 @@ static void test_bcc_not_in_message_headers(void) {
         ASSERT(strstr(buf, "Bcc:") != NULL,
                "bcc strip: draft file contains Bcc: header for editing");
     }
-
-    write_editor_script();
 }
 
 static void test_multiple_cc_semicolon_separated(void) {
@@ -1587,16 +1764,6 @@ static void test_multiple_cc_semicolon_separated(void) {
     char draft_capture[600];
     snprintf(draft_capture, sizeof(draft_capture),
              "%s/.multi_cc_draft", g_test_home);
-    char editor_script[600];
-    snprintf(editor_script, sizeof(editor_script),
-             "%s/.multi_cc_editor.sh", g_test_home);
-    FILE *f = fopen(editor_script, "w");
-    if (f) {
-        fprintf(f, "#!/bin/sh\ncp \"$1\" '%s'\necho 'Body' >> \"$1\"\n",
-                draft_capture);
-        fclose(f); chmod(editor_script, 0755);
-        setenv("EDITOR", editor_script, 1);
-    }
 
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "multi cc: reached inbox");
@@ -1613,7 +1780,7 @@ static void test_multiple_cc_semicolon_separated(void) {
     pty_send_key(s, PTY_KEY_TAB);                    /* → Subject */
     pty_send_str(s, "Multi Cc test");
     pty_send_key(s, PTY_KEY_ENTER);
-    pcr_send(s);
+    pcr_send_capture(s, draft_capture);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     pty_close(s);
 
@@ -1628,8 +1795,6 @@ static void test_multiple_cc_semicolon_separated(void) {
         ASSERT(strstr(buf, "dave@example.net") != NULL,
                "multi cc: second Cc address in draft");
     }
-
-    write_editor_script();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1668,7 +1833,6 @@ static void test_reader_reply_opens_compose(void) {
 static void test_reply_send_saves_to_sent(void) {
     /* TC-CD-67: reply from reader → send → Sent folder saved ("Saved." visible) */
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "sent folder: reached inbox");
 
@@ -1722,7 +1886,6 @@ static void test_reply_send_saves_to_sent(void) {
 static void test_replied_message_shows_answered_marker(void) {
     /* TC-CD-64 / US-CD-13 */
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "answered marker: reached inbox");
 
@@ -1752,7 +1915,6 @@ static void test_replied_message_shows_answered_marker(void) {
 static void test_forwarded_message_shows_forwarded_marker(void) {
     /* TC-CD-65 / US-CD-14 */
     restart_imap(); restart_smtp();
-    write_editor_script();
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "forwarded marker: reached inbox");
 
@@ -1817,7 +1979,6 @@ int main(int argc, char *argv[]) {
 
     mkdirs();
     write_config();
-    write_editor_script();
 
     /* ── Basic compose dialog flow ────────────────────────────────────── */
     printf("--- Basic compose dialog flow ---\n");
@@ -1829,6 +1990,14 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_compose_empty_subject_warning);
     RUN_TEST(test_compose_empty_subject_y_opens_editor);
     RUN_TEST(test_compose_opens_editor_with_to);
+    RUN_TEST(test_body_editor_type_and_esc_saves);
+    RUN_TEST(test_body_editor_autosave_while_typing);
+    RUN_TEST(test_body_editor_reopen_restores);
+    RUN_TEST(test_body_editor_resume_declined);
+    RUN_TEST(test_body_editor_paste_and_wide);
+    RUN_TEST(test_body_editor_long_line_scrolls);
+    RUN_TEST(test_body_editor_ctrl_s_saves_and_stays);
+    RUN_TEST(test_send_removes_draft);
 
     /* ── Field navigation ─────────────────────────────────────────────── */
     printf("\n--- Field navigation ---\n");

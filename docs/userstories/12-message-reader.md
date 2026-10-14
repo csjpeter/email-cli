@@ -19,7 +19,7 @@ Pressing Enter on a message in the interactive message list.
    |-----|--------|
    | PgDn / ↓ | Scroll forward one page / one line |
    | PgUp / ↑ | Scroll back one page / one line |
-   | `r` | Reply to this message (email-tui only; opens `$EDITOR`) |
+   | `r` | Reply to this message (email-tui only; built-in body editor) |
    | `a` | Save attachment (if present) |
    | ESC / q  | Return to message list |
    | Backspace | Return to message list |

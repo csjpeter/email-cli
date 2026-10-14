@@ -26,7 +26,7 @@ no code branch for a platform nobody builds on.
 | `open_memstream(3)` | `libemail/src/platform/posix/html_medium.c` | a `tmpfile`-based replacement |
 | `forkpty`/`<pty.h>`, `-lutil` | `deps/libptytest/`, `tests/pty/` | a ConPTY or per-OS pty layer (test harness only) |
 | `crontab` via `popen` (scheduled sync) | `libemail/src/domain/email_service.c` | a per-OS scheduler (launchd, Task Scheduler) |
-| `system()` with `$EDITOR`, `xdg-open` | `src/main_tui.c`, `libemail/src/infrastructure/gmail_auth.c` | a per-OS editor and URL launcher |
+| `xdg-open` | `libemail/src/infrastructure/gmail_auth.c` | a per-OS URL launcher |
 | `fork`, `mkdir(path, mode)`, `rename` over an existing file, `strptime`, `timegm`, `strcasecmp`, `asprintf`, `iconv(3)` | `libemail/src/core/`, `infrastructure/` | shims or libraries on a non-POSIX or non-glibc libc |
 | `__attribute__((cleanup))` RAII | `libemail/src/core/raii.h` | none on GCC or Clang; MSVC cannot build it |
 | `./manage.sh deps` via `apt` or `dnf`, `dpkg`, CPack DEB and RPM, Docker, local Dovecot | `manage.sh`, `CMakeLists.txt`, `tests/integration/` | none: the build and test host is Linux regardless |

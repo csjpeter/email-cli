@@ -39,6 +39,8 @@ runs are read as `#`.
 | Rule add, conditions (`rule_add_when`) | `a` in the rules editor | step 1/2 title, hint, "(empty — press 'a' …)" | a q Esc |
 | Rule add, actions (`rule_add_actions`) | `q` in step 1 | step 2/2 title; Name; add-label 1–3; rm-label 1–3; then-move-folder; then-forward-to | Enter Esc |
 | Compose dialog (`compose_dialog`, `compose_typed`, `compose_empty_to`) | `c` | "New Message"; To Cc Bcc Subject Attach fields; guard line "To: is empty …" (red); hint | Tab Shift-Tab ; Enter Esc |
+| Body editor (`body_editor`, `body_editor_typed`) | Enter on the compose dialog (US-87) | header bar "Message body — To: … Subject: …"; the text (tui_textedit, scrolls both ways, cursor at the text cursor); dim bottom line `Esc=save and continue  Ctrl-S=save`, `saved`/`autosaved` after a save | text, Enter, arrows, Esc, Ctrl-S |
+| Review (`review`, `review_discard_ask`) | Esc in the body editor | header "Review: Message"; dim labels From, To, Subject, Body (line count), Attach; key line `[s] Send … [q] Discard`; `q` asks `Discard draft? To: …, Subject: …, N line(s), M attachment(s) [y/n]` | s e b a d q |
 
 ## Not covered by a whole-screen comparison yet
 

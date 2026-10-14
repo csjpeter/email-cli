@@ -54,6 +54,10 @@ static int   g_dead_port = 0;
 static char  g_home[256];
 static char  g_tui_bin[512];
 static char  g_mock_bin[512];
+static pid_t g_gmail_pid = -1;
+static int   g_gmail_port = 0;
+static char  g_sync_bin[512];
+static char  g_gmail_bin[512];
 static FILE *g_record = NULL;
 static int   g_shown_cols = COLS;   /* width of the session being recorded */
 
@@ -122,6 +126,67 @@ static void restart_mock(void) {
     if (g_mock_pid > 0) g_imap_port = port;
 }
 
+/* ── The Gmail fixture (EMAIL-88) ────────────────────────────────────── */
+
+#define GMAIL_USER "screens@example.org"
+
+static void stop_gmail(void) {
+    if (g_gmail_pid > 0) {
+        kill(g_gmail_pid, SIGKILL);
+        waitpid(g_gmail_pid, NULL, 0);
+        g_gmail_pid = -1;
+    }
+}
+
+static void restart_gmail(void) {
+    stop_gmail();
+    if (!g_gmail_bin[0]) return;
+    setenv("MOCK_GMAIL_COUNT", "5", 1);
+    setenv("MOCK_GMAIL_EMAIL", GMAIL_USER, 1);
+    g_gmail_pid = test_spawn_mock(g_gmail_bin, "MOCK_GMAIL", 0, &g_gmail_port);
+    unsetenv("MOCK_GMAIL_COUNT");
+    unsetenv("MOCK_GMAIL_EMAIL");
+    char url[128];
+    snprintf(url, sizeof(url), "http://localhost:%d/gmail/v1/users/me", g_gmail_port);
+    setenv("GMAIL_API_BASE_URL", url, 1);
+    setenv("GMAIL_TEST_TOKEN", "test_fake_token", 1);
+}
+
+/** A home with one Gmail account, its local store filled by email-sync. */
+static void use_gmail_home(const char *view) {
+    snprintf(g_home, sizeof(g_home), "%s", TP("g-"));
+    size_t n = strlen(g_home);
+    snprintf(g_home + n, sizeof(g_home) - n, "%s", view);
+    char dir[500], path[600];
+    snprintf(dir, sizeof(dir), "%s/.config", g_home);            mkdir(g_home, 0700); mkdir(dir, 0700);
+    snprintf(dir, sizeof(dir), "%s/.config/email-cli", g_home);  mkdir(dir, 0700);
+    snprintf(dir, sizeof(dir), "%s/.config/email-cli/accounts", g_home); mkdir(dir, 0700);
+    snprintf(dir, sizeof(dir), "%s/.config/email-cli/accounts/%s", g_home, GMAIL_USER); mkdir(dir, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", dir);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp,
+        "GMAIL_MODE=1\n"
+        "EMAIL_USER=%s\n"
+        "GMAIL_ACCESS_TOKEN=fake_token\n"
+        "GMAIL_REFRESH_TOKEN=fake_refresh\n"
+        "GMAIL_TOKEN_EXPIRY=9999999999\n"
+        "EMAIL_FOLDER=INBOX\n", GMAIL_USER);
+    fclose(fp);
+    chmod(path, 0600);
+    if (!g_sync_bin[0]) return;
+    setenv("HOME", g_home, 1);
+    unsetenv("XDG_DATA_HOME");
+    unsetenv("XDG_CONFIG_HOME");
+    unsetenv("XDG_CACHE_HOME");
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl(g_sync_bin, "email-sync", (char *)NULL);
+        _exit(127);
+    }
+    if (pid > 0) waitpid(pid, NULL, 0);
+}
+
 /* ── Opening a view ──────────────────────────────────────────────────── */
 
 static int g_cols = COLS;
@@ -153,6 +218,32 @@ static PtySession *at_folders(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     if (pty_wait_for(s, "Folders", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+static PtySession *at_gmail_labels(void) {
+    PtySession *s = at_accounts();
+    if (!s) return NULL;
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "Labels", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/* Opens the label browser entry @p downs rows below Unread (Enter). */
+static void gmail_open_entry(PtySession *s, int downs) {
+    pty_send_key(s, PTY_KEY_HOME);
+    for (int i = 0; i < downs; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "message(s)", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+}
+
+static PtySession *at_gmail_entry(int downs) {
+    PtySession *s = at_gmail_labels();
+    if (!s) return NULL;
+    gmail_open_entry(s, downs);
     return s;
 }
 
@@ -223,6 +314,11 @@ static const PtyStyleKey LEGEND[] = {
     { 'S', PTY_ATTR_NONE,                    97,             PTY_COLOR_IDX(17) },
     { 'A', PTY_ATTR_BOLD,                    97,             PTY_COLOR_IDX(17) },
     { 'n', PTY_ATTR_BOLD,                    92,             PTY_COLOR_IDX(17) },
+    { 'Y', PTY_ATTR_BOLD,                    93,             PTY_COLOR_IDX(17) },
+    { 'E', PTY_ATTR_BOLD,                    91,             PTY_COLOR_IDX(17) },
+    { 'y', PTY_ATTR_BOLD,                    PTY_FG_YELLOW,  PTY_BG_DEFAULT },
+    { 'Z', PTY_ATTR_NONE,                    PTY_FG_YELLOW,  PTY_BG_DEFAULT },
+    { 'e', PTY_ATTR_BOLD,                    PTY_FG_RED,     PTY_BG_DEFAULT },
     { 0 }
 };
 
@@ -379,6 +475,19 @@ static void to_review(PtySession *s) {
         pty_close(s); \
     }
 
+#define GVIEW(name, open_expr, setup) \
+    static void test_screen_##name(void) { \
+        restart_mock(); \
+        restart_gmail(); \
+        use_gmail_home(#name); \
+        PtySession *s = (open_expr); \
+        ASSERT(s != NULL, #name ": the view opens"); \
+        setup; \
+        if (g_record) { record_view(#name, s); pty_close(s); return; } \
+        check_view(s, exp_##name, sty_##name, cur_##name); \
+        pty_close(s); \
+    }
+
 VIEW(accounts,         at_accounts(), (void)0)
 VIEW(folders,          at_folders(),  (void)0)
 VIEW(list,             at_list(),     (void)0)
@@ -439,6 +548,59 @@ VIEW(review_discard_ask, at_list(),
      (to_review(s), pty_send_str(s, "q"), pty_wait_for(s, "Discard draft?", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
 
+GVIEW(gmail_labels, at_gmail_labels(), (void)0)
+GVIEW(gmail_unread,     at_gmail_entry(0), (void)0)
+GVIEW(gmail_flagged,    at_gmail_entry(1), (void)0)
+GVIEW(gmail_inbox,      at_gmail_entry(2), (void)0)
+GVIEW(gmail_inbox_second, at_gmail_entry(2),
+      (pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_inbox_d,    at_gmail_entry(2),
+      (pty_send_str(s, "d"), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_inbox_trash_mark, at_gmail_entry(2),
+      (pty_send_str(s, "D"), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_inbox_archive_mark, at_gmail_entry(2),
+      (pty_send_str(s, "a"), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_inbox_marked, at_gmail_entry(2),
+      (pty_send_str(s, " "), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_inbox_d_off, at_gmail_entry(2),
+      (pty_send_str(s, "d"), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_inbox_trash_off, at_gmail_entry(2),
+      (pty_send_str(s, "D"), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_inbox_archive_off, at_gmail_entry(2),
+      (pty_send_str(s, "a"), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+GVIEW(gmail_starred_filled, at_gmail_entry(2),
+      (pty_send_str(s, "f"), pty_settle(s, SETTLE_MS), pty_send_key(s, PTY_KEY_ESC),
+       pty_wait_for(s, "Labels", WAIT_MS), pty_settle(s, SETTLE_MS), gmail_open_entry(s, 1)))
+GVIEW(gmail_trash_filled, at_gmail_entry(2),
+      (pty_send_str(s, "D"), pty_settle(s, SETTLE_MS), pty_send_key(s, PTY_KEY_ESC),
+       pty_wait_for(s, "Labels", WAIT_MS), pty_settle(s, SETTLE_MS), gmail_open_entry(s, 7)))
+GVIEW(gmail_archive_filled, at_gmail_entry(2),
+      (pty_send_str(s, "a"), pty_settle(s, SETTLE_MS), pty_send_key(s, PTY_KEY_ESC),
+       pty_wait_for(s, "Labels", WAIT_MS), pty_settle(s, SETTLE_MS), gmail_open_entry(s, 5)))
+/* A label exists in the browser once a message carries it: add "Work" to the
+ * first message through the bulk-action prompt (m, l). */
+static void gmail_add_work_label(PtySession *s) {
+    pty_send_str(s, "m");
+    pty_wait_for(s, "l=+label", WAIT_MS);
+    pty_send_str(s, "l");
+    pty_wait_for(s, "Add label", WAIT_MS);
+    pty_send_str(s, "Work");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_wait_for(s, "Labels", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+}
+
+GVIEW(gmail_label_user, at_gmail_entry(2),
+      (gmail_add_work_label(s), (void)0))
+GVIEW(gmail_user_label, at_gmail_entry(2),
+      (gmail_add_work_label(s), gmail_open_entry(s, 2)))
+
+GVIEW(gmail_archive,    at_gmail_entry(5), (void)0)
+GVIEW(gmail_trash,      at_gmail_entry(7), (void)0)
+
+
 int main(int argc, char *argv[]) {
     printf("--- email-tui screens (cell-exact) ---\n\n");
     if (argc < 3) {
@@ -447,6 +609,10 @@ int main(int argc, char *argv[]) {
     }
     snprintf(g_tui_bin, sizeof(g_tui_bin), "%s", argv[1]);
     snprintf(g_mock_bin, sizeof(g_mock_bin), "%s", argv[2]);
+    if (argc >= 5) {
+        snprintf(g_sync_bin, sizeof(g_sync_bin), "%s", argv[3]);
+        snprintf(g_gmail_bin, sizeof(g_gmail_bin), "%s", argv[4]);
+    }
 
     const char *rec = getenv("SCREENS_RECORD");
     if (rec && *rec) g_record = fopen(rec, "w");
@@ -496,8 +662,28 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_body_editor_typed);
     RUN_TEST(test_screen_review);
     RUN_TEST(test_screen_review_discard_ask);
+    RUN_TEST(test_screen_gmail_labels);
+    RUN_TEST(test_screen_gmail_unread);
+    RUN_TEST(test_screen_gmail_flagged);
+    RUN_TEST(test_screen_gmail_inbox);
+    RUN_TEST(test_screen_gmail_inbox_second);
+    RUN_TEST(test_screen_gmail_inbox_d);
+    RUN_TEST(test_screen_gmail_inbox_trash_mark);
+    RUN_TEST(test_screen_gmail_inbox_archive_mark);
+    RUN_TEST(test_screen_gmail_inbox_marked);
+    RUN_TEST(test_screen_gmail_archive);
+    RUN_TEST(test_screen_gmail_inbox_d_off);
+    RUN_TEST(test_screen_gmail_inbox_trash_off);
+    RUN_TEST(test_screen_gmail_inbox_archive_off);
+    RUN_TEST(test_screen_gmail_starred_filled);
+    RUN_TEST(test_screen_gmail_trash_filled);
+    RUN_TEST(test_screen_gmail_archive_filled);
+    RUN_TEST(test_screen_gmail_label_user);
+    RUN_TEST(test_screen_gmail_user_label);
+    RUN_TEST(test_screen_gmail_trash);
 
     if (g_record) fclose(g_record);
+    stop_gmail();
     if (g_mock_pid > 0) { kill(g_mock_pid, SIGKILL); waitpid(g_mock_pid, NULL, 0); }
 
     printf("\n--- PTY Test Results ---\n");

@@ -1886,13 +1886,18 @@ static void sum_subtree(char **names, int count, char sep,
 
 /**
  * Build filtered index (into names[]) of direct children of `prefix`.
- * prefix="" means root level (folders with no sep in their name).
+ * prefix="" means root level (folders with no sep in their name).  Inside a
+ * folder (prefix not empty) the folder itself is the first entry.
  * Returns number of visible entries written into vis_out[].
  */
 static int build_flat_view(char **names, int count, char sep,
                            const char *prefix, int *vis_out) {
     int vcount = 0;
     size_t plen = strlen(prefix);
+    /* Inside a folder the folder itself comes first, so that its own
+     * messages can be opened (Enter on a folder with children goes into it). */
+    for (int i = 0; plen > 0 && i < count; i++)
+        if (strcmp(names[i], prefix) == 0) { vis_out[vcount++] = i; break; }
     for (int i = 0; i < count; i++) {
         const char *name = names[i];
         if (plen == 0) {
@@ -1923,6 +1928,7 @@ typedef struct {
     const int           *vis;         /* flat: indexes into names[] */
     int                  vf[FB_PREFIX]; /* counts of the virtual rows */
     int                  selected;    /* the cursor row: never dimmed */
+    const char          *prefix;      /* flat: the folder being looked into, or NULL */
 } FolderModel;
 
 /* Index into names[] of table row @p i (>= FB_PREFIX). */
@@ -1935,7 +1941,10 @@ static int fm_name_index(const FolderModel *m, int i) {
 static void fm_counts(const FolderModel *m, int ni, int *msgs, int *unseen,
                       int *flagged, int *has_kids) {
     *has_kids = 0;
-    if (!m->tree && folder_has_children(m->names, m->count, m->names[ni], m->sep)) {
+    /* The folder being looked into shows its own counts, not its subtree's. */
+    int is_prefix = !m->tree && m->prefix && m->prefix[0] &&
+                    strcmp(m->names[ni], m->prefix) == 0;
+    if (!m->tree && !is_prefix && folder_has_children(m->names, m->count, m->names[ni], m->sep)) {
         *has_kids = 1;
         sum_subtree(m->names, m->count, m->sep, m->names[ni], m->statuses,
                     msgs, unseen, flagged);
@@ -4144,7 +4153,8 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
         FolderModel fmodel = { folders, count, sep, statuses, tree_mode, vis,
                                { 0, vf_unread, vf_flagged, vf_junk, vf_phishing,
-                                 vf_answered, vf_forwarded, 0 }, cursor };
+                                 vf_answered, vf_forwarded, 0 }, cursor,
+                               tree_mode ? NULL : current_prefix };
         static const tui_table_col fcols[] = {
             { "Unread",  6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
             { "Flagged", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
@@ -4238,6 +4248,11 @@ char *email_service_list_folders_interactive(const Config *cfg,
             } else if (display_count > VPREFIX) {
                 int ri = cursor - VPREFIX;
                 int fi = vis[ri];
+                if (current_prefix[0] && strcmp(folders[fi], current_prefix) == 0) {
+                    /* the folder itself, listed first inside it: open it */
+                    selected = strdup(folders[fi]);
+                    goto folders_int_done;
+                }
                 if (folder_has_children(folders, count, folders[fi], sep)) {
                     strncpy(current_prefix, folders[fi], sizeof(current_prefix) - 1);
                     current_prefix[sizeof(current_prefix) - 1] = '\0';

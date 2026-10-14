@@ -1655,10 +1655,11 @@ void test_email_service(void) {
         ASSERT(cnt == 2, "build_flat_view: root level = 2");
         ASSERT(vis[0] == 0 && vis[1] == 3, "build_flat_view: root indices 0,3");
 
-        /* Children of A: only A.B (direct child, no second separator) */
+        /* Inside A: A itself first (EMAIL-82), then its direct child A.B */
         cnt = build_flat_view(names, 4, '.', "A", vis);
-        ASSERT(cnt == 1, "build_flat_view: A children = 1 (A.B only)");
-        ASSERT(vis[0] == 1, "build_flat_view: A child is index 1");
+        ASSERT(cnt == 2, "build_flat_view: inside A = A itself and A.B");
+        ASSERT(vis[0] == 0, "build_flat_view: the folder itself is first");
+        ASSERT(vis[1] == 1, "build_flat_view: A child is index 1");
 
         /* No prefix match → 0 */
         cnt = build_flat_view(names, 4, '.', "X", vis);
@@ -1786,7 +1787,7 @@ void test_email_service(void) {
         FolderStatus st[3] = { { 5, 2, 1 }, { 3, 0, 0 }, { 0, 0, 0 } };
         int vis[3] = { 0, 2, 0 };
         FolderModel fm = { names, 3, '.', st, 1, vis,
-                           { 0, 4, 0, 0, 0, 0, 0, 0 }, FB_PREFIX };
+                           { 0, 4, 0, 0, 0, 0, 0, 0 }, FB_PREFIX, NULL };
         tui_table_col cols[4] = {
             { "Unread", 6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 }, { "Flagged", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
             { "Folder", 20, 1, TUI_ALIGN_LEFT, 0, 0, 0 }, { "Total", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
@@ -1813,6 +1814,13 @@ void test_email_service(void) {
                "folder model: flat view marks a folder with children");
         ASSERT(strstr(row, "8") != NULL,
                "folder model: flat view sums the subtree total");
+        /* inside INBOX: the folder itself, with its own counts and no slash */
+        fm.prefix = "INBOX";
+        tui_table_format_row(&t, 0, FB_PREFIX + 0, row, sizeof(row));
+        ASSERT(strstr(row, "INBOX/") == NULL && strstr(row, "INBOX") != NULL,
+               "folder model: the folder being looked into has no slash");
+        ASSERT(strstr(row, "8") == NULL && strstr(row, "5") != NULL,
+               "folder model: the folder being looked into shows its own total");
     }
 
     /* ── message list table model (EMAIL-79) ─────────────────────────── */

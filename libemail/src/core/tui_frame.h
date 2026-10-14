@@ -44,4 +44,13 @@ int tui_frame_draw_table(const char *header, tui_table *table, int rows, int col
 /** Frame flag: the first row is a plain title, not the header bar. */
 #define TUI_FRAME_PLAIN_TITLE 1u
 
+/**
+ * @brief Prints @p text as the header bar (bold white on blue, full width) on
+ *        terminal row @p row (1-based), for the screens that are not tables.
+ *
+ * The text is cut at a display-width boundary and padded to @p cols; the
+ * cursor is left after the bar and the style is reset.
+ */
+void tui_frame_print_bar(int row, const char *text, int cols);
+
 #endif /* CORE_TUI_FRAME_H */

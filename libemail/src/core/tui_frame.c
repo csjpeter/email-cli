@@ -7,6 +7,7 @@
 #include <tuikit/buf.h>
 #include <tuikit/canvas.h>
 #include <tuikit/screen.h>
+#include <tuikit/text.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -44,4 +45,14 @@ int tui_frame_draw_table(const char *header, tui_table *table, int rows, int col
     tui_buf_free(&out);
     tui_screen_free(scr);
     return rc;
+}
+
+void tui_frame_print_bar(int row, const char *text, int cols) {
+    if (cols < 1) cols = 80;
+    if (!text) text = "";
+    int used = 0;
+    size_t n = tui_str_fit(text, cols, &used);
+    printf("\033[%d;1H\033[1;37;44m%.*s", row, (int)n, text);
+    for (int i = used; i < cols; i++) putchar(' ');
+    printf("\033[0m");
 }

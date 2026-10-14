@@ -301,14 +301,9 @@ static int cd_render(const char *title,
     int tcols = terminal_cols();
     if (tcols < 20) tcols = 80;
 
-    printf("\033[H");
-    printf("\033[7m");
     char title_line[256];
     snprintf(title_line, sizeof(title_line), "  %s", title);
-    int tlen = (int)strlen(title_line);
-    printf("%s", title_line);
-    for (int i = tlen; i < tcols; i++) putchar(' ');
-    printf("\033[0m");
+    tui_frame_print_bar(1, title_line, tcols);
 
     printf("\033[2;1H\033[K");
 
@@ -769,12 +764,8 @@ static void pcr_render(const char *from, const char *to, const char *cc,
     if (tcols < 20) tcols = 80;
 
     printf("\033[2J\033[H");
-    printf("\033[7m");
-    const char *ttl = "  Review: Message";
-    printf("%s", ttl);
-    int tlen = (int)strlen(ttl);
-    for (int i = tlen; i < tcols; i++) putchar(' ');
-    printf("\033[0m\n\n");
+    tui_frame_print_bar(1, "  Review: Message", tcols);
+    printf("\n\n");
 
     printf("  \033[2mFrom:\033[0m    %s\n", from   ? from    : "");
     printf("  \033[2mTo:\033[0m      %s\n", to     ? to      : "");
@@ -1717,7 +1708,7 @@ static void when_list_render(const WhenAtomList *wl, int vis_rows, const char *t
     int rows = terminal_rows(), cols = terminal_cols();
     if (rows <= 0) rows = 24;
     if (cols <= 0) cols = 80;
-    tui_frame_draw_table(title, &wt, rows, cols, TUI_FRAME_PLAIN_TITLE,
+    tui_frame_draw_table(title, &wt, rows, cols, 0,
                          "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  ESC=cancel",
                          NULL);
 }
@@ -1889,10 +1880,14 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
     {
         RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
 
-        printf("\033[2J\033[H");
-        printf("%s rule for %s — step 2/2: actions\n",
-               prefill ? "Edit" : "Add new", account ? account : "?");
-        printf("Enter=next field  ESC=cancel\n");
+        {
+            char hdr[512];
+            snprintf(hdr, sizeof(hdr), "%s rule for %s — step 2/2: actions",
+                     prefill ? "Edit" : "Add new", account ? account : "?");
+            printf("\033[2J\033[H");
+            tui_frame_print_bar(1, hdr, terminal_cols());
+            printf("\033[2;1HEnter=next field  ESC=cancel\n");
+        }
         for (int i = 0; i < nfields; i++)
             printf("\033[%d;1H\033[2K%s%s", fields[i].row, fields[i].prompt, fields[i].buf);
         fflush(stdout);
@@ -2002,9 +1997,13 @@ static void tui_rules_detail(const char *account, int idx)
         }
         const MailRule *r = &rules->rules[idx];
 
-        printf("\033[2J\033[H");
-        printf("Rule: %s\n", r->name ? r->name : "(unnamed)");
-        printf("Account: %s\n\n", account ? account : "?");
+        {
+            char hdr[512];
+            snprintf(hdr, sizeof(hdr), "Rule: %s", r->name ? r->name : "(unnamed)");
+            printf("\033[2J\033[H");
+            tui_frame_print_bar(1, hdr, terminal_cols());
+            printf("\033[2;1HAccount: %s\n\n", account ? account : "?");
+        }
 
         int row = 4;
         if (r->when && r->when[0])
@@ -2115,7 +2114,7 @@ static void tui_rules_editor(const Config *cfg)
         char title[512];
         snprintf(title, sizeof(title), "Rules for %s (%d rule%s)",
                  account, count, count == 1 ? "" : "s");
-        tui_frame_draw_table(title, &rtbl, rows, cols, TUI_FRAME_PLAIN_TITLE, NULL,
+        tui_frame_draw_table(title, &rtbl, rows, cols, 0, NULL,
                              "  j/k=navigate  Enter=open  a=add  d=delete  ESC/q=back");
 
         TermKey key;

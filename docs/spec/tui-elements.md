@@ -60,9 +60,10 @@ defect or inconsistency the pictures make visible, left for the owner to ticket.
    only the subfolders, so INBOX's own messages could not be opened.  Fixed
    with EMAIL-82: inside a folder the folder itself is the first row.
 4. Header bar: the rules editor, rule detail, rule add/edit steps and the
-   compose dialog do not use the bold white-on-blue header bar of
-   `policies/tui-interface-model.md`; the compose dialog's top row is reverse
-   video, the others plain.
+   compose dialog did not use the bold white-on-blue header bar of
+   `policies/tui-interface-model.md`; the compose dialog's top row was reverse
+   video, the others plain.  Fixed with EMAIL-83: these screens, the review
+   screen and the attachment picker draw the bar (`H` in the style maps).
 5. Accounts: `d` deletes the account at once, with no confirmation.
 6. Message list: the From column is cut in the middle of the address
    (`<sender3@example.c`) at 100 columns.

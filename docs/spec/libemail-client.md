@@ -16,9 +16,20 @@ One build produces three packages:
 | `libemail-client-dev` | `email-client.h`, `libemail-client.so`, `libemail-client.pc`, `libemail-client(3)`; depends exactly on the runtime package of the same build |
 
 The SONAME's number is the library's ABI version, not the package's: it moves
-only when the interface breaks. The programs of this repository do not link
-the shared library yet (EMAIL-99); they keep the static copy of the same
-sources until then.
+only when the interface breaks. `email-cli` depends on `libemail-client0 (>=
+version)`.
+
+## Who uses it
+
+Since EMAIL-99 the programs of this repository (`email-cli`, `email-cli-ro`,
+`email-tui`, `email-sync`) reach a mail server only through this library:
+`libemail/src/infrastructure/mail_account.h` turns their `Config` into an
+`emc_account` and opens the client. They find the shared object beside
+themselves in the build tree and in the install directory (`$ORIGIN`
+run-path), and in the system library directory when installed from the
+package. The old protocol modules (`imap_client`, `gmail_client`, `mail_client`,
+`smtp_adapter`, `compose_service`) stay in the tree until EMAIL-100; the unit
+tests still exercise them directly.
 
 ## Interface (`email-client.h`)
 
@@ -27,8 +38,15 @@ All names start with `emc_`; everything else in the object is hidden.
 | Function | Does |
 |---|---|
 | `emc_open(&c, &account)` | copies the account; no network traffic |
-| `emc_send(c, &message, &result)` | sends; returns the outcome and the Message-ID |
-| `emc_list_folders` / `emc_list_messages` / `emc_fetch_message` | read |
+| `emc_connect` | connects now (every other operation connects on demand) |
+| `emc_send(c, &message, &result)` | composes, sends, optionally saves a sent copy; returns the outcome and the Message-ID |
+| `emc_compose`, `emc_send_wire`, `emc_reply_meta` | the same in steps: build the wire form, send it, read reply data |
+| `emc_list_folders` / `emc_list_messages` / `emc_fetch_message` | the short read interface |
+| `emc_list_names`, `emc_list_with_ids`, `emc_select`, `emc_select_ext`, `emc_search`, `emc_fetch_headers`, `emc_fetch_body`, `emc_fetch_flags`, `emc_fetch_flags_changedsince` | the full read interface (CONDSTORE/QRESYNC included) |
+| `emc_set_flag`, `emc_mark_junk`, `emc_mark_notjunk`, `emc_trash`, `emc_delete`, `emc_move_to_folder`, `emc_modify_label`, `emc_create_label`, `emc_delete_label`, `emc_create_folder`, `emc_delete_folder`, `emc_append` | changes on the server |
+| `emc_sync`, `emc_rebuild_indexes` | Gmail synchronisation into the local store |
+| `emc_gmail_authorize` | OAuth2 device flow; prints the code and URL on standard output |
+| `emc_log_open`, `emc_log_close` | the library's own log (the programs point it at their log file) |
 | `emc_close`, `emc_free_list`, `emc_strerror`, `emc_last_error`, `emc_version` | housekeeping |
 
 ## Rules

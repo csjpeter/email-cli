@@ -15,9 +15,7 @@
 #include "logger.h"
 #include "local_store.h"
 #include "fs_util.h"
-#include "smtp_adapter.h"
-#include "compose_service.h"
-#include "gmail_auth.h"
+#include "mail_account.h"
 #include "help_gmail.h"
 #include "mail_rules.h"
 #include "when_expr.h"
@@ -381,7 +379,7 @@ static void help_send(void) {
  *         written to stderr.
  */
 static int config_reauth_gmail(Config *cfg) {
-    if (gmail_auth_device_flow(cfg) != 0) {
+    if (mail_gmail_authorize(cfg) != 0) {
         fprintf(stderr, "Authorization was not completed — the account is unchanged.\n");
         return RESULT_REPORTED;
     }
@@ -843,6 +841,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
     if (logger_init(log_file, LOG_DEBUG) != 0)
         fprintf(stderr, "Warning: Logging system failed to initialize.\n");
+    emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
     logger_log(LOG_INFO, "--- email-cli starting (cmd: %s) ---", cmd);
 
     /* Determine if this command needs a specific account config.
@@ -1325,15 +1324,16 @@ int main(int argc, char *argv[]) {
                 help_send();
             } else {
                 const char *from = cfg->smtp_user ? cfg->smtp_user : cfg->user;
-                ComposeParams p = {from, to, NULL, NULL, subject, body, NULL,
-                                   attach_count > 0 ? attach_arr : NULL,
-                                   attach_count};
+                emc_message p = {.from = from, .to = to, .subject = subject,
+                                 .body = body,
+                                 .attachments = attach_count > 0 ? attach_arr : NULL,
+                                 .attachment_count = attach_count};
                 char *msg = NULL;
                 size_t msg_len = 0;
-                if (compose_build_message(&p, &msg, &msg_len) != 0) {
+                if (mail_compose(&p, &msg, &msg_len) != 0) {
                     fprintf(stderr, "Error: Failed to build message.\n");
                 } else {
-                    result = smtp_send(cfg, from, to, msg, msg_len);
+                    result = mail_send_wire(cfg, from, to, msg, msg_len);
                     if (result == 0) {
                         printf("Message sent.\n");
                         if (email_service_save_sent(cfg, msg, msg_len) == 0)

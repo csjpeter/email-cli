@@ -9,9 +9,7 @@
 #include "status_line.h"
 #include <tuikit/text.h>
 #include "path_complete.h"
-#include "imap_client.h"
-#include "mail_client.h"
-#include "gmail_sync.h"
+#include "mail_account.h"
 #include "local_store.h"
 #include "mail_rules.h"
 #include "mime_util.h"
@@ -220,7 +218,7 @@ static char *word_wrap(const char *text, int width) {
 
 /* Forward declaration — defined after visible_line_cols (below). */
 static void warn_charset(const MimeTextInfo *info, const char *uid);
-static void show_label_picker(MailClient *mc, const char *uid,
+static void show_label_picker(emc_client *mc, const char *uid,
                                char *feedback_out, int feedback_cap);
 static int is_system_or_special_label(const char *name);
 static void flag_push_background(const Config *cfg, const char *uid,
@@ -650,8 +648,8 @@ static void print_body_page(const char *body, int from_vrow, int vrow_budget,
 
 /* ── Mail client helpers ─────────────────────────────────────────────── */
 
-static MailClient *make_mail(const Config *cfg) {
-    return mail_client_connect((Config *)cfg);
+static emc_client *make_mail(const Config *cfg) {
+    return mail_connect(cfg);
 }
 
 /* ── Folder status ───────────────────────────────────────────────────── */
@@ -711,11 +709,11 @@ static FolderStatus *fetch_all_folder_statuses(const Config *cfg,
  *  a shared connection. */
 static char *fetch_uid_content_in(const Config *cfg, const char *folder,
                                   const char *uid, int headers_only) {
-    RAII_MAIL MailClient *mc = make_mail(cfg);
+    EMC_AUTO_CLOSE emc_client *mc = make_mail(cfg);
     if (!mc) return NULL;
-    if (mail_client_select(mc, folder) != 0) return NULL;
-    return headers_only ? mail_client_fetch_headers(mc, uid)
-                        : mail_client_fetch_body(mc, uid);
+    if (emc_select(mc, folder) != 0) return NULL;
+    return headers_only ? emc_fetch_headers(mc, uid)
+                        : emc_fetch_body(mc, uid);
 }
 
 /* ── Cached header fetch ─────────────────────────────────────────────── */
@@ -755,13 +753,13 @@ static void attach_cell(void *ctx, int i, int col, tui_table_cell *c) {
 
 /**
  * Like fetch_uid_headers_cached but uses an already-connected and folder-selected
- * MailClient instead of opening a new connection.  Falls back to the cache first.
+ * emc_client instead of opening a new connection.  Falls back to the cache first.
  * Caller must free the returned string.
  */
-static char *fetch_uid_headers_via(MailClient *mc, const char *folder, const char *uid) {
+static char *fetch_uid_headers_via(emc_client *mc, const char *folder, const char *uid) {
     if (local_hdr_exists(folder, uid))
         return local_hdr_load(folder, uid);
-    char *hdrs = mail_client_fetch_headers(mc, uid);
+    char *hdrs = emc_fetch_headers(mc, uid);
     if (hdrs)
         local_hdr_save(folder, uid, hdrs, strlen(hdrs));
     return hdrs;
@@ -954,7 +952,7 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
  *   does not carry a flags field).
  * flags_out: if non-NULL, receives the final flag state on exit.
  */
-static int show_uid_interactive(const Config *cfg, MailClient *mc,
+static int show_uid_interactive(const Config *cfg, emc_client *mc,
                                 const char *folder,
                                 const char *uid, int page_size,
                                 int initial_flags, int *flags_out) {
@@ -968,8 +966,8 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
     if (local_msg_exists(load_folder, uid)) {
         raw = local_msg_load(load_folder, uid);
     } else if (mc) {
-        if (mail_client_select(mc, folder) == 0)
-            raw = mail_client_fetch_body(mc, uid);
+        if (emc_select(mc, folder) == 0)
+            raw = emc_fetch_body(mc, uid);
         if (raw) {
             local_msg_save(folder, uid, raw, strlen(raw));
             local_index_update(folder, uid, raw);
@@ -1323,7 +1321,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 const char *lbl = folder;
                 label_idx_remove(lbl, uid);
                 local_hdr_update_labels("", uid, NULL, 0, &lbl, 1);
-                if (mc) mail_client_modify_label(mc, uid, lbl, 0);
+                if (mc) emc_modify_label(mc, uid, lbl, 0);
                 snprintf(info_msg, sizeof(info_msg), "Label removed: %s", lbl);
                 /* Reload show_labels to reflect the change */
                 free(show_labels);
@@ -1332,13 +1330,13 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
             } else if (is_gmail && ch == 'D') {
                 if (strcmp(folder, "_trash") == 0) {
                     /* In Trash: permanently delete */
-                    if (mc) mail_client_delete(mc, uid);
+                    if (mc) emc_delete(mc, uid);
                     label_idx_remove("_trash", uid);
                     result = 6;   /* signal list loop to mark entry removed */
                     goto show_int_done;
                 }
                 /* Trash: Gmail compound trash operation */
-                if (mc) mail_client_trash(mc, uid);
+                if (mc) emc_trash(mc, uid);
                 char **all_labels = NULL; int all_count = 0;
                 label_idx_list(&all_labels, &all_count);
                 for (int j = 0; j < all_count; j++) {
@@ -1374,7 +1372,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                                 if (mc &&
                                     strcmp(tok, "IMPORTANT") != 0 &&
                                     strncmp(tok, "CATEGORY_", 9) != 0)
-                                    mail_client_modify_label(mc, uid, tok, 0);
+                                    emc_modify_label(mc, uid, tok, 0);
                             }
                             tok = sep ? sep + 1 : NULL;
                         }
@@ -1387,7 +1385,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 int new_flags = reader_flags & ~MSG_FLAG_UNSEEN;
                 local_hdr_update_flags("", uid, new_flags);
                 reader_flags = new_flags;
-                if (mc) mail_client_set_flag(mc, uid, "\\Seen", 1);
+                if (mc) emc_set_flag(mc, uid, "\\Seen", 1);
                 label_idx_add("_nolabel", uid);
                 free(show_labels);
                 show_labels = local_hdr_get_labels("", uid);
@@ -1418,7 +1416,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                     free(show_labels);
                     show_labels = local_hdr_get_labels("", uid);
                 } else if (mc) {
-                    mail_client_set_flag(mc, uid, "\\Flagged", add_flag);
+                    emc_set_flag(mc, uid, "\\Flagged", add_flag);
                 }
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Unstarred" : "Starred");
@@ -1443,7 +1441,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                     free(show_labels);
                     show_labels = local_hdr_get_labels("", uid);
                 } else if (mc) {
-                    mail_client_set_flag(mc, uid, "\\Seen", add_flag);
+                    emc_set_flag(mc, uid, "\\Seen", add_flag);
                 }
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Marked as read" : "Marked as unread");
@@ -1455,7 +1453,7 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 reader_flags ^= MSG_FLAG_DONE;
                 /* .hdr flags field is not used for IMAP; skip local_hdr_update_flags */
                 local_pending_flag_add(folder, uid, "$Done", add_flag);
-                if (mc) mail_client_set_flag(mc, uid, "$Done", add_flag);
+                if (mc) emc_set_flag(mc, uid, "$Done", add_flag);
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Marked not done" : "Marked done");
                 break;
@@ -1463,9 +1461,9 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
                 /* IMAP trash / permanent delete from reader */
                 const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
                 if (strcmp(folder, trf) == 0) {
-                    if (mc) mail_client_delete(mc, uid);
+                    if (mc) emc_delete(mc, uid);
                 } else {
-                    if (mc) mail_client_move_to_folder(mc, uid, trf);
+                    if (mc) emc_move_to_folder(mc, uid, trf);
                 }
                 result = 6;   /* signal list loop to mark entry removed */
                 goto show_int_done;
@@ -1713,10 +1711,10 @@ static void flag_push_background(const Config *cfg, const char *uid,
             dup2(devnull, STDERR_FILENO);
             if (devnull > STDERR_FILENO) close(devnull);
         }
-        MailClient *mc = make_mail(cfg);
+        emc_client *mc = make_mail(cfg);
         if (mc) {
-            mail_client_set_flag(mc, uid, flag_name, add_flag);
-            mail_client_free(mc);
+            emc_set_flag(mc, uid, flag_name, add_flag);
+            emc_close(mc);
         }
         _exit(0);
     }
@@ -1737,11 +1735,11 @@ static void junk_push_background(const Config *cfg, const char *uid, int mark_ju
             dup2(devnull, STDERR_FILENO);
             if (devnull > STDERR_FILENO) close(devnull);
         }
-        MailClient *mc = make_mail(cfg);
+        emc_client *mc = make_mail(cfg);
         if (mc) {
-            if (mark_junk) mail_client_mark_junk(mc, uid);
-            else           mail_client_mark_notjunk(mc, uid);
-            mail_client_free(mc);
+            if (mark_junk) emc_mark_junk(mc, uid);
+            else           emc_mark_notjunk(mc, uid);
+            emc_close(mc);
         }
         _exit(0);
     }
@@ -2269,7 +2267,7 @@ static int list_empty_cache_view(const Config *cfg, const EmailListOpts *opts,
  * counted and the rest are still done. */
 typedef struct {
     const Config *cfg;
-    MailClient   *mc;               /* may be NULL (offline: queued for sync) */
+    emc_client   *mc;               /* may be NULL (offline: queued for sync) */
     Manifest     *manifest;
     MsgEntry     *entries;
     const char   *folder;
@@ -2334,7 +2332,7 @@ static int bulk_set_flag(BulkCtx *b, int ei, int bit, const char *flag_name,
         }
         flag_push_background(b->cfg, uid, flag_name, add_flag);
     } else if (b->mc) {
-        rc = mail_client_set_flag(b->mc, uid, flag_name, add_flag);
+        rc = emc_set_flag(b->mc, uid, flag_name, add_flag);
     }
     return rc == 0 ? 0 : -1;
 }
@@ -2343,7 +2341,7 @@ static int bulk_set_flag(BulkCtx *b, int ei, int bit, const char *flag_name,
 static int bulk_label(BulkCtx *b, int ei, const char *label, int on) {
     const char *uid = b->entries[ei].uid;
     int rc = 0;
-    if (b->mc) rc = mail_client_modify_label(b->mc, uid, label, on);
+    if (b->mc) rc = emc_modify_label(b->mc, uid, label, on);
     if (on) {
         label_idx_add(label, uid);
         local_hdr_update_labels("", uid, &label, 1, NULL, 0);
@@ -2367,7 +2365,7 @@ static int bulk_move(BulkCtx *b, int ei, const char *target) {
         if (b->pend_label && efolder[0] != '_') b->pend_label[ei] = 1;
         return rc == 0 ? 0 : -1;
     }
-    if (b->mc) rc = mail_client_move_to_folder(b->mc, uid, target);
+    if (b->mc) rc = emc_move_to_folder(b->mc, uid, target);
     if (rc == 0) {
         manifest_remove(b->manifest, uid);
         if (b->pend_remove) b->pend_remove[ei] = 1;
@@ -2385,10 +2383,10 @@ static int bulk_delete(BulkCtx *b, int ei) {
     if (b->is_gmail) {
         int in_trash = strcmp(b->folder, "_trash") == 0;
         if (in_trash) {
-            if (b->mc) rc = mail_client_delete(b->mc, uid);
+            if (b->mc) rc = emc_delete(b->mc, uid);
             label_idx_remove("_trash", uid);
         } else {
-            if (b->mc) rc = mail_client_trash(b->mc, uid);
+            if (b->mc) rc = emc_trash(b->mc, uid);
             char **all_labels = NULL;
             int all_count = 0;
             label_idx_list(&all_labels, &all_count);
@@ -2402,9 +2400,9 @@ static int bulk_delete(BulkCtx *b, int ei) {
     } else {
         const char *trf = b->cfg->trash_folder ? b->cfg->trash_folder : "Trash";
         if (strcmp(efolder, trf) == 0) {
-            if (b->mc) rc = mail_client_delete(b->mc, uid);
+            if (b->mc) rc = emc_delete(b->mc, uid);
         } else {
-            if (b->mc) rc = mail_client_move_to_folder(b->mc, uid, trf);
+            if (b->mc) rc = emc_move_to_folder(b->mc, uid, trf);
         }
     }
     if (rc == 0) {
@@ -2628,7 +2626,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
     /* Shared mail client — populated in online mode, NULL in cron mode.
      * Kept alive for the full rendering loop so header fetches reuse it. */
-    RAII_MAIL MailClient *list_mc = NULL;
+    EMC_AUTO_CLOSE emc_client *list_mc = NULL;
 
     if (is_virtual_flags) {
         /* ── Virtual Unread/Flagged: local manifest aggregate (always cache-only).
@@ -2788,7 +2786,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             fprintf(stderr, "Failed to connect.\n");
             return -1;
         }
-        if (mail_client_select(list_mc, folder) != 0) {
+        if (emc_select(list_mc, folder) != 0) {
             manifest_free(manifest);
             fprintf(stderr, "Failed to select folder %s.\n", folder);
             return -1;
@@ -2796,7 +2794,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
         char (*unseen_uids)[17] = NULL;
         int  unseen_uid_count = 0;
-        if (mail_client_search(list_mc, MAIL_SEARCH_UNREAD, &unseen_uids, &unseen_uid_count) != 0) {
+        if (emc_search(list_mc, EMC_SEARCH_UNREAD, &unseen_uids, &unseen_uid_count) != 0) {
             manifest_free(manifest);
             fprintf(stderr, "Failed to search mailbox.\n");
             return -1;
@@ -2804,17 +2802,17 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
         char (*flagged_uids)[17] = NULL;
         int flagged_count = 0;
-        mail_client_search(list_mc, MAIL_SEARCH_FLAGGED, &flagged_uids, &flagged_count);
+        emc_search(list_mc, EMC_SEARCH_FLAGGED, &flagged_uids, &flagged_count);
         /* ignore errors — treat as 0 flagged */
 
         char (*done_uids)[17] = NULL;
         int done_count = 0;
-        mail_client_search(list_mc, MAIL_SEARCH_DONE, &done_uids, &done_count);
+        emc_search(list_mc, EMC_SEARCH_DONE, &done_uids, &done_count);
         /* ignore errors — treat as 0 done */
 
         char (*all_uids)[17] = NULL;
         int  all_count = 0;
-        if (mail_client_search(list_mc, MAIL_SEARCH_ALL, &all_uids, &all_count) != 0) {
+        if (emc_search(list_mc, EMC_SEARCH_ALL, &all_uids, &all_count) != 0) {
             free(unseen_uids);
             free(flagged_uids);
             free(done_uids);
@@ -3936,7 +3934,7 @@ read_key_again: ;
                                 if (list_mc &&
                                     strcmp(tok, "IMPORTANT") != 0 &&
                                     strncmp(tok, "CATEGORY_", 9) != 0)
-                                    mail_client_modify_label(list_mc, uid, tok, 0);
+                                    emc_modify_label(list_mc, uid, tok, 0);
                             }
                             tok = sep ? sep + 1 : NULL;
                         }
@@ -3956,7 +3954,7 @@ read_key_again: ;
                     entries[ei_cur].flags = new_flags;
                 }
                 /* Mark as read via API */
-                if (list_mc) mail_client_set_flag(list_mc, uid, "\\Seen", 1);
+                if (list_mc) emc_set_flag(list_mc, uid, "\\Seen", 1);
                 /* Put in archive */
                 label_idx_add("_nolabel", uid);
                 /* Mark for immediate visual feedback (yellow strikethrough) */
@@ -3968,7 +3966,7 @@ read_key_again: ;
                 const char *uid = entries[ei_cur].uid;
                 /* In Trash: permanently delete */
                 if (strcmp(folder, "_trash") == 0) {
-                    if (list_mc) mail_client_delete(list_mc, uid);
+                    if (list_mc) emc_delete(list_mc, uid);
                     label_idx_remove("_trash", uid);
                     manifest_remove(manifest, uid);
                     if (pending_remove) pending_remove[ei_cur] = 1;
@@ -3989,15 +3987,15 @@ read_key_again: ;
                     }
                     /* Gmail API: remove TRASH label, add folder label back */
                     if (list_mc) {
-                        mail_client_modify_label(list_mc, uid, "TRASH", 0);
-                        mail_client_modify_label(list_mc, uid, restore_lbl, 1);
+                        emc_modify_label(list_mc, uid, "TRASH", 0);
+                        emc_modify_label(list_mc, uid, restore_lbl, 1);
                     }
                     pending_remove[ei_cur] = 0;
                     snprintf(feedback_msg, sizeof(feedback_msg),
                              "Undo: %s restored", restore_lbl);
                 } else {
                     /* First 'D': Gmail compound trash operation */
-                    if (list_mc) mail_client_trash(list_mc, uid);
+                    if (list_mc) emc_trash(list_mc, uid);
                     /* Remove from all local label indexes */
                     {
                         char **all_labels = NULL;
@@ -4022,10 +4020,10 @@ read_key_again: ;
                 const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
                 if (strcmp(efolder, trf) == 0) {
                     /* Already in Trash: permanently delete */
-                    if (list_mc) mail_client_delete(list_mc, uid);
+                    if (list_mc) emc_delete(list_mc, uid);
                 } else {
                     /* Move to Trash folder */
-                    if (list_mc) mail_client_move_to_folder(list_mc, uid, trf);
+                    if (list_mc) emc_move_to_folder(list_mc, uid, trf);
                 }
                 manifest_remove(manifest, uid);
                 if (pending_remove) pending_remove[ei_cur] = 1;
@@ -4047,8 +4045,8 @@ read_key_again: ;
                 }
                 /* Gmail API: remove TRASH label, add INBOX */
                 if (list_mc) {
-                    mail_client_modify_label(list_mc, uid, "TRASH", 0);
-                    mail_client_modify_label(list_mc, uid, "INBOX", 1);
+                    emc_modify_label(list_mc, uid, "TRASH", 0);
+                    emc_modify_label(list_mc, uid, "INBOX", 1);
                 }
                 /* Mark for immediate visual feedback (green strikethrough) */
                 if (pending_restore) pending_restore[ei_cur] = 1;
@@ -4078,7 +4076,7 @@ read_key_again: ;
                     if (pending_label && pending_label[ei_cur]) {
                         /* Undo: restore the label that was removed */
                         if (list_mc)
-                            mail_client_modify_label(list_mc, uid, folder, 1);
+                            emc_modify_label(list_mc, uid, folder, 1);
                         label_idx_add(folder, uid);
                         local_hdr_update_labels("", uid, &folder, 1, NULL, 0);
                         /* Remove from archive fallback if it was added */
@@ -4089,7 +4087,7 @@ read_key_again: ;
                     } else {
                         /* Remove label from this message */
                         if (list_mc)
-                            mail_client_modify_label(list_mc, uid, folder, 0);
+                            emc_modify_label(list_mc, uid, folder, 0);
                         label_idx_remove(folder, uid);
                         local_hdr_update_labels("", uid, NULL, 0, &folder, 1);
                         /* If no other real labels remain, put in archive */
@@ -4149,9 +4147,9 @@ read_key_again: ;
                     junk_push_background(cfg, uid, !is_junk);
                 } else if (list_mc) {
                     if (is_junk)
-                        mail_client_mark_notjunk(list_mc, uid);
+                        emc_mark_notjunk(list_mc, uid);
                     else
-                        mail_client_mark_junk(list_mc, uid);
+                        emc_mark_junk(list_mc, uid);
                 }
                 snprintf(feedback_msg, sizeof(feedback_msg),
                          is_junk ? "Marked as not-junk" : "Marked as junk");
@@ -4210,7 +4208,7 @@ read_key_again: ;
                     flag_push_background(cfg, uid, flag_name, add_flag);
                 } else if (list_mc) {
                     /* IMAP online mode: connection already open, push immediately */
-                    mail_client_set_flag(list_mc, uid, flag_name, add_flag);
+                    emc_set_flag(list_mc, uid, flag_name, add_flag);
                 }
                 /* Feedback message */
                 if (ch == 'n')
@@ -4256,13 +4254,13 @@ list_done:
 /** Fetch the folder list into a heap-allocated array; caller owns entries and array. */
 static char **fetch_folder_list_from_server(const Config *cfg,
                                              int *count_out, char *sep_out) {
-    RAII_MAIL MailClient *mc = make_mail(cfg);
+    EMC_AUTO_CLOSE emc_client *mc = make_mail(cfg);
     if (!mc) return NULL;
 
     char **folders = NULL;
     int count = 0;
     char sep = '.';
-    if (mail_client_list(mc, &folders, &count, &sep) != 0) return NULL;
+    if (emc_list_names(mc, &folders, &count, &sep) != 0) return NULL;
 
     *count_out = count;
     if (sep_out) *sep_out = sep;
@@ -4669,10 +4667,10 @@ folders_int_done:
 /**
  * Show a popup overlay with checkboxes for each label.
  * The user can toggle labels on/off with Enter/Space, navigate with arrows.
- * Applies changes via mail_client_set_flag and updates local .idx.
+ * Applies changes via emc_set_flag and updates local .idx.
  * Returns when the user presses ESC/Backspace/q.
  */
-static void show_label_picker(MailClient *mc, const char *uid,
+static void show_label_picker(emc_client *mc, const char *uid,
                                char *feedback_out, int feedback_cap) {
     /* Collect available labels from local .idx files */
     char **all_labels = NULL;
@@ -4821,7 +4819,7 @@ static void show_label_picker(MailClient *mc, const char *uid,
                         const char *trash_id = "TRASH";
                         label_idx_remove("_trash", uid);
                         local_hdr_update_labels("", uid, NULL, 0, &trash_id, 1);
-                        if (mc) mail_client_modify_label(mc, uid, "TRASH", 0);
+                        if (mc) emc_modify_label(mc, uid, "TRASH", 0);
                     }
                 }
             } else {
@@ -4830,9 +4828,9 @@ static void show_label_picker(MailClient *mc, const char *uid,
             }
             if (mc) {
                 if (strcmp(lid, "STARRED") == 0)
-                    mail_client_set_flag(mc, uid, "\\Flagged", adding);
+                    emc_set_flag(mc, uid, "\\Flagged", adding);
                 else
-                    mail_client_modify_label(mc, uid, lid, adding);
+                    emc_modify_label(mc, uid, lid, adding);
             }
         }
     }
@@ -6034,14 +6032,14 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
 
     /* ── Gmail: delegate to gmail_sync (flat store + label indexes) ────── */
     if (cfg->gmail_mode) {
-        GmailClient *gc = gmail_connect((Config *)cfg);
+        emc_client *gc = mail_connect(cfg);
         if (!gc) {
             fprintf(stderr, "sync: could not connect to Gmail API.\n");
             if (pid_path[0]) unlink(pid_path);
             return -1;
         }
-        int rc = force_reconcile ? gmail_sync_full(gc) : gmail_sync(gc);
-        gmail_disconnect(gc);
+        int rc = emc_sync(gc, force_reconcile) == EMC_OK ? 0 : -1;
+        emc_close(gc);
         if (pid_path[0]) unlink(pid_path);
         return rc;
     }
@@ -6073,7 +6071,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
         if (pa && pac > 0) {
             printf("Uploading %d pending message(s)...\n", pac);
             fflush(stdout);
-            RAII_MAIL MailClient *append_mc = make_mail(cfg);
+            EMC_AUTO_CLOSE emc_client *append_mc = make_mail(cfg);
             if (!append_mc) {
                 printf("  (Upload skipped: cannot connect; will retry on next sync.)\n");
             } else {
@@ -6089,7 +6087,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
                     char *append_msg = msg_to_crlf(raw, &append_len);
                     if (!append_msg) { append_msg = raw; append_len = strlen(raw); }
                     printf("  → %s ...", pa[i].folder); fflush(stdout);
-                    if (mail_client_append(append_mc, pa[i].folder, append_msg, append_len) == 0) {
+                    if (emc_append(append_mc, pa[i].folder, append_msg, append_len) == 0) {
                         local_msg_delete(pa[i].folder, pa[i].uid);
                         Manifest *mf = manifest_load(pa[i].folder);
                         if (mf) {
@@ -6111,7 +6109,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
     }
 
     /* One shared mail client connection for all folder operations */
-    RAII_MAIL MailClient *sync_mc = make_mail(cfg);
+    EMC_AUTO_CLOSE emc_client *sync_mc = make_mail(cfg);
     if (!sync_mc) {
         fprintf(stderr, "sync: could not connect to mail server.\n");
         for (int i = 0; i < folder_count; i++) free(folders[i]);
@@ -6132,8 +6130,8 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
         int have_saved = (!force_reconcile &&
                           local_sync_state_load(folder, &saved_state) == 0);
 
-        ImapSelectResult sel = {0};
-        if (mail_client_select_ext(sync_mc, folder,
+        emc_select_result sel = {0};
+        if (emc_select_ext(sync_mc, folder,
                                    have_saved ? saved_state.uidvalidity : 0,
                                    have_saved ? saved_state.highestmodseq : 0,
                                    &sel) != 0) {
@@ -6171,7 +6169,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
         /* ── SEARCH ALL: current UID set (needed in all paths) ─────────── */
         char (*uids)[17] = NULL;
         int  uid_count = 0;
-        if (mail_client_search(sync_mc, MAIL_SEARCH_ALL, &uids, &uid_count) != 0) {
+        if (emc_search(sync_mc, EMC_SEARCH_ALL, &uids, &uid_count) != 0) {
             fprintf(stderr, "  WARN: SEARCH ALL failed for %s\n", folder);
             free(sel.vanished_uids);
             errors++;
@@ -6208,7 +6206,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
             PendingMove *moves = local_pending_move_load(folder, &mcount);
             if (moves && mcount > 0) {
                 for (int mi = 0; mi < mcount; mi++)
-                    mail_client_move_to_folder(sync_mc,
+                    emc_move_to_folder(sync_mc,
                                                moves[mi].uid,
                                                moves[mi].target_folder);
                 local_pending_move_clear(folder);
@@ -6222,7 +6220,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
             PendingFlag *pending = local_pending_flag_load(folder, &pcount);
             if (pending && pcount > 0) {
                 for (int pi = 0; pi < pcount; pi++)
-                    mail_client_set_flag(sync_mc, pending[pi].uid,
+                    emc_set_flag(sync_mc, pending[pi].uid,
                                         pending[pi].flag_name, pending[pi].add);
                 local_pending_flag_clear(folder);
             }
@@ -6233,7 +6231,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
         manifest_retain(manifest, (const char (*)[17])uids, uid_count);
 
         /* ── Flag acquisition ─────────────────────────────────────────── */
-        ImapFlagUpdate *change_updates = NULL;
+        emc_flag_update *change_updates = NULL;
         int             change_count   = 0;
 
         char (*unseen_uids)[17]  = NULL; int unseen_count  = 0;
@@ -6242,7 +6240,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
 
         if (incremental) {
             /* CONDSTORE path: CHANGEDSINCE replaces three SEARCH commands */
-            mail_client_fetch_flags_changedsince(sync_mc,
+            emc_fetch_flags_changedsince(sync_mc,
                                                  saved_state.highestmodseq,
                                                  &change_updates, &change_count);
             /* Apply flag updates to existing manifest entries now */
@@ -6252,12 +6250,12 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
             }
         } else {
             /* Full path: three SEARCH commands */
-            if (mail_client_search(sync_mc, MAIL_SEARCH_UNREAD,
+            if (emc_search(sync_mc, EMC_SEARCH_UNREAD,
                                    &unseen_uids, &unseen_count) != 0)
                 unseen_count = 0;
-            mail_client_search(sync_mc, MAIL_SEARCH_FLAGGED,
+            emc_search(sync_mc, EMC_SEARCH_FLAGGED,
                                &flagged_uids, &flagged_count);
-            mail_client_search(sync_mc, MAIL_SEARCH_DONE,
+            emc_search(sync_mc, EMC_SEARCH_DONE,
                                &done_uids, &done_count);
         }
 
@@ -6301,9 +6299,9 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
             if (!local_msg_exists(folder, uid)) {
                 SyncProgressCtx pctx = { i + 1, uid_count, {0} };
                 memcpy(pctx.uid, uid, 17);
-                mail_client_set_progress(sync_mc, sync_progress_cb, &pctx);
-                char *raw = mail_client_fetch_body(sync_mc, uid);
-                mail_client_set_progress(sync_mc, NULL, NULL);
+                emc_set_progress(sync_mc, sync_progress_cb, &pctx);
+                char *raw = emc_fetch_body(sync_mc, uid);
+                emc_set_progress(sync_mc, NULL, NULL);
                 if (raw) {
                     /* Cache the header section extracted from the full body so
                      * the subsequent manifest update needs no extra IMAP round-trip. */
@@ -6506,8 +6504,12 @@ int email_service_rebuild_indexes(const char *only_account) {
         }
         printf("=== Rebuilding indexes: %s ===\n", accounts[i].name);
         local_store_init(accounts[i].cfg->host, accounts[i].cfg->user);
-        if (gmail_sync_rebuild_indexes() < 0)
-            errors++;
+        {
+            emc_account ra;
+            mail_account_from_config(accounts[i].cfg, &ra);
+            if (emc_rebuild_indexes(&ra) != EMC_OK)
+                errors++;
+        }
         done++;
     }
     config_free_account_list(accounts, count);
@@ -7100,7 +7102,7 @@ int email_service_check_credential(const Config *cfg) {
     printf("Checking the connection to %s...\n", where);
     fflush(stdout);
 
-    RAII_MAIL MailClient *mc = make_mail(cfg);
+    EMC_AUTO_CLOSE emc_client *mc = make_mail(cfg);
     if (!mc) {
         /* Why it failed is reported by the layer that knows: imap_connect()
          * names a rejected login, gmail_auth_refresh() names a revoked
@@ -7310,13 +7312,13 @@ int email_service_set_flag(const Config *cfg, const char *uid,
 
     /* Synchronous server push */
     int pushed = 0;
-    MailClient *mc = make_mail(cfg);
+    emc_client *mc = make_mail(cfg);
     const int connected = mc != NULL;
     if (mc) {
-        if (mail_client_select(mc, use_folder) == 0 &&
-            mail_client_set_flag(mc, uid, flag_name, imap_add) == 0)
+        if (emc_select(mc, use_folder) == 0 &&
+            emc_set_flag(mc, uid, flag_name, imap_add) == 0)
             pushed = 1;
-        mail_client_free(mc);
+        emc_close(mc);
     }
 
     if (cfg->gmail_mode) {
@@ -7347,13 +7349,13 @@ int email_service_set_label(const Config *cfg, const char *uid,
         return -1;
     }
 
-    MailClient *mc = make_mail(cfg);
+    emc_client *mc = make_mail(cfg);
     if (!mc) {
         fprintf(stderr, "Error: Could not connect to server.\n");
         return -1;
     }
-    int rc = mail_client_modify_label(mc, uid, label, add);
-    mail_client_free(mc);
+    int rc = emc_modify_label(mc, uid, label, add);
+    emc_close(mc);
 
     if (add) {
         label_idx_add(label, uid);
@@ -7371,7 +7373,7 @@ int email_service_list_labels(const Config *cfg) {
         fprintf(stderr, "Error: 'list-labels' is Gmail-only. Use 'list-folders' for IMAP.\n");
         return -1;
     }
-    MailClient *mc = make_mail(cfg);
+    emc_client *mc = make_mail(cfg);
     if (!mc) {
         fprintf(stderr, "Error: Could not connect.\n");
         return -1;
@@ -7379,8 +7381,8 @@ int email_service_list_labels(const Config *cfg) {
 
     char **names = NULL, **ids = NULL;
     int count = 0;
-    int rc = mail_client_list_with_ids(mc, &names, &ids, &count);
-    mail_client_free(mc);
+    int rc = emc_list_with_ids(mc, &names, &ids, &count);
+    emc_close(mc);
 
     if (rc != 0 || count == 0) {
         if (rc == 0) printf("No labels found.\n");
@@ -7417,14 +7419,14 @@ int email_service_create_label(const Config *cfg, const char *name) {
         fprintf(stderr, "Error: 'create-label' is Gmail-only. Use 'create-folder' for IMAP.\n");
         return -1;
     }
-    MailClient *mc = make_mail(cfg);
+    emc_client *mc = make_mail(cfg);
     if (!mc) {
         fprintf(stderr, "Error: Could not connect.\n");
         return -1;
     }
     char *new_id = NULL;
-    int rc = mail_client_create_label(mc, name, &new_id);
-    mail_client_free(mc);
+    int rc = emc_create_label(mc, name, &new_id);
+    emc_close(mc);
 
     if (rc == 0)
         printf("Label '%s' created (ID: %s).\n", name, new_id ? new_id : name);
@@ -7437,13 +7439,13 @@ int email_service_delete_label(const Config *cfg, const char *label_id) {
         fprintf(stderr, "Error: 'delete-label' is Gmail-only. Use 'delete-folder' for IMAP.\n");
         return -1;
     }
-    MailClient *mc = make_mail(cfg);
+    emc_client *mc = make_mail(cfg);
     if (!mc) {
         fprintf(stderr, "Error: Could not connect.\n");
         return -1;
     }
-    int rc = mail_client_delete_label(mc, label_id);
-    mail_client_free(mc);
+    int rc = emc_delete_label(mc, label_id);
+    emc_close(mc);
 
     if (rc == 0)
         printf("Label '%s' deleted.\n", label_id);
@@ -7452,20 +7454,20 @@ int email_service_delete_label(const Config *cfg, const char *label_id) {
 
 int email_service_mark_junk(const Config *cfg, const char *uid) {
     local_store_init(cfg->host, cfg->user);
-    MailClient *mc = make_mail(cfg);
+    emc_client *mc = make_mail(cfg);
     if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
-    int rc = mail_client_mark_junk(mc, uid);
-    mail_client_free(mc);
+    int rc = emc_mark_junk(mc, uid);
+    emc_close(mc);
     if (rc == 0) printf("Message %s marked as junk.\n", uid);
     return rc;
 }
 
 int email_service_mark_notjunk(const Config *cfg, const char *uid) {
     local_store_init(cfg->host, cfg->user);
-    MailClient *mc = make_mail(cfg);
+    emc_client *mc = make_mail(cfg);
     if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
-    int rc = mail_client_mark_notjunk(mc, uid);
-    mail_client_free(mc);
+    int rc = emc_mark_notjunk(mc, uid);
+    emc_close(mc);
     if (rc == 0) printf("Message %s marked as not-junk.\n", uid);
     return rc;
 }
@@ -7475,13 +7477,13 @@ int email_service_create_folder(const Config *cfg, const char *name) {
         fprintf(stderr, "Error: 'create-folder' is IMAP-only. Use 'create-label' for Gmail.\n");
         return -1;
     }
-    MailClient *mc = make_mail(cfg);
+    emc_client *mc = make_mail(cfg);
     if (!mc) {
         fprintf(stderr, "Error: Could not connect.\n");
         return -1;
     }
-    int rc = mail_client_create_folder(mc, name);
-    mail_client_free(mc);
+    int rc = emc_create_folder(mc, name);
+    emc_close(mc);
 
     if (rc == 0)
         printf("Folder '%s' created.\n", name);
@@ -7493,13 +7495,13 @@ int email_service_delete_folder(const Config *cfg, const char *name) {
         fprintf(stderr, "Error: 'delete-folder' is IMAP-only. Use 'delete-label' for Gmail.\n");
         return -1;
     }
-    MailClient *mc = make_mail(cfg);
+    emc_client *mc = make_mail(cfg);
     if (!mc) {
         fprintf(stderr, "Error: Could not connect.\n");
         return -1;
     }
-    int rc = mail_client_delete_folder(mc, name);
-    mail_client_free(mc);
+    int rc = emc_delete_folder(mc, name);
+    emc_close(mc);
 
     if (rc == 0)
         printf("Folder '%s' deleted.\n", name);

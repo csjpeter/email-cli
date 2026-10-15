@@ -308,6 +308,9 @@ cmake_build() {
     for b in "$PROJECT_NAME" "${PROJECT_NAME}-ro" email-sync email-tui email-import-rules; do
         cp "$BUILD_DIR/$b" "$BIN_DIR/" || exit 1
     done
+    # The programs link libemail-client dynamically and find it beside
+    # themselves ($ORIGIN).
+    cp -a "$BUILD_DIR"/libemail-client/libemail-client.so* "$BIN_DIR/" || exit 1
 }
 
 build_release() {
@@ -338,6 +341,8 @@ do_install() {
             echo "Warning: $src not found, skipping."
         fi
     done
+    cp -a "$BIN_DIR"/libemail-client.so* "$INSTALL_DIR/" || exit 1
+    echo "Installed $INSTALL_DIR/libemail-client.so"
     echo "Install complete. Make sure $INSTALL_DIR is in your PATH."
 }
 
@@ -349,6 +354,7 @@ do_uninstall() {
             echo "Removed $dst"
         fi
     done
+    rm -f -- "$INSTALL_DIR"/libemail-client.so*
     echo "Uninstall complete."
 }
 

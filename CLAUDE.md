@@ -88,6 +88,13 @@ build system's (CMake's) responsibility.
 
 **Data flow:** `main.c` initializes logger, paths, and local store → loads config (or runs `setup_wizard` on first run) → calls `email_service` → which uses `mail_client` (dispatch layer) to talk to the IMAP server or Gmail REST API → results go to stdout, messages stored in `~/.local/share/email-cli/accounts/`, diagnostics to `~/.cache/email-cli/logs/`.
 
+**Mail access (EMAIL-99):** the programs reach a mail server only through
+**libemail-client** (`libemail-client/`, a shared library with its own
+packages, see `docs/spec/libemail-client.md`).  `infrastructure/mail_account.h`
+is the bridge from `Config` to the library's account.  The protocol modules
+(`imap_client`, `gmail_*`, `mail_client`, `libwrite`) are compiled into the
+library; their copies in `libemail` stay until EMAIL-100 removes them.
+
 **Gmail support:** Gmail accounts use the native Gmail REST API (OAuth2 + libcurl), not IMAP. The setup wizard offers account type selection ([1] IMAP / [2] Gmail). Gmail uses label-based navigation instead of folders. See `docs/spec/gmail-api.md` for the full specification.
 
 **Config** is stored at `~/.config/email-cli/config.ini` with mode 0600 (IMAP host, user, password, folder). Gmail accounts add `GMAIL_MODE=1`, `GMAIL_REFRESH_TOKEN`, and optional `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET` fields.

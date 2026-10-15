@@ -41,6 +41,7 @@ add_library(libemail STATIC
 )
 
 target_include_directories(libemail PUBLIC
+    ${CMAKE_SOURCE_DIR}/libemail-client/include
     src
     src/core
     src/infrastructure
@@ -50,5 +51,5 @@ target_include_directories(libemail PUBLIC
 )
 
 find_package(CURL REQUIRED)
-target_link_libraries(libemail PUBLIC OpenSSL::SSL OpenSSL::Crypto CURL::libcurl
-                                        ${EMAIL_TUIKIT_LIB})
+target_link_libraries(libemail PUBLIC email-client OpenSSL::SSL OpenSSL::Crypto
+                                        CURL::libcurl ${EMAIL_TUIKIT_LIB})

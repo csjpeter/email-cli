@@ -310,7 +310,7 @@ static PtySession *at_attach_reader(void) {
     PtySession *s = at_list();
     if (!s) return NULL;
     pty_send_key(s, PTY_KEY_ENTER);
-    if (pty_wait_for(s, "A=save-all", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    if (pty_wait_for(s, "A save-all", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
     return s;
 }

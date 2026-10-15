@@ -20,6 +20,7 @@ add_library(libemail STATIC
     src/core/html_render.c
     src/core/imap_util.c
     src/core/input_line.c
+    src/core/status_line.c
     src/core/tui_frame.c
     src/core/body_editor.c
     src/core/compose_draft.c

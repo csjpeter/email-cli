@@ -94,3 +94,28 @@ defect or inconsistency the pictures make visible, left for the owner to ticket.
 7. Help overlays (fixed with EMAIL-34): rows were padded by bytes, so rows
    with `↑ / ↓` were misaligned and a multi-byte cut was possible; the
    key rows still said `ESC / q  Quit` and `Backspace` after EMAIL-37.
+8. Narrow terminal (80x24, `w80_*`): the bottom key bars of the accounts
+   screen and the message list are cut mid-hint (`(*keeps loc`, `F=f`)
+   instead of being shortened; the review screen's key line wraps onto a
+   second row.  Not changed; the pictures pin the present state.
+9. Eight-colour terminal (`TERM=linux`, `*_8colour`): the program does not
+   look at `TERM`; the selection is still the dark-blue palette-17 row with
+   `>`, so on a terminal without it the `>` alone marks the row.
+10. Connection errors (EMAIL-93): after a specific login or TLS rejection the
+    generic `Connection failed. Possible causes: …` block follows and
+    partly contradicts the specific line.
+11. Setup wizard (EMAIL-94): an unknown account type (`9`) is silently
+    taken as IMAP.
+12. Gmail label browser (EMAIL-88): a label created with `c` is not listed
+    until a message carries it.
+13. Review screen (EMAIL-91): a long To list wraps at the terminal edge in the
+    middle of an address.
+
+## State matrix (EMAIL-96)
+
+`w80_*` and `w140_*` pictures: accounts, folders, list, reader, list help,
+compose form, body editor, review and rules list at 80 and 140 columns (the
+default is 100); `list_third_row`, `folders_second_row` (cursor on a later
+row); `list_wide_subject`, `reader_wide_subject` (wide characters),
+`list_long_subject` (cut with an ellipsis); `accounts_8colour`,
+`folders_8colour`, `list_8colour`, `list_8colour_third`, `reader_8colour`.

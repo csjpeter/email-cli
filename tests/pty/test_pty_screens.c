@@ -45,6 +45,7 @@ int g_tests_failed = 0;
 
 #define ROWS 24
 #define COLS 100
+#define MAXCOLS 200   /* the widest terminal a view is recorded at */
 #define WAIT_MS 6000
 #define SETTLE_MS 500
 
@@ -201,12 +202,14 @@ static void use_gmail_home(const char *view) {
 /* ── Opening a view ──────────────────────────────────────────────────── */
 
 static int g_cols = COLS;
+static const char *g_term = NULL;   /* TERM of the view, NULL: the harness default */
 
 static PtySession *tui_open(void) {
     const char *args[] = { g_tui_bin, NULL };
     PtySession *s = pty_open(g_cols, ROWS);
     if (!s) return NULL;
     pty_setenv(s, "TZ", "UTC");
+    if (g_term) pty_setenv(s, "TERM", g_term);
     pty_setenv(s, "HOME", g_home);
     pty_setenv(s, "XDG_CONFIG_HOME", NULL);
     pty_setenv(s, "XDG_DATA_HOME", NULL);
@@ -351,6 +354,39 @@ static PtySession *at_cron_list(void) {
     return at_list();
 }
 
+/* A view at another width (80 is the policy minimum) or on another terminal. */
+static PtySession *at_cols(int cols, PtySession *(*open)(void)) {
+    g_cols = cols;
+    PtySession *s = open();
+    g_cols = COLS;
+    return s;
+}
+
+static PtySession *at_term(const char *term, PtySession *(*open)(void)) {
+    g_term = term;
+    PtySession *s = open();
+    g_term = NULL;
+    return s;
+}
+
+/* The default mock message with a chosen subject, as a list (reader 0) or
+ * the opened message (reader 1). */
+static PtySession *at_subject(const char *subject, int reader) {
+    unsetenv("MOCK_IMAP_COUNT");
+    setenv("MOCK_IMAP_SUBJECT", subject, 1);
+    restart_mock();
+    unsetenv("MOCK_IMAP_SUBJECT");
+    setenv("MOCK_IMAP_COUNT", "3", 1);
+    write_account_config();
+    PtySession *s = at_list();
+    if (!s) return NULL;
+    if (reader) {
+        pty_send_key(s, PTY_KEY_ENTER);
+        pty_settle(s, SETTLE_MS * 2);
+    }
+    return s;
+}
+
 static PtySession *at_rules(void) {
     PtySession *s = at_list();
     if (!s) return NULL;
@@ -383,6 +419,8 @@ static const PtyStyleKey LEGEND[] = {
     { 'E', PTY_ATTR_BOLD,                    91,             PTY_COLOR_IDX(17) },
     { 'y', PTY_ATTR_BOLD,                    PTY_FG_YELLOW,  PTY_BG_DEFAULT },
     { 'Z', PTY_ATTR_NONE,                    PTY_FG_YELLOW,  PTY_BG_DEFAULT },
+    /* The unread N on an 8-colour terminal: plain green, no bright variant. */
+    { 'm', PTY_ATTR_BOLD,                    PTY_FG_GREEN,   PTY_BG_DEFAULT },
     /* A dim cell on the selected row (the account list's server column). */
     { 'a', PTY_ATTR_DIM,                     97,             PTY_COLOR_IDX(17) },
     /* The address drop-down's marker: cyan, reverse on the chosen row. */
@@ -401,7 +439,7 @@ static const PtyStyleKey LEGEND[] = {
 static void record_view(const char *name, PtySession *s) {
     int rows_n = ROWS;
     pty_get_size(s, &g_shown_cols, &rows_n);
-    char buf[ROWS * (COLS + 1) * 4 + 64];
+    char buf[ROWS * (MAXCOLS + 1) * 4 + 64];
     fprintf(g_record, "=== %s\n", name);
     pty_region_dump_c(s, NULL, g_record);
     fprintf(g_record, "--- style\n%s\n",
@@ -449,7 +487,7 @@ static void check_view(PtySession *s, const char *const exp[],
         if (strcmp(exp[i], "@@") == 0) {
             int found = -1;
             for (int r = i + offset; r < ROWS && i + 1 < n; r++) {
-                char row[COLS * 4 + 4];
+                char row[MAXCOLS * 4 + 4];
                 pty_row_text(s, r, row, sizeof(row));
                 char want[COLS * 4 + 4];
                 snprintf(want, sizeof(want), "%s", exp[i + 1]);
@@ -476,7 +514,7 @@ static void check_view(PtySession *s, const char *const exp[],
             if (exp[t][0] == '%') {
                 /* A path that differs on every machine: only its start is
                  * compared (and the style of its row is not). */
-                char row[COLS * 4 + 4];
+                char row[MAXCOLS * 4 + 4];
                 pty_row_text(s, t + offset, row, sizeof(row));
                 size_t pl = strlen(exp[t] + 1);
                 ASSERT(strncmp(row, exp[t] + 1, pl) == 0,
@@ -485,7 +523,7 @@ static void check_view(PtySession *s, const char *const exp[],
                 continue;
             }
             if (exp[t][0] == '~') {
-                char row[COLS * 4 + 4], norm[COLS * 4 + 4];
+                char row[MAXCOLS * 4 + 4], norm[MAXCOLS * 4 + 4];
                 pty_row_text(s, t + offset, row, sizeof(row));
                 size_t o = 0;
                 for (const char *q = row; *q && o + 1 < sizeof(norm); q++) {
@@ -654,6 +692,36 @@ static void wizard_answers(PtySession *s, const char *const *answers, int n,
         pty_send_str(s, typing);
         pty_settle(s, SETTLE_MS);
     }
+}
+
+static PtySession *at_rules_written(void) { write_rules(); return at_rules(); }
+static PtySession *at_compose_editor(void) {
+    PtySession *s = at_list();
+    if (s) to_editor(s);
+    return s;
+}
+static PtySession *at_review_screen(void) {
+    PtySession *s = at_list();
+    if (s) to_review(s);
+    return s;
+}
+static PtySession *at_list_help(void) {
+    PtySession *s = at_list();
+    if (s) {
+        pty_send_str(s, "h");
+        pty_wait_for(s, "shortcuts", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+    }
+    return s;
+}
+static PtySession *at_compose_form(void) {
+    PtySession *s = at_list();
+    if (s) {
+        pty_send_str(s, "c");
+        pty_wait_for(s, "New Message", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+    }
+    return s;
 }
 
 #define VIEW(name, open_expr, setup) \
@@ -857,6 +925,35 @@ VIEW(rule_step2_field,  (remove_rules(), at_rules()),
       pty_wait_for(s, "step 2", WAIT_MS), pty_settle(s, 300), pty_send_str(s, "Work mail"),
       pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS)))
 
+VIEW(w80_accounts, at_cols(80, at_accounts), (void)0)
+VIEW(w80_folders, at_cols(80, at_folders), (void)0)
+VIEW(w80_list, at_cols(80, at_list), (void)0)
+VIEW(w80_reader, at_cols(80, at_reader), (void)0)
+VIEW(w80_list_help, at_cols(80, at_list_help), (void)0)
+VIEW(w80_compose_form, at_cols(80, at_compose_form), (void)0)
+VIEW(w80_body_editor, at_cols(80, at_compose_editor), (void)0)
+VIEW(w80_review, at_cols(80, at_review_screen), (void)0)
+VIEW(w80_rules, at_cols(80, at_rules_written), (void)0)
+VIEW(w140_accounts, at_cols(140, at_accounts), (void)0)
+VIEW(w140_folders, at_cols(140, at_folders), (void)0)
+VIEW(w140_list, at_cols(140, at_list), (void)0)
+VIEW(w140_reader, at_cols(140, at_reader), (void)0)
+VIEW(w140_list_help, at_cols(140, at_list_help), (void)0)
+VIEW(w140_compose_form, at_cols(140, at_compose_form), (void)0)
+VIEW(w140_body_editor, at_cols(140, at_compose_editor), (void)0)
+VIEW(w140_review, at_cols(140, at_review_screen), (void)0)
+VIEW(w140_rules, at_cols(140, at_rules_written), (void)0)
+VIEW(list_third_row, at_list(), (pty_send_key(s, PTY_KEY_DOWN), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+VIEW(folders_second_row, at_folders(), (pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+VIEW(list_wide_subject, at_subject("\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e\xe3\x81\xae\xe4\xbb\xb6\xe5\x90\x8d with mixed \xe3\x83\x86\xe3\x82\xad\xe3\x82\xb9\xe3\x83\x88", 0), (void)0)
+VIEW(reader_wide_subject, at_subject("\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e\xe3\x81\xae\xe4\xbb\xb6\xe5\x90\x8d with mixed \xe3\x83\x86\xe3\x82\xad\xe3\x82\xb9\xe3\x83\x88", 1), (void)0)
+VIEW(list_long_subject, at_subject("A very long subject line that cannot fit the subject column of the message list and must be cut with an ellipsis at the column edge", 0), (void)0)
+VIEW(accounts_8colour, at_term("linux", at_accounts), (void)0)
+VIEW(folders_8colour, at_term("linux", at_folders), (void)0)
+VIEW(list_8colour, at_term("linux", at_list), (void)0)
+VIEW(list_8colour_third, at_term("linux", at_list), (pty_send_key(s, PTY_KEY_DOWN), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+VIEW(reader_8colour, at_term("linux", at_reader), (void)0)
+
 VIEW(body_editor,       at_list(), (to_editor(s), (void)0))
 VIEW(body_editor_typed, at_list(), (editor_typed(s), (void)0))
 VIEW(review,            at_list(), (to_review(s), (void)0))
@@ -992,6 +1089,34 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_body_editor_typed);
     RUN_TEST(test_screen_review);
     RUN_TEST(test_screen_review_discard_ask);
+    RUN_TEST(test_screen_w80_accounts);
+    RUN_TEST(test_screen_w80_folders);
+    RUN_TEST(test_screen_w80_list);
+    RUN_TEST(test_screen_w80_reader);
+    RUN_TEST(test_screen_w80_list_help);
+    RUN_TEST(test_screen_w80_compose_form);
+    RUN_TEST(test_screen_w80_body_editor);
+    RUN_TEST(test_screen_w80_review);
+    RUN_TEST(test_screen_w80_rules);
+    RUN_TEST(test_screen_w140_accounts);
+    RUN_TEST(test_screen_w140_folders);
+    RUN_TEST(test_screen_w140_list);
+    RUN_TEST(test_screen_w140_reader);
+    RUN_TEST(test_screen_w140_list_help);
+    RUN_TEST(test_screen_w140_compose_form);
+    RUN_TEST(test_screen_w140_body_editor);
+    RUN_TEST(test_screen_w140_review);
+    RUN_TEST(test_screen_w140_rules);
+    RUN_TEST(test_screen_list_third_row);
+    RUN_TEST(test_screen_folders_second_row);
+    RUN_TEST(test_screen_list_wide_subject);
+    RUN_TEST(test_screen_reader_wide_subject);
+    RUN_TEST(test_screen_list_long_subject);
+    RUN_TEST(test_screen_accounts_8colour);
+    RUN_TEST(test_screen_folders_8colour);
+    RUN_TEST(test_screen_list_8colour);
+    RUN_TEST(test_screen_list_8colour_third);
+    RUN_TEST(test_screen_reader_8colour);
     RUN_TEST(test_screen_rules_help);
     RUN_TEST(test_screen_rule_detail_help);
     RUN_TEST(test_screen_rule_when_help);

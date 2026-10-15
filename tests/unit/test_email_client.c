@@ -133,6 +133,9 @@ static void ec_smtp_child(int lfd, SSL_CTX *ctx, int report_fd)
     _exit(0);
 }
 
+/* How long the IMAP mock waits before its greeting (set before ec_start()). */
+static int g_greeting_delay_ms;
+
 /* One TLS IMAP session: LOGIN, LIST, SELECT, SEARCH, FETCH, APPEND, LOGOUT.
  * An APPEND is reported as "APPEND <folder>" on report_fd. */
 static void ec_imap_child(int lfd, SSL_CTX *ctx, int report_fd)
@@ -146,6 +149,7 @@ static void ec_imap_child(int lfd, SSL_CTX *ctx, int report_fd)
     SSL *ssl = SSL_new(ctx);
     SSL_set_fd(ssl, cfd);
     if (SSL_accept(ssl) <= 0) { GCOV_FLUSH(); _exit(1); }
+    if (g_greeting_delay_ms > 0) usleep((useconds_t)g_greeting_delay_ms * 1000);
     ec_say(ssl, "* OK mock ready\r\n");
     static const char msg[] = "From: a@example.org\r\nSubject: Hi\r\n\r\nHello.\r\n";
     char buf[4096], resp[1024];
@@ -456,6 +460,46 @@ static void test_ec_imap_read(void)
     ec_collect(pid, rd, dump, sizeof(dump));
 }
 
+static void ec_on_alarm(int sig) { (void)sig; }
+
+/* A signal during a blocking read must not fail the operation: email-tui
+ * installs a SIGCHLD handler without SA_RESTART while it syncs, and a
+ * program using the library may do the same (EINTR is not an error). */
+static void test_ec_imap_survives_signals(void)
+{
+    int port = 0, rd = -1;
+    g_greeting_delay_ms = 400;
+    pid_t pid = ec_start(SRV_IMAP, &port, &rd);
+    g_greeting_delay_ms = 0;
+    ASSERT(pid > 0, "signal: start server");
+
+    struct sigaction sa, old;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = ec_on_alarm;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;   /* no SA_RESTART: the read is interrupted */
+    sigaction(SIGALRM, &sa, &old);
+    struct itimerval it = {.it_interval = {0, 50000}, .it_value = {0, 50000}};
+    struct itimerval none = {0};
+    setitimer(ITIMER_REAL, &it, NULL);
+
+    emc_account a;
+    ec_account(&a, port, 1);
+    emc_client *c = NULL;
+    emc_status st = emc_open(&c, &a);
+    char **names = NULL;
+    int n = 0;
+    if (st == EMC_OK) st = emc_list_folders(c, &names, &n);
+
+    setitimer(ITIMER_REAL, &none, NULL);
+    sigaction(SIGALRM, &old, NULL);
+    emc_free_list(names, n);
+    emc_close(c);
+    char dump[64];
+    ec_collect(pid, rd, dump, sizeof(dump));
+    ASSERT(st == EMC_OK && n == 2, "signal: the greeting wait survives interrupting signals");
+}
+
 static void test_ec_imap_unreachable(void)
 {
     int port = 0, rd = -1;
@@ -567,6 +611,7 @@ void test_email_client(void)
     RUN_TEST(test_ec_send_smtp);
     RUN_TEST(test_ec_send_smtp_unreachable);
     RUN_TEST(test_ec_imap_read);
+    RUN_TEST(test_ec_imap_survives_signals);
     RUN_TEST(test_ec_imap_unreachable);
     RUN_TEST(test_ec_send_saves_copy);
     RUN_TEST(test_ec_send_copy_failure_is_not_a_send_failure);

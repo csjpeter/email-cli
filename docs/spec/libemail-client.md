@@ -42,6 +42,9 @@ All names start with `emc_`; everything else in the object is hidden.
   revocation check is a separate ticket.)
 - **A failed copy to the sent folder is not a failed send**: `saved_copy` is 0.
 - **Gmail** accounts send through the REST API; `host`/SMTP fields are unused.
+- **Signals do not fail an operation.** A signal that interrupts a blocking
+  read or write of the IMAP connection (a `SIGCHLD` handler installed without
+  `SA_RESTART`, a timer) is retried, not reported as a connection error.
 - One handle per thread.
 
 ## Tests

@@ -53,12 +53,19 @@ struct ImapClient {
  *  Returns bytes read (>0), 0 on EOF, -1 on error. */
 static ssize_t net_read(ImapClient *c, char *buf, size_t n) {
     if (c->use_tls) {
-        int r = SSL_read(c->ssl, buf, (int)n);
-        if (r > 0) return (ssize_t)r;
-        int err = SSL_get_error(c->ssl, r);
-        if (err == SSL_ERROR_ZERO_RETURN) return 0;
-        logger_log(LOG_WARN, "SSL_read error %d", err);
-        return -1;
+        for (;;) {
+            errno = 0;
+            int r = SSL_read(c->ssl, buf, (int)n);
+            if (r > 0) return (ssize_t)r;
+            int err = SSL_get_error(c->ssl, r);
+            if (err == SSL_ERROR_ZERO_RETURN) return 0;
+            /* A signal (SIGCHLD of a helper, a timer) interrupted the read:
+             * OpenSSL reports EINTR as WANT_READ.  The 15-second receive
+             * timeout is EAGAIN and stays an error. */
+            if (errno == EINTR) continue;
+            logger_log(LOG_WARN, "SSL_read error %d", err);
+            return -1;
+        }
     }
     ssize_t r = read(c->fd, buf, n);
     if (r < 0 && (errno == EINTR || errno == EAGAIN)) return 0;
@@ -72,8 +79,10 @@ static int net_write(ImapClient *c, const char *buf, size_t n) {
     while (sent < n) {
         ssize_t r;
         if (c->use_tls) {
+            errno = 0;
             int w = SSL_write(c->ssl, buf + sent, (int)(n - sent));
             if (w <= 0) {
+                if (errno == EINTR) continue;   /* interrupted, not failed */
                 logger_log(LOG_WARN, "SSL_write error %d",
                            SSL_get_error(c->ssl, w));
                 return -1;

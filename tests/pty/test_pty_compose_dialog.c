@@ -625,6 +625,31 @@ static void test_body_editor_ctrl_s_saves_and_stays(void) {
     pty_close(s);
 }
 
+static void test_body_editor_resize_and_too_small(void) {
+    restart_imap(); restart_smtp(); draft_clear();
+    PtySession *s = open_body_editor("Resize");
+    ASSERT(s != NULL, "editor resize: opens");
+    pty_send_str(s, "kept text");
+    ASSERT_WAIT_FOR(s, "kept text", WAIT_MS);
+    pty_resize(s, 140, 30);
+    pty_settle(s, SETTLE_MS * 2);
+    ASSERT_SCREEN_CONTAINS(s, "kept text");
+    ASSERT_SCREEN_CONTAINS(s, PTY_EDITOR_MARK);
+    pty_resize(s, 60, 20);
+    ASSERT_WAIT_FOR(s, "Terminal too small", WAIT_MS);
+    pty_send_str(s, "hidden");          /* not edited while nothing is drawn */
+    pty_settle(s, 200);
+    pty_resize(s, 120, 24);
+    ASSERT_WAIT_FOR(s, "kept text", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "hidden");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
 static void test_send_removes_draft(void) {
     restart_imap(); restart_smtp(); draft_clear();
     PtySession *s = open_body_editor("Send removes");
@@ -1998,6 +2023,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_body_editor_long_line_scrolls);
     RUN_TEST(test_body_editor_ctrl_s_saves_and_stays);
     RUN_TEST(test_send_removes_draft);
+    RUN_TEST(test_body_editor_resize_and_too_small);
 
     /* ── Field navigation ─────────────────────────────────────────────── */
     printf("\n--- Field navigation ---\n");

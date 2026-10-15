@@ -6,6 +6,7 @@
 #define EMAIL_CLIENT_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /**
  * @file email-client.h
@@ -152,6 +153,192 @@ emc_status emc_fetch_message(emc_client *client, const char *folder,
 
 /** @brief Free an array returned by emc_list_folders() or emc_list_messages(). */
 void emc_free_list(char **items, int count);
+
+/* ── Mail access: the full operation set ───────────────────────────────
+ *
+ * The functions below are what email-cli's CLI, TUI and sync daemon use for
+ * all contact with a mail server.  Unless stated otherwise they return
+ * EMC_OK or a failure status, and describe the failure in emc_last_error().
+ * Messages are named by a 16-character identifier (@c char[17], with the
+ * terminating NUL): a zero-padded decimal IMAP UID or a Gmail message id.
+ */
+
+/** Message flag bits, as emc_fetch_flags() and emc_flag_update report them. */
+#define EMC_FLAG_UNSEEN    (1 << 0)  /**< \Seen is not set */
+#define EMC_FLAG_FLAGGED   (1 << 1)  /**< \Flagged (starred) */
+#define EMC_FLAG_DONE      (1 << 2)  /**< $Done keyword */
+#define EMC_FLAG_ANSWERED  (1 << 4)  /**< \Answered */
+#define EMC_FLAG_FORWARDED (1 << 5)  /**< $Forwarded */
+#define EMC_FLAG_JUNK      (1 << 6)  /**< $Junk / SPAM */
+#define EMC_FLAG_PHISHING  (1 << 7)  /**< $Phishing */
+
+/** Which messages emc_search() finds. */
+typedef enum {
+    EMC_SEARCH_ALL,       /**< every message */
+    EMC_SEARCH_UNREAD,    /**< IMAP UNSEEN; Gmail: the UNREAD label */
+    EMC_SEARCH_FLAGGED,   /**< IMAP FLAGGED; Gmail: STARRED */
+    EMC_SEARCH_DONE       /**< IMAP keyword $Done */
+} emc_search_kind;
+
+/** Result of emc_select_ext(); release vanished_uids with free(). */
+typedef struct {
+    uint32_t  uidvalidity;       /**< UIDVALIDITY of the folder */
+    uint64_t  highestmodseq;     /**< HIGHESTMODSEQ (0 without CONDSTORE) */
+    char    (*vanished_uids)[17]; /**< QRESYNC VANISHED set; NULL if none */
+    int       vanished_count;    /**< entries in vanished_uids */
+} emc_select_result;
+
+/** One flag change, as emc_fetch_flags_changedsince() reports it. */
+typedef struct {
+    char uid[17];                /**< the message */
+    int  flags;                  /**< EMC_FLAG_* bits */
+} emc_flag_update;
+
+/** Progress of a large download: bytes received of the announced total. */
+typedef void (*emc_progress_fn)(size_t received, size_t total, void *ctx);
+
+/** @brief Connect now (emc_open() does not).  EMC_ERR_CONNECT on failure. */
+emc_status emc_connect(emc_client *client);
+
+/** @brief 1 for a label-based account (Gmail), 0 for folders (IMAP). */
+int emc_uses_labels(const emc_client *client);
+
+/** @brief Install or clear (fn NULL) a download progress callback. */
+void emc_set_progress(emc_client *client, emc_progress_fn fn, void *ctx);
+
+/**
+ * @brief List folders or labels.
+ * @param sep  Receives the hierarchy separator ('/' for Gmail); may be NULL.
+ */
+emc_status emc_list_names(emc_client *client, char ***names, int *count, char *sep);
+
+/** @brief List folders or labels with their ids (equal names for IMAP). */
+emc_status emc_list_with_ids(emc_client *client, char ***names, char ***ids,
+                             int *count);
+
+/** @brief Select a folder (IMAP) or set the active label (Gmail). */
+emc_status emc_select(emc_client *client, const char *name);
+
+/**
+ * @brief SELECT with CONDSTORE/QRESYNC where the server offers it.
+ * @param known_uidval,known_modseq  Saved state, 0 on the first run.
+ */
+emc_status emc_select_ext(emc_client *client, const char *folder,
+                          uint32_t known_uidval, uint64_t known_modseq,
+                          emc_select_result *result);
+
+/** @brief Search the selected folder; @p uids is released with free(). */
+emc_status emc_search(emc_client *client, emc_search_kind kind,
+                      char (**uids)[17], int *count);
+
+/** @brief Raw headers of a message of the selected folder; NULL on failure. */
+char *emc_fetch_headers(emc_client *client, const char *uid);
+
+/** @brief The complete raw message of the selected folder; NULL on failure. */
+char *emc_fetch_body(emc_client *client, const char *uid);
+
+/** @brief EMC_FLAG_* bits of a message, or -1 on failure. */
+int emc_fetch_flags(emc_client *client, const char *uid);
+
+/** @brief Flag changes since @p modseq (IMAP; empty for Gmail). Free with free(). */
+emc_status emc_fetch_flags_changedsince(emc_client *client, uint64_t modseq,
+                                        emc_flag_update **updates, int *count);
+
+/** @brief Set or clear an IMAP-style flag ("\\Seen", "\\Flagged", "$Done"). */
+emc_status emc_set_flag(emc_client *client, const char *uid, const char *flag,
+                        int add);
+/** @brief Mark as junk (IMAP $Junk; Gmail SPAM label). */
+emc_status emc_mark_junk(emc_client *client, const char *uid);
+/** @brief Mark as not junk. */
+emc_status emc_mark_notjunk(emc_client *client, const char *uid);
+/** @brief Move to the trash. */
+emc_status emc_trash(emc_client *client, const char *uid);
+/** @brief Delete permanently. */
+emc_status emc_delete(emc_client *client, const char *uid);
+/** @brief Move to another IMAP folder (a no-op for Gmail). */
+emc_status emc_move_to_folder(emc_client *client, const char *uid,
+                              const char *target_folder);
+/** @brief Add or remove a Gmail label (a no-op for IMAP). */
+emc_status emc_modify_label(emc_client *client, const char *uid,
+                            const char *label_id, int add);
+/** @brief Create a Gmail label; @p id_out (may be NULL) is released with free(). */
+emc_status emc_create_label(emc_client *client, const char *name, char **id_out);
+/** @brief Delete a Gmail label by id. */
+emc_status emc_delete_label(emc_client *client, const char *label_id);
+/** @brief Create an IMAP folder. */
+emc_status emc_create_folder(emc_client *client, const char *name);
+/** @brief Delete an IMAP folder. */
+emc_status emc_delete_folder(emc_client *client, const char *name);
+
+/**
+ * @brief Store a message: IMAP APPEND to @p folder; for Gmail the message is
+ *        sent through the API (@p folder is ignored).
+ */
+emc_status emc_append(emc_client *client, const char *folder, const char *msg,
+                      size_t msg_len);
+
+/**
+ * @brief Synchronise a Gmail account into the local store.
+ * @param full  1 = reconcile everything, 0 = incremental by history id.
+ *
+ * IMAP accounts are synchronised folder by folder by the caller with the
+ * operations above.
+ */
+emc_status emc_sync(emc_client *client, int full);
+
+/** @brief Rebuild the label indexes of the local store of the account. */
+emc_status emc_rebuild_indexes(const emc_account *account);
+
+/**
+ * @brief Authorize a Gmail account with the OAuth2 device flow (RFC 8628).
+ *
+ * Interactive: it prints the verification URL and code on standard output
+ * and waits until the user has authorized.
+ * @param refresh_token  Receives the new refresh token; release with free().
+ */
+emc_status emc_gmail_authorize(const emc_account *account, char **refresh_token);
+
+/**
+ * @brief Build the wire form (RFC 2822) of a message, with Date and
+ *        Message-ID.  Release @p wire with free().
+ */
+emc_status emc_compose(const emc_message *message, char **wire, size_t *wire_len);
+
+/**
+ * @brief Send a message already in wire form.
+ *
+ * SMTP over TLS for IMAP accounts, the Gmail API for Gmail.  No copy is
+ * saved; the caller decides what to do with it.
+ * @param from,to  Envelope sender and recipient.
+ * @param result   Outcome and the Message-ID of the wire message; may be NULL.
+ */
+emc_status emc_send_wire(emc_client *client, const char *from, const char *to,
+                         const char *wire, size_t wire_len,
+                         emc_send_result *result);
+
+/**
+ * @brief Reply metadata of a raw message: the address to answer, the subject
+ *        with "Re: " and the Message-ID.  Release each with free().
+ */
+emc_status emc_reply_meta(const char *raw, char **reply_to, char **subject,
+                          char **message_id);
+
+/**
+ * @brief Append the library's log to @p path.  Without a call nothing is
+ *        logged to a file.  @p verbose 1 = debug level.  Errors are also
+ *        written to standard error, as email-cli's own log does.
+ */
+void emc_log_open(const char *path, int verbose);
+
+/** @brief Close the log. */
+void emc_log_close(void);
+
+/** @brief Automatic emc_close() of a handle leaving its scope. */
+static inline void emc_close_cleanup(emc_client **c)
+{
+    if (c && *c) { emc_close(*c); *c = NULL; }
+}
+#define EMC_AUTO_CLOSE __attribute__((cleanup(emc_close_cleanup)))
 
 #ifdef __cplusplus
 }

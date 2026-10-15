@@ -166,6 +166,17 @@ static void ec_imap_child(int lfd, SSL_CTX *ctx, int report_fd)
         } else if (strstr(buf, "UID SEARCH")) {
             snprintf(resp, sizeof(resp), "* SEARCH %s\r\n%s OK done\r\n",
                      strstr(buf, "UNSEEN") ? "2" : "1 2", tag);
+        } else if (strstr(buf, "BODY.PEEK[HEADER")) {
+            static const char hdr[] = "From: a@example.org\r\nSubject: Hi\r\n\r\n";
+            snprintf(resp, sizeof(resp),
+                     "* 1 FETCH (UID 1 BODY[HEADER] {%d}\r\n%s)\r\n%s OK done\r\n",
+                     (int)strlen(hdr), hdr, tag);
+        } else if (strstr(buf, "UID FETCH") && strstr(buf, "FLAGS")) {
+            snprintf(resp, sizeof(resp),
+                     "* 1 FETCH (UID 1 FLAGS (\\Seen))\r\n%s OK done\r\n", tag);
+        } else if (strstr(buf, "UID STORE")) {
+            snprintf(resp, sizeof(resp),
+                     "* 1 FETCH (FLAGS (\\Seen \\Flagged))\r\n%s OK done\r\n", tag);
         } else if (strstr(buf, "BODY.PEEK[]")) {
             snprintf(resp, sizeof(resp),
                      "* 1 FETCH (UID 1 BODY[] {%d}\r\n%s)\r\n%s OK done\r\n",
@@ -601,6 +612,190 @@ static void test_ec_gmail_send(void)
            "gmail: the id is returned, no IMAP copy");
 }
 
+
+static void test_ec_new_functions_validate_arguments(void)
+{
+    emc_account a = {.host = "imaps://127.0.0.1:1", .user = "u@example.org"};
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "args: open");
+    char **names = NULL, **ids = NULL;
+    int n = 0;
+    char sep = 0;
+    char (*uids)[17] = NULL;
+    emc_select_result sr;
+    emc_flag_update *fu = NULL;
+    char *out = NULL;
+
+    ASSERT(emc_connect(NULL) == EMC_ERR_ARGUMENT, "args: connect NULL");
+    ASSERT(emc_list_names(c, NULL, &n, &sep) == EMC_ERR_ARGUMENT, "args: list names");
+    ASSERT(emc_list_with_ids(c, &names, NULL, &n) == EMC_ERR_ARGUMENT, "args: list ids");
+    ASSERT(emc_select(NULL, "INBOX") == EMC_ERR_ARGUMENT, "args: select NULL client");
+    ASSERT(emc_select_ext(c, NULL, 0, 0, &sr) == EMC_ERR_ARGUMENT, "args: select_ext folder");
+    ASSERT(emc_select_ext(c, "INBOX", 0, 0, NULL) == EMC_ERR_ARGUMENT, "args: select_ext res");
+    ASSERT(emc_search(c, EMC_SEARCH_ALL, NULL, &n) == EMC_ERR_ARGUMENT, "args: search");
+    ASSERT(emc_fetch_headers(c, "") == NULL, "args: headers without uid");
+    ASSERT(emc_fetch_body(NULL, "1") == NULL, "args: body NULL client");
+    ASSERT(emc_fetch_flags(c, NULL) == -1, "args: flags without uid");
+    ASSERT(emc_fetch_flags_changedsince(c, 1, NULL, &n) == EMC_ERR_ARGUMENT, "args: changedsince");
+    ASSERT(emc_set_flag(c, "", "\\Seen", 1) == EMC_ERR_ARGUMENT, "args: set_flag uid");
+    ASSERT(emc_set_flag(c, "1", "", 1) == EMC_ERR_ARGUMENT, "args: set_flag flag");
+    ASSERT(emc_mark_junk(c, "") == EMC_ERR_ARGUMENT, "args: junk");
+    ASSERT(emc_mark_notjunk(c, NULL) == EMC_ERR_ARGUMENT, "args: not junk");
+    ASSERT(emc_trash(c, "") == EMC_ERR_ARGUMENT, "args: trash");
+    ASSERT(emc_delete(c, "") == EMC_ERR_ARGUMENT, "args: delete");
+    ASSERT(emc_move_to_folder(c, "1", "") == EMC_ERR_ARGUMENT, "args: move");
+    ASSERT(emc_modify_label(c, "1", "", 1) == EMC_ERR_ARGUMENT, "args: modify label");
+    ASSERT(emc_create_label(c, "", &out) == EMC_ERR_ARGUMENT && out == NULL, "args: create label");
+    ASSERT(emc_delete_label(c, "") == EMC_ERR_ARGUMENT, "args: delete label");
+    ASSERT(emc_create_folder(c, "") == EMC_ERR_ARGUMENT, "args: create folder");
+    ASSERT(emc_delete_folder(c, "") == EMC_ERR_ARGUMENT, "args: delete folder");
+    ASSERT(emc_append(c, "Sent", NULL, 0) == EMC_ERR_ARGUMENT, "args: append");
+    ASSERT(emc_rebuild_indexes(NULL) == EMC_ERR_ARGUMENT, "args: rebuild");
+    ASSERT(emc_gmail_authorize(NULL, &out) == EMC_ERR_ARGUMENT, "args: authorize");
+    ASSERT(emc_compose(NULL, &out, (size_t *)&n) == EMC_ERR_ARGUMENT, "args: compose");
+    ASSERT(emc_send_wire(c, "", "x@example.org", "m", 1, NULL) == EMC_ERR_ARGUMENT,
+           "args: send_wire from");
+    ASSERT(emc_reply_meta(NULL, &out, &out, &out) == EMC_ERR_ARGUMENT, "args: reply_meta");
+    (void)names; (void)ids; (void)uids; (void)fu;
+    emc_close(c);
+}
+
+static void test_ec_compose_and_reply_meta(void)
+{
+    emc_message m = {.from = "me@example.org", .to = "you@example.org",
+                     .cc = "cc@example.org", .subject = "Plan", .body = "Text\n",
+                     .in_reply_to = "<orig@example.org>"};
+    char *wire = NULL;
+    size_t len = 0;
+    emc_status st = emc_compose(&m, &wire, &len);
+    ASSERT(st == EMC_OK && wire != NULL && len > 0, "compose: builds the message");
+    int has = strstr(wire, "Subject: Plan") && strstr(wire, "To: you@example.org") &&
+              strstr(wire, "Cc: cc@example.org") && strstr(wire, "Message-ID: <") &&
+              strstr(wire, "In-Reply-To: <orig@example.org>");
+    char *reply_to = NULL, *subject = NULL, *id = NULL;
+    emc_status rs = emc_reply_meta(wire, &reply_to, &subject, &id);
+    int meta_ok = rs == EMC_OK && reply_to && strstr(reply_to, "me@example.org") &&
+                  subject && strcmp(subject, "Re: Plan") == 0 && id && id[0] == '<';
+    free(reply_to); free(subject); free(id); free(wire);
+    ASSERT(has, "compose: the headers are on the wire");
+    ASSERT(meta_ok, "reply_meta: address, Re: subject and id of the composed message");
+    emc_message no_from = {.to = "you@example.org", .subject = "s", .body = "b"};
+    ASSERT(emc_compose(&no_from, &wire, &len) == EMC_ERR_ARGUMENT && wire == NULL,
+           "compose: a sender is required");
+    char *a = NULL, *b = NULL, *c = NULL;
+    ASSERT(emc_reply_meta("", &a, &b, &c) != EMC_OK || (free(a), free(b), free(c), 1),
+           "reply_meta: an empty message is handled");
+}
+
+static void test_ec_send_wire_smtp(void)
+{
+    int port = 0, rd = -1;
+    pid_t pid = ec_start(SRV_SMTP, &port, &rd);
+    ASSERT(pid > 0, "wire: start server");
+    emc_account a;
+    ec_account(&a, 1, port);
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "wire: open");
+    static const char wire[] = "From: user@example.org\r\nTo: r@example.org\r\n"
+                               "Subject: Raw\r\nMessage-ID: <raw-1@example.org>\r\n\r\nBody\r\n";
+    emc_send_result r;
+    emc_status st = emc_send_wire(c, "user@example.org", "r@example.org", wire,
+                                  strlen(wire), &r);
+    emc_close(c);
+    char got[4096];
+    ec_collect(pid, rd, got, sizeof(got));
+    ASSERT(st == EMC_OK && r.status == EMC_OK, "wire: sent");
+    ASSERT(strcmp(r.message_id, "<raw-1@example.org>") == 0, "wire: the id of the message");
+    ASSERT(strstr(got, "Subject: Raw") != NULL, "wire: the server got the message");
+}
+
+static void test_ec_imap_operations(void)
+{
+    int port = 0, rd = -1;
+    pid_t pid = ec_start(SRV_IMAP, &port, &rd);
+    ASSERT(pid > 0, "ops: start server");
+    emc_account a;
+    ec_account(&a, port, 1);
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "ops: open");
+    int failed = 0;
+#define CHECK(cond) do { if (!(cond)) failed = __LINE__; } while (0)
+    CHECK(emc_uses_labels(c) == 0);
+    CHECK(emc_connect(c) == EMC_OK);
+    CHECK(emc_uses_labels(c) == 0);
+    emc_set_progress(c, NULL, NULL);
+
+    char **names = NULL, **ids = NULL;
+    int n = 0;
+    char sep = 0;
+    CHECK(emc_list_names(c, &names, &n, &sep) == EMC_OK && n == 2 && sep == '/');
+    emc_free_list(names, n);
+    CHECK(emc_list_with_ids(c, &names, &ids, &n) == EMC_OK && n == 2 &&
+          strcmp(names[0], ids[0]) == 0);
+    emc_free_list(names, n);
+    emc_free_list(ids, n);
+
+    CHECK(emc_select(c, "INBOX") == EMC_OK);
+    emc_select_result sr;
+    CHECK(emc_select_ext(c, "INBOX", 0, 0, &sr) == EMC_OK);
+    free(sr.vanished_uids);
+    char (*uids)[17] = NULL;
+    CHECK(emc_search(c, EMC_SEARCH_ALL, &uids, &n) == EMC_OK && n == 2);
+    free(uids);
+    CHECK(emc_search(c, EMC_SEARCH_UNREAD, &uids, &n) == EMC_OK && n == 1);
+    free(uids);
+
+    char *hdr = emc_fetch_headers(c, "0000000000000001");
+    CHECK(hdr && strstr(hdr, "Subject: Hi"));
+    free(hdr);
+    char *body = emc_fetch_body(c, "0000000000000001");
+    CHECK(body && strstr(body, "Hello."));
+    free(body);
+    CHECK(emc_fetch_flags(c, "0000000000000001") >= 0);
+
+    CHECK(emc_set_flag(c, "0000000000000001", "\\Flagged", 1) == EMC_OK);
+    CHECK(emc_mark_junk(c, "0000000000000001") == EMC_OK);
+    CHECK(emc_mark_notjunk(c, "0000000000000001") == EMC_OK);
+    CHECK(emc_trash(c, "0000000000000001") == EMC_OK);
+    CHECK(emc_delete(c, "0000000000000001") == EMC_OK);
+    CHECK(emc_move_to_folder(c, "0000000000000001", "Archive") == EMC_OK);
+    CHECK(emc_modify_label(c, "0000000000000001", "INBOX", 1) == EMC_OK);  /* IMAP: no-op */
+    CHECK(emc_create_folder(c, "Projects") == EMC_OK);
+    CHECK(emc_delete_folder(c, "Projects") == EMC_OK);
+    CHECK(emc_append(c, "Drafts", "From: a@example.org\r\n\r\nx\r\n", 25) == EMC_OK);
+    CHECK(emc_sync(c, 0) == EMC_OK);              /* IMAP: the caller syncs */
+    CHECK(emc_create_label(c, "Work", NULL) != EMC_OK);   /* labels are Gmail's */
+#undef CHECK
+    emc_close(c);
+    char dump[64];
+    ec_collect(pid, rd, dump, sizeof(dump));
+    ASSERT(failed == 0, "ops: every operation of the mail access set works (line in failed)");
+    (void)failed;
+}
+
+static void test_ec_log_open_writes_the_file(void)
+{
+    const char *path = TP("emc-library.log");
+    emc_log_open(path, 1);
+    emc_account a = {.host = "imaps://127.0.0.1:1", .user = "u@example.org",
+                     .insecure_tls = 1};
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "log: open");
+    emc_status st = emc_connect(c);   /* refused: logs an error */
+    emc_close(c);
+    emc_log_close();
+    emc_log_open("", 0);              /* blank path: nothing happens */
+    FILE *f = fopen(path, "r");
+    ASSERT(f != NULL, "log: the file exists");
+    char line[512];
+    int saw_error = 0;
+    while (fgets(line, sizeof(line), f))
+        if (strstr(line, "connect to 127.0.0.1:1 failed")) saw_error = 1;
+    fclose(f);
+    ASSERT(st == EMC_ERR_CONNECT, "log: the connect failed");
+    ASSERT(saw_error, "log: the library's failure is in the file");
+}
+
 void test_email_client(void)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -616,4 +811,9 @@ void test_email_client(void)
     RUN_TEST(test_ec_send_saves_copy);
     RUN_TEST(test_ec_send_copy_failure_is_not_a_send_failure);
     RUN_TEST(test_ec_gmail_send);
+    RUN_TEST(test_ec_new_functions_validate_arguments);
+    RUN_TEST(test_ec_compose_and_reply_meta);
+    RUN_TEST(test_ec_send_wire_smtp);
+    RUN_TEST(test_ec_imap_operations);
+    RUN_TEST(test_ec_log_open_writes_the_file);
 }

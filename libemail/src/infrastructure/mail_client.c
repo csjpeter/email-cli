@@ -397,3 +397,9 @@ int mail_client_sync(MailClient *c) {
     /* IMAP sync is handled by email_service_sync, not here */
     return 0;
 }
+
+int mail_client_sync_full(MailClient *c) {
+    if (c->is_gmail)
+        return gmail_sync_full(c->gmail);
+    return 0;
+}

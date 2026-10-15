@@ -6,6 +6,10 @@
 
 #include "compose_service.h"
 #include "config.h"
+#include "gmail_auth.h"
+#include "gmail_sync.h"
+#include "local_store.h"
+#include "logger.h"
 #include "mail_client.h"
 #include "mime_util.h"
 #include "smtp_adapter.h"
@@ -255,4 +259,352 @@ EMC_API emc_status emc_fetch_message(emc_client *c, const char *folder,
     if (!msg) return fail(c, EMC_ERR_PROTOCOL, "fetch");
     *raw = msg;
     return EMC_OK;
+}
+
+/* ── Mail access: the full operation set ───────────────────────────────
+ * Thin wrappers over the dispatch layer (mail_client.c): the same
+ * behaviour, one status vocabulary. */
+
+static emc_status ok_or(emc_client *c, int rc, emc_status st, const char *what)
+{
+    return rc == 0 ? EMC_OK : fail(c, st, what);
+}
+
+/* Common prologue: a connected client, the error text cleared. */
+#define EMC_NEED(c, what)                                                   \
+    do {                                                                    \
+        if (!(c)) return EMC_ERR_ARGUMENT;                                  \
+        (c)->err[0] = '\0';                                                 \
+        emc_status _st = connect_now(c);                                    \
+        if (_st != EMC_OK) return _st;                                      \
+        (void)(what);                                                       \
+    } while (0)
+
+EMC_API emc_status emc_connect(emc_client *c)
+{
+    if (!c) return EMC_ERR_ARGUMENT;
+    c->err[0] = '\0';
+    return connect_now(c);
+}
+
+EMC_API int emc_uses_labels(const emc_client *c)
+{
+    return c && c->mc ? mail_client_uses_labels(c->mc) : (c ? c->cfg->gmail_mode : 0);
+}
+
+EMC_API void emc_set_progress(emc_client *c, emc_progress_fn fn, void *ctx)
+{
+    if (c && c->mc) mail_client_set_progress(c->mc, fn, ctx);
+}
+
+EMC_API emc_status emc_list_names(emc_client *c, char ***names, int *count, char *sep)
+{
+    if (!names || !count) return EMC_ERR_ARGUMENT;
+    *names = NULL;
+    *count = 0;
+    EMC_NEED(c, "list");
+    if (mail_client_list(c->mc, names, count, sep) != 0) {
+        *names = NULL;
+        *count = 0;
+        return fail(c, EMC_ERR_PROTOCOL, "list folders");
+    }
+    return EMC_OK;
+}
+
+EMC_API emc_status emc_list_with_ids(emc_client *c, char ***names, char ***ids,
+                                     int *count)
+{
+    if (!names || !ids || !count) return EMC_ERR_ARGUMENT;
+    *names = NULL;
+    *ids = NULL;
+    *count = 0;
+    EMC_NEED(c, "list");
+    if (mail_client_list_with_ids(c->mc, names, ids, count) != 0) {
+        *names = NULL;
+        *ids = NULL;
+        *count = 0;
+        return fail(c, EMC_ERR_PROTOCOL, "list folders");
+    }
+    return EMC_OK;
+}
+
+EMC_API emc_status emc_select(emc_client *c, const char *name)
+{
+    EMC_NEED(c, "select");
+    return ok_or(c, mail_client_select(c->mc, name), EMC_ERR_PROTOCOL, "select");
+}
+
+EMC_API emc_status emc_select_ext(emc_client *c, const char *folder,
+                                  uint32_t known_uidval, uint64_t known_modseq,
+                                  emc_select_result *res)
+{
+    if (!res || !folder) return EMC_ERR_ARGUMENT;
+    memset(res, 0, sizeof(*res));
+    EMC_NEED(c, "select");
+    ImapSelectResult r;
+    memset(&r, 0, sizeof(r));
+    if (mail_client_select_ext(c->mc, folder, known_uidval, known_modseq, &r) != 0)
+        return fail(c, EMC_ERR_PROTOCOL, "select");
+    res->uidvalidity = r.uidvalidity;
+    res->highestmodseq = r.highestmodseq;
+    res->vanished_uids = r.vanished_uids;
+    res->vanished_count = r.vanished_count;
+    return EMC_OK;
+}
+
+EMC_API emc_status emc_search(emc_client *c, emc_search_kind kind,
+                              char (**uids)[17], int *count)
+{
+    if (!uids || !count) return EMC_ERR_ARGUMENT;
+    *uids = NULL;
+    *count = 0;
+    EMC_NEED(c, "search");
+    MailSearchCriteria crit = kind == EMC_SEARCH_UNREAD  ? MAIL_SEARCH_UNREAD
+                            : kind == EMC_SEARCH_FLAGGED ? MAIL_SEARCH_FLAGGED
+                            : kind == EMC_SEARCH_DONE    ? MAIL_SEARCH_DONE
+                                                         : MAIL_SEARCH_ALL;
+    if (mail_client_search(c->mc, crit, uids, count) != 0) {
+        *uids = NULL;
+        *count = 0;
+        return fail(c, EMC_ERR_PROTOCOL, "search");
+    }
+    return EMC_OK;
+}
+
+EMC_API char *emc_fetch_headers(emc_client *c, const char *uid)
+{
+    if (!c || blank(uid) || connect_now(c) != EMC_OK) return NULL;
+    char *h = mail_client_fetch_headers(c->mc, uid);
+    if (!h) fail(c, EMC_ERR_PROTOCOL, "fetch headers");
+    return h;
+}
+
+EMC_API char *emc_fetch_body(emc_client *c, const char *uid)
+{
+    if (!c || blank(uid) || connect_now(c) != EMC_OK) return NULL;
+    char *b = mail_client_fetch_body(c->mc, uid);
+    if (!b) fail(c, EMC_ERR_PROTOCOL, "fetch message");
+    return b;
+}
+
+EMC_API int emc_fetch_flags(emc_client *c, const char *uid)
+{
+    if (!c || blank(uid) || connect_now(c) != EMC_OK) return -1;
+    return mail_client_fetch_flags(c->mc, uid);
+}
+
+EMC_API emc_status emc_fetch_flags_changedsince(emc_client *c, uint64_t modseq,
+                                                emc_flag_update **updates, int *count)
+{
+    if (!updates || !count) return EMC_ERR_ARGUMENT;
+    *updates = NULL;
+    *count = 0;
+    EMC_NEED(c, "flags");
+    ImapFlagUpdate *u = NULL;
+    int n = 0;
+    if (mail_client_fetch_flags_changedsince(c->mc, modseq, &u, &n) != 0)
+        return fail(c, EMC_ERR_PROTOCOL, "fetch flag changes");
+    /* Same layout (uid[17], int flags): handed on as it is. */
+    _Static_assert(sizeof(ImapFlagUpdate) == sizeof(emc_flag_update),
+                   "flag update layouts differ");
+    *updates = (emc_flag_update *)u;
+    *count = n;
+    return EMC_OK;
+}
+
+EMC_API emc_status emc_set_flag(emc_client *c, const char *uid, const char *flag,
+                                int add)
+{
+    if (blank(uid) || blank(flag)) return EMC_ERR_ARGUMENT;
+    EMC_NEED(c, "flag");
+    return ok_or(c, mail_client_set_flag(c->mc, uid, flag, add), EMC_ERR_PROTOCOL,
+                 "set flag");
+}
+
+#define EMC_UID_OP(name, call, what)                                        \
+    EMC_API emc_status name(emc_client *c, const char *uid)                 \
+    {                                                                       \
+        if (blank(uid)) return EMC_ERR_ARGUMENT;                            \
+        EMC_NEED(c, what);                                                  \
+        return ok_or(c, call(c->mc, uid), EMC_ERR_PROTOCOL, what);          \
+    }
+EMC_UID_OP(emc_mark_junk, mail_client_mark_junk, "mark junk")
+EMC_UID_OP(emc_mark_notjunk, mail_client_mark_notjunk, "mark not junk")
+EMC_UID_OP(emc_trash, mail_client_trash, "trash")
+EMC_UID_OP(emc_delete, mail_client_delete, "delete")
+
+EMC_API emc_status emc_move_to_folder(emc_client *c, const char *uid,
+                                      const char *target)
+{
+    if (blank(uid) || blank(target)) return EMC_ERR_ARGUMENT;
+    EMC_NEED(c, "move");
+    return ok_or(c, mail_client_move_to_folder(c->mc, uid, target),
+                 EMC_ERR_PROTOCOL, "move");
+}
+
+EMC_API emc_status emc_modify_label(emc_client *c, const char *uid,
+                                    const char *label_id, int add)
+{
+    if (blank(uid) || blank(label_id)) return EMC_ERR_ARGUMENT;
+    EMC_NEED(c, "label");
+    return ok_or(c, mail_client_modify_label(c->mc, uid, label_id, add),
+                 EMC_ERR_PROTOCOL, "modify label");
+}
+
+EMC_API emc_status emc_create_label(emc_client *c, const char *name, char **id_out)
+{
+    if (id_out) *id_out = NULL;
+    if (blank(name)) return EMC_ERR_ARGUMENT;
+    EMC_NEED(c, "label");
+    return ok_or(c, mail_client_create_label(c->mc, name, id_out),
+                 EMC_ERR_PROTOCOL, "create label");
+}
+
+EMC_API emc_status emc_delete_label(emc_client *c, const char *label_id)
+{
+    if (blank(label_id)) return EMC_ERR_ARGUMENT;
+    EMC_NEED(c, "label");
+    return ok_or(c, mail_client_delete_label(c->mc, label_id), EMC_ERR_PROTOCOL,
+                 "delete label");
+}
+
+EMC_API emc_status emc_create_folder(emc_client *c, const char *name)
+{
+    if (blank(name)) return EMC_ERR_ARGUMENT;
+    EMC_NEED(c, "folder");
+    return ok_or(c, mail_client_create_folder(c->mc, name), EMC_ERR_PROTOCOL,
+                 "create folder");
+}
+
+EMC_API emc_status emc_delete_folder(emc_client *c, const char *name)
+{
+    if (blank(name)) return EMC_ERR_ARGUMENT;
+    EMC_NEED(c, "folder");
+    return ok_or(c, mail_client_delete_folder(c->mc, name), EMC_ERR_PROTOCOL,
+                 "delete folder");
+}
+
+EMC_API emc_status emc_append(emc_client *c, const char *folder, const char *msg,
+                              size_t msg_len)
+{
+    if (!msg || msg_len == 0) return EMC_ERR_ARGUMENT;
+    EMC_NEED(c, "append");
+    return ok_or(c, mail_client_append(c->mc, folder, msg, msg_len),
+                 EMC_ERR_SEND, "append");
+}
+
+EMC_API emc_status emc_sync(emc_client *c, int full)
+{
+    EMC_NEED(c, "sync");
+    if (!c->cfg->gmail_mode) return EMC_OK;   /* IMAP: the caller, folder by folder */
+    /* The library's own copy of the local store state names the account. */
+    if (local_store_init(c->cfg->host, c->cfg->user) != 0)
+        return fail(c, EMC_ERR_CONFIG, "sync (local store)");
+    int rc = full ? mail_client_sync_full(c->mc) : mail_client_sync(c->mc);
+    return ok_or(c, rc, EMC_ERR_PROTOCOL, "sync");
+}
+
+EMC_API emc_status emc_rebuild_indexes(const emc_account *a)
+{
+    if (!a) return EMC_ERR_ARGUMENT;
+    if (local_store_init(a->host, a->user) != 0) return EMC_ERR_CONFIG;
+    return gmail_sync_rebuild_indexes() < 0 ? EMC_ERR_PROTOCOL : EMC_OK;
+}
+
+EMC_API emc_status emc_gmail_authorize(const emc_account *a, char **refresh_token)
+{
+    if (!a || !refresh_token) return EMC_ERR_ARGUMENT;
+    *refresh_token = NULL;
+    Config cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.gmail_mode = 1;
+    cfg.user = (char *)a->user;
+    cfg.gmail_client_id = (char *)a->gmail_client_id;
+    cfg.gmail_client_secret = (char *)a->gmail_client_secret;
+    cfg.ssl_no_verify = a->insecure_tls ? 1 : 0;
+    if (gmail_auth_device_flow(&cfg) != 0) return EMC_ERR_CONNECT;
+    /* The flow wrote the token into cfg; the borrowed fields stay the caller's. */
+    *refresh_token = cfg.gmail_refresh_token;
+    return *refresh_token ? EMC_OK : EMC_ERR_PROTOCOL;
+}
+
+static void to_compose(const emc_message *m, const char *from, ComposeParams *p)
+{
+    memset(p, 0, sizeof(*p));
+    p->from = from;
+    p->to = m->to;
+    p->cc = m->cc;
+    p->bcc = m->bcc;
+    p->subject = m->subject;
+    p->body = m->body;
+    p->reply_to_msg_id = m->in_reply_to;
+    p->attachments = m->attachment_count > 0 ? (const char **)m->attachments : NULL;
+    p->attach_count = m->attachment_count;
+}
+
+EMC_API emc_status emc_compose(const emc_message *m, char **wire, size_t *wire_len)
+{
+    if (!m || !wire || !wire_len) return EMC_ERR_ARGUMENT;
+    *wire = NULL;
+    *wire_len = 0;
+    if (blank(m->from) || blank(m->to) || !m->subject || !m->body ||
+        m->attachment_count < 0 || (m->attachment_count > 0 && !m->attachments))
+        return EMC_ERR_ARGUMENT;
+    ComposeParams p;
+    to_compose(m, m->from, &p);
+    return compose_build_message(&p, wire, wire_len) == 0 ? EMC_OK : EMC_ERR_ARGUMENT;
+}
+
+EMC_API emc_status emc_send_wire(emc_client *c, const char *from, const char *to,
+                                 const char *wire, size_t wire_len,
+                                 emc_send_result *res)
+{
+    emc_send_result local;
+    if (!res) res = &local;
+    memset(res, 0, sizeof(*res));
+    if (!c || blank(from) || blank(to) || !wire || wire_len == 0) {
+        res->status = EMC_ERR_ARGUMENT;
+        return res->status;
+    }
+    c->err[0] = '\0';
+    int rc;
+    if (c->cfg->gmail_mode) {
+        emc_status st = connect_now(c);
+        if (st != EMC_OK) { res->status = st; return st; }
+        rc = mail_client_append(c->mc, NULL, wire, wire_len);
+    } else {
+        rc = smtp_send(c->cfg, from, to, wire, wire_len);
+    }
+    if (rc != 0) {
+        res->status = fail(c, EMC_ERR_SEND, "send");
+        return res->status;
+    }
+    char *id = mime_get_header(wire, "Message-ID");
+    if (id) {
+        snprintf(res->message_id, sizeof(res->message_id), "%s", id);
+        free(id);
+    }
+    res->status = EMC_OK;
+    return EMC_OK;
+}
+
+EMC_API emc_status emc_reply_meta(const char *raw, char **reply_to, char **subject,
+                                  char **message_id)
+{
+    if (!raw || !reply_to || !subject || !message_id) return EMC_ERR_ARGUMENT;
+    return compose_extract_reply_meta(raw, reply_to, subject, message_id) == 0
+               ? EMC_OK : EMC_ERR_PROTOCOL;
+}
+
+EMC_API void emc_log_open(const char *path, int verbose)
+{
+    if (blank(path)) return;
+    /* Appends to the file; errors are mirrored on stderr as the program's own
+     * logger does, so the user sees the same messages whichever side logs. */
+    logger_init(path, verbose ? LOG_DEBUG : LOG_INFO);
+}
+
+EMC_API void emc_log_close(void)
+{
+    logger_close();
 }

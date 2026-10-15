@@ -50,16 +50,19 @@ echo "$bdate" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}
 [ "$(dpkg-deb -f "$deb" Version)" = "$(dpkg-deb -f "$deb" Version | tr -d '+ ')" ] && ok "1.13 Version carries no build metadata" || bad "1.13 Version polluted"
 
 # 1c. The dynamic dependency set is minimal (EMAIL-36): the shipped binaries
-# need only libc, OpenSSL and libcurl; the own libraries are linked statically.
-# Depends names no package outside those, and no library of ours.
+# need only libc, OpenSSL and libemail-client (EMAIL-99: all mail access goes
+# through it, and libcurl with it); libtuikit is linked statically.  Depends
+# names no package outside those.
 tmp="$ROOT/build/package-policy-extract-$$"
 mkdir -p "$tmp" && dpkg-deb -x "$deb" "$tmp" || { bad "1.14 cannot unpack $deb"; }
 needed=$(for b in "$tmp"/usr/bin/*; do readelf -d "$b" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'; done | sort -u)
-extra=$(echo "$needed" | grep -v -E '^(libc\.so\.6|libm\.so\.6|libssl\.so\.3|libcrypto\.so\.3|libcurl\.so\.4|ld-linux-x86-64\.so\.2)$')
-[ -z "$extra" ] && ok "1.14 binaries need only libc, OpenSSL and libcurl" || bad "1.14 extra shared libraries: $extra"
+extra=$(echo "$needed" | grep -v -E '^(libc\.so\.6|libm\.so\.6|libssl\.so\.3|libcrypto\.so\.3|libcurl\.so\.4|libemail-client\.so\.0|ld-linux-x86-64\.so\.2)$')
+[ -z "$extra" ] && ok "1.14 binaries need only libc, OpenSSL and libemail-client" || bad "1.14 extra shared libraries: $extra"
 echo "$needed" | grep -q -i -E 'tuikit|ptytest' && bad "1.15 an own library is linked dynamically" || ok "1.15 own libraries are static"
-deps_extra=$(echo "$deps" | tr ',' '\n' | sed 's/ *(.*//; s/^ *//' | grep -v -E '^(libc6|libssl3t64|libssl3|libcurl4t64|libcurl4)$')
-[ -z "$deps_extra" ] && ok "1.16 Depends lists only libc6, libssl and libcurl" || bad "1.16 extra Depends: $deps_extra"
+deps_extra=$(echo "$deps" | tr ',' '\n' | sed 's/ *(.*//; s/^ *//' | grep -v -E '^(libc6|libssl3t64|libssl3|libcurl4t64|libcurl4|libemail-client0)$')
+[ -z "$deps_extra" ] && ok "1.16 Depends lists only libc6, libssl, libcurl and libemail-client0" || bad "1.16 extra Depends: $deps_extra"
+case "$deps" in *"libemail-client0 (>= "*) ok "1.16b the programs depend on libemail-client0, at least a version" ;; *) bad "1.16b no libemail-client0 (>= …) in: $deps" ;; esac
+echo "$needed" | grep -q '^libemail-client\.so\.0$' && ok "1.16c the programs link libemail-client dynamically" || bad "1.16c libemail-client is not linked"
 ( cd "$tmp" && rm -rf usr ) && rmdir "$tmp"
 
 # 1d. libemail-client (EMAIL-101): the same build ships the shared library and

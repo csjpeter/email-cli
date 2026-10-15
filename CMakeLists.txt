@@ -104,9 +104,14 @@ workspace_lib(libptytest ptytest deps/libptytest ptytest::ptytest ptytest::ptyte
 if(EMAIL_TUIKIT_LIB_WAY STREQUAL "bundled")
     add_subdirectory(deps/libtuikit EXCLUDE_FROM_ALL)
 endif()
+# The programs link libemail-client dynamically (EMAIL-99).  In the build tree
+# they find it beside themselves ($ORIGIN: manage.sh copies it next to the
+# binaries in bin/ and into the install directory) or in its build directory;
+# an installed package finds it in the system library directory.
+set(CMAKE_BUILD_RPATH "\$ORIGIN" "${CMAKE_BINARY_DIR}/libemail-client")
+add_subdirectory(libemail-client)
 add_subdirectory(libemail)
 add_subdirectory(libwrite)
-add_subdirectory(libemail-client)
 
 add_executable(email-cli src/main.c)
 target_link_libraries(email-cli libemail libwrite)
@@ -262,6 +267,14 @@ set(CPACK_POST_BUILD_SCRIPTS           "${CMAKE_SOURCE_DIR}/cmake/deb_build_info
 set(CPACK_DEBIAN_CLI_PACKAGE_NAME      "email-cli")
 set(CPACK_DEBIAN_CLI_PACKAGE_SECTION   "mail")
 set(CPACK_DEBIAN_CLI_FILE_NAME         "DEB-DEFAULT")
+# The programs link libemail-client dynamically (EMAIL-99).  Its package is
+# named here as well as discovered: a clean build machine has no installed
+# libemail-client0 for dpkg-shlibdeps to read, and the library of this very
+# build is in a private directory.  At least this version, never exactly it.
+set(CPACK_DEBIAN_CLI_PACKAGE_DEPENDS
+    "libemail-client0 (>= ${EMAIL_CLI_PACKAGE_VERSION})")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
+    "${CMAKE_BINARY_DIR}/libemail-client")
 set(CPACK_COMPONENT_CLI_DESCRIPTION
 "Terminal-based email client suite (IMAP + Gmail REST API)
 email-cli is a terminal-based email client suite written in C.
@@ -300,6 +313,10 @@ This package contains the header, the pkg-config file and the manual page.")
 # RPM-specific
 set(CPACK_RPM_PACKAGE_LICENSE          "GPL-3.0-only")
 set(CPACK_RPM_PACKAGE_GROUP            "Applications/Internet")
+set(CPACK_RPM_CLI_PACKAGE_REQUIRES
+    "libemail-client >= ${EMAIL_CLI_PACKAGE_VERSION}, openssl-libs >= 3.0.0, libcurl >= 7.68.0")
+set(CPACK_RPM_RUNTIME_PACKAGE_REQUIRES "openssl-libs >= 3.0.0, libcurl >= 7.68.0")
+set(CPACK_RPM_DEV_PACKAGE_REQUIRES "libemail-client = ${EMAIL_CLI_PACKAGE_VERSION}")
 set(CPACK_RPM_CLI_PACKAGE_SUMMARY "Terminal-based email client suite (IMAP + Gmail REST API)")
 set(CPACK_RPM_RUNTIME_PACKAGE_SUMMARY "Mail client library of email-cli")
 set(CPACK_RPM_DEV_PACKAGE_SUMMARY "Mail client library of email-cli - development files")

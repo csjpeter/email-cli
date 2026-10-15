@@ -32,11 +32,9 @@
 #include "logger.h"
 #include "local_store.h"
 #include "fs_util.h"
-#include "smtp_adapter.h"
-#include "compose_service.h"
 #include "mime_util.h"
 #include "html_render.h"
-#include "mail_client.h"
+#include "mail_account.h"
 #include "input_line.h"
 #include "tui_frame.h"
 #include "body_editor.h"
@@ -1150,15 +1148,16 @@ static int cmd_compose_interactive(Config *cfg,
                 attach_ptrs[i] = attach_paths[i];
             attach_ptrs[attach_count] = NULL;
 
-            ComposeParams p = {from_send, to_buf,
-                               cc_buf[0]  ? cc_buf  : NULL,
-                               bcc_buf[0] ? bcc_buf : NULL,
-                               subj_buf, body_str, reply_id,
-                               attach_count > 0 ? attach_ptrs : NULL,
-                               attach_count};
+            emc_message p = {.from = from_send, .to = to_buf,
+                             .cc  = cc_buf[0]  ? cc_buf  : NULL,
+                             .bcc = bcc_buf[0] ? bcc_buf : NULL,
+                             .subject = subj_buf, .body = body_str,
+                             .in_reply_to = reply_id,
+                             .attachments = attach_count > 0 ? attach_ptrs : NULL,
+                             .attachment_count = attach_count};
             char *msg = NULL;
             size_t msg_len = 0;
-            if (compose_build_message(&p, &msg, &msg_len) != 0) {
+            if (mail_compose(&p, &msg, &msg_len) != 0) {
                 fprintf(stderr, "Error: Failed to build message.\n");
                 send_rc = -1;
                 break;
@@ -1166,14 +1165,13 @@ static int cmd_compose_interactive(Config *cfg,
             printf("  Sending...\n");
             fflush(stdout);
             if (cfg->gmail_mode) {
-                RAII_MAIL MailClient *mc = mail_client_connect((Config *)cfg);
-                send_rc = mc ? mail_client_append(mc, NULL, msg, msg_len) : -1;
+                send_rc = mail_send_wire(cfg, from_send, to_buf, msg, msg_len);
                 if (send_rc == 0) {
                     compose_draft_remove();
                     printf("  Message sent.\n");
                 }
             } else {
-                send_rc = smtp_send(cfg, from_send, to_buf, msg, msg_len);
+                send_rc = mail_send_wire(cfg, from_send, to_buf, msg, msg_len);
                 if (send_rc == 0) {
                     compose_draft_remove();   /* before anything can be cut short */
                     printf("  Message sent.\n");
@@ -1262,7 +1260,7 @@ static int cmd_reply(Config *cfg, const char *uid, const char *folder) {
     }
 
     char *reply_to = NULL, *subject = NULL, *msg_id = NULL;
-    int rc = compose_extract_reply_meta(raw, &reply_to, &subject, &msg_id);
+    int rc = emc_reply_meta(raw, &reply_to, &subject, &msg_id) == EMC_OK ? 0 : -1;
     if (rc != 0) {
         free(raw);
         fprintf(stderr, "Error: Could not parse message headers.\n");
@@ -1471,7 +1469,7 @@ static int cmd_reply_all(Config *cfg, const char *uid, const char *folder) {
 
     /* Extract reply metadata (from, subject, msg_id) */
     char *reply_to = NULL, *subject = NULL, *msg_id = NULL;
-    int rc = compose_extract_reply_meta(raw, &reply_to, &subject, &msg_id);
+    int rc = emc_reply_meta(raw, &reply_to, &subject, &msg_id) == EMC_OK ? 0 : -1;
     if (rc != 0) {
         free(raw);
         fprintf(stderr, "Error: Could not parse message headers.\n");
@@ -2365,6 +2363,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
     if (logger_init(log_file, LOG_DEBUG) != 0)
         fprintf(stderr, "Warning: Logging system failed to initialize.\n");
+    emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
     logger_log(LOG_INFO, "--- email-tui starting ---");
 
     /* 3. Load configuration */
@@ -2425,16 +2424,16 @@ int main(int argc, char *argv[]) {
                                 "Run 'email-tui send --help' for usage.\n");
             } else {
                 const char *from = from_address(cfg);
-                ComposeParams p = {from, to, NULL, NULL,
-                                   subject   ? subject   : "",
-                                   body_text ? body_text : "", NULL,
-                                   attach_count > 0 ? attach_arr : NULL,
-                                   attach_count};
+                emc_message p = {.from = from, .to = to,
+                                 .subject = subject   ? subject   : "",
+                                 .body    = body_text ? body_text : "",
+                                 .attachments = attach_count > 0 ? attach_arr : NULL,
+                                 .attachment_count = attach_count};
                 char *msg = NULL; size_t msg_len = 0;
-                if (compose_build_message(&p, &msg, &msg_len) != 0) {
+                if (mail_compose(&p, &msg, &msg_len) != 0) {
                     fprintf(stderr, "Error: Failed to build message.\n");
                 } else {
-                    int sr = smtp_send(cfg, from, to, msg, msg_len);
+                    int sr = mail_send_wire(cfg, from, to, msg, msg_len);
                     free(msg);
                     if (sr == 0) {
                         printf("Message sent.\n");

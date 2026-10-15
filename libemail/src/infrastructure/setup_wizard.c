@@ -3,7 +3,7 @@
 /* Created: 2026-03-24 */
 /* The interactive first-run account configuration wizard. */
 #include "setup_wizard.h"
-#include "gmail_auth.h"
+#include "mail_account.h"
 #include "platform/terminal.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -180,7 +180,7 @@ Config* setup_wizard_run_internal(FILE *stream) {
             }
 
             printf("\nOpening Gmail authorization...\n");
-            if (gmail_auth_device_flow(cfg) != 0) {
+            if (mail_gmail_authorize(cfg) != 0) {
                 fprintf(stderr, "Press Enter to continue...");
                 getc(stdin);
                 config_free(cfg);

@@ -26,6 +26,7 @@
 #include "platform/path.h"
 #include "raii.h"
 #include "logger.h"
+#include "mail_account.h"
 #include "local_store.h"
 #include "fs_util.h"
 #include "config.h"
@@ -394,6 +395,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
     if (logger_init(log_file, LOG_DEBUG) != 0)
         fprintf(stderr, "Warning: Logging system failed to initialize.\n");
+    emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
     logger_log(LOG_INFO, "--- email-cli-ro starting (cmd: %s) ---", cmd);
 
     /* --all-accounts iterates over every configured account, so the usual

@@ -245,6 +245,11 @@ int mail_client_fetch_flags_changedsince(MailClient *c, uint64_t modseq,
  */
 int mail_client_sync(MailClient *c);
 
+/**
+ * @brief Full reconcile of a Gmail account (gmail_sync_full()); a no-op for IMAP.
+ */
+int mail_client_sync_full(MailClient *c);
+
 /* ── Inline RAII cleanup ─────────────────────────────────────��────── */
 
 static inline void mail_client_free_ptr(MailClient **p) {

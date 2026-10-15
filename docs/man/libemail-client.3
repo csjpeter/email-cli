@@ -1,0 +1,53 @@
+.TH LIBEMAIL\-CLIENT 3 "" "email-cli" "Library Functions"
+.SH NAME
+libemail\-client \- send and read mail through IMAP, SMTP or the Gmail API
+.SH SYNOPSIS
+.nf
+.B #include <email-client.h>
+.sp
+.B emc_status emc_open(emc_client **out, const emc_account *account);
+.B emc_status emc_send(emc_client *c, const emc_message *m, emc_send_result *r);
+.B emc_status emc_list_folders(emc_client *c, char ***names, int *count);
+.B emc_status emc_list_messages(emc_client *c, const char *folder,
+.B                              int unseen_only, char ***ids, int *count);
+.B emc_status emc_fetch_message(emc_client *c, const char *folder,
+.B                              const char *id, char **raw);
+.B void emc_close(emc_client *c);
+.sp
+cc ... $(pkg-config --cflags --libs libemail-client)
+.fi
+.SH DESCRIPTION
+.B libemail\-client
+holds the mail client logic of
+.BR email\-cli (1)
+once, so that other programs send and read mail natively.
+.PP
+.B emc_open
+copies an account (IMAP/SMTP, or Gmail with an OAuth2 refresh token) and
+opens no connection; the network is used when an operation needs it.
+.B emc_send
+sends a message and returns the outcome and the Message-ID in an
+.IR emc_send_result .
+IMAP accounts send through SMTP over TLS, Gmail accounts through the Gmail
+REST API.
+.B emc_list_folders ,
+.B emc_list_messages
+and
+.B emc_fetch_message
+read.  Arrays returned are released with
+.BR emc_free_list ;
+a fetched message with
+.BR free (3).
+.PP
+The library does not audit: the calling program records what it sent, to
+whom and when, from the returned outcome and message id.  It reads no
+configuration file, never prompts, and verifies the server certificate unless
+.I insecure_tls
+is set (test servers only).  A handle is not thread safe.
+.SH RETURN VALUE
+Every operation returns an
+.I emc_status
+(\fBEMC_OK\fR on success); \fBemc_strerror\fR describes it and
+\fBemc_last_error\fR gives the detail of the last failure.
+.SH SEE ALSO
+.BR email\-cli (1)

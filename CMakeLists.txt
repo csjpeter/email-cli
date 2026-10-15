@@ -106,6 +106,7 @@ if(EMAIL_TUIKIT_LIB_WAY STREQUAL "bundled")
 endif()
 add_subdirectory(libemail)
 add_subdirectory(libwrite)
+add_subdirectory(libemail-client)
 
 add_executable(email-cli src/main.c)
 target_link_libraries(email-cli libemail libwrite)
@@ -128,7 +129,7 @@ add_subdirectory(tests EXCLUDE_FROM_ALL)
 
 # ── Install targets ────────────────────────────────────────────────────────────
 install(TARGETS email-cli email-cli-ro email-sync email-tui email-import-rules
-        RUNTIME DESTINATION bin)
+        RUNTIME DESTINATION bin COMPONENT cli)
 
 # Man pages: section 1, one per binary, installed gzipped (Debian policy 12.1;
 # CPack does not compress them).  -n keeps the file name and time out of the
@@ -170,31 +171,78 @@ add_custom_command(
     VERBATIM)
 add_custom_target(email-cli-docs ALL DEPENDS ${EMAIL_CLI_MAN_GZ} "${_changelog}.gz")
 
-install(FILES ${EMAIL_CLI_MAN_GZ} DESTINATION share/man/man1)
-install(FILES "${_changelog}.gz" DESTINATION share/doc/email-cli)
-install(FILES packaging/copyright DESTINATION share/doc/email-cli)
+install(FILES ${EMAIL_CLI_MAN_GZ} DESTINATION share/man/man1 COMPONENT cli)
+install(FILES "${_changelog}.gz" DESTINATION share/doc/email-cli COMPONENT cli)
+install(FILES packaging/copyright DESTINATION share/doc/email-cli COMPONENT cli)
 # The XB-Git-Commit / XB-Build-Date fields are deliberate, not a defect; the
 # override file states why, next to the package that carries them.
 install(FILES packaging/lintian-overrides
-        DESTINATION share/lintian/overrides RENAME email-cli)
+        DESTINATION share/lintian/overrides RENAME email-cli COMPONENT cli)
+
+# libemail-client: its own two packages (libemail-client0 and
+# libemail-client-dev); each carries a changelog, the copyright file and the
+# lintian override for the XB- build fields.  The man page is in -dev.
+set(EMAIL_CLIENT_PKG_RUNTIME libemail-client0)
+set(EMAIL_CLIENT_PKG_DEV     libemail-client-dev)
+foreach(_pkg ${EMAIL_CLIENT_PKG_RUNTIME} ${EMAIL_CLIENT_PKG_DEV})
+    set(_dir "${CMAKE_BINARY_DIR}/doc-${_pkg}")
+    file(MAKE_DIRECTORY "${_dir}")
+    file(WRITE "${_dir}/changelog"
+"${_pkg} (${EMAIL_CLI_PACKAGE_VERSION}) unstable; urgency=medium
+
+  * Build ${EMAIL_CLI_VERSION}.  The history is the git log of the
+    repository; every change carries the key of its ticket.
+
+ -- Péter Császár <csjpeter@gmail.com>  ${_changelog_date}
+")
+    add_custom_command(
+        OUTPUT  "${_dir}/changelog.gz"
+        COMMAND sh -c "\"$1\" -9n -c \"$2\" > \"$3\"" sh
+                "${GZIP_EXECUTABLE}" "${_dir}/changelog" "${_dir}/changelog.gz"
+        DEPENDS "${_dir}/changelog"
+        VERBATIM)
+    add_custom_target(changelog-${_pkg} ALL DEPENDS "${_dir}/changelog.gz")
+    configure_file(packaging/lintian-overrides-lib.in
+                   "${_dir}/lintian-overrides" @ONLY)
+endforeach()
+set(_emc_man "${CMAKE_BINARY_DIR}/man/libemail-client.3.gz")
+add_custom_command(
+    OUTPUT  "${_emc_man}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/man"
+    COMMAND sh -c "\"$1\" -9n -c \"$2\" > \"$3\"" sh
+            "${GZIP_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/docs/man/libemail-client.3" "${_emc_man}"
+    DEPENDS "${CMAKE_SOURCE_DIR}/docs/man/libemail-client.3"
+    VERBATIM)
+add_custom_target(email-client-man ALL DEPENDS "${_emc_man}")
+install(FILES "${_emc_man}" DESTINATION share/man/man3 COMPONENT dev)
+foreach(_pair "runtime:${EMAIL_CLIENT_PKG_RUNTIME}" "dev:${EMAIL_CLIENT_PKG_DEV}")
+    string(REPLACE ":" ";" _pair "${_pair}")
+    list(GET _pair 0 _comp)
+    list(GET _pair 1 _pkg)
+    install(FILES "${CMAKE_BINARY_DIR}/doc-${_pkg}/changelog.gz" packaging/copyright
+            DESTINATION share/doc/${_pkg} COMPONENT ${_comp})
+    install(FILES "${CMAKE_BINARY_DIR}/doc-${_pkg}/lintian-overrides"
+            DESTINATION share/lintian/overrides RENAME ${_pkg} COMPONENT ${_comp})
+endforeach()
 
 # Claude skill: tells an AI agent when and how to use the CLI
 # (policies/cli-skill-model.md).  The package never writes into a home.
 install(FILES claude/skills/email-cli/SKILL.md
-        DESTINATION share/claude-skills/email-cli)
+        DESTINATION share/claude-skills/email-cli COMPONENT cli)
 
 # ── CPack packaging (DEB + RPM) ────────────────────────────────────────────────
+# Three packages from one build (policies/packaging-and-release-model.md,
+# "Projects that ship more than one package"): the program suite, the shared
+# library and its development files.
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_RPM_COMPONENT_INSTALL ON)
+set(CPACK_COMPONENTS_ALL cli runtime dev)
+set(CPACK_COMPONENTS_GROUPING IGNORE)
 set(CPACK_PACKAGE_NAME        "email-cli")
 set(CPACK_PACKAGE_VERSION     "${EMAIL_CLI_PACKAGE_VERSION}")
 set(CPACK_PACKAGE_CONTACT     "Péter Császár <csjpeter@gmail.com>")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "Terminal-based email client suite (IMAP + Gmail REST API)")
-set(CPACK_PACKAGE_DESCRIPTION
-"email-cli is a terminal-based email client suite written in C.
-It supports standard IMAP servers and the native Gmail REST API (OAuth2).
-Provides five binaries: email-cli (full read-write CLI),
-email-cli-ro (read-only / scripting), email-tui (interactive TUI),
-email-sync (background sync daemon), and email-import-rules.")
+# No CPACK_PACKAGE_DESCRIPTION_SUMMARY: CPackDeb would prepend it to each
+# component's description, and the first line of each is its own synopsis.
 set(CPACK_RESOURCE_FILE_LICENSE    "${CMAKE_SOURCE_DIR}/LICENSE")
 set(CPACK_STRIP_FILES              TRUE)
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
@@ -211,9 +259,53 @@ set(CPACK_DEBIAN_FILE_NAME             "DEB-DEFAULT")
 set(CPACK_EMAIL_SOURCE_DIR             "${CMAKE_SOURCE_DIR}")
 set(CPACK_POST_BUILD_SCRIPTS           "${CMAKE_SOURCE_DIR}/cmake/deb_build_info.cmake")
 
+set(CPACK_DEBIAN_CLI_PACKAGE_NAME      "email-cli")
+set(CPACK_DEBIAN_CLI_PACKAGE_SECTION   "mail")
+set(CPACK_DEBIAN_CLI_FILE_NAME         "DEB-DEFAULT")
+set(CPACK_COMPONENT_CLI_DESCRIPTION
+"Terminal-based email client suite (IMAP + Gmail REST API)
+email-cli is a terminal-based email client suite written in C.
+It supports standard IMAP servers and the native Gmail REST API (OAuth2).
+Provides five binaries: email-cli (full read-write CLI),
+email-cli-ro (read-only / scripting), email-tui (interactive TUI),
+email-sync (background sync daemon), and email-import-rules.")
+# The shared library.  Its shlibs ask for at least the version, never exactly
+# it (packaging policy, "Dependencies only ever look upward").
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME    "${EMAIL_CLIENT_PKG_RUNTIME}")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_SECTION "libs")
+set(CPACK_DEBIAN_RUNTIME_FILE_NAME       "DEB-DEFAULT")
+set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS ON)
+set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS_POLICY ">=")
+set(CPACK_COMPONENT_RUNTIME_DESCRIPTION
+"Mail client library of email-cli: IMAP, SMTP and the Gmail API
+libemail-client holds the mail client logic of email-cli, so that other
+programs send and read mail natively.  It audits nothing: it returns the
+outcome and the message id to the caller.
+
+This package contains the shared library.")
+# The -dev package: from the same repository as the runtime package, so the
+# exact dependency is the one the policy allows.
+set(CPACK_DEBIAN_DEV_PACKAGE_NAME    "${EMAIL_CLIENT_PKG_DEV}")
+set(CPACK_DEBIAN_DEV_PACKAGE_SECTION "libdevel")
+set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS
+    "${EMAIL_CLIENT_PKG_RUNTIME} (= ${EMAIL_CLI_PACKAGE_VERSION})")
+set(CPACK_DEBIAN_DEV_FILE_NAME       "DEB-DEFAULT")
+set(CPACK_COMPONENT_DEV_DESCRIPTION
+"Mail client library of email-cli - development files
+libemail-client holds the mail client logic of email-cli, so that other
+programs send and read mail natively.
+
+This package contains the header, the pkg-config file and the manual page.")
+
 # RPM-specific
 set(CPACK_RPM_PACKAGE_LICENSE          "GPL-3.0-only")
 set(CPACK_RPM_PACKAGE_GROUP            "Applications/Internet")
+set(CPACK_RPM_CLI_PACKAGE_SUMMARY "Terminal-based email client suite (IMAP + Gmail REST API)")
+set(CPACK_RPM_RUNTIME_PACKAGE_SUMMARY "Mail client library of email-cli")
+set(CPACK_RPM_DEV_PACKAGE_SUMMARY "Mail client library of email-cli - development files")
+set(CPACK_RPM_CLI_PACKAGE_NAME "email-cli")
+set(CPACK_RPM_RUNTIME_PACKAGE_NAME "libemail-client")
+set(CPACK_RPM_DEV_PACKAGE_NAME "libemail-client-devel")
 set(CPACK_RPM_PACKAGE_REQUIRES         "openssl-libs >= 3.0.0, libcurl >= 7.68.0")
 set(CPACK_RPM_FILE_NAME                "RPM-DEFAULT")
 

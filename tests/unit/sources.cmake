@@ -10,6 +10,7 @@ set(UNIT_TEST_INCLUDES
     ${CMAKE_SOURCE_DIR}/libemail/src/domain
     ${CMAKE_SOURCE_DIR}/libemail/src/platform
     ${CMAKE_SOURCE_DIR}/libwrite/src
+    ${CMAKE_SOURCE_DIR}/libemail-client/include
     ${CMAKE_SOURCE_DIR}/tests/common
 )
 
@@ -48,12 +49,14 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/test_gmail_sync.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_compose_service.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_smtp_adapter.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_email_client.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_when_expr.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_mail_rules.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_tuikit_link.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/when_expr.c
     ${CMAKE_SOURCE_DIR}/libwrite/src/compose_service.c
     ${CMAKE_SOURCE_DIR}/libwrite/src/smtp_adapter.c
+    ${CMAKE_SOURCE_DIR}/libemail-client/src/email_client.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/fs_util.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/logger.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/config.c

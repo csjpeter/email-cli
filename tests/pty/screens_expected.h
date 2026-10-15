@@ -3381,7 +3381,7 @@ static const char *const sty_att_save_all[] = {
     "",
     NULL
 };
-static const int cur_att_save_all[3] = { 21, 95, 1 };
+static const int cur_att_save_all[3] = { 21, -1, 1 };  /* end of its row: the path holds a pid */
 
 static const char *const exp_review_full[] = {
     "  Review: Message",

@@ -471,7 +471,8 @@ static void record_view(const char *name, PtySession *s) {
  *  the cursor.  A golden row that is "@@" stands for a block of any number of
  *  screen rows (the path of the message file, which wraps differently on every
  *  machine): the screen is searched for the row that follows it and the rest
- *  is compared from there.  A golden row starting with '~' is compared with
+ *  is compared from there.  A golden cursor column of -1 is the end of the
+ *  text of its row (a path with a process number in it).  A golden row starting with '~' is compared with
  *  its digit runs read as one '#' (a port number); one starting with '%' is
  *  compared by its start only (a path), and its style is not compared. */
 static void check_view(PtySession *s, const char *const exp[],
@@ -566,12 +567,25 @@ static void check_view(PtySession *s, const char *const exp[],
     int r = -1, c = -1;
     int vis = pty_cursor(s, &r, &c);
     int want_row = cur[0] + ((marker >= 0 && cur[0] > marker) ? offset : 0);
+    /* A golden cursor column of -1 means "just after the text of the row":
+     * the row ends in a path that holds the test process's number, so its
+     * length (and the column) changes with the digits of that number. */
+    int want_col = cur[1];
+    if (want_col < 0) {
+        char row[MAXCOLS * 4 + 4];
+        pty_row_text(s, want_row, row, sizeof(row));
+        size_t len = strlen(row);
+        while (len > 0 && row[len - 1] == ' ') len--;
+        want_col = 0;
+        for (size_t q = 0; q < len; q++)
+            if (((unsigned char)row[q] & 0xC0) != 0x80) want_col++;
+    }
     char why[160];
     snprintf(why, sizeof(why),
              "cursor position and visibility: row %d col %d %s, want row %d col %d %s",
-             r, c, vis ? "visible" : "hidden", want_row, cur[1],
+             r, c, vis ? "visible" : "hidden", want_row, want_col,
              cur[2] ? "visible" : "hidden");
-    ASSERT(r == want_row && c == cur[1] && vis == cur[2], why);
+    ASSERT(r == want_row && c == want_col && vis == cur[2], why);
 }
 
 /* The compose flow up to the body editor: the dialog filled, Enter. */

@@ -43,6 +43,10 @@ interactive TUI, a background sync daemon, and a Thunderbird rule importer.
 
 All five binaries share the same configuration and local message cache.
 
+The same build also ships **`libemail-client`** (`libemail-client0`,
+`libemail-client-dev`): the mail client logic as a C library for other programs
+(see `docs/spec/libemail-client.md`).
+
 **`email-cli-ro`** is strictly read-only: it only issues `FETCH` (with `BODY.PEEK`) and
 `SEARCH` IMAP commands — never sends, moves, deletes, or modifies flags on the server.
 

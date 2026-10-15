@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdint.h>
 #include <ctype.h>
 #include <time.h>
@@ -53,12 +54,19 @@ struct ImapClient {
  *  Returns bytes read (>0), 0 on EOF, -1 on error. */
 static ssize_t net_read(ImapClient *c, char *buf, size_t n) {
     if (c->use_tls) {
-        int r = SSL_read(c->ssl, buf, (int)n);
-        if (r > 0) return (ssize_t)r;
-        int err = SSL_get_error(c->ssl, r);
-        if (err == SSL_ERROR_ZERO_RETURN) return 0;
-        logger_log(LOG_WARN, "SSL_read error %d", err);
-        return -1;
+        for (;;) {
+            errno = 0;
+            int r = SSL_read(c->ssl, buf, (int)n);
+            if (r > 0) return (ssize_t)r;
+            int err = SSL_get_error(c->ssl, r);
+            if (err == SSL_ERROR_ZERO_RETURN) return 0;
+            /* A signal (SIGCHLD of a helper, a timer) interrupted the read:
+             * OpenSSL reports EINTR as WANT_READ.  The 15-second receive
+             * timeout is EAGAIN and stays an error. */
+            if (errno == EINTR) continue;
+            logger_log(LOG_WARN, "SSL_read error %d", err);
+            return -1;
+        }
     }
     ssize_t r = read(c->fd, buf, n);
     if (r < 0 && (errno == EINTR || errno == EAGAIN)) return 0;
@@ -72,8 +80,10 @@ static int net_write(ImapClient *c, const char *buf, size_t n) {
     while (sent < n) {
         ssize_t r;
         if (c->use_tls) {
+            errno = 0;
             int w = SSL_write(c->ssl, buf + sent, (int)(n - sent));
             if (w <= 0) {
+                if (errno == EINTR) continue;   /* interrupted, not failed */
                 logger_log(LOG_WARN, "SSL_write error %d",
                            SSL_get_error(c->ssl, w));
                 return -1;
@@ -452,7 +462,21 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     for (struct addrinfo *r = ai; r; r = r->ai_next) {
         fd = socket(r->ai_family, r->ai_socktype, r->ai_protocol);
         if (fd < 0) continue;
-        if (connect(fd, r->ai_addr, r->ai_addrlen) == 0) break;
+        int cr = connect(fd, r->ai_addr, r->ai_addrlen);
+        if (cr != 0 && errno == EINTR) {
+            /* A signal interrupted the connect; it goes on in the kernel.
+             * Wait for it to finish and read its outcome. */
+            struct pollfd pf = { .fd = fd, .events = POLLOUT };
+            int pr;
+            do { pr = poll(&pf, 1, 15000); } while (pr < 0 && errno == EINTR);
+            int soerr = ETIMEDOUT;
+            socklen_t sl = sizeof(soerr);
+            if (pr > 0 && getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &sl) != 0)
+                soerr = errno;
+            if (pr > 0 && soerr == 0) cr = 0;
+            else errno = soerr;
+        }
+        if (cr == 0) break;
         close(fd);
         fd = -1;
     }
@@ -500,7 +524,13 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         }
         SSL_set_fd(ssl, fd);
         SSL_set_tlsext_host_name(ssl, host);  /* SNI */
-        if (SSL_connect(ssl) != 1) {
+        int hs;
+        do {
+            errno = 0;
+            hs = SSL_connect(ssl);
+            /* An interrupted handshake read or write is continued, not failed. */
+        } while (hs != 1 && errno == EINTR);
+        if (hs != 1) {
             logger_log(LOG_ERROR, "SSL handshake failed with %s", host);
             SSL_free(ssl); SSL_CTX_free(ctx); free(c); close(fd);
             return NULL;

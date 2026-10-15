@@ -111,10 +111,9 @@ endif()
 set(CMAKE_BUILD_RPATH "\$ORIGIN" "${CMAKE_BINARY_DIR}/libemail-client")
 add_subdirectory(libemail-client)
 add_subdirectory(libemail)
-add_subdirectory(libwrite)
 
 add_executable(email-cli src/main.c)
-target_link_libraries(email-cli libemail libwrite)
+target_link_libraries(email-cli libemail)
 
 add_executable(email-cli-ro src/main_ro.c)
 target_link_libraries(email-cli-ro libemail)
@@ -123,7 +122,7 @@ add_executable(email-sync src/main_sync.c)
 target_link_libraries(email-sync libemail)
 
 add_executable(email-tui src/main_tui.c)
-target_link_libraries(email-tui libemail libwrite)
+target_link_libraries(email-tui libemail)
 
 add_executable(email-import-rules src/main_import_rules.c)
 target_link_libraries(email-import-rules libemail)

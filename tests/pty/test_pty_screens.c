@@ -825,6 +825,38 @@ VIEW(wiz_bad_type,    at_accounts(),
      (pty_send_str(s, "n"), pty_wait_for(s, "Account type", WAIT_MS), pty_settle(s, 300),
       pty_send_str(s, "9"), pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS)))
 
+VIEW(rules_help,        (write_rules(), at_rules()),
+     (pty_send_str(s, "h"), pty_wait_for(s, "Rules shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(rule_detail_help,  (write_rules(), at_rules()),
+     (pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS), pty_send_str(s, "h"),
+      pty_wait_for(s, "Rule shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(rule_when_help,    (remove_rules(), at_rules()),
+     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_str(s, "h"),
+      pty_wait_for(s, "Conditions shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(rules_delete_ask,  (write_rules(), at_rules()),
+     (pty_send_str(s, "d"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(rules_deleted,     (write_rules(), at_rules()),
+     (pty_send_str(s, "d"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_send_str(s, "y"),
+      pty_settle(s, SETTLE_MS * 2)))
+VIEW(rule_detail_delete_ask, (write_rules(), at_rules()),
+     (pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS), pty_send_str(s, "d"),
+      pty_wait_for(s, "(y/N)", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(rule_when_typed,   (remove_rules(), at_rules()),
+     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_str(s, "a"),
+      pty_settle(s, 300), pty_send_str(s, "from:*@example.org"), pty_settle(s, SETTLE_MS)))
+VIEW(rule_when_added,   (remove_rules(), at_rules()),
+     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_str(s, "a"),
+      pty_settle(s, 300), pty_send_str(s, "from:*@example.org"), pty_send_key(s, PTY_KEY_ENTER),
+      pty_settle(s, SETTLE_MS)))
+VIEW(rule_when_bad,     (remove_rules(), at_rules()),
+     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_str(s, "a"),
+      pty_settle(s, 300), pty_send_str(s, "((("), pty_send_key(s, PTY_KEY_ENTER),
+      pty_settle(s, SETTLE_MS)))
+VIEW(rule_step2_field,  (remove_rules(), at_rules()),
+     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_str(s, "q"),
+      pty_wait_for(s, "step 2", WAIT_MS), pty_settle(s, 300), pty_send_str(s, "Work mail"),
+      pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS)))
+
 VIEW(body_editor,       at_list(), (to_editor(s), (void)0))
 VIEW(body_editor_typed, at_list(), (editor_typed(s), (void)0))
 VIEW(review,            at_list(), (to_review(s), (void)0))
@@ -960,6 +992,16 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_body_editor_typed);
     RUN_TEST(test_screen_review);
     RUN_TEST(test_screen_review_discard_ask);
+    RUN_TEST(test_screen_rules_help);
+    RUN_TEST(test_screen_rule_detail_help);
+    RUN_TEST(test_screen_rule_when_help);
+    RUN_TEST(test_screen_rules_delete_ask);
+    RUN_TEST(test_screen_rules_deleted);
+    RUN_TEST(test_screen_rule_detail_delete_ask);
+    RUN_TEST(test_screen_rule_when_typed);
+    RUN_TEST(test_screen_rule_when_added);
+    RUN_TEST(test_screen_rule_when_bad);
+    RUN_TEST(test_screen_rule_step2_field);
     RUN_TEST(test_screen_wiz_imap_host);
     RUN_TEST(test_screen_wiz_imap_port);
     RUN_TEST(test_screen_wiz_imap_user);

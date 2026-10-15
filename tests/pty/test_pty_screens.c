@@ -383,6 +383,8 @@ static const PtyStyleKey LEGEND[] = {
     { 'E', PTY_ATTR_BOLD,                    91,             PTY_COLOR_IDX(17) },
     { 'y', PTY_ATTR_BOLD,                    PTY_FG_YELLOW,  PTY_BG_DEFAULT },
     { 'Z', PTY_ATTR_NONE,                    PTY_FG_YELLOW,  PTY_BG_DEFAULT },
+    /* A dim cell on the selected row (the account list's server column). */
+    { 'a', PTY_ATTR_DIM,                     97,             PTY_COLOR_IDX(17) },
     /* The address drop-down's marker: cyan, reverse on the chosen row. */
     { 'c', PTY_ATTR_NONE,                    PTY_FG_CYAN,    PTY_BG_DEFAULT },
     { 'C', PTY_ATTR_REVERSE,                 PTY_FG_CYAN,    PTY_BG_DEFAULT },
@@ -636,6 +638,24 @@ static void compose_type_path(PtySession *s, const char *prefix) {
     pty_settle(s, SETTLE_MS);
 }
 
+/* The setup wizard: `n` on the accounts screen, then the given answers, one
+ * Enter each; the text after the last answer is typed but not confirmed. */
+static void wizard_answers(PtySession *s, const char *const *answers, int n,
+                           const char *typing) {
+    pty_send_str(s, "n");
+    pty_wait_for(s, "Account type", WAIT_MS);
+    for (int i = 0; i < n; i++) {
+        pty_settle(s, 300);
+        pty_send_str(s, answers[i]);
+        pty_send_key(s, PTY_KEY_ENTER);
+    }
+    pty_settle(s, SETTLE_MS);
+    if (typing && typing[0]) {
+        pty_send_str(s, typing);
+        pty_settle(s, SETTLE_MS);
+    }
+}
+
 #define VIEW(name, open_expr, setup) \
     static void test_screen_##name(void) { \
         restart_mock(); \
@@ -788,6 +808,23 @@ VIEW(list_new_mail,     at_cron_list(),
 VIEW(list_star_feedback, at_list(),
      (pty_send_str(s, "f"), pty_settle(s, SETTLE_MS)))
 
+static const char *const W_IMAP[] = { "1", "mail.example.org", "", "alice", "secret", "", "" };
+static const char *const W_SMTP[] = { "1", "mail.example.org", "", "alice", "secret", "", "smtp.example.org" };
+static const char *const W_GMAIL[] = { "2" };
+VIEW(wiz_imap_host,   at_accounts(), (wizard_answers(s, W_IMAP, 1, NULL), (void)0))
+VIEW(wiz_imap_port,   at_accounts(), (wizard_answers(s, W_IMAP, 2, NULL), (void)0))
+VIEW(wiz_imap_user,   at_accounts(), (wizard_answers(s, W_IMAP, 3, NULL), (void)0))
+VIEW(wiz_imap_pass,   at_accounts(), (wizard_answers(s, W_IMAP, 4, NULL), (void)0))
+VIEW(wiz_imap_masked, at_accounts(), (wizard_answers(s, W_IMAP, 4, "secret"), (void)0))
+VIEW(wiz_imap_folder, at_accounts(), (wizard_answers(s, W_IMAP, 5, NULL), (void)0))
+VIEW(wiz_smtp_host,   at_accounts(), (wizard_answers(s, W_IMAP, 6, NULL), (void)0))
+VIEW(wiz_smtp_port,   at_accounts(), (wizard_answers(s, W_SMTP, 7, NULL), (void)0))
+VIEW(wiz_imap_done,   at_accounts(), (wizard_answers(s, W_IMAP, 7, NULL), pty_settle(s, 2000)))
+VIEW(wiz_gmail,       at_accounts(), (wizard_answers(s, W_GMAIL, 1, NULL), (void)0))
+VIEW(wiz_bad_type,    at_accounts(),
+     (pty_send_str(s, "n"), pty_wait_for(s, "Account type", WAIT_MS), pty_settle(s, 300),
+      pty_send_str(s, "9"), pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS)))
+
 VIEW(body_editor,       at_list(), (to_editor(s), (void)0))
 VIEW(body_editor_typed, at_list(), (editor_typed(s), (void)0))
 VIEW(review,            at_list(), (to_review(s), (void)0))
@@ -923,6 +960,17 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_body_editor_typed);
     RUN_TEST(test_screen_review);
     RUN_TEST(test_screen_review_discard_ask);
+    RUN_TEST(test_screen_wiz_imap_host);
+    RUN_TEST(test_screen_wiz_imap_port);
+    RUN_TEST(test_screen_wiz_imap_user);
+    RUN_TEST(test_screen_wiz_imap_pass);
+    RUN_TEST(test_screen_wiz_imap_masked);
+    RUN_TEST(test_screen_wiz_imap_folder);
+    RUN_TEST(test_screen_wiz_smtp_host);
+    RUN_TEST(test_screen_wiz_smtp_port);
+    RUN_TEST(test_screen_wiz_imap_done);
+    RUN_TEST(test_screen_wiz_gmail);
+    RUN_TEST(test_screen_wiz_bad_type);
     RUN_TEST(test_screen_err_connect);
     RUN_TEST(test_screen_err_login);
     RUN_TEST(test_screen_err_tls);

@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdint.h>
 #include <ctype.h>
 #include <time.h>
@@ -461,7 +462,21 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     for (struct addrinfo *r = ai; r; r = r->ai_next) {
         fd = socket(r->ai_family, r->ai_socktype, r->ai_protocol);
         if (fd < 0) continue;
-        if (connect(fd, r->ai_addr, r->ai_addrlen) == 0) break;
+        int cr = connect(fd, r->ai_addr, r->ai_addrlen);
+        if (cr != 0 && errno == EINTR) {
+            /* A signal interrupted the connect; it goes on in the kernel.
+             * Wait for it to finish and read its outcome. */
+            struct pollfd pf = { .fd = fd, .events = POLLOUT };
+            int pr;
+            do { pr = poll(&pf, 1, 15000); } while (pr < 0 && errno == EINTR);
+            int soerr = ETIMEDOUT;
+            socklen_t sl = sizeof(soerr);
+            if (pr > 0 && getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &sl) != 0)
+                soerr = errno;
+            if (pr > 0 && soerr == 0) cr = 0;
+            else errno = soerr;
+        }
+        if (cr == 0) break;
         close(fd);
         fd = -1;
     }
@@ -509,7 +524,13 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         }
         SSL_set_fd(ssl, fd);
         SSL_set_tlsext_host_name(ssl, host);  /* SNI */
-        if (SSL_connect(ssl) != 1) {
+        int hs;
+        do {
+            errno = 0;
+            hs = SSL_connect(ssl);
+            /* An interrupted handshake read or write is continued, not failed. */
+        } while (hs != 1 && errno == EINTR);
+        if (hs != 1) {
             logger_log(LOG_ERROR, "SSL handshake failed with %s", host);
             SSL_free(ssl); SSL_CTX_free(ctx); free(c); close(fd);
             return NULL;

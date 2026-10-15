@@ -1684,6 +1684,22 @@ static void when_list_cell(void *ctx, int i, int col, tui_table_cell *c) {
     tui_table_cell_put(c, buf, TUI_STYLE_DEFAULT);
 }
 
+/* The refusal of the last condition typed (EMAIL-95): shown on the bottom
+ * line once, with the next drawing. */
+static char g_when_err[256];
+
+/* 1 when @p atom is a well-formed condition; else 0 and g_when_err says why. */
+static int when_atom_valid(const char *atom) {
+    WhenNode *n = when_parse(atom);
+    if (!n) {
+        snprintf(g_when_err, sizeof(g_when_err),
+                 "  Not a valid condition: %.150s  (e.g. from:*@example.org)", atom);
+        return 0;
+    }
+    when_node_free(n);
+    return 1;
+}
+
 static void when_list_render(const WhenAtomList *wl, int vis_rows, const char *title) {
     (void)vis_rows;
     static const tui_table_col wcols[] = {
@@ -1703,8 +1719,9 @@ static void when_list_render(const WhenAtomList *wl, int vis_rows, const char *t
     if (rows <= 0) rows = 24;
     if (cols <= 0) cols = 80;
     tui_frame_draw_table(title, &wt, rows, cols, 0,
-                         "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  ESC=cancel",
-                         NULL);
+                         "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  h=help  ESC=cancel",
+                         g_when_err[0] ? g_when_err : NULL);
+    g_when_err[0] = '\0';
 }
 
 static void when_list_do_add(WhenAtomList *wl, int vis_rows, const char *title) {
@@ -1723,6 +1740,7 @@ static void when_list_do_add(WhenAtomList *wl, int vis_rows, const char *title) 
     while (sl > 0 && s[sl-1] == ' ') sl--;
     s[sl] = '\0';
     if (sl == 0) return;
+    if (!when_atom_valid(s)) return;
     snprintf(wl->atoms[wl->count], WHEN_ATOM_MAX, "%s", s);
     wl->cursor = wl->count;
     wl->count++;
@@ -1753,6 +1771,20 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
             when_list_join(&wl, buf, bufsz);
             return 1;
         }
+        if (ch == 'h' || ch == '?') {
+            static const char *help[][2] = {
+                { "j / \u2193",   "Next condition"                  },
+                { "k / \u2191",   "Previous condition"              },
+                { "Enter / e",    "Edit the condition"              },
+                { "a",            "Add a condition"                 },
+                { "d",            "Delete the condition"            },
+                { "q",            "Done: go on to the actions"      },
+                { "Esc",          "Cancel the rule"                 },
+                { "h / ?",        "Show this help"                  },
+            };
+            email_service_help_popup("Conditions shortcuts", help, 8);
+            continue;
+        }
 
         if (key == TERM_KEY_NEXT_LINE || ch == 'j') {
             if (wl.cursor < wl.count - 1) {
@@ -1780,7 +1812,8 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                     size_t sl = strlen(s);
                     while (sl > 0 && s[sl-1] == ' ') sl--;
                     s[sl] = '\0';
-                    if (sl > 0) snprintf(wl.atoms[wl.cursor], WHEN_ATOM_MAX, "%s", s);
+                    if (sl > 0 && when_atom_valid(s))
+                        snprintf(wl.atoms[wl.cursor], WHEN_ATOM_MAX, "%s", s);
                 }
             }
         } else if (ch == 'a') {
@@ -2018,7 +2051,7 @@ static void tui_rules_detail(const char *account, int idx)
 
         int trows = terminal_rows();
         int footer = (trows > row + 1) ? trows : row + 1;
-        printf("\033[%d;1H  e=edit  d=delete  ESC/q=back", footer);
+        printf("\033[%d;1H  e=edit  d=delete  h=help  ESC/q=back", footer);
         fflush(stdout);
 
         TermKey key;
@@ -2039,6 +2072,18 @@ static void tui_rules_detail(const char *account, int idx)
         if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || ch == 'q') {
             mail_rules_free(rules);
             break;
+        }
+
+        if (ch == 'h' || ch == '?') {
+            static const char *help[][2] = {
+                { "e",            "Edit the rule (conditions, then actions)" },
+                { "d",            "Delete the rule (asks first)"             },
+                { "h / ?",        "Show this help"                           },
+                { "Esc / q",      "Back to the rules list"                   },
+            };
+            mail_rules_free(rules);
+            email_service_help_popup("Rule shortcuts", help, 4);
+            continue;
         }
 
         if (ch == 'e') {
@@ -2109,7 +2154,7 @@ static void tui_rules_editor(const Config *cfg)
         snprintf(title, sizeof(title), "Rules for %s (%d rule%s)",
                  account, count, count == 1 ? "" : "s");
         tui_frame_draw_table(title, &rtbl, rows, cols, 0, NULL,
-                             "  j/k=navigate  Enter=open  a=add  d=delete  ESC/q=back");
+                             "  j/k=navigate  Enter=open  a=add  d=delete  h=help  ESC/q=back");
 
         TermKey key;
         int ch;
@@ -2130,6 +2175,21 @@ static void tui_rules_editor(const Config *cfg)
         if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || ch == 'q') {
             mail_rules_free(rules);
             break;
+        }
+
+        if (ch == 'h' || ch == '?') {
+            static const char *help[][2] = {
+                { "j / \u2193",   "Next rule"                     },
+                { "k / \u2191",   "Previous rule"                 },
+                { "Enter",        "Open the rule"                 },
+                { "a",            "Add a rule"                    },
+                { "d",            "Delete the rule (asks first)"  },
+                { "h / ?",        "Show this help"                },
+                { "Esc / q",      "Back to the message list"      },
+            };
+            mail_rules_free(rules);
+            email_service_help_popup("Rules shortcuts", help, 7);
+            continue;
         }
 
         if (key == TERM_KEY_NEXT_LINE || ch == 'j') {

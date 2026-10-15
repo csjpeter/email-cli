@@ -445,4 +445,14 @@ int email_service_list_attachments(const Config *cfg, const char *uid);
 int email_service_save_attachment(const Config *cfg, const char *uid,
                                   const char *name, const char *outdir);
 
+/**
+ * @brief Shows the help popup of the list, reader and browser screens (a
+ *        two-column key/description box) and waits for any key; for the
+ *        screens of the application layer (rules editor).
+ * @param title  Popup title.
+ * @param rows   {key, description} pairs.
+ * @param n      Number of rows.
+ */
+void email_service_help_popup(const char *title, const char *rows[][2], int n);
+
 #endif /* EMAIL_SERVICE_H */

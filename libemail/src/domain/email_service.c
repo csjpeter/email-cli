@@ -7525,3 +7525,7 @@ int email_service_save_draft(const Config *cfg, const char *msg, size_t msg_len)
     local_store_init(cfg->host, cfg->user);
     return local_save_outgoing("Drafts", msg, msg_len);
 }
+
+void email_service_help_popup(const char *title, const char *rows[][2], int n) {
+    show_help_popup(title, rows, n);
+}

@@ -34,6 +34,13 @@ if(NOT _dirty EQUAL 0)
 endif()
 string(TIMESTAMP _date "%Y-%m-%dT%H:%M:%SZ" UTC)
 
+# A package with a shared library gets an ldconfig trigger instead of the
+# ldconfig calls CPack generates (Debian policy 8.1.1; lintian
+# maintscript-calls-ldconfig).  The generated scripts are replaced only when
+# they are exactly what CPack writes.
+set(_ldconfig_postinst "#!/bin/sh\n\nset -e\n\nif [ \"$1\" = \"configure\" ]; then\n\tldconfig\nfi\n")
+set(_ldconfig_postrm   "#!/bin/sh\n\nset -e\n\nif [ \"$1\" = \"remove\" ]; then\n\tldconfig\nfi\n")
+
 foreach(_deb IN LISTS CPACK_PACKAGE_FILES)
     if(NOT _deb MATCHES "\\.deb$")
         continue()
@@ -47,6 +54,21 @@ foreach(_deb IN LISTS CPACK_PACKAGE_FILES)
     endif()
     file(READ "${_work}/DEBIAN/control" _control)
     string(REGEX REPLACE "\n+$" "\n" _control "${_control}")
+    if(EXISTS "${_work}/DEBIAN/shlibs")
+        foreach(_script postinst postrm)
+            set(_path "${_work}/DEBIAN/${_script}")
+            if(EXISTS "${_path}")
+                file(READ "${_path}" _content)
+                if(NOT _content STREQUAL "${_ldconfig_${_script}}")
+                    message(FATAL_ERROR
+                        "deb_build_info: ${_deb}: DEBIAN/${_script} is not the "
+                        "ldconfig-only script CPack generates; refusing to replace it")
+                endif()
+                file(REMOVE "${_path}")
+            endif()
+        endforeach()
+        file(WRITE "${_work}/DEBIAN/triggers" "activate-noawait ldconfig\n")
+    endif()
     file(WRITE "${_work}/DEBIAN/control"
          "${_control}XB-Git-Commit: ${_commit}\nXB-Build-Date: ${_date}\n")
     execute_process(COMMAND ${_dpkg_deb} --root-owner-group -Zxz -b "${_work}" "${_deb}"

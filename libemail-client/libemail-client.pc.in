@@ -1,0 +1,9 @@
+prefix=@EMC_PREFIX@
+libdir=${prefix}/@EMC_LIBDIR@
+includedir=${prefix}/include
+
+Name: libemail-client
+Description: Mail client library of email-cli: IMAP, SMTP and the Gmail API
+Version: @EMAIL_CLI_PACKAGE_VERSION@
+Libs: -L${libdir} -lemail-client
+Cflags: -I${includedir}

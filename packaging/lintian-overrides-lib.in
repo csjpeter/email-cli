@@ -1,0 +1,5 @@
+# The build's date and commit travel in XB- control fields rather than in the
+# Version field, whose one job is telling apt which of two packages is newer.
+# Required by policies/packaging-and-release-model.md, "Identifying a build".
+@_pkg@: unknown-field XB-Git-Commit
+@_pkg@: unknown-field XB-Build-Date

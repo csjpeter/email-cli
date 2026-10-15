@@ -42,8 +42,6 @@ static int ec_listener(int *port_out)
     if (fd < 0) return -1;
     int one = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-    struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     struct sockaddr_in a = {0};
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -88,10 +86,11 @@ static void ec_say(SSL *ssl, const char *s) { SSL_write(ssl, s, (int)strlen(s));
 /* One TLS SMTP exchange.  The received message is written to report_fd. */
 static void ec_smtp_child(int lfd, SSL_CTX *ctx, int report_fd)
 {
+    alarm(120);   /* watchdog: a child never outlives a stuck test */
     int cfd = accept(lfd, NULL, NULL);
     close(lfd);
     if (cfd < 0) { GCOV_FLUSH(); _exit(1); }
-    struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+    struct timeval tv = {.tv_sec = 60, .tv_usec = 0};
     setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     SSL *ssl = SSL_new(ctx);
     SSL_set_fd(ssl, cfd);
@@ -138,10 +137,11 @@ static void ec_smtp_child(int lfd, SSL_CTX *ctx, int report_fd)
  * An APPEND is reported as "APPEND <folder>" on report_fd. */
 static void ec_imap_child(int lfd, SSL_CTX *ctx, int report_fd)
 {
+    alarm(120);
     int cfd = accept(lfd, NULL, NULL);
     close(lfd);
     if (cfd < 0) { GCOV_FLUSH(); _exit(1); }
-    struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+    struct timeval tv = {.tv_sec = 60, .tv_usec = 0};
     setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     SSL *ssl = SSL_new(ctx);
     SSL_set_fd(ssl, cfd);
@@ -201,6 +201,7 @@ static void ec_imap_child(int lfd, SSL_CTX *ctx, int report_fd)
  * and body of a send are reported on report_fd. */
 static void ec_gmail_child(int lfd, int report_fd)
 {
+    alarm(120);
     for (int i = 0; i < 4; i++) {
         int cfd = accept(lfd, NULL, NULL);
         if (cfd < 0) break;

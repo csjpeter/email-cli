@@ -3199,15 +3199,23 @@ void test_email_service(void) {
         ASSERT(vc2 >= 0, "visible_line_cols: 0xFF invalid byte → non-negative");
     }
 
-    /* ── text_end_at_cols: ANSI CSI escape sequence ──────────────────── */
+    /* ── status line: message replaces hints, position kept (EMAIL-98) ── */
     {
-        /* "\033[31mHi" — ESC '[' '3' '1' 'm' = red.
-         * '3' and '1' are < 0x40, so the while-loop body (line 334)
-         * executes.  Covers the CSI-skip branch (lines 331-337). */
-        const char *ansi_txt = "\033[31mHi";
-        const char *ep = text_end_at_cols(ansi_txt, 80);
-        ASSERT(ep > ansi_txt,
-               "text_end_at_cols: ANSI escape → advances past sequence");
+        char line[512];
+        tui_statusline_hint h[3] = {
+            { "Enter", "open", 90 }, { "c", "compose", 50 },
+            { "Esc/q/BS", "folders", SL_PRIO_KEEP } };
+        int n = status_line_format(80, h, 3, "?", 2, 9, NULL, line, sizeof(line));
+        ASSERT(n > 0 && strstr(line, "Enter open") && strstr(line, "[2/9]"),
+               "status_line: hints and position");
+        n = status_line_format(80, h, 3, "?", 2, 9, "Moved to Trash",
+                               line, sizeof(line));
+        ASSERT(n > 0 && strstr(line, "Moved to Trash") && !strstr(line, "Enter open"),
+               "status_line: message replaces hints");
+        n = status_line_format(36, h, 3, "?", 2, 9, NULL, line, sizeof(line));
+        ASSERT(n > 0 && strstr(line, "Esc/q/BS folders") && strstr(line, "[2/9]")
+               && !strstr(line, "compose"),
+               "status_line: narrow line drops low priority, keeps back and position");
     }
 
     /* ── print_clean: multi-byte UTF-8 branches ──────────────────────── */

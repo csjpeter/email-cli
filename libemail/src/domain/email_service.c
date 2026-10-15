@@ -6,6 +6,7 @@
 #include "config_store.h"
 #include "input_line.h"
 #include "tui_frame.h"
+#include "status_line.h"
 #include <tuikit/text.h>
 #include "path_complete.h"
 #include "imap_client.h"
@@ -218,7 +219,6 @@ static char *word_wrap(const char *text, int width) {
 }
 
 /* Forward declaration — defined after visible_line_cols (below). */
-static void print_statusbar(int trows, int width, const char *text);
 static void warn_charset(const MimeTextInfo *info, const char *uid);
 static void show_label_picker(MailClient *mc, const char *uid,
                                char *feedback_out, int feedback_cap);
@@ -233,11 +233,14 @@ static void flag_push_background(const Config *cfg, const char *uid,
 static int pager_prompt(int cur_page, int total_pages, int page_size,
                         int term_rows, int sb_width) {
     for (;;) {
-        char sb[256];
-        snprintf(sb, sizeof(sb),
-                 "-- [%d/%d] PgDn/\u2193=scroll  PgUp/\u2191=back  ESC=quit --",
-                 cur_page, total_pages);
-        print_statusbar(term_rows, sb_width, sb);
+        tui_statusline_hint h[4];
+        int nh = 0;
+        #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
+        HINT("PgDn/\u2193", "scroll", 60);
+        HINT("PgUp/\u2191", "back", 60);
+        HINT("ESC", "quit", SL_PRIO_KEEP);
+#undef HINT
+        status_line_draw(term_rows, sb_width, h, nh, NULL, cur_page, total_pages, NULL);
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K");
         fflush(stderr);
@@ -341,72 +344,63 @@ static int count_visual_rows(const char *body, int term_cols) {
  * text must not contain ANSI escapes that move the cursor off the line.
  */
 /**
- * Return a pointer one past the last byte of @p text that still fits in
- * @p max_cols visible columns, skipping ANSI escape sequences.
- * The returned slice can be fputs'd directly; its visible width is <= max_cols.
+ * Show @p text on the status line (the last row), replacing the hints, as a
+ * prompt or a message (EMAIL-98: one line).  Empty text draws an empty bar.
  */
-static const char *text_end_at_cols(const char *text, int max_cols) {
-    const char *p = text;
-    int cols = 0;
-    while (*p) {
-        unsigned char c = (unsigned char)*p;
-        /* Skip ANSI CSI escape */
-        if (c == 0x1b && (unsigned char)*(p + 1) == '[') {
-            const char *q = p + 2;
-            while (*q && ((unsigned char)*q < 0x40 || (unsigned char)*q > 0x7e))
-                q++;
-            if (*q) q++;
-            p = q;
-            continue;
-        }
-        /* Decode UTF-8 codepoint width */
-        uint32_t cp; int sl;
-        if      (c < 0x80) { cp = c;        sl = 1; }
-        else if (c < 0xC2) { cp = 0xFFFD;   sl = 1; }
-        else if (c < 0xE0) { cp = c & 0x1F; sl = 2; }
-        else if (c < 0xF0) { cp = c & 0x0F; sl = 3; }
-        else if (c < 0xF8) { cp = c & 0x07; sl = 4; }
-        else               { cp = 0xFFFD;   sl = 1; }
-        for (int i = 1; i < sl && p[i]; i++) {
-            if (((unsigned char)p[i] & 0xC0) != 0x80) { sl = i; cp = 0xFFFD; break; }
-            cp = (cp << 6) | ((unsigned char)p[i] & 0x3F);
-        }
-        int w = terminal_wcwidth((wchar_t)cp);
-        if (w > 0 && cols + w > max_cols) break;
-        if (w > 0) cols += w;
-        p += sl;
-    }
-    return p;
-}
-
-static void print_statusbar(int trows, int width, const char *text) {
-    fprintf(stderr, "\033[%d;1H\033[7m", trows);
-    const char *end = text_end_at_cols(text, width);
-    fwrite(text, 1, (size_t)(end - text), stderr);
-    int used = visible_line_cols(text, end);
-    int pad  = width - used;
-    for (int i = 0; i < pad; i++) fputc(' ', stderr);
-    fprintf(stderr, "\033[0m");
-    fflush(stderr);
+static void print_infoline(int trows, int width, const char *text) {
+    status_line_draw(trows, width, NULL, 0, NULL, 0, 0, text);
 }
 
 /**
- * Print a plain (non-reverse) info line at terminal row trows-1.
- * Used as the second-from-bottom status row for persistent informational messages.
- * If text is empty, the line is cleared to blank.
+ * The status line of a message list: the key hints of the list (Gmail or
+ * IMAP, Trash or not), the position [cur/total] and an optional message that
+ * replaces them until the next key.  @p items is 0 for an empty list (no
+ * marking, no bulk menu).
  */
-static void print_infoline(int trows, int width, const char *text) {
-    fprintf(stderr, "\033[%d;1H\033[0m", trows - 1);
-    if (text && *text) {
-        fputs(text, stderr);
-        int used = visible_line_cols(text, text + strlen(text));
-        int pad  = width - used;
-        for (int i = 0; i < pad; i++) fputc(' ', stderr);
+static void list_status_line(int trows, int tcols, int is_gmail, int in_trash,
+                             int items, int cur, int total, const char *msg) {
+    tui_statusline_hint h[STATUS_LINE_MAX_HINTS];
+    int nh = 0;
+#define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
+    HINT("\u2191\u2193", "step", 60);
+    HINT("PgDn/PgUp", "page", 40);
+    HINT("Enter", "open", 90);
+    HINT("Esc/q/BS", is_gmail ? "labels" : "folders", SL_PRIO_KEEP);
+    if (is_gmail) {
+        if (in_trash) {
+            HINT("D", "del", 70);
+            HINT("u", "restore", 70);
+        } else {
+            HINT("c", "compose", 50);
+            HINT("r", "reply", 50);
+            HINT("F", "fwd", 30);
+            HINT("A", "r-all", 30);
+            HINT("a", "archive", 45);
+            HINT("d", "rm-label", 45);
+            HINT("D", "trash", 45);
+        }
+        HINT("n", "unread", 45);
+        HINT("f", "star", 45);
+        HINT("t", "labels", 35);
     } else {
-        for (int i = 0; i < width; i++) fputc(' ', stderr);
+        HINT("c", "compose", 50);
+        HINT("r", "reply", 50);
+        HINT("F", "fwd", 30);
+        HINT("A", "r-all", 30);
+        HINT("n", "new", 45);
+        HINT("f", "flag", 45);
+        HINT("d", "done", 45);
+        HINT("D", in_trash ? "del" : "trash", 45);
     }
-    fprintf(stderr, "\033[0m");
-    fflush(stderr);
+    HINT("s", "sync", 40);
+    HINT("U", "refresh", 35);
+    HINT("l", "rules", 30);
+    if (items) {
+        HINT("Space", "mark", 35);
+        HINT("m", "bulk", 35);
+    }
+#undef HINT
+    status_line_draw(trows, tcols, h, nh, "?", cur, total, msg);
 }
 
 /** Write @p s to stderr cut or padded to exactly @p width display columns
@@ -922,10 +916,16 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
         char title[64];
         snprintf(title, sizeof(title), "  Attachments (%d):", count);
         tui_frame_draw_table(title, &atbl, trows, tcols, 0, NULL, NULL);
-        char sb[160];
-        snprintf(sb, sizeof(sb),
-                 "  \u2191\u2193=select  Enter=choose  Esc/q/BS=back");
-        print_statusbar(trows, tcols, sb);
+        {
+            tui_statusline_hint h[3];
+            int nh = 0;
+            #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
+            HINT("\u2191\u2193", "select", 60);
+            HINT("Enter", "choose", 90);
+            HINT("Esc/q/BS", "back", SL_PRIO_KEEP);
+#undef HINT
+            status_line_draw(trows, tcols, h, nh, NULL, cursor + 1, count, NULL);
+        }
 
         TermKey key = terminal_read_key();
         switch (key) {
@@ -1137,46 +1137,52 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
 
         int cur_page = cur_line / rows_avail + 1;
 
-        /* Info line (second from bottom) — persistent until overwritten */
-        print_infoline(term_rows, wrap_cols, info_msg);
-
-        /* Shortcut hints (bottom row) */
+        /* One status line: a message replaces the hints until the next key. */
         {
-            char sb[256];
-            int is_gmail = cfg->gmail_mode;
-            const char *vtog = view_raw ? "v=rendered" : "v=source";
-            if (is_gmail) {
+            tui_statusline_hint h[STATUS_LINE_MAX_HINTS];
+            int nh = 0;
+            char attlbl[32];
+#define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
+            snprintf(attlbl, sizeof(attlbl), "save-all(%d)", att_count);
+            HINT("\u2191\u2193", "scroll", 60);
+            HINT("Esc/q/BS", "list", SL_PRIO_KEEP);
+            if (cfg->gmail_mode) {
+                HINT("F", "fwd", 40);
+                HINT("r", "rm-label", 45);
+                HINT("d", "rm", 45);
+                HINT("D", "trash", 45);
+                HINT("f", "star", 45);
+                HINT("n", "unread", 45);
+                HINT("a", "arch", 45);
+                HINT("t", "labels", 35);
                 if (att_count > 0) {
-                    snprintf(sb, sizeof(sb),
-                             "-- [%d/%d] \u2191\u2193=scroll  F=fwd  r=rm-label  d=rm  D=trash"
-                             "  f=star  n=unread  a=arch  t=labels  A=save(%d)"
-                             "  /=search  %s  Esc/q/BS=list --",
-                             cur_page, total_pages, att_count, vtog);
-                } else {
-                    snprintf(sb, sizeof(sb),
-                             "-- [%d/%d] \u2191\u2193=scroll  F=fwd  r=rm-label  d=rm  D=trash"
-                             "  f=star  n=unread  a=arch  t=labels"
-                             "  /=search  %s  Esc/q/BS=list --",
-                             cur_page, total_pages, vtog);
+                    snprintf(attlbl, sizeof(attlbl), "save(%d)", att_count);
+                    HINT("A", attlbl, 55);
                 }
-            } else if (att_count > 0) {
-                snprintf(sb, sizeof(sb),
-                         "-- [%d/%d] \u2191\u2193=scroll  r=reply  F=fwd  f=star  n=unread"
-                         "  d=done  D=trash  a=save  A=save-all(%d)"
-                         "  /=search  %s  Esc/q/BS=list --",
-                         cur_page, total_pages, att_count, vtog);
             } else {
-                snprintf(sb, sizeof(sb),
-                         "-- [%d/%d] \u2191\u2193=scroll  r=reply  F=fwd  f=star  n=unread"
-                         "  d=done  D=trash  /=search  %s  Esc/q/BS=list --",
-                         cur_page, total_pages, vtog);
+                HINT("r", "reply", 50);
+                HINT("F", "fwd", 40);
+                HINT("f", "star", 45);
+                HINT("n", "unread", 45);
+                HINT("d", "done", 45);
+                HINT("D", "trash", 45);
+                if (att_count > 0) {
+                    HINT("a", "save", 55);
+                    HINT("A", attlbl, 55);
+                }
             }
-            print_statusbar(term_rows, term_cols, sb);
+            HINT("/", "search", 55);
+            HINT("v", view_raw ? "rendered" : "source", 35);
+            status_line_draw(term_rows, term_cols, h, nh, "?", cur_page,
+                             total_pages, info_msg);
         }
 
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K");
         fflush(stderr);
+        /* The message lives until the next key. */
+        if (key != TERM_KEY_IGNORE || terminal_last_printable())
+            info_msg[0] = '\0';
 
         switch (key) {
         case TERM_KEY_BACK:
@@ -2239,13 +2245,7 @@ static int list_empty_cache_view(const Config *cfg, const EmailListOpts *opts,
         print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
         printf("\n  \033[2m(empty)\033[0m\n");
         fflush(stdout);
-        char sb[256];
-        snprintf(sb, sizeof(sb),
-                 "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                 "  Esc/q/BS=%s"
-                 "  s=sync  U=refresh  l=rules  [0/0]",
-                 cfg->gmail_mode ? "labels" : "folders");
-        print_statusbar(trows, tcols, sb);
+        list_status_line(trows, tcols, cfg->gmail_mode, 0, 0, 0, 0, NULL);
     }
     for (;;) {
         TermKey key = terminal_read_key();
@@ -2865,21 +2865,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
                 printf("\n  \033[2m(empty)\033[0m\n");
                 fflush(stdout);
-                char sb[256];
-                if (cfg->gmail_mode) {
-                    snprintf(sb, sizeof(sb),
-                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Esc/q/BS=labels"
-                             "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
-                             "  s=sync  U=refresh  l=rules  [0/0]");
-                } else {
-                    snprintf(sb, sizeof(sb),
-                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Esc/q/BS=folders"
-                             "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                             "  D=trash  s=sync  U=refresh  l=rules  [0/0]");
-                }
-                print_statusbar(trows, tcols, sb);
+                list_status_line(trows, tcols, cfg->gmail_mode,
+                                 cfg->gmail_mode && strcmp(folder, "_trash") == 0,
+                                 0, 0, 0, NULL);
             }
             for (;;) {
                 TermKey key = terminal_read_key();
@@ -2952,30 +2940,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
             printf("\n  \033[2m(empty)\033[0m\n");
             fflush(stdout);
-            char sb[256];
-            if (cfg->gmail_mode) {
-                int in_trash_empty = (strcmp(folder, "_trash") == 0);
-                if (in_trash_empty) {
-                    snprintf(sb, sizeof(sb),
-                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Esc/q/BS=labels"
-                             "  D=del  u=restore  t=labels  n=unread  f=star"
-                             "  s=sync  U=refresh  l=rules  [0/0]");
-                } else {
-                    snprintf(sb, sizeof(sb),
-                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Esc/q/BS=labels"
-                             "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star"
-                             "  D=trash  s=sync  U=refresh  l=rules  [0/0]");
-                }
-            } else {
-                snprintf(sb, sizeof(sb),
-                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                         "  Esc/q/BS=folders"
-                         "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                         "  D=trash  s=sync  U=refresh  l=rules  [0/0]");
-            }
-            print_statusbar(trows, tcols, sb);
+            list_status_line(trows, tcols, cfg->gmail_mode,
+                             cfg->gmail_mode && strcmp(folder, "_trash") == 0,
+                             0, 0, 0, NULL);
         }
         for (;;) {
             TermKey key = terminal_read_key();
@@ -3533,38 +3500,13 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         {
             int trows = terminal_rows();
             if (trows <= 0) trows = limit + 6;
-            /* Feedback line — second from bottom, shows last operation result */
-            print_infoline(trows, tcols, feedback_msg);
-            char sb[256];
-            if (is_gmail) {
-                int in_trash = (strcmp(folder, "_trash") == 0);
-                if (in_trash) {
-                    snprintf(sb, sizeof(sb),
-                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Esc/q/BS=labels"
-                             "  D=del  u=restore  t=labels  n=unread  f=star"
-                             "  s=sync  U=refresh  l=rules  Space=mark  m=bulk  [%d/%d]",
-                             show_count > 0 ? cursor + 1 : 0, show_count);
-                } else {
-                    snprintf(sb, sizeof(sb),
-                             "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                             "  Esc/q/BS=labels"
-                             "  c=compose  r=reply  F=fwd  A=r-all  n=unread  f=star  a=archive"
-                             "  d=rm-label  D=trash  t=labels  s=sync  U=refresh  l=rules  Space=mark  m=bulk  [%d/%d]",
-                             show_count > 0 ? cursor + 1 : 0, show_count);
-                }
-            } else {
-                const char *imap_trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
-                int imap_in_trash = (strcmp(folder, imap_trf) == 0);
-                snprintf(sb, sizeof(sb),
-                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open"
-                         "  Esc/q/BS=folders"
-                         "  c=compose  r=reply  F=fwd  A=r-all  n=new  f=flag  d=done"
-                         "  %s  s=sync  U=refresh  l=rules  Space=mark  m=bulk  [%d/%d]",
-                         imap_in_trash ? "D=del" : "D=trash",
-                         cursor + 1, show_count);
-            }
-            print_statusbar(trows, tcols, sb);
+            const char *imap_trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
+            int in_trash = is_gmail ? strcmp(folder, "_trash") == 0
+                                    : strcmp(folder, imap_trf) == 0;
+            /* One line: a message replaces the hints until the next key. */
+            list_status_line(trows, tcols, is_gmail, in_trash, 1,
+                             show_count > 0 ? cursor + 1 : 0, show_count,
+                             feedback_msg);
         }
 
         /* After render: if rebuild is needed (new char, backspace, Tab), show
@@ -3599,6 +3541,9 @@ read_key_again: ;
         int prev_sync_done = bg_sync_done;
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K"); fflush(stderr);
+        /* The message lives until the next key (not until the next redraw). */
+        if (key != TERM_KEY_IGNORE || terminal_last_printable())
+            feedback_msg[0] = '\0';
         /* Only loop if read() was actually interrupted by SIGCHLD (EINTR path
          * returns TERM_KEY_IGNORE with no printable char).  If SIGCHLD fired
          * between prev_sync_done and read(), the real key is not TERM_KEY_IGNORE
@@ -4533,19 +4478,18 @@ char *email_service_list_folders_interactive(const Config *cfg,
             int trows_f = terminal_rows();
             if (trows_f <= 0) trows_f = limit + 4;
             int tcols_f = terminal_cols();
-            char sb[256];
-            if (!tree_mode && current_prefix[0])
-                snprintf(sb, sizeof(sb),
-                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
-                         "  t=tree  Esc/q/BS=up  [%d/%d]",
-                         display_count > 0 ? cursor + 1 : 0, display_count);
-            else
-                snprintf(sb, sizeof(sb),
-                         "  \u2191\u2193=step  PgDn/PgUp=page  Enter=open/select"
-                         "  t=%s  Esc/q/BS=back  [%d/%d]",
-                         tree_mode ? "flat" : "tree",
-                         display_count > 0 ? cursor + 1 : 0, display_count);
-            print_statusbar(trows_f, tcols_f, sb);
+            tui_statusline_hint h[6];
+            int nh = 0;
+            #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
+            int up = !tree_mode && current_prefix[0];
+            HINT("\u2191\u2193", "step", 60);
+            HINT("PgDn/PgUp", "page", 40);
+            HINT("Enter", "open/select", 90);
+            HINT("t", up ? "tree" : (tree_mode ? "flat" : "tree"), 50);
+            HINT("Esc/q/BS", up ? "up" : "back", SL_PRIO_KEEP);
+#undef HINT
+            status_line_draw(trows_f, tcols_f, h, nh, "?",
+                             display_count > 0 ? cursor + 1 : 0, display_count, NULL);
         }
 
         TermKey key = terminal_read_key();
@@ -5159,7 +5103,10 @@ char *email_service_list_labels_interactive(const Config *cfg,
         }
         printf("  No labels synced yet. Run 'email-sync' to populate.\n");
         fflush(stdout);
-        print_statusbar(_tr, _tc, "  Esc/q/BS=back");
+        {
+            tui_statusline_hint h[1] = {{ "Esc/q/BS", "back", SL_PRIO_KEEP }};
+            status_line_draw(_tr, _tc, h, 1, NULL, 0, 0, NULL);
+        }
         for (;;) {
             TermKey _k = terminal_read_key();
             if (_k == TERM_KEY_BACK || _k == TERM_KEY_ESC ||
@@ -5251,12 +5198,16 @@ char *email_service_list_labels_interactive(const Config *cfg,
         fflush(stdout);
 
         {
-            char sb[256];
-            snprintf(sb, sizeof(sb),
-                     "  \u2191\u2193=select  Enter=open  c=create  d=delete  Esc/q/BS=accounts"
-                     "  h=help  [%d/%d]",
-                     cursor + 1, lbl_count);
-            print_statusbar(trows, tcols, sb);
+            tui_statusline_hint h[6];
+            int nh = 0;
+            #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
+            HINT("\u2191\u2193", "select", 60);
+            HINT("Enter", "open", 90);
+            HINT("c", "create", 45);
+            HINT("d", "delete", 45);
+            HINT("Esc/q/BS", "accounts", SL_PRIO_KEEP);
+#undef HINT
+            status_line_draw(trows, tcols, h, nh, "h", cursor + 1, lbl_count, NULL);
         }
 
         TermKey key = terminal_read_key();
@@ -5611,17 +5562,26 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
         snprintf(cl, sizeof(cl), "  Email Accounts (%d)", count);
         tui_frame_draw_table(cl, &tbl, trows, tcols, 0, NULL, NULL);
 
-        char sb[256];
-        snprintf(sb, sizeof(sb),
-                 "  \u2191\u2193=select  Enter=open  n=add  d=delete*  i=IMAP  e=SMTP  ESC=quit  (*keeps local data)");
-        print_statusbar(trows, tcols, sb);
-        if (flash_msg) {
-            print_infoline(trows, tcols, flash_msg);
-            flash_msg = NULL;
+        {
+            tui_statusline_hint h[8];
+            int nh = 0;
+            #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
+            HINT("\u2191\u2193", "select", 60);
+            HINT("Enter", "open", 90);
+            HINT("n", "add", 50);
+            HINT("d", "delete", 45);
+            HINT("i", "IMAP", 40);
+            HINT("e", "SMTP", 40);
+            HINT("ESC", "quit", SL_PRIO_KEEP);
+#undef HINT
+            status_line_draw(trows, tcols, h, nh, "h", count > 0 ? cursor + 1 : 0,
+                             count, flash_msg);
         }
 
         TermKey key = terminal_read_key();
         fprintf(stderr, "\r\033[K"); fflush(stderr);
+        if (key != TERM_KEY_IGNORE || terminal_last_printable())
+            flash_msg = NULL;          /* the notice lives until the next key */
 
         int ch = terminal_last_printable();
 

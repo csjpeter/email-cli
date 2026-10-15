@@ -57,7 +57,7 @@ int g_tests_failed = 0;
 #define SETTLE_MS 700
 #define ROWS 30
 #define COLS 120
-#define FEEDBACK_ROW (ROWS - 2)   /* 0-indexed PTY row for the infoline */
+#define FEEDBACK_ROW (ROWS - 1)   /* 0-indexed PTY row of the status line */
 
 /* ── Global state ────────────────────────────────────────────────────── */
 
@@ -749,11 +749,11 @@ static void test_label_picker_unarchive(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
- *  TEST: Trash statusbar shows u=restore hint
+ *  TEST: Trash statusbar shows u restore hint
  * ══════════════════════════════════════════════════════════════════════ */
 
 /**
- * When viewing the Trash folder, the status bar must show "u=restore" to
+ * When viewing the Trash folder, the status bar must show "u restore" to
  * guide the user.  This test works even with an empty Trash.
  */
 static void test_trash_statusbar_restore_hint(void) {
@@ -764,8 +764,8 @@ static void test_trash_statusbar_restore_hint(void) {
     ASSERT(pty_run(s, args) == 0, "trash-sb: pty_run");
     ASSERT(navigate_to_trash(s) == 0, "trash-sb: navigate_to_trash");
 
-    /* The status bar (last row) must contain "u=restore" */
-    ASSERT_SCREEN_CONTAINS(s, "u=restore");
+    /* The status bar (last row) must contain "u restore" */
+    ASSERT_SCREEN_CONTAINS(s, "u restore");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);

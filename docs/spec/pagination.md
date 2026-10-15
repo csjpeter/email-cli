@@ -89,7 +89,7 @@ Ctrl-C quits at once, see `policies/tui-interface-model.md`).  Reaching the firs
 Printed after the table on each redraw (dim style):
 
 ```
-  ↑↓=step  PgDn/PgUp=page  Enter=open  q=quit  [<cursor+1>/<total>]
+↑↓ step  PgDn/PgUp page  Enter open  Esc/q/BS folders  ? help  [<cursor+1>/<total>]
 ```
 
 ---

@@ -44,8 +44,8 @@ runs are read as `#`.
 | Gmail pending marks (`gmail_inbox_d`, `gmail_inbox_trash_mark`, `gmail_inbox_archive_mark`, `*_off`) | `d`, `D`, `a` on a row | mark `d` (bold yellow, whole row yellow when the cursor is elsewhere), `D` (red row), feedback line "Label removed: INBOX" / "Moved to Trash" / "Archived"; archive also clears the unread `N` | d D a |
 | Bulk-action states (`list_marked`, `list_marked_two`, `list_bulk_prompt`, `list_bulk_cursor_prompt`, `list_move_prompt`, `list_delete_ask`, `list_bulk_done`) | `Space`, `m` on the message list (US-86) | `*` in the mark column, `[N marked]` in the header; the prompt line `N [marked ]message(s): r=read …  Esc=cancel`; `Move to folder: <text>`; `Move to Trash N message(s)? (y/N)`; the result line `N message(s) starred` | Space x m r u f F D Esc |
 | Gmail label picker (`gmail_picker`, `gmail_picker_second`, `gmail_picker_toggled`, `gmail_picker_done`) | `t` on a Gmail message | boxed popup "Toggle Labels" (reverse video, cursor row bold), rows `[x]`/`[ ]` per label, dim footer `↑↓=move  Enter=toggle  ESC=done`; after Esc the feedback line names the change (`Label removed: INBOX`) | ↑↓ Enter Space Esc |
-| Reader with attachments (`att_reader`) | Enter on the multipart message | the reader plus `Attach:  2 files: notes.txt, data.bin` and `a=save  A=save-all(2)` in the status bar; the rendered HTML body keeps its bold/italic/underline/strike/colour |  a A |
-| Attachment picker (`att_picker`, `att_picker_second`) | `a` in the reader | "Attachments (N):", one row per file (name, type, size), selected row dark blue with `>`; hint line `↑↓=select  Enter=choose  Esc/q/BS=back` | ↑↓ Enter Esc |
+| Reader with attachments (`att_reader`) | Enter on the multipart message | the reader plus `Attach:  2 files: notes.txt, data.bin` and `a save  A save-all(2)` in the status line; the rendered HTML body keeps its bold/italic/underline/strike/colour |  a A |
+| Attachment picker (`att_picker`, `att_picker_second`) | `a` in the reader | "Attachments (N):", one row per file (name, type, size), selected row dark blue with `>`; status line `↑↓ select  Enter choose  Esc/q/BS back  [n/N]` | ↑↓ Enter Esc |
 | Save prompts and result (`att_save_prompt`, `att_saved`, `att_save_all`) | Enter in the picker, `A` | `Save as: <path>` (line editor, scrolls), `Saved: <path>`, `Save all to: <dir>`; the golden pictures compare these rows by their start only (paths differ per machine) | Enter Esc |
 | Review states (`review_full`, `review_long_to`, `review_attach_ask`, `review_attach_removed`, `review_send_failed`) | `s`, `a`, `d` in the review | Cc, Bcc and Attach rows when present (`Attach:  (none)` otherwise); a long To list wraps at the terminal edge; `Add Attachment` / `Path:` prompt; a failed send appends `Sending...`, the SMTP error, `Saved to Drafts (will retry on next sync).` below the review | s e b a d q |
 | Address drop-down (`dd_many`, `dd_one`, `dd_second`, `dd_none`, `dd_wide`, `dd_accepted`) | typing 2+ characters in To/Cc/Bcc | up to five candidate rows under the field, each `▶ address   name` (cyan marker, the chosen row in reverse); none when nothing matches; Down moves, Enter takes the address | text ↓ ↑ Enter ; Tab |
@@ -57,6 +57,27 @@ runs are read as `#`.
 | Rules editor states (`rules_delete_ask`, `rules_deleted`, `rule_detail_delete_ask`, `rule_when_typed`, `rule_when_added`, `rule_when_bad`, `rule_step2_field`) | `d`, `a` in the rule views | the delete question `Delete "NAME"? (y/N)` on the last row; the typed condition on the `new:` line; a condition that does not parse is refused with `Not a valid condition: … (e.g. from:*@example.org)` on the last row and not added; step 2 shows the typed field | d y a Enter q |
 | Body editor (`body_editor`, `body_editor_typed`) | Enter on the compose dialog (US-87) | header bar "Message body — To: … Subject: …"; the text (tui_textedit, scrolls both ways, cursor at the text cursor); dim bottom line `Esc=save and continue  Ctrl-S=save`, `saved`/`autosaved` after a save | text, Enter, arrows, Esc, Ctrl-S |
 | Review (`review`, `review_discard_ask`) | Esc in the body editor | header "Review: Message"; dim labels From, To, Subject, Body (line count), Attach; key line `[s] Send … [q] Discard`; `q` asks `Discard draft? To: …, Subject: …, N line(s), M attachment(s) [y/n]` | s e b a d q |
+
+## The status line (EMAIL-98)
+
+Every full-screen view ends in one reverse-video row, drawn by libtuikit's
+`tui_statusline` (`libemail/src/core/status_line.c`); there is no information
+row above it any more.
+
+- **Hints** are `key label` pairs (`Enter open`, `Esc/q/BS folders`).  When
+  the terminal is too narrow whole hints are dropped, lowest priority first;
+  the way back (`Esc/q/BS …`), the open key and the position stay.
+- **Position** `[n/N]` is right-aligned and always kept; with no items it is
+  not shown.  The reader shows its page `[page/pages]`.
+- **Help**: `?` help (`h help` in the label browser and the accounts list)
+  is the last hint.
+- **Message**: an action's feedback (`Moved to Trash`, `Label removed: …`),
+  a search miss in the reader, a prompt (`Delete account NAME? (y/N)`, the
+  bulk menu and its confirmations) and a flash notice replace the hints on
+  the same row until the next key; then the hints are back.
+- The prompts' own screens (compose dialog, body editor, review, rules
+  editor) keep the dim key line of their frame; they are not part of this
+  line.
 
 ## Not covered by a whole-screen comparison yet
 

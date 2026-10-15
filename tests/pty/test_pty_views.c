@@ -508,8 +508,8 @@ static void test_interactive_list_statusbar(void) {
     int sb = find_row(s, "step");
     ASSERT(sb >= 0, "list sb: found row with 'step'");
     if (sb >= 0) {
-        ASSERT(pty_row_contains(s, sb, "Enter=open"), "list sb: Enter=open");
-        ASSERT(pty_row_contains(s, sb, "Esc/q/BS=folders"), "list sb: Esc/q/BS=folders");
+        ASSERT(pty_row_contains(s, sb, "Enter open"), "list sb: Enter=open");
+        ASSERT(pty_row_contains(s, sb, "Esc/q/BS folders"), "list sb: Esc/q/BS folders");
         ASSERT(!pty_row_contains(s, sb, "ESC=quit"), "list sb: no longer says ESC=quit");
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
     }
@@ -701,8 +701,8 @@ static void test_interactive_show_separator(void) {
 static void test_interactive_show_statusbar(void) {
     restart_mock();
     /* The reader status bar lists every shortcut, including the two attachment
-     * entries the mock message provides (a=save, A=save-all).  That line is
-     * longer than 100 columns and would be truncated before "/=search", so use
+     * entries the mock message provides (a=save, A save-all).  That line is
+     * longer than 100 columns and would be truncated before "/ search", so use
      * a wider terminal here. */
     PtySession *s = tui_open_to_list_size(160, ROWS);
     ASSERT(s != NULL, "show statusbar: opens");
@@ -712,11 +712,11 @@ static void test_interactive_show_statusbar(void) {
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    int sb = find_row(s, "/=search");
+    int sb = find_row(s, "/ search");
     ASSERT(sb >= 0, "show sb: found /=search");
     if (sb >= 0) {
-        ASSERT(pty_row_contains(s, sb, "/=search"), "show sb: /=search");
-        ASSERT(pty_row_contains(s, sb, "v=source"), "show sb: v=source");
+        ASSERT(pty_row_contains(s, sb, "/ search"), "show sb: /=search");
+        ASSERT(pty_row_contains(s, sb, "v source"), "show sb: v=source");
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
     }
     pty_send_key(s, PTY_KEY_BACK);
@@ -809,7 +809,7 @@ static void test_interactive_show_uid_in_header(void) {
  * Acceptance criteria:
  *   - Default view is rendered (HTML/text body visible).
  *   - 'v' switches to raw source: MIME headers (Content-Type:) visible.
- *   - Statusbar shows "v=rendered" in source mode, "v=source" in rendered.
+ *   - Statusbar shows "v rendered" in source mode, "v source" in rendered.
  *   - Second 'v' returns to rendered view.
  * ══════════════════════════════════════════════════════════════════════
  */
@@ -831,12 +831,12 @@ static void test_interactive_show_source_toggle(void) {
     pty_send_str(s, "v");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Content-Type:");
-    ASSERT_WAIT_FOR(s, "v=rendered", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "v rendered", WAIT_MS);
     /* Press v again → back to rendered */
     pty_send_str(s, "v");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Hello from Mock Server");
-    ASSERT_SCREEN_CONTAINS(s, "v=source");
+    ASSERT_SCREEN_CONTAINS(s, "v source");
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
@@ -1042,8 +1042,8 @@ static void test_interactive_folders_statusbar(void) {
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    int sb = find_row(s, "Enter=open/select");
-    ASSERT(sb >= 0, "list-folders sb: found Enter=open/select");
+    int sb = find_row(s, "Enter open/select");
+    ASSERT(sb >= 0, "list-folders sb: found Enter open/select");
     if (sb >= 0)
         ASSERT_CELL_ATTR(s, sb, 2, PTY_ATTR_REVERSE);
     pty_send_key(s, PTY_KEY_ESC);
@@ -1063,12 +1063,12 @@ static void test_interactive_folders_toggle(void) {
     /* Toggle to flat */
     pty_send_str(s, "t");
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "t=tree");
+    ASSERT_SCREEN_CONTAINS(s, "t tree");
 
     /* Toggle back to tree */
     pty_send_str(s, "t");
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "t=flat");
+    ASSERT_SCREEN_CONTAINS(s, "t flat");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1144,20 +1144,20 @@ static void test_interactive_folders_flat_navigate_up(void) {
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "t");                     /* toggle to flat view */
-    ASSERT_WAIT_FOR(s, "t=tree", WAIT_MS);    /* flat mode: hint shows "t=tree" */
+    ASSERT_WAIT_FOR(s, "t tree", WAIT_MS);    /* flat mode: hint shows "t=tree" */
     pty_settle(s, SETTLE_MS);
     /* Flat view at root shows only top-level list-folders (no '.' in name) */
     ASSERT_SCREEN_CONTAINS(s, "INBOX");
     pty_send_key(s, PTY_KEY_ENTER);           /* navigate into INBOX */
-    ASSERT_WAIT_FOR(s, "Esc/q/BS=up", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS up", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     /* Header shows "Folders: INBOX/ (3)"; flat mode shows last component only */
     ASSERT_SCREEN_CONTAINS(s, "INBOX/");
     ASSERT_SCREEN_CONTAINS(s, "Sent");
     pty_send_key(s, PTY_KEY_BACK);            /* navigate up to root */
-    ASSERT_WAIT_FOR(s, "Esc/q/BS=back", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS back", WAIT_MS);
     pty_send_str(s, "t");                     /* toggle back to tree mode */
-    ASSERT_WAIT_FOR(s, "t=flat", WAIT_MS);   /* tree mode shows "t=flat" hint */
+    ASSERT_WAIT_FOR(s, "t flat", WAIT_MS);   /* tree mode shows "t=flat" hint */
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -1174,10 +1174,10 @@ static void test_interactive_folders_flat_parent_openable(void) {
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "t");
-    ASSERT_WAIT_FOR(s, "t=tree", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "t tree", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);           /* into INBOX/ */
-    ASSERT_WAIT_FOR(s, "Esc/q/BS=up", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS up", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     /* the first row under the column heads is INBOX itself, cursor on it */
     int row = find_row(s, "Sent");
@@ -1202,7 +1202,7 @@ static void test_interactive_folders_flat_parent_openable(void) {
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "t");
-    ASSERT_WAIT_FOR(s, "t=flat", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "t flat", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -1281,7 +1281,7 @@ static void test_interactive_empty_folder(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Subject");
     ASSERT_SCREEN_CONTAINS(s, "(empty)");
-    ASSERT_SCREEN_CONTAINS(s, "Esc/q/BS=folders");
+    ASSERT_SCREEN_CONTAINS(s, "Esc/q/BS folders");
 
     /* Backspace returns to folder browser */
     pty_send_key(s, PTY_KEY_BACK);
@@ -1336,7 +1336,7 @@ static void test_interactive_empty_folder_cron(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "(empty)");
     ASSERT_SCREEN_CONTAINS(s, "No cached data");
-    ASSERT_SCREEN_CONTAINS(s, "Esc/q/BS=folders");
+    ASSERT_SCREEN_CONTAINS(s, "Esc/q/BS folders");
     /* Restore folder cursor to INBOX so subsequent tests open INBOX */
     pty_send_key(s, PTY_KEY_BACK);          /* back to folder browser */
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
@@ -1371,18 +1371,18 @@ static PtySession *open_show_view(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     /* Wait for the attachment status bar — proves the full show view rendered */
-    if (pty_wait_for(s, "A=save-all", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    if (pty_wait_for(s, "A save-all", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
     return s;
 }
 
-/** Status bar shows  a=save  A=save-all(2) when list-attachments present. */
+/** Status bar shows  a=save  A save-all(2) when list-attachments present. */
 static void test_show_attachment_statusbar(void) {
     PtySession *s = open_show_view();
     ASSERT(s != NULL, "att statusbar: opens");
 
-    ASSERT_SCREEN_CONTAINS(s, "a=save");
-    ASSERT_SCREEN_CONTAINS(s, "A=save-all(2)");
+    ASSERT_SCREEN_CONTAINS(s, "a save");
+    ASSERT_SCREEN_CONTAINS(s, "A save-all(2)");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -2224,9 +2224,61 @@ static void test_resize_list_redraws_at_once(void) {
     ASSERT(s != NULL, "resize list: opens at 80x24");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "U=refresh");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "U refresh");
     ASSERT(pty_resize(s, 160, 24) == 0, "resize list: the window is resized");
-    ASSERT_WAIT_FOR(s, "U=refresh", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "U refresh", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ── EMAIL-98: one status line ──────────────────────────────────────── */
+
+static void test_statusline_one_row_hints_position(void) {
+    /* The hints and the position are on the last row; no second bar above. */
+    restart_mock();
+    PtySession *s = tui_open_to_list_size(120, 24);
+    ASSERT(s != NULL, "status line: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, 23, "Enter open"), "status line: hints on the last row");
+    ASSERT(pty_row_contains(s, 23, "Esc/q/BS folders"), "status line: back hint kept");
+    ASSERT(pty_row_contains(s, 23, "[1/"), "status line: position on the last row");
+    ASSERT(pty_row_contains(s, 23, "? help"), "status line: help hint");
+    ASSERT(!pty_row_contains(s, 22, "Enter open"), "status line: no second bar");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_statusline_message_replaces_hints(void) {
+    /* After an action the message replaces the hints; the next key brings
+     * the hints back. */
+    restart_mock();
+    PtySession *s = tui_open_to_list_size(120, 24);
+    ASSERT(s != NULL, "status message: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "f");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, 23, "arred"), "status message: shown on the last row");
+    ASSERT(!pty_row_contains(s, 23, "Enter open"), "status message: replaces the hints");
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, 23, "Enter open"), "status message: the hints return");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_statusline_narrow_keeps_back_and_position(void) {
+    /* A narrow line drops whole hints, lowest priority first; the way back
+     * and the position stay. */
+    restart_mock();
+    PtySession *s = tui_open_to_list_size(80, 24);
+    ASSERT(s != NULL, "status narrow: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, 23, "Esc/q/BS folders"), "status narrow: back hint kept");
+    ASSERT(pty_row_contains(s, 23, "[1/"), "status narrow: position kept");
+    ASSERT(!pty_row_contains(s, 23, "l rules"), "status narrow: low priority hint dropped");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -2302,9 +2354,11 @@ static void test_resize_on_every_screen(void) {
     ASSERT(pty_run(s, args) == 0, "resize screens: runs");
     ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "(*keeps local data)");
+    ASSERT_SCREEN_CONTAINS(s, "ESC quit");
     pty_resize(s, 120, 24);
-    ASSERT_WAIT_FOR(s, "(*keeps local data)", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "ESC quit");
+    ASSERT_SCREEN_CONTAINS(s, "e SMTP");
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
@@ -2787,7 +2841,7 @@ static void test_tui_show_help_panel(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     pty_settle(s, SETTLE_MS);
     /* back in reader */
-    ASSERT_SCREEN_CONTAINS(s, "r=reply");
+    ASSERT_SCREEN_CONTAINS(s, "r reply");
     pty_send_key(s, PTY_KEY_ESC);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -4839,6 +4893,9 @@ int main(int argc, char *argv[]) {
     printf("\n--- email-tui: interactive ---\n");
     RUN_TEST(test_tui_list_content);
     RUN_TEST(test_resize_list_redraws_at_once);
+    RUN_TEST(test_statusline_one_row_hints_position);
+    RUN_TEST(test_statusline_message_replaces_hints);
+    RUN_TEST(test_statusline_narrow_keeps_back_and_position);
     RUN_TEST(test_resize_keeps_selection);
     RUN_TEST(test_resize_below_minimum_shows_notice);
     RUN_TEST(test_start_below_minimum_shows_notice);

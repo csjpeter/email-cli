@@ -18,7 +18,7 @@ after the command returns.
 ▶ <uid>  <from>                          <subject>                       <date>   ← selected row (reverse video + \033[K\033[0m)
   ...
 
-  ↑↓=step  PgDn/PgUp=page  Enter=open  q=quit  [<cursor+1>/<total>]   ← status bar (dim)
+↑↓ step  PgDn/PgUp page  Enter open  Esc/q/BS folders  …  ? help  [<cursor+1>/<total>]   ← status line (reverse)
 
 Success: Fetch complete.
 ```
@@ -81,7 +81,7 @@ If the date cannot be parsed, the raw string is shown as-is.
      <uid>  <from>                          <subject>                       <date>
   ...
 
-  ↑↓=step  PgDn/PgUp=page  Enter=open  q=quit  [<cursor+1>/<total>]
+↑↓ step  PgDn/PgUp page  Enter open  Esc/q/BS folders  ? help  [<cursor+1>/<total>]
 ```
 
 The `S` (status) column contains `N` for unread messages and a space for read ones.
@@ -184,7 +184,7 @@ after a key is pressed.
 Printed to **stdout** below the table (dim style `\033[2m … \033[0m`):
 
 ```
-  ↑↓=step  PgDn/PgUp=page  Enter=open  Esc/q/BS=folders  [<cursor+1>/<total>]
+↑↓ step  PgDn/PgUp page  Enter open  Esc/q/BS folders  ? help  [<cursor+1>/<total>]
 ```
 
 ## Status bar — interactive `show` (opened from list)

@@ -119,3 +119,22 @@ default is 100); `list_third_row`, `folders_second_row` (cursor on a later
 row); `list_wide_subject`, `reader_wide_subject` (wide characters),
 `list_long_subject` (cut with an ellipsis); `accounts_8colour`,
 `folders_8colour`, `list_8colour`, `list_8colour_third`, `reader_8colour`.
+
+## Resize and the minimum size (EMAIL-97)
+
+`terminal_read_key()` (platform/posix/terminal.c) waits for input or
+`SIGWINCH` with `ppoll()`: a resize returns "ignored", so every screen redraws
+at the new size at once, without a key.  A resize that arrives while a screen
+is being drawn is kept in a flag and is not lost.  The reader lays the message
+out again at the new width and keeps its position; the list, folder browser and
+the other screens re-read the size on every pass.  The body editor
+(`body_editor.c`) does the same with its own wait.
+
+Below 80x24 the screen is replaced by `Terminal too small (WxH).` /
+`Needs 80x24. Resize, or Esc to leave.`; keys other than Esc and Ctrl-C are
+swallowed until the window is large enough again, and nothing is edited while
+nothing is drawn.  Pictures: no cell-exact golden (the notice is two lines);
+the behaviour is in `test_resize_*`, `test_start_below_minimum_shows_notice`
+and `test_body_editor_resize_and_too_small`.  The single-line editor
+(`input_line`, libtuikit's `tui_lineedit_run`) has its own key loop and is not
+redrawn by a resize until the next key.

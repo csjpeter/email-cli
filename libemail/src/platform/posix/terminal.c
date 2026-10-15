@@ -19,6 +19,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <termios.h>
+#include <errno.h>
+#include <poll.h>
+#include <signal.h>
 
 /** Opaque saved terminal state. Definition lives here (hidden from header). */
 struct TermRawState {
@@ -70,12 +73,112 @@ static char g_last_utf8[5]    = "";
 int         terminal_last_printable(void) { return g_last_printable; }
 const char *terminal_last_utf8(void)      { return g_last_utf8; }
 
+/* ── Resize and the minimum size (tui-interface-model) ───────────────── */
+
+/* The screens draw once per key; a window resize must redraw at once, so
+ * terminal_read_key() waits for input or SIGWINCH and returns "ignored" when
+ * the size changed: every caller redraws at the top of its loop.  A resize
+ * that arrives while the screen is being drawn is remembered in the flag and
+ * is not lost.  Below 80x24 a short notice replaces whatever was drawn. */
+#define TERM_MIN_COLS 80
+#define TERM_MIN_ROWS 24
+
+static volatile sig_atomic_t g_winch;
+
+static void on_winch(int sig) {
+    (void)sig;
+    g_winch = 1;
+}
+
+static void install_winch_handler(void) {
+    static int done;
+    if (done) return;
+    done = 1;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = on_winch;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGWINCH, &sa, NULL);
+}
+
+static int too_small(void) {
+    int c = tui_tty_cols(STDOUT_FILENO), r = tui_tty_rows(STDOUT_FILENO);
+    return c > 0 && r > 0 && (c < TERM_MIN_COLS || r < TERM_MIN_ROWS);
+}
+
+static void show_too_small_notice(void) {
+    int c = tui_tty_cols(STDOUT_FILENO), r = tui_tty_rows(STDOUT_FILENO);
+    char msg[160];
+    int n = snprintf(msg, sizeof(msg),
+                     "\033[2J\033[HTerminal too small (%dx%d).\r\n"
+                     "Needs %dx%d. Resize, or Esc to leave.",
+                     c, r, TERM_MIN_COLS, TERM_MIN_ROWS);
+    if (n > 0) {
+        ssize_t w = write(STDOUT_FILENO, msg, (size_t)n);
+        (void)w;
+    }
+}
+
+/* Waits for input.  Returns 1 when a key is ready, 0 when the terminal was
+ * resized (the caller returns "ignored" so that the screen is redrawn), -1
+ * when waiting is not possible (not a terminal: read as before). */
+static int wait_input_or_resize(void) {
+    if (!tui_tty_is(STDIN_FILENO)) return 1;
+    install_winch_handler();
+    sigset_t block, orig;
+    sigemptyset(&block);
+    sigaddset(&block, SIGWINCH);
+    sigprocmask(SIG_BLOCK, &block, &orig);
+    int result;
+    if (g_winch) {
+        g_winch = 0;
+        result = 0;
+    } else {
+        struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN, .revents = 0 };
+        int pr = ppoll(&pfd, 1, NULL, &orig);
+        if (pr < 0 && errno == EINTR) {
+            g_winch = 0;
+            result = 0;
+        } else {
+            result = 1;
+        }
+    }
+    sigprocmask(SIG_SETMASK, &orig, NULL);
+    return result;
+}
+
 /** Map a decoded key of libtuikit to the program's TermKey.  A key with a
  *  modifier that this program has no meaning for is ignored; Alt+character is
  *  the ESC it has always been (the character is consumed with it). */
 TermKey terminal_read_key(void) {
     g_last_printable = 0;
     g_last_utf8[0]   = '\0';
+
+    if (too_small()) {
+        /* The notice stays until the window is large enough; only Esc and
+         * Ctrl-C get through (to leave), everything else is swallowed. */
+        for (;;) {
+            show_too_small_notice();
+            int w = wait_input_or_resize();
+            if (w == 0) {
+                if (!too_small()) return TERM_KEY_IGNORE;   /* redraw */
+                continue;
+            }
+            tui_event nev;
+            int nrc = tui_tty_read_key(STDIN_FILENO, &nev);
+            if (nrc <= 0) return TERM_KEY_IGNORE;
+            if (nev.type == TUI_EV_KEY &&
+                (nev.key == TUI_KEY_ESC ||
+                 (nev.key == TUI_KEY_CHAR && (nev.mods & TUI_MOD_CTRL) && nev.cp == 'c')))
+                return nev.key == TUI_KEY_ESC ? TERM_KEY_ESC : TERM_KEY_QUIT;
+            if (!too_small()) return TERM_KEY_IGNORE;
+        }
+    }
+    if (wait_input_or_resize() == 0)
+        return TERM_KEY_IGNORE;                 /* resized: redraw */
+    if (too_small())
+        return TERM_KEY_IGNORE;                 /* the notice comes next call */
 
     tui_event ev;
     int rc = tui_tty_read_key(STDIN_FILENO, &ev);

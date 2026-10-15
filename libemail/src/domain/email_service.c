@@ -1092,9 +1092,40 @@ static int show_uid_interactive(const Config *cfg, MailClient *mc,
 
     int result = 0;
     for (int cur_line = 0;;) {
+        /* A resize (EMAIL-97): take the new size and lay the message out
+         * again; the position in the text is kept, within the new length. */
+        {
+            int nc = terminal_cols(), nr = terminal_rows();
+            if (nc > 0 && nr > 0 && (nc != term_cols || nr != term_rows)) {
+                int old_wrap = wrap_cols;
+                term_cols = nc;
+                term_rows = nr;
+                wrap_cols = term_cols > SHOW_WIDTH ? SHOW_WIDTH : term_cols;
+                rows_avail = (term_rows > hdr_rows + 2) ? term_rows - hdr_rows - 2 : 1;
+                if (wrap_cols != old_wrap) {
+                    char *nb = NULL;
+                    char *hr = mime_get_html_part(raw);
+                    if (hr) {
+                        nb = html_render(hr, wrap_cols, 1);
+                        free(hr);
+                    } else {
+                        MimeTextInfo ti;
+                        char *pl = mime_get_text_body_ex(raw, &ti);
+                        if (pl) {
+                            char *w = word_wrap(pl, wrap_cols);
+                            if (w) { free(pl); nb = w; }
+                            else nb = pl;
+                        }
+                    }
+                    free(body);
+                    body = nb;
+                }
+            }
+        }
         /* Recompute active body text and pagination for current view mode */
         body_text  = view_raw ? raw : (body ? body : "(no readable text body)");
         body_vrows = count_visual_rows(body_text, term_cols);
+        if (cur_line >= body_vrows) cur_line = body_vrows > 0 ? body_vrows - 1 : 0;
         total_pages = (body_vrows + rows_avail - 1) / rows_avail;
         if (total_pages < 1) total_pages = 1;
 

@@ -980,11 +980,12 @@ static void test_interactive_show_arrow_scroll(void) {
      * ↓ steps forward to page 2 again — confirming single-line granularity. */
     restart_mock();
     /* Open email-tui in a short terminal and navigate to the message list.
-     * 16 rows: the reader header block (From/Subject/Date/UID/File/DMARC/Attach
-     * plus separator) needs 8 of them, and the rest still forces multi-page
-     * scrolling — which is what this test exercises. */
+     * 24 rows is the smallest drawn terminal (EMAIL-97: below it only a
+     * notice is shown): the header block (From/Subject/Date/UID/File/DMARC/
+     * Attach plus separator) takes 8, the rendered body still needs two
+     * pages — which is what this test exercises. */
     const char *tui_args[] = {g_tui_bin, NULL};
-    PtySession *s = pty_open(COLS, 16);
+    PtySession *s = pty_open(COLS, 24);
     ASSERT(s != NULL, "show arrow scroll: opens");
     if (pty_run(s, tui_args) != 0) { pty_close(s); return; }
     if (pty_wait_for(s, "Email Account", WAIT_MS) != 0) { pty_close(s); return; }
@@ -2209,6 +2210,120 @@ static void test_tui_list_bulk_delete_confirm(void) {
     ASSERT_WAIT_FOR(s, "(y/N)", WAIT_MS);
     pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "1 message(s) deleted", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ── EMAIL-97: resize and the minimum size ──────────────────────────── */
+
+static void test_resize_list_redraws_at_once(void) {
+    /* At 80 columns the key bar is cut; widening the window shows the rest
+     * with no key pressed. */
+    restart_mock();
+    PtySession *s = tui_open_to_list_size(80, 24);
+    ASSERT(s != NULL, "resize list: opens at 80x24");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "U=refresh");
+    ASSERT(pty_resize(s, 160, 24) == 0, "resize list: the window is resized");
+    ASSERT_WAIT_FOR(s, "U=refresh", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_resize_keeps_selection(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list_size(100, 24);
+    ASSERT(s != NULL, "resize selection: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_settle(s, SETTLE_MS);
+    int row_before = -1;
+    for (int r = 0; r < 24; r++)
+        if (pty_row_contains(s, r, ">") && pty_row_contains(s, r, "Test Message")) row_before = r;
+    pty_resize(s, 130, 30);
+    pty_settle(s, SETTLE_MS * 2);
+    int row_after = -1;
+    for (int r = 0; r < 30; r++)
+        if (pty_row_contains(s, r, ">") && pty_row_contains(s, r, "Test Message")) row_after = r;
+    ASSERT(row_before >= 0 && row_after == row_before,
+           "resize selection: the cursor stays on the same message");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_resize_below_minimum_shows_notice(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list_size(100, 24);
+    ASSERT(s != NULL, "too small: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_resize(s, 60, 20);
+    ASSERT_WAIT_FOR(s, "Terminal too small", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "60x20");
+    ASSERT_SCREEN_CONTAINS(s, "80x24");
+    /* keys do not reach the list while the notice is shown */
+    pty_send_str(s, "x");
+    pty_settle(s, 200);
+    ASSERT_SCREEN_CONTAINS(s, "Terminal too small");
+    /* back to a usable size: the list is drawn again, selection kept */
+    pty_resize(s, 100, 24);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    int sel = -1;
+    for (int r = 0; r < 24; r++)
+        if (pty_row_contains(s, r, ">") && pty_row_contains(s, r, "Test Message")) sel = r;
+    ASSERT(sel >= 0, "too small: the selection is kept across the notice");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_start_below_minimum_shows_notice(void) {
+    restart_mock();
+    const char *args[] = {g_tui_bin, NULL};
+    PtySession *s = pty_open(60, 16);
+    ASSERT(s != NULL, "start small: opens");
+    ASSERT(pty_run(s, args) == 0, "start small: runs");
+    ASSERT_WAIT_FOR(s, "Terminal too small", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "60x16");
+    pty_resize(s, 100, 24);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_resize_on_every_screen(void) {
+    /* accounts, folders, list, reader: each is redrawn by a resize alone. */
+    restart_mock();
+    const char *args[] = {g_tui_bin, NULL};
+    PtySession *s = pty_open(80, 24);
+    ASSERT(s != NULL, "resize screens: opens");
+    ASSERT(pty_run(s, args) == 0, "resize screens: runs");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "(*keeps local data)");
+    pty_resize(s, 120, 24);
+    ASSERT_WAIT_FOR(s, "(*keeps local data)", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_resize(s, 90, 30);
+    pty_settle(s, SETTLE_MS * 2);
+    ASSERT_SCREEN_CONTAINS(s, "Folders");
+    ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    folders_goto_inbox(s);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_resize(s, 130, 26);
+    pty_settle(s, SETTLE_MS * 2);
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_resize(s, 100, 24);
+    pty_settle(s, SETTLE_MS * 2);
+    ASSERT_SCREEN_CONTAINS(s, "From:");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -4723,6 +4838,11 @@ int main(int argc, char *argv[]) {
 
     printf("\n--- email-tui: interactive ---\n");
     RUN_TEST(test_tui_list_content);
+    RUN_TEST(test_resize_list_redraws_at_once);
+    RUN_TEST(test_resize_keeps_selection);
+    RUN_TEST(test_resize_below_minimum_shows_notice);
+    RUN_TEST(test_start_below_minimum_shows_notice);
+    RUN_TEST(test_resize_on_every_screen);
     RUN_TEST(test_tui_list_space_marks);
     RUN_TEST(test_tui_list_esc_clears_marks);
     RUN_TEST(test_tui_list_bulk_star_marked);

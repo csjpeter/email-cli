@@ -71,14 +71,15 @@ The project follows a strict layered CLEAN architecture with zero circular depen
 ```
 Application    →  src/main.c, main_ro.c, main_sync.c, main_tui.c, main_import_rules.c
 Domain         →  libemail/src/domain/email_service.c
-Infrastructure →  libemail/src/infrastructure/{config_store,local_store,imap_client,setup_wizard,
-                                                  gmail_auth,gmail_client,gmail_sync,mail_client,
-                                                  mail_rules,when_expr}.c
+Infrastructure →  libemail/src/infrastructure/{config_store,local_store,setup_wizard,
+                                                  mail_rules,when_expr}.c + mail_account.h
 Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_parser,html_render,
-                                     imap_util,input_line,path_complete,json_util}.c + raii.h
+                                     imap_util,input_line,path_complete}.c + raii.h
 Platform       →  libemail/src/platform/{terminal,path,process,credential_key}.h + html_medium.h
                     libemail/src/platform/posix/{terminal,path,process,credential_key,html_medium}.c    (Linux)
-Write library  →  libwrite/src/{smtp_adapter,compose_service}.c
+Mail client    →  libemail-client/src/{email_client,mail_client,imap_client,gmail_client,
+                                         gmail_auth,gmail_sync,smtp_adapter,compose_service,
+                                         json_util}.c   (shared library libemail-client)
 ```
 
 Dependency rule: every layer may depend on layers below it; `platform/` sits
@@ -86,14 +87,15 @@ alongside `core/` and is depended upon by `domain/` and `infrastructure/`.
 No layer may contain `#ifdef` guards for platform selection — that is the
 build system's (CMake's) responsibility.
 
-**Data flow:** `main.c` initializes logger, paths, and local store → loads config (or runs `setup_wizard` on first run) → calls `email_service` → which uses `mail_client` (dispatch layer) to talk to the IMAP server or Gmail REST API → results go to stdout, messages stored in `~/.local/share/email-cli/accounts/`, diagnostics to `~/.cache/email-cli/logs/`.
+**Data flow:** `main.c` initializes logger, paths, and local store → loads config (or runs `setup_wizard` on first run) → calls `email_service` → which uses `libemail-client` (`emc_*`) to talk to the IMAP server or Gmail REST API → results go to stdout, messages stored in `~/.local/share/email-cli/accounts/`, diagnostics to `~/.cache/email-cli/logs/`.
 
-**Mail access (EMAIL-99):** the programs reach a mail server only through
-**libemail-client** (`libemail-client/`, a shared library with its own
+**Mail access (EMAIL-99, EMAIL-100):** the programs reach a mail server only
+through **libemail-client** (`libemail-client/`, a shared library with its own
 packages, see `docs/spec/libemail-client.md`).  `infrastructure/mail_account.h`
 is the bridge from `Config` to the library's account.  The protocol modules
-(`imap_client`, `gmail_*`, `mail_client`, `libwrite`) are compiled into the
-library; their copies in `libemail` stay until EMAIL-100 removes them.
+(IMAP, Gmail, SMTP, message composition) live in the library's directory only;
+`libemail` holds the programs' own parts (configuration, local store, rules,
+domain service, screens).
 
 **Gmail support:** Gmail accounts use the native Gmail REST API (OAuth2 + libcurl), not IMAP. The setup wizard offers account type selection ([1] IMAP / [2] Gmail). Gmail uses label-based navigation instead of folders. See `docs/spec/gmail-api.md` for the full specification.
 
@@ -111,7 +113,7 @@ No external test libraries are used. Tests use `ASSERT(condition, message)` and 
 
 ## Language & Standard
 
-C11 (`-std=c11`). Linked against libssl (OpenSSL) for IMAP, and libcurl for SMTP (libwrite) and Gmail REST API (libemail). All public functions should have Doxygen-style comments.
+C11 (`-std=c11`). Linked against libssl (OpenSSL) for IMAP, and libcurl for SMTP and the Gmail REST API (both in libemail-client). All public functions should have Doxygen-style comments.
 
 ## GNU/Linux CLI Conventions
 
@@ -128,7 +130,7 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 
 ## Dependency Policy
 
-**Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libssl (OpenSSL), and libcurl (SMTP only, in libwrite).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
+**Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libssl (OpenSSL), and libcurl (SMTP and the Gmail REST API, in libemail-client).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
 The one library of the workspace used at run time is **libtuikit**
 (`deps/libtuikit`, a git submodule pinned to a release tag, now v0.6.1), linked

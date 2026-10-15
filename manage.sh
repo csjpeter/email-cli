@@ -515,7 +515,7 @@ case "$1" in
         capture_product() {  # capture_product <raw.info> <product.info>
             (cd "$BUILD_DIR" && lcov --capture --directory . --output-file "$1" && \
              lcov --extract "$1" --ignore-errors unused \
-                  "$ROOT_ABS/src/*" "$ROOT_ABS/libemail/src/*" "$ROOT_ABS/libwrite/src/*" \
+                  "$ROOT_ABS/src/*" "$ROOT_ABS/libemail/src/*" "$ROOT_ABS/libemail-client/src/*" \
                   --output-file "$2")
         }
         line_pct() {         # line_pct <product.info> -> "91.8"
@@ -550,7 +550,7 @@ case "$1" in
         COVERAGE_MIN=80      # policy floor for unit alone and for the external suites
         COVERAGE_TARGET=90   # policy target for everything together (not a gate)
         echo ""
-        echo "Line coverage of product code (src/, libemail/src/, libwrite/src/):"
+        echo "Line coverage of product code (src/, libemail/src/, libemail-client/src/):"
         echo "  unit tests alone            ${UNIT_PCT}%   (minimum ${COVERAGE_MIN}%)"
         echo "  functional + PTY together   ${EXT_PCT}%   (minimum ${COVERAGE_MIN}%)"
         echo "  everything combined         ${ALL_PCT}%   (target ${COVERAGE_TARGET}%)"

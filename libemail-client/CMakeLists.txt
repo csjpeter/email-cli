@@ -8,7 +8,6 @@
 # include/email-client.h are exported; everything else is hidden.  The
 # library needs no terminal toolkit and reads no configuration file.
 set(EMC_SRC ${CMAKE_SOURCE_DIR}/libemail/src)
-set(EMC_WRITE_SRC ${CMAKE_SOURCE_DIR}/libwrite/src)
 
 # The ABI version, independent of the package version: it moves only when the
 # interface breaks (packaging policy, "Which number moves").
@@ -16,20 +15,22 @@ set(EMAIL_CLIENT_SOVERSION 0)
 
 add_library(email-client SHARED
     src/email_client.c
+    src/mail_client.c
+    src/imap_client.c
+    src/gmail_client.c
+    src/gmail_auth.c
+    src/gmail_sync.c
+    src/json_util.c
+    src/smtp_adapter.c
+    src/compose_service.c
     ${EMC_SRC}/core/logger.c
     ${EMC_SRC}/core/fs_util.c
     ${EMC_SRC}/core/mime_util.c
     ${EMC_SRC}/core/html_parser.c
     ${EMC_SRC}/core/html_render.c
     ${EMC_SRC}/core/imap_util.c
-    ${EMC_SRC}/core/json_util.c
     ${EMC_SRC}/infrastructure/config_store.c
-    ${EMC_SRC}/infrastructure/imap_client.c
     ${EMC_SRC}/infrastructure/local_store.c
-    ${EMC_SRC}/infrastructure/gmail_auth.c
-    ${EMC_SRC}/infrastructure/gmail_client.c
-    ${EMC_SRC}/infrastructure/gmail_sync.c
-    ${EMC_SRC}/infrastructure/mail_client.c
     ${EMC_SRC}/infrastructure/mail_rules.c
     ${EMC_SRC}/infrastructure/when_expr.c
     ${EMC_SRC}/core/config.c
@@ -37,13 +38,12 @@ add_library(email-client SHARED
     ${EMC_SRC}/platform/posix/process.c
     ${EMC_SRC}/platform/posix/credential_key.c
     ${EMC_SRC}/platform/posix/html_medium.c
-    ${EMC_WRITE_SRC}/smtp_adapter.c
-    ${EMC_WRITE_SRC}/compose_service.c
 )
 target_include_directories(email-client
     PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE ${EMC_SRC} ${EMC_SRC}/core ${EMC_SRC}/infrastructure
-            ${EMC_SRC}/domain ${EMC_SRC}/platform ${EMC_WRITE_SRC})
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${EMC_SRC} ${EMC_SRC}/core ${EMC_SRC}/infrastructure
+            ${EMC_SRC}/domain ${EMC_SRC}/platform)
 target_compile_definitions(email-client PRIVATE
     EMC_VERSION_STRING="${EMAIL_CLI_PACKAGE_VERSION}")
 set_target_properties(email-client PROPERTIES

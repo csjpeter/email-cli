@@ -38,7 +38,7 @@ jobs:
         run: |
           pip install genbadge[coverage] lcov_cobertura --quiet
 
-          # Combined badge: line coverage of product code (src, libemail, libwrite)
+          # Combined badge: line coverage of product code (src, libemail, libemail-client)
           lcov_cobertura build/coverage.info -o build/coverage.xml
           genbadge coverage -i build/coverage.xml \
               -o build/coverage_report/coverage-badge.svg

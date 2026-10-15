@@ -328,8 +328,8 @@ received senders appear in autocomplete after a sync.
 
 | File | Change |
 |------|--------|
-| `libwrite/src/compose_service.h` | Add `cc`, `bcc` to `ComposeParams` |
-| `libwrite/src/compose_service.c` | Generate `Cc:` header; strip `Bcc:` from wire |
+| `libemail-client/src/compose_service.h` | Add `cc`, `bcc` to `ComposeParams` |
+| `libemail-client/src/compose_service.c` | Generate `Cc:` header; strip `Bcc:` from wire |
 | `src/main_tui.c` | Route 'c'/'r'/'F'/'A' through compose dialog; add `cmd_forward()`, `cmd_reply_all()` |
 | `libemail/src/domain/email_service.c` | Return codes 4=reply-all, 5=forward from list TUI; add 'F'/'A' key handlers; update help panel |
 | `libemail/src/domain/email_service.h` | Document new return codes 4 and 5 |

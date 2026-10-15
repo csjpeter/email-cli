@@ -25,15 +25,9 @@ add_library(libemail STATIC
     src/core/body_editor.c
     src/core/compose_draft.c
     src/core/path_complete.c
-    src/core/json_util.c
     src/infrastructure/config_store.c
     src/infrastructure/setup_wizard.c
-    src/infrastructure/imap_client.c
     src/infrastructure/local_store.c
-    src/infrastructure/gmail_auth.c
-    src/infrastructure/gmail_client.c
-    src/infrastructure/gmail_sync.c
-    src/infrastructure/mail_client.c
     src/infrastructure/when_expr.c
     src/infrastructure/mail_rules.c
     src/domain/email_service.c

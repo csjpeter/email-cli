@@ -27,9 +27,13 @@ Since EMAIL-99 the programs of this repository (`email-cli`, `email-cli-ro`,
 `emc_account` and opens the client. They find the shared object beside
 themselves in the build tree and in the install directory (`$ORIGIN`
 run-path), and in the system library directory when installed from the
-package. The old protocol modules (`imap_client`, `gmail_client`, `mail_client`,
-`smtp_adapter`, `compose_service`) stay in the tree until EMAIL-100; the unit
-tests still exercise them directly.
+package.
+
+The protocol modules (`imap_client`, `gmail_client`, `gmail_auth`,
+`gmail_sync`, `mail_client`, `smtp_adapter`, `compose_service`, `json_util`)
+live in `libemail-client/src/` and nowhere else (EMAIL-100); the programs'
+build no longer compiles them. The unit tests still exercise those modules
+directly, from their new place.
 
 ## Interface (`email-client.h`)
 

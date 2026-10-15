@@ -9,7 +9,7 @@ set(UNIT_TEST_INCLUDES
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure
     ${CMAKE_SOURCE_DIR}/libemail/src/domain
     ${CMAKE_SOURCE_DIR}/libemail/src/platform
-    ${CMAKE_SOURCE_DIR}/libwrite/src
+    ${CMAKE_SOURCE_DIR}/libemail-client/src
     ${CMAKE_SOURCE_DIR}/libemail-client/include
     ${CMAKE_SOURCE_DIR}/tests/common
 )
@@ -54,8 +54,8 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/test_mail_rules.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_tuikit_link.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/when_expr.c
-    ${CMAKE_SOURCE_DIR}/libwrite/src/compose_service.c
-    ${CMAKE_SOURCE_DIR}/libwrite/src/smtp_adapter.c
+    ${CMAKE_SOURCE_DIR}/libemail-client/src/compose_service.c
+    ${CMAKE_SOURCE_DIR}/libemail-client/src/smtp_adapter.c
     ${CMAKE_SOURCE_DIR}/libemail-client/src/email_client.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/fs_util.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/logger.c
@@ -69,14 +69,14 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/libemail/src/core/status_line.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/compose_draft.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/path_complete.c
-    ${CMAKE_SOURCE_DIR}/libemail/src/core/json_util.c
-    ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/gmail_auth.c
-    ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/gmail_client.c
-    ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/gmail_sync.c
-    ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/mail_client.c
+    ${CMAKE_SOURCE_DIR}/libemail-client/src/json_util.c
+    ${CMAKE_SOURCE_DIR}/libemail-client/src/gmail_auth.c
+    ${CMAKE_SOURCE_DIR}/libemail-client/src/gmail_client.c
+    ${CMAKE_SOURCE_DIR}/libemail-client/src/gmail_sync.c
+    ${CMAKE_SOURCE_DIR}/libemail-client/src/mail_client.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/config_store.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/setup_wizard.c
-    ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/imap_client.c
+    ${CMAKE_SOURCE_DIR}/libemail-client/src/imap_client.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/local_store.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/mail_rules.c
     ${CMAKE_SOURCE_DIR}/tests/unit/html_medium_stub.c

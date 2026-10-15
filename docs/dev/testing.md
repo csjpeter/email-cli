@@ -51,7 +51,8 @@ Each source module has a corresponding test file:
 | `test_config.c` | `libemail/src/infrastructure/config_store.c` |
 | `test_wizard.c` | `libemail/src/infrastructure/setup_wizard.c` |
 | `test_local_store.c` | `libemail/src/infrastructure/local_store.c` |
-| `test_imap_client.c` | `libemail/src/infrastructure/imap_client.c` |
+| `test_imap_client.c` | `libemail-client/src/imap_client.c` |
+| `test_email_client.c` | `libemail-client/src/email_client.c` (the public `emc_*` interface) |
 | `test_mime.c` | `libemail/src/core/mime_util.c` |
 | `test_imap_util.c` | `libemail/src/core/imap_util.c` |
 | `test_email_service.c` | `libemail/src/domain/email_service.c` |
@@ -336,7 +337,7 @@ ASSERT_WAIT_FOR(s, "text", timeout_ms);
 ## Coverage Requirements
 
 `./manage.sh coverage` measures **line coverage of product code only**
-(`src/`, `libemail/src/`, `libwrite/src/`; never `tests/`, never libptytest or
+(`src/`, `libemail/src/`, `libemail-client/src/`; never `tests/`, never libptytest or
 other libraries) with one definition for every report, and fails the run
 below the policy floors (policies/testing-model.md, *Coverage*):
 

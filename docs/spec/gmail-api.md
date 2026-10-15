@@ -669,7 +669,7 @@ if (mail_client_uses_labels(client)) {
     // Gmail: send via REST API
     gmail_send_message(client, raw_rfc2822, len);
 } else {
-    // IMAP: send via SMTP (existing libwrite path)
+    // IMAP: send via SMTP (libemail-client SMTP path)
     smtp_send(smtp_cfg, raw_rfc2822, len);
 }
 ```

@@ -3,11 +3,14 @@
 /* Created: 2026-10-14 */
 /* One full-screen frame: a header bar and a libtuikit table, written at once. */
 #include "tui_frame.h"
+#include "key_events.h"
+#include "platform/terminal.h"
 
 #include <tuikit/buf.h>
 #include <tuikit/canvas.h>
 #include <tuikit/screen.h>
 #include <tuikit/text.h>
+#include <tuikit/tty.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -55,4 +58,81 @@ void tui_frame_print_bar(int row, const char *text, int cols) {
     printf("\033[%d;1H\033[1;37;44m%.*s", row, (int)n, text);
     for (int i = used; i < cols; i++) putchar(' ');
     printf("\033[0m");
+}
+
+/* ── Overlays (EMAIL-110) ────────────────────────────────────────────── */
+
+int tui_frame_overlay(void (*draw)(tui_canvas c, void *ctx), void *ctx,
+                      int rows, int cols) {
+    if (rows < 1 || cols < 1 || !draw) return -1;
+    tui_screen *scr = tui_screen_new(rows, cols);
+    if (!scr) return -1;
+    tui_buf out;
+    tui_buf_init(&out);
+    /* Every cell starts as a no-break space: the screen believes the
+     * terminal shows that, so the render writes exactly the cells the
+     * drawing changes, the blanks of a box among them (a letter would be
+     * skipped wherever the drawing has the same letter). */
+    for (int r = 0; r < rows; r++) tui_screen_fill(scr, r, 0, cols, 0xA0, TUI_STYLE_DEFAULT);
+    int rc = -1;
+    if (tui_screen_render(scr, &out) >= 0) {
+        tui_buf_reset(&out);                         /* the baseline is not written */
+        draw(tui_canvas_of(scr), ctx);
+        if (tui_screen_render(scr, &out) >= 0) {
+            fflush(stdout);
+            fflush(stderr);
+            rc = out.len == 0 || tui_buf_write_fd(&out, STDOUT_FILENO) == 0 ? 0 : -1;
+        }
+    }
+    tui_buf_free(&out);
+    tui_screen_free(scr);
+    return rc;
+}
+
+static void draw_dialog(tui_canvas c, void *ctx) {
+    tui_dialog_render((tui_dialog *)ctx, c);
+}
+
+tui_dialog_state tui_frame_run_dialog(tui_dialog *d) {
+    tui_decoder dec;
+    tui_decoder_init(&dec);
+    KeyEvents winch;
+    key_events_begin(&winch);
+    while (d->state == TUI_DIALOG_OPEN) {
+        int rows = terminal_rows(), cols = terminal_cols();
+        if (rows <= 0) rows = 24;
+        if (cols <= 0) cols = 80;
+        tui_frame_overlay(draw_dialog, d, rows, cols);
+        tui_event ev;
+        int r = key_events_next(STDIN_FILENO, &dec, &ev, -1);
+        if (r <= 0 || ev.type == TUI_EV_HANGUP) {
+            d->state = TUI_DIALOG_CANCELLED;
+            break;
+        }
+        if (ev.type == TUI_EV_RESIZE) continue;
+        tui_dialog_handle(d, &ev);
+    }
+    key_events_end(&winch);
+    tui_decoder_free(&dec);
+    return d->state;
+}
+
+typedef struct { tui_table *table; int row, col, h, w; } RowsOverlay;
+
+static void draw_rows(tui_canvas c, void *ctx) {
+    RowsOverlay *o = ctx;
+    tui_canvas sub = tui_canvas_sub(c, tui_rect_make(o->row - 1, o->col - 1, o->h, o->w));
+    o->table->flags |= TUI_TABLE_NO_HEADER;
+    tui_table_render(o->table, sub, TUI_STYLE_DEFAULT);
+}
+
+int tui_frame_overlay_rows(tui_table *table, int row, int col, int h, int w) {
+    int rows = terminal_rows(), cols = terminal_cols();
+    if (rows <= 0) rows = 24;
+    if (cols <= 0) cols = 80;
+    if (row < 1 || col < 1 || h < 1 || w < 1) return -1;
+    if (row - 1 + h > rows) rows = row - 1 + h;      /* a terminal of unknown height */
+    if (col - 1 + w > cols) w = cols - (col - 1);
+    RowsOverlay o = { table, row, col, h, w };
+    return tui_frame_overlay(draw_rows, &o, rows, cols);
 }

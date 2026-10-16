@@ -287,6 +287,50 @@ static void cd_complete(char *buf, int *cur, const char *addr) {
     *cur = tok_start + addr_len;
 }
 
+/* The drop-down lists of the dialog are libtuikit tables drawn as an overlay
+ * (EMAIL-110): contacts as address and name, files as the file name. */
+typedef struct {
+    const CDContact *contacts;
+    const int       *match_idx;
+    char (*files)[CD_ATTACH_PATH_SZ];
+} CDDropdown;
+
+static void cd_dd_cell(void *ctx, int index, int col, tui_table_cell *c) {
+    const CDDropdown *dd = ctx;
+    if (dd->contacts) {
+        const CDContact *ct = &dd->contacts[dd->match_idx[index]];
+        tui_table_cell_put(c, col == 0 ? ct->addr : ct->name,
+                           col == 0 ? TUI_STYLE_ACCENT : TUI_STYLE_DEFAULT);
+    } else {
+        const char *fname = strrchr(dd->files[index], '/');
+        fname = fname ? fname + 1 : dd->files[index];
+        tui_table_cell_put(c, fname, TUI_STYLE_ACCENT);
+    }
+}
+
+/** Draw the drop-down of @p n rows with row @p sel selected, below terminal
+ *  row @p row - 1, in the value column of the dialog. */
+static void cd_draw_dropdown(const CDDropdown *dd, int n, int sel, int row, int tcols) {
+    static const tui_table_col contact_cols[2] = {
+        { NULL, 40, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
+        { NULL, 10, 1, TUI_ALIGN_LEFT, 0, 0, 0 },
+    };
+    static const tui_table_col file_cols[1] = {
+        { NULL, 10, 1, TUI_ALIGN_LEFT, 0, 0, 0 },
+    };
+    tui_table_model model = { NULL, cd_dd_cell, (void *)dd };
+    tui_table t;
+    if (dd->contacts) tui_table_init(&t, contact_cols, 2, &model);
+    else              tui_table_init(&t, file_cols, 1, &model);
+    tui_table_set_count(&t, n);
+    tui_table_select(&t, sel);
+    if (!dd->contacts) t.lv.selected = -1;     /* files: Tab picks, no row is selected */
+    int w = tcols - 12;
+    if (w < 10) w = 10;
+    tui_frame_overlay_rows(&t, row, 13, n, w);
+    tui_table_free(&t);
+}
+
 /** Render the dialog to the terminal. Returns 1-based row of active field. */
 static int cd_render(const char *title,
                      char bufs[CD_NFIELDS][CD_FIELD_BUFSZ],
@@ -309,6 +353,7 @@ static int cd_render(const char *title,
 
     int row = 3;
     int active_row = 3;
+    int dd_row = 0, dd_n = 0, dd_files = 0;    /* the drop-down, drawn last */
 
     static const char *labels[CD_NFIELDS] = {
         "To:      ",
@@ -345,22 +390,21 @@ static int cd_render(const char *title,
         row++;
 
         if (f == active && f < CD_FIELD_SUBJ && match_count > 0) {
-            /* Contact autocomplete dropdown */
+            /* Contact autocomplete dropdown: the rows are cleared here and
+             * drawn as a table overlay at the end */
+            dd_row = row;
+            dd_n   = match_count;
             for (int m = 0; m < match_count; m++) {
                 printf("\033[%d;1H\033[K", row);
-                printf("             %s\033[36m\xe2\x96\xb6 %-40s  %s\033[0m",
-                       (m == match_sel) ? "\033[7m" : "",
-                       contacts[match_idx[m]].addr,
-                       contacts[match_idx[m]].name);
                 row++;
             }
         } else if (f == active && f == CD_FIELD_ATTACH && attach && attach->match_count > 0) {
             /* File browser dropdown */
+            dd_row   = row;
+            dd_n     = attach->match_count;
+            dd_files = 1;
             for (int m = 0; m < attach->match_count; m++) {
-                const char *fname = strrchr(attach->matches[m], '/');
-                fname = fname ? fname + 1 : attach->matches[m];
                 printf("\033[%d;1H\033[K", row);
-                printf("             \033[36m\xe2\x96\xb6 %s\033[0m", fname);
                 row++;
             }
         }
@@ -407,6 +451,11 @@ static int cd_render(const char *title,
 
     printf("\033[%d;1H\033[J", row);
     fflush(stdout);
+    if (dd_n > 0) {
+        CDDropdown dd = { dd_files ? NULL : contacts, match_idx,
+                          dd_files ? (char (*)[CD_ATTACH_PATH_SZ])attach->matches : NULL };
+        cd_draw_dropdown(&dd, dd_n, dd_files ? 0 : match_sel, dd_row, tcols);
+    }
     return active_row;
 }
 

@@ -490,6 +490,47 @@ static void test_label_picker_shows_unread(void) {
     pty_close(s);
 }
 
+/** Space ticks without changing anything; Esc closes the picker and leaves
+ *  every label as it was (EMAIL-110); Enter applies the ticked set. */
+static void test_label_picker_esc_discards_enter_applies(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "picker-esc: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "picker-esc: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "picker-esc: navigate_to_inbox");
+
+    pty_send_str(s, "t");
+    pty_wait_for(s, "Toggle Labels", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[x] INBOX");
+    pty_send_key(s, PTY_KEY_DOWN);              /* UNREAD -> INBOX */
+    pty_send_str(s, " ");                       /* untick INBOX */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[ ] INBOX");
+    pty_send_key(s, PTY_KEY_ESC);               /* discard */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
+    ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Label removed"),
+           "picker-esc: Esc changes no label");
+
+    pty_send_str(s, "t");                       /* the label is still there */
+    pty_wait_for(s, "Toggle Labels", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[x] INBOX");
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_str(s, " ");
+    pty_send_key(s, PTY_KEY_ENTER);             /* apply */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Label removed"),
+           "picker-esc: Enter applies the unticked label");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  Label browser: cross-folder search ('/') and label creation ('c')
  * ══════════════════════════════════════════════════════════════════════ */
@@ -741,9 +782,9 @@ static void test_label_picker_unarchive(void) {
     pty_wait_for(s, "Toggle Labels", WAIT_MS);
     pty_settle(s, SETTLE_MS / 2);
     pty_send_key(s, PTY_KEY_DOWN);  /* cursor → INBOX */
-    pty_send_key(s, PTY_KEY_ENTER); /* toggle INBOX on */
+    pty_send_str(s, " "); /* toggle INBOX on (Space ticks) */
     pty_settle(s, SETTLE_MS / 2);
-    pty_send_key(s, PTY_KEY_ESC);   /* close picker */
+    pty_send_key(s, PTY_KEY_ENTER);   /* Enter applies the ticked set */
     pty_settle(s, SETTLE_MS);
 
     /* Refresh Archive view — message must be gone (now in INBOX) */
@@ -1215,14 +1256,14 @@ static void test_label_picker_unarchive_green_fg(void) {
         int row = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row >= 0, "unarch-green: " GMAIL_TOP_MSG " in Archive");
 
-        /* Open label picker, Down → INBOX, Enter to toggle on, ESC close */
+        /* Open label picker, Down → INBOX, Space to tick, Enter to apply */
         pty_send_str(s, "t");
         pty_wait_for(s, "Toggle Labels", WAIT_MS);
         pty_settle(s, SETTLE_MS / 2);
         pty_send_key(s, PTY_KEY_DOWN);   /* UNREAD → INBOX */
-        pty_send_key(s, PTY_KEY_ENTER);  /* add INBOX */
+        pty_send_str(s, " ");  /* add INBOX (Space ticks) */
         pty_settle(s, SETTLE_MS / 2);
-        pty_send_key(s, PTY_KEY_ESC);    /* close picker */
+        pty_send_key(s, PTY_KEY_ENTER);    /* Enter applies the ticked set */
         pty_settle(s, SETTLE_MS);
 
         /* Row must now show green 'u' pending marker (message left _nolabel) */
@@ -1277,14 +1318,14 @@ static void test_label_picker_untrash_green_fg(void) {
         int row = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row >= 0, "untrash-green: " GMAIL_TOP_MSG " in Trash");
 
-        /* Open label picker, Down → INBOX, Enter to toggle on, ESC close */
+        /* Open label picker, Down → INBOX, Space to tick, Enter to apply */
         pty_send_str(s, "t");
         pty_wait_for(s, "Toggle Labels", WAIT_MS);
         pty_settle(s, SETTLE_MS / 2);
         pty_send_key(s, PTY_KEY_DOWN);   /* UNREAD → INBOX */
-        pty_send_key(s, PTY_KEY_ENTER);  /* add INBOX */
+        pty_send_str(s, " ");  /* add INBOX (Space ticks) */
         pty_settle(s, SETTLE_MS / 2);
-        pty_send_key(s, PTY_KEY_ESC);    /* close picker */
+        pty_send_key(s, PTY_KEY_ENTER);    /* Enter applies the ticked set */
         pty_settle(s, SETTLE_MS);
 
         /* Row must show green 'u' pending marker (message left _trash) */
@@ -1662,15 +1703,15 @@ static void test_feedback_t_label_added(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "fb-t: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "fb-t: navigate_to_inbox");
-    /* Open label picker, navigate to STARRED (Down×2), add it, ESC close */
+    /* Open label picker, navigate to STARRED (Down×2), tick it, Enter applies */
     pty_send_str(s, "t");
     pty_wait_for(s, "Toggle Labels", WAIT_MS);
     pty_settle(s, SETTLE_MS / 2);
     pty_send_key(s, PTY_KEY_DOWN);  /* UNREAD → INBOX */
     pty_send_key(s, PTY_KEY_DOWN);  /* INBOX  → STARRED */
-    pty_send_key(s, PTY_KEY_ENTER); /* add STARRED (currently off) */
+    pty_send_str(s, " "); /* add STARRED (currently off) (Space ticks) */
     pty_settle(s, SETTLE_MS / 2);
-    pty_send_key(s, PTY_KEY_ESC);   /* close picker */
+    pty_send_key(s, PTY_KEY_ENTER);   /* Enter applies the ticked set */
     pty_settle(s, SETTLE_MS);
     /* Feedback must mention the label that was added */
     ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Label added"),
@@ -1982,6 +2023,7 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_label_picker_shows_unread);
+    RUN_TEST(test_label_picker_esc_discards_enter_applies);
 
     printf("--- Fresh sync (test 7) ---\n");
     if (reset_and_sync() != 0) {

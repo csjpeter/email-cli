@@ -152,8 +152,9 @@ package declares none.  It replaces this project's own terminal code module by
 module (EMAIL-28).  Migrated: terminal size, raw mode, key decoding and
 character width (`platform/posix/terminal.c` is an adapter over `tui_tty_*` and
 `tui_cp_width`), the masked password prompt on a terminal
-(`tui_tty_read_password_masked`) and the line editor (`core/input_line.c` is a
-thin call of `tui_lineedit_run`) and, since EMAIL-79, the row lists: accounts,
+(`tui_tty_read_password_masked`) and the line editor (`core/input_line.c` is the editing
+of `tui_lineedit_handle` in a loop of its own that also redraws on a resize,
+EMAIL-109) and, since EMAIL-79, the row lists: accounts,
 folder tree and flat view, message list, Gmail label browser, rules editor,
 attachment picker and the rule condition list are `tui_table` views drawn
 through `libemail/src/core/tui_frame.c`.  Not migrated: the dialogs and popups

@@ -109,6 +109,40 @@ static PtySession *open_harness(const char *initial)
 
 /** Prompt appears on row 0 immediately after launch. */
 
+/* ── Resize (EMAIL-109) ──────────────────────────────────────────────── */
+
+/* The line is drawn again at the new width when the terminal is resized:
+ * narrower it scrolls so that the cursor and the end of the text stay
+ * visible, wider it shows the whole text again, and the result is untouched. */
+static void test_resize_redraws_the_line(void)
+{
+    PtySession *s = open_harness(NULL);
+    ASSERT(s != NULL, "resize: harness launched");
+    ASSERT_WAIT_FOR(s, "Path:", WAIT_MS);
+
+    pty_send_str(s, "abcdefghij0123456789ABCDEFGHIJ0123456789klmnopqrstuvwxyz-END");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "abcdefghij0123456789ABCDEFGHIJ");   /* whole, at 200 columns */
+
+    ASSERT(pty_resize(s, 40, ROWS) == 0, "resize: narrower");
+    ASSERT_WAIT_FOR(s, "-END", WAIT_MS);
+    char row[256];
+    pty_row_text(s, 0, row, sizeof(row));
+    ASSERT(strstr(row, "Path:") != NULL, "resize: the prompt is still drawn");
+    ASSERT(strstr(row, "abcdefghij") == NULL, "resize: the text scrolled, its start is out of the field");
+    ASSERT(strlen(row) <= 40, "resize: the row fits the narrow terminal");
+
+    ASSERT(pty_resize(s, COLS, ROWS) == 0, "resize: wide again");
+    ASSERT_WAIT_FOR(s, "abcdefghij0123456789ABCDEFGHIJ", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "-END");
+
+    pty_send_str(s, "!");                      /* editing goes on after the resizes */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "RESULT:", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "-END!");
+    pty_close(s);
+}
+
 /* ── UTF-8 input (accented characters) ──────────────────────────────── */
 
 /* Typing non-ASCII must insert the whole code point, not a placeholder byte.
@@ -618,6 +652,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_typed_text_in_result);
     RUN_TEST(test_arrow_keys_move_cursor);
     RUN_TEST(test_home_end_keys);
+    RUN_TEST(test_resize_redraws_the_line);
 
     /* Tab completion */
     printf("\n[Tab completion]\n");

@@ -51,6 +51,10 @@ Enters an interactive edit loop on terminal row `trow` (1-based).
    `col = 3 + display_cols(prompt) + display_cols(buf[0..cur])`.  
    Show the cursor (`\033[?25h`).
 
+**Resize** (EMAIL-109): a terminal resize (SIGWINCH) redraws the row at once
+at the new width; the text scrolls horizontally so that the cursor stays
+visible.  The program's own SIGWINCH handler is put back when the loop ends.
+
 **Key bindings**:
 
 | Key          | Action                                              |

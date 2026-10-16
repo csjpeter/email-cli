@@ -2604,15 +2604,28 @@ int main(int argc, char *argv[]) {
             const char *to = NULL, *subject = NULL, *body_text = NULL;
             const char *attach_arr[8];
             int attach_count = 0;
-            for (int i = sub_i + 1; i < argc - 1; i++) {
-                if (strcmp(argv[i], "--to")      == 0) to         = argv[++i];
-                else if (strcmp(argv[i], "--subject") == 0) subject = argv[++i];
-                else if (strcmp(argv[i], "--body")    == 0) body_text = argv[++i];
-                else if (strcmp(argv[i], "--batch")   == 0) (void)0;
-                else if (strcmp(argv[i], "--attach")  == 0 && i + 1 < argc - 1 &&
-                         attach_count < 8) attach_arr[attach_count++] = argv[++i];
+            int send_args_ok = 1;
+            for (int i = sub_i + 1; i < argc; i++) {
+                int has_val = i + 1 < argc;
+                if (strcmp(argv[i], "--to") == 0 && has_val) to = argv[++i];
+                else if (strcmp(argv[i], "--subject") == 0 && has_val) subject = argv[++i];
+                else if (strcmp(argv[i], "--body") == 0 && has_val) body_text = argv[++i];
+                else if (strcmp(argv[i], "--batch") == 0) (void)0;
+                else if (strcmp(argv[i], "--attach") == 0) {
+                    if (!has_val) {
+                        fprintf(stderr, "Error: --attach requires a file path.\n");
+                        send_args_ok = 0;
+                    } else if (attach_count < 8) {
+                        attach_arr[attach_count++] = argv[++i];
+                    } else {
+                        fprintf(stderr, "Error: maximum 8 attachments allowed.\n");
+                        send_args_ok = 0;
+                    }
+                }
             }
-            if (!to) {
+            if (!send_args_ok) {
+                /* already reported */
+            } else if (!to) {
                 fprintf(stderr, "Error: --to is required for send.\n"
                                 "Run 'email-tui send --help' for usage.\n");
             } else {
@@ -2751,26 +2764,6 @@ int main(int argc, char *argv[]) {
         snprintf(fc_key, sizeof(fc_key), "folder_cursor_%s",
                  sel_cfg->user ? sel_cfg->user : "default");
         char *saved_folder = ui_pref_get_str(fc_key);
-        /* Gmail OAuth credential check */
-        if (sel_cfg->gmail_mode &&
-            !sel_cfg->gmail_refresh_token &&
-            (!sel_cfg->gmail_client_id || !sel_cfg->gmail_client_id[0])) {
-            fprintf(stderr,
-                "\n  This Gmail account has no OAuth2 credentials configured.\n"
-                "  Add GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET to:\n"
-                "    ~/.config/email-cli/accounts/%s/config.ini\n"
-                "  Run 'email-cli help gmail' for the setup guide.\n\n"
-                "  Press any key to return to accounts...\n",
-                sel_cfg->user ? sel_cfg->user : "(unknown)");
-            fflush(stderr);
-            {
-                TermRawState *_r = terminal_raw_enter();
-                char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
-                terminal_raw_exit(&_r);
-            }
-            config_free(sel_cfg);
-            continue;
-        }
 
         const char *init_folder = (saved_folder && saved_folder[0])
                                   ? saved_folder

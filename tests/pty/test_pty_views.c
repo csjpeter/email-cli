@@ -4597,6 +4597,166 @@ static void test_tui_rules_edit_form_opens(void) {
     remove_rules_ini();
 }
 
+
+/* ── EMAIL-115: the rule form, all the way to the saved file ─────────── */
+
+/** 1 when rules.ini of the test account contains @p text. */
+static int rules_ini_contains(const char *text) {
+    char path[512], buf[8192];
+    snprintf(path, sizeof(path), "%s/.config/email-cli/accounts/testuser/rules.ini", g_test_home);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return 0;
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    buf[n] = '\0';
+    return strstr(buf, text) != NULL;
+}
+
+/** Answer the nine fields of step 2 with Enter, typing @p extra into the
+ *  second add-label field (the third one) first when it is not NULL. */
+static void rule_form_fields(PtySession *s, const char *extra) {
+    ASSERT_WAIT_FOR(s, "step 2/2: actions", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    for (int i = 0; i < 9; i++) {
+        if (i == 2 && extra) pty_send_str(s, extra);
+        pty_send_key(s, PTY_KEY_ENTER);
+        pty_settle(s, 100);
+    }
+}
+
+static void test_tui_rules_edit_form_saves(void) {
+    remove_rules_ini();
+    write_rules_ini();
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rule form saves: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "SpamFilter", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "e");
+    ASSERT_WAIT_FOR(s, "conditions (step 1/2)", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "from:*@spam.example.com");
+
+    pty_send_str(s, "a");                       /* add a condition */
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "subject:*offer*");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "subject:*offer*");
+    pty_send_str(s, "k");                       /* up to the first one ... */
+    pty_send_str(s, "k");                       /* ... and no further */
+    pty_send_str(s, "j");                       /* down again */
+    pty_send_str(s, "j");                       /* ... and no further */
+    pty_send_str(s, "e");                       /* edit the second one */
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "!");                       /* an invalid condition is dropped */
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "subject:*offer*");
+    pty_send_key(s, PTY_KEY_ENTER);             /* Enter edits, too */
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "x");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "h");                       /* the help popup */
+    ASSERT_WAIT_FOR(s, "Conditions shortcuts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "d");                       /* delete the one under the cursor */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "subject:*offer*");
+    pty_send_str(s, "q");                       /* conditions done */
+
+    rule_form_fields(s, "ExtraLabel");
+    ASSERT_WAIT_FOR(s, "Save? (y/N)", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(rules_ini_contains("ExtraLabel"), "rule form saves: the new label is in rules.ini");
+    ASSERT(rules_ini_contains("SpamFilter"), "rule form saves: the rule keeps its name");
+    ASSERT(rules_ini_contains("*@spam.example.com"), "rule form saves: and its condition");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    remove_rules_ini();
+}
+
+static void test_tui_rules_add_form_saves_new_rule(void) {
+    remove_rules_ini();
+    write_rules_ini();
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "add rule: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "SpamFilter", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Add new rule for", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "press 'a' to add a condition");
+    pty_send_key(s, PTY_KEY_ENTER);             /* Enter on an empty list adds, too */
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "from:*@brand-new.example*");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "step 2/2: actions", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "BrandNew");                /* the name */
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_send_str(s, "Fresh");                   /* add-label [1] */
+    pty_send_key(s, PTY_KEY_ENTER);
+    for (int i = 0; i < 7; i++) { pty_send_key(s, PTY_KEY_ENTER); pty_settle(s, 100); }
+    ASSERT_WAIT_FOR(s, "Save? (y/N)", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "(4 rules)", WAIT_MS);     /* saved, and the list shows it */
+    ASSERT(rules_ini_contains("BrandNew"), "add rule: the rule is in rules.ini");
+    ASSERT(rules_ini_contains("brand-new.example"), "add rule: with its condition");
+    ASSERT(rules_ini_contains("SpamFilter"), "add rule: the others are kept");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    remove_rules_ini();
+}
+
+static void test_tui_rules_add_form_needs_a_name(void) {
+    remove_rules_ini();
+    write_rules_ini();
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "nameless rule: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "SpamFilter", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Add new rule for", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");                       /* no conditions, on to the actions */
+    ASSERT_WAIT_FOR(s, "step 2/2: actions", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    for (int i = 0; i < 9; i++) { pty_send_key(s, PTY_KEY_ENTER); pty_settle(s, 100); }
+    ASSERT_WAIT_FOR(s, "Rule name is required", WAIT_MS);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "SpamFilter", RULES_WAIT_MS);
+    ASSERT(!rules_ini_contains("[rule \"\"]"), "nameless rule: nothing was saved");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    remove_rules_ini();
+}
+
 static void test_tui_rules_edit_form_prefill(void) {
     /* US-80 AC2: when conditions from existing rule are shown in step 1 of the edit form */
     remove_rules_ini();
@@ -4682,6 +4842,107 @@ static void test_tui_rules_edit_form_esc_cancel(void) {
 /* ── Main ────────────────────────────────────────────────────────────── */
 
 #define RUN_TEST(fn) do { if (!test_selected(#fn)) break; printf("  %s...\n", #fn); fn(); } while(0)
+
+
+/* ══════════════════════════════════════════════════════════════════════
+ * EMAIL-115: the accounts screen and what happens when an account cannot be
+ * opened.  Each test runs with ONE other account in place of the usual one.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static char g_acc_saved_home[512];
+
+/** Make a fresh HOME whose only account is @p ini (a config.ini). */
+static void only_account(const char *name, const char *ini) {
+    static int n;
+    char home[512], p[800], rel[32];
+    snprintf(rel, sizeof(rel), "acchome-%d", ++n);
+    snprintf(home, sizeof(home), "%s", test_path(rel));
+    const char *old = getenv("HOME");
+    snprintf(g_acc_saved_home, sizeof(g_acc_saved_home), "%s", old ? old : "");
+    mkdir(home, 0700);
+    snprintf(p, sizeof(p), "%s/.config", home);                       mkdir(p, 0700);
+    snprintf(p, sizeof(p), "%s/.config/email-cli", home);             mkdir(p, 0700);
+    snprintf(p, sizeof(p), "%s/.config/email-cli/accounts", home);    mkdir(p, 0700);
+    snprintf(p, sizeof(p), "%s/.config/email-cli/accounts/%s", home, name); mkdir(p, 0700);
+    snprintf(p, sizeof(p), "%s/.config/email-cli/accounts/%s/config.ini", home, name);
+    FILE *f = fopen(p, "w");
+    if (f) { fputs(ini, f); fclose(f); }
+    chmod(p, 0600);
+    setenv("HOME", home, 1);
+}
+
+/** Back to the usual HOME. */
+static void restore_accounts(const char *name) {
+    (void)name;
+    setenv("HOME", g_acc_saved_home, 1);
+}
+
+static void test_account_unreachable_returns_to_accounts(void) {
+    char ini[512];
+    snprintf(ini, sizeof(ini),
+             "EMAIL_HOST=imaps://localhost:%d\nEMAIL_USER=down@example.com\n"
+             "EMAIL_PASS=x\nEMAIL_FOLDER=INBOX\nSSL_NO_VERIFY=1\n"
+             "SMTP_HOST=smtps://localhost:%d\n", g_dead_port, g_dead_port);
+    only_account("down", ini);
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "unreachable account: started");
+    ASSERT_WAIT_FOR(s, "down@example.com", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Press any key to return to accounts", WAIT_MS);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "down@example.com", WAIT_MS);     /* the accounts screen again */
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    restore_accounts("down");
+}
+
+static void test_account_imap_gmail_host_is_explained(void) {
+    only_account("gi", "EMAIL_HOST=imaps://mail.gmail.com.invalid\nEMAIL_USER=gi@example.com\n"
+                       "EMAIL_PASS=x\nEMAIL_FOLDER=INBOX\n");
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "gmail host over IMAP: started");
+    ASSERT_WAIT_FOR(s, "gi@example.com", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Press any key to return to accounts", WAIT_MS);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "gi@example.com", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    restore_accounts("gi");
+}
+
+/* 'n' adds an account through the wizard, 'i' and 'e' edit the IMAP and SMTP
+ * settings of the selected one; a wizard that is given up changes nothing. */
+static void test_accounts_screen_wizards_can_be_abandoned(void) {
+    char ini[512];
+    snprintf(ini, sizeof(ini),
+             "EMAIL_HOST=imaps://localhost:%d\nEMAIL_USER=wz@example.com\n"
+             "EMAIL_PASS=x\nEMAIL_FOLDER=INBOX\nSSL_NO_VERIFY=1\n"
+             "SMTP_HOST=smtps://localhost:%d\n", g_imap_port, g_dead_port);
+    only_account("wz", ini);
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "wizards: started");
+    ASSERT_WAIT_FOR(s, "wz@example.com", WAIT_MS);
+
+    pty_send_str(s, "n");                       /* new account: give up at once */
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
+
+    pty_send_str(s, "i");                       /* IMAP settings: give up */
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);
+
+    pty_send_str(s, "e");                       /* SMTP settings: give up */
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    restore_accounts("wz");
+}
 
 int main(int argc, char *argv[]) {
     printf("--- email-cli PTY View Tests ---\n\n");
@@ -5054,8 +5315,16 @@ int main(int argc, char *argv[]) {
     restart_mock();
     RUN_TEST(test_tui_rules_edit_form_opens);
     RUN_TEST(test_tui_rules_edit_form_prefill);
+    RUN_TEST(test_tui_rules_edit_form_saves);
+    RUN_TEST(test_tui_rules_add_form_saves_new_rule);
+    RUN_TEST(test_tui_rules_add_form_needs_a_name);
     RUN_TEST(test_tui_rules_edit_form_esc_cancel);
     RUN_TEST(test_tui_function_and_modified_keys_do_nothing);
+
+    printf("\n--- email-tui: accounts screen and accounts that cannot be opened (EMAIL-115) ---\n");
+    RUN_TEST(test_account_unreachable_returns_to_accounts);
+    RUN_TEST(test_account_imap_gmail_host_is_explained);
+    RUN_TEST(test_accounts_screen_wizards_can_be_abandoned);
 
 done:
     stop_mock_server();

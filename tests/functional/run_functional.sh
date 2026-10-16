@@ -6649,6 +6649,104 @@ kill "$GMAIL113_PID"
 
 fi
 
+if phase_wanted 114; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 114 — email-tui send / reply subcommands and first run (EMAIL-115)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 114: email-tui send, reply and first-run wizard (EMAIL-115) ---"
+# its own SMTP mock: the shared one may be gone by the time this phase runs
+alloc_port SMTP114_PORT
+SMTP114_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp_114.log"
+(cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP114_PORT "$MOCK_SMTP_BIN") >"$SMTP114_LOG" 2>&1 &
+SMTP114_PID=$!
+sleep 1
+H_F114="./build/tests/functional/work-$$/homes/f114-$$"
+case "$H_F114" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F114 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f114-$$"
+mkdir -p "$H_F114/.config/email-cli/accounts/testuser"
+cat > "$H_F114/.config/email-cli/accounts/testuser/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP1_PORT
+EMAIL_USER=testuser@example.com
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SMTP_HOST=smtps://localhost:$SMTP114_PORT
+SMTP_PORT=$SMTP114_PORT
+SMTP_USER=testuser@example.com
+SMTP_PASS=testpass
+SSL_NO_VERIFY=1
+INI
+chmod 0600 "$H_F114/.config/email-cli/accounts/testuser/config.ini"
+F114_TXT="$H_F114/attach.txt"
+echo "attachment" > "$F114_TXT"
+
+# f114 <args...>: email-tui with a terminal type and the exit code appended
+f114() {
+    (export HOME="$H_F114" TERM=xterm; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/email-tui" "$@" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+
+OUT114=$(f114 send --subject s --body b)
+check "114.1 send without --to is refused"        "Error: --to is required for send" "$OUT114"
+check "114.2 and exits non-zero"                  "exit-code=1"                      "$OUT114"
+OUT114=$(f114 send --to alice@example.com --subject "Tui" --body "b" --attach "$F114_TXT")
+check "114.3 send with an attachment"            "Message sent."                    "$OUT114"
+check "114.4 exits 0"                            "exit-code=0"                      "$OUT114"
+OUT114=$(f114 send --to alice@example.com --subject "Tui" --body "b" --attach "$H_F114/no-such-file")
+check "114.5 a missing attachment is an error"   "Error"                            "$OUT114"
+check "114.6 and exits non-zero"                 "exit-code=1"                      "$OUT114"
+OUT114=$(f114 reply)
+check "114.7 reply without a UID is refused"     "Error: reply requires a UID"      "$OUT114"
+OUT114=$(f114 reply 99999)
+check "114.9 a dialog with no input is cancelled: non-zero" "exit-code=1"           "$OUT114"
+OUT114=$(f114 --bogus)
+check "114.17 an unknown option is refused"      "Unknown option '--bogus'"         "$OUT114"
+OUT114=$(f114 stray)
+check "114.18 a stray argument is refused"       "email-tui does not accept arguments" "$OUT114"
+OUT114=$(f114 -V)
+check "114.19 -V prints the version"             "email-tui "                       "$OUT114"
+OUT114=$(f114 send --to)
+check "114.20 an option without its value is not a recipient" "Error: --to is required for send" "$OUT114"
+OUT114=$(f114 send --to a@example.com --attach)
+check "114.21 --attach without a path is refused" "attach requires a file path"   "$OUT114"
+
+# A server that is down: the send fails and says so.
+H_F114D="./build/tests/functional/work-$$/homes/f114d-$$"
+case "$H_F114D" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F114D path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f114d-$$"
+mkdir -p "$H_F114D/.config/email-cli/accounts/testuser"
+sed "s|smtps://localhost:$SMTP114_PORT|smtps://localhost:$DEAD_PORT|" \
+    "$H_F114/.config/email-cli/accounts/testuser/config.ini" \
+    > "$H_F114D/.config/email-cli/accounts/testuser/config.ini"
+chmod 0600 "$H_F114D/.config/email-cli/accounts/testuser/config.ini"
+OUT114=$( (export HOME="$H_F114D" TERM=xterm; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-tui" send --to alice@example.com --subject s --body b </dev/null 2>&1
+    echo "exit-code=$?") )
+check "114.10 a send that fails says so"         "Error: Send failed."              "$OUT114"
+check "114.11 with the reason"                   "Error: send:"                     "$OUT114"
+check "114.12 and exits non-zero"                "exit-code=1"                      "$OUT114"
+
+# First run: no configuration.  Nothing to read from the input: the wizard is
+# abandoned; answers piped in: the account is saved.
+H_F114W="./build/tests/functional/work-$$/homes/f114w-$$"
+case "$H_F114W" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F114W path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f114w-$$"
+mkdir -p "$H_F114W"
+OUT114=$( (export HOME="$H_F114W" TERM=xterm; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-tui" send --to a@example.com </dev/null 2>&1; echo "exit-code=$?") )
+check "114.13 first run without answers is abandoned" "Configuration aborted. Exiting." "$OUT114"
+check "114.14 and exits non-zero"                "exit-code=1"                      "$OUT114"
+OUT114=$( (export HOME="$H_F114W" TERM=xterm; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf '1\nimaps://localhost:%s\n\nwiz@example.com\nsecret\nINBOX\n' "$IMAP1_PORT" \
+        | "$BIN_DIR/email-tui" send --to a@example.com 2>&1; echo "exit-code=$?") )
+check "114.15 first run with answers saves the account" "Configuration saved."      "$OUT114"
+check "114.16 and the account file exists" "wiz@example.com" \
+      "$(cat "$H_F114W"/.config/email-cli/accounts/*/config.ini)"
+kill "$SMTP114_PID"
+
+fi
+
 if phase_wanted 96; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)

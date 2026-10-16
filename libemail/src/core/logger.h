@@ -52,4 +52,18 @@ int logger_clean_logs(const char *log_dir);
  */
 void logger_set_stderr(int enable);
 
+/**
+ * @brief Number of ERROR messages written to stderr so far (EMAIL-105).
+ *
+ * A caller that wants to know whether a failing call already told the user
+ * why compares the value before and after the call.
+ */
+unsigned logger_stderr_error_count(void);
+
+/**
+ * @brief Count one error the caller wrote to stderr itself (EMAIL-105), for
+ *        a message that must not depend on the logger's stderr mirror.
+ */
+void logger_note_stderr_error(void);
+
 #endif /* LOGGER_H */

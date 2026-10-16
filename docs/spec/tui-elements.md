@@ -50,7 +50,7 @@ runs are read as `#`.
 | Review states (`review_full`, `review_long_to`, `review_attach_ask`, `review_attach_removed`, `review_send_failed`) | `s`, `a`, `d` in the review | Cc, Bcc and Attach rows when present (`Attach:  (none)` otherwise); a long To list wraps at the terminal edge; `Add Attachment` / `Path:` prompt; a failed send appends `Sending...`, the SMTP error, `Saved to Drafts (will retry on next sync).` below the review | s e b a d q |
 | Address drop-down (`dd_many`, `dd_one`, `dd_second`, `dd_none`, `dd_wide`, `dd_accepted`) | typing 2+ characters in To/Cc/Bcc | up to five candidate rows under the field, each `▶ address   name` (cyan marker, the chosen row in reverse); none when nothing matches; Down moves, Enter takes the address | text ↓ ↑ Enter ; Tab |
 | Path completion (`path_many`, `path_one`) | typing a path in Attach | the typed path scrolls in the field; candidate file names below with the same marker; hint line `Tab=complete … Enter=add  d=remove last` | Tab Enter d |
-| Connection errors (`err_connect`, `err_login`, `err_tls`) | Enter on an account whose server cannot be used | the specific error line (`ERROR: connect to …`, `localhost rejected the login for …` with the server's words, `SSL handshake failed …`), then the generic `Connection failed.` causes and `Press any key to return to accounts...` | any key |
+| Connection errors (`err_connect`, `err_login`, `err_tls`) | Enter on an account whose server cannot be used | the specific error line (`ERROR: connect to …`, `localhost rejected the login for …` with the server's words, `SSL handshake failed …`), and `Press any key to return to accounts...`; the generic `Connection failed.` causes block is printed only when no specific error line was written (EMAIL-105) | any key |
 | Sync and feedback (`list_syncing`, `list_new_mail`, `list_star_feedback`) | `s` and `f` on the message list | the header suffix `↻ syncing...`, then `✉ New mail may have arrived!  U=refresh`; a one-word feedback line (`Starred`) above the key bar | s U f |
 | Setup wizard steps (`wiz_imap_host`, `wiz_imap_port`, `wiz_imap_user`, `wiz_imap_pass`, `wiz_imap_masked`, `wiz_imap_folder`, `wiz_smtp_host`, `wiz_smtp_port`, `wiz_gmail`, `wiz_bad_type`, `wiz_imap_done`) | `n` on accounts, then the answers | plain prompts one under the other (IMAP host with `→ using imaps://…`, port, username, password echoed as `*` with `→ password updated (N characters)`, folder, SMTP host/port); the Gmail path asks for the address; `wiz_imap_done` is the accounts list with the new account selected | text, Enter |
 | Rules editor help (`rules_help`, `rule_detail_help`, `rule_when_help`) | `h` or `?` in the rules list, a rule, the condition list (EMAIL-95) | the same boxed overlay as the other screens: title ("Rules shortcuts", "Rule shortcuts", "Conditions shortcuts"), key/description rows, "Press any key to close" | any key |
@@ -122,14 +122,11 @@ defect or inconsistency the pictures make visible, left for the owner to ticket.
 9. Eight-colour terminal (`TERM=linux`, `*_8colour`): the program does not
    look at `TERM`; the selection is still the dark-blue palette-17 row with
    `>`, so on a terminal without it the `>` alone marks the row.
-10. Connection errors (EMAIL-93): after a specific login or TLS rejection the
-    generic `Connection failed. Possible causes: …` block follows and
-    partly contradicts the specific line.
-11. Setup wizard (EMAIL-94): an unknown account type (`9`) is silently
+10. Setup wizard (EMAIL-94): an unknown account type (`9`) is silently
     taken as IMAP.
-12. Gmail label browser (EMAIL-88): a label created with `c` is not listed
+11. Gmail label browser (EMAIL-88): a label created with `c` is not listed
     until a message carries it.
-13. Review screen (EMAIL-91): a long To list wraps at the terminal edge in the
+12. Review screen (EMAIL-91): a long To list wraps at the terminal edge in the
     middle of an address.
 
 ## State matrix (EMAIL-96)

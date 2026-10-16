@@ -89,8 +89,16 @@ void test_logger(void) {
     {
         logger_init(test_log_file, LOG_DEBUG);
         logger_set_stderr(1);  /* re-enable stderr mirror */
+        unsigned before = logger_stderr_error_count();
+        logger_log(LOG_WARN, "a warning is not counted");
+        ASSERT(logger_stderr_error_count() == before, "WARN does not count as a stderr error");
         logger_log(LOG_ERROR, "stderr mirror test");
+        ASSERT(logger_stderr_error_count() == before + 1, "an ERROR written to stderr is counted");
         logger_set_stderr(0);  /* restore for subsequent tests */
+        logger_note_stderr_error();
+        ASSERT(logger_stderr_error_count() == before + 2, "an error the caller wrote itself can be noted");
+        logger_log(LOG_ERROR, "not mirrored, not counted");
+        ASSERT(logger_stderr_error_count() == before + 2, "an ERROR not mirrored to stderr is not counted");
         logger_close();
     }
 

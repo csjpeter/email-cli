@@ -2588,6 +2588,7 @@ int main(int argc, char *argv[]) {
         int go_up = 0;
         char *tui_folder = NULL;
         const char *browser_init = init_folder;
+        unsigned errors_before = logger_stderr_error_count();
         for (;;) {
             tui_folder = sel_cfg->gmail_mode
                 ? email_service_list_labels_interactive(sel_cfg, browser_init, &go_up)
@@ -2610,36 +2611,42 @@ int main(int argc, char *argv[]) {
             ui_pref_set_str(fc_key, tui_folder);  /* persist selected folder */
 
         if (!tui_folder && !go_up) {
-            /* Connection error or empty folder list — show actionable advice */
-            fprintf(stderr, "\n  Connection failed.\n\n");
-            if (sel_cfg->gmail_mode) {
-                fprintf(stderr,
-                    "  Possible causes:\n"
-                    "  - OAuth2 credentials missing or expired\n"
-                    "  - Network issue\n\n"
-                    "  To fix: check GMAIL_CLIENT_ID and GMAIL_REFRESH_TOKEN in\n"
-                    "    ~/.config/email-cli/accounts/%s/config.ini\n"
-                    "  Run 'email-cli help gmail' for the setup guide.\n",
-                    sel_cfg->user ? sel_cfg->user : "(unknown)");
-            } else if (sel_cfg->host &&
-                       (strstr(sel_cfg->host, "gmail.com") ||
-                        strstr(sel_cfg->host, "google.com") ||
-                        strstr(sel_cfg->host, "googlemail.com"))) {
-                fprintf(stderr,
-                    "  Gmail is not supported via IMAP in email-cli.\n\n"
-                    "  To fix: delete this account ('d' on accounts screen) and\n"
-                    "  re-add it ('n') as Gmail type (option 2), which uses the\n"
-                    "  Gmail API with OAuth2 instead of IMAP.\n\n"
-                    "  Run 'email-cli help gmail' for the setup guide.\n");
+            /* Connection error or empty folder list.  A specific error line
+             * (login rejected, TLS failure, ...) already says why: print it
+             * once and no generic block after it (EMAIL-105). */
+            if (logger_stderr_error_count() != errors_before) {
+                fprintf(stderr, "\n");
             } else {
-                fprintf(stderr,
-                    "  Possible causes:\n"
-                    "  - Wrong password or username\n"
-                    "  - Server requires app-specific password (e.g. Gmail with 2FA)\n"
-                    "  - Server address or port is incorrect\n"
-                    "  - Network issue\n\n"
-                    "  To fix: press 'i' on accounts screen to edit IMAP settings,\n"
-                    "  or delete and re-add the account with 'd' then 'n'.\n");
+                fprintf(stderr, "\n  Connection failed.\n\n");
+                if (sel_cfg->gmail_mode) {
+                    fprintf(stderr,
+                        "  Possible causes:\n"
+                        "  - OAuth2 credentials missing or expired\n"
+                        "  - Network issue\n\n"
+                        "  To fix: check GMAIL_CLIENT_ID and GMAIL_REFRESH_TOKEN in\n"
+                        "    ~/.config/email-cli/accounts/%s/config.ini\n"
+                        "  Run 'email-cli help gmail' for the setup guide.\n",
+                        sel_cfg->user ? sel_cfg->user : "(unknown)");
+                } else if (sel_cfg->host &&
+                           (strstr(sel_cfg->host, "gmail.com") ||
+                            strstr(sel_cfg->host, "google.com") ||
+                            strstr(sel_cfg->host, "googlemail.com"))) {
+                    fprintf(stderr,
+                        "  Gmail is not supported via IMAP in email-cli.\n\n"
+                        "  To fix: delete this account ('d' on accounts screen) and\n"
+                        "  re-add it ('n') as Gmail type (option 2), which uses the\n"
+                        "  Gmail API with OAuth2 instead of IMAP.\n\n"
+                        "  Run 'email-cli help gmail' for the setup guide.\n");
+                } else {
+                    fprintf(stderr,
+                        "  Possible causes:\n"
+                        "  - Wrong password or username\n"
+                        "  - Server requires app-specific password (e.g. Gmail with 2FA)\n"
+                        "  - Server address or port is incorrect\n"
+                        "  - Network issue\n\n"
+                        "  To fix: press 'i' on accounts screen to edit IMAP settings,\n"
+                        "  or delete and re-add the account with 'd' then 'n'.\n");
+                }
             }
             fprintf(stderr, "\n  Press any key to return to accounts...\n");
             fflush(stderr);

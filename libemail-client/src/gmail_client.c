@@ -1,14 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
 /* Created: 2026-04-17 */
-/* Gmail REST API v1 client over libcurl. */
+/* Gmail REST API v1 client over the library's HTTP client. */
 #include "gmail_client.h"
 #include "gmail_auth.h"
 #include "json_util.h"
 #include "logger.h"
 #include "raii.h"
-#include "tls_revocation.h"
-#include <curl/curl.h>
+#include "http_client.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,77 +35,37 @@ struct GmailClient {
     void   *progress_ctx;
 };
 
-/* ── libcurl write callback ───────────────────────────────────────── */
-
-typedef struct {
-    char  *data;
-    size_t len;
-    size_t cap;
-} CurlBuf;
-
-static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata) {
-    CurlBuf *buf = userdata;
-    size_t bytes = size * nmemb;
-    if (buf->len + bytes + 1 > buf->cap) {
-        size_t newcap = (buf->cap ? buf->cap * 2 : 4096);
-        while (newcap < buf->len + bytes + 1) newcap *= 2;
-        char *tmp = realloc(buf->data, newcap);
-        if (!tmp) return 0;
-        buf->data = tmp;
-        buf->cap = newcap;
-    }
-    memcpy(buf->data + buf->len, ptr, bytes);
-    buf->len += bytes;
-    buf->data[buf->len] = '\0';
-    return bytes;
-}
-
 /* ── HTTP helpers ─────────────────────────────────────────────────── */
 
 /**
- * Perform an authenticated GET request.
- * Returns heap-allocated response body; sets *http_code.
+ * One authenticated request to the Gmail API.  Returns the heap-allocated
+ * response body (an empty string when there is none) and sets *http_code, or
+ * NULL when no response could be read.
  */
-static char *api_get(GmailClient *c, const char *url, long *http_code) {
-    CURL *curl = curl_easy_init();
-    if (!curl) return NULL;
-
-    CurlBuf buf = {0};
+static char *api_call(GmailClient *c, const char *method, const char *url,
+                      const char *json_body, int with_body_header, long *http_code) {
     char auth_hdr[2048];
     snprintf(auth_hdr, sizeof(auth_hdr), "Authorization: Bearer %s", c->access_token);
+    const char *headers[3] = { auth_hdr, NULL, NULL };
+    if (with_body_header) headers[1] = "Content-Type: application/json";
 
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, auth_hdr);
-
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-
-    /* Disable SSL verification when talking to a plain HTTP test server */
-    if (strncmp(url, "http://", 7) == 0) {
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    } else {
-        tls_revocation_prepare_curl(curl);
-    }
-
-    CURLcode res = curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-
-    if (res != CURLE_OK) {
-        logger_log(LOG_ERROR, "gmail: GET %s failed: %s", url, curl_easy_strerror(res));
-        free(buf.data);
-        curl_easy_cleanup(curl);
+    HttpRequest req = {
+        .method = method, .url = url, .headers = headers,
+        .body = json_body, .body_len = json_body ? strlen(json_body) : 0,
+        .timeout_s = 60,
+    };
+    char *resp = NULL;
+    char err[160];
+    if (http_request(&req, http_code, &resp, NULL, err, sizeof(err)) != 0) {
+        logger_log(LOG_ERROR, "gmail: %s %s failed: %s", method, url, err);
         return NULL;
     }
+    return resp;
+}
 
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
-    curl_easy_cleanup(curl);
-    return buf.data;
+/** Perform an authenticated GET request. */
+static char *api_get(GmailClient *c, const char *url, long *http_code) {
+    return api_call(c, "GET", url, NULL, 0, http_code);
 }
 
 /**
@@ -115,53 +74,7 @@ static char *api_get(GmailClient *c, const char *url, long *http_code) {
  */
 static char *api_post_json(GmailClient *c, const char *url,
                            const char *json_body, long *http_code) {
-    CURL *curl = curl_easy_init();
-    if (!curl) return NULL;
-
-    CurlBuf buf = {0};
-    char auth_hdr[2048];
-    snprintf(auth_hdr, sizeof(auth_hdr), "Authorization: Bearer %s", c->access_token);
-
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, auth_hdr);
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-
-    /* Disable SSL verification when talking to a plain HTTP test server */
-    if (strncmp(url, "http://", 7) == 0) {
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    } else {
-        tls_revocation_prepare_curl(curl);
-    }
-
-    if (json_body) {
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body);
-    } else {
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0L);
-    }
-
-    CURLcode res = curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-
-    if (res != CURLE_OK) {
-        logger_log(LOG_ERROR, "gmail: POST %s failed: %s", url, curl_easy_strerror(res));
-        free(buf.data);
-        curl_easy_cleanup(curl);
-        return NULL;
-    }
-
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
-    curl_easy_cleanup(curl);
-    return buf.data;
+    return api_call(c, "POST", url, json_body, 1, http_code);
 }
 
 /**
@@ -313,55 +226,11 @@ void gmail_set_progress(GmailClient *c, GmailProgressFn fn, void *ctx) {
 
 /**
  * Perform an authenticated DELETE request.
- * Absorbs the response body (usually empty for 204 responses).
+ * The response body is usually empty (204); an empty string, not NULL, is
+ * returned then, so the caller can tell a transport error from an HTTP one.
  */
 static char *api_delete(GmailClient *c, const char *url, long *http_code) {
-    CURL *curl = curl_easy_init();
-    if (!curl) return NULL;
-
-    CurlBuf buf = {0};
-    char auth_hdr[2048];
-    snprintf(auth_hdr, sizeof(auth_hdr), "Authorization: Bearer %s", c->access_token);
-
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, auth_hdr);
-
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-
-    /* Disable SSL verification when talking to a plain HTTP test server */
-    if (strncmp(url, "http://", 7) == 0) {
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    } else {
-        tls_revocation_prepare_curl(curl);
-    }
-
-    CURLcode res = curl_easy_perform(curl);
-    curl_slist_free_all(headers);
-
-    if (res != CURLE_OK) {
-        logger_log(LOG_ERROR, "gmail: DELETE %s failed: %s", url, curl_easy_strerror(res));
-        free(buf.data);
-        curl_easy_cleanup(curl);
-        return NULL;
-    }
-
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
-    curl_easy_cleanup(curl);
-    /* Return an empty string (not NULL) so caller can distinguish curl error from HTTP error */
-    if (!buf.data) {
-        char *empty = malloc(1);
-        if (empty) *empty = '\0';
-        return empty;
-    }
-    return buf.data;
+    return api_call(c, "DELETE", url, NULL, 0, http_code);
 }
 
 static char *api_delete_retry(GmailClient *c, const char *url, long *http_code) {
@@ -408,7 +277,7 @@ int gmail_delete_label(GmailClient *c, const char *label_id) {
     long code = 0;
     RAII_STRING char *resp = api_delete_retry(c, url, &code);
     if (!resp) {
-        logger_log(LOG_ERROR, "gmail_delete_label: curl error for label %s", label_id);
+        logger_log(LOG_ERROR, "gmail_delete_label: transport error for label %s", label_id);
         return -1;
     }
     if (code != 204 && code != 200) {

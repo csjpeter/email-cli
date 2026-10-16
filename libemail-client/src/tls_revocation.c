@@ -4,6 +4,7 @@
 /* Revocation check (OCSP, then CRL) of a verified server certificate. */
 #include "tls_revocation.h"
 #include "fs_util.h"
+#include "http_client.h"
 #include "logger.h"
 #include "path.h"
 
@@ -20,7 +21,6 @@
  * @brief OCSP and CRL revocation check, see tls_revocation.h.
  */
 
-#define REV_FETCH_CONNECT_S  3L
 #define REV_FETCH_TOTAL_S    5L
 #define REV_FETCH_MAX_BYTES  (8u * 1024u * 1024u)
 #define REV_OCSP_SKEW_S      300L
@@ -76,7 +76,7 @@ static const char *state_dir(void)
 
 typedef struct { unsigned char *data; size_t len; int overflow; } Body;
 
-static size_t body_cb(void *ptr, size_t size, size_t nmemb, void *ud)
+static size_t body_append(void *ptr, size_t size, size_t nmemb, void *ud)
 {
     Body *b = ud;
     size_t n = size * nmemb;
@@ -95,32 +95,24 @@ static int http_fetch(const char *url, const unsigned char *post, size_t post_le
                       Body *out)
 {
     if (strncmp(url, "http://", 7) != 0) return -1;   /* OCSP and CRLs are plain HTTP */
-    CURL *curl = curl_easy_init();
-    if (!curl) return -1;
-    struct curl_slist *hdr = NULL;
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http");
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, REV_FETCH_CONNECT_S);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, REV_FETCH_TOTAL_S);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, body_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, out);
-    if (post) {
-        hdr = curl_slist_append(hdr, "Content-Type: application/ocsp-request");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdr);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, (const char *)post);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)post_len);
-    }
-    CURLcode rc = curl_easy_perform(curl);
+    const char *hdr[] = { "Content-Type: application/ocsp-request", NULL };
+    HttpRequest req = {
+        .method = post ? "POST" : "GET", .url = url,
+        .headers = post ? hdr : NULL,
+        .body = post, .body_len = post_len,
+        .timeout_s = (int)REV_FETCH_TOTAL_S, .max_response = REV_FETCH_MAX_BYTES,
+    };
     long code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
-    curl_slist_free_all(hdr);
-    curl_easy_cleanup(curl);
-    if (rc != CURLE_OK || code != 200) {
-        free(out->data); out->data = NULL; out->len = 0;
+    char *data = NULL;
+    size_t len = 0;
+    char err[128];
+    if (http_request(&req, &code, &data, &len, err, sizeof(err)) != 0 || code != 200) {
+        free(data);
         return -1;
     }
+    free(out->data);
+    out->data = (unsigned char *)data;
+    out->len = len;
     return 0;
 }
 
@@ -265,7 +257,7 @@ static int read_file(const char *path, Body *out)
     unsigned char buf[4096];
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
-        if ((size_t)body_cb(buf, 1, n, out) != n) { fclose(f); return -1; }
+        if ((size_t)body_append(buf, 1, n, out) != n) { fclose(f); return -1; }
     fclose(f);
     return out->len ? 0 : -1;
 }
@@ -459,18 +451,4 @@ int tls_revocation_verify_cb(int preverify_ok, X509_STORE_CTX *sctx)
 void tls_revocation_attach(SSL_CTX *ctx)
 {
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, tls_revocation_verify_cb);
-}
-
-static CURLcode curl_ctx_cb(CURL *curl, void *sslctx, void *parm)
-{
-    (void)curl; (void)parm;
-    tls_revocation_attach((SSL_CTX *)sslctx);
-    return CURLE_OK;
-}
-
-void tls_revocation_prepare_curl(CURL *curl)
-{
-    const char *ca = getenv("SSL_CERT_FILE");
-    if (ca && *ca) curl_easy_setopt(curl, CURLOPT_CAINFO, ca);
-    curl_easy_setopt(curl, CURLOPT_SSL_CTX_FUNCTION, curl_ctx_cb);
 }

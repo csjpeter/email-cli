@@ -29,7 +29,7 @@ lintian "$deb"; rc=$?
 [ "$rc" -eq 0 ] && ok "1.2 lintian reports nothing" || bad "1.2 lintian exit $rc"
 
 deps=$(dpkg-deb -f "$deb" Depends)
-case "$deps" in *libc6*) ok "1.3 Depends names libc6" ;; *) bad "1.3 no libc6 in: $deps" ;; esac
+[ -z "$deps" ] && ok "1.3 the programs are static: the package has no Depends" || bad "1.3 Depends in a static package: $deps"
 case "$deps" in *"libssl3 "*|*"libcurl4 "*) bad "1.4 hand-written package names in: $deps" ;; *) ok "1.4 no hand-written libssl3/libcurl4" ;; esac
 case "$deps" in *"(="*|*"(<<"*|*"(<="*) bad "1.5 exact or upper-bound dependency: $deps" ;; *) ok "1.5 dependencies only look upward" ;; esac
 
@@ -49,20 +49,21 @@ bdate=$(dpkg-deb -f "$deb" XB-Build-Date)
 echo "$bdate" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' && ok "1.12 XB-Build-Date is $bdate" || bad "1.12 XB-Build-Date '$bdate'"
 [ "$(dpkg-deb -f "$deb" Version)" = "$(dpkg-deb -f "$deb" Version | tr -d '+ ')" ] && ok "1.13 Version carries no build metadata" || bad "1.13 Version polluted"
 
-# 1c. The dynamic dependency set is minimal (EMAIL-36): the shipped binaries
-# need only libc, OpenSSL and libemail-client (EMAIL-99: all mail access goes
-# through it, and libcurl with it); libtuikit is linked statically.  Depends
-# names no package outside those.
+# 1c. The programs are fully static (EMAIL-103): the shipped binaries need no
+# shared library and no dynamic loader, so one binary copied to another Linux
+# distribution runs with nothing installed beside it.
 tmp="$ROOT/build/package-policy-extract-$$"
 mkdir -p "$tmp" && dpkg-deb -x "$deb" "$tmp" || { bad "1.14 cannot unpack $deb"; }
-needed=$(for b in "$tmp"/usr/bin/*; do readelf -d "$b" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'; done | sort -u)
-extra=$(echo "$needed" | grep -v -E '^(libc\.so\.6|libm\.so\.6|libssl\.so\.3|libcrypto\.so\.3|libcurl\.so\.4|libemail-client\.so\.0|ld-linux-x86-64\.so\.2)$')
-[ -z "$extra" ] && ok "1.14 binaries need only libc, OpenSSL and libemail-client" || bad "1.14 extra shared libraries: $extra"
-echo "$needed" | grep -q -i -E 'tuikit|ptytest' && bad "1.15 an own library is linked dynamically" || ok "1.15 own libraries are static"
-deps_extra=$(echo "$deps" | tr ',' '\n' | sed 's/ *(.*//; s/^ *//' | grep -v -E '^(libc6|libssl3t64|libssl3|libcurl4t64|libcurl4|libemail-client0)$')
-[ -z "$deps_extra" ] && ok "1.16 Depends lists only libc6, libssl, libcurl and libemail-client0" || bad "1.16 extra Depends: $deps_extra"
-case "$deps" in *"libemail-client0 (>= "*) ok "1.16b the programs depend on libemail-client0, at least a version" ;; *) bad "1.16b no libemail-client0 (>= …) in: $deps" ;; esac
-echo "$needed" | grep -q '^libemail-client\.so\.0$' && ok "1.16c the programs link libemail-client dynamically" || bad "1.16c libemail-client is not linked"
+needed=$(for b in "$tmp"/usr/bin/*; do readelf -d "$b" 2>&1 | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'; done | sort -u)
+[ -z "$needed" ] && ok "1.14 the binaries need no shared library" || bad "1.14 shared libraries needed: $needed"
+interp=$(for b in "$tmp"/usr/bin/*; do readelf -l "$b" | grep -c INTERP; done | sort -u | tr -d '\n')
+[ "$interp" = "0" ] && ok "1.15 no binary asks for a dynamic loader" || bad "1.15 a binary has an interpreter ($interp)"
+[ -z "$deps" ] && ok "1.16 Depends is empty (libc, OpenSSL and libtuikit are inside)" || bad "1.16 Depends: $deps"
+for b in "$tmp"/usr/bin/*; do
+    n=$(basename "$b")
+    out=$("$b" --version 2>&1 | head -1); rcv=$?
+    [ -n "$out" ] && ok "1.16c $n runs ($out)" || bad "1.16c $n printed nothing for --version"
+done
 ( cd "$tmp" && rm -rf usr ) && rmdir "$tmp"
 
 # 1d. libemail-client (EMAIL-101): the same build ships the shared library and
@@ -90,8 +91,8 @@ if [ -f "$rt" ] && [ -f "$dev" ]; then
     [ -n "$exported" ] && [ -z "$(echo "$exported" | grep -v '^emc_')" ] \
         && ok "1.23 only emc_* symbols are exported" || bad "1.23 exported: $exported"
     needed=$(readelf -d "$so" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | sort -u)
-    extra=$(echo "$needed" | grep -v -E '^(libc\.so\.6|libm\.so\.6|libssl\.so\.3|libcrypto\.so\.3|libcurl\.so\.4)$')
-    [ -z "$extra" ] && ok "1.24 the library needs only libc, OpenSSL and libcurl" || bad "1.24 extra: $extra"
+    extra=$(echo "$needed" | grep -v -E '^(libc\.so\.6|libm\.so\.6|libssl\.so\.3|libcrypto\.so\.3)$')
+    [ -z "$extra" ] && ok "1.24 the library needs only libc and OpenSSL (no libcurl)" || bad "1.24 extra: $extra"
     # A program written against the installed header links and runs.
     printf '#include <email-client.h>\n#include <stdio.h>\nint main(void){puts(emc_version());return 0;}\n' > "$lib/use.c"
     out=$(gcc -o "$lib/use" "$lib/use.c" -I"$lib/usr/include" -L"$(dirname "$so")" -lemail-client 2>&1) \
@@ -103,6 +104,8 @@ if [ -f "$rt" ] && [ -f "$dev" ]; then
         && ok "1.26 the pkg-config file is in -dev" || bad "1.26 no .pc file"
     [ -f "$lib/usr/share/man/man3/libemail-client.3.gz" ] \
         && ok "1.27 the man page is in -dev" || bad "1.27 no man page"
+    [ -f "$lib/usr/lib/$(basename "$(dirname "$so")")/libemail-client.a" ] \
+        && ok "1.28 the static form of the library is in -dev" || bad "1.28 no libemail-client.a"
     ( cd "$lib" && rm -rf usr ctl && rm -f use use.c ) && rmdir "$lib"
 fi
 

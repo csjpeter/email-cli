@@ -5,10 +5,10 @@
 #include "test_helpers.h"
 #include "tls_revocation.h"
 #include "imap_client.h"
+#include "http_client.h"
 #include "email-client.h"
 
 #include <arpa/inet.h>
-#include <curl/curl.h>
 #include <netinet/in.h>
 #include <openssl/ec.h>
 #include <openssl/err.h>
@@ -566,24 +566,19 @@ static void test_rev_insecure_connection_skips_the_check(void)
     mock_stop(&srv); pki_free(&p);
 }
 
-static size_t sink(void *p, size_t s, size_t n, void *u) { (void)p; (void)u; return s * n; }
-
-static CURLcode curl_get(int port)
+/** GET https://127.0.0.1:port/ with the library's HTTP client: 0 / -1, status in *code. */
+static int https_get(int port, long *code, char *err, size_t err_len)
 {
     char url[64];
     snprintf(url, sizeof(url), "https://127.0.0.1:%d/", port);
-    CURL *curl = curl_easy_init();
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sink);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    tls_revocation_prepare_curl(curl);
-    CURLcode rc = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
+    HttpRequest req = { .method = "GET", .url = url, .timeout_s = 10 };
+    char *body = NULL;
+    int rc = http_request(&req, code, &body, NULL, err, err_len);
+    free(body);
     return rc;
 }
 
-static void test_rev_curl_connections_are_checked_too(void)
+static void test_rev_https_requests_are_checked_too(void)
 {
     fresh();
     int op = 0; int ol = listen_any(&op);
@@ -592,8 +587,11 @@ static void test_rev_curl_connections_are_checked_too(void)
     Mock http = http_mock_start(ol, op, o, len, NULL, 0);
     setenv("SSL_CERT_FILE", write_ca(&p, "rev-ca-4.pem"), 1);
     Mock srv = tls_server_start(&p, TLS_HTTP, 2);
-    ASSERT(curl_get(srv.port) == CURLE_PEER_FAILED_VERIFICATION,
-           "libcurl (SMTP, Gmail) refuses a revoked certificate");
+    long code = 0;
+    char herr[200];
+    ASSERT(https_get(srv.port, &code, herr, sizeof(herr)) != 0,
+           "the HTTP client (Gmail, OAuth) refuses a revoked certificate");
+    ASSERT(strstr(herr, "certificate") != NULL, "and says it is the certificate");
     mock_stop(&srv); mock_stop(&http); OPENSSL_free(o); pki_free(&p);
 
     fresh();
@@ -603,8 +601,33 @@ static void test_rev_curl_connections_are_checked_too(void)
     http = http_mock_start(ol, op, o, len, NULL, 0);
     setenv("SSL_CERT_FILE", write_ca(&p, "rev-ca-5.pem"), 1);
     srv = tls_server_start(&p, TLS_HTTP, 2);
-    ASSERT(curl_get(srv.port) == CURLE_OK, "and accepts a good one");
+    ASSERT(https_get(srv.port, &code, herr, sizeof(herr)) == 0 && code == 200,
+           "and accepts a good one");
     mock_stop(&srv); mock_stop(&http); OPENSSL_free(o); pki_free(&p);
+}
+
+static void test_rev_host_name_is_verified(void)
+{
+    fresh();
+    Pki p; pki_for_ports(&p, 0, 0);            /* the certificate is for IP 127.0.0.1 */
+    setenv("SSL_CERT_FILE", write_ca(&p, "rev-ca-6.pem"), 1);
+    Mock srv = tls_server_start(&p, TLS_HTTP, 2);
+    char url[96], err[200];
+    snprintf(url, sizeof(url), "https://localhost:%d/", srv.port);
+    HttpRequest req = { .method = "GET", .url = url, .timeout_s = 10 };
+    long code = 0;
+    char *body = NULL;
+    ASSERT(http_request(&req, &code, &body, NULL, err, sizeof(err)) != 0,
+           "a certificate for another name is refused (HTTP client)");
+    ASSERT(strstr(err, "certificate") != NULL, "and the reason is the certificate");
+    free(body);
+    mock_stop(&srv);
+
+    srv = tls_server_start(&p, TLS_IMAP, 2);
+    snprintf(url, sizeof(url), "imaps://localhost:%d", srv.port);
+    ImapClient *c = imap_connect(url, "u@example.org", "pw", 1);
+    ASSERT(c == NULL, "and the same for IMAP, which did not check the name before");
+    mock_stop(&srv); pki_free(&p);
 }
 
 static void test_rev_notice_api(void)
@@ -633,7 +656,8 @@ void test_tls_revocation(void)
     RUN_TEST(test_rev_imap_accepts_a_good_certificate);
     RUN_TEST(test_rev_unavailable_check_lets_the_connection_go_on_with_one_signal);
     RUN_TEST(test_rev_insecure_connection_skips_the_check);
-    RUN_TEST(test_rev_curl_connections_are_checked_too);
+    RUN_TEST(test_rev_https_requests_are_checked_too);
+    RUN_TEST(test_rev_host_name_is_verified);
     RUN_TEST(test_rev_notice_api);
     unsetenv("SSL_CERT_FILE");
 }

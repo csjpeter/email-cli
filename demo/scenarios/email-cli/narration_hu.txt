@@ -1,6 +1,6 @@
 ## INTRO
 email-cli C-ben írt terminál email kliens.
-Külső futásidejű függősége kettő: OpenSSL és libcurl — mindkettő disztribúció által ellenőrzött rendszerkönyvtár.
+Futásidejű függősége nincs: a programok statikus, önálló binárisok, az OpenSSL beleszerkesztve.
 Nincs csomagkezelő, nincs futásidejű keretrendszer, nincs supply-chain kockázat.
 A csomag négy binárisból áll különböző jogosultságszinttel: interaktív TUI, írható parancssori eszköz, kizárólag olvasható változat AI ügynökök számára, és háttér szinkronizáló démon.
 Mindenük közös konfigurációt és helyi levéltárat használ.
@@ -100,5 +100,5 @@ Az email-sync lekéri az új üzeneteket a szerverről és frissíti a helyi lev
 Cronból futtatva a többi eszköz mindig friss adatból dolgozik szerver kapcsolat nélkül.
 
 ## OUTRO
-email-cli — C, POSIX, OpenSSL, libcurl.
+email-cli — C, POSIX, OpenSSL.
 Forráskód, dokumentáció és hibajelentés: github.com/csjpeter/email-cli.

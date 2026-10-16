@@ -11,23 +11,34 @@ One build produces three packages:
 
 | Package | Contents |
 |---|---|
-| `email-cli` | the five programs, unchanged |
-| `libemail-client0` | `libemail-client.so.0`; `shlibs` asks for `>=` the version |
-| `libemail-client-dev` | `email-client.h`, `libemail-client.so`, `libemail-client.pc`, `libemail-client(3)`; depends exactly on the runtime package of the same build |
+| `email-cli` | the five programs, fully static (EMAIL-103): no dependency |
+| `libemail-client0` | `libemail-client.so.0`; `shlibs` asks for `>=` the version; needs libc and OpenSSL only |
+| `libemail-client-dev` | `email-client.h`, `libemail-client.so`, `libemail-client.a`, `libemail-client.pc`, `libemail-client(3)`; depends exactly on the runtime package of the same build |
 
 The SONAME's number is the library's ABI version, not the package's: it moves
-only when the interface breaks. `email-cli` depends on `libemail-client0 (>=
-version)`.
+only when the interface breaks. `email-cli` depends on no package: the
+programs carry the library inside.
+
+## Two forms, one set of objects (EMAIL-103)
+
+`libemail-client/CMakeLists.txt` compiles the sources once (an object library)
+and links them into `libemail-client.so.0` (what other programs link) and
+`libemail-client.a` (what the email programs and the unit tests link).  The
+library needs OpenSSL and nothing else: the TCP/TLS layer (`net_tls.c`), the
+HTTP/1.1 client (`http_client.c`: Content-Length, chunked and close-delimited
+bodies, no redirects or proxies) and the SMTP client (`smtp_adapter.c`: smtps
+or STARTTLS, AUTH PLAIN or LOGIN, dot stuffing) are its own.  Name resolution
+is the C library's `getaddrinfo()`.  Certificates are verified with the host
+name checked; the trusted CAs are `SSL_CERT_FILE` when set, otherwise
+OpenSSL's defaults plus the bundle paths of Debian, RHEL, openSUSE and Alpine.
+
 
 ## Who uses it
 
 Since EMAIL-99 the programs of this repository (`email-cli`, `email-cli-ro`,
 `email-tui`, `email-sync`) reach a mail server only through this library:
 `libemail/src/infrastructure/mail_account.h` turns their `Config` into an
-`emc_account` and opens the client. They find the shared object beside
-themselves in the build tree and in the install directory (`$ORIGIN`
-run-path), and in the system library directory when installed from the
-package.
+`emc_account` and opens the client. They link its static form.
 
 The protocol modules (`imap_client`, `gmail_client`, `gmail_auth`,
 `gmail_sync`, `mail_client`, `smtp_adapter`, `compose_service`, `json_util`)
@@ -72,8 +83,8 @@ All names start with `emc_`; everything else in the object is hidden.
   entry is written and `emc_take_security_notice()` returns the text; at most
   one signal per certificate (SHA-256 fingerprint) and 6 hours, recorded in
   `$XDG_CACHE_HOME/email-cli/revocation/signals`.  The check runs for IMAP
-  (OpenSSL verify callback), SMTP and the Gmail API (libcurl SSL context
-  callback), in `tls_revocation.c`.  A certificate that names no responder and
+  (OpenSSL verify callback), SMTP and the Gmail API (the same callback on the
+  library's own TLS contexts), in `tls_revocation.c`.  A certificate that names no responder and
   no CRL gives the same signal.  `SSL_CERT_FILE` names the trusted CA file for
   both stacks (as OpenSSL does).
 - **A failed copy to the sent folder is not a failed send**: `saved_copy` is 0.
@@ -89,7 +100,9 @@ All names start with `emc_`; everything else in the object is hidden.
 servers (TLS SMTP, TLS IMAP, Gmail over HTTP).
 `tests/unit/test_tls_revocation.c` generates a small PKI and runs the revocation
 check against forked OCSP/CRL servers and TLS servers (good, revoked, down,
-expired CRL, cache, 6-hour signal, IMAP and libcurl paths). `tests/functional/
-run_package_policy.sh` checks the packaged artefact: dependencies, `shlibs`,
+expired CRL, cache, 6-hour signal, IMAP and HTTPS paths, host name check). `tests/unit/test_net_clients.c`
+drives the HTTP and SMTP clients against forked mocks. `tests/functional/
+run_static_binaries.sh` runs the binary alone in an empty root against the mock
+servers. `tests/functional/run_package_policy.sh` checks the packaged artefact: dependencies, `shlibs`,
 the ldconfig trigger, that only `emc_*` symbols are exported, and that a
 program compiles against the installed header and runs.

@@ -184,11 +184,15 @@ ensure_workspace_libs() {
     for path in $paths; do
         name=$(basename "$path")
         # auto: an installed package wins, the submodule is not needed.
-        if [ "$WORKSPACE_LIBS" = auto ] && pkg-config --exists "$name" 2>/dev/null; then
+        if [ "$WORKSPACE_LIBS" = auto ] && pkg-config --exists "$name"; then
             continue
         fi
         pin=$(git ls-files -s -- "$path" | awk '{print $2}')
-        have=$(git -C "$path" rev-parse HEAD 2>/dev/null) || have=""
+        have=""
+        # a submodule not yet initialised has no .git entry: nothing to ask it
+        if [ -e "$path/.git" ]; then
+            have=$(git -C "$path" rev-parse HEAD) || have=""
+        fi
         if [ -z "$have" ] || [ "$have" != "$pin" ]; then
             echo "Fetching submodule $path (pin ${pin:0:12})..."
             if ! git submodule update --init --recursive -- "$path"; then
@@ -215,7 +219,7 @@ install_deps() {
                 if [[ "$VERSION_ID" == "24.04" ]]; then
                     echo "Detected Ubuntu 24.04. Installing dependencies..."
                     sudo apt-get update
-                    sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev lcov valgrind dpkg-dev
+                    sudo apt-get install -y build-essential cmake libssl-dev zlib1g-dev libzstd-dev lcov valgrind dpkg-dev
                 else
                     echo "Unsupported Ubuntu version: $VERSION_ID. Only 24.04 is explicitly supported."
                     exit 1
@@ -226,7 +230,7 @@ install_deps() {
                     echo "Detected Rocky Linux 9. Installing dependencies..."
                     sudo dnf install -y epel-release
                     sudo dnf groupinstall -y "Development Tools"
-                    sudo dnf install -y cmake libcurl-devel openssl-devel lcov valgrind rpm-build
+                    sudo dnf install -y cmake openssl-devel openssl-static zlib-static libzstd-static glibc-static lcov valgrind rpm-build
                 else
                     echo "Unsupported Rocky version: $VERSION_ID. Only 9.x is explicitly supported."
                     exit 1
@@ -308,9 +312,6 @@ cmake_build() {
     for b in "$PROJECT_NAME" "${PROJECT_NAME}-ro" email-sync email-tui email-import-rules; do
         cp "$BUILD_DIR/$b" "$BIN_DIR/" || exit 1
     done
-    # The programs link libemail-client dynamically and find it beside
-    # themselves ($ORIGIN).
-    cp -a "$BUILD_DIR"/libemail-client/libemail-client.so* "$BIN_DIR/" || exit 1
 }
 
 build_release() {
@@ -341,8 +342,6 @@ do_install() {
             echo "Warning: $src not found, skipping."
         fi
     done
-    cp -a "$BIN_DIR"/libemail-client.so* "$INSTALL_DIR/" || exit 1
-    echo "Installed $INSTALL_DIR/libemail-client.so"
     echo "Install complete. Make sure $INSTALL_DIR is in your PATH."
 }
 
@@ -354,7 +353,7 @@ do_uninstall() {
             echo "Removed $dst"
         fi
     done
-    rm -f -- "$INSTALL_DIR"/libemail-client.so*
+    rm -f -- "$INSTALL_DIR"/libemail-client.so*      # left by installs before EMAIL-103
     echo "Uninstall complete."
 }
 

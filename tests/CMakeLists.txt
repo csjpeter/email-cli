@@ -8,8 +8,6 @@
 # fails when a declared test has no executable there or an executable is not
 # declared.
 
-find_package(CURL REQUIRED)
-
 # project_test(<category> <name> [SOURCES f...] [SCRIPT f] [INCLUDES d...]
 #              [LINK l...] [NEEDS t...] [DEFINES d...] [TIMEOUT s])
 #   SOURCES  compiled into build/tests/<category>/bin/<name>
@@ -65,7 +63,7 @@ set(PTY_LIBS ${EMAIL_PTYTEST_LIB} util)
 set(PTY_INCLUDES ${CMAKE_SOURCE_DIR}/tests/common)
 set(SCRATCH ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c)
 
-project_test(unit test-runner SOURCES ${UNIT_TEST_SOURCES} INCLUDES ${UNIT_TEST_INCLUDES} LINK OpenSSL::SSL OpenSSL::Crypto CURL::libcurl ${EMAIL_TUIKIT_LIB} NEEDS test-tls-certs
+project_test(unit test-runner SOURCES ${UNIT_TEST_SOURCES} INCLUDES ${UNIT_TEST_INCLUDES} LINK email-client-static ${EMAIL_TUIKIT_LIB} NEEDS test-tls-certs
     DEFINES TEST_CERT_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.crt" TEST_KEY_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.key")
 
 project_test(functional run_functional SCRIPT functional/run_functional.sh)
@@ -73,6 +71,7 @@ project_test(functional run_manage_sh SCRIPT functional/run_manage_sh.sh)
 project_test(functional run_package_dir SCRIPT functional/run_package_dir.sh)
 project_test(functional run_package_policy SCRIPT functional/run_package_policy.sh)
 project_test(functional run_workspace_libs SCRIPT functional/run_workspace_libs.sh)
+project_test(functional run_static_binaries SCRIPT functional/run_static_binaries.sh)
 project_test(functional run_private_names SCRIPT functional/run_private_names.sh)
 project_test(functional run_source_header SCRIPT functional/run_source_header.sh)
 project_test(functional run_timing SCRIPT functional/run_timing.sh)

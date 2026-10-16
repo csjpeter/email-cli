@@ -53,7 +53,7 @@ Message sent.
 | Missing `--subject` | (same) | 1 |
 | Missing `--body` | (same) | 1 |
 | No SMTP config (IMAP account) | `smtp_send: refused to send...` | 1 |
-| SMTP connection failure | `smtp_send: <curl error>` | 1 |
+| SMTP connection failure | `smtp_send: <reason>` (e.g. `Could not connect to server`) | 1 |
 | Gmail API send failure | `gmail_send: <error>` | 1 |
 
 ---

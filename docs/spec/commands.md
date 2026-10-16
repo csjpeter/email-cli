@@ -453,7 +453,7 @@ Use `list-labels` for Gmail accounts.
 
 ### Behaviour
 
-1. Issue IMAP `LIST "" "*"` via `CURLOPT_CUSTOMREQUEST` against the root mailbox URL.
+1. Issue IMAP `LIST "" "*"` on the IMAP connection (libemail-client).
 2. Parse each `* LIST (flags) sep mailbox` response line.
 3. Decode IMAP Modified UTF-7 folder names (see [imap-protocol.md](imap-protocol.md)).
 4. Sort folder names lexicographically.

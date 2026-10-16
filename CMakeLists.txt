@@ -97,35 +97,37 @@ add_custom_target(test-tls-certs DEPENDS ${TEST_CERT} ${TEST_KEY})
 # The workspace's own libraries: a pinned submodule linked statically, or the
 # installed -dev package (cmake/workspace_libs.cmake, WORKSPACE_LIBS).
 include(cmake/workspace_libs.cmake)
-workspace_lib(libtuikit tuikit deps/libtuikit tuikit::tuikit tuikit::tuikit_static
+# The programs are fully static (EMAIL-103), so the installed package is used
+# through its static flavour too: no run-time dependency on libtuikit either way.
+workspace_lib(libtuikit tuikit deps/libtuikit tuikit::tuikit_static tuikit::tuikit_static
               EMAIL_TUIKIT_LIB)
 workspace_lib(libptytest ptytest deps/libptytest ptytest::ptytest ptytest::ptytest_static
               EMAIL_PTYTEST_LIB)
 if(EMAIL_TUIKIT_LIB_WAY STREQUAL "bundled")
     add_subdirectory(deps/libtuikit EXCLUDE_FROM_ALL)
 endif()
-# The programs link libemail-client dynamically (EMAIL-99).  In the build tree
-# they find it beside themselves ($ORIGIN: manage.sh copies it next to the
-# binaries in bin/ and into the install directory) or in its build directory;
-# an installed package finds it in the system library directory.
-set(CMAKE_BUILD_RPATH "\$ORIGIN" "${CMAKE_BINARY_DIR}/libemail-client")
 add_subdirectory(libemail-client)
 add_subdirectory(libemail)
 
-add_executable(email-cli src/main.c)
-target_link_libraries(email-cli libemail)
+# The programs are fully static: one self-contained binary that runs on another
+# Linux distribution with nothing installed beside it (EMAIL-103, owner decision
+# 2026-10-16).  The libraries they use (libemail-client's static form, OpenSSL,
+# libtuikit) are linked in, and so is the C library.
+function(email_static_program name source)
+    add_executable(${name} ${source})
+    target_link_libraries(${name} libemail)
+    # AddressSanitizer cannot be linked static: the Debug build (the unit-test
+    # run) keeps the C library dynamic; every other build is fully static.
+    if(NOT (CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ENABLE_COVERAGE))
+        target_link_options(${name} PRIVATE -static)
+    endif()
+endfunction()
 
-add_executable(email-cli-ro src/main_ro.c)
-target_link_libraries(email-cli-ro libemail)
-
-add_executable(email-sync src/main_sync.c)
-target_link_libraries(email-sync libemail)
-
-add_executable(email-tui src/main_tui.c)
-target_link_libraries(email-tui libemail)
-
-add_executable(email-import-rules src/main_import_rules.c)
-target_link_libraries(email-import-rules libemail)
+email_static_program(email-cli src/main.c)
+email_static_program(email-cli-ro src/main_ro.c)
+email_static_program(email-sync src/main_sync.c)
+email_static_program(email-tui src/main_tui.c)
+email_static_program(email-import-rules src/main_import_rules.c)
 
 # Test Build
 enable_testing()
@@ -266,14 +268,11 @@ set(CPACK_POST_BUILD_SCRIPTS           "${CMAKE_SOURCE_DIR}/cmake/deb_build_info
 set(CPACK_DEBIAN_CLI_PACKAGE_NAME      "email-cli")
 set(CPACK_DEBIAN_CLI_PACKAGE_SECTION   "mail")
 set(CPACK_DEBIAN_CLI_FILE_NAME         "DEB-DEFAULT")
-# The programs link libemail-client dynamically (EMAIL-99).  Its package is
-# named here as well as discovered: a clean build machine has no installed
-# libemail-client0 for dpkg-shlibdeps to read, and the library of this very
-# build is in a private directory.  At least this version, never exactly it.
-set(CPACK_DEBIAN_CLI_PACKAGE_DEPENDS
-    "libemail-client0 (>= ${EMAIL_CLI_PACKAGE_VERSION})")
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
-    "${CMAKE_BINARY_DIR}/libemail-client")
+# The programs are fully static (EMAIL-103): they need no package at run time,
+# so there is nothing to discover and nothing to name.  The library packages
+# are for other programs.
+set(CPACK_DEBIAN_CLI_PACKAGE_SHLIBDEPS OFF)
+set(CPACK_DEBIAN_CLI_PACKAGE_DEPENDS   "")
 set(CPACK_COMPONENT_CLI_DESCRIPTION
 "Terminal-based email client suite (IMAP + Gmail REST API)
 email-cli is a terminal-based email client suite written in C.
@@ -312,9 +311,8 @@ This package contains the header, the pkg-config file and the manual page.")
 # RPM-specific
 set(CPACK_RPM_PACKAGE_LICENSE          "GPL-3.0-only")
 set(CPACK_RPM_PACKAGE_GROUP            "Applications/Internet")
-set(CPACK_RPM_CLI_PACKAGE_REQUIRES
-    "libemail-client >= ${EMAIL_CLI_PACKAGE_VERSION}, openssl-libs >= 3.0.0, libcurl >= 7.68.0")
-set(CPACK_RPM_RUNTIME_PACKAGE_REQUIRES "openssl-libs >= 3.0.0, libcurl >= 7.68.0")
+set(CPACK_RPM_CLI_PACKAGE_REQUIRES "")
+set(CPACK_RPM_RUNTIME_PACKAGE_REQUIRES "openssl-libs >= 3.0.0")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES "libemail-client = ${EMAIL_CLI_PACKAGE_VERSION}")
 set(CPACK_RPM_CLI_PACKAGE_SUMMARY "Terminal-based email client suite (IMAP + Gmail REST API)")
 set(CPACK_RPM_RUNTIME_PACKAGE_SUMMARY "Mail client library of email-cli")
@@ -322,7 +320,6 @@ set(CPACK_RPM_DEV_PACKAGE_SUMMARY "Mail client library of email-cli - developmen
 set(CPACK_RPM_CLI_PACKAGE_NAME "email-cli")
 set(CPACK_RPM_RUNTIME_PACKAGE_NAME "libemail-client")
 set(CPACK_RPM_DEV_PACKAGE_NAME "libemail-client-devel")
-set(CPACK_RPM_PACKAGE_REQUIRES         "openssl-libs >= 3.0.0, libcurl >= 7.68.0")
 set(CPACK_RPM_FILE_NAME                "RPM-DEFAULT")
 
 include(CPack)

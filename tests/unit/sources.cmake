@@ -54,14 +54,13 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/test_mail_rules.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_tuikit_link.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/when_expr.c
-    ${CMAKE_SOURCE_DIR}/libemail-client/src/compose_service.c
-    ${CMAKE_SOURCE_DIR}/libemail-client/src/smtp_adapter.c
-    ${CMAKE_SOURCE_DIR}/libemail-client/src/tls_revocation.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_tls_revocation.c
-    ${CMAKE_SOURCE_DIR}/libemail-client/src/email_client.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_net_clients.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_charset.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/fs_util.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/logger.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/config.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/core/charset.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/mime_util.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/html_parser.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/html_render.c
@@ -71,14 +70,8 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/libemail/src/core/status_line.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/compose_draft.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/path_complete.c
-    ${CMAKE_SOURCE_DIR}/libemail-client/src/json_util.c
-    ${CMAKE_SOURCE_DIR}/libemail-client/src/gmail_auth.c
-    ${CMAKE_SOURCE_DIR}/libemail-client/src/gmail_client.c
-    ${CMAKE_SOURCE_DIR}/libemail-client/src/gmail_sync.c
-    ${CMAKE_SOURCE_DIR}/libemail-client/src/mail_client.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/config_store.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/setup_wizard.c
-    ${CMAKE_SOURCE_DIR}/libemail-client/src/imap_client.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/local_store.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/mail_rules.c
     ${CMAKE_SOURCE_DIR}/tests/unit/html_medium_stub.c

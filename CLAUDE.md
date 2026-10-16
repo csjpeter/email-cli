@@ -78,7 +78,7 @@ Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_pars
 Platform       →  libemail/src/platform/{terminal,path,process,credential_key}.h + html_medium.h
                     libemail/src/platform/posix/{terminal,path,process,credential_key,html_medium}.c    (Linux)
 Mail client    →  libemail-client/src/{email_client,mail_client,imap_client,gmail_client,
-                                         gmail_auth,gmail_sync,smtp_adapter,tls_revocation,compose_service,
+                                         gmail_auth,gmail_sync,smtp_adapter,tls_revocation,net_tls,http_client,compose_service,
                                          json_util}.c   (shared library libemail-client)
 ```
 
@@ -97,7 +97,20 @@ is the bridge from `Config` to the library's account.  The protocol modules
 `libemail` holds the programs' own parts (configuration, local store, rules,
 domain service, screens).
 
-**Gmail support:** Gmail accounts use the native Gmail REST API (OAuth2 + libcurl), not IMAP. The setup wizard offers account type selection ([1] IMAP / [2] Gmail). Gmail uses label-based navigation instead of folders. See `docs/spec/gmail-api.md` for the full specification.
+**Static programs (EMAIL-103):** the five programs are linked **fully static**
+(libemail-client's static form, OpenSSL, libtuikit, the C library): one binary
+copied to another Linux distribution runs with nothing installed beside it
+(`tests/functional/run_static_binaries.sh` runs it in an empty root).  The
+library is built in both forms from the same objects: `libemail-client.so.0`
+for other programs and `libemail-client.a` in `-dev`.  What a static binary
+needs from the system: `/etc/hosts` and `/etc/resolv.conf` (glibc 2.34+ has the
+`files` and `dns` resolvers built in), and a CA bundle, found at the usual
+distribution paths or named by `SSL_CERT_FILE`.  Character sets: the common
+single-byte ones are built in (`core/charset.c`); the rest need the system's
+iconv modules.  The Debug (ASAN) build keeps the C library dynamic, because
+AddressSanitizer cannot be linked static.
+
+**Gmail support:** Gmail accounts use the native Gmail REST API (OAuth2, over the library's own HTTP client), not IMAP. The setup wizard offers account type selection ([1] IMAP / [2] Gmail). Gmail uses label-based navigation instead of folders. See `docs/spec/gmail-api.md` for the full specification.
 
 **Config** is stored at `~/.config/email-cli/config.ini` with mode 0600 (IMAP host, user, password, folder). Gmail accounts add `GMAIL_MODE=1`, `GMAIL_REFRESH_TOKEN`, and optional `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET` fields.
 
@@ -113,7 +126,7 @@ No external test libraries are used. Tests use `ASSERT(condition, message)` and 
 
 ## Language & Standard
 
-C11 (`-std=c11`). Linked against libssl (OpenSSL) for IMAP, and libcurl for SMTP and the Gmail REST API (both in libemail-client). All public functions should have Doxygen-style comments.
+C11 (`-std=c11`). Linked against libssl (OpenSSL) only: IMAP, SMTP and the Gmail REST API all run on libemail-client's own TLS, HTTP and SMTP code (no libcurl, EMAIL-103). All public functions should have Doxygen-style comments.
 
 ## GNU/Linux CLI Conventions
 
@@ -130,7 +143,7 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 
 ## Dependency Policy
 
-**Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, libssl (OpenSSL), and libcurl (SMTP and the Gmail REST API, in libemail-client).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
+**Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, and libssl (OpenSSL).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
 The one library of the workspace used at run time is **libtuikit**
 (`deps/libtuikit`, a git submodule pinned to a release tag, now v0.6.1), linked

@@ -6,3 +6,13 @@
 # "Identifying a build".
 email-cli: unknown-field XB-Git-Commit
 email-cli: unknown-field XB-Build-Date
+
+# The programs are deliberately fully static (EMAIL-103, owner decision
+# 2026-10-16, policies/local-service-access-model.md, "How a client library is
+# built and linked"): the one binary copied to another Linux distribution must
+# run there with nothing installed beside it.  Static linking is the aim, and
+# so is the OpenSSL, zlib and libtuikit code inside; the package declares no
+# dependency because there is none.  The security updates of the embedded
+# libraries arrive with a new build of this package.
+email-cli: statically-linked-binary [usr/bin/*]
+email-cli: embedded-library zlib [usr/bin/*]

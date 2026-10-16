@@ -1,6 +1,6 @@
 ## INTRO
 email-cli is a terminal email client written in C.
-It has exactly two runtime dependencies: OpenSSL and libcurl — both distribution-managed system libraries.
+It has no runtime dependencies at all: the programs are single static binaries, with OpenSSL linked in.
 No package manager, no runtime framework, no supply-chain risk.
 The package ships four binaries with distinct privilege levels: an interactive TUI, a read-write CLI tool, a read-only variant for AI agents, and a background sync daemon.
 All four share the same configuration and local mail store.
@@ -100,5 +100,5 @@ email-sync fetches new messages from the server and updates the local mail store
 When run from cron, all other tools always work from fresh data without a server connection.
 
 ## OUTRO
-email-cli — C, POSIX, OpenSSL, libcurl.
+email-cli — C, POSIX, OpenSSL.
 Source code, documentation, and bug reports: github.com/csjpeter/email-cli.

@@ -52,7 +52,7 @@ runs are read as `#`.
 | Path completion (`path_many`, `path_one`) | typing a path in Attach | the typed path scrolls in the field; candidate file names below with the same marker; hint line `Tab=complete … Enter=add  d=remove last` | Tab Enter d |
 | Connection errors (`err_connect`, `err_login`, `err_tls`) | Enter on an account whose server cannot be used | the specific error line (`ERROR: connect to …`, `localhost rejected the login for …` with the server's words, `SSL handshake failed …`), and `Press any key to return to accounts...`; the generic `Connection failed.` causes block is printed only when no specific error line was written (EMAIL-105) | any key |
 | Sync and feedback (`list_syncing`, `list_new_mail`, `list_star_feedback`) | `s` and `f` on the message list | the header suffix `↻ syncing...`, then `✉ New mail may have arrived!  U=refresh`; a one-word feedback line (`Starred`) above the key bar | s U f |
-| Setup wizard steps (`wiz_imap_host`, `wiz_imap_port`, `wiz_imap_user`, `wiz_imap_pass`, `wiz_imap_masked`, `wiz_imap_folder`, `wiz_smtp_host`, `wiz_smtp_port`, `wiz_gmail`, `wiz_bad_type`, `wiz_imap_done`) | `n` on accounts, then the answers | plain prompts one under the other (IMAP host with `→ using imaps://…`, port, username, password echoed as `*` with `→ password updated (N characters)`, folder, SMTP host/port); the Gmail path asks for the address; `wiz_imap_done` is the accounts list with the new account selected | text, Enter |
+| Setup wizard steps (`wiz_imap_host`, `wiz_imap_port`, `wiz_imap_user`, `wiz_imap_pass`, `wiz_imap_masked`, `wiz_imap_folder`, `wiz_smtp_host`, `wiz_smtp_port`, `wiz_gmail`, `wiz_bad_type`, `wiz_imap_done`) | `n` on accounts, then the answers | plain prompts one under the other (IMAP host with `→ using imaps://…`, port, username, password echoed as `*` with `→ password updated (N characters)`, folder, SMTP host/port); the account type question takes `1` (or Enter) for IMAP and `2` for Gmail, any other answer is refused with `Unknown account type '…'` and asked again (EMAIL-106); the Gmail path asks for the address; `wiz_imap_done` is the accounts list with the new account selected | text, Enter |
 | Rules editor help (`rules_help`, `rule_detail_help`, `rule_when_help`) | `h` or `?` in the rules list, a rule, the condition list (EMAIL-95) | the same boxed overlay as the other screens: title ("Rules shortcuts", "Rule shortcuts", "Conditions shortcuts"), key/description rows, "Press any key to close" | any key |
 | Rules editor states (`rules_delete_ask`, `rules_deleted`, `rule_detail_delete_ask`, `rule_when_typed`, `rule_when_added`, `rule_when_bad`, `rule_step2_field`) | `d`, `a` in the rule views | the delete question `Delete "NAME"? (y/N)` on the last row; the typed condition on the `new:` line; a condition that does not parse is refused with `Not a valid condition: … (e.g. from:*@example.org)` on the last row and not added; step 2 shows the typed field | d y a Enter q |
 | Body editor (`body_editor`, `body_editor_typed`) | Enter on the compose dialog (US-87) | header bar "Message body — To: … Subject: …"; the text (tui_textedit, scrolls both ways, cursor at the text cursor); dim bottom line `Esc=save and continue  Ctrl-S=save`, `saved`/`autosaved` after a save | text, Enter, arrows, Esc, Ctrl-S |
@@ -122,11 +122,7 @@ defect or inconsistency the pictures make visible, left for the owner to ticket.
 9. Eight-colour terminal (`TERM=linux`, `*_8colour`): the program does not
    look at `TERM`; the selection is still the dark-blue palette-17 row with
    `>`, so on a terminal without it the `>` alone marks the row.
-10. Setup wizard (EMAIL-94): an unknown account type (`9`) is silently
-    taken as IMAP.
-11. Gmail label browser (EMAIL-88): a label created with `c` is not listed
-    until a message carries it.
-12. Review screen (EMAIL-91): a long To list wraps at the terminal edge in the
+10. Review screen (EMAIL-91): a long To list wraps at the terminal edge in the
     middle of an address.
 
 ## State matrix (EMAIL-96)

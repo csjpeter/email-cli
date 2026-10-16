@@ -141,10 +141,18 @@ Config* setup_wizard_run_internal(FILE *stream) {
         printf("Account type:\n  [1] IMAP (standard e-mail server)\n"
                "  [2] Gmail (Google account — uses Gmail API, not IMAP)\n");
 
-    char *type_str = get_input("Choice [1]", 0, stream);
-    int account_type = 1;
-    if (type_str && type_str[0] == '2') account_type = 2;
-    free(type_str);
+    /* Empty = IMAP, 1 = IMAP, 2 = Gmail; anything else is refused with a
+     * message and asked again (EMAIL-106).  End of input ends the wizard. */
+    int account_type = 0;
+    while (!account_type) {
+        char *type_str = get_input("Choice [1]", 0, stream);
+        if (!type_str) { config_free(cfg); return NULL; }
+        if (!type_str[0] || strcmp(type_str, "1") == 0) account_type = 1;
+        else if (strcmp(type_str, "2") == 0) account_type = 2;
+        else fprintf(stderr, "Unknown account type '%s': enter 1 for IMAP or 2 for Gmail.\n",
+                     type_str);
+        free(type_str);
+    }
 
     /* ── Gmail flow ──────────────────────────────────────────────────── */
     if (account_type == 2) {

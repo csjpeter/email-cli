@@ -201,7 +201,7 @@ the next compose offers again), then a review screen where `s` sends and `q` dis
   Review: Message
   To:      alice@example.com
   Subject: Re: Meeting
-  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard
+  s send  e edit headers  b edit body  a add attachment  d remove last  q discard   (the status line)
 ```
 
 The other binaries (`email-cli`, `email-cli-ro`, `email-sync`) are batch-only.

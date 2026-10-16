@@ -37,6 +37,7 @@
 #include "mail_account.h"
 #include "input_line.h"
 #include "tui_frame.h"
+#include "status_line.h"
 #include "body_editor.h"
 #include "compose_draft.h"
 #include "mail_rules.h"
@@ -287,6 +288,18 @@ static void cd_complete(char *buf, int *cur, const char *addr) {
     *cur = tok_start + addr_len;
 }
 
+/* The bottom status line of a screen of this program (EMAIL-111): the hints
+ * that fit the width, in reverse video on the last row, a message in their
+ * place when there is one.  The same widget as the lists' status line. */
+static void screen_bar(const tui_statusline_hint *h, int nh, const char *help_key,
+                       const char *msg) {
+    int trows = terminal_rows(), tcols = terminal_cols();
+    if (trows <= 0) trows = 24;
+    if (tcols <= 0) tcols = 80;
+    fflush(stdout);
+    status_line_draw(trows, tcols, h, nh, help_key, 0, 0, msg);
+}
+
 /* The drop-down lists of the dialog are libtuikit tables drawn as an overlay
  * (EMAIL-110): contacts as address and name, files as the file name. */
 typedef struct {
@@ -308,9 +321,9 @@ static void cd_dd_cell(void *ctx, int index, int col, tui_table_cell *c) {
     }
 }
 
-/** Draw the drop-down of @p n rows with row @p sel selected, below terminal
- *  row @p row - 1, in the value column of the dialog. */
-static void cd_draw_dropdown(const CDDropdown *dd, int n, int sel, int row, int tcols) {
+/** Draw the drop-down of @p n rows with row @p sel selected, from terminal row
+ *  @p row and column @p col (1-based). */
+static void cd_draw_dropdown(const CDDropdown *dd, int n, int sel, int row, int col, int tcols) {
     static const tui_table_col contact_cols[2] = {
         { NULL, 40, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
         { NULL, 10, 1, TUI_ALIGN_LEFT, 0, 0, 0 },
@@ -325,9 +338,9 @@ static void cd_draw_dropdown(const CDDropdown *dd, int n, int sel, int row, int 
     tui_table_set_count(&t, n);
     tui_table_select(&t, sel);
     if (!dd->contacts) t.lv.selected = -1;     /* files: Tab picks, no row is selected */
-    int w = tcols - 12;
+    int w = tcols - (col - 1);
     if (w < 10) w = 10;
-    tui_frame_overlay_rows(&t, row, 13, n, w);
+    tui_frame_overlay_rows(&t, row, col, n, w);
     tui_table_free(&t);
 }
 
@@ -442,19 +455,34 @@ static int cd_render(const char *title,
     row++;
 
     printf("\033[%d;1H\033[K", row);
-    if (active == CD_FIELD_ATTACH) {
-        printf("\033[2m  Tab=complete  Shift-Tab=prev  Enter=add  d=remove last  Enter(empty)=OK  ESC=cancel\033[0m");
-    } else {
-        printf("\033[2m  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel\033[0m");
-    }
     row++;
 
     printf("\033[%d;1H\033[J", row);
     fflush(stdout);
+    if (active == CD_FIELD_ATTACH) {
+        static const tui_statusline_hint h[] = {
+            { "Tab", "complete", SL_PRIO_HIGH },
+            { "Shift-Tab", "prev", SL_PRIO_LOW },
+            { "Enter", "add", SL_PRIO_KEEP },
+            { "d", "remove last", SL_PRIO_LOW },
+            { "Enter (empty)", "ok", SL_PRIO_MID },
+            { "Esc", "cancel", SL_PRIO_KEEP },
+        };
+        screen_bar(h, 6, NULL, NULL);
+    } else {
+        static const tui_statusline_hint h[] = {
+            { "Tab", "next", SL_PRIO_HIGH },
+            { "Shift-Tab", "prev", SL_PRIO_LOW },
+            { ";", "add addr", SL_PRIO_MID },
+            { "Enter", "ok", SL_PRIO_KEEP },
+            { "Esc", "cancel", SL_PRIO_KEEP },
+        };
+        screen_bar(h, 5, NULL, NULL);
+    }
     if (dd_n > 0) {
         CDDropdown dd = { dd_files ? NULL : contacts, match_idx,
                           dd_files ? (char (*)[CD_ATTACH_PATH_SZ])attach->matches : NULL };
-        cd_draw_dropdown(&dd, dd_n, dd_files ? 0 : match_sel, dd_row, tcols);
+        cd_draw_dropdown(&dd, dd_n, dd_files ? 0 : match_sel, dd_row, 13, tcols);
     }
     return active_row;
 }
@@ -900,8 +928,15 @@ static void pcr_render(const char *from, const char *to, const char *cc,
     if (status_msg && status_msg[0])
         printf("  \033[31m%s\033[0m\n\n", status_msg);
 
-    printf("  \033[2m[s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard\033[0m\n");
-    fflush(stdout);
+    static const tui_statusline_hint h[] = {
+        { "s", "send", SL_PRIO_KEEP },
+        { "e", "edit headers", SL_PRIO_HIGH },
+        { "b", "edit body", SL_PRIO_HIGH },
+        { "a", "add attachment", SL_PRIO_MID },
+        { "d", "remove last", SL_PRIO_LOW },
+        { "q", "discard", SL_PRIO_KEEP },
+    };
+    screen_bar(h, 6, NULL, NULL);
 }
 
 /* Inline single-field attachment picker used by [a] key in review.
@@ -929,18 +964,28 @@ static int pcr_pick_attach_raw(char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_S
         printf("  \033[1mPath:\033[0m  %s\n", input);
 
         int row = 4;
-        for (int m = 0; m < file_match_count; m++) {
-            const char *fn = strrchr(file_matches[m], '/');
-            fn = fn ? fn + 1 : file_matches[m];
-            printf("\033[%d;1H\033[K  \033[36m\xe2\x96\xb6 %s\033[0m", row++, fn);
-        }
+        int dd_row = row;
+        for (int m = 0; m < file_match_count; m++)
+            printf("\033[%d;1H\033[K", row++);          /* the table overlay fills them */
         if (error[0]) {
             printf("\033[%d;1H\033[K  \033[31m%s\033[0m", row++, error);
         }
         printf("\033[%d;1H\033[K", row);
-        printf("\033[%d;1H\033[2m  Tab=complete  Enter=add  ESC=cancel\033[0m", row + 1);
-        printf("\033[3;%dH", 9 + cursor);   /* position cursor on input field */
         (void)tcols;
+        fflush(stdout);
+        {
+            static const tui_statusline_hint h[] = {
+                { "Tab", "complete", SL_PRIO_HIGH },
+                { "Enter", "add", SL_PRIO_KEEP },
+                { "Esc", "cancel", SL_PRIO_KEEP },
+            };
+            screen_bar(h, 3, NULL, NULL);
+        }
+        if (file_match_count > 0) {
+            CDDropdown dd = { NULL, NULL, file_matches };
+            cd_draw_dropdown(&dd, file_match_count, 0, dd_row, 3, tcols);
+        }
+        printf("\033[3;%dH", 9 + cursor);   /* position cursor on input field */
         fflush(stdout);
 
         TermKey key = terminal_read_key();
@@ -1820,9 +1865,18 @@ static void when_list_render(const WhenAtomList *wl, int vis_rows, const char *t
     int rows = terminal_rows(), cols = terminal_cols();
     if (rows <= 0) rows = 24;
     if (cols <= 0) cols = 80;
-    tui_frame_draw_table(title, &wt, rows, cols, 0,
-                         "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  h=help  ESC=cancel",
-                         g_when_err[0] ? g_when_err : NULL);
+    tui_frame_draw_table(title, &wt, rows, cols, 0, NULL, NULL);
+    {
+        static const tui_statusline_hint h[] = {
+            { "j/k", "move", SL_PRIO_MID },
+            { "Enter/e", "edit", SL_PRIO_HIGH },
+            { "a", "add", SL_PRIO_HIGH },
+            { "d", "delete", SL_PRIO_HIGH },
+            { "q", "confirm", SL_PRIO_KEEP },
+            { "Esc", "cancel", SL_PRIO_KEEP },
+        };
+        screen_bar(h, 6, "h", g_when_err[0] ? g_when_err : NULL);
+    }
     g_when_err[0] = '\0';
 }
 
@@ -2015,7 +2069,13 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
                      prefill ? "Edit" : "Add new", account ? account : "?");
             printf("\033[2J\033[H");
             tui_frame_print_bar(1, hdr, terminal_cols());
-            printf("\033[2;1HEnter=next field  ESC=cancel\n");
+        }
+        {
+            static const tui_statusline_hint h[] = {
+                { "Enter", "next field", SL_PRIO_KEEP },
+                { "Esc", "cancel", SL_PRIO_KEEP },
+            };
+            screen_bar(h, 2, NULL, NULL);
         }
         for (int i = 0; i < nfields; i++)
             printf("\033[%d;1H\033[2K%s%s", fields[i].row, fields[i].prompt, fields[i].buf);
@@ -2151,10 +2211,14 @@ static void tui_rules_detail(const char *account, int idx)
         if (r->then_forward_to)
             { printf("\033[%d;1H  then-forward-to:  %s", row++, r->then_forward_to); }
 
-        int trows = terminal_rows();
-        int footer = (trows > row + 1) ? trows : row + 1;
-        printf("\033[%d;1H  e=edit  d=delete  h=help  ESC/q=back", footer);
-        fflush(stdout);
+        {
+            static const tui_statusline_hint h[] = {
+                { "e", "edit", SL_PRIO_HIGH },
+                { "d", "delete", SL_PRIO_HIGH },
+                { "Esc/q", "back", SL_PRIO_KEEP },
+            };
+            screen_bar(h, 3, "h", NULL);
+        }
 
         TermKey key;
         int ch;
@@ -2164,6 +2228,8 @@ static void tui_rules_detail(const char *account, int idx)
             key = terminal_read_key();
             ch  = terminal_last_printable();
             if (ch == 'd') {
+                int footer = terminal_rows();
+                if (footer <= 0) footer = 24;
                 printf("\033[%d;1H\033[2K  Delete \"%s\"? (y/N) ",
                        footer, r->name ? r->name : "?");
                 fflush(stdout);
@@ -2255,8 +2321,17 @@ static void tui_rules_editor(const Config *cfg)
         char title[512];
         snprintf(title, sizeof(title), "Rules for %s (%d rule%s)",
                  account, count, count == 1 ? "" : "s");
-        tui_frame_draw_table(title, &rtbl, rows, cols, 0, NULL,
-                             "  j/k=navigate  Enter=open  a=add  d=delete  h=help  ESC/q=back");
+        tui_frame_draw_table(title, &rtbl, rows, cols, 0, NULL, NULL);
+        {
+            static const tui_statusline_hint h[] = {
+                { "j/k", "navigate", SL_PRIO_MID },
+                { "Enter", "open", SL_PRIO_KEEP },
+                { "a", "add", SL_PRIO_HIGH },
+                { "d", "delete", SL_PRIO_HIGH },
+                { "Esc/q", "back", SL_PRIO_KEEP },
+            };
+            screen_bar(h, 5, "h", NULL);
+        }
 
         TermKey key;
         int ch;

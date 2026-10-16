@@ -4254,7 +4254,7 @@ static void test_tui_rules_editor_opens(void) {
     pty_send_str(s, "l");
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
     pty_settle(s, SETTLE_MS); /* status bar rendered after title fflush */
-    ASSERT_SCREEN_CONTAINS(s, "a=add");
+    ASSERT_SCREEN_CONTAINS(s, "a add");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
@@ -4271,7 +4271,8 @@ static void test_tui_rules_editor_empty_message(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "l");
     ASSERT_WAIT_FOR(s, "no rules", RULES_WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "a=add");
+    pty_settle(s, SETTLE_MS);   /* the status line is drawn after the frame */
+    ASSERT_SCREEN_CONTAINS(s, "a add");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
@@ -4501,7 +4502,7 @@ static void test_tui_rules_detail_shows_fields(void) {
     pty_settle(s, SETTLE_MS); /* wait for when/labels flushed after title */
     ASSERT_SCREEN_CONTAINS(s, "*@spam.example.com");
     ASSERT_SCREEN_CONTAINS(s, "_junk");
-    ASSERT_SCREEN_CONTAINS(s, "e=edit");
+    ASSERT_SCREEN_CONTAINS(s, "e edit");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);

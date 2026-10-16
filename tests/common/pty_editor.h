@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 /** Marker of the editor's bottom line, printed by body_editor.c. */
-#define PTY_EDITOR_MARK "Esc=save and continue"
+#define PTY_EDITOR_MARK "Esc save and continue"
 
 /**
  * Waits for the body editor, types @p text (may be NULL) and leaves it with

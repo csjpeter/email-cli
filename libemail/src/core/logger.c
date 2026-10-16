@@ -19,6 +19,7 @@ static FILE *g_log_fp = NULL;
 static LogLevel g_log_level = LOG_INFO;
 static char *g_log_path = NULL;
 static int g_log_stderr = 1;
+static unsigned g_stderr_errors;
 
 /** @brief Converts a LogLevel enum to its string representation. */
 static const char* level_to_str(LogLevel level) {
@@ -101,6 +102,7 @@ void logger_log(LogLevel level, const char *format, ...) {
 
     // Also log to stderr if ERROR and enabled
     if (level == LOG_ERROR && g_log_stderr) {
+        g_stderr_errors++;
         fprintf(stderr, "ERROR: ");
         va_start(args, format);
         vfprintf(stderr, format, args);
@@ -137,4 +139,12 @@ int logger_clean_logs(const char *log_dir) {
         }
     }
     return 0;
+}
+
+unsigned logger_stderr_error_count(void) {
+    return g_stderr_errors;
+}
+
+void logger_note_stderr_error(void) {
+    g_stderr_errors++;
 }

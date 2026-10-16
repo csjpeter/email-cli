@@ -589,6 +589,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
          * the server's exact answer. */
         logger_log(LOG_WARN, "LOGIN rejected for %s on %s: %s", user, host,
                    resp.tagged ? resp.tagged : "(no response line)");
+        logger_note_stderr_error();
         fprintf(stderr, "ERROR: %s rejected the login for %s.\n", host, user);
         if (said && said[0])
             fprintf(stderr, "  The server said: %s\n", said);

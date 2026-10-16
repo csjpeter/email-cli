@@ -11,7 +11,7 @@
 | # | Criterion |
 |---|-----------|
 | 1 | When `email_service_list` fails (connection error, auth failure, etc.), the TUI shows an error message instead of exiting. |
-| 2 | The error message is displayed below the last screen content with `Connection failed. Press any key to return to accounts...`. |
+| 2 | The error message is displayed below the last screen content with `Press any key to return to accounts...`. A specific error line (connect, TLS, login rejected) is shown once and is not followed by a generic block; when no specific line was written, the generic `Connection failed.` block with the possible causes is shown. |
 | 3 | After pressing any key, the user returns to the accounts screen with cursor position preserved. |
 | 4 | The accounts screen is fully functional after returning from an error (can open other accounts, add new ones, quit). |
 | 5 | The TUI never exits with a non-zero exit code due to a single account connection failure. |

@@ -47,7 +47,7 @@ runs are read as `#`.
 | Reader with attachments (`att_reader`) | Enter on the multipart message | the reader plus `Attach:  2 files: notes.txt, data.bin` and `a save  A save-all(2)` in the status line; the rendered HTML body keeps its bold/italic/underline/strike/colour |  a A |
 | Attachment picker (`att_picker`, `att_picker_second`) | `a` in the reader | "Attachments (N):", one row per file (name, type, size), selected row dark blue with `>`; status line `↑↓ select  Enter choose  Esc/q/BS back  [n/N]` | ↑↓ Enter Esc |
 | Save prompts and result (`att_save_prompt`, `att_saved`, `att_save_all`) | Enter in the picker, `A` | `Save as: <path>` (line editor, scrolls), `Saved: <path>`, `Save all to: <dir>`; the golden pictures compare these rows by their start only (paths differ per machine) | Enter Esc |
-| Review states (`review_full`, `review_long_to`, `review_attach_ask`, `review_attach_removed`, `review_send_failed`) | `s`, `a`, `d` in the review | Cc, Bcc and Attach rows when present (`Attach:  (none)` otherwise); a long To list wraps at the terminal edge; `Add Attachment` / `Path:` prompt; a failed send appends `Sending...`, the SMTP error, `Saved to Drafts (will retry on next sync).` below the review | s e b a d q |
+| Review states (`review_full`, `review_long_to`, `review_attach_ask`, `review_attach_removed`, `review_send_failed`) | `s`, `a`, `d` in the review | Cc, Bcc and Attach rows when present (`Attach:  (none)` otherwise); a To, Cc or Bcc list that does not fit the width is broken between addresses (after the `;` or `,`), the continuation line indented to the value column, never inside an address (EMAIL-107; `w80_review_long_to`, `w140_review_long_to`); `Add Attachment` / `Path:` prompt; a failed send appends `Sending...`, the SMTP error, `Saved to Drafts (will retry on next sync).` below the review | s e b a d q |
 | Address drop-down (`dd_many`, `dd_one`, `dd_second`, `dd_none`, `dd_wide`, `dd_accepted`) | typing 2+ characters in To/Cc/Bcc | up to five candidate rows under the field, each `▶ address   name` (cyan marker, the chosen row in reverse); none when nothing matches; Down moves, Enter takes the address | text ↓ ↑ Enter ; Tab |
 | Path completion (`path_many`, `path_one`) | typing a path in Attach | the typed path scrolls in the field; candidate file names below with the same marker; hint line `Tab=complete … Enter=add  d=remove last` | Tab Enter d |
 | Connection errors (`err_connect`, `err_login`, `err_tls`) | Enter on an account whose server cannot be used | the specific error line (`ERROR: connect to …`, `localhost rejected the login for …` with the server's words, `SSL handshake failed …`), and `Press any key to return to accounts...`; the generic `Connection failed.` causes block is printed only when no specific error line was written (EMAIL-105) | any key |
@@ -122,8 +122,6 @@ defect or inconsistency the pictures make visible, left for the owner to ticket.
 9. Eight-colour terminal (`TERM=linux`, `*_8colour`): the program does not
    look at `TERM`; the selection is still the dark-blue palette-17 row with
    `>`, so on a terminal without it the `>` alone marks the row.
-10. Review screen (EMAIL-91): a long To list wraps at the terminal edge in the
-    middle of an address.
 
 ## State matrix (EMAIL-96)
 

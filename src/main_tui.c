@@ -753,6 +753,61 @@ dialog_done:;
 #define PCR_EDIT_BODY    1
 #define PCR_EDIT_HEADERS 2
 
+/** Number of characters (not bytes) of the UTF-8 text s[0..n). */
+static int pcr_chars(const char *s, size_t n)
+{
+    int c = 0;
+    for (size_t i = 0; i < n; i++)
+        if (((unsigned char)s[i] & 0xC0) != 0x80) c++;
+    return c;
+}
+
+/**
+ * Print an address-list header line of the review screen.  A line that does
+ * not fit is broken between addresses (after the ";" or "," that ends one,
+ * outside < >), never inside an address; a continuation line is indented to
+ * the value column (EMAIL-107).  One address wider than the line is left to
+ * the terminal.
+ */
+static void pcr_print_addresses(const char *label, const char *value, int tcols)
+{
+    const int indent = 11;                      /* "  Label:    ", as the Subject line */
+    int room = tcols - indent;
+    if (room < 10) room = 10;
+    printf("  \033[2m%s\033[0m", label);
+    for (int pad = pcr_chars(label, strlen(label)) + 2; pad < indent; pad++) putchar(' ');
+    if (!value) value = "";
+
+    int used = 0, first = 1;
+    const char *p = value;
+    while (*p) {
+        const char *e = p;                      /* end of this address */
+        int angle = 0;
+        while (*e) {
+            if (*e == '<') angle = 1;
+            else if (*e == '>') angle = 0;
+            else if (!angle && (*e == ';' || *e == ',')) { e++; break; }
+            e++;
+        }
+        const char *next = e;                   /* skip the blanks after the separator */
+        while (*next == ' ' || *next == '\t') next++;
+        const char *te = e;                     /* item without trailing blanks */
+        while (te > p && (te[-1] == ' ' || te[-1] == '\t')) te--;
+        int w = pcr_chars(p, (size_t)(te - p));
+        if (!first && used + 1 + w > room) {
+            printf("\n%*s", indent, "");
+            used = 0;
+            first = 1;
+        }
+        if (!first) { putchar(' '); used++; }
+        fwrite(p, 1, (size_t)(te - p), stdout);
+        used += w;
+        first = 0;
+        p = next;
+    }
+    putchar('\n');
+}
+
 /* Render the review screen — called in a loop from post_compose_review. */
 static void pcr_render(const char *from, const char *to, const char *cc,
                         const char *bcc, const char *subject,
@@ -768,9 +823,9 @@ static void pcr_render(const char *from, const char *to, const char *cc,
     printf("\n\n");
 
     printf("  \033[2mFrom:\033[0m    %s\n", from   ? from    : "");
-    printf("  \033[2mTo:\033[0m      %s\n", to     ? to      : "");
-    if (cc  && cc[0])  printf("  \033[2mCc:\033[0m      %s\n", cc);
-    if (bcc && bcc[0]) printf("  \033[2mBcc:\033[0m     %s\n", bcc);
+    pcr_print_addresses("To:", to, tcols);
+    if (cc  && cc[0])  pcr_print_addresses("Cc:", cc, tcols);
+    if (bcc && bcc[0]) pcr_print_addresses("Bcc:", bcc, tcols);
     printf("  \033[2mSubject:\033[0m %s\n", subject ? subject : "(no subject)");
 
     int body_lines = 0;

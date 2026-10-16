@@ -31,4 +31,15 @@ pid_t platform_getpid(void);
  */
 int platform_pid_is_program(pid_t pid, const char *progname);
 
+/**
+ * @brief The name check of platform_pid_is_program(), on a given file.
+ *
+ * @p comm_path holds the process name (one line).  A file that cannot be
+ * opened or read gives 1 ("cannot verify, assume it matches"), as for a pid.
+ *
+ * @return 1 when the first line (without CR/LF) equals @p progname or the
+ *         file cannot be read, 0 otherwise.
+ */
+int platform_comm_file_is_program(const char *comm_path, const char *progname);
+
 #endif /* PLATFORM_PROCESS_H */

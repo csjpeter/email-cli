@@ -26,6 +26,7 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/test_runner.c
     ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_platform.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_platform_identity.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_fs_util.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_config.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_logger.c

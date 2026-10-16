@@ -12,15 +12,8 @@ pid_t platform_getpid(void) {
     return getpid();
 }
 
-int platform_pid_is_program(pid_t pid, const char *progname) {
-    /* Check liveness with signal 0 (POSIX) */
-    if (kill(pid, 0) != 0)
-        return 0;
-
-    /* Verify executable name via /proc/<pid>/comm */
-    char path[64];
-    snprintf(path, sizeof(path), "/proc/%d/comm", (int)pid);
-    FILE *f = fopen(path, "r");
+int platform_comm_file_is_program(const char *comm_path, const char *progname) {
+    FILE *f = fopen(comm_path, "r");
     if (!f)
         return 1; /* can't verify — conservatively assume it matches */
     char comm[256] = {0};
@@ -34,4 +27,15 @@ int platform_pid_is_program(pid_t pid, const char *progname) {
     }
     fclose(f);
     return 1; /* can't verify — conservatively assume it matches */
+}
+
+int platform_pid_is_program(pid_t pid, const char *progname) {
+    /* Check liveness with signal 0 (POSIX) */
+    if (kill(pid, 0) != 0)
+        return 0;
+
+    /* Verify executable name via /proc/<pid>/comm */
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/comm", (int)pid);
+    return platform_comm_file_is_program(path, progname);
 }

@@ -333,6 +333,19 @@ void emc_log_open(const char *path, int verbose);
 /** @brief Close the log. */
 void emc_log_close(void);
 
+/**
+ * @brief Take the pending security notice, if any.
+ *
+ * Set when a TLS connection went on although the revocation of the server
+ * certificate (OCSP, then CRL) could not be checked; at most one per
+ * certificate and 6 hours.  A revoked certificate is not a notice: the
+ * connection is refused.
+ * @param buf   Receives the text (UTF-8, one line).
+ * @param size  Size of @p buf.
+ * @return 1 when there was a notice (now cleared), 0 when not.
+ */
+int emc_take_security_notice(char *buf, size_t size);
+
 /** @brief Automatic emc_close() of a handle leaving its scope. */
 static inline void emc_close_cleanup(emc_client **c)
 {

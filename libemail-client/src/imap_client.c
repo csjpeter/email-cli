@@ -7,6 +7,7 @@
 #include "local_store.h"
 #include "logger.h"
 #include "raii.h"
+#include "tls_revocation.h"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <sys/types.h>
@@ -515,6 +516,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         } else {
             SSL_CTX_set_default_verify_paths(ctx);
             SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+            tls_revocation_attach(ctx);   /* OCSP, then CRL, at the leaf */
         }
         SSL *ssl = SSL_new(ctx);
         if (!ssl) {

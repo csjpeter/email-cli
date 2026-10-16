@@ -78,7 +78,7 @@ Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_pars
 Platform       →  libemail/src/platform/{terminal,path,process,credential_key}.h + html_medium.h
                     libemail/src/platform/posix/{terminal,path,process,credential_key,html_medium}.c    (Linux)
 Mail client    →  libemail-client/src/{email_client,mail_client,imap_client,gmail_client,
-                                         gmail_auth,gmail_sync,smtp_adapter,compose_service,
+                                         gmail_auth,gmail_sync,smtp_adapter,tls_revocation,compose_service,
                                          json_util}.c   (shared library libemail-client)
 ```
 

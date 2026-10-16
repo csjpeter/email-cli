@@ -61,6 +61,7 @@ void test_gmail_sync(void);
 void test_compose_service(void);
 void test_smtp_adapter(void);
 void test_email_client(void);
+void test_tls_revocation(void);
 void test_mail_rules(void);
 void test_when_expr(void);
 void test_tuikit_link(void);
@@ -161,6 +162,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_compose_service);
     RUN_TEST(test_smtp_adapter);
     RUN_TEST(test_email_client);
+    RUN_TEST(test_tls_revocation);
     RUN_TEST(test_mail_rules);
     RUN_TEST(test_when_expr);
     RUN_TEST(test_tuikit_link);

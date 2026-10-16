@@ -13,6 +13,7 @@
 #include "mail_client.h"
 #include "mime_util.h"
 #include "smtp_adapter.h"
+#include "tls_revocation.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -607,4 +608,9 @@ EMC_API void emc_log_open(const char *path, int verbose)
 EMC_API void emc_log_close(void)
 {
     logger_close();
+}
+
+EMC_API int emc_take_security_notice(char *buf, size_t size)
+{
+    return tls_revocation_take_notice(buf, size);
 }

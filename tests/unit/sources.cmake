@@ -72,6 +72,7 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/libemail/src/core/compose_draft.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/path_complete.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/config_store.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/gmail_login.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/setup_wizard.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/local_store.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/mail_rules.c

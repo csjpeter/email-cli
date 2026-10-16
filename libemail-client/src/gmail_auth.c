@@ -7,6 +7,8 @@
 #include "logger.h"
 #include "raii.h"
 #include "http_client.h"
+#include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,6 +66,18 @@ static char *http_post(const char *url, const char *postdata, long *http_code) {
     return resp;
 }
 
+/* ── Reasons ─────────────────────────────────────────────────────── */
+
+/** Record why the authorization failed (the library prints nothing). */
+static void ui_error(GmailAuthUi *ui, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+static void ui_error(GmailAuthUi *ui, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(ui->error, sizeof(ui->error), fmt, ap);
+    va_end(ap);
+    logger_log(LOG_ERROR, "gmail_auth: %s", ui->error);
+}
+
 /* ── Localhost redirect listener ─────────────────────────────────── */
 
 #define LOOPBACK_PORT_START 8089
@@ -97,48 +111,100 @@ static int open_listener(int *listen_fd) {
     return -1;
 }
 
+/** Percent-decode @p s in place ('+' is left alone: codes never carry spaces). */
+static void percent_decode(char *s) {
+    char *o = s;
+    for (const char *p = s; *p; p++) {
+        if (p[0] == '%' && isxdigit((unsigned char)p[1]) && isxdigit((unsigned char)p[2])) {
+            char hex[3] = { p[1], p[2], '\0' };
+            *o++ = (char)strtol(hex, NULL, 16);
+            p += 2;
+        } else {
+            *o++ = *p;
+        }
+    }
+    *o = '\0';
+}
+
+/** The value of query parameter @p name in @p text (heap, decoded), or NULL. */
+static char *query_param(const char *text, const char *name) {
+    size_t nl = strlen(name);
+    for (const char *p = text; (p = strstr(p, name)) != NULL; p += nl) {
+        int boundary = p == text || p[-1] == '?' || p[-1] == '&' || p[-1] == ' ';
+        if (!boundary || p[nl] != '=') continue;
+        const char *v = p + nl + 1;
+        const char *e = v;
+        while (*e && *e != '&' && *e != ' ' && *e != '\r' && *e != '\n' && *e != '#') e++;
+        char *val = strndup(v, (size_t)(e - v));
+        if (val) percent_decode(val);
+        return val;
+    }
+    return NULL;
+}
+
+/**
+ * @brief The authorization code in what the user's browser was redirected to.
+ *
+ * @p text is an HTTP request line ("GET /callback?code=... HTTP/1.1"), the
+ * redirect URL a person pasted, its query string, or the bare code.
+ * @return heap code, or NULL with the reason in @p ui->error.
+ */
+static char *auth_code_from(const char *text, GmailAuthUi *ui) {
+    char *code = query_param(text, "code");
+    if (code && code[0]) return code;
+    free(code);
+    char *error = query_param(text, "error");
+    if (error) {
+        ui_error(ui, "Authorization denied: %s", error[0] ? error : "unknown");
+        free(error);
+        return NULL;
+    }
+    /* Not a URL: the bare code, if it looks like one. */
+    while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n') text++;
+    size_t n = strlen(text);
+    while (n && (text[n - 1] == ' ' || text[n - 1] == '\t' ||
+                 text[n - 1] == '\r' || text[n - 1] == '\n')) n--;
+    if (n == 0 || memchr(text, ' ', n) || memchr(text, '?', n) || memchr(text, '=', n) ||
+        strncmp(text, "http", 4) == 0 || text[0] == '/') {
+        ui_error(ui, "No authorization code in the pasted text");
+        return NULL;
+    }
+    code = strndup(text, n);
+    if (code) percent_decode(code);
+    return code;
+}
+
 /**
  * @brief Wait for Google's redirect and extract the authorization code.
  *
- * Accepts one HTTP connection, reads the GET request, extracts the
- * ?code= parameter, sends a simple HTML "success" response, and
- * closes the connection.
+ * Accepts one HTTP connection, reads the GET request, extracts the code,
+ * sends a simple HTML response and closes the connection.
  *
  * @param listen_fd  Listening socket fd (will NOT be closed by this function).
- * @return Heap-allocated authorization code, or NULL on error/denial.
+ * @return Heap-allocated authorization code, or NULL (reason in @p ui->error).
  */
-static char *wait_for_auth_code(int listen_fd) {
+static char *wait_for_auth_code(int listen_fd, GmailAuthUi *ui) {
     struct sockaddr_in cli = {0};
     socklen_t cli_len = sizeof(cli);
     int conn = accept(listen_fd, (struct sockaddr *)&cli, &cli_len);
-    if (conn < 0) return NULL;
+    if (conn < 0) {
+        ui_error(ui, "Did not receive the authorization code (timed out)");
+        return NULL;
+    }
 
     /* Read the HTTP request (small — fits in 4K) */
     char req[4096] = {0};
     ssize_t n = read(conn, req, sizeof(req) - 1);
-    if (n <= 0) { close(conn); return NULL; }
-
-    /* Extract ?code=... from "GET /callback?code=XXXX&scope=... HTTP/1.1" */
-    char *code_start = strstr(req, "code=");
-    char *auth_code = NULL;
-    if (code_start) {
-        code_start += 5;
-        char *code_end = code_start;
-        while (*code_end && *code_end != '&' && *code_end != ' ' && *code_end != '\r')
-            code_end++;
-        auth_code = strndup(code_start, (size_t)(code_end - code_start));
+    if (n <= 0) {
+        close(conn);
+        ui_error(ui, "Did not receive the authorization code");
+        return NULL;
     }
+    /* Only the request line matters; the rest is headers. */
+    char *eol = strpbrk(req, "\r\n");
+    if (eol) *eol = '\0';
 
-    /* Check for error=access_denied */
-    char *error_start = strstr(req, "error=");
-    if (error_start && !auth_code) {
-        error_start += 6;
-        char *error_end = error_start;
-        while (*error_end && *error_end != '&' && *error_end != ' ') error_end++;
-        char *err = strndup(error_start, (size_t)(error_end - error_start));
-        fprintf(stderr, "  Authorization denied: %s\n", err ? err : "unknown");
-        free(err);
-    }
+    char *auth_code = auth_code_from(req, ui);
 
     /* Send a simple response to the browser */
     const char *html = auth_code
@@ -151,54 +217,62 @@ static char *wait_for_auth_code(int listen_fd) {
     ssize_t wr = write(conn, html, strlen(html)); (void)wr;
     close(conn);
 
+    if (!auth_code && !ui->error[0])
+        ui_error(ui, "Did not receive the authorization code");
     return auth_code;
 }
 
-/* ── Authorization Code Flow (Desktop App) ───────────────────────── */
+/* ── Authorization Code Flow (installed application, loopback redirect) ── */
 
 #define AUTH_URL    "https://accounts.google.com/o/oauth2/v2/auth"
 #define TOKEN_URL   "https://oauth2.googleapis.com/token"
 #define GMAIL_SCOPE "https://mail.google.com/"
 
-int gmail_auth_device_flow(Config *cfg) {
+int gmail_auth_authorize(Config *cfg, GmailAuthUi *ui) {
+    if (!ui) return -1;
+    ui->error[0] = '\0';
+    if (!cfg || !ui->show_url || (ui->paste && !ui->read_redirect)) {
+        ui_error(ui, "The authorization needs a way to show the URL%s",
+                 ui->paste ? " and to read the pasted redirect" : "");
+        return -1;
+    }
     const char *client_id = get_client_id(cfg);
     if (!client_id[0]) {
-        fprintf(stderr,
-            "\n"
-            "  Gmail OAuth2 credentials are not configured yet.\n"
-            "\n"
-            "  To use Gmail, you need a Google Cloud OAuth2 client_id and\n"
-            "  client_secret. Add them to your account config file:\n"
-            "\n"
-            "    ~/.config/email-cli/accounts/<email>/config.ini\n"
-            "\n"
-            "  Add these two lines:\n"
-            "    GMAIL_CLIENT_ID=<your-client-id>.apps.googleusercontent.com\n"
-            "    GMAIL_CLIENT_SECRET=<your-client-secret>\n"
-            "\n"
-            "  Run 'email-cli help gmail' for the step-by-step setup guide.\n"
-            "\n");
+        ui_error(ui,
+            "Gmail OAuth2 credentials are not configured yet.\n"
+            "Add them to the account config file\n"
+            "(~/.config/email-cli/accounts/<email>/config.ini):\n"
+            "  GMAIL_CLIENT_ID=<your-client-id>.apps.googleusercontent.com\n"
+            "  GMAIL_CLIENT_SECRET=<your-client-secret>\n"
+            "Run 'email-cli help gmail' for the step-by-step setup guide.");
         return -1;
     }
 
     const char *client_secret = get_client_secret(cfg);
 
-    /* Step 1: Open a localhost listener for the OAuth redirect */
+    /* Step 1: the redirect target.  Loopback mode listens on it; paste mode
+     * only names it, and the person copies the address the browser ends up
+     * on (which fails to load, and does not matter). */
     int listen_fd = -1;
-    int port = open_listener(&listen_fd);
-    if (port < 0) {
-        fprintf(stderr, "Error: Could not open localhost listener (ports %d-%d busy).\n",
-                LOOPBACK_PORT_START, LOOPBACK_PORT_END);
-        return -1;
+    int port;
+    if (ui->paste) {
+        port = LOOPBACK_PORT_START;
+    } else {
+        port = open_listener(&listen_fd);
+        if (port < 0) {
+            ui_error(ui, "Could not open a localhost listener (ports %d-%d busy)",
+                     LOOPBACK_PORT_START, LOOPBACK_PORT_END);
+            return -1;
+        }
+        /* 5-minute timeout so wait_for_auth_code() can't block forever. */
+        struct timeval _tv = {300, 0};
+        setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &_tv, sizeof(_tv));
     }
-    /* 5-minute timeout so wait_for_auth_code() can't block forever. */
-    struct timeval _tv = {300, 0};
-    setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &_tv, sizeof(_tv));
 
     char redirect_uri[64];
     snprintf(redirect_uri, sizeof(redirect_uri), "http://localhost:%d/callback", port);
 
-    /* Step 2: Build the authorization URL and open in browser */
+    /* Step 2: Build the authorization URL and hand it to the program */
     RAII_STRING char *auth_url = NULL;
     char *escaped_scope = http_url_escape(GMAIL_SCOPE);
     char *escaped_redirect = http_url_escape(redirect_uri);
@@ -208,52 +282,51 @@ int gmail_auth_device_flow(Config *cfg) {
                  AUTH_URL, client_id, escaped_redirect, escaped_scope) == -1) {
         free(escaped_scope);
         free(escaped_redirect);
-        close(listen_fd);
+        if (listen_fd >= 0) close(listen_fd);
+        ui_error(ui, "Out of memory");
         return -1;
     }
     free(escaped_scope);
     free(escaped_redirect);
 
-    fprintf(stderr,
-        "\n"
-        "  Opening browser for Gmail authorization...\n"
-        "  If the browser doesn't open, visit this URL manually:\n\n"
-        "  %s\n\n"
-        "  Waiting for authorization... (^C to cancel)\n\n",
-        auth_url);
+    ui->show_url(auth_url, port, ui->user);
 
-    /* Try to open the browser — run in background so system() returns immediately.
-     * On headless CI/servers this exits quickly; on desktops the browser opens. */
-    RAII_STRING char *browser_cmd = NULL;
-    if (asprintf(&browser_cmd,
-                 "xdg-open '%s' >/dev/null 2>&1 &",
-                 auth_url) != -1) {
-        int rc = system(browser_cmd);
-        (void)rc;
+    /* Step 3: the redirect with the auth code */
+    char *auth_code = NULL;
+    if (ui->paste) {
+        char *text = ui->read_redirect(ui->user);
+        if (!text) ui_error(ui, "No redirect address was given");
+        else {
+            auth_code = auth_code_from(text, ui);
+            free(text);
+        }
+    } else {
+        auth_code = wait_for_auth_code(listen_fd, ui);
+        close(listen_fd);
     }
-
-    /* Step 3: Wait for the redirect with the auth code */
-    char *auth_code = wait_for_auth_code(listen_fd);
-    close(listen_fd);
-
-    if (!auth_code) {
-        fprintf(stderr, "Error: Did not receive authorization code.\n");
-        return -1;
-    }
+    if (!auth_code) return -1;
 
     /* Step 4: Exchange the auth code for tokens */
     RAII_STRING char *post = NULL;
     char *escaped_code = http_url_escape(auth_code);
-    if (asprintf(&post,
-                 "code=%s&client_id=%s&client_secret=%s"
-                 "&redirect_uri=%s&grant_type=authorization_code",
-                 escaped_code, client_id, client_secret, redirect_uri) == -1) {
-        free(escaped_code);
-        free(auth_code);
+    char *escaped_id = http_url_escape(client_id);
+    char *escaped_secret = http_url_escape(client_secret);
+    char *escaped_uri = http_url_escape(redirect_uri);
+    int pr = (escaped_code && escaped_id && escaped_secret && escaped_uri)
+           ? asprintf(&post,
+                      "code=%s&client_id=%s&client_secret=%s"
+                      "&redirect_uri=%s&grant_type=authorization_code",
+                      escaped_code, escaped_id, escaped_secret, escaped_uri)
+           : -1;
+    free(escaped_code);
+    free(escaped_id);
+    free(escaped_secret);
+    free(escaped_uri);
+    free(auth_code);
+    if (pr == -1) {
+        ui_error(ui, "Out of memory");
         return -1;
     }
-    free(escaped_code);
-    free(auth_code);
 
     const char *url_override2 = getenv("GMAIL_TEST_TOKEN_URL");
     const char *token_url2 = (url_override2 && url_override2[0]) ? url_override2 : TOKEN_URL;
@@ -261,11 +334,9 @@ int gmail_auth_device_flow(Config *cfg) {
     long tcode = 0;
     RAII_STRING char *tresp = http_post(token_url2, post, &tcode);
     if (!tresp || tcode != 200) {
-        fprintf(stderr, "Error: Token exchange failed (HTTP %ld).\n", tcode);
-        if (tresp) {
-            RAII_STRING char *err = json_get_string(tresp, "error_description");
-            if (err) fprintf(stderr, "  %s\n", err);
-        }
+        RAII_STRING char *why = tresp ? json_get_string(tresp, "error_description") : NULL;
+        ui_error(ui, "Token exchange failed (HTTP %ld)%s%s", tcode,
+                 why ? ": " : "", why ? why : "");
         return -1;
     }
 
@@ -274,7 +345,7 @@ int gmail_auth_device_flow(Config *cfg) {
 
     if (!access) {
         free(refresh);
-        fprintf(stderr, "Error: Token response missing access_token.\n");
+        ui_error(ui, "Token response missing access_token");
         return -1;
     }
     free(access);  /* We only persist the refresh_token */
@@ -284,7 +355,6 @@ int gmail_auth_device_flow(Config *cfg) {
         cfg->gmail_refresh_token = refresh;
     }
 
-    fprintf(stderr, "  Authorization successful.\n\n");
     logger_log(LOG_INFO, "gmail_auth: authorization completed for %s",
                cfg->user ? cfg->user : "(unknown)");
     return 0;

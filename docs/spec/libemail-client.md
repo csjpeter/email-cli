@@ -60,7 +60,7 @@ All names start with `emc_`; everything else in the object is hidden.
 | `emc_list_names`, `emc_list_with_ids`, `emc_select`, `emc_select_ext`, `emc_search`, `emc_fetch_headers`, `emc_fetch_body`, `emc_fetch_flags`, `emc_fetch_flags_changedsince` | the full read interface (CONDSTORE/QRESYNC included) |
 | `emc_set_flag`, `emc_mark_junk`, `emc_mark_notjunk`, `emc_trash`, `emc_delete`, `emc_move_to_folder`, `emc_modify_label`, `emc_create_label`, `emc_delete_label`, `emc_create_folder`, `emc_delete_folder`, `emc_append` | changes on the server |
 | `emc_sync`, `emc_rebuild_indexes` | Gmail synchronisation into the local store |
-| `emc_gmail_authorize` | OAuth2 device flow; prints the code and URL on standard output |
+| `emc_gmail_authorize_with(&account, &auth, &token)` | OAuth2 authorization code with a loopback redirect (not the device flow, which excludes the Gmail scope); the URL goes to the `show_url` callback, the code comes by loopback listener or by the `read_redirect` callback (paste mode); prints nothing, starts no browser, the reason is in `auth.error`. `emc_gmail_authorize` is the old call, kept for the ABI, and only refuses |
 | `emc_log_open`, `emc_log_close` | the library's own log (the programs point it at their log file) |
 | `emc_take_security_notice` | the pending "revocation could not be checked" notice, if any |
 | `emc_close`, `emc_free_list`, `emc_strerror`, `emc_last_error`, `emc_version` | housekeeping |

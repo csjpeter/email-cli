@@ -30,6 +30,16 @@ sends a message and returns the outcome and the Message-ID in an
 .IR emc_send_result .
 IMAP accounts send through SMTP over TLS, Gmail accounts through the Gmail
 REST API.
+.B emc_gmail_authorize_with
+obtains the refresh token of a Gmail account (OAuth2 authorization code with a
+loopback redirect, or with the redirect address pasted back).  The library
+prints nothing and starts no browser: it passes the URL to the caller's
+.I show_url
+callback, and a reason for a failure is left in the
+.I error
+field of the
+.I emc_gmail_auth
+structure.
 .B emc_list_folders ,
 .B emc_list_messages
 and

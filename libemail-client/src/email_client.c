@@ -522,10 +522,18 @@ EMC_API emc_status emc_rebuild_indexes(const emc_account *a)
     return gmail_sync_rebuild_indexes() < 0 ? EMC_ERR_PROTOCOL : EMC_OK;
 }
 
-EMC_API emc_status emc_gmail_authorize(const emc_account *a, char **refresh_token)
+EMC_API emc_status emc_gmail_authorize_with(const emc_account *a, emc_gmail_auth *auth,
+                                            char **refresh_token)
 {
-    if (!a || !refresh_token) return EMC_ERR_ARGUMENT;
+    if (!a || !auth || !refresh_token) return EMC_ERR_ARGUMENT;
     *refresh_token = NULL;
+    auth->error[0] = '\0';
+    if (!auth->show_url || (auth->mode == EMC_GMAIL_AUTH_PASTE && !auth->read_redirect)) {
+        snprintf(auth->error, sizeof(auth->error),
+                 "the authorization needs show_url%s",
+                 auth->mode == EMC_GMAIL_AUTH_PASTE ? " and read_redirect" : "");
+        return EMC_ERR_ARGUMENT;
+    }
     Config cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.gmail_mode = 1;
@@ -533,10 +541,28 @@ EMC_API emc_status emc_gmail_authorize(const emc_account *a, char **refresh_toke
     cfg.gmail_client_id = (char *)a->gmail_client_id;
     cfg.gmail_client_secret = (char *)a->gmail_client_secret;
     cfg.ssl_no_verify = a->insecure_tls ? 1 : 0;
-    if (gmail_auth_device_flow(&cfg) != 0) return EMC_ERR_CONNECT;
+    GmailAuthUi ui;
+    memset(&ui, 0, sizeof(ui));
+    ui.paste = auth->mode == EMC_GMAIL_AUTH_PASTE;
+    ui.show_url = auth->show_url;
+    ui.read_redirect = auth->read_redirect;
+    ui.user = auth->user;
+    int rc = gmail_auth_authorize(&cfg, &ui);
+    snprintf(auth->error, sizeof(auth->error), "%s", ui.error);
+    if (rc != 0) return EMC_ERR_CONNECT;
     /* The flow wrote the token into cfg; the borrowed fields stay the caller's. */
     *refresh_token = cfg.gmail_refresh_token;
     return *refresh_token ? EMC_OK : EMC_ERR_PROTOCOL;
+}
+
+EMC_API emc_status emc_gmail_authorize(const emc_account *a, char **refresh_token)
+{
+    /* Kept for binary compatibility.  It used to print the URL and start a
+     * browser itself; the library does neither now, and without callbacks
+     * there is no way to show the URL, so it only refuses. */
+    if (!a || !refresh_token) return EMC_ERR_ARGUMENT;
+    *refresh_token = NULL;
+    return EMC_ERR_ARGUMENT;
 }
 
 static void to_compose(const emc_message *m, const char *from, ComposeParams *p)

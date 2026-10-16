@@ -376,11 +376,35 @@ static void help_send(void) {
  * password changes, and until this existed the only way back was to delete the
  * account and add it again — which also threw away its local store.
  *
+ * @param import  1 = take over a refresh token read from standard input
+ *                (obtained on another machine) instead of asking Google;
+ *                it is tested before it is saved.
  * @return 0 on success, RESULT_REPORTED when it failed for a reason already
  *         written to stderr.
  */
-static int config_reauth_gmail(Config *cfg) {
-    if (mail_gmail_authorize(cfg) != 0) {
+static int config_reauth_gmail(Config *cfg, GmailLoginMode mode, int import) {
+    if (import) {
+        char *old = cfg->gmail_refresh_token ? strdup(cfg->gmail_refresh_token) : NULL;
+        if (gmail_login_import_token(cfg, stdin) != 0) {
+            fprintf(stderr, "Error: expected one refresh token on standard input.\n");
+            free(old);
+            return RESULT_REPORTED;
+        }
+        if (email_service_check_credential(cfg) != 0) {
+            free(cfg->gmail_refresh_token);
+            cfg->gmail_refresh_token = old;
+            fprintf(stderr, "The token was not accepted — the account is unchanged.\n");
+            return RESULT_REPORTED;
+        }
+        free(old);
+        if (config_save_to_store(cfg) != 0) {
+            fprintf(stderr, "Error: the token works but could not be saved.\n");
+            return RESULT_REPORTED;
+        }
+        printf("Gmail authorization taken over.\n");
+        return 0;
+    }
+    if (gmail_login(cfg, mode, stdin) != 0) {
         fprintf(stderr, "Authorization was not completed — the account is unchanged.\n");
         return RESULT_REPORTED;
     }
@@ -404,6 +428,9 @@ static void help_config(void) {
         "  show      Print current configuration (passwords masked)\n"
         "  password  Change nothing but the password, then test it\n"
         "  reauth    Renew a Gmail account's authorization, then test it\n"
+        "              --no-browser    only show the URL (SSH-forward the printed port)\n"
+        "              --paste         no listener: paste the redirect address back\n"
+        "              --import-token  read a refresh token from stdin (made elsewhere)\n"
         "  imap      Interactively configure IMAP (incoming mail) settings\n"
         "  smtp      Interactively configure SMTP (outgoing mail) settings\n"
         "\n"
@@ -1204,7 +1231,7 @@ int main(int argc, char *argv[]) {
                        "Google, and changing the Google account password revokes\n"
                        "it. Renewing that authorization now — 'config reauth'\n"
                        "does exactly this.\n");
-                result = config_reauth_gmail(cfg);
+                result = config_reauth_gmail(cfg, GMAIL_LOGIN_BROWSER, 0);
             } else {
                 int rc = setup_wizard_password(cfg);
                 if (rc < 0) {
@@ -1232,7 +1259,19 @@ int main(int argc, char *argv[]) {
                         "Run 'email-cli config password' to change its password.\n");
                 result = RESULT_REPORTED;
             } else {
-                result = config_reauth_gmail(cfg);
+                GmailLoginMode lm = GMAIL_LOGIN_BROWSER;
+                int import = 0, bad_opt = 0;
+                for (int ai = cmd_idx + 2; ai < argc; ai++) {
+                    if (strcmp(argv[ai], "--paste") == 0) lm = GMAIL_LOGIN_PASTE;
+                    else if (strcmp(argv[ai], "--no-browser") == 0) lm = GMAIL_LOGIN_LOOPBACK;
+                    else if (strcmp(argv[ai], "--import-token") == 0) import = 1;
+                    else {
+                        fprintf(stderr, "Unknown option for 'config reauth': %s\n"
+                                        "Run 'email-cli help config'.\n", argv[ai]);
+                        bad_opt = 1;
+                    }
+                }
+                result = bad_opt ? RESULT_REPORTED : config_reauth_gmail(cfg, lm, import);
             }
 
         } else if (strcmp(subcmd, "imap") == 0) {

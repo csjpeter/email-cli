@@ -5,8 +5,10 @@
 #include "test_helpers.h"
 #include "gmail_auth.h"
 #include "config.h"
+#include "gmail_login.h"
 #include <fcntl.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -39,14 +41,14 @@ static void run_mock_token_server_expect(int port, const char *response,
  * reliably collectable (an earlier test may have changed SIGCHLD handling). */
 static int g_mock_report_fd = -1;
 
-/* The loopback redirect range gmail_auth_device_flow() picks a port from.
+/* The loopback redirect range gmail_auth_authorize() picks a port from.
  * Mirrors LOOPBACK_PORT_START/END in libemail/src/infrastructure/gmail_auth.c. */
 #define REDIRECT_PORT_FIRST 8089
 #define REDIRECT_PORT_LAST  8099
 
 /**
  * Stand in for the browser Google redirects: connect to the loopback listener
- * gmail_auth_device_flow() opened and deliver @p request.
+ * gmail_auth_authorize() opened and deliver @p request.
  *
  * The port is not known in advance — device_flow binds the first free one in
  * the range — so the range is scanned.  The scan is *retried* until it
@@ -94,6 +96,58 @@ static void redirect_child(const char *request, int deadline_ms) {
     _exit(1);
 }
 
+
+/* ── The authorization with the program's side stubbed ───────────────── */
+
+static char g_auth_url[2048];
+static int  g_auth_port;
+static int  g_auth_shown;
+static char g_auth_stderr[256];
+static GmailAuthUi g_auth_ui;
+static const char *g_auth_paste;
+
+static void stub_show_url(const char *url, int port, void *user) {
+    (void)user;
+    snprintf(g_auth_url, sizeof(g_auth_url), "%s", url);
+    g_auth_port = port;
+    g_auth_shown++;
+}
+
+static char *stub_read_redirect(void *user) {
+    (void)user;
+    return g_auth_paste ? strdup(g_auth_paste) : NULL;
+}
+
+/**
+ * gmail_auth_authorize() with stub callbacks and stderr captured: the library
+ * must print nothing (EMAIL-113), so g_auth_stderr stays empty and the reason
+ * is in g_auth_ui.error.
+ */
+static int authorize_run(Config *cfg, int paste, const char *pasted) {
+    memset(&g_auth_ui, 0, sizeof(g_auth_ui));
+    g_auth_ui.paste = paste;
+    g_auth_ui.show_url = stub_show_url;
+    g_auth_ui.read_redirect = stub_read_redirect;
+    g_auth_paste = pasted;
+    g_auth_shown = 0;
+    g_auth_url[0] = '\0';
+    int cap[2];
+    if (pipe(cap) != 0) return -2;
+    fcntl(cap[0], F_SETFL, O_NONBLOCK);
+    fflush(stderr);
+    int saved = dup(2);
+    dup2(cap[1], 2);
+    int rc = gmail_auth_authorize(cfg, &g_auth_ui);
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
+    close(cap[1]);
+    ssize_t got = read(cap[0], g_auth_stderr, sizeof(g_auth_stderr) - 1);
+    g_auth_stderr[got > 0 ? got : 0] = '\0';
+    close(cap[0]);
+    return rc;
+}
+
 /* ── gmail_auth_refresh — error paths (no network needed) ─────────── */
 
 static void test_refresh_no_token(void) {
@@ -115,7 +169,7 @@ static void test_refresh_empty_token(void) {
 
 static void test_auth_code_extraction(void) {
     /* Simulate the localhost listener + browser redirect that
-     * gmail_auth_device_flow uses internally. */
+     * gmail_auth_authorize uses internally. */
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     ASSERT(listen_fd >= 0, "auth_code: socket created");
     int opt = 1;
@@ -363,18 +417,17 @@ static void test_device_flow_no_credentials(void) {
     setenv("GMAIL_TEST_NO_CLIENT_ID", "1", 1);
 
     Config cfg = {0};
-    int saved = dup(2);
-    int dn = open("/dev/null", O_WRONLY);
-    if (dn >= 0) dup2(dn, 2);
     time_t t0 = time(NULL);
-    int rc = gmail_auth_device_flow(&cfg);
+    int rc = authorize_run(&cfg, 0, NULL);
     time_t elapsed = time(NULL) - t0;
-    if (dn >= 0) { dup2(saved, 2); close(dn); }
-    close(saved);
 
     unsetenv("GMAIL_TEST_NO_CLIENT_ID");
 
     ASSERT(rc == -1, "device_flow: no client_id returns -1");
+    ASSERT(strstr(g_auth_ui.error, "credentials are not configured") != NULL,
+           "no client_id: the reason is returned");
+    ASSERT(g_auth_shown == 0 && g_auth_stderr[0] == '\0',
+           "no client_id: nothing shown, nothing printed");
     /* The point of the branch is that it refuses *before* waiting for anyone:
      * a -1 that arrives after the accept timeout is not the same answer. */
     ASSERT(elapsed < 5, "device_flow: no client_id refuses without waiting");
@@ -393,14 +446,12 @@ static void test_device_flow_access_denied(void) {
         redirect_child("GET /callback?error=access_denied HTTP/1.1\r\n"
                        "Host: localhost\r\n\r\n", 5000);   /* never returns */
 
-    int saved = dup(2);
-    int dn = open("/dev/null", O_WRONLY);
-    if (dn >= 0) dup2(dn, 2);
-    int rc = gmail_auth_device_flow(&cfg);
-    if (dn >= 0) { dup2(saved, 2); close(dn); }
-    close(saved);
+    int rc = authorize_run(&cfg, 0, NULL);
 
     ASSERT(rc == -1, "device_flow: access_denied returns -1");
+    ASSERT(strstr(g_auth_ui.error, "access_denied") != NULL,
+           "access_denied: the reason is returned through the interface");
+    ASSERT(g_auth_stderr[0] == '\0', "access_denied: the library printed nothing");
 
     wait_child(pid);
 
@@ -578,7 +629,7 @@ static void test_refresh_via_mock_server_curl_error(void) {
 }
 
 static void test_device_flow_full_mock(void) {
-    /* Covers lines 287-305: successful token exchange in gmail_auth_device_flow.
+    /* Covers lines 287-305: successful token exchange in gmail_auth_authorize.
      * Child 1 simulates the browser redirect (code=xxx).
      * Child 2 is the mock token server that returns a valid access_token.
      * The function completes successfully → returns 0. */
@@ -608,14 +659,17 @@ static void test_device_flow_full_mock(void) {
         redirect_child("GET /callback?code=full_test_code&scope=x HTTP/1.1\r\n"
                        "Host: localhost\r\n\r\n", 5000);   /* never returns */
 
-    int saved = dup(2);
-    int dn = open("/dev/null", O_WRONLY);
-    if (dn >= 0) dup2(dn, 2);
-    int rc = gmail_auth_device_flow(&cfg);
-    if (dn >= 0) { dup2(saved, 2); close(dn); }
-    close(saved);
+    int rc = authorize_run(&cfg, 0, NULL);
 
     ASSERT(rc == 0, "device_flow full mock: returns 0 on success");
+    ASSERT(g_auth_shown == 1, "full mock: the URL was handed to the program once");
+    ASSERT(strstr(g_auth_url, "client_id=test-client-id.apps.googleusercontent.com") != NULL &&
+           strstr(g_auth_url, "scope=https%3A%2F%2Fmail.google.com%2F") != NULL &&
+           strstr(g_auth_url, "access_type=offline") != NULL,
+           "full mock: the URL carries client, scope and offline access");
+    ASSERT(g_auth_port >= REDIRECT_PORT_FIRST && g_auth_port <= REDIRECT_PORT_LAST,
+           "full mock: the listener port is reported");
+    ASSERT(g_auth_stderr[0] == '\0', "full mock: the library printed nothing");
     if (cfg.gmail_refresh_token)
         ASSERT(strcmp(cfg.gmail_refresh_token, "dev_flow_refresh") == 0,
                "device_flow full mock: refresh_token set");
@@ -633,7 +687,7 @@ static void test_device_flow_full_mock(void) {
 static void test_device_flow_with_code(void) {
     /* Child sends a real code= → wait_for_auth_code returns the code.
      * Covers wait_for_auth_code code-extraction path and the post-building
-     * step in gmail_auth_device_flow.  http_post to TOKEN_URL fails
+     * step in gmail_auth_authorize.  http_post to TOKEN_URL fails
      * (invalid credentials / no network) → returns -1. */
     Config cfg = {0};
     cfg.gmail_client_id     = strdup("test-client-id.apps.googleusercontent.com");
@@ -644,20 +698,161 @@ static void test_device_flow_with_code(void) {
         redirect_child("GET /callback?code=test_code_exchange&scope=x HTTP/1.1\r\n"
                        "Host: localhost\r\n\r\n", 5000);   /* never returns */
 
-    int saved = dup(2);
-    int dn = open("/dev/null", O_WRONLY);
-    if (dn >= 0) dup2(dn, 2);
-    int rc = gmail_auth_device_flow(&cfg);
-    if (dn >= 0) { dup2(saved, 2); close(dn); }
-    close(saved);
+    int rc = authorize_run(&cfg, 0, NULL);
 
     /* Token exchange fails with invalid test credentials → returns -1 */
     ASSERT(rc == -1, "device_flow: invalid credentials returns -1");
+    ASSERT(strstr(g_auth_ui.error, "Token exchange failed") != NULL,
+           "failed exchange: the reason is returned");
+    ASSERT(g_auth_stderr[0] == '\0', "failed exchange: the library printed nothing");
 
     wait_child(pid);
 
     free(cfg.gmail_client_id);
     free(cfg.gmail_client_secret);
+    free(cfg.gmail_refresh_token);
+}
+
+
+/* ── Paste mode and the shape of what is pasted (EMAIL-113) ──────────── */
+
+/**
+ * Paste mode against the mock token endpoint: @p pasted is what the person
+ * pastes, @p expect the form field the exchange must carry (NULL = the
+ * exchange must not happen).  Returns the authorization's result; the token
+ * lands in @p tok_out (heap) on success.
+ */
+static int paste_case(const char *pasted, const char *expect, char **tok_out,
+                      char *verdict, size_t vcap) {
+    const int mock_port = mock_listen();
+    const char *resp =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+        "{\"access_token\":\"a\",\"refresh_token\":\"pasted_refresh\"}";
+    const char *expects[] = { expect, "grant_type=authorization_code",
+                              "client_secret=test-client-secret", NULL };
+    int report[2];
+    if (pipe(report) != 0) return -2;
+    g_mock_report_fd = report[1];
+    pid_t srv = fork();
+    if (srv == 0) {
+        close(report[0]);
+        run_mock_token_server_expect(mock_port, resp, expects);
+    }
+    close(report[1]);
+    g_mock_report_fd = -1;
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
+    setenv("GMAIL_TEST_TOKEN_URL", url, 1);
+
+    Config cfg = {0};
+    cfg.gmail_client_id     = strdup("test-client-id.apps.googleusercontent.com");
+    cfg.gmail_client_secret = strdup("test-client-secret");
+    int rc = authorize_run(&cfg, 1, pasted);
+    *tok_out = cfg.gmail_refresh_token;
+    cfg.gmail_refresh_token = NULL;
+    free(cfg.gmail_client_id);
+    free(cfg.gmail_client_secret);
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+
+    if (rc != 0) kill(srv, SIGKILL);    /* no exchange happened: nothing to wait for */
+    ssize_t vn = read(report[0], verdict, vcap - 1);
+    verdict[vn > 0 ? vn : 0] = '\0';
+    close(report[0]);
+    kill(srv, SIGKILL);
+    wait_child(srv);
+    return rc;
+}
+
+static void test_paste_redirect_url(void) {
+    char *tok = NULL; char v[300];
+    int rc = paste_case("http://localhost:8089/callback?code=pasted_code&scope=x\n",
+                        "code=pasted_code", &tok, v, sizeof(v));
+    int tok_ok = tok && strcmp(tok, "pasted_refresh") == 0;
+    free(tok);
+    ASSERT(rc == 0, "paste: the pasted redirect address authorizes");
+    ASSERT(tok_ok, "paste: the refresh token comes back");
+    ASSERT(strcmp(v, "OK") == 0, v[0] ? v : "paste: the exchange carried the pasted code");
+    ASSERT(g_auth_shown == 1 && strstr(g_auth_url, "redirect_uri=http%3A%2F%2Flocalhost%3A8089") != NULL,
+           "paste: the URL was shown, with the fixed redirect port");
+    ASSERT(g_auth_port == 8089, "paste: the redirect port is reported");
+    ASSERT(g_auth_stderr[0] == '\0', "paste: the library printed nothing");
+}
+
+static void test_paste_bare_code_and_encoded_code(void) {
+    char *tok = NULL; char v[300];
+    int rc = paste_case("  4%2F0AbcDEF-xyz  \r\n", "code=4%2F0AbcDEF-xyz", &tok, v, sizeof(v));
+    free(tok);
+    ASSERT(rc == 0, "paste: a bare code (percent-encoded slash) authorizes");
+    ASSERT(strcmp(v, "OK") == 0, v[0] ? v : "paste: the code is decoded and re-encoded once");
+    rc = paste_case("?code=4/0Aplain&scope=x", "code=4%2F0Aplain", &tok, v, sizeof(v));
+    free(tok);
+    ASSERT(rc == 0 && strcmp(v, "OK") == 0, "paste: a query string alone works, slash encoded once");
+}
+
+static void test_paste_refusals(void) {
+    char *tok = NULL; char v[300];
+    int rc = paste_case("http://localhost:8089/callback?error=access_denied\n", "code=x",
+                        &tok, v, sizeof(v));
+    ASSERT(rc == -1 && tok == NULL, "paste: a denial fails");
+    ASSERT(strstr(g_auth_ui.error, "access_denied") != NULL, "paste: the denial is the reason");
+    rc = paste_case("this is not a code\n", "code=x", &tok, v, sizeof(v));
+    ASSERT(rc == -1, "paste: text with blanks is no code");
+    ASSERT(strstr(g_auth_ui.error, "No authorization code") != NULL, "paste: and says so");
+    rc = paste_case("http://localhost:8089/callback\n", "code=x", &tok, v, sizeof(v));
+    ASSERT(rc == -1, "paste: an address without a code is no code");
+    rc = paste_case(NULL, "code=x", &tok, v, sizeof(v));
+    ASSERT(rc == -1 && strstr(g_auth_ui.error, "No redirect") != NULL,
+           "paste: nothing pasted fails with its reason");
+    ASSERT(g_auth_stderr[0] == '\0', "paste refusals: the library printed nothing");
+}
+
+static void test_authorize_needs_callbacks(void) {
+    Config cfg = {0};
+    cfg.gmail_client_id     = strdup("id");
+    cfg.gmail_client_secret = strdup("secret");
+    GmailAuthUi ui;
+    memset(&ui, 0, sizeof(ui));
+    int r1 = gmail_auth_authorize(&cfg, &ui);               /* no show_url */
+    char e1[sizeof(ui.error)];
+    snprintf(e1, sizeof(e1), "%s", ui.error);
+    ui.show_url = stub_show_url;
+    ui.paste = 1;                                           /* paste, no reader */
+    int r2 = gmail_auth_authorize(&cfg, &ui);
+    free(cfg.gmail_client_id);
+    free(cfg.gmail_client_secret);
+    ASSERT(r1 == -1 && e1[0] != '\0', "no show_url: refused with a reason");
+    ASSERT(r2 == -1 && strstr(ui.error, "pasted redirect") != NULL,
+           "paste without read_redirect: refused with a reason");
+    ASSERT(gmail_auth_authorize(&cfg, NULL) == -1, "no ui: refused");
+}
+
+
+/* ── Taking over a refresh token made elsewhere (EMAIL-113) ─────────── */
+
+static int import_from(const char *text, Config *cfg) {
+    FILE *f = fmemopen((void *)text, strlen(text), "r");
+    if (!f) return -2;
+    int rc = gmail_login_import_token(cfg, f);
+    fclose(f);
+    return rc;
+}
+
+static void test_import_token(void) {
+    Config cfg = {0};
+    cfg.gmail_refresh_token = strdup("old");
+    int r1 = import_from("  1//0gNewToken-abc_DEF  \r\n", &cfg);
+    ASSERT(r1 == 0, "import: a token line is taken");
+    ASSERT(strcmp(cfg.gmail_refresh_token, "1//0gNewToken-abc_DEF") == 0,
+           "import: blanks around it are dropped, the old token replaced");
+    int r2 = import_from("two words\n", &cfg);
+    ASSERT(r2 == -1 && strcmp(cfg.gmail_refresh_token, "1//0gNewToken-abc_DEF") == 0,
+           "import: a line with blanks inside is refused and changes nothing");
+    int r3 = import_from("   \n", &cfg);
+    ASSERT(r3 == -1, "import: an empty line is refused");
+    int r4 = import_from("", &cfg);
+    ASSERT(r4 == -1, "import: end of input is refused");
+    ASSERT(strcmp(cfg.gmail_refresh_token, "1//0gNewToken-abc_DEF") == 0,
+           "import: the token survives every refusal");
     free(cfg.gmail_refresh_token);
 }
 
@@ -732,6 +927,11 @@ void test_gmail_auth(void) {
     RUN_TEST(test_auth_code_denied);
     RUN_TEST(test_wizard_rejects_gmail_imap);
     RUN_TEST(test_refresh_with_client_credentials);
+    RUN_TEST(test_import_token);
+    RUN_TEST(test_paste_redirect_url);
+    RUN_TEST(test_paste_bare_code_and_encoded_code);
+    RUN_TEST(test_paste_refusals);
+    RUN_TEST(test_authorize_needs_callbacks);
     RUN_TEST(test_device_flow_no_credentials);
     RUN_TEST(test_device_flow_access_denied);
     RUN_TEST(test_device_flow_with_code);

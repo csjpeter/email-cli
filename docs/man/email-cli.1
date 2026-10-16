@@ -80,6 +80,13 @@ changes nothing but the password and then tests it against the server;
 renews a Gmail account's OAuth2 authorization, which a change of the Google
 account password revokes.
 Each of the two points at the other when it is given the wrong account type.
+.B config reauth
+takes
+.BR \-\-no\-browser " (only show the URL; forward its port with " "ssh \-L" "),"
+.B \-\-paste
+(no listener: paste the address the browser was redirected to, or the code) and
+.B \-\-import\-token
+(read a refresh token made on another machine from standard input).
 .TP
 .B migrate\-credentials
 Re\-encrypt or decrypt stored passwords.

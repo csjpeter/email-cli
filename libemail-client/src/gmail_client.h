@@ -28,7 +28,7 @@ static inline void gmail_disconnect_ptr(GmailClient **p);
  *
  * Refreshes the OAuth2 access token from the stored refresh_token.
  * If the refresh token is invalid, returns NULL (caller should trigger
- * re-authorization via gmail_auth_device_flow).
+ * re-authorization via gmail_auth_authorize).
  *
  * @param cfg  Config with gmail_refresh_token set.
  * @return New client handle, or NULL on failure.

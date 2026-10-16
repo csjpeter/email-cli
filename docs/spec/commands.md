@@ -867,7 +867,21 @@ add it again, which also discarded its local store.
 
 The browser flow is the same as the one the first-run wizard uses: a loopback
 listener on ports 8089–8099, the authorization URL opened in the default
-browser, and the redirect carrying the code.
+browser (by the program, not the library), and the redirect carrying the code.
+
+Options for a machine without a browser (EMAIL-113):
+
+- `--no-browser`: only show the URL; the hint names the port, so an SSH
+  forward `ssh -L PORT:localhost:PORT <this-host>` run on the machine that has
+  the browser carries the redirect back to the listener.
+- `--paste`: no listener; the URL is shown, the person opens it anywhere and
+  pastes the address the browser ends up on (or just the code) at the prompt.
+- `--import-token`: read a refresh token made on another machine from standard
+  input (one line).  It is tested against Google first; a refused token leaves
+  the stored one untouched.
+
+Details of the flow, and why it is not the device flow: `docs/spec/gmail-api.md`,
+section 2.
 
 On an **IMAP account** it refuses and points at `config password`.
 

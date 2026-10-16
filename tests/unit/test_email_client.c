@@ -652,6 +652,21 @@ static void test_ec_new_functions_validate_arguments(void)
     ASSERT(emc_append(c, "Sent", NULL, 0) == EMC_ERR_ARGUMENT, "args: append");
     ASSERT(emc_rebuild_indexes(NULL) == EMC_ERR_ARGUMENT, "args: rebuild");
     ASSERT(emc_gmail_authorize(NULL, &out) == EMC_ERR_ARGUMENT, "args: authorize");
+    {
+        emc_account ga = {.user = "u@gmail.com", .gmail = 1};
+        emc_gmail_auth au = {0};
+        ASSERT(emc_gmail_authorize_with(NULL, &au, &out) == EMC_ERR_ARGUMENT, "args: authorize_with account");
+        ASSERT(emc_gmail_authorize_with(&ga, NULL, &out) == EMC_ERR_ARGUMENT, "args: authorize_with auth");
+        ASSERT(emc_gmail_authorize_with(&ga, &au, &out) == EMC_ERR_ARGUMENT && out == NULL &&
+               au.error[0] != '\0', "authorize_with: no show_url is refused, with a reason");
+        au.mode = EMC_GMAIL_AUTH_PASTE;
+        au.show_url = (void (*)(const char *, int, void *))abort;
+        ASSERT(emc_gmail_authorize_with(&ga, &au, &out) == EMC_ERR_ARGUMENT &&
+               strstr(au.error, "read_redirect") != NULL,
+               "authorize_with: paste mode without read_redirect is refused");
+        ASSERT(emc_gmail_authorize(&ga, &out) == EMC_ERR_ARGUMENT && out == NULL,
+               "the old call without callbacks only refuses");
+    }
     ASSERT(emc_compose(NULL, &out, (size_t *)&n) == EMC_ERR_ARGUMENT, "args: compose");
     ASSERT(emc_send_wire(c, "", "x@example.org", "m", 1, NULL) == EMC_ERR_ARGUMENT,
            "args: send_wire from");

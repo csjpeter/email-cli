@@ -6508,6 +6508,147 @@ check "102.2 testenv guards: no failure reported" "0 failed" "$OUT102"
 
 fi
 
+if phase_wanted 113; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 113 — Gmail authorization without a browser on the machine (EMAIL-113)
+# ════════════════════════════════════════════════════════════════════════════
+# The library prints nothing and starts no browser; the program does.  Headless:
+# paste mode (no listener), the loopback listener reached the way an SSH
+# forward would reach it, and a refresh token taken over from another machine.
+echo ""
+echo "--- Phase 113: config reauth --paste / --no-browser / --import-token (EMAIL-113) ---"
+alloc_port GMAIL113_PORT
+GMAIL113_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_113.log"
+(MOCK_GMAIL_PORT=$GMAIL113_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="f113@gmail.com" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL113_LOG" 2>&1 &
+GMAIL113_PID=$!
+sleep 1
+
+H_F113="./build/tests/functional/work-$$/homes/f113-$$"
+case "$H_F113" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F113 path" >&2; exit 1 ;; esac
+rm -rf "./build/tests/functional/work-$$/homes/f113-$$"
+mkdir -p "$H_F113/.config/email-cli/accounts/f113@gmail.com" "$H_F113/bin"
+cat > "$H_F113/.config/email-cli/settings.ini" <<'SETTINGS'
+credential_obfuscation=false
+SETTINGS
+F113_INI="$H_F113/.config/email-cli/accounts/f113@gmail.com/config.ini"
+f113_reset() {
+    cat > "$F113_INI" <<'CONFIG'
+EMAIL_USER=f113@gmail.com
+GMAIL_MODE=1
+GMAIL_CLIENT_ID=f113.apps.googleusercontent.com
+GMAIL_CLIENT_SECRET=f113-secret
+GMAIL_REFRESH_TOKEN=revoked-token
+CONFIG
+    chmod 0600 "$F113_INI"
+}
+# a fake xdg-open that leaves a mark, to see whether a browser was started
+cat > "$H_F113/bin/xdg-open" <<'FAKE'
+#!/bin/sh
+echo "$1" > "$(dirname "$0")/browser-started"
+FAKE
+chmod +x "$H_F113/bin/xdg-open"
+
+# f113 <input> <args...>: config reauth with the mock token endpoint
+f113() {
+    local input="$1"; shift
+    (export HOME="$H_F113"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     export PATH="$H_F113/bin:$PATH"
+     export GMAIL_TEST_TOKEN_URL="http://127.0.0.1:$GMAIL113_PORT/token"
+     export GMAIL_TEST_TOKEN=f113access
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL113_PORT/gmail/v1/users/me"
+     printf '%b' "$input" | "$BIN_DIR/email-cli" config reauth "$@" 2>&1
+     echo "exit-code=$?")
+}
+
+f113_reset
+OUT113=$(f113 'http://localhost:8089/callback?code=good&scope=x\n' --paste)
+check "113.1 paste: the URL is shown for another machine" "Open this address in a browser" "$OUT113"
+check "113.2 paste: names the redirect address to copy"   "http://localhost:8089/callback?code=" "$OUT113"
+check "113.3 paste: the pasted address authorizes"        "Authorization successful"           "$OUT113"
+check "113.4 paste: and the account is renewed"           "Gmail authorization renewed"        "$OUT113"
+check "113.5 paste: the new token is stored"              "GMAIL_REFRESH_TOKEN=mock-refresh"   "$(cat "$F113_INI")"
+check "113.6 paste: exit status 0"                        "exit-code=0"                        "$OUT113"
+[ ! -e "$H_F113/bin/browser-started" ] && ok113=1 || ok113=0
+check "113.7 paste: no browser is started" "1" "$ok113"
+
+f113_reset
+OUT113=$(f113 'http://localhost:8089/callback?error=access_denied\n' --paste)
+check "113.8 a denial is reported"           "Authorization denied: access_denied" "$OUT113"
+check "113.9 and the command fails"          "exit-code=1"                         "$OUT113"
+check "113.10 the old token survives"        "GMAIL_REFRESH_TOKEN=revoked-token"   "$(cat "$F113_INI")"
+
+OUT113=$(f113 'http://localhost:8089/callback?code=bad\n' --paste)
+check "113.11 Google refusing the code is reported" "Token exchange failed (HTTP 400)" "$OUT113"
+OUT113=$(f113 '' --paste)
+check "113.12 nothing pasted is reported"    "No redirect address was given"       "$OUT113"
+OUT113=$(f113 'two words\n' --paste)
+check "113.13 text that is no code is said"  "No authorization code"                "$OUT113"
+check "113.14 the old token survives them all" "GMAIL_REFRESH_TOKEN=revoked-token" "$(cat "$F113_INI")"
+
+# A token made on another machine is taken over, after it was tested.
+OUT113=$(f113 'imported-token-xyz\n' --import-token)
+check "113.15 import: taken over"            "Gmail authorization taken over"      "$OUT113"
+check "113.16 import: stored"                "GMAIL_REFRESH_TOKEN=imported-token-xyz" "$(cat "$F113_INI")"
+OUT113=$(f113 'two words\n' --import-token)
+check "113.17 import: a line with blanks is refused" "expected one refresh token"  "$OUT113"
+check "113.18 import: the stored token is unchanged" "GMAIL_REFRESH_TOKEN=imported-token-xyz" "$(cat "$F113_INI")"
+
+OUT113=$(f113 '' --frobnicate)
+check "113.19 an unknown option is refused"  "Unknown option for 'config reauth'"  "$OUT113"
+
+# Loopback without a browser: the listener is reached the way an SSH forward
+# would reach it -- a connection to 127.0.0.1:<port> carrying the redirect.
+f113_reset
+F113_OUT="$H_F113/loopback.out"
+(export HOME="$H_F113"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+ export PATH="$H_F113/bin:$PATH"
+ export GMAIL_TEST_TOKEN_URL="http://127.0.0.1:$GMAIL113_PORT/token"
+ export GMAIL_TEST_TOKEN=f113access
+ export GMAIL_API_BASE_URL="http://localhost:$GMAIL113_PORT/gmail/v1/users/me"
+ "$BIN_DIR/email-cli" config reauth --no-browser </dev/null >"$F113_OUT" 2>&1) &
+F113_PID=$!
+for _ in $(seq 1 50); do grep -q "Waiting for authorization" "$F113_OUT" && break; sleep 0.2; done
+F113_FWD_PORT=$(sed -n 's/.*ssh -L \([0-9]*\):localhost.*/\1/p' "$F113_OUT" | head -1)
+exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
+printf 'GET /callback?code=good&scope=x HTTP/1.1\r\nHost: localhost\r\n\r\n' >&7
+IFS= read -r -t 10 F113_REPLY <&7
+exec 7<&-
+wait "$F113_PID"; F113_RC=$?
+OUT113=$(cat "$F113_OUT")
+check "113.20 loopback: the URL is shown"            "accounts.google.com/o/oauth2/v2/auth" "$OUT113"
+check "113.21 loopback: the SSH forward is documented" "ssh -L ${F113_FWD_PORT}:localhost:${F113_FWD_PORT}" "$OUT113"
+check "113.22 loopback: the redirect authorizes"     "Gmail authorization renewed"          "$OUT113"
+check "113.23 loopback: exit status 0"               "rc=0"                                 "rc=$F113_RC"
+check "113.24 loopback: the browser was answered"    "HTTP/1.1 200 OK"                      "$F113_REPLY"
+[ ! -e "$H_F113/bin/browser-started" ] && ok113=1 || ok113=0
+check "113.25 --no-browser starts no browser"        "1"                                    "$ok113"
+check "113.26 loopback: the new token is stored"     "GMAIL_REFRESH_TOKEN=mock-refresh"     "$(cat "$F113_INI")"
+
+# The default mode starts the browser -- the program does, not the library.
+f113_reset
+F113_OUT="$H_F113/browser.out"
+(export HOME="$H_F113"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+ export PATH="$H_F113/bin:$PATH"
+ export GMAIL_TEST_TOKEN_URL="http://127.0.0.1:$GMAIL113_PORT/token"
+ export GMAIL_TEST_TOKEN=f113access
+ export GMAIL_API_BASE_URL="http://localhost:$GMAIL113_PORT/gmail/v1/users/me"
+ "$BIN_DIR/email-cli" config reauth </dev/null >"$F113_OUT" 2>&1) &
+F113_PID=$!
+for _ in $(seq 1 50); do [ -e "$H_F113/bin/browser-started" ] && break; sleep 0.2; done
+F113_FWD_PORT=$(sed -n 's/.*ssh -L \([0-9]*\):localhost.*/\1/p' "$F113_OUT" | head -1)
+exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
+printf 'GET /callback?code=good HTTP/1.1\r\n\r\n' >&7
+IFS= read -r -t 10 F113_REPLY <&7
+exec 7<&-
+wait "$F113_PID"; F113_RC=$?
+check "113.27 the default mode starts the browser with the URL" "accounts.google.com/o/oauth2/v2/auth" \
+      "$(cat "$H_F113/bin/browser-started")"
+check "113.28 and the redirect authorizes" "rc=0" "rc=$F113_RC"
+kill "$GMAIL113_PID"
+
+fi
+
 if phase_wanted 96; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)

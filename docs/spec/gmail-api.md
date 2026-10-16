@@ -44,31 +44,51 @@ Gmail accounts still store `EMAIL_USER=user@gmail.com` for display purposes.
 
 ## 2. OAuth2 Authentication
 
-### Device Authorization Grant (RFC 8628)
+### Authorization Code Grant, loopback redirect (RFC 8252)
 
-Used because email-cli is a CLI/TUI application without a guaranteed browser
-redirect capability.
+The flow is the "installed application" one, not the device flow (RFC 8628).
+**Google's device flow does not admit the Gmail scope** (EMAIL-113; checked
+against Google's *OAuth 2.0 for TV and Limited-Input Device Applications*
+page, 2026-10-16): it is supported only for `openid`, `email`, `profile`, the
+Drive scopes `drive.appdata` and `drive.file`, and the YouTube scopes
+`youtube` and `youtube.readonly`.  `https://mail.google.com/` is not among
+them, so a device-flow client cannot obtain a Gmail token.
 
-**Flow:**
+The consent stays interactive -- a person opens the URL and agrees -- but the
+refresh token that results works without a person (`email-sync` from cron).
 
-1. POST `https://oauth2.googleapis.com/device/code`
-   - Parameters: `client_id`, `scope=https://www.googleapis.com/auth/gmail`
-   - Response: `device_code`, `user_code`, `verification_url`, `expires_in`, `interval`
+**Flow** (`gmail_auth_authorize()`, `emc_gmail_authorize_with()`):
 
-2. Display to user:
-   ```
-   Go to: https://accounts.google.com/device
-   Enter code: XXXX-XXXX
-   (Waiting for authorization... ^C to cancel)
-   ```
-
-3. Poll `https://oauth2.googleapis.com/token` every `interval` seconds:
-   - Parameters: `grant_type=urn:ietf:params:oauth:grant-type:device_code`,
-     `client_id`, `device_code`
-   - Until: `access_token` + `refresh_token` returned, or `expires_in` exceeded
-
+1. Build `https://accounts.google.com/o/oauth2/v2/auth?client_id=...&redirect_uri=http://localhost:PORT/callback&response_type=code&scope=https://mail.google.com/&access_type=offline&prompt=consent`
+   and hand it to the program through the `show_url` callback.  **The library
+   prints nothing and starts no browser**; the program shows the URL and, if it
+   wants, opens a browser (`email-cli` starts `xdg-open`).
+2. Receive the code, one of two ways:
+   - **loopback** (default): the library listens on `127.0.0.1`, ports
+     8089-8099, for Google's redirect and answers the browser with a short page.
+   - **paste**: no listener.  The person opens the URL on any machine, agrees,
+     and the browser is sent to `http://localhost:8089/callback?code=...`, which
+     fails to load on that machine; they copy that address (or only the code)
+     and the program's `read_redirect` callback returns it.  The pasted text may
+     be the whole address, its query string, or the bare code; a percent-encoded
+     code is decoded.  A `error=access_denied` redirect is reported as the
+     reason.
+3. POST `https://oauth2.googleapis.com/token` with `grant_type=authorization_code`,
+   the code, the client id and secret and the same `redirect_uri`.
 4. Store `refresh_token` in `config.ini` (persisted, mode 0600).
    `access_token` is held in memory only (expires in ~3600s).
+
+Errors are returned to the program as text (`emc_gmail_auth.error`); the
+library writes nothing to the terminal.
+
+**Headless use** (`email-cli config reauth`):
+
+| Situation | Command |
+|---|---|
+| Browser on this machine | `email-cli config reauth` |
+| Another machine has the browser, with an SSH forward | on that machine `ssh -L 8089:localhost:8089 user@this-host`, then on this host `email-cli config reauth --no-browser` and open the printed URL there (the port printed in the hint is the one to forward) |
+| No forward, copy the address back | `email-cli config reauth --paste` |
+| The token was made on another machine | `email-cli config reauth --import-token < token-file` (one line on standard input; it is tested against Google before it is saved, and the old token stays if it is refused) |
 
 ### Token Refresh (automatic)
 
@@ -489,15 +509,16 @@ Choice [1]:
 Email address: user@gmail.com
 ```
 
-### Step 3 (Gmail): OAuth2 Device Flow
+### Step 3 (Gmail): OAuth2 authorization
 
 ```
 Opening Gmail authorization...
-  Go to: https://accounts.google.com/device
-  Enter code: XXXX-XXXX
-  (Waiting for authorization... ^C to cancel)
+  Opening browser for Gmail authorization...
+  If the browser doesn't open, visit this URL manually:
+  https://accounts.google.com/o/oauth2/v2/auth?...
+  Waiting for authorization... (^C to cancel)
 
-✓ Authorization successful. Configuration saved.
+  Authorization successful.
 ```
 
 On success:
@@ -694,8 +715,8 @@ No SMTP configuration is stored or needed for Gmail accounts.
 |-------|----------|
 | `invalid_grant` (expired/revoked refresh token) | Report it on stderr, naming the account, that a Google password change revokes it, and `email-cli config reauth`.  The flow is **not** started automatically — see §11, Reauthorization |
 | `invalid_client` | Display: `"OAuth2 client credentials are invalid. Check GMAIL_CLIENT_ID/SECRET in config.ini."` plus a pointer to `email-cli help gmail` |
-| Network error during device flow poll | Retry silently up to `expires_in` timeout; then display: `"Authorization timed out."` |
-| User cancels (^C during device flow) | Return to account setup; no partial config saved |
+| No redirect within 5 minutes (loopback) | `Did not receive the authorization code (timed out)` |
+| User cancels (^C during the authorization) | Return to account setup; no partial config saved |
 
 ### API Request Errors
 

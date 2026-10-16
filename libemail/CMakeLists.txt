@@ -28,6 +28,7 @@ add_library(libemail STATIC
     src/core/compose_draft.c
     src/core/path_complete.c
     src/infrastructure/config_store.c
+    src/infrastructure/gmail_login.c
     src/infrastructure/setup_wizard.c
     src/infrastructure/local_store.c
     src/infrastructure/when_expr.c

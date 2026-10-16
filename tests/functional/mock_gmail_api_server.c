@@ -564,6 +564,27 @@ static void handle_connection(int fd) {
 
     printf("Mock Gmail: %s %s\n", method, path);
 
+    /* The OAuth2 token endpoint (EMAIL-113): POST /token exchanges the
+     * authorization code.  Only code=good is accepted, as Google would
+     * refuse an unknown one. */
+    if (strncmp(path, "/token", 6) == 0) {
+        if (strstr(buf, "grant_type=authorization_code") && strstr(buf, "code=good")) {
+            send_json(fd, "{\"access_token\":\"mock-access\","
+                          "\"refresh_token\":\"mock-refresh\","
+                          "\"token_type\":\"Bearer\",\"expires_in\":3600}");
+        } else {
+            const char *body = "{\"error\":\"invalid_grant\","
+                               "\"error_description\":\"Bad Request\"}";
+            char resp[512];
+            snprintf(resp, sizeof(resp),
+                     "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n"
+                     "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                     strlen(body), body);
+            ssize_t r = write(fd, resp, strlen(resp)); (void)r;
+        }
+        return;
+    }
+
     /* Route by path prefix */
     /* /gmail/v1/users/me/profile */
     if (strstr(path, "/profile")) {

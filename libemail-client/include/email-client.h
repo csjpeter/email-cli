@@ -289,12 +289,53 @@ emc_status emc_sync(emc_client *client, int full);
 /** @brief Rebuild the label indexes of the local store of the account. */
 emc_status emc_rebuild_indexes(const emc_account *account);
 
+/** How emc_gmail_authorize_with() receives the redirect. */
+enum {
+    EMC_GMAIL_AUTH_LOOPBACK = 0,  /**< listen on 127.0.0.1, ports 8089-8099 */
+    EMC_GMAIL_AUTH_PASTE    = 1   /**< no listener: the person pastes the redirect */
+};
+
 /**
- * @brief Authorize a Gmail account with the OAuth2 device flow (RFC 8628).
+ * What the program supplies to an authorization.  The library prints nothing
+ * and starts no browser: it hands the URL to @c show_url and the program shows
+ * it, opens a browser, or sends it to another machine.
+ */
+typedef struct emc_gmail_auth {
+    int   mode;           /**< EMC_GMAIL_AUTH_LOOPBACK or EMC_GMAIL_AUTH_PASTE */
+    /** Show @p url (required).  @p port is the redirect port: in loopback mode
+     *  the one the library listens on, which an SSH forward must carry. */
+    void (*show_url)(const char *url, int port, void *user);
+    /** Paste mode (required there): return what the person pasted -- the
+     *  address the browser was redirected to, its query string, or the bare
+     *  code -- as a malloc()ed string, or NULL when nothing was given. */
+    char *(*read_redirect)(void *user);
+    void *user;           /**< handed back to the callbacks */
+    char  error[512];     /**< out: why it failed; empty on success */
+} emc_gmail_auth;
+
+/**
+ * @brief Authorize a Gmail account (OAuth2 authorization code, loopback
+ *        redirect, RFC 8252).
  *
- * Interactive: it prints the verification URL and code on standard output
- * and waits until the user has authorized.
+ * The consent is interactive -- a person opens the URL and agrees -- but it
+ * need not happen on this machine: in loopback mode an SSH forward of the
+ * redirect port (`ssh -L PORT:localhost:PORT host`) carries the browser's
+ * redirect to the listener, and in paste mode the person copies the address
+ * the browser ends up on.  Afterwards the refresh token works without a
+ * person.  (It is not the device flow of RFC 8628: Google's device flow does
+ * not admit the Gmail scope.)
+ *
  * @param refresh_token  Receives the new refresh token; release with free().
+ * @return EMC_OK; EMC_ERR_ARGUMENT for missing callbacks; EMC_ERR_CONNECT when
+ *         the person denied it, nothing arrived or Google refused the code
+ *         (the reason is in @p auth->error).
+ */
+emc_status emc_gmail_authorize_with(const emc_account *account, emc_gmail_auth *auth,
+                                    char **refresh_token);
+
+/**
+ * @brief Deprecated: kept for binary compatibility, it always returns
+ *        EMC_ERR_ARGUMENT.  Use emc_gmail_authorize_with().
  */
 emc_status emc_gmail_authorize(const emc_account *account, char **refresh_token);
 

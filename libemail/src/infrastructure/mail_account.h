@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include "config.h"
 #include "email-client.h"
+#include "gmail_login.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -98,19 +99,13 @@ static inline int mail_send_wire(const Config *cfg, const char *from,
 }
 
 /**
- * @brief Authorize a Gmail account with the device flow and store the new
- *        refresh token in @p cfg.
+ * @brief Authorize a Gmail account (browser, loopback redirect) and store the
+ *        new refresh token in @p cfg.  See gmail_login.h for the other ways.
  * @return 0 on success, -1 on failure or when the user gave up.
  */
 static inline int mail_gmail_authorize(Config *cfg)
 {
-    emc_account a;
-    char *token = NULL;
-    mail_account_from_config(cfg, &a);
-    if (emc_gmail_authorize(&a, &token) != EMC_OK) return -1;
-    free(cfg->gmail_refresh_token);
-    cfg->gmail_refresh_token = token;
-    return 0;
+    return gmail_login(cfg, GMAIL_LOGIN_BROWSER, stdin);
 }
 
 #endif /* MAIL_ACCOUNT_H */

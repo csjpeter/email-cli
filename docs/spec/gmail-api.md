@@ -290,6 +290,12 @@ zero-padded strings at the `mail_client` boundary.
 
 Each `.idx` file contains one UID per line, sorted in ascending order.
 
+Every sync (full reconcile and incremental) reads the label list of the account
+and creates an **empty** `.idx` file for each user label that has none, so a
+label that exists on the server but carries no message yet is listed by the
+label browser (EMAIL-104).  System labels (upper case ids) are not created
+this way.
+
 **Record format:** 16-character UID + newline = **17 bytes per record** (fixed).
 
 **Binary search:** For a file with N records:

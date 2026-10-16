@@ -155,9 +155,11 @@ static void restart_gmail(void) {
     if (!g_gmail_bin[0]) return;
     setenv("MOCK_GMAIL_COUNT", "5", 1);
     setenv("MOCK_GMAIL_EMAIL", GMAIL_USER, 1);
+    setenv("MOCK_GMAIL_NO_USER_LABELS", "1", 1);   /* the recorded pictures list system labels only */
     g_gmail_pid = test_spawn_mock(g_gmail_bin, "MOCK_GMAIL", 0, &g_gmail_port);
     unsetenv("MOCK_GMAIL_COUNT");
     unsetenv("MOCK_GMAIL_EMAIL");
+    unsetenv("MOCK_GMAIL_NO_USER_LABELS");
     char url[128];
     snprintf(url, sizeof(url), "http://localhost:%d/gmail/v1/users/me", g_gmail_port);
     setenv("GMAIL_API_BASE_URL", url, 1);

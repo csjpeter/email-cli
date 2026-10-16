@@ -740,7 +740,8 @@ static void run_reconcile_server(int lfd, int count) {
             gs_send_json(cfd, 200,
                 "{\"labels\":["
                 "{\"id\":\"INBOX\",\"name\":\"INBOX\"},"
-                "{\"id\":\"UNREAD\",\"name\":\"UNREAD\"}"
+                "{\"id\":\"UNREAD\",\"name\":\"UNREAD\"},"
+                "{\"id\":\"Label_7\",\"name\":\"Projects\"}"
                 "]}");
         } else if (strstr(path, "/profile")) {
             gs_send_json(cfd, 200,
@@ -788,6 +789,18 @@ static void test_reconcile_success(void) {
 
     ASSERT(queued == 2, "reconcile: 2 messages queued");
     ASSERT(pending_cnt == 2, "reconcile: pending_fetch count == 2");
+
+    /* EMAIL-104: a user label that carries no message is listed too */
+    char **labels = NULL;
+    int nlabels = 0, found = 0;
+    label_idx_list(&labels, &nlabels);
+    for (int i = 0; i < nlabels; i++) {
+        if (strcmp(labels[i], "Label_7") == 0) found = 1;
+        free(labels[i]);
+    }
+    free(labels);
+    ASSERT(found, "reconcile: an empty user label (Label_7) has an index and is listed");
+    ASSERT(label_idx_count("Label_7") == 0, "reconcile: and it is empty");
 }
 
 static void test_reconcile_with_cached_messages(void) {
@@ -1250,7 +1263,8 @@ static void run_incremental_server(int lfd, int count) {
                 "{\"labels\":["
                 "{\"id\":\"INBOX\",\"name\":\"INBOX\"},"
                 "{\"id\":\"STARRED\",\"name\":\"STARRED\"},"
-                "{\"id\":\"UNREAD\",\"name\":\"UNREAD\"}"
+                "{\"id\":\"UNREAD\",\"name\":\"UNREAD\"},"
+                "{\"id\":\"Label_9\",\"name\":\"Created on server\"}"
                 "]}");
         } else if (strstr(path, "/profile")) {
             gs_send_json(cfd, 200,
@@ -1317,6 +1331,17 @@ static void test_incremental_with_history(void) {
         free(hid);
     }
     ASSERT(msg_ok, "incremental: added message saved");
+
+    /* EMAIL-104: a label created on the server shows up with no message in it */
+    char **labels = NULL;
+    int nlabels = 0, found = 0;
+    label_idx_list(&labels, &nlabels);
+    for (int i = 0; i < nlabels; i++) {
+        if (strcmp(labels[i], "Label_9") == 0) found = 1;
+        free(labels[i]);
+    }
+    free(labels);
+    ASSERT(found, "incremental: a label created on the server is listed with no message");
 }
 
 static void test_incremental_history_expired(void) {

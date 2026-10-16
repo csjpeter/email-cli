@@ -441,6 +441,8 @@ static int store_fetched_message(GmailClient *gc, const char *uid,
  * Returns the number of UIDs added to the pending-fetch queue, or -1 on
  * a fatal error (e.g. the server cannot be reached).
  */
+static void ensure_user_label_indexes(char **ids, int count);
+
 int gmail_sync_reconcile(GmailClient *gc) {
     logger_log(LOG_INFO, "gmail_sync: reconcile — listing server messages");
 
@@ -509,6 +511,7 @@ int gmail_sync_reconcile(GmailClient *gc) {
         int lbl_count = 0;
         if (gmail_list_labels(gc, &lbl_names, &lbl_ids, &lbl_count) == 0) {
             local_gmail_label_names_save(lbl_ids, lbl_names, lbl_count);
+            ensure_user_label_indexes(lbl_ids, lbl_count);
             for (int i = 0; i < lbl_count; i++) { free(lbl_names[i]); free(lbl_ids[i]); }
             free(lbl_names); free(lbl_ids);
         }
@@ -936,12 +939,14 @@ int gmail_sync_incremental(GmailClient *gc) {
 
     free(resp);
 
-    /* Refresh label name mapping if any label events occurred */
-    if (hc.label_changes > 0) {
+    /* Refresh the label list on every pass: creating a label on the server
+     * leaves no trace in the history, and an empty one must show up too. */
+    {
         char **lbl_names = NULL, **lbl_ids = NULL;
         int lbl_count = 0;
         if (gmail_list_labels(gc, &lbl_names, &lbl_ids, &lbl_count) == 0) {
             local_gmail_label_names_save(lbl_ids, lbl_names, lbl_count);
+            ensure_user_label_indexes(lbl_ids, lbl_count);
             for (int i = 0; i < lbl_count; i++) { free(lbl_names[i]); free(lbl_ids[i]); }
             free(lbl_names);
             free(lbl_ids);
@@ -1012,6 +1017,16 @@ static int is_system_label_id(const char *s) {
         if (!((*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_'))
             return 0;
     return 1;
+}
+
+/* Every user label of the account gets an index file, so that a label with no
+ * synced message yet is listed too (EMAIL-104).  System labels (INBOX, SENT,
+ * CATEGORY_*, ...) are all upper case; user labels are not. */
+static void ensure_user_label_indexes(char **ids, int count)
+{
+    for (int i = 0; i < count; i++)
+        if (ids[i] && ids[i][0] && ids[i][0] != '_' && !is_system_label_id(ids[i]))
+            label_idx_ensure(ids[i]);
 }
 
 /**

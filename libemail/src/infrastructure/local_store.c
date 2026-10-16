@@ -1565,6 +1565,15 @@ int label_idx_write(const char *label, const char (*uids)[17], int count) {
     return 0;
 }
 
+int label_idx_ensure(const char *label) {
+    if (!label || !label[0]) return -1;
+    if (ensure_label_dir(label) != 0) return -1;
+    RAII_STRING char *path = label_idx_path(label);
+    if (!path) return -1;
+    RAII_FILE FILE *fp = fopen(path, "a");     /* creates, never truncates */
+    return fp ? 0 : -1;
+}
+
 char *local_hdr_get_labels(const char *folder, const char *uid) {
     char *hdr = local_hdr_load(folder, uid);
     if (!hdr) return NULL;

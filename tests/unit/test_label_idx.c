@@ -194,6 +194,32 @@ static void test_label_idx_list(void) {
            "label_idx_list: all labels found");
 }
 
+static void test_label_idx_ensure(void) {
+    char url[256];
+    snprintf(url, sizeof(url), "imaps://labelidx-ensure-%d.example.com", getpid());
+    local_store_init(url, NULL);
+
+    ASSERT(label_idx_ensure(NULL) == -1, "ensure: NULL label is refused");
+    ASSERT(label_idx_ensure("") == -1, "ensure: empty label is refused");
+    ASSERT(label_idx_ensure("Label_1") == 0, "ensure: creates the index");
+    ASSERT(label_idx_count("Label_1") == 0, "ensure: the new index is empty");
+
+    char **labels = NULL;
+    int count = 0;
+    label_idx_list(&labels, &count);
+    int found = 0;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(labels[i], "Label_1") == 0) found = 1;
+        free(labels[i]);
+    }
+    free(labels);
+    ASSERT(found, "ensure: the empty label is listed");
+
+    label_idx_add("Label_2", "0000000000000009");
+    ASSERT(label_idx_ensure("Label_2") == 0, "ensure: on an existing index succeeds");
+    ASSERT(label_idx_count("Label_2") == 1, "ensure: and keeps its entries");
+}
+
 /* ── local_hdr_get_labels tests (#26) ─────────────────────────────── */
 
 static void test_hdr_get_labels_normal(void) {
@@ -716,6 +742,7 @@ void test_label_idx(void) {
     RUN_TEST(test_label_idx_hex_uids);
     RUN_TEST(test_gmail_history_id);
     RUN_TEST(test_label_idx_list);
+    RUN_TEST(test_label_idx_ensure);
     RUN_TEST(test_hdr_get_labels_normal);
     RUN_TEST(test_hdr_get_labels_missing);
     RUN_TEST(test_hdr_get_labels_empty);

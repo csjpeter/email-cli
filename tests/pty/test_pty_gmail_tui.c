@@ -555,6 +555,16 @@ static void test_label_browser_search_runs(void) {
     pty_close(s);
 }
 
+/** EMAIL-104: a label that exists on the server but carries no message is
+ *  listed by the label browser after a sync. */
+static void test_label_browser_lists_a_label_without_messages(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label browser: reaches the label list");
+    ASSERT_SCREEN_CONTAINS(s, "Empty Label");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 static void test_label_browser_create_label_prompt(void) {
     PtySession *s = open_label_browser();
     ASSERT(s != NULL, "label browser: reaches the label list");
@@ -1927,6 +1937,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_d_key_row_stays_visible);
     RUN_TEST(test_label_browser_search_prompt_and_scopes);
     RUN_TEST(test_label_browser_search_runs);
+    RUN_TEST(test_label_browser_lists_a_label_without_messages);
     RUN_TEST(test_label_browser_create_label_prompt);
     RUN_TEST(test_label_browser_create_label_confirmed);
 

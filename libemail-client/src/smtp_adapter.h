@@ -10,7 +10,7 @@
 
 /**
  * @file smtp_adapter.h
- * @brief Send a pre-built RFC 2822 message via SMTP using libcurl.
+ * @brief Send a pre-built RFC 2822 message via SMTP on the library's own TLS connection.
  *
  * **TLS is mandatory.** Only smtps:// (implicit TLS, port 465) is accepted.
  * smtp:// is rejected at runtime to prevent credentials being sent in plaintext.

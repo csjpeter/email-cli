@@ -23,7 +23,7 @@ printf '#!/bin/sh\nexit 0\n' > "$WORK/stubs/cmake"
 chmod 755 "$WORK/stubs/cmake"
 
 # 1. build: the binaries were not produced, so the copy must fail the build.
-out=$(cd "$WORK/tree" && PATH="$WORK/stubs:$PATH" ./manage.sh build 2>&1); rc=$?
+out=$(cd "$WORK/tree" && WORKSPACE_LIBS=system PATH="$WORK/stubs:$PATH" ./manage.sh build 2>&1); rc=$?
 [ "$rc" -ne 0 ]                              && ok "1.1 build exits non-zero without binaries" || bad "1.1 build exited 0"
 echo "$out" | grep -q "cannot stat"            && ok "1.2 the cp error is shown"               || bad "1.2 no cp error in: $(echo "$out" | tail -2)"
 echo "$out" | grep -q "Build complete"         && bad "1.3 claims 'Build complete'"            || ok "1.3 does not claim 'Build complete'"

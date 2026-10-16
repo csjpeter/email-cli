@@ -190,6 +190,8 @@ prints `Gate: not measured` with a non-zero status when there is none; with a
 key it comments the line on the ticket. `./tests/functional/run_timing.sh`
 tests the log and the line against a log under `build/`.
 
+`./tests/functional/run_static_binaries.sh` checks that the programs are fully static and runs the binary alone in an empty root (user namespace, `chroot`) against the mock servers with certificate verification on (EMAIL-103).
+
 `./tests/functional/run_package_policy.sh` checks the package itself (EMAIL-16):
 `lintian` reports nothing, `Depends` is discovered (libc6 present, no
 hand-written or exact versions), man pages and changelog are gzipped, the

@@ -721,8 +721,7 @@ period (>30 days) or when Google's internal history is pruned.
 ### Network Connectivity
 
 All Gmail API calls go through a single `gmail_request()` helper that handles:
-- Connection timeouts: 10 seconds (libcurl `CURLOPT_CONNECTTIMEOUT`)
-- Transfer timeouts: 60 seconds (libcurl `CURLOPT_TIMEOUT`)
+- Timeouts: 60 seconds for the connect and for every read and write of one call (`http_client.c`)
 - On timeout: display `"Network error — check internet connection"` in the
   status bar; operation is not retried automatically (user can press `s` to
   retry sync).

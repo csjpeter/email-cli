@@ -93,7 +93,7 @@ of two ways, selected by `WORKSPACE_LIBS`:
 | `WORKSPACE_LIBS` | How |
 |---|---|
 | `bundled` (**default**) | git submodules under `deps/`, pinned to release tags and linked statically; `./manage.sh build` fetches them itself |
-| `system` | the installed `libtuikit-dev` / `libptytest-dev` packages, linked dynamically |
+| `system` | the installed `libtuikit-dev` / `libptytest-dev` packages; the programs still link `libtuikit` through its static flavour (they are fully static) |
 | `auto` | the installed package when present, else the submodule |
 
 ```bash
@@ -566,4 +566,4 @@ There is no warranty.
 
 The libraries the project is built with are used under their own licences and
 are compatible with the GPL: `libtuikit` and `libptytest` (see their
-repositories), OpenSSL and libcurl.
+repositories) and OpenSSL.

@@ -9,12 +9,11 @@
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
-#include <curl/curl.h>
 
 /**
  * @file tls_revocation.h
  * @brief Revocation check of the server certificate every TLS connection of
- *        the library verifies (IMAP over OpenSSL, SMTP and Gmail over libcurl).
+ *        the library verifies (IMAP, SMTP and the HTTPS calls, all on OpenSSL).
  *
  * Policy (network-and-config-model.md): after the chain is verified, the leaf
  * certificate is checked, OCSP first at the responder it names, then the CRL
@@ -55,13 +54,6 @@ int tls_revocation_verify_cb(int preverify_ok, X509_STORE_CTX *sctx);
 
 /** @brief Install tls_revocation_verify_cb on a context that verifies the peer. */
 void tls_revocation_attach(SSL_CTX *ctx);
-
-/**
- * @brief Prepare a libcurl handle for a TLS connection that is verified:
- *        install the revocation check, and trust the file named by
- *        SSL_CERT_FILE when that variable is set (as OpenSSL itself does).
- */
-void tls_revocation_prepare_curl(CURL *curl);
 
 /**
  * @brief Take the pending notice (text for the user) set by the last check

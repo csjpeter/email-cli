@@ -6,7 +6,8 @@
 
 # EMAIL-41 (policies/dependencies-model.md, "two ways"): WORKSPACE_LIBS selects
 # bundled, system or auto; the system way builds and passes the unit tests
-# against the installed -dev packages and links them dynamically; manage.sh
+# against the installed -dev packages (libtuikit through its static flavour: the
+# programs are fully static, EMAIL-103); manage.sh
 # fetches a missing or out-of-pin submodule and refuses a pin that is not a
 # release tag.  Everything lives under build/.
 set -u
@@ -33,10 +34,10 @@ else
     echo "$out" | grep -q 'libptytest: system' && ok "2.3 libptytest comes from the system" || bad "2.3 no 'libptytest: system'"
     out=$(cmake --build "$SYS" --target email-tui email-cli tests-unit -- -j"$(nproc)" 2>&1); rc=$?
     [ "$rc" -eq 0 ] && ok "2.4 system way builds" || { bad "2.4 build rc=$rc"; echo "$out" | tail -15; }
-    if readelf -d "$SYS/email-tui" | grep -q 'Shared library: \[libtuikit\.so'; then
-        ok "2.5 email-tui links libtuikit dynamically"
+    if [ "$(readelf -d "$SYS/email-tui" 2>&1 | grep -c 'Shared library')" = "0" ] && [ "$(readelf -l "$SYS/email-tui" | grep -c INTERP)" = "0" ]; then
+        ok "2.5 email-tui is fully static also against the system libtuikit"
     else
-        bad "2.5 email-tui does not need libtuikit.so"
+        bad "2.5 email-tui needs a shared library or a loader"
     fi
     out=$( cd "$SYS" && ./tests/unit/bin/test-runner 2>&1 ); rc=$?
     [ "$rc" -eq 0 ] && ok "2.6 unit tests pass against the system libraries" || { bad "2.6 unit tests rc=$rc"; echo "$out" | tail -15; }

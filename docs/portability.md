@@ -26,6 +26,8 @@ no code branch for a platform nobody builds on.
 | `open_memstream(3)` | `libemail/src/platform/posix/html_medium.c` | a `tmpfile`-based replacement |
 | `forkpty`/`<pty.h>`, `-lutil` | `deps/libptytest/`, `tests/pty/` | a ConPTY or per-OS pty layer (test harness only) |
 | `crontab` via `popen` (scheduled sync) | `libemail/src/domain/email_service.c` | a per-OS scheduler (launchd, Task Scheduler) |
+| static glibc: `getaddrinfo` reads `/etc/hosts` and `/etc/resolv.conf` through the NSS modules `files` and `dns` built into glibc 2.34+; other `nsswitch` modules (mdns, systemd-resolved's) are not available, and `iconv` finds only the built-in character sets without the system's gconv modules (`libemail/src/core/charset.c` carries the common single-byte ones) | `src/`, `libemail-client/` (fully static link, EMAIL-103) | a different libc (musl) would need the same checks |
+| CA bundle paths of Debian, RHEL, openSUSE, Alpine | `libemail-client/src/net_tls.c` | a per-OS certificate store |
 | `xdg-open` | `libemail-client/src/gmail_auth.c` | a per-OS URL launcher |
 | `fork`, `mkdir(path, mode)`, `rename` over an existing file, `strptime`, `timegm`, `strcasecmp`, `asprintf`, `iconv(3)` | `libemail/src/core/`, `infrastructure/` | shims or libraries on a non-POSIX or non-glibc libc |
 | `__attribute__((cleanup))` RAII | `libemail/src/core/raii.h` | none on GCC or Clang; MSVC cannot build it |

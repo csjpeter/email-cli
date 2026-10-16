@@ -7,12 +7,15 @@
 #include "local_store.h"
 #include "logger.h"
 #include "raii.h"
+#include "net_tls.h"
 #include "tls_revocation.h"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <arpa/inet.h>
+#include <openssl/x509v3.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
@@ -503,26 +506,30 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     /* TLS handshake */
     if (use_tls) {
         /* Init OpenSSL (idempotent in OpenSSL 1.1+) */
-        SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+        SSL_CTX *ctx = net_tls_ctx_new(verify_tls);
         if (!ctx) {
             logger_log(LOG_ERROR, "SSL_CTX_new failed");
             free(c); close(fd);
             return NULL;
-        }
-        SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
-        SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
-        if (!verify_tls) {
-            SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
-        } else {
-            SSL_CTX_set_default_verify_paths(ctx);
-            SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-            tls_revocation_attach(ctx);   /* OCSP, then CRL, at the leaf */
         }
         SSL *ssl = SSL_new(ctx);
         if (!ssl) {
             logger_log(LOG_ERROR, "SSL_new failed");
             SSL_CTX_free(ctx); free(c); close(fd);
             return NULL;
+        }
+        if (verify_tls) {
+            /* the certificate must be the one of the host asked for */
+            unsigned char ipb[sizeof(struct in6_addr)];
+            int is_ip = inet_pton(AF_INET, host, ipb) == 1 ||
+                        inet_pton(AF_INET6, host, ipb) == 1;
+            int hc = is_ip ? X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), host)
+                           : SSL_set1_host(ssl, host);
+            if (hc != 1) {
+                logger_log(LOG_ERROR, "TLS host name check could not be set for %s", host);
+                SSL_free(ssl); SSL_CTX_free(ctx); free(c); close(fd);
+                return NULL;
+            }
         }
         SSL_set_fd(ssl, fd);
         SSL_set_tlsext_host_name(ssl, host);  /* SNI */

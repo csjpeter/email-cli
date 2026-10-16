@@ -13,7 +13,7 @@
  * @brief Gmail REST API v1 client.
  *
  * Thin wrapper around the Gmail API endpoints needed by email-cli.
- * Uses libcurl for HTTP and json_util for response parsing.
+ * Uses the library's HTTP client (http_client.h) and json_util for response parsing.
  * Authentication is handled via gmail_auth (OAuth2 token refresh).
  */
 

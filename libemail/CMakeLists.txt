@@ -15,6 +15,7 @@ add_library(libemail STATIC
     src/core/logger.c
     src/core/fs_util.c
     src/core/config.c
+    src/core/charset.c
     src/core/mime_util.c
     src/core/html_parser.c
     src/core/html_render.c
@@ -44,6 +45,6 @@ target_include_directories(libemail PUBLIC
     ${OPENSSL_INCLUDE_DIR}
 )
 
-find_package(CURL REQUIRED)
-target_link_libraries(libemail PUBLIC email-client OpenSSL::SSL OpenSSL::Crypto
-                                        CURL::libcurl ${EMAIL_TUIKIT_LIB})
+# The programs carry the mail client library inside (its static form) and need
+# nothing at run time (EMAIL-103).
+target_link_libraries(libemail PUBLIC email-client-static ${EMAIL_TUIKIT_LIB})

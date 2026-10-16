@@ -10,7 +10,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
-#include <iconv.h>
+#include "charset.h"
 #include <errno.h>
 
 /* ── Header extraction ──────────────────────────────────────────────── */
@@ -204,7 +204,7 @@ static char *extract_charset(const char *ctype) {
     return NULL;
 }
 
-/* Convert s from from_charset to UTF-8 via iconv.
+/* Convert s from from_charset to UTF-8 (charset.h).
  * Returns a malloc'd UTF-8 string; on failure returns strdup(s).
  *
  * @param info  Optional; records what happened so that callers can report a
@@ -224,30 +224,15 @@ static char *charset_to_utf8_info(const char *s, const char *from_charset,
         strcasecmp(from_charset, "us-ascii") == 0)
         return strdup(s);
 
-    iconv_t cd = iconv_open("UTF-8", from_charset);
-    if (cd == (iconv_t)-1) {
-        if (info) info->unknown_charset = 1;
+    CharsetStatus st;
+    char *out = charset_decode(from_charset, s, strlen(s), NULL, &st);
+    if (!out) {
+        if (info) {
+            if (st == CHARSET_UNKNOWN) info->unknown_charset = 1;
+            else info->invalid_sequence = 1;
+        }
         return strdup(s);
     }
-
-    size_t in_len   = strlen(s);
-    size_t out_size = in_len * 4 + 1;
-    char  *out      = malloc(out_size);
-    if (!out) { iconv_close(cd); return strdup(s); }
-
-    char  *inp      = (char *)s;
-    char  *outp     = out;
-    size_t inbytes  = in_len;
-    size_t outbytes = out_size - 1;
-    size_t r        = iconv(cd, &inp, &inbytes, &outp, &outbytes);
-    iconv_close(cd);
-
-    if (r == (size_t)-1) {
-        if (info) info->invalid_sequence = 1;
-        free(out);
-        return strdup(s);
-    }
-    *outp = '\0';
     if (info) info->converted = 1;
     return out;
 }
@@ -387,26 +372,9 @@ static char *decode_encoded_word(const char *charset, char enc,
     if (strcasecmp(charset, "utf-8") == 0 || strcasecmp(charset, "utf8") == 0)
         return raw;
 
-    /* Otherwise convert via iconv. */
-    iconv_t cd = iconv_open("UTF-8", charset);
-    if (cd == (iconv_t)-1)
-        return raw;   /* unknown charset — return raw bytes */
-
-    size_t raw_len   = strlen(raw);
-    size_t out_size  = raw_len * 4 + 1;
-    char  *utf8      = malloc(out_size);
-    if (!utf8) { iconv_close(cd); return raw; }
-
-    char   *inp      = raw;
-    char   *outp     = utf8;
-    size_t  inbytes  = raw_len;
-    size_t  outbytes = out_size - 1;
-    size_t  r        = iconv(cd, &inp, &inbytes, &outp, &outbytes);
-    iconv_close(cd);
-
-    if (r == (size_t)-1) { free(utf8); return raw; }
-
-    *outp = '\0';
+    /* Otherwise convert (built-in tables, then the system's iconv). */
+    char *utf8 = charset_decode(charset, raw, strlen(raw), NULL, NULL);
+    if (!utf8) return raw;   /* unknown or invalid: the raw bytes */
     free(raw);
     return utf8;
 }

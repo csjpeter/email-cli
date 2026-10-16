@@ -6,8 +6,7 @@
 #include "json_util.h"
 #include "logger.h"
 #include "raii.h"
-#include "tls_revocation.h"
-#include <curl/curl.h>
+#include "http_client.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,60 +46,22 @@ static const char *get_client_secret(const Config *cfg) {
     return no_builtin_credentials() ? "" : GMAIL_DEFAULT_CLIENT_SECRET;
 }
 
-/* ── libcurl write callback ───────────────────────────────────────── */
-
-typedef struct {
-    char  *data;
-    size_t len;
-    size_t cap;
-} CurlBuf;
-
-static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata) {
-    CurlBuf *buf = userdata;
-    size_t bytes = size * nmemb;
-    if (buf->len + bytes + 1 > buf->cap) {
-        size_t newcap = (buf->cap ? buf->cap * 2 : 4096);
-        while (newcap < buf->len + bytes + 1) newcap *= 2;
-        char *tmp = realloc(buf->data, newcap);
-        if (!tmp) return 0;
-        buf->data = tmp;
-        buf->cap = newcap;
-    }
-    memcpy(buf->data + buf->len, ptr, bytes);
-    buf->len += bytes;
-    buf->data[buf->len] = '\0';
-    return bytes;
-}
-
 /* ── HTTP POST helper ─────────────────────────────────────────────── */
 
 static char *http_post(const char *url, const char *postdata, long *http_code) {
-    CURL *curl = curl_easy_init();
-    if (!curl) return NULL;
-    if (strncmp(url, "https://", 8) == 0) tls_revocation_prepare_curl(curl);
-
-    CurlBuf buf = {0};
-
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postdata);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-
-    CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) {
-        logger_log(LOG_ERROR, "gmail_auth: HTTP POST %s failed: %s",
-                   url, curl_easy_strerror(res));
-        free(buf.data);
-        curl_easy_cleanup(curl);
+    const char *headers[] = { "Content-Type: application/x-www-form-urlencoded", NULL };
+    HttpRequest req = {
+        .method = "POST", .url = url, .headers = headers,
+        .body = postdata, .body_len = postdata ? strlen(postdata) : 0,
+        .timeout_s = 30,
+    };
+    char *resp = NULL;
+    char err[160];
+    if (http_request(&req, http_code, &resp, NULL, err, sizeof(err)) != 0) {
+        logger_log(LOG_ERROR, "gmail_auth: HTTP POST %s failed: %s", url, err);
         return NULL;
     }
-
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
-    curl_easy_cleanup(curl);
-    return buf.data;
+    return resp;
 }
 
 /* ── Localhost redirect listener ─────────────────────────────────── */
@@ -239,19 +200,19 @@ int gmail_auth_device_flow(Config *cfg) {
 
     /* Step 2: Build the authorization URL and open in browser */
     RAII_STRING char *auth_url = NULL;
-    char *escaped_scope = curl_easy_escape(NULL, GMAIL_SCOPE, 0);
-    char *escaped_redirect = curl_easy_escape(NULL, redirect_uri, 0);
+    char *escaped_scope = http_url_escape(GMAIL_SCOPE);
+    char *escaped_redirect = http_url_escape(redirect_uri);
     if (asprintf(&auth_url,
                  "%s?client_id=%s&redirect_uri=%s&response_type=code"
                  "&scope=%s&access_type=offline&prompt=consent",
                  AUTH_URL, client_id, escaped_redirect, escaped_scope) == -1) {
-        curl_free(escaped_scope);
-        curl_free(escaped_redirect);
+        free(escaped_scope);
+        free(escaped_redirect);
         close(listen_fd);
         return -1;
     }
-    curl_free(escaped_scope);
-    curl_free(escaped_redirect);
+    free(escaped_scope);
+    free(escaped_redirect);
 
     fprintf(stderr,
         "\n"
@@ -282,16 +243,16 @@ int gmail_auth_device_flow(Config *cfg) {
 
     /* Step 4: Exchange the auth code for tokens */
     RAII_STRING char *post = NULL;
-    char *escaped_code = curl_easy_escape(NULL, auth_code, 0);
+    char *escaped_code = http_url_escape(auth_code);
     if (asprintf(&post,
                  "code=%s&client_id=%s&client_secret=%s"
                  "&redirect_uri=%s&grant_type=authorization_code",
                  escaped_code, client_id, client_secret, redirect_uri) == -1) {
-        curl_free(escaped_code);
+        free(escaped_code);
         free(auth_code);
         return -1;
     }
-    curl_free(escaped_code);
+    free(escaped_code);
     free(auth_code);
 
     const char *url_override2 = getenv("GMAIL_TEST_TOKEN_URL");

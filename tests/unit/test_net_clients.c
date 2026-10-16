@@ -11,6 +11,7 @@
 #include <netinet/in.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -439,6 +440,33 @@ static void drain(int fd, char *out, size_t cap)
     close(fd);
 }
 
+/* What the last smtp_case() send returned as reason, and what it wrote to
+ * stderr (EMAIL-112: nothing). */
+static char g_smtp_why[256];
+static char g_smtp_stderr[512];
+
+/* smtp_send() with stderr captured into @p out. */
+static int smtp_send_captured(const Config *cfg, const char *msg, char *why, size_t why_len,
+                              char *out, size_t out_len)
+{
+    int cap[2];
+    if (pipe(cap) != 0) return -2;
+    fcntl(cap[0], F_SETFL, O_NONBLOCK);
+    fflush(stderr);
+    int saved = dup(STDERR_FILENO);
+    dup2(cap[1], STDERR_FILENO);
+    int rc = smtp_send(cfg, "Alice <a@example.org>", "bob@example.org", msg, strlen(msg),
+                       why, why_len);
+    fflush(stderr);
+    dup2(saved, STDERR_FILENO);
+    close(saved);
+    close(cap[1]);
+    ssize_t got = read(cap[0], out, out_len - 1);
+    out[got > 0 ? got : 0] = '\0';
+    close(cap[0]);
+    return rc;
+}
+
 static int smtp_case(SmtpMode mode, int implicit, int no_verify, const char *user,
                      const char *msg, char *transcript, size_t tcap)
 {
@@ -452,7 +480,8 @@ static int smtp_case(SmtpMode mode, int implicit, int no_verify, const char *use
     cfg.smtp_user = (char *)user;
     cfg.smtp_pass = "p@ss";
     cfg.ssl_no_verify = no_verify;
-    int rc = smtp_send(&cfg, "Alice <a@example.org>", "bob@example.org", msg, strlen(msg));
+    int rc = smtp_send_captured(&cfg, msg, g_smtp_why, sizeof(g_smtp_why),
+                                g_smtp_stderr, sizeof(g_smtp_stderr));
     drain(rep, transcript, tcap);
     kill(p, SIGKILL);
     waitpid(p, NULL, 0);
@@ -484,9 +513,13 @@ static void test_smtp_rejections(void)
     char t[4096];
     ASSERT(smtp_case(SM_AUTH_FAIL, 1, 1, "user1", "Subject: x\r\n\r\nb\r\n", t, sizeof(t)) == -1,
            "a refused login fails the send");
+    ASSERT(g_smtp_why[0] != '\0', "the refused login is described in the returned reason");
+    ASSERT(g_smtp_stderr[0] == '\0', "and smtp_send printed nothing (EMAIL-112)");
     ASSERT(strstr(t, "--DATA--") == NULL, "and no message is sent");
     ASSERT(smtp_case(SM_RCPT_FAIL, 1, 1, "user1", "Subject: x\r\n\r\nb\r\n", t, sizeof(t)) == -1,
            "a refused recipient fails the send");
+    ASSERT(g_smtp_why[0] != '\0' && g_smtp_stderr[0] == '\0',
+           "the refused recipient is in the reason, nothing printed");
     ASSERT(strstr(t, "--DATA--") == NULL, "and no message is sent");
 }
 
@@ -516,7 +549,37 @@ static void test_smtp_verifies_the_certificate(void)
     char t[4096];
     int rc = smtp_case(SM_OK, 1, 0, "user1", "Subject: v\r\n\r\nb\r\n", t, sizeof(t));
     ASSERT(rc == -1, "a self-signed server certificate is refused when verifying");
+    ASSERT(g_smtp_why[0] != '\0', "the TLS failure comes back as a reason");
+    ASSERT(g_smtp_stderr[0] == '\0', "and smtp_send printed nothing (EMAIL-112)");
     ASSERT(t[0] == '\0', "and nothing was said to that server");
+}
+
+static void test_smtp_connect_failure_is_returned_not_printed(void)
+{
+    int port; int l = nc_listen(&port);
+    close(l);                                   /* a port nobody listens on */
+    char host[96];
+    snprintf(host, sizeof(host), "smtps://127.0.0.1:%d", port);
+    Config cfg = {0};
+    cfg.smtp_host = host;
+    cfg.smtp_user = "user1";
+    cfg.smtp_pass = "p@ss";
+    cfg.ssl_no_verify = 1;
+    char why[256] = "", out[256];
+    ASSERT(smtp_send_captured(&cfg, "Subject: c\r\n\r\nb\r\n", why, sizeof(why),
+                              out, sizeof(out)) == -1, "a refused connection fails the send");
+    ASSERT(why[0] != '\0', "the reason comes back through the interface");
+    ASSERT(out[0] == '\0', "smtp_send printed nothing on stderr");
+    ASSERT(smtp_send_captured(&cfg, "x", NULL, 0, out, sizeof(out)) == -1 && out[0] == '\0',
+           "without a buffer it is still silent");
+
+    Config bad = {0};
+    bad.smtp_host = "smtp://mail.example.org";
+    char why2[400] = "";
+    ASSERT(smtp_send_captured(&bad, "x", why2, sizeof(why2), out, sizeof(out)) == -1,
+           "smtp:// without the test flag is refused");
+    ASSERT(strstr(why2, "smtps://") != NULL && out[0] == '\0',
+           "the refusal names the fix and prints nothing");
 }
 
 static void test_smtp_no_credentials_skips_auth(void)
@@ -545,5 +608,6 @@ void test_net_clients(void)
     RUN_TEST(test_smtp_starttls);
     RUN_TEST(test_smtp_dot_stuffing_and_line_ends);
     RUN_TEST(test_smtp_verifies_the_certificate);
+    RUN_TEST(test_smtp_connect_failure_is_returned_not_printed);
     RUN_TEST(test_smtp_no_credentials_skips_auth);
 }

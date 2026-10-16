@@ -5,6 +5,7 @@
 #ifndef MAIL_ACCOUNT_H
 #define MAIL_ACCOUNT_H
 
+#include <stdio.h>
 #include "config.h"
 #include "email-client.h"
 
@@ -81,8 +82,8 @@ static inline int mail_compose(const emc_message *m, char **wire, size_t *wire_l
 /**
  * @brief Send a message in wire form with the account of @p cfg: SMTP over TLS
  *        for IMAP accounts, the Gmail API for Gmail.
- * @return 0 on success, -1 on failure (reported on stderr by the layer that
- *         knows why).
+ * @return 0 on success, -1 on failure (the reason is written to stderr as
+ *         "Error: send: <reason>").
  */
 static inline int mail_send_wire(const Config *cfg, const char *from,
                                  const char *to, const char *wire, size_t len)
@@ -90,6 +91,8 @@ static inline int mail_send_wire(const Config *cfg, const char *from,
     emc_client *c = mail_open(cfg);
     if (!c) return -1;
     emc_status st = emc_send_wire(c, from, to, wire, len, NULL);
+    /* The library prints nothing (EMAIL-112): the program tells the user why. */
+    if (st != EMC_OK) fprintf(stderr, "Error: %s\n", emc_last_error(c));
     emc_close(c);
     return st == EMC_OK ? 0 : -1;
 }

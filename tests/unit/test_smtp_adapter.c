@@ -11,25 +11,25 @@
 /* ── smtp_send error paths ───────────────────────────────────────────── */
 
 static void test_send_null_cfg(void) {
-    ASSERT(smtp_send(NULL, "a@b.com", "c@d.com", "msg", 3) == -1,
+    ASSERT(smtp_send(NULL, "a@b.com", "c@d.com", "msg", 3, NULL, 0) == -1,
            "send: NULL cfg → -1");
 }
 
 static void test_send_null_from(void) {
     Config cfg = {0};
-    ASSERT(smtp_send(&cfg, NULL, "c@d.com", "msg", 3) == -1,
+    ASSERT(smtp_send(&cfg, NULL, "c@d.com", "msg", 3, NULL, 0) == -1,
            "send: NULL from → -1");
 }
 
 static void test_send_null_to(void) {
     Config cfg = {0};
-    ASSERT(smtp_send(&cfg, "a@b.com", NULL, "msg", 3) == -1,
+    ASSERT(smtp_send(&cfg, "a@b.com", NULL, "msg", 3, NULL, 0) == -1,
            "send: NULL to → -1");
 }
 
 static void test_send_null_message(void) {
     Config cfg = {0};
-    ASSERT(smtp_send(&cfg, "a@b.com", "c@d.com", NULL, 0) == -1,
+    ASSERT(smtp_send(&cfg, "a@b.com", "c@d.com", NULL, 0, NULL, 0) == -1,
            "send: NULL message → -1");
 }
 
@@ -39,7 +39,7 @@ static void test_send_rejects_insecure_url(void) {
     cfg.smtp_host = "smtp://insecure.example.com";
     cfg.ssl_no_verify = 0;
     int rc = smtp_send(&cfg, "a@b.com", "c@d.com",
-                        "From: a\r\n\r\nbody\r\n", 20);
+                        "From: a\r\n\r\nbody\r\n", 20, NULL, 0);
     ASSERT(rc == -1, "send: insecure smtp:// rejected");
 }
 
@@ -49,7 +49,7 @@ static void test_send_rejects_derived_insecure(void) {
     cfg.host = "imap://imap.example.com";
     cfg.ssl_no_verify = 0;
     int rc = smtp_send(&cfg, "a@b.com", "c@d.com",
-                        "From: a\r\n\r\nbody\r\n", 20);
+                        "From: a\r\n\r\nbody\r\n", 20, NULL, 0);
     ASSERT(rc == -1, "send: derived smtp:// rejected");
 }
 
@@ -60,7 +60,7 @@ static void test_send_url_from_host_no_scheme(void) {
     cfg.host = "mail.example.com";   /* no :// — hits the else/strdup branch */
     cfg.ssl_no_verify = 0;
     int rc = smtp_send(&cfg, "a@b.com", "c@d.com",
-                        "From: a\r\n\r\nbody\r\n", 20);
+                        "From: a\r\n\r\nbody\r\n", 20, NULL, 0);
     ASSERT(rc == -1, "send: bare host URL rejected (not smtps://)");
 }
 
@@ -70,7 +70,7 @@ static void test_send_url_fallback_localhost(void) {
     Config cfg = {0};
     cfg.ssl_no_verify = 0;
     int rc = smtp_send(&cfg, "a@b.com", "c@d.com",
-                        "From: a\r\n\r\nbody\r\n", 20);
+                        "From: a\r\n\r\nbody\r\n", 20, NULL, 0);
     ASSERT(rc == -1, "send: fallback smtp://localhost rejected");
 }
 
@@ -80,7 +80,7 @@ static void test_send_url_fallback_localhost_ssl_skip(void) {
     Config cfg = {0};
     cfg.ssl_no_verify = 1;
     int rc = smtp_send(&cfg, "a@b.com", "c@d.com",
-                        "From: a\r\n\r\nbody\r\n", 20);
+                        "From: a\r\n\r\nbody\r\n", 20, NULL, 0);
     ASSERT(rc == -1, "send: smtp://localhost + ssl_no_verify reaches curl (connection refused)");
 }
 
@@ -92,7 +92,7 @@ static void test_send_smtp_host_with_embedded_port(void) {
     cfg.ssl_no_verify = 1;
     /* smtps:// passes TLS check; curl will fail to connect → -1 */
     int rc = smtp_send(&cfg, "a@b.com", "c@d.com",
-                        "From: a\r\n\r\nbody\r\n", 20);
+                        "From: a\r\n\r\nbody\r\n", 20, NULL, 0);
     ASSERT(rc == -1, "send: smtp_host with embedded port (strdup path), curl fails");
 }
 
@@ -104,7 +104,7 @@ static void test_send_smtp_host_port_appended(void) {
     cfg.ssl_no_verify = 1;
     /* smtps:// passes TLS check; curl will fail to connect → -1 */
     int rc = smtp_send(&cfg, "a@b.com", "c@d.com",
-                        "From: a\r\n\r\nbody\r\n", 20);
+                        "From: a\r\n\r\nbody\r\n", 20, NULL, 0);
     ASSERT(rc == -1, "send: smtp_port appended to smtp_host URL, curl fails");
 }
 
@@ -118,7 +118,7 @@ static void test_send_display_name_stripping(void) {
                        "Alice Smith <alice@example.com>",
                        "Bob Jones <bob@example.com>",
                        "From: Alice Smith <alice@example.com>\r\nTo: Bob Jones <bob@example.com>\r\n\r\nHello\r\n",
-                       80);
+                       80, NULL, 0);
     ASSERT(rc == -1, "send: display name stripping reaches curl (connection refused)");
 }
 
@@ -128,7 +128,7 @@ static void test_send_smtps_derived_from_imaps(void) {
     cfg.host = "imaps://imap.example.com";
     cfg.ssl_no_verify = 1;
     int rc = smtp_send(&cfg, "a@b.com", "c@d.com",
-                        "From: a\r\n\r\nbody\r\n", 20);
+                        "From: a\r\n\r\nbody\r\n", 20, NULL, 0);
     ASSERT(rc == -1, "send: smtps derived from imaps + ssl_no_verify reaches curl");
 }
 

@@ -67,6 +67,15 @@ static emc_status fail(emc_client *c, emc_status st, const char *what)
     return st;
 }
 
+/* The same with the reason the protocol layer gave ("send: Could not connect
+ * to server"); the plain form when it gave none. */
+static emc_status fail_why(emc_client *c, emc_status st, const char *what, const char *why)
+{
+    if (!why || !why[0]) return fail(c, st, what);
+    snprintf(c->err, sizeof(c->err), "%s: %s", what, why);
+    return st;
+}
+
 EMC_API emc_status emc_open(emc_client **out, const emc_account *a)
 {
     if (!out) return EMC_ERR_ARGUMENT;
@@ -161,16 +170,17 @@ EMC_API emc_status emc_send(emc_client *c, const emc_message *m,
     }
 
     int rc;
+    char why[256] = "";
     if (c->cfg->gmail_mode) {
         emc_status st = connect_now(c);
         if (st != EMC_OK) { free(wire); res->status = st; return st; }
         rc = mail_client_append(c->mc, NULL, wire, wire_len);
     } else {
-        rc = smtp_send(c->cfg, from, m->to, wire, wire_len);
+        rc = smtp_send(c->cfg, from, m->to, wire, wire_len, why, sizeof(why));
     }
     if (rc != 0) {
         free(wire);
-        res->status = fail(c, EMC_ERR_SEND, "send");
+        res->status = fail_why(c, EMC_ERR_SEND, "send", why);
         return res->status;
     }
 
@@ -569,15 +579,16 @@ EMC_API emc_status emc_send_wire(emc_client *c, const char *from, const char *to
     }
     c->err[0] = '\0';
     int rc;
+    char why[256] = "";
     if (c->cfg->gmail_mode) {
         emc_status st = connect_now(c);
         if (st != EMC_OK) { res->status = st; return st; }
         rc = mail_client_append(c->mc, NULL, wire, wire_len);
     } else {
-        rc = smtp_send(c->cfg, from, to, wire, wire_len);
+        rc = smtp_send(c->cfg, from, to, wire, wire_len, why, sizeof(why));
     }
     if (rc != 0) {
-        res->status = fail(c, EMC_ERR_SEND, "send");
+        res->status = fail_why(c, EMC_ERR_SEND, "send", why);
         return res->status;
     }
     char *id = mime_get_header(wire, "Message-ID");

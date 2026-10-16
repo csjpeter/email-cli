@@ -27,6 +27,7 @@
 #include "fs_util.h"
 #include "imap_util.h"
 #include "platform/path.h"
+#include "platform/terminal.h"
 #include "logger.h"
 #include "raii.h"
 
@@ -677,6 +678,9 @@ static void help(void) {
 
 int main(int argc, char *argv[]) {
     setlocale(LC_ALL, "");
+
+    /* TERM unset or dumb: no colour or erase codes in the output (EMAIL-108). */
+    terminal_plain_output_if_needed();
 
     const char *tb_path = NULL;
     const char *account = NULL;

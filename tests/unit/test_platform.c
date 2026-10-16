@@ -11,6 +11,9 @@
 #include <fcntl.h>
 #include <locale.h>
 #include <termios.h>
+#include <stdio.h>
+#include <stdio_ext.h>
+#include <sys/wait.h>
 
 /* Feed `bytes` to terminal_read_key() through a pipe (closed afterwards, so a
  * lone ESC is a bare ESC) and perform `count` reads.  keys[i] is the TermKey,
@@ -30,6 +33,40 @@ static void feed_keys(const char *bytes, int count, TermKey *keys, int *typed) {
     }
     dup2(saved, STDIN_FILENO);
     close(saved);
+}
+
+/* Run terminal_plain_output_if_needed() in a child with TERM=term and read
+ * what the child then writes to stdout and to stderr (EMAIL-108). */
+static int plain_output_of(const char *term, char *out, size_t cap)
+{
+    int fds[2];
+    if (pipe(fds) != 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        close(fds[0]);
+        /* the parent's unwritten output is not the child's to write */
+        __fpurge(stdout);
+        __fpurge(stderr);
+        dup2(fds[1], STDOUT_FILENO);
+        dup2(fds[1], STDERR_FILENO);
+        close(fds[1]);
+        if (term) setenv("TERM", term, 1); else unsetenv("TERM");
+        terminal_plain_output_if_needed();
+        printf("\033[1mbold\033[0m \033[38;5;12mblue\033[0m\n");
+        fprintf(stderr, "\r\033[K  progress 42\n");
+        fflush(stdout);
+        _exit(0);
+    }
+    close(fds[1]);
+    size_t n = 0;
+    ssize_t r;
+    while (n + 1 < cap && (r = read(fds[0], out + n, cap - 1 - n)) > 0) n += (size_t)r;
+    out[n] = '\0';
+    close(fds[0]);
+    int st = 0;
+    waitpid(pid, &st, 0);
+    return WIFEXITED(st) && WEXITSTATUS(st) == 0 ? 0 : -1;
 }
 
 void test_platform(void) {
@@ -336,4 +373,52 @@ void test_platform(void) {
     ASSERT(strcmp(cfg, TP("test-xdg-config")) == 0,
            "platform_config_dir should respect XDG_CONFIG_HOME");
     unsetenv("XDG_CONFIG_HOME");
+
+    /* ── TERM and the escape sequences (EMAIL-108) ───────────────────── */
+    {
+        const char *saved = getenv("TERM");
+        char *keep = saved ? strdup(saved) : NULL;
+        unsetenv("TERM");
+        ASSERT(!terminal_understands_escapes(), "TERM unset: no escape sequences");
+        setenv("TERM", "", 1);
+        ASSERT(!terminal_understands_escapes(), "TERM empty: no escape sequences");
+        setenv("TERM", "dumb", 1);
+        ASSERT(!terminal_understands_escapes(), "TERM=dumb: no escape sequences");
+        setenv("TERM", "xterm-256color", 1);
+        ASSERT(terminal_understands_escapes(), "TERM=xterm-256color: escape sequences");
+        setenv("TERM", "linux", 1);
+        ASSERT(terminal_understands_escapes(), "TERM=linux: escape sequences");
+        setenv("TERM", "some-unknown-terminal", 1);
+        ASSERT(terminal_understands_escapes(), "an unknown TERM is taken as ANSI");
+        if (keep) { setenv("TERM", keep, 1); free(keep); } else unsetenv("TERM");
+
+        /* The stripper, whole and cut at every possible place. */
+        const char *in = "a\033[1mB\033[38;5;12mc\033[0m\r\033[Kd\033Xe";
+        const char *want = "aBc\rdXe";
+        char out[64];
+        TermStrip st = {0};
+        size_t o = terminal_strip_csi(&st, in, strlen(in), out);
+        out[o] = '\0';
+        ASSERT(strcmp(out, want) == 0, "CSI sequences are removed, other text kept");
+        for (size_t cut = 0; cut <= strlen(in); cut++) {
+            TermStrip s2 = {0};
+            char o2[64];
+            size_t n1 = terminal_strip_csi(&s2, in, cut, o2);
+            size_t n2 = terminal_strip_csi(&s2, in + cut, strlen(in) - cut, o2 + n1);
+            o2[n1 + n2] = '\0';
+            ASSERT(strcmp(o2, want) == 0, "a sequence cut between two chunks is still removed");
+        }
+
+        /* The real thing: stdout and stderr of a child. */
+        char got[256];
+        ASSERT(plain_output_of("dumb", got, sizeof(got)) == 0, "child with TERM=dumb runs");
+        ASSERT(strstr(got, "\033") == NULL, "TERM=dumb: no escape byte reaches the output");
+        ASSERT(strstr(got, "bold blue") != NULL && strstr(got, "progress 42") != NULL,
+               "TERM=dumb: the text of stdout and stderr is kept");
+        ASSERT(plain_output_of(NULL, got, sizeof(got)) == 0, "child without TERM runs");
+        ASSERT(strstr(got, "\033") == NULL, "TERM unset: no escape byte reaches the output");
+        ASSERT(plain_output_of("xterm-256color", got, sizeof(got)) == 0, "child with xterm runs");
+        ASSERT(strstr(got, "\033[1mbold") != NULL && strstr(got, "\033[K") != NULL,
+               "TERM=xterm-256color: the escape sequences are written as they are");
+    }
 }

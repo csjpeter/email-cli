@@ -20,6 +20,7 @@
 #include "config_store.h"
 #include "email_service.h"
 #include "platform/path.h"
+#include "platform/terminal.h"
 #include "raii.h"
 #include "logger.h"
 #include "mail_account.h"
@@ -91,6 +92,9 @@ static void help_cron(void) {
 
 int main(int argc, char *argv[]) {
     setlocale(LC_ALL, "");
+
+    /* TERM unset or dumb: no colour or erase codes in the output (EMAIL-108). */
+    terminal_plain_output_if_needed();
 
     const char *cmd = argc > 1 ? argv[1] : NULL;
 

@@ -2398,6 +2398,20 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    /* The full-screen interface cannot be drawn on a terminal that does not
+     * understand escape sequences (TERM unset or dumb); the non-interactive
+     * send still works, with the codes dropped from its output (EMAIL-108). */
+    if (!terminal_understands_escapes()) {
+        if (subcmd && strcmp(subcmd, "send") == 0) {
+            terminal_plain_output_if_needed();
+        } else {
+            fprintf(stderr, "email-tui draws a full-screen interface and needs a terminal that\n"
+                            "understands escape sequences; TERM is unset or 'dumb'.\n"
+                            "Use email-cli instead, or set TERM (for example xterm-256color).\n");
+            return EXIT_FAILURE;
+        }
+    }
+
     /* 1. Determine cache directory for logs */
     const char *cache_base = platform_cache_dir();
     if (!cache_base) {

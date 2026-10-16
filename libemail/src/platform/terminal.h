@@ -37,6 +37,33 @@ int terminal_cols(void);
 /** Returns the terminal height in rows, or 0 if unknown. */
 int terminal_rows(void);
 
+/**
+ * Does the terminal named by TERM understand escape sequences (colour,
+ * cursor movement, line erase)?  0 when TERM is unset, empty or "dumb";
+ * 1 for every other value, known or not (EMAIL-108).
+ */
+int terminal_understands_escapes(void);
+
+/** State of terminal_strip_csi(): where in an escape sequence the text stands. */
+typedef struct { int state; } TermStrip;
+
+/**
+ * Copy @p n bytes of @p in to @p out without the CSI escape sequences
+ * (ESC [ parameters, final byte 0x40-0x7E) in them.  A sequence cut by the
+ * end of a chunk continues in the next call with the same @p st.
+ * @return number of bytes written; at most @p n.
+ */
+size_t terminal_strip_csi(TermStrip *st, const char *in, size_t n, char *out);
+
+/**
+ * For the programs that write plain output: when the terminal does not
+ * understand escape sequences (terminal_understands_escapes() is 0), replace
+ * stdout and stderr by streams that drop the CSI sequences, so a dumb
+ * terminal, a log or a pipe is never filled with colour and erase codes.
+ * Call once at the start of main().  A no-op otherwise.
+ */
+void terminal_plain_output_if_needed(void);
+
 /** Returns 1 if fd is connected to a terminal, 0 otherwise. */
 int terminal_is_tty(int fd);
 

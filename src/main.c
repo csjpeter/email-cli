@@ -11,6 +11,7 @@
 #include "setup_wizard.h"
 #include "email_service.h"
 #include "platform/path.h"
+#include "platform/terminal.h"
 #include "raii.h"
 #include "logger.h"
 #include "local_store.h"
@@ -676,6 +677,9 @@ int main(int argc, char *argv[]) {
     /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
     setlocale(LC_ALL, "");
+
+    /* TERM unset or dumb: no colour or erase codes in the output (EMAIL-108). */
+    terminal_plain_output_if_needed();
 
     if (argc >= 2 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)) {
         printf("email-cli %s\n", EMAIL_CLI_VERSION);

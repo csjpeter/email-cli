@@ -192,6 +192,8 @@ tests the log and the line against a log under `build/`.
 
 `./tests/functional/run_static_binaries.sh` checks that the programs are fully static and runs the binary alone in an empty root (user namespace, `chroot`) against the mock servers with certificate verification on (EMAIL-103).
 
+`./tests/functional/run_term.sh` checks that the programs honour `TERM`: `email-tui` refuses an unset or `dumb` terminal, `email-sync` writes no escape byte there and the erase-line code under `xterm-256color` (EMAIL-108).
+
 `./tests/functional/run_package_policy.sh` checks the package itself (EMAIL-16):
 `lintian` reports nothing, `Depends` is discovered (libc6 present, no
 hand-written or exact versions), man pages and changelog are gzipped, the

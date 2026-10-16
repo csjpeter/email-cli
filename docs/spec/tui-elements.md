@@ -119,9 +119,22 @@ defect or inconsistency the pictures make visible, left for the owner to ticket.
    screen and the message list are cut mid-hint (`(*keeps loc`, `F=f`)
    instead of being shortened; the review screen's key line wraps onto a
    second row.  Not changed; the pictures pin the present state.
-9. Eight-colour terminal (`TERM=linux`, `*_8colour`): the program does not
-   look at `TERM`; the selection is still the dark-blue palette-17 row with
-   `>`, so on a terminal without it the `>` alone marks the row.
+9. Eight-colour terminal (`TERM=linux`, `*_8colour`): the programs treat
+   every `TERM` but unset, empty and `dumb` as ANSI (EMAIL-108); the
+   selection is still the dark-blue palette-17 row with `>`, so on a
+   terminal without it the `>` alone marks the row.
+
+### TERM (EMAIL-108)
+
+`TERM` unset, empty or `dumb` means a terminal without escape sequences.
+`email-tui` (full-screen interface) then refuses to start: exit status 1 and a
+plain message on stderr that names the need and points to `email-cli`; its
+`send` subcommand, `--help` and `--version` work.  The other programs
+(`email-cli`, `email-cli-ro`, `email-sync`, `email-import-rules`) drop the CSI
+escape sequences (colour, cursor, erase-line) from stdout and stderr, so the
+text of the output is the same without the codes.  Any other value, known or
+not, is taken as an ANSI terminal.  Checked by `tests/functional/run_term.sh`
+and the unit test of `terminal_strip_csi()` / `terminal_plain_output_if_needed()`.
 
 ## State matrix (EMAIL-96)
 

@@ -266,3 +266,69 @@ int terminal_read_password(const char *prompt, char *buf, size_t size) {
     }
     return read_password_plain(buf, size);
 }
+
+int terminal_understands_escapes(void) {
+    const char *t = getenv("TERM");
+    return t && t[0] && strcmp(t, "dumb") != 0;
+}
+
+size_t terminal_strip_csi(TermStrip *st, const char *in, size_t n, char *out) {
+    /* state 0 = text, 1 = after ESC, 2 = inside a CSI sequence */
+    size_t o = 0;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)in[i];
+        if (st->state == 0) {
+            if (c == 0x1B) st->state = 1;
+            else out[o++] = (char)c;
+        } else if (st->state == 1) {
+            if (c == '[') st->state = 2;
+            else { st->state = 0; if (c == 0x1B) st->state = 1; else out[o++] = (char)c; }
+        } else if (c >= 0x40 && c <= 0x7E) {
+            st->state = 0;
+        }
+    }
+    return o;
+}
+
+/** The stream behind a filtered stdout or stderr. */
+typedef struct { FILE *real; TermStrip strip; } PlainOut;
+
+static ssize_t plain_write(void *cookie, const char *buf, size_t size) {
+    PlainOut *p = cookie;
+    char tmp[1024];
+    size_t done = 0;
+    while (done < size) {
+        size_t chunk = size - done < sizeof(tmp) ? size - done : sizeof(tmp);
+        size_t o = terminal_strip_csi(&p->strip, buf + done, chunk, tmp);
+        if (o && (fwrite(tmp, 1, o, p->real) != o || fflush(p->real) != 0)) return -1;
+        done += chunk;
+    }
+    return (ssize_t)size;
+}
+
+static int plain_close(void *cookie) {
+    PlainOut *p = cookie;
+    int rc = fflush(p->real);
+    free(p);
+    return rc;
+}
+
+static FILE *plain_stream(FILE *real) {
+    PlainOut *p = calloc(1, sizeof(*p));
+    if (!p) return real;
+    p->real = real;
+    cookie_io_functions_t io = { .write = plain_write, .close = plain_close };
+    FILE *f = fopencookie(p, "w", io);
+    if (!f) { free(p); return real; }
+    /* line buffered, so that stdout and stderr keep their order */
+    setvbuf(f, NULL, real == stderr ? _IONBF : _IOLBF, 0);
+    return f;
+}
+
+void terminal_plain_output_if_needed(void) {
+    if (terminal_understands_escapes()) return;
+    FILE *out = stdout, *err = stderr;
+    FILE *po = plain_stream(out), *pe = plain_stream(err);
+    stdout = po;
+    stderr = pe;
+}

@@ -289,6 +289,9 @@ static void unknown_option(const char *cmd, const char *opt) {
 int main(int argc, char *argv[]) {
     setlocale(LC_ALL, "");
 
+    /* TERM unset or dumb: no colour or erase codes in the output (EMAIL-108). */
+    terminal_plain_output_if_needed();
+
     if (argc >= 2 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)) {
         printf("email-cli-ro %s\n", EMAIL_CLI_VERSION);
         return EXIT_SUCCESS;

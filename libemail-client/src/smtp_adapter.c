@@ -292,26 +292,33 @@ int smtp_send(const Config *cfg,
               const char *from,
               const char *to,
               const char *message,
-              size_t message_len) {
-    if (!cfg || !from || !to || !message) return -1;
+              size_t message_len,
+              char *err,
+              size_t err_len) {
+    if (err && err_len) err[0] = '\0';
+    if (!cfg || !from || !to || !message) {
+        if (err && err_len) snprintf(err, err_len, "missing argument");
+        return -1;
+    }
 
     const char *smtp_user = cfg->smtp_user ? cfg->smtp_user : cfg->user;
     const char *smtp_pass = cfg->smtp_pass ? cfg->smtp_pass : cfg->pass;
 
     char *url = build_smtp_url(cfg);
     if (!url) {
-        fprintf(stderr, "smtp_send: failed to build SMTP URL.\n");
+        if (err && err_len) snprintf(err, err_len, "failed to build the SMTP URL");
+        logger_log(LOG_ERROR, "smtp_send: failed to build the SMTP URL");
         return -1;
     }
 
     /* Hard enforcement: only smtps:// (implicit TLS) is allowed.
      * Exception: cfg->ssl_no_verify=1 permits smtp:// for test environments. */
     if (strncmp(url, "smtps://", 8) != 0 && !cfg->ssl_no_verify) {
-        fprintf(stderr,
-                "smtp_send: refused to send via %s — "
-                "only smtps:// is allowed (TLS required).\n"
-                "Set SMTP_HOST=smtps://smtp.example.com in your config.\n"
-                "For test environments only: add SSL_NO_VERIFY=1 to config.\n", url);
+        if (err && err_len)
+            snprintf(err, err_len,
+                     "refused to send via %s - only smtps:// is allowed (TLS required). "
+                     "Set SMTP_HOST=smtps://smtp.example.com in your config "
+                     "(for test environments only: SSL_NO_VERIFY=1)", url);
         logger_log(LOG_ERROR,
                    "smtp_send: rejected insecure SMTP URL: %s", url);
         free(url);
@@ -345,7 +352,7 @@ int smtp_send(const Config *cfg,
     int rc = smtp_deliver(url, smtp_user, smtp_pass, cfg->ssl_no_verify,
                           from_env, to_env, message, message_len, why, sizeof(why));
     if (rc != 0) {
-        fprintf(stderr, "smtp_send: %s\n", why);
+        if (err && err_len) snprintf(err, err_len, "%s", why);
         logger_log(LOG_ERROR, "smtp_send failed: %s", why);
     } else {
         logger_log(LOG_INFO, "smtp_send: message sent from %s to %s", from, to);

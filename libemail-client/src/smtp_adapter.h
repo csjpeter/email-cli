@@ -31,12 +31,18 @@
  * @param to           Envelope To address.
  * @param message      Complete RFC 2822 wire bytes (headers + blank line + body).
  * @param message_len  Byte length of message.
- * @return 0 on success, -1 on error (details written to stderr and logger).
+ * @param err          Receives the reason when the send fails (may be NULL).
+ *                     Nothing is printed: the caller reports it, and the
+ *                     logger has the record.
+ * @param err_len      Size of @p err.
+ * @return 0 on success, -1 on error.
  */
 int smtp_send(const Config *cfg,
               const char *from,
               const char *to,
               const char *message,
-              size_t message_len);
+              size_t message_len,
+              char *err,
+              size_t err_len);
 
 #endif /* SMTP_ADAPTER_H */

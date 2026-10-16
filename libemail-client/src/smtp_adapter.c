@@ -4,6 +4,7 @@
 /* libcurl-based SMTP sender of RFC 2822 messages. */
 #include "smtp_adapter.h"
 #include "logger.h"
+#include "tls_revocation.h"
 #include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -154,6 +155,8 @@ int smtp_send(const Config *cfg,
     if (cfg->ssl_no_verify) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    } else {
+        tls_revocation_prepare_curl(curl);
     }
 
     CURLcode res = curl_easy_perform(curl);

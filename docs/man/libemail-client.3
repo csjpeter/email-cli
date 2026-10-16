@@ -44,6 +44,17 @@ whom and when, from the returned outcome and message id.  It reads no
 configuration file, never prompts, and verifies the server certificate unless
 .I insecure_tls
 is set (test servers only).  A handle is not thread safe.
+.PP
+A verified server certificate is also checked for revocation: OCSP first, at
+the responder the certificate names, then the CRL it names (cached with its
+validity; an expired CRL counts as none).  A certificate known to be revoked
+is refused.  When neither source can be used the connection goes on, with an
+error\-level log entry and a notice that
+.B emc_take_security_notice
+returns (1 and the text, then cleared; 0 when none), at most once per
+certificate and 6 hours.  The CRL cache and the record of signals live under
+\fI/email\-cli/revocation\fR.  \fISSL_CERT_FILE\fR, when set,
+names the trusted certificates of every connection.
 .SH RETURN VALUE
 Every operation returns an
 .I emc_status

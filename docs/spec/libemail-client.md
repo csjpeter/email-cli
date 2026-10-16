@@ -51,6 +51,7 @@ All names start with `emc_`; everything else in the object is hidden.
 | `emc_sync`, `emc_rebuild_indexes` | Gmail synchronisation into the local store |
 | `emc_gmail_authorize` | OAuth2 device flow; prints the code and URL on standard output |
 | `emc_log_open`, `emc_log_close` | the library's own log (the programs point it at their log file) |
+| `emc_take_security_notice` | the pending "revocation could not be checked" notice, if any |
 | `emc_close`, `emc_free_list`, `emc_strerror`, `emc_last_error`, `emc_version` | housekeeping |
 
 ## Rules
@@ -60,8 +61,21 @@ All names start with `emc_`; everything else in the object is hidden.
 - **No configuration file, no terminal.** The caller passes an `emc_account`;
   the library reads nothing from the user's home and never prompts.
 - **TLS is mandatory.** `emc_account.insecure_tls` disables certificate
-  verification and exists for test servers only. (The network model's
-  revocation check is a separate ticket.)
+  verification (and the revocation check) and exists for test servers only.
+- **Revocation is checked** (EMAIL-102, network-and-config-model.md): after the
+  chain is verified, the leaf certificate is checked, OCSP first at the
+  responder it names (plain HTTP, answer verified against the trust store),
+  then the CRL it names (downloaded, signature checked, cached on disk with its
+  validity; an expired CRL counts as none and the message says it expired).
+  A certificate known to be revoked is refused (`X509_V_ERR_CERT_REVOKED`).
+  When neither source can be used the connection goes on, an error-level log
+  entry is written and `emc_take_security_notice()` returns the text; at most
+  one signal per certificate (SHA-256 fingerprint) and 6 hours, recorded in
+  `$XDG_CACHE_HOME/email-cli/revocation/signals`.  The check runs for IMAP
+  (OpenSSL verify callback), SMTP and the Gmail API (libcurl SSL context
+  callback), in `tls_revocation.c`.  A certificate that names no responder and
+  no CRL gives the same signal.  `SSL_CERT_FILE` names the trusted CA file for
+  both stacks (as OpenSSL does).
 - **A failed copy to the sent folder is not a failed send**: `saved_copy` is 0.
 - **Gmail** accounts send through the REST API; `host`/SMTP fields are unused.
 - **Signals do not fail an operation.** A signal that interrupts a blocking
@@ -72,7 +86,10 @@ All names start with `emc_`; everything else in the object is hidden.
 ## Tests
 
 `tests/unit/test_email_client.c` drives the interface against in-process mock
-servers (TLS SMTP, TLS IMAP, Gmail over HTTP). `tests/functional/
+servers (TLS SMTP, TLS IMAP, Gmail over HTTP).
+`tests/unit/test_tls_revocation.c` generates a small PKI and runs the revocation
+check against forked OCSP/CRL servers and TLS servers (good, revoked, down,
+expired CRL, cache, 6-hour signal, IMAP and libcurl paths). `tests/functional/
 run_package_policy.sh` checks the packaged artefact: dependencies, `shlibs`,
 the ldconfig trigger, that only `emc_*` symbols are exported, and that a
 program compiles against the installed header and runs.

@@ -56,6 +56,8 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/when_expr.c
     ${CMAKE_SOURCE_DIR}/libemail-client/src/compose_service.c
     ${CMAKE_SOURCE_DIR}/libemail-client/src/smtp_adapter.c
+    ${CMAKE_SOURCE_DIR}/libemail-client/src/tls_revocation.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_tls_revocation.c
     ${CMAKE_SOURCE_DIR}/libemail-client/src/email_client.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/fs_util.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/logger.c

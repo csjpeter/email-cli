@@ -22,6 +22,7 @@ add_library(email-client SHARED
     src/gmail_sync.c
     src/json_util.c
     src/smtp_adapter.c
+    src/tls_revocation.c
     src/compose_service.c
     ${EMC_SRC}/core/logger.c
     ${EMC_SRC}/core/fs_util.c

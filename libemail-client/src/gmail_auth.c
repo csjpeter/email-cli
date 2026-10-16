@@ -6,6 +6,7 @@
 #include "json_util.h"
 #include "logger.h"
 #include "raii.h"
+#include "tls_revocation.h"
 #include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +77,7 @@ static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata) {
 static char *http_post(const char *url, const char *postdata, long *http_code) {
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
+    if (strncmp(url, "https://", 8) == 0) tls_revocation_prepare_curl(curl);
 
     CurlBuf buf = {0};
 

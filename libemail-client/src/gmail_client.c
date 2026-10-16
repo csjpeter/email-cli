@@ -7,6 +7,7 @@
 #include "json_util.h"
 #include "logger.h"
 #include "raii.h"
+#include "tls_revocation.h"
 #include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,6 +90,8 @@ static char *api_get(GmailClient *c, const char *url, long *http_code) {
     if (strncmp(url, "http://", 7) == 0) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    } else {
+        tls_revocation_prepare_curl(curl);
     }
 
     CURLcode res = curl_easy_perform(curl);
@@ -135,6 +138,8 @@ static char *api_post_json(GmailClient *c, const char *url,
     if (strncmp(url, "http://", 7) == 0) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    } else {
+        tls_revocation_prepare_curl(curl);
     }
 
     if (json_body) {
@@ -334,6 +339,8 @@ static char *api_delete(GmailClient *c, const char *url, long *http_code) {
     if (strncmp(url, "http://", 7) == 0) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    } else {
+        tls_revocation_prepare_curl(curl);
     }
 
     CURLcode res = curl_easy_perform(curl);

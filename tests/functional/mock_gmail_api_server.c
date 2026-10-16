@@ -13,6 +13,7 @@
  *   MOCK_GMAIL_PORT  - TCP port to listen on (default 0: the kernel picks)
  *   MOCK_GMAIL_PORT_FILE - file the bound port is written to
  *   MOCK_GMAIL_COUNT - Number of messages to simulate (default 200)
+ *   MOCK_GMAIL_NO_USER_LABELS - set: the label list holds the system labels only
  *
  * Message layout (N = message number, 1-indexed):
  *   ID:      zero-padded 16-char hex, e.g. "0000000000000001"
@@ -305,7 +306,7 @@ static void handle_profile(int fd) {
 
 /** Build the /labels response */
 static void handle_labels(int fd) {
-    const char *body =
+    const char *sys =
         "{\"labels\":["
         "{\"id\":\"INBOX\",\"name\":\"INBOX\",\"type\":\"system\"},"
         "{\"id\":\"SENT\",\"name\":\"SENT\",\"type\":\"system\"},"
@@ -313,10 +314,14 @@ static void handle_labels(int fd) {
         "{\"id\":\"STARRED\",\"name\":\"STARRED\",\"type\":\"system\"},"
         "{\"id\":\"SPAM\",\"name\":\"SPAM\",\"type\":\"system\"},"
         "{\"id\":\"TRASH\",\"name\":\"TRASH\",\"type\":\"system\"},"
-        "{\"id\":\"IMPORTANT\",\"name\":\"IMPORTANT\",\"type\":\"system\"},"
-        "{\"id\":\"Work\",\"name\":\"Work\",\"type\":\"user\"},"
-        "{\"id\":\"Personal\",\"name\":\"Personal\",\"type\":\"user\"}"
-        "]}";
+        "{\"id\":\"IMPORTANT\",\"name\":\"IMPORTANT\",\"type\":\"system\"}";
+    /* Work and Personal carry messages; Empty Label carries none (EMAIL-104). */
+    const char *user =
+        ",{\"id\":\"Work\",\"name\":\"Work\",\"type\":\"user\"},"
+        "{\"id\":\"Personal\",\"name\":\"Personal\",\"type\":\"user\"},"
+        "{\"id\":\"Label_Empty1\",\"name\":\"Empty Label\",\"type\":\"user\"}";
+    char body[2048];
+    snprintf(body, sizeof(body), "%s%s]}", sys, getenv("MOCK_GMAIL_NO_USER_LABELS") ? "" : user);
     send_json(fd, body);
 }
 

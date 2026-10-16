@@ -491,6 +491,16 @@ int label_idx_load(const char *label, char (**uids_out)[17], int *count_out);
 int label_idx_write(const char *label, const char (*uids)[17], int count);
 
 /**
+ * @brief Make sure the label has an index file, empty when new.
+ *
+ * A label that exists on the server but carries no synced message is listed by
+ * label_idx_list() only once it has this file.  An existing index is left as
+ * it is.
+ * @return 0 on success, -1 on error.
+ */
+int label_idx_ensure(const char *label);
+
+/**
  * @brief Extract the labels field from a Gmail .hdr file.
  *
  * The .hdr format is: from\tsubject\tdate\tlabels\tflags

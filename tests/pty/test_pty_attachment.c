@@ -551,6 +551,38 @@ static void test_review_e_reopens_header_dialog(void)
     pty_close(s);
 }
 
+
+/* EMAIL-115: editing the headers from the review keeps the attachments, shows
+ * them in the dialog, and takes the changed values back to the review. */
+static void test_review_e_applies_changes(void)
+{
+    restart_servers();
+    PtySession *s = compose_to_review("alice@example.com", "Before edit");
+    ASSERT(s != NULL, "edit applies: review reached");
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    pty_send_str(s, g_attach_file2);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
+
+    pty_send_str(s, "e");
+    ASSERT_WAIT_FOR(s, "Edit Message", WAIT_MS);
+    pty_settle(s, 200);
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");     /* the dialog lists what is attached */
+    pty_send_key(s, PTY_KEY_TAB);               /* starts on Cc: Cc -> Bcc */
+    pty_send_str(s, "carol@example.com");
+    pty_send_key(s, PTY_KEY_TAB);               /* Bcc -> Subject */
+    pty_send_str(s, " changed");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);      /* the footer is drawn last */
+    ASSERT_SCREEN_CONTAINS(s, "Before edit changed");
+    ASSERT_SCREEN_CONTAINS(s, "carol@example.com");
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");
+    pty_send_str(s, "q");
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
 /* TC-PCR-09: [b] reopens editor; review reappears with updated line count */
 static void test_review_b_reopens_editor(void)
 {
@@ -584,6 +616,118 @@ static void test_review_a_opens_attach_picker(void)
     ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
     pty_send_str(s, "q");
     pty_send_str(s, "y");
+    pty_close(s);
+}
+
+
+/* EMAIL-115: the picker of the review screen refuses what cannot be attached,
+ * completes a path with Tab, edits with Backspace and gives up with Esc. */
+static void test_review_picker_errors(void)
+{
+    restart_servers();
+    PtySession *s = compose_to_review("alice@example.com", "Picker errors");
+    ASSERT(s != NULL, "picker errors: review reached");
+    char dir[700];
+    snprintf(dir, sizeof(dir), "%s/attachments", g_test_home);
+
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    pty_send_str(s, "/no/such/file.bin");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "File not found: /no/such/file.bin", WAIT_MS);
+    pty_send_str(s, "x");                       /* typing clears the message */
+    pty_settle(s, 200);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "File not found");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);      /* back on the review screen */
+
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    pty_send_str(s, dir);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Not a file:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);             /* the same again: still refused */
+    pty_settle(s, 200);
+    ASSERT_SCREEN_CONTAINS(s, "Not a file:");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+
+    pty_send_str(s, "a");                       /* an empty path gives up */
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    pty_send_str(s, "q");
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
+static void test_review_picker_tab_and_backspace(void)
+{
+    restart_servers();
+    PtySession *s = compose_to_review("alice@example.com", "Picker tab");
+    ASSERT(s != NULL, "picker tab: review reached");
+    char prefix[700];
+    snprintf(prefix, sizeof(prefix), "%s/attachments/rep", g_test_home);
+
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    pty_send_str(s, prefix);
+    ASSERT_WAIT_FOR(s, "report.pdf", WAIT_MS);  /* the drop-down offers it */
+    pty_send_key(s, PTY_KEY_TAB);               /* Tab takes the first match */
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_BACK);              /* ... and Backspace edits it */
+    pty_send_str(s, "f");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "report.pdf");
+    pty_send_str(s, "q");
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
+static void test_review_picker_max_attachments(void)
+{
+    restart_servers();
+    PtySession *s = compose_to_review("alice@example.com", "Picker max");
+    ASSERT(s != NULL, "picker max: review reached");
+    for (int i = 0; i < 8; i++) {
+        pty_send_str(s, "a");
+        ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+        pty_send_str(s, g_attach_file2);
+        pty_send_key(s, PTY_KEY_ENTER);
+        ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+        pty_settle(s, 100);
+    }
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    pty_send_str(s, g_attach_file2);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Max attachments (8) reached", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    pty_send_str(s, "q");
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
+/* The same limit in the Attach field of the compose dialog. */
+static void test_attach_field_max_attachments(void)
+{
+    restart_servers();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "field max: inbox reached");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    nav_to_attach_field(s);
+    for (int i = 0; i < 8; i++) {
+        pty_send_str(s, g_attach_file2);
+        pty_send_key(s, PTY_KEY_ENTER);
+        pty_settle(s, 150);
+    }
+    pty_send_str(s, g_attach_file2);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Max attachments (8) reached", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
 
@@ -749,8 +893,13 @@ int main(int argc, char *argv[])
     RUN_TEST(test_review_no_attachments_shown);
     RUN_TEST(test_review_s_sends_message);
     RUN_TEST(test_review_e_reopens_header_dialog);
+    RUN_TEST(test_review_e_applies_changes);
     RUN_TEST(test_review_b_reopens_editor);
     RUN_TEST(test_review_a_opens_attach_picker);
+    RUN_TEST(test_review_picker_errors);
+    RUN_TEST(test_review_picker_tab_and_backspace);
+    RUN_TEST(test_review_picker_max_attachments);
+    RUN_TEST(test_attach_field_max_attachments);
     RUN_TEST(test_review_d_removes_attachment);
     RUN_TEST(test_review_q_asks_discard_confirm);
     RUN_TEST(test_review_q_y_cancels);

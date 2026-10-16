@@ -24,6 +24,7 @@
 #include "test_scratch.h"
 #include "pty_editor.h"
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -48,6 +49,8 @@ static char g_smtp_bin[512];
  * data directory after it (the .config directory name is unrelated). */
 #define TEST_ACCOUNT "testuser@example.com"
 
+/* 1: the generated config names no SMTP server (the prompt of EMAIL-115) */
+static int  g_no_smtp;
 static char g_test_home[512];
 static char g_old_home[512];
 
@@ -90,16 +93,25 @@ static void write_config(void) {
         g_tests_failed++;
         return;
     }
-    fprintf(fp,
-        "EMAIL_HOST=imaps://localhost:%d\n"
-        "EMAIL_USER=testuser@example.com\n"
-        "EMAIL_PASS=testpass\n"
-        "EMAIL_FOLDER=INBOX\n"
-        "SMTP_HOST=smtps://localhost:%d\n"
-        "SMTP_PORT=%d\n"
-        "SMTP_USER=testuser@example.com\n"
-        "SMTP_PASS=testpass\n"
-        "SSL_NO_VERIFY=1\n", g_imap_port, g_smtp_port, g_smtp_port);
+    if (g_no_smtp) {
+        fprintf(fp,
+            "EMAIL_HOST=imaps://localhost:%d\n"
+            "EMAIL_USER=testuser@example.com\n"
+            "EMAIL_PASS=testpass\n"
+            "EMAIL_FOLDER=INBOX\n"
+            "SSL_NO_VERIFY=1\n", g_imap_port);
+    } else {
+        fprintf(fp,
+            "EMAIL_HOST=imaps://localhost:%d\n"
+            "EMAIL_USER=testuser@example.com\n"
+            "EMAIL_PASS=testpass\n"
+            "EMAIL_FOLDER=INBOX\n"
+            "SMTP_HOST=smtps://localhost:%d\n"
+            "SMTP_PORT=%d\n"
+            "SMTP_USER=testuser@example.com\n"
+            "SMTP_PASS=testpass\n"
+            "SSL_NO_VERIFY=1\n", g_imap_port, g_smtp_port, g_smtp_port);
+    }
     fclose(fp);
     chmod(path, 0600);
 }
@@ -833,6 +845,52 @@ static void test_compose_backspace_removes_address(void) {
     pty_close(s);
 }
 
+
+/* EMAIL-115: the caret moves inside a field; Backspace and Delete act at it. */
+static void test_compose_caret_editing(void) {
+    restart_imap();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "caret editing: reached inbox");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_key(s, PTY_KEY_TAB);               /* To -> Cc */
+    pty_send_key(s, PTY_KEY_TAB);               /* Cc -> Bcc */
+    pty_send_key(s, PTY_KEY_TAB);               /* Bcc -> Subject */
+    pty_send_str(s, "abc");
+    pty_send_key(s, PTY_KEY_LEFT);
+    pty_send_str(s, "X");                       /* abXc */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "abXc");
+    pty_send_key(s, PTY_KEY_BACK);              /* ab|c: removes X */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "abc");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "abXc");
+    pty_send_key(s, PTY_KEY_LEFT);
+    pty_send_key(s, PTY_KEY_DELETE);            /* a|c: removes b */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Subject:");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "abc");
+    pty_send_key(s, PTY_KEY_RIGHT);
+    pty_send_key(s, PTY_KEY_RIGHT);             /* at the end: no effect */
+    pty_send_key(s, PTY_KEY_DELETE);            /* nothing to delete */
+    pty_send_str(s, "Z");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "acZ");
+    pty_send_key(s, PTY_KEY_LEFT);
+    pty_send_key(s, PTY_KEY_LEFT);
+    pty_send_key(s, PTY_KEY_LEFT);
+    pty_send_key(s, PTY_KEY_LEFT);              /* stops at the start */
+    pty_send_key(s, PTY_KEY_BACK);              /* nothing before the caret */
+    pty_send_str(s, "_");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "_acZ");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 static void test_compose_cc_written_to_tempfile(void) {
     /* TC-CD-16: Cc address appears as Cc: header in the editor temp file */
     restart_imap(); restart_smtp();
@@ -1335,6 +1393,146 @@ static void test_reply_all_own_address_excluded_from_cc(void) {
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
+}
+
+
+/* The tests of EMAIL-115 run in a home of their own: messages and contacts
+ * cached by earlier tests would change what reply-all and the address field
+ * see. */
+static char g_saved_test_home[512];
+static void fresh_home_begin(const char *name) {
+    snprintf(g_saved_test_home, sizeof(g_saved_test_home), "%s", g_test_home);
+    snprintf(g_test_home, sizeof(g_test_home), "%s", test_path(name));
+    mkdir(g_test_home, 0700);
+    setenv("HOME", g_test_home, 1);
+}
+static void fresh_home_end(void) {
+    snprintf(g_test_home, sizeof(g_test_home), "%s", g_saved_test_home);
+    setenv("HOME", g_test_home, 1);
+}
+
+/* EMAIL-115: reply-all collects the other recipients of the message into Cc,
+ * without the user's own address and without duplicates of the sender. */
+static void test_reply_all_collects_recipients(void) {
+    fresh_home_begin("home-reply-all");
+    setenv("MOCK_IMAP_TO", "Testuser <testuser@example.com>, dave@example.org", 1);
+    setenv("MOCK_IMAP_CC", "erin@example.net,  Frank <frank@example.net> ", 1);
+    restart_imap();
+    unsetenv("MOCK_IMAP_TO");
+    unsetenv("MOCK_IMAP_CC");
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "reply-all recipients: reached inbox");
+
+    pty_send_str(s, "A");
+    ASSERT_WAIT_FOR(s, "Reply All", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "dave@example.org");
+    ASSERT_SCREEN_CONTAINS(s, "erin@example.net");
+    ASSERT_SCREEN_CONTAINS(s, "frank@example.net");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "testuser@example.com");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    fresh_home_end();
+}
+
+/* EMAIL-115: an account without an SMTP server is offered the SMTP wizard
+ * when a message is composed; the answer never blocks the composing. */
+static PtySession *compose_without_smtp(void) {
+    fresh_home_begin("home-no-smtp");
+    g_no_smtp = 1;
+    restart_imap();
+    PtySession *s = tui_open_to_inbox();
+    g_no_smtp = 0;
+    return s;
+}
+
+/* The text of every account's config.ini (the account may have been saved
+ * under its address, so all of them are read). */
+static void accounts_text(char *text, size_t cap) {
+    text[0] = '\0';
+    char adir[700];
+    snprintf(adir, sizeof(adir), "%s/.config/email-cli/accounts", g_test_home);
+    DIR *d = opendir(adir);
+    struct dirent *de;
+    while (d && (de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        char cp[1400];
+        snprintf(cp, sizeof(cp), "%s/%s/config.ini", adir, de->d_name);
+        FILE *cf = fopen(cp, "r");
+        if (!cf) continue;
+        size_t used = strlen(text);
+        size_t cn = fread(text + used, 1, cap - 1 - used, cf);
+        text[used + cn] = '\0';
+        fclose(cf);
+    }
+    if (d) closedir(d);
+}
+
+/* Fill the dialog and confirm it: the prompt comes before the editor. */
+static void smtp_prompt_reach(PtySession *s) {
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_send_str(s, "alice@example.com;");
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_str(s, "No SMTP yet");
+    pty_send_key(s, PTY_KEY_ENTER);
+}
+
+/* After the prompt: the editor opens, then the review, which is discarded. */
+static void smtp_prompt_finish(PtySession *s) {
+    ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "the editor opens after the prompt");
+    ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS);
+    pty_send_str(s, "q");
+    pty_send_str(s, "y");
+    pty_close(s);
+    fresh_home_end();
+}
+
+static void test_smtp_prompt_declined(void) {
+    PtySession *s = compose_without_smtp();
+    ASSERT(s != NULL, "smtp prompt declined: reached inbox");
+    smtp_prompt_reach(s);
+    ASSERT_WAIT_FOR(s, "Configure SMTP now? [Y/n]", WAIT_MS);
+    pty_send_str(s, "n\r");
+    smtp_prompt_finish(s);                               /* composing goes on */
+}
+
+static void test_smtp_prompt_wizard_abandoned(void) {
+    PtySession *s = compose_without_smtp();
+    ASSERT(s != NULL, "smtp prompt abandoned: reached inbox");
+    smtp_prompt_reach(s);
+    ASSERT_WAIT_FOR(s, "Configure SMTP now? [Y/n]", WAIT_MS);
+    pty_send_str(s, "y\r");
+    ASSERT_WAIT_FOR(s, "SMTP (outgoing mail) configuration", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    pty_settle(s, SETTLE_MS);
+    char text[4096];
+    accounts_text(text, sizeof(text));
+    ASSERT(strstr(text, "SMTP_HOST=") == NULL, "an abandoned SMTP wizard saves nothing");
+    smtp_prompt_finish(s);
+}
+
+static void test_smtp_prompt_wizard_saves(void) {
+    PtySession *s = compose_without_smtp();
+    ASSERT(s != NULL, "smtp prompt saves: reached inbox");
+    smtp_prompt_reach(s);
+    ASSERT_WAIT_FOR(s, "Configure SMTP now? [Y/n]", WAIT_MS);
+    pty_send_str(s, "\r");                              /* Enter = yes */
+    ASSERT_WAIT_FOR(s, "SMTP (outgoing mail) configuration", WAIT_MS);
+    for (int i = 0; i < 6; i++) {                       /* accept every default */
+        pty_settle(s, 150);
+        pty_send_key(s, PTY_KEY_ENTER);
+    }
+    ASSERT_WAIT_FOR(s, "Message body", WAIT_MS);        /* the wizard is through */
+    char text[4096];
+    accounts_text(text, sizeof(text));
+    ASSERT(strstr(text, "SMTP_HOST=") != NULL, "the wizard's SMTP settings were saved");
+    smtp_prompt_finish(s);
 }
 
 static void test_reply_all_esc_cancels(void) {
@@ -1966,6 +2164,30 @@ static void test_forwarded_message_shows_forwarded_marker(void) {
     pty_close(s);
 }
 
+static void test_reply_all_send(void) {
+    /* EMAIL-115: a reply-all can be written and sent like a reply */
+    restart_imap(); restart_smtp();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "reply-all answered: reached inbox");
+
+    pty_send_str(s, "A");
+    ASSERT_WAIT_FOR(s, "Reply All", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_TAB);   /* Cc -> Bcc */
+    pty_send_key(s, PTY_KEY_TAB);   /* Bcc -> Subject */
+    pty_send_key(s, PTY_KEY_ENTER);
+    pcr_send(s);
+    ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message sent.", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
+
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  Main
  * ══════════════════════════════════════════════════════════════════════ */
@@ -2038,6 +2260,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_compose_to_field_accepts_email);
     RUN_TEST(test_compose_multiple_to_addresses);
     RUN_TEST(test_compose_backspace_removes_address);
+    RUN_TEST(test_compose_caret_editing);
     RUN_TEST(test_compose_cc_written_to_tempfile);
     RUN_TEST(test_compose_bcc_written_to_tempfile);
 
@@ -2073,6 +2296,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_reply_all_dialog_opens);
     RUN_TEST(test_reply_all_title);
     RUN_TEST(test_reply_all_own_address_excluded_from_cc);
+    RUN_TEST(test_reply_all_collects_recipients);
+    RUN_TEST(test_smtp_prompt_declined);
+    RUN_TEST(test_smtp_prompt_wizard_abandoned);
+    RUN_TEST(test_smtp_prompt_wizard_saves);
     RUN_TEST(test_reply_all_esc_cancels);
     RUN_TEST(test_reply_all_in_help_panel);
 
@@ -2121,6 +2348,7 @@ int main(int argc, char *argv[]) {
     restart_imap();
     RUN_TEST(test_replied_message_shows_answered_marker);
     RUN_TEST(test_forwarded_message_shows_forwarded_marker);
+    RUN_TEST(test_reply_all_send);
 
     /* ── Cleanup ──────────────────────────────────────────────────────── */
     stop_server(&g_imap_pid);

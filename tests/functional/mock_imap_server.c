@@ -23,6 +23,7 @@
  *   MOCK_IMAP_PORT_FILE - file the bound port is written to
  *   MOCK_IMAP_SUBJECT - Subject returned in FETCH responses (default "Test Message")
  *   MOCK_IMAP_COUNT   - Number of messages to simulate (default 1, backward compat)
+ *   MOCK_IMAP_TO, MOCK_IMAP_CC - recipients written into the plain-text messages
  *
  * Launching two instances with different ports and subjects allows testing
  * that account isolation works correctly (each account connects to its own
@@ -46,6 +47,9 @@ static const char *g_dmarc      = NULL;  /* MOCK_IMAP_DMARC: "pass" / "fail" / N
  * accepted, which means a wrong password is indistinguishable from a right
  * one and the product's own handling of a rejection cannot be tested. */
 static const char *g_password   = NULL;
+/* MOCK_IMAP_TO / MOCK_IMAP_CC: recipients written into the plain-text
+ * messages, so reply-all has addresses to work with. */
+static char        g_rcpt_hdr[1024] = "";
 
 /*
  * CONDSTORE / QRESYNC support (RFC 4551 / RFC 5162):
@@ -247,12 +251,13 @@ static char *build_message_content(int uid, int is_header, int is_flags_only,
         if (asprintf(&msg,
                      "From: %s <%s>\r\n"
                      "Subject: %s\r\n"
+                     "%s"
                      "Date: %s\r\n"
                      "MIME-Version: 1.0\r\n"
                      "Content-Type: text/plain; charset=UTF-8\r\n"
                      "\r\n"
                      "%s\r\n",
-                     from_name, from_addr, subject, date_str, body_text) == -1)
+                     from_name, from_addr, subject, g_rcpt_hdr, date_str, body_text) == -1)
             return NULL;
         return msg;
     }
@@ -345,15 +350,15 @@ static char *build_legacy_content(int is_header, const char **section_out) {
     if (g_dmarc)
         snprintf(ar_hdr, sizeof(ar_hdr),
                  "Authentication-Results: localhost; dmarc=%s\r\n", g_dmarc);
-    char headers[700];
+    char headers[1700];
     snprintf(headers, sizeof(headers),
              "From: =?UTF-8?Q?Test_User?= <test@example.com>\r\n"
              "Subject: %s\r\n"
              " (folded continuation)\r\n"
              "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
-             "%s"
+             "%s%s"
              "\r\n",
-             g_subject, ar_hdr);
+             g_subject, g_rcpt_hdr, ar_hdr);
 
     char *full_msg = NULL;
     if (asprintf(&full_msg,
@@ -361,6 +366,7 @@ static char *build_legacy_content(int is_header, const char **section_out) {
                  "Subject: %s\r\n"
                  " (folded continuation)\r\n"
                  "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+                 "%s"
                  "MIME-Version: 1.0\r\n"
                  "Content-Type: multipart/mixed; boundary=\"B001\"\r\n"
                  "\r\n"
@@ -414,7 +420,7 @@ static char *build_legacy_content(int is_header, const char **section_out) {
                  "\r\n"
                  "dGVzdCBkYXRh\r\n"
                  "--B001--\r\n",
-                 g_subject) == -1)
+                 g_subject, g_rcpt_hdr) == -1)
         return NULL;
 
     if (is_header) {
@@ -818,6 +824,14 @@ int main(void) {
     if (dmarc_env && dmarc_env[0]) g_dmarc = dmarc_env;
     const char *pass_env = getenv("MOCK_IMAP_PASSWORD");
     if (pass_env && pass_env[0]) g_password = pass_env;
+    const char *to_env = getenv("MOCK_IMAP_TO");
+    const char *cc_env = getenv("MOCK_IMAP_CC");
+    if (to_env && to_env[0])
+        snprintf(g_rcpt_hdr + strlen(g_rcpt_hdr), sizeof(g_rcpt_hdr) - strlen(g_rcpt_hdr),
+                 "To: %s\r\n", to_env);
+    if (cc_env && cc_env[0])
+        snprintf(g_rcpt_hdr + strlen(g_rcpt_hdr), sizeof(g_rcpt_hdr) - strlen(g_rcpt_hdr),
+                 "Cc: %s\r\n", cc_env);
 
     /* CONDSTORE / QRESYNC */
     const char *caps_env = getenv("MOCK_IMAP_CAPS");

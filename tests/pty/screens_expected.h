@@ -4870,8 +4870,8 @@ static const char *const exp_wiz_bad_type[] = {
     "  [1] IMAP (standard e-mail server)",
     "  [2] Gmail (Google account — uses Gmail API, not IMAP)",
     "Choice [1]: 9",
-    "",
-    "IMAP Host (e.g. imap.example.com):",
+    "Unknown account type '9': enter 1 for IMAP or 2 for Gmail.",
+    "Choice [1]:",
     NULL
 };
 static const char *const sty_wiz_bad_type[] = {
@@ -4901,7 +4901,7 @@ static const char *const sty_wiz_bad_type[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_wiz_bad_type[3] = { 23, 35, 1 };
+static const int cur_wiz_bad_type[3] = { 23, 12, 1 };
 
 
 

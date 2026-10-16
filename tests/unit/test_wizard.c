@@ -43,6 +43,24 @@ void test_wizard(void) {
         ASSERT(strcmp(cfg->folder, "INBOX") == 0, "Folder should default to INBOX");
     }
 
+    // 2a. An unknown account type is refused and asked again (EMAIL-106)
+    {
+        const char *in = "9\nimap\n1\nh\n\nu\np\n\n";
+        RAII_FILE FILE *stream = fmemopen((void*)in, strlen(in), "r");
+        RAII_WITH_CLEANUP(config_cleanup) Config *cfg = setup_wizard_run_internal(stream);
+        ASSERT(cfg != NULL, "the wizard asks again after an unknown account type");
+        ASSERT(!cfg->gmail_mode && cfg->user && strcmp(cfg->user, "u") == 0,
+               "the answer after the refused one selects IMAP");
+    }
+
+    // 2b. End of input right after an unknown account type ends the wizard
+    {
+        const char *in = "9\n";
+        RAII_FILE FILE *stream = fmemopen((void*)in, strlen(in), "r");
+        RAII_WITH_CLEANUP(config_cleanup) Config *cfg = setup_wizard_run_internal(stream);
+        ASSERT(cfg == NULL, "an unknown account type is not taken as IMAP");
+    }
+
     // 3. EOF after host: user field missing → should return NULL
     {
         const char *input3 = "1\nimaps://imap.test.com\n\n";

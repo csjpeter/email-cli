@@ -1692,14 +1692,10 @@ int main(int argc, char *argv[]) {
                     printf("  %d. %s\n", r + 1,
                            rule->name && rule->name[0] ? rule->name : "(unnamed)");
 
+                    /* mail_rules_load() builds `when` from the flat if-* fields,
+                     * so a rule with any condition has one. */
                     if (rule->when && rule->when[0])
                         printf("       when         = %s\n", rule->when);
-                    else {
-                        if (rule->if_from)    printf("       if-from      = %s\n", rule->if_from);
-                        if (rule->if_subject) printf("       if-subject   = %s\n", rule->if_subject);
-                        if (rule->if_to)      printf("       if-to        = %s\n", rule->if_to);
-                        if (rule->if_label)   printf("       if-label     = %s\n", rule->if_label);
-                    }
 
                     for (int j = 0; j < rule->then_add_count; j++)
                         printf("       then-add-label    = %s\n", rule->then_add_label[j]);

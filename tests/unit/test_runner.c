@@ -40,6 +40,7 @@ void test_flag_search_folder_isolation(void);
 void test_local_contacts_update(void);
 void test_imap_util(void);
 void test_platform(void);
+void test_platform_identity(void);
 void test_email_service(void);
 void test_html_parser(void);
 void test_html_render(void);
@@ -143,6 +144,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_local_save_outgoing);
     RUN_TEST(test_imap_util);
     RUN_TEST(test_platform);
+    RUN_TEST(test_platform_identity);
     RUN_TEST(test_email_service);
     RUN_TEST(test_html_parser);
     RUN_TEST(test_html_render);

@@ -1188,6 +1188,93 @@ static const char *const sty_account_delete_ask[] = {
 };
 static const int cur_account_delete_ask[3] = { 23, 99, 0 };
 
+static const char *const exp_w80_review_long_to[] = {
+    "  Review: Message",
+    "",
+    "  From:    testuser",
+    "  To:      annabelle.longname@example.org; bartholomew.longname@example.org;",
+    "           cornelia.longname@example.org; dominic.longname@example.org",
+    "  Cc:      cc@example.org",
+    "  Bcc:     bcc@example.org",
+    "  Subject: Quarterly report",
+    "  Body:    1 line",
+    "  Attach:  report.pdf",
+    "",
+    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last",
+    "  [q] Discard",
+    NULL
+};
+static const char *const sty_w80_review_long_to[] = {
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "                                                                                ",
+    "  ddddd                                                                         ",
+    "  ddd                                                                           ",
+    "                                                                                ",
+    "  ddd                                                                           ",
+    "  dddd                                                                          ",
+    "  dddddddd                                                                      ",
+    "  ddddd                                                                         ",
+    "  ddddddd                                                                       ",
+    "                                                                                ",
+    "  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "ddddddddddddd                                                                   ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    NULL
+};
+static const int cur_w80_review_long_to[3] = { 13, 0, 1 };
+static const char *const exp_w140_review_long_to[] = {
+    "  Review: Message",
+    "",
+    "  From:    testuser",
+    "  To:      annabelle.longname@example.org; bartholomew.longname@example.org; cornelia.longname@example.org; dominic.longname@example.org",
+    "  Cc:      cc@example.org",
+    "  Bcc:     bcc@example.org",
+    "  Subject: Quarterly report",
+    "  Body:    1 line",
+    "  Attach:  report.pdf",
+    "",
+    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    NULL
+};
+static const char *const sty_w140_review_long_to[] = {
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "                                                                                                                                            ",
+    "  ddddd                                                                                                                                     ",
+    "  ddd                                                                                                                                       ",
+    "  ddd                                                                                                                                       ",
+    "  dddd                                                                                                                                      ",
+    "  dddddddd                                                                                                                                  ",
+    "  ddddd                                                                                                                                     ",
+    "  ddddddd                                                                                                                                   ",
+    "                                                                                                                                            ",
+    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                               ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    NULL
+};
+static const int cur_w140_review_long_to[3] = { 11, 0, 1 };
+
 #endif /* TEST_PTY_SCREENS_EXPECTED_H */
 
 static const char *const exp_body_editor[] = {
@@ -3430,8 +3517,8 @@ static const char *const exp_review_long_to[] = {
     "  Review: Message",
     "",
     "  From:    testuser",
-    "  To:      annabelle.longname@example.org;  bartholomew.longname@example.org;  cornelia.longname@exa",
-    "mple.org;  dominic.longname@example.org",
+    "  To:      annabelle.longname@example.org; bartholomew.longname@example.org;",
+    "           cornelia.longname@example.org; dominic.longname@example.org",
     "  Cc:      cc@example.org",
     "  Bcc:     bcc@example.org",
     "  Subject: Quarterly report",

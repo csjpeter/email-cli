@@ -721,6 +721,13 @@ static PtySession *at_review_screen(void) {
     if (s) to_review(s);
     return s;
 }
+/* The review screen with a To list too long for a narrow terminal (EMAIL-107). */
+static PtySession *at_review_long_to(void) {
+    PtySession *s = at_list();
+    if (s) to_review_full(s, "annabelle.longname@example.org; bartholomew.longname@example.org; "
+                             "cornelia.longname@example.org; dominic.longname@example.org");
+    return s;
+}
 static PtySession *at_list_help(void) {
     PtySession *s = at_list();
     if (s) {
@@ -950,6 +957,7 @@ VIEW(w80_compose_form, at_cols(80, at_compose_form), (void)0)
 VIEW(w80_body_editor, at_cols(80, at_compose_editor), (void)0)
 VIEW(w80_review, at_cols(80, at_review_screen), (void)0)
 VIEW(w80_rules, at_cols(80, at_rules_written), (void)0)
+VIEW(w80_review_long_to, at_cols(80, at_review_long_to), (void)0)
 VIEW(w140_accounts, at_cols(140, at_accounts), (void)0)
 VIEW(w140_folders, at_cols(140, at_folders), (void)0)
 VIEW(w140_list, at_cols(140, at_list), (void)0)
@@ -959,6 +967,7 @@ VIEW(w140_compose_form, at_cols(140, at_compose_form), (void)0)
 VIEW(w140_body_editor, at_cols(140, at_compose_editor), (void)0)
 VIEW(w140_review, at_cols(140, at_review_screen), (void)0)
 VIEW(w140_rules, at_cols(140, at_rules_written), (void)0)
+VIEW(w140_review_long_to, at_cols(140, at_review_long_to), (void)0)
 VIEW(list_third_row, at_list(), (pty_send_key(s, PTY_KEY_DOWN), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
 VIEW(folders_second_row, at_folders(), (pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
 VIEW(list_wide_subject, at_subject("\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e\xe3\x81\xae\xe4\xbb\xb6\xe5\x90\x8d with mixed \xe3\x83\x86\xe3\x82\xad\xe3\x82\xb9\xe3\x83\x88", 0), (void)0)
@@ -1104,6 +1113,8 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_body_editor);
     RUN_TEST(test_screen_body_editor_typed);
     RUN_TEST(test_screen_review);
+    RUN_TEST(test_screen_w80_review_long_to);
+    RUN_TEST(test_screen_w140_review_long_to);
     RUN_TEST(test_screen_review_discard_ask);
     RUN_TEST(test_screen_w80_accounts);
     RUN_TEST(test_screen_w80_folders);

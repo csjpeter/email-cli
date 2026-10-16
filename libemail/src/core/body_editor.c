@@ -3,6 +3,7 @@
 /* Created: 2026-10-14 */
 /* The full-screen message body editor: libtuikit's tui_textedit with autosave. */
 #include "body_editor.h"
+#include "key_events.h"
 
 #include <tuikit/buf.h>
 #include <tuikit/canvas.h>
@@ -67,69 +68,6 @@ static void draw(tui_textedit *te, const char *header, const char *note,
     tui_screen_free(scr);
 }
 
-/* A resize while the editor is open (EMAIL-97): SIGWINCH sets the flag and
- * interrupts the wait; the editor redraws at the new size at once.  The
- * handler of the program is put back when the editor ends. */
-static volatile sig_atomic_t g_resized;
-
-static void on_winch(int sig) {
-    (void)sig;
-    g_resized = 1;
-}
-
-/* One event from @p fd through the persistent decoder @p d, so that a
- * bracketed paste arrives whole (tui_tty_read_key() is one-shot and drops
- * the text of a paste).  @p idle_ms < 0 blocks; otherwise 0 is returned when
- * that long passes with no input.  Returns 1 event, 0 idle, -1 hang-up. */
-static int next_event(int fd, tui_decoder *d, tui_event *ev, int idle_ms) {
-    sigset_t block, orig;
-    sigemptyset(&block);
-    sigaddset(&block, SIGWINCH);
-    for (;;) {
-        if (tui_decoder_next(d, ev)) return 1;
-        int pending = tui_decoder_pending(d);
-        /* Wait for input, a resize, or the idle time; SIGWINCH is blocked
-         * outside ppoll so that a resize cannot slip between the check and
-         * the wait. */
-        sigprocmask(SIG_BLOCK, &block, &orig);
-        if (g_resized) {
-            g_resized = 0;
-            sigprocmask(SIG_SETMASK, &orig, NULL);
-            memset(ev, 0, sizeof(*ev));
-            ev->type = TUI_EV_RESIZE;
-            return 1;
-        }
-        struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
-        struct timespec ts, *tsp = NULL;
-        int wait = pending ? TUI_ESC_DELAY_DEFAULT : idle_ms;
-        if (wait >= 0) {
-            ts.tv_sec  = wait / 1000;
-            ts.tv_nsec = (long)(wait % 1000) * 1000000L;
-            tsp = &ts;
-        }
-        int pr = ppoll(&pfd, 1, tsp, &orig);
-        int err = errno;
-        sigprocmask(SIG_SETMASK, &orig, NULL);
-        if (pr < 0 && err == EINTR) continue;      /* the flag says why */
-        if (pr < 0) return -1;
-        if (pr == 0) {
-            if (pending) {
-                if (tui_decoder_timeout(d, ev)) return 1;
-                continue;
-            }
-            return 0;
-        }
-        unsigned char c;
-        ssize_t n = read(fd, &c, 1);
-        if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) {
-            if (tui_decoder_timeout(d, ev)) return 1;
-            return -1;
-        }
-        tui_decoder_feed(d, (const char *)&c, 1);
-    }
-}
-
 int body_editor_run(char **body, const char *header, BodyEditorSave save, void *ctx) {
     tui_tty_raw *raw = tui_tty_raw_enter(STDIN_FILENO, 0);
     if (!raw) return -1;
@@ -145,12 +83,8 @@ int body_editor_run(char **body, const char *header, BodyEditorSave save, void *
 
     tui_decoder dec;
     tui_decoder_init(&dec);
-    struct sigaction sa, old_sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = on_winch;
-    sigemptyset(&sa.sa_mask);
-    g_resized = 0;
-    sigaction(SIGWINCH, &sa, &old_sa);
+    KeyEvents winch;
+    key_events_begin(&winch);     /* a resize redraws at once (EMAIL-97) */
     const char *note = "";
     int saved_dirty = 0;
     for (;;) {
@@ -163,7 +97,7 @@ int body_editor_run(char **body, const char *header, BodyEditorSave save, void *
         /* Idle with unsaved changes: save instead of waiting for a key. */
         tui_event ev;
         int want_idle = (te.dirty && !saved_dirty) ? BODY_EDITOR_AUTOSAVE_MS : -1;
-        int rc = next_event(STDIN_FILENO, &dec, &ev, want_idle);
+        int rc = key_events_next(STDIN_FILENO, &dec, &ev, want_idle);
         if (rc == 0) {
             if (save) save(te.buf, ctx);
             saved_dirty = 1;
@@ -188,7 +122,7 @@ int body_editor_run(char **body, const char *header, BodyEditorSave save, void *
     *body = strdup(te.buf);
     w = write(STDOUT_FILENO, off, sizeof(off) - 1);
     (void)w;
-    sigaction(SIGWINCH, &old_sa, NULL);
+    key_events_end(&winch);
     tui_decoder_free(&dec);
     free(buf);
     tui_tty_raw_exit(&raw);

@@ -36,6 +36,7 @@ set(HARNESS_PLATFORM_SOURCES
 add_executable(input-line-harness EXCLUDE_FROM_ALL
     input_line_harness.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/input_line.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/core/key_events.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/path_complete.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/logger.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/fs_util.c

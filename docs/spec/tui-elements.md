@@ -153,13 +153,15 @@ at the new size at once, without a key.  A resize that arrives while a screen
 is being drawn is kept in a flag and is not lost.  The reader lays the message
 out again at the new width and keeps its position; the list, folder browser and
 the other screens re-read the size on every pass.  The body editor
-(`body_editor.c`) does the same with its own wait.
+(`body_editor.c`) and the single-line editor (`input_line.c`) do the same
+through `key_events_next()` (`core/key_events.c`), which reports SIGWINCH as
+`TUI_EV_RESIZE`.
 
 Below 80x24 the screen is replaced by `Terminal too small (WxH).` /
 `Needs 80x24. Resize, or Esc to leave.`; keys other than Esc and Ctrl-C are
 swallowed until the window is large enough again, and nothing is edited while
 nothing is drawn.  Pictures: no cell-exact golden (the notice is two lines);
 the behaviour is in `test_resize_*`, `test_start_below_minimum_shows_notice`
-and `test_body_editor_resize_and_too_small`.  The single-line editor
-(`input_line`, libtuikit's `tui_lineedit_run`) has its own key loop and is not
-redrawn by a resize until the next key.
+and `test_body_editor_resize_and_too_small`.  The single-line editor is
+drawn again at once at the new width (EMAIL-109: the text scrolls so that the
+cursor stays visible; `test_resize_redraws_the_line`).

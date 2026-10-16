@@ -66,6 +66,7 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/libemail/src/core/html_render.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/imap_util.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/input_line.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/core/key_events.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/tui_frame.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/status_line.c
     ${CMAKE_SOURCE_DIR}/libemail/src/core/compose_draft.c

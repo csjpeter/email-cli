@@ -3595,11 +3595,24 @@ if phase_wanted 54; then
 echo ""
 echo "--- Phase 54: email-sync cron status/remove ---"
 
-CRON_STATUS=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+# a crontab command of our own: these runs must never touch the real crontab
+CRON54_BIN="$WORK_DIR/cron54-bin"
+mkdir -p "$CRON54_BIN"
+cat > "$CRON54_BIN/crontab" <<'FAKE'
+#!/bin/sh
+store="$(dirname "$0")/crontab.store"
+case "$1" in
+    -l) if [ -f "$store" ]; then cat "$store"; else echo "no crontab for user" >&2; exit 1; fi ;;
+    -)  cat > "$store" ;;
+esac
+FAKE
+chmod +x "$CRON54_BIN/crontab"
+
+CRON_STATUS=$( (export HOME="$H_ALPHA" PATH="$CRON54_BIN:$PATH"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-sync" cron status 2>&1 || true) )
 check     "54.1 cron status: exits cleanly"   "not installed\|installed\|cron" "$CRON_STATUS"
 
-CRON_REMOVE=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+CRON_REMOVE=$( (export HOME="$H_ALPHA" PATH="$CRON54_BIN:$PATH"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-sync" cron remove 2>&1 || true) )
 check_not "54.2 cron remove: no fatal error"  "Segmentation\|Abort"            "$CRON_REMOVE"
 
@@ -6594,6 +6607,15 @@ OUT113=$(f113 'two words\n' --import-token)
 check "113.17 import: a line with blanks is refused" "expected one refresh token"  "$OUT113"
 check "113.18 import: the stored token is unchanged" "GMAIL_REFRESH_TOKEN=imported-token-xyz" "$(cat "$F113_INI")"
 
+# a token Google refuses is not taken over, and the old one stays
+OUT113=$( (export HOME="$H_F113"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME GMAIL_TEST_TOKEN
+    export GMAIL_TEST_TOKEN_URL="http://127.0.0.1:$GMAIL113_PORT/token"
+    printf 'refused-token-abc\n' | "$BIN_DIR/email-cli" config reauth --import-token 2>&1
+    echo "exit-code=$?") )
+check "113.29 import: a refused token is not accepted" "The token was not accepted"  "$OUT113"
+check "113.30 import: and the command fails"     "exit-code=1"                       "$OUT113"
+check "113.31 import: the stored token is unchanged" "GMAIL_REFRESH_TOKEN=imported-token-xyz" "$(cat "$F113_INI")"
+
 OUT113=$(f113 '' --frobnicate)
 check "113.19 an unknown option is refused"  "Unknown option for 'config reauth'"  "$OUT113"
 
@@ -6655,6 +6677,14 @@ if phase_wanted 114; then
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo "--- Phase 114: email-tui send, reply and first-run wizard (EMAIL-115) ---"
+
+# its own IMAP mock: the shared ones may be gone by the time this phase runs
+alloc_port IMAP114_PORT
+IMAP114_PORT_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_114.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP114_PORT MOCK_IMAP_SUBJECT="Phase114Msg" \
+    "$MOCK_SERVER_BIN") >"$IMAP114_PORT_LOG" 2>&1 &
+IMAP114_PORT_PID=$!
+sleep 1
 # its own SMTP mock: the shared one may be gone by the time this phase runs
 alloc_port SMTP114_PORT
 SMTP114_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp_114.log"
@@ -6666,7 +6696,7 @@ case "$H_F114" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: u
 rm -rf "./build/tests/functional/work-$$/homes/f114-$$"
 mkdir -p "$H_F114/.config/email-cli/accounts/testuser"
 cat > "$H_F114/.config/email-cli/accounts/testuser/config.ini" <<INI
-EMAIL_HOST=imaps://localhost:$IMAP1_PORT
+EMAIL_HOST=imaps://localhost:$IMAP114_PORT
 EMAIL_USER=testuser@example.com
 EMAIL_PASS=testpass
 EMAIL_FOLDER=INBOX
@@ -6738,12 +6768,272 @@ OUT114=$( (export HOME="$H_F114W" TERM=xterm; unset XDG_DATA_HOME XDG_CONFIG_HOM
 check "114.13 first run without answers is abandoned" "Configuration aborted. Exiting." "$OUT114"
 check "114.14 and exits non-zero"                "exit-code=1"                      "$OUT114"
 OUT114=$( (export HOME="$H_F114W" TERM=xterm; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    printf '1\nimaps://localhost:%s\n\nwiz@example.com\nsecret\nINBOX\n' "$IMAP1_PORT" \
+    printf '1\nimaps://localhost:%s\n\nwiz@example.com\nsecret\nINBOX\n' "$IMAP114_PORT" \
         | "$BIN_DIR/email-tui" send --to a@example.com 2>&1; echo "exit-code=$?") )
 check "114.15 first run with answers saves the account" "Configuration saved."      "$OUT114"
 check "114.16 and the account file exists" "wiz@example.com" \
       "$(cat "$H_F114W"/.config/email-cli/accounts/*/config.ini)"
 kill "$SMTP114_PID"
+kill "$IMAP114_PORT_PID"
+
+fi
+
+if phase_wanted 116; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 116 — email-cli: argument errors, rules sub-commands, first run (EMAIL-116)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 116: email-cli option errors, rules, empty and double accounts (EMAIL-116) ---"
+
+# its own IMAP mock: the shared ones may be gone by the time this phase runs
+alloc_port IMAP116_PORT
+IMAP116_PORT_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_116.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP116_PORT MOCK_IMAP_SUBJECT="Phase116Msg" \
+    "$MOCK_SERVER_BIN") >"$IMAP116_PORT_LOG" 2>&1 &
+IMAP116_PORT_PID=$!
+sleep 1
+mk116_home() {      # mk116_home <dir> <account...>: homes with IMAP accounts on mock 1
+    local dir="$1"; shift
+    case "$dir" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe path $dir" >&2; exit 1 ;; esac
+    rm -rf "$dir"
+    mkdir -p "$dir/.config/email-cli"
+    printf 'credential_obfuscation=false\n' > "$dir/.config/email-cli/settings.ini"
+    local a
+    for a in "$@"; do
+        mkdir -p "$dir/.config/email-cli/accounts/$a"
+        cat > "$dir/.config/email-cli/accounts/$a/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP116_PORT
+EMAIL_USER=$a
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+INI
+        chmod 0600 "$dir/.config/email-cli/accounts/$a/config.ini"
+    done
+}
+H116="./build/tests/functional/work-$$/homes/f116-$$"
+H116B="./build/tests/functional/work-$$/homes/f116b-$$"
+H116E="./build/tests/functional/work-$$/homes/f116e-$$"
+mk116_home "$H116" testuser
+mk116_home "$H116B" first@example.org second@example.org
+mk116_home "$H116E"
+
+# c116 <home> <args...>: email-cli with the exit code appended, no input
+c116() {
+    local home="$1"; shift
+    (export HOME="$home"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/email-cli" "$@" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+
+# list: dates and filters
+OUT=$(c116 "$H116" list --since 2026-1-1)
+check "116.1 --since must be a full date"        "must be a date in YYYY-MM-DD form"  "$OUT"
+OUT=$(c116 "$H116" list --before 2026-01-0x)
+check "116.2 --before must be a date, too"       "must be a date in YYYY-MM-DD form"  "$OUT"
+OUT=$(c116 "$H116" list --since)
+check "116.3 --since needs a value"              "requires a date"                    "$OUT"
+OUT=$(c116 "$H116" list --from)
+check "116.4 --from needs a value"               "requires a substring"               "$OUT"
+OUT=$(c116 "$H116" list --since 2000-01-01 --before 2100-01-01 --json)
+check "116.5 valid dates with --json are accepted" "exit-code=0"                      "$OUT"
+
+# marks
+OUT=$(c116 "$H116" mark-read)
+check "116.6 mark-read without a UID"            "'mark-read' requires a UID"         "$OUT"
+OUT=$(c116 "$H116" mark-read 1 2)
+check "116.7 mark-read with two UIDs"            "Unknown option"                     "$OUT"
+OUT=$(c116 "$H116" mark-read --folder)
+check "116.8 mark-read --folder without a name"  "folder requires a folder name"    "$OUT"
+OUT=$(c116 "$H116" mark-starred)
+check "116.9 mark-starred without a UID"         "'mark-starred' requires a UID"      "$OUT"
+OUT=$(c116 "$H116" mark-starred --folder)
+check "116.10 mark-starred --folder without a name" "folder requires a folder name" "$OUT"
+OUT=$(c116 "$H116" mark-starred 1 2)
+check "116.11 mark-starred with two UIDs"        "Unknown option"                     "$OUT"
+OUT=$(c116 "$H116" mark-starred zz)
+check "116.12 mark-starred with a bad UID"       "invalid UID 'zz'"                   "$OUT"
+OUT=$(c116 "$H116" mark-read zz)
+check "116.13 mark-read with a bad UID"          "invalid UID 'zz'"                   "$OUT"
+OUT=$(c116 "$H116" mark-junk)
+check "116.14 mark-junk without a UID"           "'mark-junk' requires a UID"         "$OUT"
+OUT=$(c116 "$H116" mark-notjunk)
+check "116.15 mark-notjunk without a UID"        "'mark-notjunk' requires a UID"      "$OUT"
+OUT=$(c116 "$H116" mark-notjunk 1 2)
+check "116.16 mark-notjunk with two UIDs"        "Unknown option"                     "$OUT"
+OUT=$(c116 "$H116" mark-notjunk zz)
+check "116.17 mark-notjunk with a bad UID"       "invalid UID 'zz'"                   "$OUT"
+OUT=$(c116 "$H116" mark-junk zz)
+check "116.18 mark-junk with a bad UID"          "invalid UID 'zz'"                   "$OUT"
+OUT=$(c116 "$H116" add-label zz)
+check "116.19 add-label needs a label"           "requires a UID and a label"         "$OUT"
+OUT=$(c116 "$H116" add-label zz Work)
+check "116.20 add-label with a bad UID"          "invalid UID 'zz'"                   "$OUT"
+
+# send
+OUT=$(c116 "$H116" send --to a@example.org --attach)
+check "116.21 send --attach needs a path"        "attach requires a file path"      "$OUT"
+OUT=$(c116 "$H116" send --to a@example.org --attach 1 --attach 2 --attach 3 --attach 4 --attach 5 --attach 6 --attach 7 --attach 8 --attach 9)
+check "116.22 more than eight attachments"       "maximum 8 attachments"              "$OUT"
+
+# accounts
+OUT=$(c116 "$H116E" list-accounts)
+check "116.23 no accounts are said"              "No accounts configured."            "$OUT"
+OUT=$(c116 "$H116B" list-accounts)
+check "116.24 two accounts are listed"           "second@example.org"                 "$OUT"
+
+# commands and rules
+OUT=$(c116 "$H116" frobnicate)
+check "116.25 an unknown command"                "Unknown command 'frobnicate'"       "$OUT"
+OUT=$(c116 "$H116" rules frobnicate)
+check "116.26 an unknown rules sub-command"      "Unknown 'rules' subcommand"         "$OUT"
+OUT=$(c116 "$H116" rules --help)
+check "116.27 rules --help"                      "rules"                              "$OUT"
+OUT=$(c116 "$H116" rules list --help)
+check "116.28 rules list --help"                 "rules"                              "$OUT"
+OUT=$(c116 "$H116" rules apply --help)
+check "116.29 rules apply --help"                "rules"                              "$OUT"
+cat > "$H116/.config/email-cli/accounts/testuser/rules.ini" <<'RULES'
+[rule "Flat"]
+if-from = *@a.example
+if-subject = *news*
+if-to = me@example.org
+if-label = Work
+then-add-label = Seen
+RULES
+OUT=$(c116 "$H116" rules list)
+check "116.30 flat conditions are listed as one expression" "when         = " "$OUT"
+check "116.31 with all of them in it"            "me@example.org"                     "$OUT"
+OUT=$(c116 "$H116" rules list --account nobody@example.org)
+check "116.32 rules list for an account that is not there" "Account 'nobody@example.org' not found" "$OUT"
+OUT=$(c116 "$H116" rules apply --dry-run --verbose --account testuser --batch)
+check "116.33 rules apply accepts its options"   "exit-code=0"                        "$OUT"
+OUT=$(c116 "$H116" rules add --bogus)
+check "116.34 rules add: unknown option"         "Unknown option '--bogus' for 'rules add'" "$OUT"
+OUT=$(c116 "$H116B" rules add --name R --if-from x --add-label L1 --add-label L2 --add-label L3 --add-label L4 --add-label L5 --add-label L6 --remove-label M1 --remove-label M2 --remove-label M3 --remove-label M4 --remove-label M5 --remove-label M6)
+check "116.35 rules add with two accounts needs --account" "Multiple accounts configured" "$OUT"
+OUT=$(c116 "$H116E" rules add --name R --if-from x)
+check "116.36 rules add with no accounts"        "No accounts configured."            "$OUT"
+OUT=$(c116 "$H116B" rules remove --name R)
+check "116.37 rules remove with two accounts needs --account" "Multiple accounts configured" "$OUT"
+OUT=$(c116 "$H116E" rules remove --name R)
+check "116.38 rules remove with no accounts"     "No accounts configured."            "$OUT"
+OUT=$(c116 "$H116B" rules remove --bogus)
+check "116.39 rules remove: unknown option"      "Unknown option '--bogus' for 'rules remove'" "$OUT"
+OUT=$(c116 "$H116B" rules remove --account first@example.org --name Nothing)
+check "116.40 rules remove without any rules"    "No rules found for first@example.org" "$OUT"
+
+# first run: the wizard is run from the input, the account is saved and tried
+H116W="./build/tests/functional/work-$$/homes/f116w-$$"
+mk116_home "$H116W"
+rm -rf "$H116W/.config/email-cli/settings.ini" "$H116W/.config"
+mkdir -p "$H116W"
+OUT=$( (export HOME="$H116W"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    printf '1\nimaps://localhost:%s\n\nwiz116@example.org\nsecret\nINBOX\n' "$IMAP116_PORT" \
+        | "$BIN_DIR/email-cli" list 2>&1; echo "exit-code=$?") )
+check "116.41 first run saves the account"       "Configuration saved."               "$OUT"
+check "116.42 and tries it"                      "Checking the connection"            "$OUT"
+
+# the log directory cannot be made: a warning, not a failure
+H116L="./build/tests/functional/work-$$/homes/f116l-$$"
+mk116_home "$H116L" testuser
+printf 'x' > "$H116L/not-a-dir"
+OUT=$( (export HOME="$H116L" XDG_CACHE_HOME="$H116L/not-a-dir"; unset XDG_DATA_HOME XDG_CONFIG_HOME
+    "$BIN_DIR/email-cli" list-accounts </dev/null 2>&1; echo "exit-code=$?") )
+check "116.43 an unusable log directory is a warning" "Could not create log directory" "$OUT"
+check "116.44 and the logger says so, too"       "Logging system failed to initialize" "$OUT"
+check "116.45 the command still runs"            "testuser"                           "$OUT"
+
+# config smtp given up
+OUT=$(c116 "$H116" config smtp)
+check "116.46 config smtp with no answers is given up" "Cancelled"                    "$OUT"
+
+# email-sync cron: against a crontab command of our own, never the real one
+H116C="./build/tests/functional/work-$$/homes/f116c-$$"
+mk116_home "$H116C" testuser
+mkdir -p "$H116C/bin"
+cat > "$H116C/bin/crontab" <<'FAKE'
+#!/bin/sh
+store="$(dirname "$0")/crontab.store"
+case "$1" in
+    -l) if [ -f "$store" ]; then cat "$store"; else echo "no crontab for user" >&2; exit 1; fi ;;
+    -)  cat > "$store" ;;
+esac
+FAKE
+chmod +x "$H116C/bin/crontab"
+s116() {
+    (export HOME="$H116C" PATH="$H116C/bin:$PATH"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/email-sync" "$@" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+OUT=$( (export HOME="$H116E"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+        "$BIN_DIR/email-sync" cron setup </dev/null 2>&1; echo "exit-code=$?") )
+check "116.47 cron setup without an account"     "No configuration found"             "$OUT"
+check "116.48 fails"                             "exit-code=1"                        "$OUT"
+OUT=$(s116 cron setup)
+check "116.49 cron setup uses the default interval" "using default of 5 minutes"      "$OUT"
+check "116.50 and succeeds"                      "exit-code=0"                        "$OUT"
+check "116.51 the entry reaches the crontab"     "*/5"                                "$(cat "$H116C/bin/crontab.store")"
+check "116.52 and runs email-sync"               "email-sync"                         "$(cat "$H116C/bin/crontab.store")"
+OUT=$(s116 cron status)
+check "116.53 cron status finds it"              "email-sync"                         "$OUT"
+OUT=$(s116 cron remove)
+check "116.54 cron remove succeeds"              "exit-code=0"                        "$OUT"
+check "116.55 and takes the entry out"           "entries=0"                          "entries=$(grep -c email-sync "$H116C/bin/crontab.store")"
+OUT=$(s116 cron setup)
+check "116.56 a second setup, now the interval is stored" "exit-code=0"               "$OUT"
+check_not "116.57 and does not say the default again" "using default of 5 minutes"   "$OUT"
+
+# email-import-rules: a profile found by itself, --output, and the option errors
+H116T="./build/tests/functional/work-$$/homes/f116t-$$"
+mk116_home "$H116T" ir116@example.org
+sed -i "s|imaps://localhost:$IMAP116_PORT|imaps://tb.example.org:993|" "$H116T/.config/email-cli/accounts/ir116@example.org/config.ini"
+TB116="$H116T/.thunderbird/default-release"
+mkdir -p "$TB116/ImapMail/tb.example.org"
+make_tb_prefs "$TB116" tb.example.org ir116@example.org tb.example.org
+cat > "$TB116/ImapMail/tb.example.org/msgFilterRules.dat" <<'TBFILTER'
+version="9"
+logging="no"
+name="Move newsletters"
+enabled="yes"
+type="17"
+action="Move to folder"
+actionValue="imap://tb.example.org/Newsletters"
+condition="AND (from,contains,newsletter@)"
+TBFILTER
+ir116() {
+    (export HOME="$H116T"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/email-import-rules" "$@" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+OUT=$(ir116 --account ir116@example.org --dry-run)
+check "116.58 the profile is found under ~/.thunderbird" "Thunderbird profile: " "$OUT"
+check "116.59 and its rules are read"            "Move newsletters"                   "$OUT"
+OUT=$(ir116 --account ir116@example.org --output "$H116T/out/rules-copy.ini")
+check "116.60 --output writes where it is told"  "Rules saved to: "                   "$OUT"
+check "116.61 the file holds the rule"           "Move newsletters"                   "$(cat "$H116T/out/rules-copy.ini")"
+OUT=$(ir116 --account ir116@example.org --output "$H116T/not-a-dir/x/rules.ini")
+check "116.62 an --output that cannot be written is an error" "exit-code=" "$OUT"
+OUT=$(ir116 --account ir116@example.org)
+check "116.63 without --output the rules go to the account" "rules.ini"               "$OUT"
+OUT=$(ir116 --thunderbird-path)
+check "116.64 --thunderbird-path needs a path"   "requires a path"                    "$OUT"
+OUT=$(ir116 --account)
+check "116.65 --account needs an address"        "requires an email address"          "$OUT"
+OUT=$(ir116 --output)
+check "116.66 --output needs a path"             "requires a path"                    "$OUT"
+OUT=$(ir116 --output "$H116T/x.ini")
+check "116.67 --output needs --account"          "requires --account"                 "$OUT"
+OUT=$(ir116 --bogus)
+check "116.68 an unknown option"                 "Unknown option '--bogus'"           "$OUT"
+OUT=$(ir116 --version)
+check "116.69 --version"                         "email-import-rules "                "$OUT"
+OUT=$( (export HOME="$H116E"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+        "$BIN_DIR/email-import-rules" </dev/null 2>&1; echo "exit-code=$?") )
+check "116.70 no profile at all"                 "No Thunderbird profile found"       "$OUT"
+OUT=$(ir116)
+check "116.71 all accounts at once"              "Thunderbird profile: "              "$OUT"
+kill "$IMAP116_PORT_PID"
 
 fi
 

@@ -157,10 +157,13 @@ of `tui_lineedit_handle` in a loop of its own that also redraws on a resize,
 EMAIL-109) and, since EMAIL-79, the row lists: accounts,
 folder tree and flat view, message list, Gmail label browser, rules editor,
 attachment picker and the rule condition list are `tui_table` views drawn
-through `libemail/src/core/tui_frame.c`.  Not migrated: the dialogs and popups
-(help overlay, label picker, address drop-down), the reader and the compose
-screens, which stay printf-based; until a module is migrated, the old code
-stays authoritative.
+through `libemail/src/core/tui_frame.c`.  Since EMAIL-110 the help overlay
+(`tui_dialog_help`), the label picker (`tui_dialog_checklist`) and the address
+and file drop-downs (`tui_table` rows) are libtuikit widgets too, drawn as
+overlays by `tui_frame_overlay()` / `tui_frame_run_dialog()` so that the view
+stays visible around them.  Not migrated: the reader and the compose screens,
+which stay printf-based; until a module is migrated, the old code stays
+authoritative.
 `deps/libptytest` is the PTY test harness, test-only.
 
 ## Platform

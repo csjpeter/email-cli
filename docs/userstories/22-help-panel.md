@@ -14,8 +14,8 @@
 | 2 | The overlay is displayed centred over the current view without destroying it. |
 | 3 | The overlay title identifies the current view (e.g. "Message list shortcuts"). |
 | 4 | The left column shows the key name; the right column shows a short description. |
-| 5 | A footer reads "Press any key to close". |
-| 6 | Any keypress dismisses the overlay and returns to the same view. |
+| 5 | The overlay is libtuikit's help dialog (EMAIL-110); it has no footer. |
+| 6 | `Esc`, `q` and `Backspace` dismiss the overlay and return to the same view; the movement keys scroll it when it is longer than the screen; any other key changes nothing. |
 | 7 | The overlay is available in: **Accounts**, **Folder browser**, **Message list**, **Message reader**. |
 
 ---

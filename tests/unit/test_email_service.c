@@ -1967,7 +1967,7 @@ void test_email_service(void) {
             { "ESC",   "Quit"         },
         };
         int saved_stdin;
-        INJECT_STDIN("\r", 1, saved_stdin);
+        INJECT_STDIN("\rq", 2, saved_stdin);   /* Enter changes nothing, q closes */
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
         show_help_popup("Help", rows, 2);
@@ -2198,7 +2198,7 @@ void test_email_service(void) {
     {
         local_store_init(NULL, "picker@gmail.com");
         int saved_stdin;
-        INJECT_STDIN("\033x", 2, saved_stdin);
+        INJECT_STDIN("\003", 1, saved_stdin);     /* Ctrl-C cancels the dialog */
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
         /* mc=NULL is safe: the picker checks if(mc) before calling it */
@@ -2206,6 +2206,26 @@ void test_email_service(void) {
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         ASSERT(1, "show_label_picker: ESC exits cleanly");
+
+        /* EMAIL-110: Space ticks, Enter applies, Ctrl-C leaves everything */
+        label_idx_add("INBOX", "0000000000001234");
+        INJECT_STDIN("\033[B \003", 5, saved_stdin);   /* Down, untick INBOX, cancel */
+        SUPPRESS_OUT(sout, serr);
+        show_label_picker(NULL, "0000000000001234", NULL, 0);
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(label_idx_contains("INBOX", "0000000000001234"),
+               "show_label_picker: cancelled, the label stays");
+        char fb[128] = "";
+        INJECT_STDIN("\033[B \r", 5, saved_stdin);     /* Down, untick INBOX, apply */
+        SUPPRESS_OUT(sout, serr);
+        show_label_picker(NULL, "0000000000001234", fb, (int)sizeof(fb));
+        RESTORE_OUT(sout, serr);
+        RESTORE_STDIN(saved_stdin);
+        ASSERT(!label_idx_contains("INBOX", "0000000000001234"),
+               "show_label_picker: Enter applies the unticked label");
+        ASSERT(strcmp(fb, "Label removed: INBOX") == 0,
+               "show_label_picker: the feedback names the change");
         local_store_init("imaps://test.example.com", "testuser");
     }
 
@@ -2696,15 +2716,14 @@ void test_email_service(void) {
      *   \033[B      Down in reader
      *   \033[A      Up in reader
      *   \r          Enter in reader (break/stay)
-     *   h\r         help popup + dismiss (lines 926-939)
+     *   hq          help popup + dismiss (lines 926-939)
      *   q           quit reader → back to list
-     *   h\r         Gmail help popup in list + dismiss (lines 2011-2053)
+     *   hq          Gmail help popup in list + dismiss (lines 2011-2053)
      *   a           archive (lines 2055-2088)
      *   D           trash (lines 2090-2112)
      *   u           untrash (lines 2114-2147)
      *   t           label picker (lines 2149-2151; user-label lines 2626-2643)
-     *   \033[B\r    Down + toggle in picker
-     *   \033x       ESC exit picker
+     *   \033[B \r   Down, Space ticks, Enter applies in the picker
      *   d           remove label (lines 2153-2183)
      *   n           toggle unread (lines 2185-2228, Gmail path)
      *   f           toggle starred
@@ -2750,15 +2769,14 @@ void test_email_service(void) {
             "\033[B"       /* Down */
             "\033[A"       /* Up */
             "\r"           /* Enter (stay) */
-            "h\r"          /* help popup + dismiss */
+            "hq"           /* help popup + dismiss (q) */
             "q"            /* quit reader */
-            "h\r"          /* Gmail help popup + dismiss */
+            "hq"           /* Gmail help popup + dismiss (q) */
             "aDut"         /* archive, trash, untrash, label-picker */
-            "\033[B\r"     /* Down+toggle in picker */
-            "\033x"        /* ESC exit picker */
+            "\033[B \r"    /* Down, Space ticks, Enter applies in the picker */
             "dnf"          /* remove-label, toggle-unread, toggle-starred */
             "\033x",       /* ESC exit list */
-            36, saved_stdin);
+            35, saved_stdin);
 
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
@@ -2816,8 +2834,8 @@ void test_email_service(void) {
         int cursor2 = 0;
         int saved_stdin;
         /* Down (cursor++ clamped to 0), Up (no-op), Backspace (continue),
-         * h (help popup), Enter (dismiss popup), n (return 3 = add account) */
-        INJECT_STDIN("\033[B\033[A\x7fh\rn", 10, saved_stdin);
+         * h (help popup), q (dismiss popup), n (return 3 = add account) */
+        INJECT_STDIN("\033[B\033[A\x7fhqn", 10, saved_stdin);
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
         int aret2 = email_service_account_interactive(&acc_out2, &cursor2, NULL);
@@ -3958,9 +3976,8 @@ void test_email_service(void) {
         label_idx_add("UNREAD", gr_uid);
         local_msg_save("INBOX", gr_uid, gr_msg, strlen(gr_msg));
 
-        /* 't' = label-picker (1221-1225): picker opens, ESC cancels it, then 'q' */
-        /* picker reads '\033'+'X' = ESC (X consumed as c2 by ESC handler), then 'q' quits reader */
-        INJECT_STDIN("t\033Xq", 4, saved_stdin);
+        /* 't' = label-picker (1221-1225): picker opens, Ctrl-C cancels it, then 'q' quits the reader */
+        INJECT_STDIN("t\003q", 3, saved_stdin);
         SUPPRESS_OUT(sout, serr);
         show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
         RESTORE_OUT(sout, serr);

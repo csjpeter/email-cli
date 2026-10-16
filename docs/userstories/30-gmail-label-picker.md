@@ -34,7 +34,7 @@
   │ [ ] Personal         │
   │ [ ] Project-X        │
   │                      │
-  │ Enter=toggle  q=done │
+  │ Space=tick  Enter=ok │
   └──────────────────────┘
 ```
 
@@ -45,15 +45,16 @@
 | Key | Action |
 |-----|--------|
 | ↑ / ↓ | Navigate the label list |
-| Enter | Toggle selected label on/off |
-| q / ESC | Close picker, return to previous view |
+| Space | Tick / untick the selected label |
+| Enter | Apply what was ticked and close the picker |
+| Esc / q | Close the picker and change nothing |
 
 ---
 
 ## Status bar (while picker is open)
 
 ```
-Enter=toggle  ↑↓=navigate  q=done
+Space=tick  Enter=apply  Esc=cancel
 ```
 
 ---

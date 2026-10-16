@@ -5,6 +5,8 @@
 #ifndef CORE_TUI_FRAME_H
 #define CORE_TUI_FRAME_H
 
+#include <tuikit/canvas.h>
+#include <tuikit/dialog.h>
 #include <tuikit/table.h>
 
 /**
@@ -52,5 +54,40 @@ int tui_frame_draw_table(const char *header, tui_table *table, int rows, int col
  * cursor is left after the bar and the style is reset.
  */
 void tui_frame_print_bar(int row, const char *text, int cols);
+
+/**
+ * @brief Draws over what the terminal shows, touching only the cells the
+ *        drawing covers (the modals and the drop-down lists, EMAIL-110).
+ *
+ * @p draw gets a canvas of @p rows x @p cols cells whose cells all start
+ * as "not drawn"; whatever it puts or fills is written to the terminal at
+ * that position, every other cell is left as it is.  A cell the drawing
+ * clears (a blank in the box of a modal) is written, so a box covers all
+ * the cells it spans.  Nothing is written for the rows the drawing does not
+ * reach, and the terminal cursor is not moved on purpose (callers place it).
+ *
+ * @return 0, or -1 when the drawing could not be built or written.
+ */
+int tui_frame_overlay(void (*draw)(tui_canvas c, void *ctx), void *ctx,
+                      int rows, int cols);
+
+/**
+ * @brief Runs the modal @p d over the screen until it is no longer open:
+ *        draws it as an overlay, reads the events (a resize draws it again
+ *        at the new size) and gives them to tui_dialog_handle().
+ *
+ * The terminal must be in raw mode.  The caller redraws its own view
+ * afterwards, as the cells under the box are gone.
+ *
+ * @return TUI_DIALOG_OK or TUI_DIALOG_CANCELLED (also when the input ends).
+ */
+tui_dialog_state tui_frame_run_dialog(tui_dialog *d);
+
+/**
+ * @brief Draws the rows of @p table, without its header, in the rectangle of
+ *        @p h rows x @p w columns at terminal row @p row, column @p col
+ *        (both 1-based), as an overlay (see tui_frame_overlay()).
+ */
+int tui_frame_overlay_rows(tui_table *table, int row, int col, int h, int w);
 
 #endif /* CORE_TUI_FRAME_H */

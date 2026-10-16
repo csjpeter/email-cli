@@ -33,7 +33,7 @@
 ## Help and input checks (EMAIL-95)
 
 * `h` (or `?`) in the rules list, in a rule and in the condition list opens
-  the same boxed key overlay as the other screens; any key closes it.  The
+  the same boxed key overlay as the other screens; Esc, q and Backspace close it.  The
   key bars name it (`h=help`).
 * A condition typed in the condition list (new or edited) is parsed at once;
   one that does not parse is refused with

@@ -2789,10 +2789,15 @@ static void test_tui_accounts_help_panel(void) {
     pty_send_str(s, "h");
     ASSERT_WAIT_FOR(s, "Accounts shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Press any key to close");
-    /* dismiss with any key */
+    ASSERT_SCREEN_CONTAINS(s, "Open selected account");
+    /* a key that is not a closing key changes nothing; Esc closes it
+     * (policies/tui-interface-model.md, "The help screen") */
     pty_send_key(s, PTY_KEY_ENTER);
     pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Accounts shortcuts");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Accounts shortcuts");
     /* should be back on accounts screen */
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
     pty_send_key(s, PTY_KEY_ESC);
@@ -2801,9 +2806,7 @@ static void test_tui_accounts_help_panel(void) {
 
 static void test_tui_list_help_panel(void) {
     /* US-22 AC7: 'h' in message list shows help overlay.
-     * The popup only prints the "Press any key to close" footer when every
-     * shortcut row fits; otherwise it becomes scrollable and shows the
-     * scroll hint instead.  Use a tall terminal so the full list fits. */
+     * Use a tall terminal so that every shortcut row fits. */
     restart_mock();
     PtySession *s = tui_open_to_list_size(COLS, 50);
     ASSERT(s != NULL, "list help: opens");
@@ -2812,11 +2815,13 @@ static void test_tui_list_help_panel(void) {
     pty_send_str(s, "h");
     ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Press any key to close");
     ASSERT_SCREEN_CONTAINS(s, "Compose new message");
-    /* dismiss */
-    pty_send_key(s, PTY_KEY_ENTER);
+    pty_send_key(s, PTY_KEY_ENTER);          /* not a closing key */
     pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Message list shortcuts");
+    pty_send_str(s, "q");                    /* q closes it */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
     /* still in list view */
     ASSERT_SCREEN_CONTAINS(s, "message(s) in");
     pty_send_key(s, PTY_KEY_ESC);
@@ -2836,10 +2841,10 @@ static void test_tui_show_help_panel(void) {
     pty_send_str(s, "h");
     ASSERT_WAIT_FOR(s, "Message reader shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Press any key to close");
     ASSERT_SCREEN_CONTAINS(s, "Reply to this message");
-    pty_send_key(s, PTY_KEY_ENTER);
+    pty_send_key(s, PTY_KEY_BACK);           /* Backspace closes it */
     pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message reader shortcuts");
     /* back in reader */
     ASSERT_SCREEN_CONTAINS(s, "r reply");
     pty_send_key(s, PTY_KEY_ESC);
@@ -2860,10 +2865,10 @@ static void test_tui_folders_help_panel(void) {
     pty_send_str(s, "h");
     ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Press any key to close");
     ASSERT_SCREEN_CONTAINS(s, "Toggle tree");
-    pty_send_key(s, PTY_KEY_ENTER);
+    pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser shortcuts");
     /* back in folder browser */
     ASSERT_SCREEN_CONTAINS(s, "Folders");
     pty_send_key(s, PTY_KEY_ESC);
@@ -2880,7 +2885,7 @@ static void test_tui_help_panel_question_mark(void) {
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_ESC);   /* any key dismisses */
+    pty_send_key(s, PTY_KEY_ESC);   /* Esc dismisses */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "message(s) in");
     pty_send_key(s, PTY_KEY_ESC);

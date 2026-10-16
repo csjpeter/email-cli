@@ -8,6 +8,7 @@
 #include "tui_frame.h"
 #include "status_line.h"
 #include <tuikit/text.h>
+#include <tuikit/dialog.h>
 #include "path_complete.h"
 #include "mail_account.h"
 #include "local_store.h"
@@ -401,31 +402,13 @@ static void list_status_line(int trows, int tcols, int is_gmail, int in_trash,
     status_line_draw(trows, tcols, h, nh, "?", cur, total, msg);
 }
 
-/** Write @p s to stderr cut or padded to exactly @p width display columns
- *  (whole characters only; the width of a character is the terminal's). */
-static void put_cols(const char *s, int width) {
-    int used = 0;
-    const unsigned char *p = (const unsigned char *)s;
-    while (*p && used < width) {
-        uint32_t cp;
-        int n;
-        if (*p < 0x80)                 { cp = *p; n = 1; }
-        else if ((*p & 0xE0) == 0xC0)  { cp = *p & 0x1F; n = 2; }
-        else if ((*p & 0xF0) == 0xE0)  { cp = *p & 0x0F; n = 3; }
-        else                           { cp = *p & 0x07; n = 4; }
-        for (int i = 1; i < n && p[i]; i++) cp = (cp << 6) | (p[i] & 0x3F);
-        int w = terminal_wcwidth(cp);
-        if (w < 1) w = 1;
-        if (used + w > width) break;
-        fwrite(p, 1, (size_t)n, stderr);
-        used += w;
-        p += n;
-    }
-    for (; used < width; used++) fputc(' ', stderr);
-}
-
 /**
- * Show a two-column help popup overlay and wait for any key to dismiss.
+ * Show a help popup over the view and wait until it is closed.
+ *
+ * A modal of libtuikit (tui_dialog_help, EMAIL-110): two columns, the keys in
+ * bold, the title naming the view; Esc, q and Backspace close it, the
+ * movement keys scroll it when it is longer than the screen, any other key
+ * changes nothing (policies/tui-interface-model.md, "The help screen").
  *
  * @param title  Title displayed in the popup header.
  * @param rows   Array of {key_label, description} string pairs.
@@ -433,100 +416,10 @@ static void put_cols(const char *s, int width) {
  */
 static void show_help_popup(const char *title,
                             const char *rows[][2], int n) {
-    int tcols = terminal_cols();
-    int trows = terminal_rows();
-    if (tcols <= 0) tcols = 80;
-    if (trows <= 0) trows = 24;
-
-    int key_col_w  = 12;
-    int desc_col_w = 44;
-    int inner_w    = key_col_w + 2 + desc_col_w;
-    int box_w      = inner_w + 4;
-
-    /* How many data rows fit: total rows minus top border, title, separator,
-     * bottom border, and footer line. */
-    int max_data  = trows - 5;
-    if (max_data < 1) max_data = 1;
-    int visible_n = (n < max_data) ? n : max_data;
-    int box_h     = visible_n + 4;
-
-    int col0 = (tcols - box_w) / 2;
-    int row0 = (trows - box_h) / 2;
-    if (col0 < 1) col0 = 1;
-    if (row0 < 1) row0 = 1;
-
-    int scroll = 0;  /* index of first visible row */
-
-    for (;;) {
-        /* Top border */
-        fprintf(stderr, "\033[%d;%dH\033[7m\u250c", row0, col0);
-        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
-        fprintf(stderr, "\u2510\033[0m");
-
-        /* Title row */
-        fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 1, col0);
-        int tlen      = visible_line_cols(title, title + strlen(title));
-        int pad_left  = (box_w - 4 - tlen) / 2;
-        int pad_right = (box_w - 4 - tlen) - pad_left;
-        for (int i = 0; i < pad_left;  i++) fputc(' ', stderr);
-        fprintf(stderr, "%s", title);
-        for (int i = 0; i < pad_right; i++) fputc(' ', stderr);
-        fprintf(stderr, " \u2502\033[0m");
-
-        /* Separator */
-        fprintf(stderr, "\033[%d;%dH\033[7m\u251c", row0 + 2, col0);
-        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
-        fprintf(stderr, "\u2524\033[0m");
-
-        /* Data rows */
-        for (int i = 0; i < visible_n; i++) {
-            int ri = scroll + i;
-            fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 3 + i, col0);
-            fprintf(stderr, "\033[1m");
-            put_cols(rows[ri][0], key_col_w);
-            fprintf(stderr, "\033[22m  ");
-            put_cols(rows[ri][1], desc_col_w);
-            fprintf(stderr, " \u2502\033[0m");
-        }
-
-        /* Bottom border */
-        fprintf(stderr, "\033[%d;%dH\033[7m\u2514", row0 + 3 + visible_n, col0);
-        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
-        fprintf(stderr, "\u2518\033[0m");
-
-        /* Footer */
-        const char *footer = (n > visible_n)
-            ? " \u2191\u2193/j/k=scroll  any other key=close "
-            : " Press any key to close ";
-        int flen = visible_line_cols(footer, footer + strlen(footer));
-        if (flen < box_w - 2) {
-            int fc = col0 + (box_w - flen) / 2;
-            fprintf(stderr, "\033[%d;%dH\033[2m%s\033[0m",
-                    row0 + 4 + visible_n, fc, footer);
-        }
-        fflush(stderr);
-
-        TermKey key = terminal_read_key();
-        int ch = terminal_last_printable();
-        if (n > visible_n) {
-            if (key == TERM_KEY_NEXT_LINE || ch == 'j') {
-                if (scroll + visible_n < n) scroll++;
-                continue;
-            }
-            if (key == TERM_KEY_PREV_LINE || ch == 'k') {
-                if (scroll > 0) scroll--;
-                continue;
-            }
-        }
-        break;  /* any other key closes */
-    }
-
-    /* Clear the popup area (include footer row) */
-    for (int r = row0; r <= row0 + 5 + visible_n; r++) {
-        fprintf(stderr, "\033[%d;%dH\033[K", r, col0);
-        for (int c = 0; c < box_w; c++) fputc(' ', stderr);
-    }
-    fflush(stderr);
+    tui_dialog d;
+    if (tui_dialog_help(&d, title, &rows[0][0], n) != 0) return;
+    tui_frame_run_dialog(&d);
+    tui_dialog_free(&d);
 }
 
 /**
@@ -4670,6 +4563,41 @@ folders_int_done:
  * Applies changes via emc_set_flag and updates local .idx.
  * Returns when the user presses ESC/Backspace/q.
  */
+/** Add (@p adding = 1) or remove label @p lid on message @p uid: the local
+ *  index, the .hdr and, with a client, the server.  Adding a real label (not
+ *  UNREAD/STARRED/CATEGORY_) implicitly moves the message out of the virtual
+ *  archive (_nolabel) and out of the trash. */
+static void apply_label_change(emc_client *mc, const char *uid, const char *lid,
+                               int adding) {
+    if (adding) {
+        label_idx_add(lid, uid);
+        local_hdr_update_labels("", uid, &lid, 1, NULL, 0);
+        if (strcmp(lid, "UNREAD") != 0 &&
+            strcmp(lid, "STARRED") != 0 &&
+            strncmp(lid, "CATEGORY_", 9) != 0) {
+            /* Unarchive: remove from _nolabel virtual archive index */
+            if (label_idx_contains("_nolabel", uid))
+                label_idx_remove("_nolabel", uid);
+            /* Untrash: remove TRASH label from local index, .hdr, API */
+            if (label_idx_contains("_trash", uid)) {
+                const char *trash_id = "TRASH";
+                label_idx_remove("_trash", uid);
+                local_hdr_update_labels("", uid, NULL, 0, &trash_id, 1);
+                if (mc) emc_modify_label(mc, uid, "TRASH", 0);
+            }
+        }
+    } else {
+        label_idx_remove(lid, uid);
+        local_hdr_update_labels("", uid, NULL, 0, &lid, 1);
+    }
+    if (mc) {
+        if (strcmp(lid, "STARRED") == 0)
+            emc_set_flag(mc, uid, "\\Flagged", adding);
+        else
+            emc_modify_label(mc, uid, lid, adding);
+    }
+}
+
 static void show_label_picker(emc_client *mc, const char *uid,
                                char *feedback_out, int feedback_cap) {
     /* Collect available labels from local .idx files */
@@ -4733,106 +4661,25 @@ static void show_label_picker(emc_client *mc, const char *uid,
     int was_in_nolabel = label_idx_contains("_nolabel", uid);
     int was_in_trash   = label_idx_contains("_trash", uid);
 
-    int pcursor = 0;
-    int tcols = terminal_cols();
-    int trows = terminal_rows();
-    if (tcols <= 0) tcols = 80;
-    if (trows <= 0) trows = 24;
-
-    int inner_w = 30;
-    int box_w = inner_w + 4;
-    int box_h = pick_count + 4;
-    int col0 = (tcols - box_w) / 2;
-    int row0 = (trows - box_h) / 2;
-    if (col0 < 1) col0 = 1;
-    if (row0 < 1) row0 = 1;
-
-    for (;;) {
-        /* Draw popup */
-        fprintf(stderr, "\033[%d;%dH\033[7m\u250c", row0, col0);
-        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
-        fprintf(stderr, "\u2510\033[0m");
-
-        const char *title = "Toggle Labels";
-        int tlen = (int)strlen(title);
-        fprintf(stderr, "\033[%d;%dH\033[7m\u2502 ", row0 + 1, col0);
-        int pl = (box_w - 4 - tlen) / 2;
-        int pr = (box_w - 4 - tlen) - pl;
-        for (int i = 0; i < pl; i++) fputc(' ', stderr);
-        fprintf(stderr, "%s", title);
-        for (int i = 0; i < pr; i++) fputc(' ', stderr);
-        fprintf(stderr, " \u2502\033[0m");
-
-        fprintf(stderr, "\033[%d;%dH\033[7m\u251c", row0 + 2, col0);
-        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
-        fprintf(stderr, "\u2524\033[0m");
-
-        for (int i = 0; i < pick_count; i++) {
-            int sel = (i == pcursor);
-            fprintf(stderr, "\033[%d;%dH", row0 + 3 + i, col0);
-            if (sel) fprintf(stderr, "\033[7m\033[1m");
-            else     fprintf(stderr, "\033[7m");
-            fprintf(stderr, "\u2502 [%c] %-*.*s \u2502",
-                    pick_on[i] ? 'x' : ' ',
-                    inner_w - 4, inner_w - 4,
-                    pick_names[i]);
-            fprintf(stderr, "\033[0m");
-        }
-
-        fprintf(stderr, "\033[%d;%dH\033[7m\u2514", row0 + 3 + pick_count, col0);
-        for (int i = 0; i < box_w - 2; i++) fprintf(stderr, "\u2500");
-        fprintf(stderr, "\u2518\033[0m");
-
-        const char *foot = " \u2191\u2193=move  Enter=toggle  ESC=done ";
-        int flen = tui_str_width(foot);
-        if (flen < box_w) {
-            int fc = col0 + (box_w - flen) / 2;
-            fprintf(stderr, "\033[%d;%dH\033[2m%s\033[0m",
-                    row0 + 4 + pick_count, fc, foot);
-        }
-        fflush(stderr);
-
-        TermKey key = terminal_read_key();
-        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC || key == TERM_KEY_BACK)
-            break;
-        if (key == TERM_KEY_NEXT_LINE && pcursor < pick_count - 1) pcursor++;
-        if (key == TERM_KEY_PREV_LINE && pcursor > 0) pcursor--;
-        if (key == TERM_KEY_ENTER || terminal_last_printable() == ' ') {
-            /* Toggle the label */
-            pick_on[pcursor] = !pick_on[pcursor];
-            const char *lid = pick_ids[pcursor];
-            int adding = pick_on[pcursor];
-            if (adding) {
-                label_idx_add(lid, uid);
-                local_hdr_update_labels("", uid, &lid, 1, NULL, 0);
-                /* Adding a real label (not UNREAD/STARRED/CATEGORY_) implicitly
-                 * moves the message out of virtual archive (_nolabel) and/or trash.
-                 * Remove the old virtual location from local index + .hdr + API. */
-                if (strcmp(lid, "UNREAD") != 0 &&
-                    strcmp(lid, "STARRED") != 0 &&
-                    strncmp(lid, "CATEGORY_", 9) != 0) {
-                    /* Unarchive: remove from _nolabel virtual archive index */
-                    if (label_idx_contains("_nolabel", uid))
-                        label_idx_remove("_nolabel", uid);
-                    /* Untrash: remove TRASH label from local index, .hdr, API */
-                    if (label_idx_contains("_trash", uid)) {
-                        const char *trash_id = "TRASH";
-                        label_idx_remove("_trash", uid);
-                        local_hdr_update_labels("", uid, NULL, 0, &trash_id, 1);
-                        if (mc) emc_modify_label(mc, uid, "TRASH", 0);
-                    }
+    /* The labels as a checklist of libtuikit (EMAIL-110): Space ticks, Enter
+     * applies what was ticked, Esc leaves everything as it was. */
+    unsigned char *ticked = calloc((size_t)pick_count, 1);
+    if (ticked) {
+        for (int i = 0; i < pick_count; i++) ticked[i] = pick_on[i] ? 1 : 0;
+        tui_dialog dlg;
+        if (tui_dialog_checklist(&dlg, "Toggle Labels", (const char *const *)pick_names,
+                                 pick_count, ticked, 0) == 0) {
+            if (tui_frame_run_dialog(&dlg) == TUI_DIALOG_OK) {
+                for (int i = 0; i < pick_count; i++) {
+                    int now = tui_dialog_is_checked(&dlg, i);
+                    if (now == (pick_on[i] ? 1 : 0)) continue;
+                    pick_on[i] = now;
+                    apply_label_change(mc, uid, pick_ids[i], now);
                 }
-            } else {
-                label_idx_remove(lid, uid);
-                local_hdr_update_labels("", uid, NULL, 0, &lid, 1);
             }
-            if (mc) {
-                if (strcmp(lid, "STARRED") == 0)
-                    emc_set_flag(mc, uid, "\\Flagged", adding);
-                else
-                    emc_modify_label(mc, uid, lid, adding);
-            }
+            tui_dialog_free(&dlg);
         }
+        free(ticked);
     }
 
     /* Compute feedback: diff pick_initial vs pick_on */

@@ -435,6 +435,10 @@ static const PtyStyleKey LEGEND[] = {
     { 'u', PTY_ATTR_UNDERLINE,               PTY_FG_DEFAULT, PTY_BG_DEFAULT },
     { 'k', PTY_ATTR_UNDERLINE | PTY_ATTR_STRIKE, PTY_FG_DEFAULT, PTY_BG_DEFAULT },
     { 'e', PTY_ATTR_BOLD,                    PTY_FG_RED,     PTY_BG_DEFAULT },
+    /* The frame and the title of a libtuikit dialog, the address in the
+     * drop-down (bold cyan); the same on the selected row (EMAIL-110). */
+    { 'T', PTY_ATTR_BOLD,                    PTY_FG_CYAN,    PTY_BG_DEFAULT },
+    { 'Q', PTY_ATTR_BOLD,                    96,             PTY_COLOR_IDX(17) },
     { 0 }
 };
 
@@ -1042,11 +1046,11 @@ GVIEW(gmail_picker_second, at_gmail_entry(2),
        pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_picker_toggled, at_gmail_entry(2),
       (pty_send_str(s, "t"), pty_wait_for(s, "Toggle Labels", WAIT_MS),
-       pty_send_key(s, PTY_KEY_DOWN), pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS)))
+       pty_send_key(s, PTY_KEY_DOWN), pty_send_str(s, " "), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_picker_done,  at_gmail_entry(2),
       (pty_send_str(s, "t"), pty_wait_for(s, "Toggle Labels", WAIT_MS),
-       pty_send_key(s, PTY_KEY_DOWN), pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, 200),
-       pty_send_key(s, PTY_KEY_ESC), pty_wait_for(s, "Label removed", WAIT_MS),
+       pty_send_key(s, PTY_KEY_DOWN), pty_send_str(s, " "), pty_settle(s, 200),
+       pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Label removed", WAIT_MS),
        pty_settle(s, SETTLE_MS)))
 
 GVIEW(gmail_archive,    at_gmail_entry(5), (void)0)

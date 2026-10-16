@@ -563,7 +563,7 @@ appears:
   │ [ ] Personal         │
   │ [ ] Project-X        │
   │                      │
-  │ Enter=toggle  q=done │
+  │ Space=tick  Enter=ok │
   └──────────────────────┘
 ```
 
@@ -574,10 +574,12 @@ appears:
   user labels.  **Excluded** from the picker: TRASH, SPAM, DRAFTS, SENT —
   these are managed exclusively by compound API calls.
 - `[x]` = message currently has this label; `[ ]` = does not.
-- **Enter** = toggle the selected label immediately via `messages.modify()`.
-  The checkbox updates in-place; the API call fires asynchronously.
+- **Space** = tick / untick the selected label (EMAIL-110: a libtuikit
+  checklist).  Nothing is sent yet.
+- **Enter** = apply every label that was ticked or unticked, each through
+  `messages.modify()`, and close the picker.
 - **↑ / ↓** = navigate the picker list.
-- **q / ESC** = close the picker and return to the message list.
+- **Esc / q** = close the picker and change nothing.
 - If the toggle results in the message having **no labels at all**, it
   migrates to `_nolabel.idx` (Archive).
 
@@ -601,7 +603,7 @@ accounts:
 | Message list (INBOX) | `r=remove  d=trash  a=archive  f=star  t=labels  c=compose  q=back` |
 | Message list (other label) | `r=remove  d=trash  f=star  t=labels  c=compose  q=back` |
 | Message reader | `r=remove  d=trash  f=star  n=unread  t=labels  q=back` |
-| Label picker | `Enter=toggle  ↑↓=navigate  q=done` |
+| Label picker | `Space=tick  ↑↓=navigate  Enter=apply  Esc=cancel` |
 
 **Notes:**
 - The `a` (archive) key hint appears **only** in the INBOX view — archiving

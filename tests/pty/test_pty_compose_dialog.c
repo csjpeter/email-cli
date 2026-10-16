@@ -315,7 +315,7 @@ static void test_compose_dialog_status_line(void) {
     pty_settle(s, SETTLE_MS);
     /* At least Tab and ESC must be mentioned */
     ASSERT_SCREEN_CONTAINS(s, "Tab");
-    ASSERT_SCREEN_CONTAINS(s, "ESC");
+    ASSERT_SCREEN_CONTAINS(s, "Esc");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -481,7 +481,7 @@ static void test_body_editor_type_and_esc_saves(void) {
     ASSERT_SCREEN_CONTAINS(s, "Editor basics");
     pty_send_str(s, "n");              /* declined: still in review, draft kept */
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[s] Send");
+    ASSERT_SCREEN_CONTAINS(s, "s send");
     ASSERT(draft_contains("second line"), "body editor: declining keeps the draft");
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
@@ -510,7 +510,7 @@ static void test_body_editor_reopen_restores(void) {
     pty_send_str(s, "kept across sessions");
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
     pty_close(s);                       /* the review is left without sending */
 
     s = tui_open_to_inbox();
@@ -529,7 +529,7 @@ static void test_body_editor_reopen_restores(void) {
     ASSERT_WAIT_FOR(s, PTY_EDITOR_MARK, WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "kept across sessions");
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "alice@example.com");
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
@@ -544,7 +544,7 @@ static void test_body_editor_resume_declined(void) {
     pty_send_str(s, "old text");
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
     pty_close(s);
 
     s = tui_open_to_inbox();
@@ -563,7 +563,7 @@ static void test_body_editor_resume_declined(void) {
     ASSERT_SCREEN_NOT_CONTAINS(s, "old text");
     ASSERT_SCREEN_CONTAINS(s, "New one");
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
     pty_send_str(s, "y");
@@ -600,7 +600,7 @@ static void test_body_editor_long_line_scrolls(void) {
     pty_send_str(s, line);
     ASSERT_WAIT_FOR(s, "END", WAIT_MS);   /* scrolled horizontally to the cursor */
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
     ASSERT(draft_contains("END"), "long line: the whole line was saved");
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
@@ -614,11 +614,11 @@ static void test_body_editor_ctrl_s_saves_and_stays(void) {
     ASSERT(s != NULL, "ctrl-s: opens");
     pty_send_str(s, "text one");
     pty_send_str(s, "\x13");
-    ASSERT_WAIT_FOR(s, "Ctrl-S=save   saved", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "saved", WAIT_MS);
     ASSERT(draft_contains("text one"), "ctrl-s: written");
-    ASSERT_SCREEN_CONTAINS(s, PTY_EDITOR_MARK);      /* still in the editor */
+    ASSERT_SCREEN_CONTAINS(s, "Message body");      /* the editor's title bar: still in the editor */
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
     pty_send_str(s, "y");
@@ -643,7 +643,7 @@ static void test_body_editor_resize_and_too_small(void) {
     ASSERT_WAIT_FOR(s, "kept text", WAIT_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "hidden");
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
     pty_send_str(s, "y");
@@ -657,7 +657,7 @@ static void test_send_removes_draft(void) {
     pty_send_str(s, "to be sent");
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "[s] Send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
     ASSERT(draft_contains("to be sent"), "send: the draft exists before sending");
     pty_send_str(s, "s");
     ASSERT_WAIT_FOR(s, "Message sent", WAIT_MS);

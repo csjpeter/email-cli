@@ -15,7 +15,7 @@ attachments I forgot during the header phase.
 | 1 | After the editor exits the TUI shows a **Post-Compose Review** screen instead of a plain `Send? [y/n]` prompt. |
 | 2 | The review screen displays the parsed headers: From, To, Cc (if non-empty), Bcc (if non-empty), Subject, and the number of body lines. |
 | 3 | The review screen shows the attachment list (filenames only) or `(none)` if no attachments. |
-| 4 | The key-binding bar shows: `[s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove attachment  [q] Cancel`. |
+| 4 | The status line on the last row shows the keys (EMAIL-111): `s send  e edit headers  b edit body  a add attachment  d remove last  q discard`; on a narrow terminal the lower-priority hints drop out. |
 | 5 | Pressing `s` sends the message immediately (no further prompt). |
 | 6 | Pressing `e` reopens the pre-compose dialog (US-CD-1) pre-filled with the current To, Cc, Bcc, Subject, and attachment list. After confirming the dialog the editor does **not** reopen; the review screen is shown again with updated headers. |
 | 7 | Pressing `b` reopens the built-in body editor (US-87) with the current text. After Esc the review screen is shown again with the updated body line count. |

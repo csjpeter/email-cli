@@ -245,7 +245,22 @@ static const char *const exp_compose_dialog[] = {
     "  Subject:",
     "  Attach:",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_compose_dialog[] = {
@@ -257,7 +272,6 @@ static const char *const sty_compose_dialog[] = {
     "ddddddddddddd                                                                                       ",
     "ddddddddddddd                                                                                       ",
     "                                                                                                    ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                        ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -273,6 +287,7 @@ static const char *const sty_compose_dialog[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_compose_dialog[3] = { 2, 13, 1 };
@@ -1057,7 +1072,22 @@ static const char *const exp_compose_typed[] = {
     "  Subject:",
     "  Attach:",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_compose_typed[] = {
@@ -1069,7 +1099,6 @@ static const char *const sty_compose_typed[] = {
     "ddddddddddddd                                                                                       ",
     "ddddddddddddd                                                                                       ",
     "                                                                                                    ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                        ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -1085,6 +1114,7 @@ static const char *const sty_compose_typed[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_compose_typed[3] = { 2, 28, 1 };
@@ -1099,7 +1129,21 @@ static const char *const exp_compose_empty_to[] = {
     "  Attach:",
     "  To: is empty — enter at least one recipient.",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_compose_empty_to[] = {
@@ -1112,7 +1156,6 @@ static const char *const sty_compose_empty_to[] = {
     "ddddddddddddd                                                                                       ",
     "  RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR                                                      ",
     "                                                                                                    ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                        ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -1127,6 +1170,7 @@ static const char *const sty_compose_empty_to[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_compose_empty_to[3] = { 2, 13, 1 };
@@ -1199,8 +1243,19 @@ static const char *const exp_w80_review_long_to[] = {
     "  Body:    1 line",
     "  Attach:  report.pdf",
     "",
-    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last",
-    "  [q] Discard",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " s send  e edit headers  b edit body  a add attachment  q discard",
     NULL
 };
 static const char *const sty_w80_review_long_to[] = {
@@ -1215,8 +1270,6 @@ static const char *const sty_w80_review_long_to[] = {
     "  ddddd                                                                         ",
     "  ddddddd                                                                       ",
     "                                                                                ",
-    "  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "ddddddddddddd                                                                   ",
     "                                                                                ",
     "                                                                                ",
     "                                                                                ",
@@ -1228,9 +1281,11 @@ static const char *const sty_w80_review_long_to[] = {
     "                                                                                ",
     "                                                                                ",
     "                                                                                ",
+    "                                                                                ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_w80_review_long_to[3] = { 13, 0, 1 };
+static const int cur_w80_review_long_to[3] = { 23, 79, 1 };
 static const char *const exp_w140_review_long_to[] = {
     "  Review: Message",
     "",
@@ -1242,7 +1297,20 @@ static const char *const exp_w140_review_long_to[] = {
     "  Body:    1 line",
     "  Attach:  report.pdf",
     "",
-    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " s send  e edit headers  b edit body  a add attachment  d remove last  q discard",
     NULL
 };
 static const char *const sty_w140_review_long_to[] = {
@@ -1256,7 +1324,6 @@ static const char *const sty_w140_review_long_to[] = {
     "  ddddd                                                                                                                                     ",
     "  ddddddd                                                                                                                                   ",
     "                                                                                                                                            ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                               ",
     "                                                                                                                                            ",
     "                                                                                                                                            ",
     "                                                                                                                                            ",
@@ -1270,9 +1337,10 @@ static const char *const sty_w140_review_long_to[] = {
     "                                                                                                                                            ",
     "                                                                                                                                            ",
     "                                                                                                                                            ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_w140_review_long_to[3] = { 11, 0, 1 };
+static const int cur_w140_review_long_to[3] = { 23, 139, 1 };
 
 #endif /* TEST_PTY_SCREENS_EXPECTED_H */
 
@@ -1300,7 +1368,7 @@ static const char *const exp_body_editor[] = {
     "",
     "",
     "",
-    "  Esc=save and continue  Ctrl-S=save",
+    " Esc save and continue  Ctrl-S save",
     NULL
 };
 static const char *const sty_body_editor[] = {
@@ -1327,7 +1395,7 @@ static const char *const sty_body_editor[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "ddddddddddddddddddddddddddddddddddddddd                                                             ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_body_editor[3] = { 1, 0, 1 };
@@ -1356,7 +1424,7 @@ static const char *const exp_body_editor_typed[] = {
     "",
     "",
     "",
-    "  Esc=save and continue  Ctrl-S=save",
+    " Esc save and continue  Ctrl-S save",
     NULL
 };
 static const char *const sty_body_editor_typed[] = {
@@ -1383,7 +1451,7 @@ static const char *const sty_body_editor_typed[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "ddddddddddddddddddddddddddddddddddddddd                                                             ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_body_editor_typed[3] = { 3, 15, 1 };
@@ -1397,7 +1465,22 @@ static const char *const exp_review[] = {
     "  Body:    3 lines",
     "  Attach:  (none)",
     "",
-    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " s send  e edit headers  b edit body  a add attachment  d remove last  q discard",
     NULL
 };
 static const char *const sty_review[] = {
@@ -1409,7 +1492,6 @@ static const char *const sty_review[] = {
     "  ddddd                                                                                             ",
     "  ddddddd                                                                                           ",
     "                                                                                                    ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd       ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -1425,9 +1507,10 @@ static const char *const sty_review[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_review[3] = { 9, 0, 1 };
+static const int cur_review[3] = { 23, 99, 1 };
 
 static const char *const exp_review_discard_ask[] = {
     "",
@@ -3477,7 +3560,20 @@ static const char *const exp_review_full[] = {
     "  Body:    1 line",
     "  Attach:  report.pdf",
     "",
-    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " s send  e edit headers  b edit body  a add attachment  d remove last  q discard",
     NULL
 };
 static const char *const sty_review_full[] = {
@@ -3491,7 +3587,6 @@ static const char *const sty_review_full[] = {
     "  ddddd                                                                                             ",
     "  ddddddd                                                                                           ",
     "                                                                                                    ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd       ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3505,9 +3600,10 @@ static const char *const sty_review_full[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_review_full[3] = { 11, 0, 1 };
+static const int cur_review_full[3] = { 23, 99, 1 };
 
 static const char *const exp_review_long_to[] = {
     "  Review: Message",
@@ -3521,7 +3617,19 @@ static const char *const exp_review_long_to[] = {
     "  Body:    1 line",
     "  Attach:  report.pdf",
     "",
-    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " s send  e edit headers  b edit body  a add attachment  d remove last  q discard",
     NULL
 };
 static const char *const sty_review_long_to[] = {
@@ -3536,7 +3644,6 @@ static const char *const sty_review_long_to[] = {
     "  ddddd                                                                                             ",
     "  ddddddd                                                                                           ",
     "                                                                                                    ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd       ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3549,16 +3656,36 @@ static const char *const sty_review_long_to[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_review_long_to[3] = { 12, 0, 1 };
+static const int cur_review_long_to[3] = { 23, 99, 1 };
 
 static const char *const exp_review_attach_ask[] = {
     "  Add Attachment",
     "",
     "  Path:",
     "",
-    "  Tab=complete  Enter=add  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab complete  Enter add  Esc cancel",
     NULL
 };
 static const char *const sty_review_attach_ask[] = {
@@ -3566,7 +3693,6 @@ static const char *const sty_review_attach_ask[] = {
     "                                                                                                    ",
     "  bbbbb                                                                                             ",
     "                                                                                                    ",
-    "ddddddddddddddddddddddddddddddddddddd                                                               ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3586,6 +3712,7 @@ static const char *const sty_review_attach_ask[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_review_attach_ask[3] = { 2, 8, 1 };
@@ -3601,7 +3728,20 @@ static const char *const exp_review_attach_removed[] = {
     "  Body:    1 line",
     "  Attach:  (none)",
     "",
-    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " s send  e edit headers  b edit body  a add attachment  d remove last  q discard",
     NULL
 };
 static const char *const sty_review_attach_removed[] = {
@@ -3615,7 +3755,6 @@ static const char *const sty_review_attach_removed[] = {
     "  ddddd                                                                                             ",
     "  ddddddd                                                                                           ",
     "                                                                                                    ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd       ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3629,22 +3768,28 @@ static const char *const sty_review_attach_removed[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_review_attach_removed[3] = { 11, 0, 1 };
+static const int cur_review_attach_removed[3] = { 23, 99, 1 };
 
 static const char *const exp_review_send_failed[] = {
-    "  Review: Message",
-    "",
-    "  From:    testuser",
-    "  To:      ann@example.org",
-    "  Cc:      cc@example.org",
-    "  Bcc:     bcc@example.org",
-    "  Subject: Quarterly report",
-    "  Body:    1 line",
     "  Attach:  report.pdf",
     "",
-    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " s send  e edit headers  b edit body  a add attachment  d remove last  q discard",
     "  Sending...",
     "smtp_send: Could not connect to server",
     "ERROR: smtp_send failed: Could not connect to server",
@@ -3655,22 +3800,22 @@ static const char *const exp_review_send_failed[] = {
     NULL
 };
 static const char *const sty_review_send_failed[] = {
-    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
-    "                                                                                                    ",
-    "  ddddd                                                                                             ",
-    "  ddd                                                                                               ",
-    "  ddd                                                                                               ",
-    "  dddd                                                                                              ",
-    "  dddddddd                                                                                          ",
-    "  ddddd                                                                                             ",
     "  ddddddd                                                                                           ",
     "                                                                                                    ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd       ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3681,7 +3826,7 @@ static const char *const sty_review_send_failed[] = {
     "                                                                                                    ",
     NULL
 };
-static const int cur_review_send_failed[3] = { 18, 0, 1 };
+static const int cur_review_send_failed[3] = { 23, 0, 1 };
 
 static const char *const exp_dd_many[] = {
     "  New Message",
@@ -3697,7 +3842,17 @@ static const char *const exp_dd_many[] = {
     "  Subject:",
     "  Attach:",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_dd_many[] = {
@@ -3714,7 +3869,6 @@ static const char *const sty_dd_many[] = {
     "ddddddddddddd                                                                                       ",
     "ddddddddddddd                                                                                       ",
     "                                                                                                    ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                        ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3725,6 +3879,7 @@ static const char *const sty_dd_many[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_dd_many[3] = { 2, 16, 1 };
@@ -3739,7 +3894,21 @@ static const char *const exp_dd_one[] = {
     "  Subject:",
     "  Attach:",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_dd_one[] = {
@@ -3752,7 +3921,6 @@ static const char *const sty_dd_one[] = {
     "ddddddddddddd                                                                                       ",
     "ddddddddddddd                                                                                       ",
     "                                                                                                    ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                        ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3767,6 +3935,7 @@ static const char *const sty_dd_one[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_dd_one[3] = { 2, 17, 1 };
@@ -3785,7 +3954,17 @@ static const char *const exp_dd_second[] = {
     "  Subject:",
     "  Attach:",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_dd_second[] = {
@@ -3802,7 +3981,6 @@ static const char *const sty_dd_second[] = {
     "ddddddddddddd                                                                                       ",
     "ddddddddddddd                                                                                       ",
     "                                                                                                    ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                        ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3813,6 +3991,7 @@ static const char *const sty_dd_second[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_dd_second[3] = { 2, 16, 1 };
@@ -3826,7 +4005,22 @@ static const char *const exp_dd_none[] = {
     "  Subject:",
     "  Attach:",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_dd_none[] = {
@@ -3838,7 +4032,6 @@ static const char *const sty_dd_none[] = {
     "ddddddddddddd                                                                                       ",
     "ddddddddddddd                                                                                       ",
     "                                                                                                    ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                        ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3854,6 +4047,7 @@ static const char *const sty_dd_none[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_dd_none[3] = { 2, 16, 1 };
@@ -3868,7 +4062,21 @@ static const char *const exp_dd_wide[] = {
     "  Subject:",
     "  Attach:",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_dd_wide[] = {
@@ -3881,7 +4089,6 @@ static const char *const sty_dd_wide[] = {
     "ddddddddddddd                                                                                       ",
     "ddddddddddddd                                                                                       ",
     "                                                                                                    ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                        ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3896,6 +4103,7 @@ static const char *const sty_dd_wide[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_dd_wide[3] = { 2, 16, 1 };
@@ -3909,7 +4117,22 @@ static const char *const exp_dd_accepted[] = {
     "  Subject:",
     "  Attach:",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_dd_accepted[] = {
@@ -3921,7 +4144,6 @@ static const char *const sty_dd_accepted[] = {
     "ddddddddddddd                                                                                       ",
     "ddddddddddddd                                                                                       ",
     "                                                                                                    ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                        ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3937,6 +4159,7 @@ static const char *const sty_dd_accepted[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_dd_accepted[3] = { 2, 29, 1 };
@@ -3952,7 +4175,20 @@ static const char *const exp_path_many[] = {
     "              alpha2.txt",
     "              alpha.txt",
     "",
-    "  Tab=complete  Shift-Tab=prev  Enter=add  d=remove last  Enter(empty)=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab complete  Shift-Tab prev  Enter add  d remove last  Enter (empty) ok  Esc cancel",
     NULL
 };
 static const char *const sty_path_many[] = {
@@ -3966,7 +4202,6 @@ static const char *const sty_path_many[] = {
     "              TTTTTTTTTT                                                                            ",
     "              TTTTTTTTT                                                                             ",
     "                                                                                                    ",
-    "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd               ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3980,6 +4215,7 @@ static const char *const sty_path_many[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_path_many[3] = { 6, 99, 1 };
@@ -3994,7 +4230,21 @@ static const char *const exp_path_one[] = {
     "%  Attach:    ",
     "              beta.bin",
     "",
-    "  Tab=complete  Shift-Tab=prev  Enter=add  d=remove last  Enter(empty)=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab complete  Shift-Tab prev  Enter add  d remove last  Enter (empty) ok  Esc cancel",
     NULL
 };
 static const char *const sty_path_one[] = {
@@ -4007,7 +4257,6 @@ static const char *const sty_path_one[] = {
     "bbbbbbbbbbbbb                                                                                       ",
     "              TTTTTTTT                                                                              ",
     "                                                                                                    ",
-    "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd               ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -4022,6 +4271,7 @@ static const char *const sty_path_one[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_path_one[3] = { 6, 99, 1 };
@@ -5020,7 +5270,7 @@ static const char *const exp_rules_empty[] = {
     "",
     "",
     "",
-    "  j/k=navigate  Enter=open  a=add  d=delete  h=help  ESC/q=back",
+    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rules_empty[] = {
@@ -5047,10 +5297,10 @@ static const char *const sty_rules_empty[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rules_empty[3] = { 23, 63, 0 };
+static const int cur_rules_empty[3] = { 23, 99, 0 };
 
 static const char *const exp_rules_list[] = {
     "Rules for testuser (2 rules)",
@@ -5076,7 +5326,7 @@ static const char *const exp_rules_list[] = {
     "",
     "",
     "",
-    "  j/k=navigate  Enter=open  a=add  d=delete  h=help  ESC/q=back",
+    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rules_list[] = {
@@ -5103,10 +5353,10 @@ static const char *const sty_rules_list[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rules_list[3] = { 23, 63, 0 };
+static const int cur_rules_list[3] = { 23, 99, 0 };
 
 static const char *const exp_rule_detail[] = {
     "Rule: SpamFilter",
@@ -5132,7 +5382,7 @@ static const char *const exp_rule_detail[] = {
     "",
     "",
     "",
-    "  e=edit  d=delete  h=help  ESC/q=back",
+    " e edit  d delete  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rule_detail[] = {
@@ -5159,15 +5409,36 @@ static const char *const sty_rule_detail[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rule_detail[3] = { 23, 38, 1 };
+static const int cur_rule_detail[3] = { 23, 99, 1 };
 
 static const char *const exp_rule_add_when[] = {
     "Add new rule for testuser — conditions (step 1/2)",
-    "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  h=help  ESC=cancel",
+    "",
     "(empty — press 'a' to add a condition)",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " j/k move  Enter/e edit  a add  d delete  q confirm  Esc cancel  h help",
     NULL
 };
 static const char *const sty_rule_add_when[] = {
@@ -5194,14 +5465,14 @@ static const char *const sty_rule_add_when[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rule_add_when[3] = { 2, 38, 0 };
+static const int cur_rule_add_when[3] = { 23, 99, 0 };
 
 static const char *const exp_rule_add_actions[] = {
     "Add new rule for testuser — step 2/2: actions",
-    "Enter=next field  ESC=cancel",
+    "",
     "  Name:",
     "add-label [1]:",
     "add-label [2]:",
@@ -5211,6 +5482,19 @@ static const char *const exp_rule_add_actions[] = {
     "rm-label  [3]:",
     "then-move-folder:",
     "then-forward-to:",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Enter next field  Esc cancel",
     NULL
 };
 static const char *const sty_rule_add_actions[] = {
@@ -5237,7 +5521,7 @@ static const char *const sty_rule_add_actions[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_rule_add_actions[3] = { 2, 20, 1 };
@@ -5266,7 +5550,7 @@ static const char *const exp_rules_second[] = {
     "",
     "",
     "",
-    "  j/k=navigate  Enter=open  a=add  d=delete  h=help  ESC/q=back",
+    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rules_second[] = {
@@ -5293,15 +5577,36 @@ static const char *const sty_rules_second[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rules_second[3] = { 23, 63, 0 };
+static const int cur_rules_second[3] = { 23, 99, 0 };
 
 static const char *const exp_rule_edit_form[] = {
     "Edit rule \"SpamFilter\" for testuser — conditions (step 1/2)",
-    "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  h=help  ESC=cancel",
+    "",
     ">   1. from:*@spam.example.com",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " j/k move  Enter/e edit  a add  d delete  q confirm  Esc cancel  h help",
     NULL
 };
 static const char *const sty_rule_edit_form[] = {
@@ -5328,10 +5633,10 @@ static const char *const sty_rule_edit_form[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rule_edit_form[3] = { 2, 99, 0 };
+static const int cur_rule_edit_form[3] = { 23, 99, 0 };
 
 static const char *const exp_rules_help[] = {
     "Rules for testuser (2 rules)",
@@ -5357,7 +5662,7 @@ static const char *const exp_rules_help[] = {
     "",
     "",
     "",
-    "  j/k=navigate  Enter=open  a=add  d=delete  h=help  ESC/q=back",
+    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rules_help[] = {
@@ -5384,7 +5689,7 @@ static const char *const sty_rules_help[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_rules_help[3] = { 15, 70, 1 };
@@ -5413,7 +5718,7 @@ static const char *const exp_rule_detail_help[] = {
     "",
     "",
     "",
-    "  e=edit  d=delete  h=help  ESC/q=back",
+    " e edit  d delete  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rule_detail_help[] = {
@@ -5440,14 +5745,14 @@ static const char *const sty_rule_detail_help[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_rule_detail_help[3] = { 14, 76, 1 };
 
 static const char *const exp_rule_when_help[] = {
     "Add new rule for testuser — conditions (step 1/2)",
-    "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  h=help  ESC=cancel",
+    "",
     "(empty — press 'a' to add a condition)",
     "",
     "",
@@ -5463,6 +5768,13 @@ static const char *const exp_rule_when_help[] = {
     "                             │ Esc        Cancel the rule            │",
     "                             │ h / ?      Show this help             │",
     "                             └───────────────────────────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " j/k move  Enter/e edit  a add  d delete  q confirm  Esc cancel  h help",
     NULL
 };
 static const char *const sty_rule_when_help[] = {
@@ -5489,7 +5801,7 @@ static const char *const sty_rule_when_help[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_rule_when_help[3] = { 16, 70, 0 };
@@ -5574,7 +5886,7 @@ static const char *const exp_rules_deleted[] = {
     "",
     "",
     "",
-    "  j/k=navigate  Enter=open  a=add  d=delete  h=help  ESC/q=back",
+    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rules_deleted[] = {
@@ -5601,10 +5913,10 @@ static const char *const sty_rules_deleted[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rules_deleted[3] = { 23, 63, 0 };
+static const int cur_rules_deleted[3] = { 23, 99, 0 };
 
 static const char *const exp_rule_detail_delete_ask[] = {
     "Rule: SpamFilter",
@@ -5664,9 +5976,29 @@ static const int cur_rule_detail_delete_ask[3] = { 23, 29, 1 };
 
 static const char *const exp_rule_when_typed[] = {
     "Add new rule for testuser — conditions (step 1/2)",
-    "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  h=help  ESC=cancel",
+    "",
     "(empty — press 'a' to add a condition)",
     "  new:  from:*@example.org",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " j/k move  Enter/e edit  a add  d delete  q confirm  Esc cancel  h help",
     NULL
 };
 static const char *const sty_rule_when_typed[] = {
@@ -5693,15 +6025,36 @@ static const char *const sty_rule_when_typed[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_rule_when_typed[3] = { 3, 26, 1 };
 
 static const char *const exp_rule_when_added[] = {
     "Add new rule for testuser — conditions (step 1/2)",
-    "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  h=help  ESC=cancel",
+    "",
     ">   1. from:*@example.org",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " j/k move  Enter/e edit  a add  d delete  q confirm  Esc cancel  h help",
     NULL
 };
 static const char *const sty_rule_when_added[] = {
@@ -5728,14 +6081,14 @@ static const char *const sty_rule_when_added[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rule_when_added[3] = { 2, 99, 0 };
+static const int cur_rule_when_added[3] = { 23, 99, 0 };
 
 static const char *const exp_rule_when_bad[] = {
     "Add new rule for testuser — conditions (step 1/2)",
-    "j/k=move  Enter/e=edit  a=add  d=delete  q=confirm  h=help  ESC=cancel",
+    "",
     "(empty — press 'a' to add a condition)",
     "",
     "",
@@ -5757,7 +6110,7 @@ static const char *const exp_rule_when_bad[] = {
     "",
     "",
     "",
-    "  Not a valid condition: (((  (e.g. from:*@example.org)",
+    "   Not a valid condition: (((  (e.g. from:*@example.org)",
     NULL
 };
 static const char *const sty_rule_when_bad[] = {
@@ -5784,14 +6137,14 @@ static const char *const sty_rule_when_bad[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rule_when_bad[3] = { 23, 55, 0 };
+static const int cur_rule_when_bad[3] = { 23, 99, 0 };
 
 static const char *const exp_rule_step2_field[] = {
     "Add new rule for testuser — step 2/2: actions",
-    "Enter=next field  ESC=cancel",
+    "",
     "  Name:             Work mail",
     "  add-label [1]:",
     "add-label [2]:",
@@ -5801,6 +6154,19 @@ static const char *const exp_rule_step2_field[] = {
     "rm-label  [3]:",
     "then-move-folder:",
     "then-forward-to:",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Enter next field  Esc cancel",
     NULL
 };
 static const char *const sty_rule_step2_field[] = {
@@ -5827,7 +6193,7 @@ static const char *const sty_rule_step2_field[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_rule_step2_field[3] = { 3, 20, 1 };
@@ -6116,7 +6482,22 @@ static const char *const exp_w80_compose_form[] = {
     "  Subject:",
     "  Attach:",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_w80_compose_form[] = {
@@ -6128,7 +6509,22 @@ static const char *const sty_w80_compose_form[] = {
     "ddddddddddddd                                                                   ",
     "ddddddddddddd                                                                   ",
     "                                                                                ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                    ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_w80_compose_form[3] = { 2, 13, 1 };
@@ -6157,7 +6553,7 @@ static const char *const exp_w80_body_editor[] = {
     "",
     "",
     "",
-    "  Esc=save and continue  Ctrl-S=save",
+    " Esc save and continue  Ctrl-S save",
     NULL
 };
 static const char *const sty_w80_body_editor[] = {
@@ -6184,7 +6580,7 @@ static const char *const sty_w80_body_editor[] = {
     "                                                                                ",
     "                                                                                ",
     "                                                                                ",
-    "ddddddddddddddddddddddddddddddddddddddd                                         ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_w80_body_editor[3] = { 1, 0, 1 };
@@ -6198,8 +6594,22 @@ static const char *const exp_w80_review[] = {
     "  Body:    3 lines",
     "  Attach:  (none)",
     "",
-    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last",
-    "  [q] Discard",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " s send  e edit headers  b edit body  a add attachment  q discard",
     NULL
 };
 static const char *const sty_w80_review[] = {
@@ -6211,11 +6621,25 @@ static const char *const sty_w80_review[] = {
     "  ddddd                                                                         ",
     "  ddddddd                                                                       ",
     "                                                                                ",
-    "  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "ddddddddddddd                                                                   ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "                                                                                ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_w80_review[3] = { 10, 0, 1 };
+static const int cur_w80_review[3] = { 23, 79, 1 };
 
 static const char *const exp_w80_rules[] = {
     "Rules for testuser (2 rules)",
@@ -6241,7 +6665,7 @@ static const char *const exp_w80_rules[] = {
     "",
     "",
     "",
-    "  j/k=navigate  Enter=open  a=add  d=delete  h=help  ESC/q=back",
+    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
     NULL
 };
 static const char *const sty_w80_rules[] = {
@@ -6268,10 +6692,10 @@ static const char *const sty_w80_rules[] = {
     "                                                                                ",
     "                                                                                ",
     "                                                                                ",
-    "                                                                                ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_w80_rules[3] = { 23, 63, 0 };
+static const int cur_w80_rules[3] = { 23, 79, 0 };
 
 static const char *const exp_w140_accounts[] = {
     "  Email Accounts (1)",
@@ -6559,7 +6983,22 @@ static const char *const exp_w140_compose_form[] = {
     "  Subject:",
     "  Attach:",
     "",
-    "  Tab=next  Shift-Tab=prev  ;=add addr  Enter=OK  ESC=cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Tab next  Shift-Tab prev  ; add addr  Enter ok  Esc cancel",
     NULL
 };
 static const char *const sty_w140_compose_form[] = {
@@ -6571,7 +7010,22 @@ static const char *const sty_w140_compose_form[] = {
     "ddddddddddddd                                                                                                                               ",
     "ddddddddddddd                                                                                                                               ",
     "                                                                                                                                            ",
-    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                                                                ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_w140_compose_form[3] = { 2, 13, 1 };
@@ -6600,7 +7054,7 @@ static const char *const exp_w140_body_editor[] = {
     "",
     "",
     "",
-    "  Esc=save and continue  Ctrl-S=save",
+    " Esc save and continue  Ctrl-S save",
     NULL
 };
 static const char *const sty_w140_body_editor[] = {
@@ -6627,7 +7081,7 @@ static const char *const sty_w140_body_editor[] = {
     "                                                                                                                                            ",
     "                                                                                                                                            ",
     "                                                                                                                                            ",
-    "ddddddddddddddddddddddddddddddddddddddd                                                                                                     ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_w140_body_editor[3] = { 1, 0, 1 };
@@ -6641,7 +7095,22 @@ static const char *const exp_w140_review[] = {
     "  Body:    3 lines",
     "  Attach:  (none)",
     "",
-    "  [s] Send  [e] Edit headers  [b] Edit body  [a] Add attachment  [d] Remove last  [q] Discard",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " s send  e edit headers  b edit body  a add attachment  d remove last  q discard",
     NULL
 };
 static const char *const sty_w140_review[] = {
@@ -6653,10 +7122,25 @@ static const char *const sty_w140_review[] = {
     "  ddddd                                                                                                                                     ",
     "  ddddddd                                                                                                                                   ",
     "                                                                                                                                            ",
-    "  ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd                                               ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "                                                                                                                                            ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_w140_review[3] = { 9, 0, 1 };
+static const int cur_w140_review[3] = { 23, 139, 1 };
 
 static const char *const exp_w140_rules[] = {
     "Rules for testuser (2 rules)",
@@ -6682,7 +7166,7 @@ static const char *const exp_w140_rules[] = {
     "",
     "",
     "",
-    "  j/k=navigate  Enter=open  a=add  d=delete  h=help  ESC/q=back",
+    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
     NULL
 };
 static const char *const sty_w140_rules[] = {
@@ -6709,10 +7193,10 @@ static const char *const sty_w140_rules[] = {
     "                                                                                                                                            ",
     "                                                                                                                                            ",
     "                                                                                                                                            ",
-    "                                                                                                                                            ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_w140_rules[3] = { 23, 63, 0 };
+static const int cur_w140_rules[3] = { 23, 139, 0 };
 
 static const char *const exp_list_third_row[] = {
     "  1-3 of 3 message(s) in INBOX (3 unread) [testuser].",

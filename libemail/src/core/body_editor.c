@@ -4,6 +4,7 @@
 /* The full-screen message body editor: libtuikit's tui_textedit with autosave. */
 #include "body_editor.h"
 #include "key_events.h"
+#include "status_line.h"
 
 #include <tuikit/buf.h>
 #include <tuikit/canvas.h>
@@ -54,9 +55,18 @@ static void draw(tui_textedit *te, const char *header, const char *note,
         tui_canvas ec = tui_canvas_sub(c, tui_rect_make(1, 0, rows - 2, cols));
         tui_textedit_render(te, ec, TUI_STYLE_DEFAULT);
     }
-    char status[160];
-    snprintf(status, sizeof(status), "  Esc=save and continue  Ctrl-S=save   %s", note);
-    tui_canvas_put(c, rows - 1, 0, status, tui_style_attrs(TUI_ATTR_DIM));
+    /* The one status line of the program (EMAIL-111): the hints that fit,
+     * the note ("saved", "autosaved") in their place. */
+    static const tui_statusline_hint hints[] = {
+        { "Esc", "save and continue", SL_PRIO_KEEP },
+        { "Ctrl-S", "save", SL_PRIO_HIGH },
+    };
+    char status[256];
+    if (status_line_format(cols, hints, 2, NULL, 0, 0, note, status, sizeof(status)) < 0)
+        status[0] = '\0';
+    tui_style bar = tui_style_attrs(TUI_ATTR_REVERSE);
+    tui_canvas_fill(c, tui_rect_make(rows - 1, 0, 1, cols), bar);
+    tui_canvas_put(c, rows - 1, 0, status, bar);
 
     tui_buf out;
     tui_buf_init(&out);

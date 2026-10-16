@@ -448,7 +448,7 @@ static PtySession *compose_to_review(const char *to, const char *subject)
     /* Wait for the footer, which pcr_render() prints last — waiting for the
      * title alone can return while the body/attachment lines are still being
      * written. */
-    if (pty_wait_for(s, "[s] Send", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    if (pty_wait_for(s, "s send", WAIT_MS) != 0) { pty_close(s); return NULL; }
     return s;
 }
 

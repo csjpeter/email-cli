@@ -33,10 +33,10 @@ runs are read as `#`.
 | List search (`list_search`) | `/` | filter line "Filter [Subject|From|To|Body]: _  Showing n of N" | text, Tab, Enter, Esc |
 | Message reader (`reader`, `reader_source`, `reader_search`) | Enter on a message | header block From, Subject, Date, UID, File, DMARC; rule; body; status line "-- [1/1] …" with the keys | ↑↓ PgUp/PgDn Home End r F f n d D a A v / h Esc q BS |
 | Reader help (`reader_help`) | `h` | overlay (as the accounts help) | Esc q BS |
-| Rules editor (`rules_empty`, `rules_list`, `rules_second`) | `l` on the list | title "Rules for account (n rules)"; "(no rules …)" or one row per rule, `>` and the selection on the cursor; hint line | j k ↑↓ Enter a d Esc q |
-| Rule detail (`rule_detail`) | Enter on a rule | "Rule:", "Account:", `when:` and the `then-*` rows; hint line | e d Esc q |
+| Rules editor (`rules_empty`, `rules_list`, `rules_second`) | `l` on the list | title "Rules for account (n rules)"; "(no rules …)" or one row per rule, `>` and the selection on the cursor; status line (`j/k navigate  Enter open  a add  d delete  Esc/q back  h help`) | j k ↑↓ Enter a d Esc q |
+| Rule detail (`rule_detail`) | Enter on a rule | "Rule:", "Account:", `when:` and the `then-*` rows; status line (`e edit  d delete  Esc/q back  h help`) | e d Esc q |
 | Rule edit (`rule_edit_form`) | `e` on a rule | condition list editor step 1/2 prefilled | j k Enter e a d q Esc |
-| Rule add, conditions (`rule_add_when`) | `a` in the rules editor | step 1/2 title, hint, "(empty — press 'a' …)" | a q Esc |
+| Rule add, conditions (`rule_add_when`) | `a` in the rules editor | step 1/2 title, status line, "(empty — press 'a' …)" | a q Esc |
 | Rule add, actions (`rule_add_actions`) | `q` in step 1 | step 2/2 title; Name; add-label 1–3; rm-label 1–3; then-move-folder; then-forward-to | Enter Esc |
 | Compose dialog (`compose_dialog`, `compose_typed`, `compose_empty_to`) | `c` | "New Message"; To Cc Bcc Subject Attach fields; guard line "To: is empty …" (red); hint | Tab Shift-Tab ; Enter Esc |
 | Gmail label browser (`gmail_labels`, `gmail_label_user`) | Enter on a Gmail account | header "Labels — account (N)"; heads Count, Label; "Tags / Flags" (Unread, Flagged, user labels) and "Folders" (Inbox, Sent, Drafts, Archive, Spam, Trash with "auto-delete: 30 days"); selected row dark blue with `>`; counts of what is synced | ↑↓ Enter c d h Esc |
@@ -49,14 +49,14 @@ runs are read as `#`.
 | Save prompts and result (`att_save_prompt`, `att_saved`, `att_save_all`) | Enter in the picker, `A` | `Save as: <path>` (line editor, scrolls), `Saved: <path>`, `Save all to: <dir>`; the golden pictures compare these rows by their start only (paths differ per machine) | Enter Esc |
 | Review states (`review_full`, `review_long_to`, `review_attach_ask`, `review_attach_removed`, `review_send_failed`) | `s`, `a`, `d` in the review | Cc, Bcc and Attach rows when present (`Attach:  (none)` otherwise); a To, Cc or Bcc list that does not fit the width is broken between addresses (after the `;` or `,`), the continuation line indented to the value column, never inside an address (EMAIL-107; `w80_review_long_to`, `w140_review_long_to`); `Add Attachment` / `Path:` prompt; a failed send appends `Sending...`, the SMTP error, `Saved to Drafts (will retry on next sync).` below the review | s e b a d q |
 | Address drop-down (`dd_many`, `dd_one`, `dd_second`, `dd_none`, `dd_wide`, `dd_accepted`) | typing 2+ characters in To/Cc/Bcc | up to five candidate rows under the field, each a `tui_table` row of address (cyan) and name, drawn as an overlay (EMAIL-110), `>` and the selection style on the chosen row; none when nothing matches; Down moves, Enter takes the address | text ↓ ↑ Enter ; Tab |
-| Path completion (`path_many`, `path_one`) | typing a path in Attach | the typed path scrolls in the field; candidate file names below with the same marker; hint line `Tab=complete … Enter=add  d=remove last` | Tab Enter d |
+| Path completion (`path_many`, `path_one`) | typing a path in Attach | the typed path scrolls in the field; candidate file names below as table rows (EMAIL-110); status line `Tab complete  Enter add  Enter (empty) ok  d remove last  Esc cancel` | Tab Enter d |
 | Connection errors (`err_connect`, `err_login`, `err_tls`) | Enter on an account whose server cannot be used | the specific error line (`ERROR: connect to …`, `localhost rejected the login for …` with the server's words, `SSL handshake failed …`), and `Press any key to return to accounts...`; the generic `Connection failed.` causes block is printed only when no specific error line was written (EMAIL-105) | any key |
 | Sync and feedback (`list_syncing`, `list_new_mail`, `list_star_feedback`) | `s` and `f` on the message list | the header suffix `↻ syncing...`, then `✉ New mail may have arrived!  U=refresh`; a one-word feedback line (`Starred`) above the key bar | s U f |
 | Setup wizard steps (`wiz_imap_host`, `wiz_imap_port`, `wiz_imap_user`, `wiz_imap_pass`, `wiz_imap_masked`, `wiz_imap_folder`, `wiz_smtp_host`, `wiz_smtp_port`, `wiz_gmail`, `wiz_bad_type`, `wiz_imap_done`) | `n` on accounts, then the answers | plain prompts one under the other (IMAP host with `→ using imaps://…`, port, username, password echoed as `*` with `→ password updated (N characters)`, folder, SMTP host/port); the account type question takes `1` (or Enter) for IMAP and `2` for Gmail, any other answer is refused with `Unknown account type '…'` and asked again (EMAIL-106); the Gmail path asks for the address; `wiz_imap_done` is the accounts list with the new account selected | text, Enter |
 | Rules editor help (`rules_help`, `rule_detail_help`, `rule_when_help`) | `h` or `?` in the rules list, a rule, the condition list (EMAIL-95) | the same boxed overlay as the other screens: title ("Rules shortcuts", "Rule shortcuts", "Conditions shortcuts"), key/description rows | Esc q BS |
 | Rules editor states (`rules_delete_ask`, `rules_deleted`, `rule_detail_delete_ask`, `rule_when_typed`, `rule_when_added`, `rule_when_bad`, `rule_step2_field`) | `d`, `a` in the rule views | the delete question `Delete "NAME"? (y/N)` on the last row; the typed condition on the `new:` line; a condition that does not parse is refused with `Not a valid condition: … (e.g. from:*@example.org)` on the last row and not added; step 2 shows the typed field | d y a Enter q |
-| Body editor (`body_editor`, `body_editor_typed`) | Enter on the compose dialog (US-87) | header bar "Message body — To: … Subject: …"; the text (tui_textedit, scrolls both ways, cursor at the text cursor); dim bottom line `Esc=save and continue  Ctrl-S=save`, `saved`/`autosaved` after a save | text, Enter, arrows, Esc, Ctrl-S |
-| Review (`review`, `review_discard_ask`) | Esc in the body editor | header "Review: Message"; dim labels From, To, Subject, Body (line count), Attach; key line `[s] Send … [q] Discard`; `q` asks `Discard draft? To: …, Subject: …, N line(s), M attachment(s) [y/n]` | s e b a d q |
+| Body editor (`body_editor`, `body_editor_typed`) | Enter on the compose dialog (US-87) | header bar "Message body — To: … Subject: …"; the text (tui_textedit, scrolls both ways, cursor at the text cursor); status line `Esc save and continue  Ctrl-S save`, `saved`/`autosaved` in its place after a save | text, Enter, arrows, Esc, Ctrl-S |
+| Review (`review`, `review_discard_ask`) | Esc in the body editor | header "Review: Message"; dim labels From, To, Subject, Body (line count), Attach; status line `s send  e edit headers  b edit body  a add attachment  d remove last  q discard`; `q` asks `Discard draft? To: …, Subject: …, N line(s), M attachment(s) [y/n]` | s e b a d q |
 
 ## The status line (EMAIL-98)
 
@@ -75,9 +75,11 @@ row above it any more.
   a search miss in the reader, a prompt (`Delete account NAME? (y/N)`, the
   bulk menu and its confirmations) and a flash notice replace the hints on
   the same row until the next key; then the hints are back.
-- The prompts' own screens (compose dialog, body editor, review, rules
-  editor) keep the dim key line of their frame; they are not part of this
-  line.
+- The compose dialog and its attachment prompt, the body editor, the review
+  and the rules editor draw the same status line on the last row (EMAIL-111):
+  hints with priorities that drop out on a narrow terminal, a message in their
+  place (the condition list's refusal, the editor's `saved`).  The delete
+  question of the rules editor replaces it for the moment.
 
 ## Not covered by a whole-screen comparison yet
 
@@ -117,8 +119,7 @@ defect or inconsistency the pictures make visible, left for the owner to ticket.
    key rows still said `ESC / q  Quit` and `Backspace` after EMAIL-37.
 8. Narrow terminal (80x24, `w80_*`): the bottom key bars of the accounts
    screen and the message list are cut mid-hint (`(*keeps loc`, `F=f`)
-   instead of being shortened; the review screen's key line wraps onto a
-   second row.  Not changed; the pictures pin the present state.
+   instead of being shortened.  Not changed; the pictures pin the present state.
 9. Eight-colour terminal (`TERM=linux`, `*_8colour`): the programs treat
    every `TERM` but unset, empty and `dumb` as ANSI (EMAIL-108); the
    selection is still the dark-blue palette-17 row with `>`, so on a

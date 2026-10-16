@@ -604,7 +604,7 @@ static void to_editor(PtySession *s) {
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_str(s, "Hello");
     pty_send_key(s, PTY_KEY_ENTER);
-    pty_wait_for(s, "Esc=save and continue", WAIT_MS);
+    pty_wait_for(s, "Esc save and continue", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 }
 
@@ -617,7 +617,7 @@ static void editor_typed(PtySession *s) {
 static void to_review(PtySession *s) {
     editor_typed(s);
     pty_send_key(s, PTY_KEY_ESC);
-    pty_wait_for(s, "[s] Send", WAIT_MS);
+    pty_wait_for(s, "s send", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 }
 
@@ -641,12 +641,12 @@ static void to_review_full(PtySession *s, const char *to) {
     pty_send_key(s, PTY_KEY_ENTER);   /* adds the attachment */
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ENTER);   /* confirms the dialog */
-    pty_wait_for(s, "Esc=save and continue", WAIT_MS);
+    pty_wait_for(s, "Esc save and continue", WAIT_MS);
     pty_settle(s, 200);
     pty_send_str(s, "Please find the report attached.");
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ESC);
-    pty_wait_for(s, "[s] Send", WAIT_MS);
+    pty_wait_for(s, "s send", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 }
 

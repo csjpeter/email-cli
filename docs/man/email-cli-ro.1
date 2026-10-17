@@ -112,6 +112,20 @@ Emit JSON instead of the table: one object per message, with
 Standard output stays a single parseable document \- the count line and the
 paging hint are suppressed, notices go to standard error, and an empty result
 is an empty array. Unlike the table, fields are never truncated.
+.PP
+.B \-\-json
+is also accepted by
+.BR show ", " list\-folders ", " list\-labels ", " list\-attachments
+and
+.BR list\-accounts :
+the same facts as the table, as one JSON document (an object for
+.BR show ,
+an array of objects for the others). It cannot be combined with
+.B show \-\-raw.
+Errors stay text on standard error and the exit status is non\-zero.
+A script reads
+.BR \-\-json ,
+not the table.
 .TP
 .B \-\-raw
 .RB ( show )

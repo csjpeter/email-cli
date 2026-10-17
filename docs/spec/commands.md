@@ -1026,3 +1026,25 @@ mode `0600`.  If the user aborts (EOF / empty host), the program exits with code
 The `main` function maps the internal `0` / `−1` return to `EXIT_SUCCESS` /
 `EXIT_FAILURE` and prints a trailing `"\nSuccess: Fetch complete.\n"` on success
 or `"\nFailed. Check logs in <path>\n"` on failure.
+
+## `--json` on the read commands (EMAIL-122)
+
+Policy: `cli-output-model.md`.  A command prints for a person by default; a
+script reads `--json`, which carries the complete record, keeps errors as text
+on stderr and exits non-zero on failure.  `email-cli` and `email-cli-ro` offer
+it on:
+
+| Command | JSON |
+|---------|------|
+| `list` | array of messages (see *JSON output* above) |
+| `show <uid>` | object: `uid`, `folder`, `from`, `to`, `subject`, `date`, `labels`, `dmarc`, `attachments` (names), `body`.  Refused with `--raw`. |
+| `list-folders` | array of `{name, separator, unread, flagged, total}`; `--tree` is ignored (the tree is the names split at `separator`) |
+| `list-labels` | array of `{name, id}` |
+| `list-attachments <uid>` | array of `{filename, size}` (bytes) |
+| `list-accounts` | array of `{account, type, server}` |
+| `rules list` (email-cli) | array of `{account, rules: [{name, when, then_add_label[], then_remove_label[], then_move_folder}]}` |
+
+Not offered: `config show` (a human summary of settings that include credential
+state; a script reads `config.ini`), the writing commands (`send`, `mark-*`,
+`add-label`, `create-*`, `delete-*`), which print a single status line, and
+`save-attachment`, which writes a file.

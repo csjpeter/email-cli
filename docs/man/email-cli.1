@@ -124,6 +124,18 @@ flag, and the
 .B \-\-account
 selector behave exactly as described in
 .BR email\-cli\-ro (1).
+.PP
+.B \-\-json
+is accepted by every read command a script reads:
+.BR list ", " show ", " list\-folders ", " list\-labels ", " list\-attachments ", "
+.B list\-accounts
+and
+.BR "rules list" .
+It prints the complete record as JSON instead of the table, errors stay text
+on standard error, and a failing command still exits non\-zero. Not offered:
+.B config show
+(a summary of the settings, which a script reads from the configuration file),
+and the writing commands, which print one status line.
 .SH VIRTUAL FOLDERS AND SEARCH
 .B \-\-folder
 accepts the virtual folders

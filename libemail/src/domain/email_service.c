@@ -1477,6 +1477,13 @@ static void print_json_string(const char *s) {
     putchar('"');
 }
 
+/* EMAIL-122: when set, the read commands print JSON instead of the table. */
+static int g_json_out;
+
+void email_service_set_json(int on) { g_json_out = on ? 1 : 0; }
+
+void email_service_print_json_string(const char *s) { print_json_string(s); }
+
 /* True when no batch filter is configured — the common case, kept cheap. */
 static int list_filters_off(const EmailListOpts *o) {
     return !(o->filter_from   && o->filter_from[0])
@@ -4186,7 +4193,8 @@ int email_service_list_folders(const Config *cfg, int tree) {
     char **folders = fetch_folder_list(cfg, &count, &sep);
 
     if (!folders || count == 0) {
-        printf("No folders found.\n");
+        if (g_json_out && folders) printf("[]\n");
+        else printf("No folders found.\n");
         if (folders) free(folders);
         return folders ? 0 : -1;
     }
@@ -4195,7 +4203,20 @@ int email_service_list_folders(const Config *cfg, int tree) {
 
     FolderStatus *statuses = fetch_all_folder_statuses(cfg, folders, count);
 
-    if (tree) {
+    if (g_json_out) {
+        /* the complete record: every folder with its counters; the tree is
+         * the folder names split at "separator" */
+        printf("[");
+        for (int i = 0; i < count; i++) {
+            printf("%s\n  {\"name\": ", i ? "," : "");
+            print_json_string(folders[i]);
+            printf(", \"separator\": \"%c\", \"unread\": %d, \"flagged\": %d, \"total\": %d}",
+                   sep, statuses ? statuses[i].unseen : 0,
+                   statuses ? statuses[i].flagged : 0,
+                   statuses ? statuses[i].messages : 0);
+        }
+        printf("\n]\n");
+    } else if (tree) {
         render_folder_tree(folders, count, sep, statuses);
     } else {
         /* Batch flat view: Unread | Flagged | Folder | Total */
@@ -5730,7 +5751,8 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
     }
     mime_free_attachments(ro_atts, ro_att_count);
 
-    print_show_headers(from, ro_to, subject, date, uid, ro_labels, ro_path, ro_dmarc, ro_attach_buf);
+    if (!g_json_out)
+        print_show_headers(from, ro_to, subject, date, uid, ro_labels, ro_path, ro_dmarc, ro_attach_buf);
 
     int term_cols_show = pager ? terminal_cols() : SHOW_WIDTH;
     int wrap_cols = term_cols_show > SHOW_WIDTH ? SHOW_WIDTH : term_cols_show;
@@ -5752,6 +5774,32 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
         }
     }
     const char *body_text = body ? body : "(no readable text body)";
+
+    if (g_json_out) {
+        /* the complete record of the message: headers, attachment names, body */
+        printf("{\"uid\": ");     print_json_string(uid);
+        printf(",\n \"folder\": "); print_json_string(folder);
+        printf(",\n \"from\": ");   print_json_string(from);
+        printf(",\n \"to\": ");     print_json_string(ro_to);
+        printf(",\n \"subject\": "); print_json_string(subject);
+        printf(",\n \"date\": ");   print_json_string(date);
+        printf(",\n \"labels\": "); print_json_string(ro_labels);
+        printf(",\n \"dmarc\": ");  print_json_string(ro_dmarc);
+        int jn = 0;
+        MimeAttachment *jat = mime_list_attachments(raw, &jn);
+        printf(",\n \"attachments\": [");
+        for (int i = 0; i < jn; i++) {
+            printf("%s", i ? ", " : "");
+            print_json_string(jat[i].filename);
+        }
+        mime_free_attachments(jat, jn);
+        printf("],\n \"body\": ");
+        print_json_string(body ? body : "");
+        printf("}\n");
+        free(ro_path); free(ro_dmarc); free(ro_to);
+        free(body); free(from); free(subject); free(date); free(ro_labels); free(raw);
+        return 0;
+    }
 
 #define SHOW_HDR_LINES 8
     if (!pager || page_size <= SHOW_HDR_LINES) {
@@ -7011,6 +7059,17 @@ int email_service_list_attachments(const Config *cfg, const char *uid) {
     int count = 0;
     MimeAttachment *atts = mime_list_attachments(raw, &count);
     free(raw);
+    if (g_json_out) {
+        printf("[");
+        for (int i = 0; i < count; i++) {
+            printf("%s\n  {\"filename\": ", i ? "," : "");
+            print_json_string(atts[i].filename);
+            printf(", \"size\": %zu}", atts[i].size);
+        }
+        printf("%s]\n", count ? "\n" : "");
+        mime_free_attachments(atts, count);
+        return 0;
+    }
     if (count == 0) {
         printf("No attachments.\n");
         mime_free_attachments(atts, count);
@@ -7231,6 +7290,21 @@ int email_service_list_labels(const Config *cfg) {
     int rc = emc_list_with_ids(mc, &names, &ids, &count);
     emc_close(mc);
 
+    if (rc == 0 && g_json_out) {
+        printf("[");
+        for (int i = 0; i < count; i++) {
+            printf("%s\n  {\"name\": ", i ? "," : "");
+            print_json_string(names[i]);
+            printf(", \"id\": ");
+            print_json_string(ids[i]);
+            printf("}");
+        }
+        printf("%s]\n", count ? "\n" : "");
+        for (int i = 0; i < count; i++) { free(names[i]); free(ids[i]); }
+        free(names);
+        free(ids);
+        return 0;
+    }
     if (rc != 0 || count == 0) {
         if (rc == 0) printf("No labels found.\n");
         /* free any partial results */
@@ -7368,4 +7442,64 @@ int email_service_save_draft(const Config *cfg, const char *msg, size_t msg_len)
 
 void email_service_help_popup(const char *title, const char *rows[][2], int n) {
     show_help_popup(title, rows, n);
+}
+
+/* ── JSON for the account and rule listings (EMAIL-122) ──────────────── */
+
+int email_service_list_accounts_json(void) {
+    int count = 0;
+    AccountEntry *accs = config_list_accounts(&count);
+    printf("[");
+    for (int i = 0; i < count; i++) {
+        printf("%s\n  {\"account\": ", i ? "," : "");
+        print_json_string(accs[i].name);
+        printf(", \"type\": \"%s\", \"server\": ",
+               (accs[i].cfg && accs[i].cfg->gmail_mode) ? "Gmail" : "IMAP");
+        print_json_string(accs[i].cfg ? accs[i].cfg->host : NULL);
+        printf("}");
+    }
+    printf("%s]\n", count ? "\n" : "");
+    if (accs) config_free_account_list(accs, count);
+    return 0;
+}
+
+int email_service_rules_json(const char *only_account) {
+    int count = 0;
+    AccountEntry *accs = config_list_accounts(&count);
+    int printed = 0;
+    printf("[");
+    for (int i = 0; i < count; i++) {
+        if (only_account && only_account[0] && strcmp(accs[i].name, only_account) != 0)
+            continue;
+        MailRules *rules = mail_rules_load(accs[i].name);
+        printf("%s\n  {\"account\": ", printed ? "," : "");
+        print_json_string(accs[i].name);
+        printf(", \"rules\": [");
+        for (int r = 0; rules && r < rules->count; r++) {
+            const MailRule *rule = &rules->rules[r];
+            printf("%s\n    {\"name\": ", r ? "," : "");
+            print_json_string(rule->name);
+            printf(", \"when\": ");
+            print_json_string(rule->when);
+            printf(", \"then_add_label\": [");
+            for (int j = 0; j < rule->then_add_count; j++) {
+                printf("%s", j ? ", " : "");
+                print_json_string(rule->then_add_label[j]);
+            }
+            printf("], \"then_remove_label\": [");
+            for (int j = 0; j < rule->then_rm_count; j++) {
+                printf("%s", j ? ", " : "");
+                print_json_string(rule->then_rm_label[j]);
+            }
+            printf("], \"then_move_folder\": ");
+            print_json_string(rule->then_move_folder);
+            printf("}");
+        }
+        printf("]}");
+        mail_rules_free(rules);
+        printed++;
+    }
+    printf("%s]\n", printed ? "\n" : "");
+    if (accs) config_free_account_list(accs, count);
+    return printed;
 }

@@ -158,6 +158,9 @@ static void help_show(void) {
     printf(
         "Usage: email-cli-ro show <uid> [--folder <name>] [--raw]\n"
         "\n"
+        "--json: print JSON, the complete record, instead of the table.\n"
+        "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "\n"
         "Displays the full content of the message identified by <uid>.\n"
         "\n"
         "  <uid>             Numeric IMAP UID shown by 'email-cli-ro list'\n"
@@ -187,6 +190,9 @@ static void help_folders(void) {
     printf(
         "Usage: email-cli-ro list-folders [options]\n"
         "\n"
+        "--json: print JSON, the complete record, instead of the table.\n"
+        "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "\n"
         "Lists all available IMAP folders on the server.\n"
         "\n"
         "Options:\n"
@@ -201,6 +207,9 @@ static void help_folders(void) {
 static void help_attachments(void) {
     printf(
         "Usage: email-cli-ro list-attachments <uid>\n"
+        "\n"
+        "--json: print JSON, the complete record, instead of the table.\n"
+        "A script reads --json, not the table.  Errors stay text on stderr.\n"
         "\n"
         "Lists all attachments in the message identified by <uid>.\n"
         "Prints one line per attachment: filename and decoded size.\n"
@@ -232,6 +241,9 @@ static void help_list_labels(void) {
     printf(
         "Usage: email-cli-ro list-labels\n"
         "\n"
+        "--json: print JSON, the complete record, instead of the table.\n"
+        "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "\n"
         "List all available labels (Gmail) or folders (IMAP).\n"
         "For Gmail, shows both the display name and the label ID.\n"
         "\n"
@@ -243,6 +255,9 @@ static void help_list_labels(void) {
 static void help_list_accounts(void) {
     printf(
         "Usage: email-cli-ro list-accounts\n"
+        "\n"
+        "--json: print JSON, the complete record, instead of the table.\n"
+        "A script reads --json, not the table.  Errors stay text on stderr.\n"
         "\n"
         "List all configured accounts with their type and server.\n"
         "\n"
@@ -344,6 +359,7 @@ int main(int argc, char *argv[]) {
     /* Command: first non-flag, non-account arg */
     const char *cmd = NULL;
     int cmd_idx = 0;
+    int cmd_json = 0;   /* --json given (EMAIL-122) */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) continue;
         if (strcmp(argv[i], "--account") == 0) { i++; continue; }
@@ -452,6 +468,17 @@ int main(int argc, char *argv[]) {
 
     /* 6. Dispatch — batch mode only (pager = 0) */
     int result = -1;
+
+    /* EMAIL-122: --json on the read commands that offer it */
+    {
+        int want_json = 0;
+        for (int i = cmd_idx + 1; i < argc; i++)
+            if (strcmp(argv[i], "--json") == 0) want_json = 1;
+        if (want_json && (strcmp(cmd, "show") == 0 || strcmp(cmd, "list-folders") == 0 ||
+                          strcmp(cmd, "list-attachments") == 0 || strcmp(cmd, "list-labels") == 0))
+            email_service_set_json(1);
+        cmd_json = want_json;
+    }
 
     if (strcmp(cmd, "list") == 0) {
         EmailListOpts opts = {0};
@@ -580,8 +607,8 @@ int main(int argc, char *argv[]) {
         int raw_mode = 0;
         int ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
-            if (strcmp(argv[i], "--batch") == 0) {
-                continue; /* no-op */
+            if (strcmp(argv[i], "--batch") == 0 || strcmp(argv[i], "--json") == 0) {
+                continue; /* no-op here: --json is read before the dispatch */
             } else if (strcmp(argv[i], "--raw") == 0) {
                 raw_mode = 1;
             } else if (strcmp(argv[i], "--folder") == 0 ||
@@ -601,6 +628,9 @@ int main(int argc, char *argv[]) {
         }
         if (!ok) {
             /* error already printed above */
+        } else if (raw_mode && cmd_json) {
+            fprintf(stderr, "Error: --raw cannot be combined with --json.\n");
+            result = -1;
         } else if (!uid_str) {
             fprintf(stderr, "Error: 'show' requires a UID argument.\n");
             help_show();
@@ -619,7 +649,7 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(cmd, "list-folders") == 0) {
         int tree = 0, ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
-            if (strcmp(argv[i], "--batch") == 0) { /* no-op */
+            if (strcmp(argv[i], "--batch") == 0 || strcmp(argv[i], "--json") == 0) { /* no-op */
             } else if (strcmp(argv[i], "--tree") == 0)
                 tree = 1;
             else { unknown_option("list-folders", argv[i]); ok = 0; }
@@ -629,7 +659,7 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(cmd, "list-attachments") == 0) {
         const char *uid_str = NULL;
         for (int i = cmd_idx + 1; i < argc; i++) {
-            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--batch") == 0 || strcmp(argv[i], "--json") == 0) continue;
             uid_str = argv[i]; break;
         }
         if (!uid_str) {
@@ -675,8 +705,10 @@ int main(int argc, char *argv[]) {
 
     } else if (strcmp(cmd, "list-accounts") == 0) {
         int count = 0;
-        AccountEntry *accs = config_list_accounts(&count);
-        if (count == 0) {
+        AccountEntry *accs = cmd_json ? NULL : config_list_accounts(&count);
+        if (cmd_json) {
+            result = email_service_list_accounts_json();
+        } else if (count == 0) {
             printf("No accounts configured.\n");
             result = 0;
         } else {

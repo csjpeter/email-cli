@@ -75,6 +75,30 @@ int email_service_list(const Config *cfg, EmailListOpts *opts);
 int email_service_list_folders(const Config *cfg, int tree);
 
 /**
+ * @brief Make the read commands print JSON instead of the table (EMAIL-122).
+ *
+ * Affects email_service_list_folders(), email_service_list_labels(),
+ * email_service_list_attachments() and email_service_read().  Errors still go
+ * to stderr as text.
+ *
+ * @param on  1 = JSON, 0 = the human-readable form (the default).
+ */
+void email_service_set_json(int on);
+
+/** @brief Write @p s as a JSON string value (quotes included) to stdout. */
+void email_service_print_json_string(const char *s);
+
+/** @brief `list-accounts --json`: a JSON array of the configured accounts. 0. */
+int email_service_list_accounts_json(void);
+
+/**
+ * @brief `rules list --json`: a JSON array of accounts with their rules.
+ * @param only_account  Restrict to this account name (NULL/"" = all).
+ * @return the number of accounts printed (0 when @p only_account is unknown).
+ */
+int email_service_rules_json(const char *only_account);
+
+/**
  * @brief Interactive folder browser (TUI).
  *
  * Displays a full-screen cursor-driven folder list with tree/flat toggle.

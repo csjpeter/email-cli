@@ -7037,6 +7037,115 @@ kill "$IMAP116_PORT_PID"
 
 fi
 
+if phase_wanted 122; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 122 — --json on the read commands (EMAIL-122)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 122: --json on show, list-folders, list-labels, list-attachments, list-accounts, rules list (EMAIL-122) ---"
+
+alloc_port IMAP122_PORT
+alloc_port GMAIL122_PORT
+IMAP122_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_122.log"
+GMAIL122_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_122.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP122_PORT MOCK_IMAP_SUBJECT="Json \"quoted\" Msg" \
+    "$MOCK_SERVER_BIN") >"$IMAP122_LOG" 2>&1 &
+IMAP122_PID=$!
+(MOCK_GMAIL_PORT=$GMAIL122_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="json@gmail.example" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL122_LOG" 2>&1 &
+GMAIL122_PID=$!
+sleep 1
+
+H122="./build/tests/functional/work-$$/homes/f122-$$"
+case "$H122" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe path $H122" >&2; exit 1 ;; esac
+rm -rf "$H122"
+mkdir -p "$H122/.config/email-cli/accounts/json@example.org" "$H122/.config/email-cli/accounts/json@gmail.example"
+printf 'credential_obfuscation=false\n' > "$H122/.config/email-cli/settings.ini"
+cat > "$H122/.config/email-cli/accounts/json@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP122_PORT
+EMAIL_USER=json@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+INI
+cat > "$H122/.config/email-cli/accounts/json@gmail.example/config.ini" <<INI
+EMAIL_HOST=
+EMAIL_USER=json@gmail.example
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=fakefaketoken
+INI
+chmod 0600 "$H122"/.config/email-cli/accounts/*/config.ini
+cat > "$H122/.config/email-cli/accounts/json@example.org/rules.ini" <<'RINI'
+[rule "Newsletter rule"]
+if-from    = *@example.net
+then-add-label    = News
+then-remove-label = INBOX
+then-move-folder  = INBOX.News
+RINI
+
+# j122 <bin> <account> <args...>: stdout only (the JSON), exit code on the last line
+j122() {
+    local bin="$1" acc="$2"; shift 2
+    (export HOME="$H122"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     export GMAIL_TEST_TOKEN=testtoken
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL122_PORT/gmail/v1/users/me"
+     "$BIN_DIR/$bin" "$acc" "$@" </dev/null 2>"$H122/stderr"
+     echo "exit-code=$?")
+}
+# jv122 <what-to-print-from-python-expression-of-d> <output>: parse the JSON part
+jv122() {
+    local expr="$1" out="$2"
+    printf '%s\n' "$out" | sed '/^exit-code=/d' | python3 -I -c "import json,sys; d=json.load(sys.stdin); print($expr)"
+}
+
+IMAP_ACC=json@example.org
+GM_ACC=json@gmail.example
+for bin in email-cli email-cli-ro; do
+    OUT=$(j122 $bin $IMAP_ACC list-folders --json)
+    check "122.1 $bin list-folders --json: exit 0"          "exit-code=0" "$OUT"
+    check "122.2 $bin list-folders --json: INBOX with counters" "INBOX:True" "$(jv122 "'INBOX:' + str(any(f['name']=='INBOX' and 'unread' in f and 'total' in f and 'separator' in f for f in d))" "$OUT")"
+    check_not "122.3 $bin list-folders --json: no table header" "Unread" "$OUT"
+
+    OUT=$(j122 $bin $IMAP_ACC show 1 --json)
+    check "122.4 $bin show --json: exit 0"                  "exit-code=0" "$OUT"
+    check "122.5 $bin show --json: the quoted subject survives" 'Json "quoted" Msg' "$(jv122 "d['subject']" "$OUT")"
+    check "122.6 $bin show --json: uid, from, body, attachments" "1:True:True" "$(jv122 "d['uid']+':'+str(bool(d['from']))+':'+str(isinstance(d['attachments'],list) and 'body' in d)" "$OUT")"
+    OUT=$(j122 $bin $IMAP_ACC show 1 --raw --json)
+    check "122.7 $bin show --raw --json is refused"          "exit-code=1" "$OUT"
+    check "122.8 $bin show --raw --json: the reason is on stderr" "cannot be combined" "$(cat "$H122/stderr")"
+
+    OUT=$(j122 $bin $IMAP_ACC list-attachments 1 --json)
+    check "122.9 $bin list-attachments --json: names and sizes" "notes.txt:11,data.bin:9" "$(jv122 "','.join(a['filename']+':'+str(a['size']) for a in d)" "$OUT")"
+
+    OUT=$(j122 $bin $IMAP_ACC list-accounts --json)
+    check "122.10 $bin list-accounts --json: both accounts, with type" "Gmail,IMAP" "$(jv122 "','.join(sorted(a['type'] for a in d))" "$OUT")"
+    check "122.11 $bin list-accounts --json: server field" "localhost" "$(jv122 "[a['server'] for a in d if a['type']=='IMAP'][0]" "$OUT")"
+
+    OUT=$(j122 $bin $GM_ACC list-labels --json)
+    check "122.12 $bin list-labels --json: exit 0"           "exit-code=0" "$OUT"
+    check "122.13 $bin list-labels --json: name and id"      "INBOX:True" "$(jv122 "'INBOX:' + str(any(l['name']=='INBOX' and l['id'] for l in d))" "$OUT")"
+
+    OUT=$(j122 $bin $IMAP_ACC list-folders --help)
+    check "122.14 $bin list-folders --help names --json"     "\-\-json" "$OUT"
+    OUT=$(j122 $bin $IMAP_ACC help show)
+    check "122.15 $bin help show names --json"               "\-\-json" "$OUT"
+done
+
+OUT=$(j122 email-cli $IMAP_ACC rules list --json)
+check "122.16 rules list --json: exit 0"                    "exit-code=0" "$OUT"
+check "122.17 rules list --json: name, actions"             'Newsletter rule|News|INBOX|INBOX.News' \
+    "$(jv122 "'|'.join([d[0]['rules'][0]['name'], d[0]['rules'][0]['then_add_label'][0], d[0]['rules'][0]['then_remove_label'][0], d[0]['rules'][0]['then_move_folder']])" "$OUT")"
+OUT=$(j122 email-cli --account nobody@example.org rules list --json)
+check_not "122.18 rules list --json for an unknown account: not success" "exit-code=0" "$OUT"
+OUT=$(j122 email-cli $IMAP_ACC list-folders --tree --json)
+check "122.19 list-folders --tree --json: JSON wins, still valid" "True" "$(jv122 "isinstance(d, list)" "$OUT")"
+OUT=$(j122 email-cli $IMAP_ACC list-folders)
+check_not "122.20 the default stays the table, not JSON"    '^\[' "$OUT"
+
+kill "$IMAP122_PID" "$GMAIL122_PID"
+
+fi
+
 if phase_wanted 96; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)

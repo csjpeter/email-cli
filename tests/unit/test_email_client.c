@@ -136,6 +136,10 @@ static void ec_smtp_child(int lfd, SSL_CTX *ctx, int report_fd)
 /* How long the IMAP mock waits before its greeting (set before ec_start()). */
 static int g_greeting_delay_ms;
 
+/* Set before ec_start(): the IMAP mock logs in, then answers NO to every
+ * mailbox command (EMAIL-117: the failure paths of the library). */
+static int g_imap_no;
+
 /* One TLS IMAP session: LOGIN, LIST, SELECT, SEARCH, FETCH, APPEND, LOGOUT.
  * An APPEND is reported as "APPEND <folder>" on report_fd. */
 static void ec_imap_child(int lfd, SSL_CTX *ctx, int report_fd)
@@ -161,6 +165,8 @@ static void ec_imap_child(int lfd, SSL_CTX *ctx, int report_fd)
         sscanf(buf, "%31s", tag);
         if (strstr(buf, "LOGIN")) {
             snprintf(resp, sizeof(resp), "%s OK [CAPABILITY IMAP4rev1] ok\r\n", tag);
+        } else if (g_imap_no && !strstr(buf, "LOGOUT")) {
+            snprintf(resp, sizeof(resp), "%s NO mailbox command refused\r\n", tag);
         } else if (strstr(buf, "SELECT")) {
             snprintf(resp, sizeof(resp), "* 2 EXISTS\r\n%s OK [READ-WRITE] ok\r\n", tag);
         } else if (strstr(buf, "UID SEARCH")) {
@@ -788,6 +794,94 @@ static void test_ec_imap_operations(void)
     (void)failed;
 }
 
+
+/* EMAIL-117: a server that refuses the mailbox commands is a protocol error
+ * of the operation, never a crash or a half-filled result. */
+static void test_ec_imap_refusals(void)
+{
+    g_imap_no = 1;
+    int port = 0, rd = -1;
+    pid_t pid = ec_start(SRV_IMAP, &port, &rd);
+    g_imap_no = 0;
+    ASSERT(pid > 0, "refusals: start server");
+    emc_account a;
+    ec_account(&a, port, 1);
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "refusals: open");
+    int failed = 0;
+#define CHECK(cond) do { if (!(cond) && !failed) failed = __LINE__; } while (0)
+    char **names = NULL, **ids = NULL;
+    int n = -1;
+    char sep = 0;
+    CHECK(emc_list_folders(c, &names, &n) == EMC_ERR_PROTOCOL && names == NULL && n == 0);
+    CHECK(emc_list_messages(c, "INBOX", 0, &ids, &n) == EMC_ERR_PROTOCOL && ids == NULL);
+    CHECK(emc_list_names(c, &names, &n, &sep) == EMC_ERR_PROTOCOL && names == NULL && n == 0);
+    CHECK(emc_list_with_ids(c, &names, &ids, &n) == EMC_ERR_PROTOCOL &&
+          names == NULL && ids == NULL && n == 0);
+    CHECK(emc_select(c, "INBOX") == EMC_ERR_PROTOCOL);
+    emc_select_result sr;
+    CHECK(emc_select_ext(c, "INBOX", 0, 0, &sr) == EMC_ERR_PROTOCOL);
+    char (*uids)[17] = NULL;
+    CHECK(emc_search(c, EMC_SEARCH_ALL, &uids, &n) == EMC_ERR_PROTOCOL && uids == NULL && n == 0);
+    emc_flag_update *fu = NULL;
+    CHECK(emc_fetch_flags_changedsince(c, 5, &fu, &n) == EMC_ERR_PROTOCOL);
+    CHECK(emc_last_error(c)[0] != '\0');
+#undef CHECK
+    emc_close(c);
+    char dump[64];
+    ec_collect(pid, rd, dump, sizeof(dump));
+    ASSERT(failed == 0, "refusals: every refused operation reports a protocol error (line in failed)");
+}
+
+/* EMAIL-117: what emc_send refuses before anything is sent. */
+static void test_ec_send_refusals(void)
+{
+    emc_account a = {.gmail = 1, .gmail_refresh_token = "refresh"};   /* a Gmail account without an address */
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "send refusals: open without an address");
+    emc_message m = {.to = "x@example.org", .subject = "s", .body = "b"};
+    emc_send_result r;
+    ASSERT(emc_send(c, &m, &r) == EMC_ERR_CONFIG && r.status == EMC_ERR_CONFIG,
+           "send: no sender at all is a configuration error");
+    ASSERT(strstr(emc_last_error(c), "no sender") != NULL, "send: and says so");
+    emc_close(c);
+
+    emc_account b = {.host = "imaps://127.0.0.1:1", .user = "u@example.org", .insecure_tls = 1};
+    ASSERT(emc_open(&c, &b) == EMC_OK, "send refusals: open");
+    const char *const missing[] = { "/no/such/attachment.bin" };
+    emc_message att = {.to = "x@example.org", .subject = "s", .body = "b",
+                       .attachments = missing, .attachment_count = 1};
+    ASSERT(emc_send(c, &att, &r) == EMC_ERR_ARGUMENT, "send: a missing attachment is refused");
+    ASSERT(strstr(emc_last_error(c), "cannot build") != NULL, "send: and says why");
+    emc_close(c);
+}
+
+/* EMAIL-117: a wire message through the Gmail API. */
+static void test_ec_gmail_send_wire(void)
+{
+    int port = 0, rd = -1;
+    pid_t pid = ec_start(SRV_GMAIL, &port, &rd);
+    ASSERT(pid > 0, "gmail wire: start server");
+    char base[128];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d/gmail/v1/users/me", port);
+    setenv("GMAIL_TEST_TOKEN", "unit_test_token", 1);
+    setenv("GMAIL_API_BASE_URL", base, 1);
+    emc_account a = {.gmail = 1, .user = "me@example.org", .gmail_refresh_token = "refresh"};
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "gmail wire: open");
+    static const char wire[] = "From: me@example.org\r\nTo: r@example.org\r\n"
+                               "Subject: Raw\r\nMessage-ID: <raw-g1@example.org>\r\n\r\nBody\r\n";
+    emc_send_result r;
+    emc_status st = emc_send_wire(c, "me@example.org", "r@example.org", wire, strlen(wire), &r);
+    emc_close(c);
+    unsetenv("GMAIL_TEST_TOKEN");
+    unsetenv("GMAIL_API_BASE_URL");
+    char got[16384];
+    ec_collect(pid, rd, got, sizeof(got));
+    ASSERT(st == EMC_OK && r.status == EMC_OK, "gmail wire: sent");
+    ASSERT(strstr(got, "/messages/send") != NULL, "gmail wire: through the API");
+}
+
 static void test_ec_log_open_writes_the_file(void)
 {
     const char *path = TP("emc-library.log");
@@ -830,5 +924,8 @@ void test_email_client(void)
     RUN_TEST(test_ec_compose_and_reply_meta);
     RUN_TEST(test_ec_send_wire_smtp);
     RUN_TEST(test_ec_imap_operations);
+    RUN_TEST(test_ec_imap_refusals);
+    RUN_TEST(test_ec_send_refusals);
+    RUN_TEST(test_ec_gmail_send_wire);
     RUN_TEST(test_ec_log_open_writes_the_file);
 }

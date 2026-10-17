@@ -1192,6 +1192,136 @@ static void test_delete_label_error(void) {
     wait_child(pid);
 }
 
+
+/* ── A token that has expired: 401, a refresh, the call once more (EMAIL-117) ── */
+
+/* Answers up to @p rounds connections.  A request carrying the "stale" token
+ * is refused with 401; POST /token hands out the new one; with the new token
+ * the label calls succeed. */
+static void run_stale_token_server(int listen_fd, int rounds) {
+    for (int i = 0; i < rounds; i++) {
+        int fd = accept(listen_fd, NULL, NULL);
+        if (fd < 0) break;
+        char buf[8192];
+        if (mock_read_request(fd, buf, (int)sizeof(buf)) <= 0) { close(fd); continue; }
+        char method[16] = {0}, path[2048] = {0};
+        sscanf(buf, "%15s %2047s", method, path);
+        if (strstr(path, "/token")) {
+            mock_send_json(fd, 200, "{\"access_token\":\"fresh_token\",\"expires_in\":3600}");
+        } else if (strstr(buf, "Bearer stale_token")) {
+            mock_send_json(fd, 401, "{\"error\":{\"code\":401}}");
+        } else if (strcmp(method, "DELETE") == 0) {
+            mock_send_json(fd, 204, NULL);
+        } else if (strcmp(method, "POST") == 0) {
+            mock_send_json(fd, 200, "{\"id\":\"Label_Fresh\",\"name\":\"N\"}");
+        } else {
+            mock_send_json(fd, 200, "{\"labels\":[{\"id\":\"INBOX\",\"name\":\"INBOX\"}]}");
+        }
+        close(fd);
+    }
+    close(listen_fd);
+    GCOV_FLUSH();
+    _exit(0);
+}
+
+/* A client whose access token is "stale_token"; the refresh goes to the mock. */
+static GmailClient *stale_client(int port) {
+    char api_base[128], tok_url[128];
+    snprintf(api_base, sizeof(api_base), "http://127.0.0.1:%d/gmail/v1/users/me", port);
+    snprintf(tok_url, sizeof(tok_url), "http://127.0.0.1:%d/token", port);
+    setenv("GMAIL_TEST_TOKEN", "stale_token", 1);
+    setenv("GMAIL_API_BASE_URL", api_base, 1);
+    static Config cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.gmail_mode = 1;
+    cfg.gmail_refresh_token = "fake_refresh_token";
+    GmailClient *c = gmail_connect(&cfg);
+    unsetenv("GMAIL_TEST_TOKEN");                 /* the refresh must ask the mock */
+    setenv("GMAIL_TEST_TOKEN_URL", tok_url, 1);
+    return c;
+}
+
+static void test_expired_token_is_refreshed_and_the_call_repeated(void) {
+    int port = 0;
+    int lfd = make_mock_listener(&port);
+    ASSERT(lfd >= 0, "expired token: listener");
+    pid_t pid = fork();
+    if (pid == 0) run_stale_token_server(lfd, 9);
+    close(lfd);
+
+    GmailClient *c = stale_client(port);
+    ASSERT(c != NULL, "expired token: client");
+    char **names = NULL, **ids = NULL;
+    int count = 0;
+    int r_list = gmail_list_labels(c, &names, &ids, &count);
+    int list_n = count;
+    for (int i = 0; i < count; i++) { free(names[i]); free(ids[i]); }
+    free(names); free(ids);
+    gmail_disconnect(c);
+
+    c = stale_client(port);
+    char *id = NULL;
+    int r_create = gmail_create_label(c, "Fresh", &id);
+    int id_ok = id && strcmp(id, "Label_Fresh") == 0;
+    free(id);
+    gmail_disconnect(c);
+
+    c = stale_client(port);
+    int r_delete = gmail_delete_label(c, "Label_Fresh");
+    gmail_disconnect(c);
+
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+    unsetenv("GMAIL_API_BASE_URL");
+    wait_child(pid);
+    ASSERT(r_list == 0 && list_n == 1, "expired token: the label list is read after the refresh");
+    ASSERT(r_create == 0 && id_ok, "expired token: the label is created after the refresh");
+    ASSERT(r_delete == 0, "expired token: the label is deleted after the refresh");
+}
+
+/* A refresh that fails ends the call: no endless retrying. */
+static void test_expired_token_that_cannot_be_refreshed_fails(void) {
+    int port = 0;
+    int lfd = make_mock_listener(&port);
+    ASSERT(lfd >= 0, "refresh fails: listener");
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* a server whose token endpoint answers 400, and 401 to the rest */
+        for (int i = 0; i < 3; i++) {
+            int fd = accept(lfd, NULL, NULL);
+            if (fd < 0) break;
+            char buf[8192];
+            if (mock_read_request(fd, buf, (int)sizeof(buf)) > 0) {
+                if (strstr(buf, "POST /token"))
+                    mock_send_json(fd, 400, "{\"error\":\"invalid_grant\"}");
+                else
+                    mock_send_json(fd, 401, "{\"error\":{\"code\":401}}");
+            }
+            close(fd);
+        }
+        close(lfd);
+        GCOV_FLUSH();
+        _exit(0);
+    }
+    close(lfd);
+    GmailClient *c = stale_client(port);
+    ASSERT(c != NULL, "refresh fails: client");
+    char **names = NULL, **ids = NULL;
+    int count = 0;
+    int r = gmail_list_labels(c, &names, &ids, &count);
+    gmail_disconnect(c);
+    char *id = NULL;
+    c = stale_client(port);
+    int r2 = gmail_create_label(c, "X", &id);
+    gmail_disconnect(c);
+    c = stale_client(port);
+    int r3 = gmail_delete_label(c, "X");
+    gmail_disconnect(c);
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+    unsetenv("GMAIL_API_BASE_URL");
+    wait_child(pid);
+    ASSERT(r != 0 && r2 != 0 && r3 != 0, "refresh fails: each call reports the failure");
+}
+
 /* ── Registration ─────────────────────────────────────────────────── */
 
 void test_gmail_client(void) {
@@ -1236,4 +1366,6 @@ void test_gmail_client(void) {
     RUN_TEST(test_modify_labels_error);
     RUN_TEST(test_get_history_id_error);
     RUN_TEST(test_delete_label_error);
+    RUN_TEST(test_expired_token_is_refreshed_and_the_call_repeated);
+    RUN_TEST(test_expired_token_that_cannot_be_refreshed_fails);
 }

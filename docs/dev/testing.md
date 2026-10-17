@@ -194,6 +194,8 @@ nothing (exit 0), a record from a newer run posts again even if the text is
 identical (EMAIL-121). `./tests/functional/run_timing.sh`
 tests the log and the line against a log under `build/`.
 
+`./tests/functional/run_coverage_map.sh` (EMAIL-124) keeps `docs/functional-coverage.md` honest: every command, sub-command and option the programs name in their own `--help` has a row, every row names functional or PTY tests that exist (or a reasoned gap), and a row matching nothing is stale. `./tests/functional/run_parity.sh` (EMAIL-123) does the same for `docs/interface-parity.md`. A change that adds or removes a capability changes its row in the same commit.
+
 `./tests/functional/run_static_binaries.sh` checks that the programs are fully static and runs the binary alone in an empty root (user namespace, `chroot`) against the mock servers with certificate verification on (EMAIL-103).
 
 `./tests/functional/run_term.sh` checks that the programs honour `TERM`: `email-tui` refuses an unset or `dumb` terminal, `email-sync` writes no escape byte there and the erase-line code under `xterm-256color` (EMAIL-108).

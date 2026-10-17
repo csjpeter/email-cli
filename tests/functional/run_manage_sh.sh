@@ -44,6 +44,23 @@ SUPPRESS=$(grep -c -E '2>/dev/null|\|\| true|set \+e' "$ROOT/manage.sh")
 [ "$SUPPRESS" -eq 0 ]                         && ok "3.2 no suppressed error output or verdict" || bad "3.2 $SUPPRESS suppressing line(s)"
 "$ROOT/manage.sh" help | grep -q '^  check '  && ok "3.3 help lists check"                    || bad "3.3 help does not list check"
 
+# 4. coverage: an invalid .gcda is named, removed and fails the check (EMAIL-119);
+# valid ones are left alone; the coverage run gives the PTY children time to exit.
+G="$WORK/gcda"
+mkdir -p "$G/sub" || exit 1
+: > "$G/sub/empty.c.gcda"
+printf 'adcgvalid-looking' > "$G/sub/good.c.gcda"
+printf 'xy' > "$G/sub/short.c.gcda"
+out=$("$ROOT/tests/functional/gcda_check.sh" "$G" 2>&1); rc=$?
+[ "$rc" -eq 1 ]                                   && ok "4.1 invalid .gcda files fail the check"    || bad "4.1 exit $rc"
+echo "$out" | grep -q "empty.c.gcda"              && ok "4.2 the empty file is named"                || bad "4.2 no name in: $out"
+echo "$out" | grep -q "short.c.gcda"              && ok "4.3 the truncated file is named"            || bad "4.3 no name in: $out"
+echo "$out" | grep -q "good.c.gcda"               && bad "4.4 a valid file is reported"              || ok "4.4 the valid file is not reported"
+[ ! -e "$G/sub/empty.c.gcda" ] && [ -e "$G/sub/good.c.gcda" ] && ok "4.5 bad files removed, good one kept" || bad "4.5 file state wrong"
+out=$("$ROOT/tests/functional/gcda_check.sh" "$G" 2>&1); rc=$?
+[ "$rc" -eq 0 ]                                   && ok "4.6 a clean tree passes"                    || bad "4.6 exit $rc: $out"
+grep -q 'PTYTEST_CLOSE_GRACE_MS' "$ROOT/manage.sh" && ok "4.7 the coverage run sets the PTY close grace" || bad "4.7 grace not set"
+
 case "$WORK" in
     "$ROOT"/build/manage-sh-test-*) ;;
     *) echo "ERROR: refusing unsafe path '$WORK'" >&2; exit 1 ;;

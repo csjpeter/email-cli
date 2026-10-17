@@ -506,7 +506,13 @@ case "$1" in
                 pty_cov_rc=1
             fi
         }
+        # A program that is killed while it writes its .gcda at exit leaves a
+        # truncated file that fails lcov (EMAIL-119): the PTY harness lets a
+        # child that is on its way out finish before it signals it.
+        export PTYTEST_CLOSE_GRACE_MS="${PTYTEST_CLOSE_GRACE_MS:-3000}"
         for_each_pty_suite run_pty_lenient "$ABS_BIN"
+        gcda_rc=0
+        tests/functional/gcda_check.sh "$ABS_BUILD" || gcda_rc=$?
         # One definition of "product code" for every report: the program's own
         # sources.  Test code, the PTY library and the system headers are not
         # measured (policies/testing-model.md, Coverage).
@@ -568,6 +574,10 @@ case "$1" in
         done
         if awk -v p="$ALL_PCT" -v m="$COVERAGE_TARGET" 'BEGIN{exit !(p+0 < m+0)}'; then
             echo "note: the combined figure is below the ${COVERAGE_TARGET}% target (not a gate)."
+        fi
+        if [ "$gcda_rc" -ne 0 ]; then
+            echo "ERROR: coverage run failed: invalid .gcda files (named above, see build/pty-coverage-*.log)." >&2
+            exit 1
         fi
         if [ "$functional_rc" -ne 0 ] || [ "$pty_cov_rc" -ne 0 ]; then
             echo "ERROR: coverage run failed: functional suite status $functional_rc," \

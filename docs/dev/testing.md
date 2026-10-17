@@ -351,6 +351,14 @@ below the policy floors (policies/testing-model.md, *Coverage*):
 | Functional + PTY together | the black-box suites on the instrumented binaries | at least 80% (gate) |
 | Everything combined | unit on top of the above | target above 90% (reported, not a gate) |
 
+**Invalid counter files (EMAIL-119).**  A coverage-built program that is killed
+while it writes its `.gcda` at exit leaves a truncated file, and `lcov` then
+fails the whole report ("not a gcov data file").  The coverage run sets
+`PTYTEST_CLOSE_GRACE_MS` (default 3000) so libptytest lets a child that is on
+its way out finish before it signals it, and then runs
+`tests/functional/gcda_check.sh`, which names every file without the gcov magic,
+removes it so the report can still be made, and fails the run.
+
 The published badges are the combined figure and the functional + PTY figure,
 both line coverage over the same code.
 

@@ -30,6 +30,8 @@ recorded weakness, not coverage of the promise.
 | `email-cli delete-folder` | F:124.16 | |
 | `email-cli delete-label` | F:122.25 | |
 | `email-cli help` | F:1.2 F:85.7 | |
+| `email-cli --help` | F:1.1 | |
+| `email-cli --version` | F:74.1 | |
 | `email-cli list` | F:1.4 F:1.6 | |
 | `email-cli list --all-accounts` | F:84.26 | exercised through `email-cli-ro`, which shares the code |
 | `email-cli list --folder` | F:58.1 F:59.1 | virtual folders and search; weak: asserts no crash |
@@ -63,6 +65,8 @@ recorded weakness, not coverage of the promise.
 | Capability | Tests | Notes |
 |------------|-------|-------|
 | `email-cli-ro help` | F:77.1 | |
+| `email-cli-ro --help` | F:77.1 | |
+| `email-cli-ro --version` | F:74.20 | |
 | `email-cli-ro list` | F:84.2 F:77.9 | |
 | `email-cli-ro list --all-accounts` | F:84.26 | |
 | `email-cli-ro list --folder` | F:77.4 P:test_ro_list_folder | |

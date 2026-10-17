@@ -91,6 +91,8 @@ static void help_general(void) {
         "Help:\n"
         "  help [command]              Show this help, or detailed help for a command\n"
         "  help gmail                  Step-by-step Gmail OAuth2 setup guide\n"
+        "  --help, -h                  Show this help (also: <command> --help)\n"
+        "  --version                   Print the version\n"
         "\n"
         "Run 'email-cli help <command>' for more information.\n"
         "For the interactive TUI use email-tui.\n"

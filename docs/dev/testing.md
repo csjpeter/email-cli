@@ -183,11 +183,15 @@ under `build/`.
 `./manage.sh timing [KEY-N]` and the timing log (EMAIL-76): every verb that does
 work (`build`, `debug`, `test`, `coverage`, `valgrind`, `functional`, `pty`,
 `integration`, `integration-local`, `headers`, `names`, `check`, `package`,
-`install`) appends `<UTC time> <verb> <s>s <ok|fail>` to `build/timing.log`,
+`install`) appends `<UTC time> <verb> <s>s <ok|fail> <commit>` to `build/timing.log`
+(`<commit>` is the short HEAD id, `+` after it when the tree was dirty),
 success or failure. `timing` prints `Gate: <total>s (check .., package ..,
 install ..)` from the latest run of each, leaves out a part that never ran, and
 prints `Gate: not measured` with a non-zero status when there is none; with a
-key it comments the line on the ticket. `./tests/functional/run_timing.sh`
+key it comments the line on the ticket, once per measured record: the log
+lines used are kept per key in `build/timing.posted`, the same record posts
+nothing (exit 0), a record from a newer run posts again even if the text is
+identical (EMAIL-121). `./tests/functional/run_timing.sh`
 tests the log and the line against a log under `build/`.
 
 `./tests/functional/run_static_binaries.sh` checks that the programs are fully static and runs the binary alone in an empty root (user namespace, `chroot`) against the mock servers with certificate verification on (EMAIL-103).

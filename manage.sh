@@ -358,8 +358,10 @@ do_uninstall() {
 }
 
 # Every verb that does work times itself (manage-sh-model.md): the verb is re-run
-# by this script under MANAGE_TIMED=1 and one line "<UTC time> <verb> <s>s <ok|fail>"
-# is appended to the timing log, whatever the outcome.  MANAGE_TIMING_LOG
+# by this script under MANAGE_TIMED=1 and one line
+# "<UTC time> <verb> <s>s <ok|fail> <commit>" is appended to the timing log,
+# whatever the outcome; <commit> is the short id of HEAD, with a "+" after it
+# when the working tree had uncommitted changes (EMAIL-121).  MANAGE_TIMING_LOG
 # overrides the log path (the tests keep theirs under build/).
 TIMING_LOG="${MANAGE_TIMING_LOG:-$BUILD_DIR/timing.log}"
 case "$1" in
@@ -372,8 +374,13 @@ case "$1" in
             timed_res=ok
             [ "$timed_rc" -eq 0 ] || timed_res=fail
             mkdir -p "$(dirname "$TIMING_LOG")" || exit 1
-            printf '%s %s %ss %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" \
-                "$((timed_end - timed_start))" "$timed_res" >> "$TIMING_LOG" || exit 1
+            timed_commit=$(git rev-parse --short HEAD) || timed_commit=unknown
+            if [ "$timed_commit" != unknown ]; then
+                timed_dirty=$(git status --porcelain) || timed_dirty=""
+                [ -z "$timed_dirty" ] || timed_commit="${timed_commit}+"
+            fi
+            printf '%s %s %ss %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" \
+                "$((timed_end - timed_start))" "$timed_res" "$timed_commit" >> "$TIMING_LOG" || exit 1
             exit "$timed_rc"
         fi
         ;;
@@ -382,6 +389,16 @@ esac
 # Prints the gate line from the latest run of each of check, package and install
 # in the log.  A part that never ran through this script is left out; with none
 # of them the line is "Gate: not measured" and the status is non-zero.
+# gate_record: the log lines the gate line is made from (the latest of each
+# part), which is what makes two reports the same or different.
+gate_record() {
+    local verb
+    [ -s "$TIMING_LOG" ] || return 0
+    for verb in check package install; do
+        awk -v v="$verb" '$2 == v { l = $0 } END { if (l != "") print l }' "$TIMING_LOG"
+    done
+}
+
 gate_line() {
     local verb secs total=0 parts="" n=0
     if [ -s "$TIMING_LOG" ]; then
@@ -728,7 +745,19 @@ case "$1" in
         line=$(gate_line) || { echo "$line"; exit 1; }
         echo "$line"
         if [ -n "$2" ]; then
+            # A measurement is posted once: build/timing.posted keeps, per key,
+            # the record (the log lines used) last posted.  The same record is
+            # not posted again; a record from a newer run is, even when the
+            # text of the line is identical.
+            posted="$(dirname "$TIMING_LOG")/timing.posted"
+            record_sum=$(gate_record | cksum | cut -d' ' -f1,2 | tr ' ' '-')
+            if [ -f "$posted" ] && grep -qx "$2 $record_sum" "$posted"; then
+                echo "timing: this measurement is already posted on $2; nothing posted."
+                exit 0
+            fi
             issue-cli issue comment "$2" "$line"
+            { [ ! -f "$posted" ] || grep -v "^$2 " "$posted" || [ "$?" -eq 1 ]; echo "$2 $record_sum"; } > "$posted.new" \
+                && mv "$posted.new" "$posted"
         fi
         ;;
     clean-logs)

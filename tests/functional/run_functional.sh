@@ -7148,14 +7148,108 @@ OUT=$(j122 email-cli $GM_ACC delete-label Label_1)
 check "122.25 delete-label (Gmail) reports the deletion" "Label .Label_1. deleted" "$OUT"
 OUT=$(j122 email-cli $IMAP_ACC migrate-credentials)
 check "122.26 migrate-credentials reports the result" "Done. All account credentials" "$OUT"
-OUT=$(j122 email-cli $IMAP_ACC show 1 --raw)
-check "122.21 show --raw prints the source headers"         "Subject: " "$OUT"
+for bin in email-cli email-cli-ro; do
+    OUT=$(j122 $bin $IMAP_ACC show 1 --raw)
+    check "122.21 $bin show --raw prints the source headers" "Subject: " "$OUT"
+done
 OUT=$(j122 email-cli $IMAP_ACC remove-account json@gmail.example)
 check "122.22 remove-account removes the account"           "removed" "$OUT"
 OUT=$(j122 email-cli $IMAP_ACC list-accounts --json)
 check "122.23 the removed account is no longer listed"      "IMAP" "$(jv122 "','.join(a['type'] for a in d)" "$OUT")"
 
 kill "$IMAP122_PID" "$GMAIL122_PID"
+
+fi
+
+if phase_wanted 124; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 124 — the writing commands against the mocks, outcomes asserted (EMAIL-124)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 124: writing commands and their promises (EMAIL-124) ---"
+
+alloc_port IMAP124_PORT
+alloc_port GMAIL124_PORT
+IMAP124_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_124.log"
+GMAIL124_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_124.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP124_PORT MOCK_IMAP_SUBJECT="Phase124Msg" \
+    "$MOCK_SERVER_BIN") >"$IMAP124_LOG" 2>&1 &
+IMAP124_PID=$!
+(MOCK_GMAIL_PORT=$GMAIL124_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="w124@gmail.example" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL124_LOG" 2>&1 &
+GMAIL124_PID=$!
+sleep 1
+
+H124="./build/tests/functional/work-$$/homes/f124-$$"
+case "$H124" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe path $H124" >&2; exit 1 ;; esac
+rm -rf "$H124"
+mkdir -p "$H124/.config/email-cli/accounts/w124@example.org" "$H124/.config/email-cli/accounts/w124@gmail.example"
+printf 'credential_obfuscation=false\n' > "$H124/.config/email-cli/settings.ini"
+cat > "$H124/.config/email-cli/accounts/w124@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP124_PORT
+EMAIL_USER=w124@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+INI
+cat > "$H124/.config/email-cli/accounts/w124@gmail.example/config.ini" <<INI
+EMAIL_HOST=
+EMAIL_USER=w124@gmail.example
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=fakefaketoken
+INI
+chmod 0600 "$H124"/.config/email-cli/accounts/*/config.ini
+
+# w124 <account> <args...>: email-cli with stderr merged and the exit code appended
+w124() {
+    local acc="$1"; shift
+    (export HOME="$H124"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     export GMAIL_TEST_TOKEN=testtoken
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL124_PORT/gmail/v1/users/me"
+     "$BIN_DIR/email-cli" "$acc" "$@" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+IM=w124@example.org
+GM=w124@gmail.example
+ilog() { grep "Client requested" "$IMAP124_LOG"; }
+glog() { grep "MODIFY\|POST\|DELETE" "$GMAIL124_LOG"; }
+
+OUT=$(w124 $IM mark-read 1);     check "124.1 IMAP mark-read exits 0"      "exit-code=0" "$OUT"
+check "124.2 IMAP mark-read stores \\Seen on the UID"          "UID STORE 0000000000000001 +FLAGS (.Seen)" "$(ilog)"
+OUT=$(w124 $IM mark-unread 1);   check "124.3 IMAP mark-unread exits 0"    "exit-code=0" "$OUT"
+check "124.4 IMAP mark-unread clears \\Seen"                    "UID STORE 0000000000000001 -FLAGS (.Seen)" "$(ilog)"
+OUT=$(w124 $IM mark-starred 1);  check "124.5 IMAP mark-starred exits 0"   "exit-code=0" "$OUT"
+check "124.6 IMAP mark-starred stores \\Flagged"                "UID STORE 0000000000000001 +FLAGS (.Flagged)" "$(ilog)"
+OUT=$(w124 $IM remove-starred 1); check "124.7 IMAP remove-starred exits 0" "exit-code=0" "$OUT"
+check "124.8 IMAP remove-starred clears \\Flagged"              "UID STORE 0000000000000001 -FLAGS (.Flagged)" "$(ilog)"
+OUT=$(w124 $IM mark-junk 1)
+check "124.9 IMAP mark-junk reports it"                         "marked as junk" "$OUT"
+check "124.10 IMAP mark-junk sets \$Junk"                        'UID STORE 0000000000000001 +FLAGS (\$Junk)' "$(ilog)"
+OUT=$(w124 $IM mark-notjunk 1)
+check "124.11 IMAP mark-notjunk reports it"                     "marked as not-junk" "$OUT"
+check "124.12 IMAP mark-notjunk sets \$NotJunk"                  'UID STORE 0000000000000001 +FLAGS (\$NotJunk)' "$(ilog)"
+OUT=$(w124 $IM create-folder Folder124)
+check "124.13 create-folder reports it"                         "Folder 'Folder124' created" "$OUT"
+check "124.14 create-folder sends CREATE"                       'CREATE "Folder124"' "$(ilog)"
+OUT=$(w124 $IM delete-folder Folder124)
+check "124.15 delete-folder reports it"                         "Folder 'Folder124' deleted" "$OUT"
+check "124.16 delete-folder sends DELETE"                       'DELETE "Folder124"' "$(ilog)"
+
+OUT=$(w124 $GM mark-read 1);     check "124.17 Gmail mark-read exits 0"    "exit-code=0" "$OUT"
+check "124.18 Gmail mark-read removes UNREAD"                   'removeLabelIds":\["UNREAD"\]' "$(glog)"
+OUT=$(w124 $GM mark-starred 1);  check "124.19 Gmail mark-starred exits 0" "exit-code=0" "$OUT"
+check "124.20 Gmail mark-starred adds STARRED"                  'addLabelIds":\["STARRED"\]' "$(glog)"
+OUT=$(w124 $GM add-label 1 Work); check "124.21 Gmail add-label exits 0"   "exit-code=0" "$OUT"
+check "124.22 Gmail add-label adds the label"                   'addLabelIds":\["Work"\]' "$(glog)"
+OUT=$(w124 $GM remove-label 1 Work); check "124.23 Gmail remove-label exits 0" "exit-code=0" "$OUT"
+check "124.24 Gmail remove-label removes the label"             'removeLabelIds":\["Work"\]' "$(glog)"
+OUT=$(w124 $GM mark-junk 1)
+check "124.25 Gmail mark-junk moves to SPAM out of INBOX"       'addLabelIds":\["SPAM"\],"removeLabelIds":\["INBOX"\]' "$(glog)"
+OUT=$(w124 $IM create-label X)
+check "124.26 create-label on IMAP is refused with a reason"    "Gmail-only" "$OUT"
+OUT=$(w124 $GM create-folder X)
+check "124.27 create-folder on Gmail is refused with a reason"  "IMAP-only" "$OUT"
+kill "$IMAP124_PID" "$GMAIL124_PID"
 
 fi
 

@@ -106,3 +106,25 @@ run_static_binaries.sh` runs the binary alone in an empty root against the mock
 servers. `tests/functional/run_package_policy.sh` checks the packaged artefact: dependencies, `shlibs`,
 the ldconfig trigger, that only `emc_*` symbols are exported, and that a
 program compiles against the installed header and runs.
+
+### Shared state: logger and local store (EMAIL-118)
+
+The library's objects include `core/logger.c`, `core/fs_util.c` and
+`infrastructure/local_store.c`, the same sources the programs use.  Their
+state is file-static, so the number of copies depends on how a program links:
+
+- **Static programs** (all five of this project): the linker keeps one copy of
+  each, so the program and the library share one log stream and one account
+  base.  `emc_log_open` after the program's own `logger_init` therefore opens
+  the same file twice; `logger_init` treats a second open of the same path as
+  a level update (no second banner, no leaked stream) and a different path as a
+  switch (the old stream is closed).
+- **Dynamic users of `libemail-client.so.0`**: the library exports only the
+  `emc_*` API (no `logger_*`, no `local_store_*`), so it keeps a private copy.
+  Its log is opened with `emc_log_open` and its local store is set by each
+  `emc_*` call that needs one (`emc_sync` and the account functions call
+  `local_store_init` themselves); nothing of it depends on the host program.
+
+Decision: the library is the owner of its own state when used as a shared
+library, and shares the program's when linked static; no cross-copy handshake
+is needed because the programs never mix the two forms.

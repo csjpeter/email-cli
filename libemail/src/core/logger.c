@@ -62,6 +62,14 @@ static void rotate_logs() {
 }
 
 int logger_init(const char *log_file_path, LogLevel level) {
+    /* A program and libemail-client (linked static: one copy of this state)
+     * both open the log; the second call must not leak the first one's file
+     * and path, nor repeat the banner. */
+    if (g_log_fp && g_log_path && strcmp(g_log_path, log_file_path) == 0) {
+        g_log_level = level;
+        return 0;
+    }
+    logger_close();
     g_log_level = level;
     g_log_path = strdup(log_file_path);
 

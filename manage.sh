@@ -445,7 +445,30 @@ case "$1" in
         echo "Running functional tests..."
         build_release
         cmake --build "$BUILD_DIR" --target tests-functional -- -j"$JOBS"
-        "$BUILD_DIR/tests/functional/bin/run_functional" ${2:+--phase "$2"}
+        functional_rc=0
+        "$BUILD_DIR/tests/functional/bin/run_functional" ${2:+--phase "$2"} || functional_rc=$?
+        if [ -z "$2" ]; then
+            # The other declared functional tests (scripts for the manage.sh
+            # verdicts, the package, the static binaries, the skill and the
+            # maps ...) run with it: a declared test that nothing runs proves
+            # nothing.  Every one is named in the summary.
+            functional_summary=""
+            for fscript in "$BUILD_DIR"/tests/functional/bin/*; do
+                fname=$(basename "$fscript")
+                [ "$fname" = run_functional ] && continue
+                echo "=== functional: $fname ==="
+                if MANAGE_TIMED= "$fscript"; then
+                    functional_summary="${functional_summary}  $(printf '%-26s' "$fname") PASS"$'\n'
+                else
+                    functional_summary="${functional_summary}  $(printf '%-26s' "$fname") FAIL"$'\n'
+                    functional_rc=1
+                fi
+            done
+            echo ""
+            echo "=== functional: scripts summary ==="
+            printf '%s' "$functional_summary"
+        fi
+        [ "$functional_rc" -eq 0 ] || { echo "functional tests FAILED" >&2; exit 1; }
         ;;
     pty)
         echo "Running PTY tests..."

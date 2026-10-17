@@ -7247,6 +7247,10 @@ OUT=$(w124 $GM mark-junk 1)
 check "124.25 Gmail mark-junk moves to SPAM out of INBOX"       'addLabelIds":\["SPAM"\],"removeLabelIds":\["INBOX"\]' "$(glog)"
 OUT=$(w124 $IM create-label X)
 check "124.26 create-label on IMAP is refused with a reason"    "Gmail-only" "$OUT"
+for bin in email-cli email-cli-ro; do
+    OUT=$("$BIN_DIR/$bin" --help 2>&1)
+    check "124.28 $bin --help names --version and --help" "\-\-version" "$OUT"
+done
 OUT=$(w124 $GM create-folder X)
 check "124.27 create-folder on Gmail is refused with a reason"  "IMAP-only" "$OUT"
 kill "$IMAP124_PID" "$GMAIL124_PID"

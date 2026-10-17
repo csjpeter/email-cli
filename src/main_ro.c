@@ -72,6 +72,8 @@ static void help_general(void) {
         "\n"
         "Help:\n"
         "  help [command]             Show this help, or detailed help for a command\n"
+        "  --help, -h                 Show this help (also: <command> --help)\n"
+        "  --version                  Print the version\n"
         "\n"
         "Run 'email-cli-ro help <command>' for more information.\n"
         "For write operations (send, mark-read, add-label, etc.) use 'email-cli'.\n"

@@ -61,6 +61,19 @@ out=$("$ROOT/tests/functional/gcda_check.sh" "$G" 2>&1); rc=$?
 [ "$rc" -eq 0 ]                                   && ok "4.6 a clean tree passes"                    || bad "4.6 exit $rc: $out"
 grep -q 'PTYTEST_CLOSE_GRACE_MS' "$ROOT/manage.sh" && ok "4.7 the coverage run sets the PTY close grace" || bad "4.7 grace not set"
 
+# 5. coverage summary line (EMAIL-120): figures come from the tracefiles.
+C="$WORK/cov"
+mkdir -p "$C" || exit 1
+printf 'SF:a.c\nFNF:4\nFNH:2\nLF:10\nLH:5\nend_of_record\n' > "$C/unit.info"
+printf 'SF:a.c\nLF:10\nLH:8\nend_of_record\n' > "$C/func.info"
+printf 'SF:a.c\nFNF:10\nFNH:9\nLF:20\nLH:19\nend_of_record\nSF:b.c\nFNF:10\nFNH:10\nLF:20\nLH:20\nend_of_record\n' > "$C/all.info"
+out=$("$ROOT/tests/functional/coverage_summary.sh" 2026-10-17 abc123 "$C/unit.info" "$C/func.info" "$C/all.info" 2>&1); rc=$?
+[ "$rc" -eq 0 ] && [ "$out" = "2026-10-17 abc123 unit=50.0% functional=80.0% combined=97.5% functions=95.0%" ] \
+    && ok "5.1 the summary line is computed from the tracefiles" || bad "5.1 rc=$rc line: $out"
+out=$("$ROOT/tests/functional/coverage_summary.sh" d c "$C/none.info" "$C/func.info" "$C/all.info" 2>&1); rc=$?
+[ "$rc" -eq 1 ] && echo "$out" | grep -q "none.info" && ok "5.2 a missing tracefile is an error that names it" || bad "5.2 rc=$rc: $out"
+grep -q 'coverage-summary.txt' "$ROOT/manage.sh" && ok "5.3 the coverage run records the line" || bad "5.3 not recorded"
+
 case "$WORK" in
     "$ROOT"/build/manage-sh-test-*) ;;
     *) echo "ERROR: refusing unsafe path '$WORK'" >&2; exit 1 ;;

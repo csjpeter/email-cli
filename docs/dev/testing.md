@@ -359,6 +359,17 @@ its way out finish before it signals it, and then runs
 `tests/functional/gcda_check.sh`, which names every file without the gcov magic,
 removes it so the report can still be made, and fails the run.
 
+**Recorded figures (EMAIL-120).**  Each `./manage.sh coverage` run prints one line
+(`DATE COMMIT unit=… functional=… combined=… functions=…`) and keeps it in
+`build/coverage-summary.txt`; a figure quoted anywhere is such a line, with its
+date and commit.  The release record, one row per release, is appended to this
+table when a release is tagged (copy the line of the last run on that commit):
+
+| Date | Commit / release | Unit | Functional + PTY | Combined | Functions |
+|------|------------------|------|------------------|----------|-----------|
+| 2026-10-16 | baseline (before EMAIL-112..117) | 79.2% | 80.2% | 89.7% | 98.7% |
+| 2026-10-17 | c74cca59df85 (after EMAIL-119) | 80.1% | 82.2% | 92.3% | 98.7% |
+
 The published badges are the combined figure and the functional + PTY figure,
 both line coverage over the same code.
 

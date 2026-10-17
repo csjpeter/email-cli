@@ -559,6 +559,11 @@ case "$1" in
         echo "  unit tests alone            ${UNIT_PCT}%   (minimum ${COVERAGE_MIN}%)"
         echo "  functional + PTY together   ${EXT_PCT}%   (minimum ${COVERAGE_MIN}%)"
         echo "  everything combined         ${ALL_PCT}%   (target ${COVERAGE_TARGET}%)"
+        # Kept for the per-release record (docs/dev/testing.md), so the figures
+        # quoted anywhere are the ones of a run, with its date and commit.
+        tests/functional/coverage_summary.sh "$(date +%F)" "$(git rev-parse --short=12 HEAD)" \
+            "$BUILD_DIR/coverage-unit.info" "$BUILD_DIR/coverage-functional.info" \
+            "$BUILD_DIR/coverage.info" | tee "$BUILD_DIR/coverage-summary.txt"
         echo "Combined report:  $BUILD_DIR/coverage_report/index.html"
         echo "External report:  $BUILD_DIR/coverage_functional_report/index.html"
         coverage_gate_rc=0

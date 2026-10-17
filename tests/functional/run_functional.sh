@@ -7142,6 +7142,19 @@ check "122.19 list-folders --tree --json: JSON wins, still valid" "True" "$(jv12
 OUT=$(j122 email-cli $IMAP_ACC list-folders)
 check_not "122.20 the default stays the table, not JSON"    '^\[' "$OUT"
 
+OUT=$(j122 email-cli $GM_ACC create-label Fresh122)
+check "122.24 create-label (Gmail) reports the new label and its id" "Label .Fresh122. created (ID: Label_Test001)" "$OUT"
+OUT=$(j122 email-cli $GM_ACC delete-label Label_1)
+check "122.25 delete-label (Gmail) reports the deletion" "Label .Label_1. deleted" "$OUT"
+OUT=$(j122 email-cli $IMAP_ACC migrate-credentials)
+check "122.26 migrate-credentials reports the result" "Done. All account credentials" "$OUT"
+OUT=$(j122 email-cli $IMAP_ACC show 1 --raw)
+check "122.21 show --raw prints the source headers"         "Subject: " "$OUT"
+OUT=$(j122 email-cli $IMAP_ACC remove-account json@gmail.example)
+check "122.22 remove-account removes the account"           "removed" "$OUT"
+OUT=$(j122 email-cli $IMAP_ACC list-accounts --json)
+check "122.23 the removed account is no longer listed"      "IMAP" "$(jv122 "','.join(a['type'] for a in d)" "$OUT")"
+
 kill "$IMAP122_PID" "$GMAIL122_PID"
 
 fi

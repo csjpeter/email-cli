@@ -64,6 +64,8 @@ email-cli mark-junk 42 | mark-notjunk 42
 email-cli create-folder NAME | delete-folder NAME          # IMAP
 email-cli create-label NAME | delete-label ID | add-label 42 LABEL | remove-label 42 LABEL   # Gmail
 email-cli rules list | rules apply [--dry-run] [--verbose] | rules remove --name N
+email-cli rules edit --name N [--new-name M] [--if-from G] [--if-subject G] [--if-to G] [--if-label G] \
+    [--add-label L] [--remove-label L] [--move-folder F]   # changes only what is given
 email-cli rules add --name N [--if-from G] [--if-subject G] [--if-to G] [--if-label G] \
     [--add-label L] [--remove-label L] [--move-folder F]
 email-cli remove-account ADDRESS     # deletes the account's configuration; local mail is kept

@@ -31,7 +31,7 @@ for prog in email-cli email-cli-ro; do
         cmds="$cmds $c"
         case "$NO_PAGE" in *" $c "*) continue ;; esac
         if [ "$c" = rules ]; then
-            for sub in list apply add remove; do
+            for sub in list apply add edit remove; do
                 p=$("$BIN/$prog" help rules $sub 2>&1) || { bad "2.1 $prog help rules $sub failed: $p"; continue; }
                 pages="$pages"$'\n'"$p"
             done
@@ -56,7 +56,7 @@ done
 for s in show password reauth imap smtp; do
     grep -Fq -- "config $s" "$SKILL" || { bad "3.3 'config $s' is not in SKILL.md"; miss=$((miss + 1)); }
 done
-for s in list apply add remove; do
+for s in list apply add edit remove; do
     grep -Fq -- "rules $s" "$SKILL" || { bad "3.4 'rules $s' is not in SKILL.md"; miss=$((miss + 1)); }
 done
 [ "$miss" -eq 0 ] && ok "3.5 every command and option of the CLI is in SKILL.md"

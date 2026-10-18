@@ -2642,6 +2642,43 @@ check "37.17 rules remove without --name: error" "name\|required\|Error" "$RM_NO
 check "37.18 help rules add: usage"    "rules add"    "$( "$BIN_DIR/email-cli" help rules 2>&1 || true )"
 check "37.19 help rules remove: usage" "rules remove" "$( "$BIN_DIR/email-cli" help rules 2>&1 || true )"
 
+# 37.8 rules edit: change a rule in place (EMAIL-127)
+RE() { ( export HOME="$H_RW"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" "$@" 2>&1 || true ); }
+RE rules add --name "Zeta" --if-from "*@zeta.test" --add-label Z1 --remove-label INBOX > /dev/null
+RE rules add --name "Omega" --if-from "*@omega.test" --add-label O1 > /dev/null
+ED1=$( RE rules edit --name "Zeta" --add-label Z2 --add-label Z3 )
+check "37.20 rules edit: success message" "Rule updated" "$ED1"
+ED_LIST=$( RE rules list )
+check     "37.21 rules edit: new add-label present"       "Z2"        "$ED_LIST"
+check_not "37.22 rules edit: old add-label replaced"      "Z1"        "$ED_LIST"
+check     "37.23 rules edit: untouched condition kept"    "zeta.test" "$ED_LIST"
+check     "37.24 rules edit: other rule untouched"        "omega.test" "$ED_LIST"
+ED2=$( RE rules edit --name "Zeta" --if-subject "*sale*" --move-folder "INBOX.Sales" )
+check "37.25 rules edit condition+folder: success" "Rule updated" "$ED2"
+ED_LIST2=$( RE rules list )
+check     "37.26 rules edit: new condition shown"         "sale"        "$ED_LIST2"
+check_not "37.27 rules edit: old condition replaced"      "zeta.test"   "$ED_LIST2"
+check     "37.28 rules edit: move-folder set"             "INBOX.Sales" "$ED_LIST2"
+ED3=$( RE rules edit --name "Zeta" --new-name "Sales" )
+check "37.29 rules edit --new-name: success" "Rule updated" "$ED3"
+ED_LIST3=$( RE rules list )
+check     "37.30 rules edit --new-name: new name listed"  "Sales"  "$ED_LIST3"
+check_not "37.31 rules edit --new-name: old name gone"    "Zeta"   "$ED_LIST3"
+check     "37.32 rules edit --new-name: still 3 rules"    "3 rule" "$ED_LIST3"
+check     "37.33 rules edit: order kept (Sales before Omega)" "^ok$" \
+    "$(echo "$ED_LIST3" | awk '/Sales/{s=NR} /Omega/{o=NR} END{print (s&&o&&s<o)?"ok":"bad"}')"
+check "37.34 rules edit to an existing name: error" "already exists" \
+    "$( RE rules edit --name "Sales" --new-name "Omega" )"
+check "37.35 rules edit non-existent: error" "No rule named" "$( RE rules edit --name "NoSuch" --add-label X )"
+check "37.36 rules edit without --name: error" "name.*required\|required" "$( RE rules edit --add-label X )"
+check "37.37 rules edit with nothing to change: error" "nothing to change" "$( RE rules edit --name "Sales" )"
+check "37.38 rules edit --help: usage" "rules edit --name" "$( RE rules edit --help )"
+check "37.39 help rules edit: usage"   "rules edit --name" "$( RE help rules edit )"
+ED4=$( RE rules edit --name "Sales" --move-folder "" )
+RE_LIST4=$( RE rules list | awk '/Sales/{f=1;next} /Omega/{f=0} f' )
+check_not "37.40 rules edit --move-folder \"\": folder cleared" "INBOX.Sales" "$RE_LIST4"
+
 rm -rf "./build/tests/functional/work-$$/homes/rw-$$"
 
 fi

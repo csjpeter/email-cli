@@ -30,7 +30,7 @@ existing references and every `no` has a reason.
 |-----------|-----|----------|-----|----------|----------------------------|
 | List messages (unread/all, paging) | yes | F:1.4 | yes | P:test_screen_list | |
 | Filter the list by sender/subject/to/body text | yes (`--from`, `__search__:`) | F:84.2 | yes (`/`) | P:test_tui_list_search_filter | |
-| Filter the list by date (`--since`, `--before`) | yes | F:84.5 | no | | not built in the TUI; ticket to be opened by the owner |
+| Filter the list by date (`--since`, `--before`) | yes | F:84.5 | yes (`/`, Tab to Since / Before) | P:test_tui_list_date_filter | |
 | Search cached mail | yes (`--folder __search__:scope:text`) | F:59.1 | yes (`/`) | P:test_screen_list_search | |
 | Virtual folders (unread, flagged, junk, answered, forwarded) | yes | F:58.1 | yes | P:test_virtual_junk_list_shows_messages | |
 | Read a message | yes (`show`) | F:1.10 | yes | P:test_screen_reader | |

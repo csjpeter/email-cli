@@ -2049,6 +2049,17 @@ static char *resolve_folder_name_dup(const char *name) {
     return result;
 }
 
+/* TUI date scopes (EMAIL-128): same semantics as the CLI --since (inclusive)
+ * and --before (exclusive).  Only a complete YYYY-MM-DD is a date; while the
+ * text is incomplete the filter does not narrow the list. */
+static int tui_date_text_valid(const char *s) {
+    for (int i = 0; i < 10; i++) {
+        if (i == 4 || i == 7) { if (s[i] != '-') return 0; }
+        else if (s[i] < '0' || s[i] > '9') return 0;
+    }
+    return s[10] == '\0';
+}
+
 /* Rebuild filtered entry index.
  * fentries[0..fcount-1] holds original indices from entries[] that match fbuf.
  * Empty fbuf = identity (all entries match). */
@@ -2059,7 +2070,8 @@ static void list_filter_rebuild(
     const char *fbuf, int fscope,
     int *fentries, int *fcount_out)
 {
-    if (!fbuf || fbuf[0] == '\0') {
+    if (!fbuf || fbuf[0] == '\0' ||
+        (fscope >= 4 && !tui_date_text_valid(fbuf))) {
         for (int i = 0; i < show_count; i++) fentries[i] = i;
         *fcount_out = show_count;
         return;
@@ -2074,6 +2086,10 @@ static void list_filter_rebuild(
         } else if (fscope == 1) {
             const char *s = (me && me->from) ? me->from : "";
             match = strcasestr(s, fbuf) != NULL;
+        } else if (fscope == 4) {
+            match = me && me->date && strncmp(me->date, fbuf, 10) >= 0;
+        } else if (fscope == 5) {
+            match = me && me->date && strncmp(me->date, fbuf, 10) < 0;
         } else if (fscope == 2) {
             char *hdrs = fetch_uid_headers_cached(cfg, folder, entries[i].uid);
             if (hdrs) {
@@ -2892,7 +2908,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     /* ── Live filter state ──────────────────────────────────────────── */
     int   filter_active = 0;   /* filter bar is visible */
     int   filter_input  = 0;   /* typing mode (vs navigation mode) */
-    int   filter_scope  = 0;   /* 0=Subject  1=From  2=To  3=Body */
+    int   filter_scope  = 0;   /* 0=Subject 1=From 2=To 3=Body 4=Since 5=Before */
     int   filter_dirty    = 0;   /* rebuild needed after next render */
     int   filter_scanning = 0;   /* body scan in progress — show progress bar */
     char  filter_buf[256] = "";
@@ -3060,7 +3076,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             else
                 suffix = "";
             if (filter_active) {
-                static const char *scn[] = {"Subject","From","To","Body"};
+                static const char *scn[] = {"Subject","From","To","Body","Since","Before"};
                 snprintf(cl, sizeof(cl),
                          "  Showing %d of %d  [filter:%s]  %s (%d unread) [%s].%s",
                          fcount, show_count, scn[filter_scope],
@@ -3376,12 +3392,12 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
 
         /* Filter bar — shown when filter is active (separator + input = 2 rows) */
         if (filter_active) {
-            static const char *scope_names[] = {"Subject","From","To","Body"};
+            static const char *scope_names[] = {"Subject","From","To","Body","Since","Before"};
             printf("\033[%d;1H", 5 + (wend - wstart));
             printf("  \xe2\x94\x80"); /* ─ */
             for (int _p = 3; _p < tcols - 2; _p++) printf("\xe2\x94\x80");
             printf("\n  Filter [");
-            for (int _s = 0; _s < 4; _s++) {
+            for (int _s = 0; _s < 6; _s++) {
                 if (_s > 0) printf("|");
                 if (_s == filter_scope) printf("\033[7m%s\033[0m", scope_names[_s]);
                 else printf("%s", scope_names[_s]);
@@ -3567,7 +3583,7 @@ read_key_again: ;
 
             /* ── Filter input mode: Tab cycles scope, printable chars typed ── */
             if (filter_input && key == TERM_KEY_TAB) {
-                filter_scope = (filter_scope + 1) % 4;
+                filter_scope = (filter_scope + 1) % 6;
                 if (filter_buf[0]) filter_dirty = 1;  /* rebuild after next render */
                 break;
             }

@@ -514,7 +514,7 @@ static const char *const exp_list_search[] = {
     "  2020-01-02 12:00 N----- Message 2                                 Sender 2 <sender2@example.com>",
     "  2020-01-01 12:00 N----- Message 1                                 Sender 1 <sender1@example.com>",
     "  ────────────────────────────────────────────────────────────────────────────────────────────────",
-    "  Filter [Subject|From|To|Body]: _  Showing 3 of 3",
+    "  Filter [Subject|From|To|Body|Since|Before]: _  Showing 3 of 3",
     "",
     "",
     "",

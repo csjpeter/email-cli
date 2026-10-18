@@ -35,7 +35,7 @@ is the end of the text of its row.
 | Bulk action prompt (US-86) | `m` on the message list | information line `N [marked ]message(s): r=read u=unread f=star F=unstar m=move D=trash  Esc=cancel`; Gmail adds `l=+label L=-label`; `D` asks `(y/N)` | r u f F l L m D Esc |
 | Empty folder (`list_empty`) | Enter on an empty folder | header "0 of 0 message(s) …", "(empty)" | |
 | List help (`list_help`) | `h` | overlay with key rows and the Sts legend | Esc q BS |
-| List search (`list_search`) | `/` | filter line "Filter [Subject|From|To|Body]: _  Showing n of N" | text, Tab, Enter, Esc |
+| List search (`list_search`) | `/` | filter line "Filter [Subject|From|To|Body|Since|Before]: _  Showing n of N" | text (Since/Before take YYYY-MM-DD, as the CLI --since/--before), Tab, Enter, Esc |
 | Message reader (`reader`, `reader_source`, `reader_search`) | Enter on a message | header block From, Subject, Date, UID, File, DMARC; rule; body; status line "-- [1/1] …" with the keys | ↑↓ PgUp/PgDn Home End r F f n d D a A v / h Esc q BS |
 | Reader help (`reader_help`) | `h` | overlay (as the accounts help) | Esc q BS |
 | Rules editor (`rules_empty`, `rules_list`, `rules_second`) | `l` on the list | title "Rules for account (n rules)"; "(no rules …)" or one row per rule, `>` and the selection on the cursor; status line (`j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q back  h help`) | j k ↑↓ Enter a d Esc q |

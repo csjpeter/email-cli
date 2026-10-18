@@ -664,6 +664,55 @@ static void test_tui_list_search_filter(void) {
     pty_close(s);
 }
 
+/* EMAIL-128: the filter bar has Since (inclusive) and Before (exclusive)
+ * date scopes with the CLI's --since/--before semantics.  The mock mail is
+ * dated 2026-03-26. */
+static void test_tui_list_date_filter(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "date filter: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Filter", WAIT_MS);
+    for (int i = 0; i < 4; i++) pty_send_key(s, PTY_KEY_TAB);  /* -> Since */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Since");
+    ASSERT_SCREEN_CONTAINS(s, "Before");
+
+    /* Incomplete date: list is not narrowed */
+    pty_send_str(s, "2026-03");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Showing 0 of");
+
+    /* Since the day after the mail: nothing */
+    pty_send_str(s, "-27");
+    ASSERT_WAIT_FOR(s, "Showing 0 of", WAIT_MS);
+
+    /* Since is inclusive: back to the mail's own day */
+    pty_send_key(s, PTY_KEY_BACK);
+    pty_send_str(s, "6");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Showing 0 of");
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+
+    /* Before is exclusive: the mail's own day matches nothing */
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Showing 0 of", WAIT_MS);
+    /* Before the next day: the mail is back */
+    pty_send_key(s, PTY_KEY_BACK);
+    pty_send_str(s, "7");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Showing 0 of");
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  INTERACTIVE SHOW VIEW
  * ══════════════════════════════════════════════════════════════════════ */
@@ -5078,6 +5127,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_list_nav);
     RUN_TEST(test_interactive_list_flags);
     RUN_TEST(test_tui_list_search_filter);
+    RUN_TEST(test_tui_list_date_filter);
 
     printf("\n--- Interactive show ---\n");
     RUN_TEST(test_interactive_show_content);

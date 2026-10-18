@@ -1342,6 +1342,174 @@ static const char *const sty_w140_review_long_to[] = {
 };
 static const int cur_w140_review_long_to[3] = { 23, 139, 1 };
 
+static const char *const exp_rules_apply_ask[] = {
+    "Rules for testuser (2 rules)",
+    "",
+    "> SpamFilter",
+    "  Newsletters",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "  Apply the rules to the cached messages now? (y/N)",
+    NULL
+};
+static const char *const sty_rules_apply_ask[] = {
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "                                                                                                    ",
+    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    NULL
+};
+static const int cur_rules_apply_ask[3] = { 23, 52, 0 };
+
+static const char *const exp_rules_preview[] = {
+    "  Rules preview (dry run, nothing changed): testuser",
+    "",
+    "=== Dry-run rules: testuser ===",
+    "  [dry-run] \"Everything\" → uid:0000000000000003  +Tagged",
+    "  [dry-run] \"Everything\" → uid:0000000000000002  +Tagged",
+    "  [dry-run] \"Everything\" → uid:0000000000000001  +Tagged",
+    "  Rules dry-run: 3 message(s) would be modified.",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " any key back",
+    NULL
+};
+static const char *const sty_rules_preview[] = {
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+    NULL
+};
+static const int cur_rules_preview[3] = { 23, 99, 1 };
+
+static const char *const exp_rules_applied[] = {
+    "  Rules applied: testuser",
+    "",
+    "=== Applying rules: testuser ===",
+    "  [rule] \"Everything\" → uid:0000000000000003  +Tagged",
+    "  [rule] \"Everything\" → uid:0000000000000002  +Tagged",
+    "  [rule] \"Everything\" → uid:0000000000000001  +Tagged",
+    "  Rules applied: 3 message(s) modified.",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " any key back",
+    NULL
+};
+static const char *const sty_rules_applied[] = {
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+    NULL
+};
+static const int cur_rules_applied[3] = { 23, 99, 1 };
+
 #endif /* TEST_PTY_SCREENS_EXPECTED_H */
 
 static const char *const exp_body_editor[] = {
@@ -5270,7 +5438,7 @@ static const char *const exp_rules_empty[] = {
     "",
     "",
     "",
-    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
+    " j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rules_empty[] = {
@@ -5326,7 +5494,7 @@ static const char *const exp_rules_list[] = {
     "",
     "",
     "",
-    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
+    " j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rules_list[] = {
@@ -5550,7 +5718,7 @@ static const char *const exp_rules_second[] = {
     "",
     "",
     "",
-    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
+    " j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rules_second[] = {
@@ -5645,24 +5813,24 @@ static const char *const exp_rules_help[] = {
     "  Newsletters",
     "",
     "",
-    "",
-    "                             ┌─ Rules shortcuts ─────────────────────┐",
-    "                             │ j / ↓    Next rule                    │",
-    "                             │ k / ↑    Previous rule                │",
-    "                             │ Enter    Open the rule                │",
-    "                             │ a        Add a rule                   │",
-    "                             │ d        Delete the rule (asks first) │",
-    "                             │ h / ?    Show this help               │",
-    "                             │ Esc / q  Back to the message list     │",
-    "                             └───────────────────────────────────────┘",
-    "",
-    "",
-    "",
+    "                       ┌─ Rules shortcuts ──────────────────────────────────┐",
+    "                       │ j / ↓    Next rule                                 │",
+    "                       │ k / ↑    Previous rule                             │",
+    "                       │ Enter    Open the rule                             │",
+    "                       │ a        Add a rule                                │",
+    "                       │ d        Delete the rule (asks first)              │",
+    "                       │ p        Preview what the rules would do (dry run) │",
+    "                       │ A        Apply the rules now (asks first)          │",
+    "                       │ h / ?    Show this help                            │",
+    "                       │ Esc / q  Back to the message list                  │",
+    "                       └────────────────────────────────────────────────────┘",
     "",
     "",
     "",
     "",
-    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
+    "",
+    "",
+    " j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rules_help[] = {
@@ -5672,17 +5840,17 @@ static const char *const sty_rules_help[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
-    "                             TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                              ",
-    "                             T bbbbb                                 T                              ",
-    "                             T bbbbb                                 T                              ",
-    "                             T bbbbb                                 T                              ",
-    "                             T b                                     T                              ",
-    "                             T b                                     T                              ",
-    "                             T bbbbb                                 T                              ",
-    "                             T bbbbbbb                               T                              ",
-    "                             TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                              ",
-    "                                                                                                    ",
+    "                       TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                       ",
+    "                       T bbbbb                                              T                       ",
+    "                       T bbbbb                                              T                       ",
+    "                       T bbbbb                                              T                       ",
+    "                       T b                                                  T                       ",
+    "                       T b                                                  T                       ",
+    "                       T b                                                  T                       ",
+    "                       T b                                                  T                       ",
+    "                       T bbbbb                                              T                       ",
+    "                       T bbbbbbb                                            T                       ",
+    "                       TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                       ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -5692,7 +5860,7 @@ static const char *const sty_rules_help[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rules_help[3] = { 15, 70, 1 };
+static const int cur_rules_help[3] = { 16, 77, 1 };
 
 static const char *const exp_rule_detail_help[] = {
     "Rule: SpamFilter",
@@ -5886,7 +6054,7 @@ static const char *const exp_rules_deleted[] = {
     "",
     "",
     "",
-    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
+    " j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q back  h help",
     NULL
 };
 static const char *const sty_rules_deleted[] = {
@@ -6641,7 +6809,7 @@ static const char *const exp_w80_rules[] = {
     "",
     "",
     "",
-    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
+    " j/k navigate  Enter open  a add  d delete  p preview  Esc/q back  h help",
     NULL
 };
 static const char *const sty_w80_rules[] = {
@@ -7142,7 +7310,7 @@ static const char *const exp_w140_rules[] = {
     "",
     "",
     "",
-    " j/k navigate  Enter open  a add  d delete  Esc/q back  h help",
+    " j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q back  h help",
     NULL
 };
 static const char *const sty_w140_rules[] = {

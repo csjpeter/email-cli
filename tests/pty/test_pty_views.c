@@ -4729,6 +4729,60 @@ static void test_tui_rules_add_form_saves_new_rule(void) {
     remove_rules_ini();
 }
 
+/* EMAIL-126: the rules editor previews (dry run) and applies the rules. */
+static void test_tui_rules_preview_and_apply(void) {
+    remove_rules_ini();
+    write_rules_ini();
+    {   /* one rule that matches every cached message */
+        char path[512];
+        snprintf(path, sizeof(path),
+                 "%s/.config/email-cli/accounts/testuser/rules.ini", g_test_home);
+        FILE *fp = fopen(path, "a");
+        ASSERT(fp != NULL, "rules apply: rules.ini is writable");
+        if (fp) {
+            fprintf(fp, "\n[rule \"Everything\"]\nwhen = from:*\n"
+                        "then-add-label = Tagged\n");
+            fclose(fp);
+        }
+    }
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rules apply: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "SpamFilter", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_str(s, "p");                       /* preview: a dry run */
+    ASSERT_WAIT_FOR(s, "Rules dry-run:", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "preview (dry run, nothing changed)");
+    ASSERT_SCREEN_CONTAINS(s, "[dry-run]");     /* the matches are shown */
+    ASSERT_SCREEN_CONTAINS(s, "+Tagged");
+    pty_send_str(s, " ");                       /* any key goes back */
+    ASSERT_WAIT_FOR(s, "SpamFilter", RULES_WAIT_MS);
+
+    pty_send_str(s, "A");                       /* apply: asks first */
+    ASSERT_WAIT_FOR(s, "Apply the rules", WAIT_MS);
+    pty_send_str(s, "n");                       /* declined: nothing runs */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Rules applied:");
+    ASSERT_SCREEN_CONTAINS(s, "SpamFilter");
+
+    pty_send_str(s, "A");
+    ASSERT_WAIT_FOR(s, "Apply the rules", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Rules applied:", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "[dry-run]");
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "SpamFilter", RULES_WAIT_MS);
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    remove_rules_ini();
+}
+
 static void test_tui_rules_add_form_needs_a_name(void) {
     remove_rules_ini();
     write_rules_ini();
@@ -5317,6 +5371,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_tui_rules_edit_form_prefill);
     RUN_TEST(test_tui_rules_edit_form_saves);
     RUN_TEST(test_tui_rules_add_form_saves_new_rule);
+    RUN_TEST(test_tui_rules_preview_and_apply);
     RUN_TEST(test_tui_rules_add_form_needs_a_name);
     RUN_TEST(test_tui_rules_edit_form_esc_cancel);
     RUN_TEST(test_tui_function_and_modified_keys_do_nothing);

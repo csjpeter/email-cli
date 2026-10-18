@@ -111,6 +111,20 @@ static void write_rules(void) {
     fclose(fp);
 }
 
+/* The rules above and one that matches every message (EMAIL-126). */
+static void write_rules_matching(void) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/.config/email-cli/accounts/testuser/rules.ini", g_home);
+    write_rules();
+    FILE *fp = fopen(path, "a");
+    if (!fp) return;
+    fprintf(fp,
+        "\n[rule \"Everything\"]\n"
+        "when = from:*\n"
+        "then-add-label = Tagged\n");
+    fclose(fp);
+}
+
 static void remove_rules(void) {
     char path[512];
     snprintf(path, sizeof(path), "%s/.config/email-cli/accounts/testuser/rules.ini", g_home);
@@ -966,6 +980,13 @@ VIEW(rules_delete_ask,  (write_rules(), at_rules()),
 VIEW(rules_deleted,     (write_rules(), at_rules()),
      (pty_send_str(s, "d"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_send_str(s, "y"),
       pty_settle(s, SETTLE_MS * 2)))
+VIEW(rules_apply_ask,   (write_rules(), at_rules()),
+     (pty_send_str(s, "A"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(rules_preview,     (write_rules_matching(), at_rules()),
+     (pty_send_str(s, "p"), pty_wait_for(s, "Rules dry-run:", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(rules_applied,     (write_rules_matching(), at_rules()),
+     (pty_send_str(s, "A"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_send_str(s, "y"),
+      pty_wait_for(s, "Rules applied:", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(rule_detail_delete_ask, (write_rules(), at_rules()),
      (pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS), pty_send_str(s, "d"),
       pty_wait_for(s, "(y/N)", WAIT_MS), pty_settle(s, SETTLE_MS)))
@@ -1186,6 +1207,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_rule_when_help);
     RUN_TEST(test_screen_rules_delete_ask);
     RUN_TEST(test_screen_rules_deleted);
+    RUN_TEST(test_screen_rules_apply_ask);
+    RUN_TEST(test_screen_rules_preview);
+    RUN_TEST(test_screen_rules_applied);
     RUN_TEST(test_screen_rule_detail_delete_ask);
     RUN_TEST(test_screen_rule_when_typed);
     RUN_TEST(test_screen_rule_when_added);

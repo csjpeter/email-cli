@@ -116,7 +116,7 @@ recorded weakness, not coverage of the promise.
 | `email-tui` compose, reply, forward | P:test_review_s_sends_message P:test_reply_all_send P:test_forward_fill_to_opens_editor | |
 | `email-tui send` | F:114.3 | |
 | `email-tui reply` | F:114.7 | refusal without a UID; the reply itself P:test_review_reply_uses_review_screen |
-| `email-tui` rules editor | P:test_tui_rules_add_form_saves_new_rule P:test_screen_rules_deleted | |
+| `email-tui` rules editor | P:test_tui_rules_add_form_saves_new_rule P:test_screen_rules_deleted P:test_tui_rules_preview_and_apply P:test_screen_rules_preview | |
 | `email-tui` Gmail labels and flags | P:test_feedback_t_label_added P:test_feedback_f_star | |
 | TUI mark junk (`j`) | | gap: no PTY test; also listed in `docs/interface-parity.md`; ticket to be opened by the owner |
 | TUI delete label (`d` in the label browser) | | gap: no PTY test, and it deletes by name not id; ticket to be opened by the owner |

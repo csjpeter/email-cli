@@ -5,6 +5,7 @@
 #ifndef EMAIL_SERVICE_H
 #define EMAIL_SERVICE_H
 
+#include <stdio.h>
 #include <stddef.h>
 #include "config.h"
 
@@ -268,6 +269,13 @@ void email_service_set_verbose(int verbose);
  * @return Number of messages modified (or would be modified), or -1 on error.
  */
 int email_service_apply_rules(const char *only_account, int dry_run, int verbose);
+
+/**
+ * @brief Like email_service_apply_rules(), writing the report to @p out
+ *        (the TUI shows it in a screen) instead of stdout.
+ */
+int email_service_apply_rules_to(FILE *out, const char *only_account,
+                                 int dry_run, int verbose);
 
 /**
  * @brief Rebuild the contact suggestion cache from all locally cached headers.

@@ -6538,7 +6538,7 @@ static char *csv_update_labels(const char *existing,
 }
 
 /* ── apply_rules: print rule match lines ─────────────────────────────── */
-static void print_rule_matches(const MailRules *rules,
+static void print_rule_matches(FILE *out, const MailRules *rules,
                                 const char *from, const char *subject,
                                 const char *to, const char *labels,
                                 const char *uid, int dry_run) {
@@ -6547,20 +6547,21 @@ static void print_rule_matches(const MailRules *rules,
                                NULL, (time_t)0))
             continue;
         const MailRule *mr = &rules->rules[r];
-        printf("  %s \"%s\" \xe2\x86\x92 uid:%s",
+        fprintf(out, "  %s \"%s\" \xe2\x86\x92 uid:%s",
                dry_run ? "[dry-run]" : "[rule]",
                mr->name ? mr->name : "?", uid);
         for (int j = 0; j < mr->then_add_count; j++)
-            printf("  +%s", mr->then_add_label[j]);
+            fprintf(out, "  +%s", mr->then_add_label[j]);
         for (int j = 0; j < mr->then_rm_count; j++)
-            printf("  -%s", mr->then_rm_label[j]);
+            fprintf(out, "  -%s", mr->then_rm_label[j]);
         if (mr->then_move_folder)
-            printf("  \xe2\x86\x92%s", mr->then_move_folder);
-        printf("\n");
+            fprintf(out, "  \xe2\x86\x92%s", mr->then_move_folder);
+        fprintf(out, "\n");
     }
 }
 
-int email_service_apply_rules(const char *only_account, int dry_run, int verbose) {
+int email_service_apply_rules_to(FILE *out, const char *only_account,
+                                 int dry_run, int verbose) {
     int count = 0;
     AccountEntry *accounts = config_list_accounts(&count);
     if (!accounts || count == 0) {
@@ -6576,13 +6577,13 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
             strcmp(accounts[i].name, only_account) != 0)
             continue;
 
-        printf("=== %s rules: %s ===\n",
+        fprintf(out, "=== %s rules: %s ===\n",
                dry_run ? "Dry-run" : "Applying", accounts[i].name);
         local_store_init(accounts[i].cfg->host, accounts[i].cfg->user);
 
         MailRules *rules = mail_rules_load(accounts[i].name);
         if (!rules || rules->count == 0) {
-            printf("  No rules found for %s.\n", accounts[i].name);
+            fprintf(out, "  No rules found for %s.\n", accounts[i].name);
             mail_rules_free(rules);
             done++;
             continue;
@@ -6634,7 +6635,7 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
 
                     if (has_new) {
                         if (verbose || dry_run)
-                            print_rule_matches(rules, fields[0], fields[1],
+                            print_rule_matches(out, rules, fields[0], fields[1],
                                                NULL, fields[3], uid, dry_run);
                         fired_total++;
                         if (!dry_run) {
@@ -6680,7 +6681,7 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
             /* Iterate over manifest entries (decoded from/subject + flags) */
             Manifest *mf = manifest_load(imap_folder);
             if (!mf || mf->count == 0) {
-                printf("  No messages found in folder %s.\n", imap_folder);
+                fprintf(out, "  No messages found in folder %s.\n", imap_folder);
                 manifest_free(mf);
                 if (ul_arr) ul_free_all(ul_arr, ul_count);
                 mail_rules_free(rules);
@@ -6757,7 +6758,7 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
 
                     if (has_new) {
                         if (verbose || dry_run)
-                            print_rule_matches(rules,
+                            print_rule_matches(out, rules,
                                                e->from    ? e->from    : "",
                                                e->subject ? e->subject : "",
                                                NULL, existing, e->uid, dry_run);
@@ -6813,9 +6814,9 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
 
         mail_rules_free(rules);
         if (dry_run)
-            printf("  Rules dry-run: %d message(s) would be modified.\n", fired_total);
+            fprintf(out, "  Rules dry-run: %d message(s) would be modified.\n", fired_total);
         else
-            printf("  Rules applied: %d message(s) modified.\n", fired_total);
+            fprintf(out, "  Rules applied: %d message(s) modified.\n", fired_total);
         total_fired += fired_total;
         done++;
     }
@@ -6827,6 +6828,10 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
         return -1;
     }
     return errors > 0 ? -1 : total_fired;
+}
+
+int email_service_apply_rules(const char *only_account, int dry_run, int verbose) {
+    return email_service_apply_rules_to(stdout, only_account, dry_run, verbose);
 }
 
 int email_service_rebuild_contacts(const char *only_account) {

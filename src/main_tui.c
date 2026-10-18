@@ -2284,6 +2284,51 @@ static void rules_cell(void *ctx, int i, int col, tui_table_cell *c) {
 }
 
 /**
+ * Show the report of a rules run (EMAIL-126): the lines the CLI's
+ * `rules apply [--dry-run] --verbose` prints, in a screen of their own.
+ * Any key goes back.
+ */
+static void tui_rules_report(const char *account, int dry_run)
+{
+    char *buf = NULL;
+    size_t len = 0;
+    FILE *out = open_memstream(&buf, &len);
+    if (!out) return;
+    int rc = email_service_apply_rules_to(out, account, dry_run, 1);
+    fclose(out);
+
+    int rows = terminal_rows();
+    if (rows < 5) rows = 24;
+    int cols = terminal_cols();
+    if (cols <= 0) cols = 80;
+    printf("\033[2J\033[H");
+    char hdr[256];
+    snprintf(hdr, sizeof(hdr), "  Rules %s: %s",
+             dry_run ? "preview (dry run, nothing changed)" : "applied", account);
+    tui_frame_print_bar(1, hdr, cols);
+    int row = 3;
+    const char *p = buf ? buf : "";
+    while (*p && row < rows - 1) {
+        const char *nl = strchr(p, '\n');
+        int n = nl ? (int)(nl - p) : (int)strlen(p);
+        printf("\033[%d;1H%.*s", row++, n, p);
+        p += n + (nl ? 1 : 0);
+    }
+    if (rc < 0)
+        printf("\033[%d;1H  Error: the rules could not be applied.", row);
+    free(buf);
+    {
+        static const tui_statusline_hint h[] = {
+            { "any key", "back", SL_PRIO_KEEP },
+        };
+        screen_bar(h, 1, NULL, NULL);
+    }
+    fflush(stdout);
+    RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
+    (void)terminal_read_key();
+}
+
+/**
  * Full-screen rules list with cursor navigation.
  * Keys: j/k/↑/↓=navigate  Enter=open detail  a=add  d=delete  ESC/q=back
  */
@@ -2328,9 +2373,11 @@ static void tui_rules_editor(const Config *cfg)
                 { "Enter", "open", SL_PRIO_KEEP },
                 { "a", "add", SL_PRIO_HIGH },
                 { "d", "delete", SL_PRIO_HIGH },
+                { "p", "preview", SL_PRIO_MID },
+                { "A", "apply now", SL_PRIO_MID },
                 { "Esc/q", "back", SL_PRIO_KEEP },
             };
-            screen_bar(h, 5, "h", NULL);
+            screen_bar(h, 7, "h", NULL);
         }
 
         TermKey key;
@@ -2340,6 +2387,12 @@ static void tui_rules_editor(const Config *cfg)
             RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
             key = terminal_read_key();
             ch  = terminal_last_printable();
+            if (ch == 'A') {
+                printf("\033[%d;1H\033[2K  Apply the rules to the cached messages now? (y/N) ",
+                       rows);
+                fflush(stdout);
+                ssize_t _na = read(STDIN_FILENO, &del_confirm, 1); (void)_na;
+            }
             if (ch == 'd' && count > 0) {
                 const char *rname = rules->rules[cursor].name
                                   ? rules->rules[cursor].name : "?";
@@ -2361,11 +2414,13 @@ static void tui_rules_editor(const Config *cfg)
                 { "Enter",        "Open the rule"                 },
                 { "a",            "Add a rule"                    },
                 { "d",            "Delete the rule (asks first)"  },
+                { "p",            "Preview what the rules would do (dry run)" },
+                { "A",            "Apply the rules now (asks first)" },
                 { "h / ?",        "Show this help"                },
                 { "Esc / q",      "Back to the message list"      },
             };
             mail_rules_free(rules);
-            email_service_help_popup("Rules shortcuts", help, 7);
+            email_service_help_popup("Rules shortcuts", help, 9);
             continue;
         }
 
@@ -2392,6 +2447,12 @@ static void tui_rules_editor(const Config *cfg)
         if (ch == 'a') {
             mail_rules_free(rules);
             tui_rules_add_form(account, NULL);
+            continue;
+        }
+
+        if (ch == 'p' || (ch == 'A' && (del_confirm == 'y' || del_confirm == 'Y'))) {
+            mail_rules_free(rules);
+            tui_rules_report(account, ch == 'p');
             continue;
         }
 

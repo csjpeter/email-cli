@@ -62,7 +62,7 @@ existing references and every `no` has a reason.
 | Add a sorting rule | yes | F:37.1 | yes | P:test_tui_rules_add_form_saves_new_rule | |
 | Remove a sorting rule | yes | F:37.12 | yes | P:test_screen_rules_deleted | |
 | Edit a sorting rule | no | | yes (`e`) | P:test_screen_rule_edit_form | not built in the CLI (remove and add); ticket to be opened by the owner |
-| Apply rules now (also `--dry-run`) | yes | F:36.1 | no | | the TUI applies rules during its sync only; no on-demand or dry-run key; ticket to be opened by the owner |
+| Apply rules now (also `--dry-run`) | yes | F:36.1 | yes (`A` asks first, `p` previews) | P:test_tui_rules_preview_and_apply | |
 | Sync now | yes (`email-sync`) | F:20.1 | yes (`s`) | P:test_screen_list_syncing | |
 | Set up / remove / show the sync cron entry | yes (`email-sync cron`) | F:54.2 | no | | scheduling is the background program's; `n/a` in a screen, not a gap |
 

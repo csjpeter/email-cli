@@ -53,6 +53,7 @@ recorded weakness, not coverage of the promise.
 | `email-cli remove-starred` | F:124.8 | |
 | `email-cli rules add` | F:37.1 | |
 | `email-cli rules apply` | F:36.1 | `--dry-run` F:36.3 |
+| `email-cli rules edit` | F:37.20 | `--new-name` F:37.29 |
 | `email-cli rules list` | F:34.1 | `--json` F:122.16 |
 | `email-cli rules remove` | F:37.12 | |
 | `email-cli save-attachment` | F:15.2 | |

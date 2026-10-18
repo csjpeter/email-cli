@@ -30,6 +30,15 @@
 | 11 | `--name` is required; omitting it prints an error and exits non-zero. |
 | 12 | `email-cli rules remove --help` shows the full usage page. |
 
+### rules edit (EMAIL-127)
+
+| # | Criterion |
+|---|-----------|
+| 13 | `email-cli rules edit --name <name>` changes the named rule in place; its position is kept. |
+| 14 | Only what is given changes: `--new-name`, `--if-*` (replace the whole condition), `--add-label` and `--remove-label` (replace the list), `--move-folder` (`""` clears it). |
+| 15 | An unknown rule, a `--new-name` already in use, a missing `--name` or nothing to change prints an error and exits non-zero. |
+| 16 | `email-cli rules edit --help` and `help rules edit` show the usage page. |
+
 ---
 
 ## Example usage
@@ -39,6 +48,8 @@ email-cli rules add --name "GitHub" \
     --if-from "*@github.com" \
     --add-label GitHub \
     --remove-label INBOX
+
+email-cli rules edit --name "GitHub" --add-label Code
 
 email-cli rules remove --name "GitHub"
 ```

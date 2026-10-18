@@ -457,7 +457,7 @@ static const char *const exp_reader_help[] = {
     "Subject: Message 3",
     "Date:    2020-01-03 12:00",
     "UID:     000000000000000┌─ Message reader shortcuts ──────────────────────┐",
-    "%File:    /home/csjpeter/│ PgDn / ↓      Scroll down one page / one line   │",
+    "%File:    \001│ PgDn / ↓      Scroll down one page / one line   │",
     "%",
     "DMARC:   Not evaluated (│ Home / End    Jump to top / bottom of message   │",
     "────────────────────────│ r             Reply to this message             │─────",
@@ -3438,7 +3438,7 @@ static const char *const sty_att_save_prompt[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_att_save_prompt[3] = { 22, 99, 1 };
+static const int cur_att_save_prompt[3] = { 22, -1, 1 };
 
 static const char *const exp_att_saved[] = {
     "From:    Test User <test@example.com>",
@@ -4218,7 +4218,7 @@ static const char *const sty_path_many[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_path_many[3] = { 6, 99, 1 };
+static const int cur_path_many[3] = { 6, -1, 1 };
 
 static const char *const exp_path_one[] = {
     "  New Message",
@@ -4274,7 +4274,7 @@ static const char *const sty_path_one[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_path_one[3] = { 6, 99, 1 };
+static const int cur_path_one[3] = { 6, -1, 1 };
 
 static const char *const exp_err_connect[] = {
     "~>                testuser                         IMAP  …aps://localhost:# …ps://localhost:#",
@@ -6375,19 +6375,7 @@ static const char *const exp_w80_reader[] = {
     "DMARC:   Not evaluated (no Authentication-Results header)",
     "────────────────────────────────────────────────────────────────────────────────",
     "Body of message 3",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
+    "==",
     " ↑↓ scroll  Esc/q/BS list  r reply  f star  n unread  / search  ? help    [1/1]",
     NULL
 };
@@ -6401,22 +6389,10 @@ static const char *const sty_w80_reader[] = {
     "                                                                                ",
     "                                                                                ",
     "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_w80_reader[3] = { 21, 79, 0 };
+static const int cur_w80_reader[3] = { 9, 79, 0 };
 
 static const char *const exp_w80_list_help[] = {
     "  1-3 of 3 message(s) in INBOX (3 unread) [testuser].",

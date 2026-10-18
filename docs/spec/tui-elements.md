@@ -12,7 +12,12 @@ green, `R` red, space default.  The selection of a table (EMAIL-79, libtuikit
 `tui_table`) is a dark blue background (palette 17) with a `>` in column 0:
 `S` bright white text on it, `A` the bold `>`, `n` a green cell kept as bright
 green and bold.  A golden row starting with `~` holds a port number: its digit
-runs are read as `#`.
+runs are read as `#`.  The expectations do not depend on where the work tree
+is (EMAIL-174): a row starting with `%` is compared by its start, and the byte
+`\001` in it stands for any run of characters (the start of a path); a row
+`==` stands for any number of blank rows, the rows after it being compared
+from the bottom of the screen (a status bar); a golden cursor column of `-1`
+is the end of the text of its row.
 
 ## Views
 

@@ -473,6 +473,22 @@ static void record_view(const char *name, PtySession *s) {
     fflush(g_record);
 }
 
+/** Prefix match of a row against a '%' golden row: the byte \001 stands for
+ *  any run of characters (the start of a path, which differs on every
+ *  machine and with the length of the checkout path), every other byte for
+ *  itself.  The pattern may end before the row does. */
+static int match_prefix(const char *s, const char *p) {
+    if (!*p) return 1;
+    if (*p == '\001') {
+        for (const char *q = s;; q++) {
+            if (match_prefix(q, p + 1)) return 1;
+            if (!*q) return 0;
+        }
+    }
+    if (*s != *p) return 0;
+    return match_prefix(s + 1, p + 1);
+}
+
 /** Compare the screen with a picture and a style map, region by region, and
  *  the cursor.  A golden row that is "@@" stands for a block of any number of
  *  screen rows (the path of the message file, which wraps differently on every
@@ -491,6 +507,24 @@ static void check_view(PtySession *s, const char *const exp[],
     int marker = -1;         /* golden row of the first "@@" */
     int i = 0;
     while (i < n) {
+        if (strcmp(exp[i], "==") == 0) {
+            /* Any number of blank rows: the rows after the marker are the
+             * bottom of the screen (a status line), so they are compared
+             * where they are, counted from the last screen row. */
+            int shift = rows_n - n;
+            ASSERT(shift >= offset, "rows after a '==' marker fit below the rows before it");
+            for (int r = i + offset; r <= i + shift; r++) {
+                char row[MAXCOLS * 4 + 4];
+                pty_row_text(s, r, row, sizeof(row));
+                size_t len = strlen(row);
+                while (len > 0 && row[len - 1] == ' ') len--;
+                ASSERT(len == 0, "rows under a '==' marker are blank");
+            }
+            offset = shift;
+            if (marker < 0) marker = i;
+            i++;
+            continue;
+        }
         if (strcmp(exp[i], "@@") == 0) {
             int found = -1;
             for (int r = i + offset; r < ROWS && i + 1 < n; r++) {
@@ -507,7 +541,7 @@ static void check_view(PtySession *s, const char *const exp[],
             continue;
         }
         int j = i;
-        while (j < n && strcmp(exp[j], "@@") != 0) j++;
+        while (j < n && strcmp(exp[j], "@@") != 0 && strcmp(exp[j], "==") != 0) j++;
         const char *srows[ROWS + 1];
         int k = 0;
         for (int r = i; r < j; r++, k++) srows[k] = sty[r];
@@ -523,8 +557,7 @@ static void check_view(PtySession *s, const char *const exp[],
                  * compared (and the style of its row is not). */
                 char row[MAXCOLS * 4 + 4];
                 pty_row_text(s, t + offset, row, sizeof(row));
-                size_t pl = strlen(exp[t] + 1);
-                ASSERT(strncmp(row, exp[t] + 1, pl) == 0,
+                ASSERT(match_prefix(row, exp[t] + 1),
                        "row with a variable path starts as in its picture");
                 t++;
                 continue;

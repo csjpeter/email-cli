@@ -21,6 +21,7 @@
 | 9 | After **D** (trash, if supported): `Moved to Trash`. |
 | 10 | The feedback line is empty on initial load and after **R** / ESC. |
 | 11 | Flag changes are queued (pending flag queue); the feedback appears before the flag change is confirmed by the server. |
+| 12 | With no connection, **D** queues the move to the Trash for the next sync: `Moved to Trash` (the reader says `Moved to Trash (queued, no connection)`). A permanent delete in the Trash cannot be queued and is refused: `No connection: not deleted`; the message stays. |
 
 ---
 

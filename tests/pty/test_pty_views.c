@@ -22,6 +22,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -3770,6 +3771,46 @@ static void test_pending_flags_offline_queue(void) {
     restart_mock();
 }
 
+/* EMAIL-160: with no connection, 'D' must queue the move to the Trash for
+ * the next sync (and say so), not drop the message locally and lose it. */
+static void test_delete_offline_queues_move(void) {
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "offline D: sync opens");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    char pm_path[512];
+    snprintf(pm_path, sizeof(pm_path),
+             "%s/.local/share/email-cli/accounts/testuser/pending_moves/INBOX.tsv",
+             g_test_home);
+    if (unlink(pm_path) != 0 && errno != ENOENT)
+        perror("offline D: unlink stale pending_moves");
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "offline D: tui opens offline");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_screen_contains(s, "Moved to Trash"),
+           "offline D: feedback says the message was moved to Trash");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    ASSERT(access(pm_path, F_OK) == 0,
+           "offline D: pending_moves/INBOX.tsv written for the next sync");
+
+    write_config();
+    restart_mock();
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  VIRTUAL UNREAD / FLAGGED LIST (Ticket 4 + IMAP bug fixes)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -5660,6 +5701,7 @@ int main(int argc, char *argv[]) {
     printf("\n--- pending flags offline queue (US-26) ---\n");
     restart_mock();
     RUN_TEST(test_pending_flags_offline_queue);
+    RUN_TEST(test_delete_offline_queues_move);
 
     printf("\n--- virtual Unread/Flagged list ---\n");
     restart_mock();

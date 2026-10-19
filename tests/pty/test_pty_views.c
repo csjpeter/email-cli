@@ -3644,8 +3644,8 @@ static void test_delete_offline_queues_move(void) {
     ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
     pty_send_str(s, "y");
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_screen_contains(s, "queued"),
-           "offline D: feedback says the move is queued");
+    ASSERT(pty_screen_contains(s, "Moved to Trash"),
+           "offline D: feedback says the message was moved to Trash");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 

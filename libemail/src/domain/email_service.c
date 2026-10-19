@@ -5332,10 +5332,9 @@ char *email_service_list_labels_interactive(const Config *cfg,
                 }
             }
             if (lact == EA_LABEL_DELETE && lbl_count > 0 && !lbl_hdr[cursor]) {
-                /* Delete selected label — use the label name as ID (best effort).
-                 * TODO: use label ID instead of name for Gmail (ID != name for
-                 *       user-defined labels). For IMAP this is correct (name == ID). */
-                const char *del_id = lbl_names[cursor];
+                /* Gmail deletes a label by its id, which differs from the
+                 * name shown for a user label (EMAIL-135). */
+                const char *del_id = lbl_ids[cursor];
                 if (del_id) {
                     email_service_delete_label(cfg, del_id);
                     /* Rebuild display after deletion */

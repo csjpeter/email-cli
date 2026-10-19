@@ -1465,6 +1465,12 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                     local_msg_save(folder, uid, raw, strlen(raw));
                 result = 5;      /* forward this message */
                 goto show_int_done;
+            } else if (ch == 'A') {
+                /* Reply-all: same key as in the list (EMAIL-155). */
+                if (!local_msg_exists(folder, uid))
+                    local_msg_save(folder, uid, raw, strlen(raw));
+                result = 7;      /* reply to all of this message */
+                goto show_int_done;
             } else if (att_count > 0 && ch == 'a') {
                 int sel = 0;
                 if (att_count > 1) {
@@ -3950,6 +3956,13 @@ read_key_again: ;
                     memcpy(opts->action_uid, entries[ei_cur].uid, 17);
                     snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
                     list_result = 3;
+                    goto list_done;
+                }
+                if (ret == 7) {
+                    /* 'A' pressed in reader -> reply to all */
+                    memcpy(opts->action_uid, entries[ei_cur].uid, 17);
+                    snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
+                    list_result = 6;
                     goto list_done;
                 }
                 if (ret == 5) {

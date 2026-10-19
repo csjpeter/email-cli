@@ -367,6 +367,24 @@ its way out finish before it signals it, and then runs
 `tests/functional/gcda_check.sh`, which names every file without the gcov magic,
 removes it so the report can still be made, and fails the run.
 
+**Fault injection (EMAIL-139).**  The failure branches a healthy peer never
+reaches are driven on purpose, in the unit runner:
+
+- `tests/common/fault_alloc.[ch]`: the runner is linked with
+  `-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc`, so `fault_alloc_arm(k)` makes
+  the k-th allocation of product code (not of OpenSSL or libc) fail.  The
+  "every allocation failing in turn" sweeps (`test_fault_injection.c`,
+  `test_store_state.c`, `test_gmail_auth.c`) arm k = 1, 2, ... until a run passes
+  without the failure firing, assert that each injected failure is a clean
+  error return, and rely on the leak checker for the error paths' cleanup.
+  Allocations by `asprintf`, `strdup` and `open_memstream` are libc-internal and
+  are not injectable; those branches stay uncovered by design.
+- `tests/unit/test_fault_injection.c`: a forked loopback peer that resets,
+  stalls, speaks garbage or hangs up (TLS and plain), and a 40 ms `SIGALRM`
+  without `SA_RESTART` to interrupt blocking reads, polls and handshakes
+  (EINTR).  These found that `net_connect()` and `net_close()` could kill the
+  process with SIGPIPE when the server had hung up; both now block it.
+
 **Recorded figures (EMAIL-120).**  Each `./manage.sh coverage` run prints one line
 (`DATE COMMIT unit=… functional=… combined=… functions=…`) and keeps it in
 `build/coverage-summary.txt`; a figure quoted anywhere is such a line, with its

@@ -56,6 +56,8 @@ void test_compose_draft(void);
 void test_path_complete(void);
 void run_json_util_tests(void);
 void test_gmail_auth(void);
+void test_fault_injection(void);
+void test_store_state(void);
 void test_gmail_client(void);
 void test_label_idx(void);
 void test_mail_client(void);
@@ -161,6 +163,8 @@ int main(int argc, char **argv) {
     RUN_TEST(test_path_complete);
     RUN_TEST(run_json_util_tests);
     RUN_TEST(test_gmail_auth);
+    RUN_TEST(test_fault_injection);
+    RUN_TEST(test_store_state);
     RUN_TEST(test_gmail_client);
     RUN_TEST(test_label_idx);
     RUN_TEST(test_mail_client);

@@ -25,6 +25,9 @@ set(UNIT_TEST_PLATFORM_SOURCES
 set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/test_runner.c
     ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c
+    ${CMAKE_SOURCE_DIR}/tests/common/fault_alloc.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_fault_injection.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_store_state.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_platform.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_platform_identity.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_fs_util.c

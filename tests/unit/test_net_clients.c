@@ -317,7 +317,9 @@ typedef enum {
     SM_LOGIN_ONLY,    /* only AUTH LOGIN offered */
     SM_AUTH_FAIL,     /* 535 after AUTH */
     SM_RCPT_FAIL,     /* 550 for RCPT */
-    SM_NO_STARTTLS    /* plain server without STARTTLS */
+    SM_NO_STARTTLS,   /* plain server without STARTTLS */
+    SM_DATA_FAIL,     /* 554 after the message (EMAIL-139) */
+    SM_TLS_DEAD       /* says "go ahead" to STARTTLS and then speaks no TLS (EMAIL-139) */
 } SmtpMode;
 
 typedef struct { int fd; SSL *ssl; } Link;
@@ -368,6 +370,7 @@ static void smtp_session(Link *l, SmtpMode mode, int starttls, SSL_CTX *tctx, in
             ln_say(l, "250 OK\r\n");
         } else if (strncasecmp(line, "STARTTLS", 8) == 0) {
             ln_say(l, "220 go ahead\r\n");
+            if (mode == SM_TLS_DEAD) return;
             l->ssl = SSL_new(tctx);
             SSL_set_fd(l->ssl, l->fd);
             if (SSL_accept(l->ssl) != 1) return;
@@ -394,7 +397,7 @@ static void smtp_session(Link *l, SmtpMode mode, int starttls, SSL_CTX *tctx, in
                 dprintf(rep, "%s\n", line);
             }
             dprintf(rep, "--END--\n");
-            ln_say(l, "250 queued\r\n");
+            ln_say(l, mode == SM_DATA_FAIL ? "554 5.7.1 rejected as spam\r\n" : "250 queued\r\n");
         } else if (strncasecmp(line, "QUIT", 4) == 0) {
             ln_say(l, "221 bye\r\n");
             return;
@@ -523,6 +526,25 @@ static void test_smtp_rejections(void)
     ASSERT(strstr(t, "--DATA--") == NULL, "and no message is sent");
 }
 
+static void test_smtp_message_refused_after_data(void)
+{
+    char t[4096];
+    ASSERT(smtp_case(SM_DATA_FAIL, 1, 1, "user1", "Subject: x\r\n\r\nb\r\n", t, sizeof(t)) == -1,
+           "a message refused after the final dot fails the send");
+    ASSERT(strstr(g_smtp_why, "did not accept the message") != NULL && strstr(g_smtp_why, "554") != NULL,
+           "the reason carries the server's code");
+    ASSERT(g_smtp_stderr[0] == '\0', "and nothing is printed");
+}
+
+static void test_smtp_starttls_that_never_starts(void)
+{
+    char t[4096];
+    ASSERT(smtp_case(SM_TLS_DEAD, 0, 1, "user1", "Subject: x\r\n\r\nb\r\n", t, sizeof(t)) == -1,
+           "a server that accepts STARTTLS and then speaks no TLS fails the send");
+    ASSERT(g_smtp_why[0] != '\0' && strstr(t, "--DATA--") == NULL,
+           "with a reason, and no message was sent in the clear");
+}
+
 static void test_smtp_starttls(void)
 {
     char t[4096];
@@ -605,6 +627,8 @@ void test_net_clients(void)
     RUN_TEST(test_smtp_implicit_tls_with_auth_plain);
     RUN_TEST(test_smtp_auth_login_fallback);
     RUN_TEST(test_smtp_rejections);
+    RUN_TEST(test_smtp_message_refused_after_data);
+    RUN_TEST(test_smtp_starttls_that_never_starts);
     RUN_TEST(test_smtp_starttls);
     RUN_TEST(test_smtp_dot_stuffing_and_line_ends);
     RUN_TEST(test_smtp_verifies_the_certificate);

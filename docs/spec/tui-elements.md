@@ -172,3 +172,29 @@ the behaviour is in `test_resize_*`, `test_start_below_minimum_shows_notice`
 and `test_body_editor_resize_and_too_small`.  The single-line editor is
 drawn again at once at the new width (EMAIL-109: the text scrolls so that the
 cursor stays visible; `test_resize_redraws_the_line`).
+
+## Keys that change state (EMAIL-175)
+
+Policy: `policies/tui-interface-model.md`, "Actions that change state: the
+action menu".  The keys of the message list, the message reader, the Gmail
+label browser and the review screen are rows of one libtuikit key table
+(`libemail/src/core/key_table.c`).  The key handler asks the table
+(`ekeys_find`), the help overlay is made from it (`ekeys_help`) and `:` opens
+the menu of the view (`ekeys_menu`); the table is validated when `email-tui`
+starts and the program refuses to start with a table that breaks the policy.
+
+| Key | Action | Class |
+|---|---|---|
+| `*` | toggle the star | routine, at once |
+| `+` / `-` | mark read / unread | routine, at once |
+| `!` | toggle junk | routine, at once |
+| `d`, `Delete` | move to Trash (for good in Trash) | serious: a dialog names sender and subject, default No |
+| `t` | Gmail label picker | routine |
+| `:` | the action menu | lists every state-changing action |
+
+These act on the marked rows, or on the row under the cursor.  In the `:` menu
+only: start a sync (a dialog names the account and folder), send (review
+screen; names the recipients), delete a label (names it), create a label,
+archive, restore from Trash, remove a label, add/remove a named label, move,
+toggle Done, save all attachments.  `j`/`k` move on every list; `h` is not a
+help key; Esc in the compose dialog asks before it discards typed text.

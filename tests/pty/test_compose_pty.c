@@ -25,6 +25,17 @@
 #include <arpa/inet.h>
 #include <errno.h>
 
+/* EMAIL-175: sending is in the review screen's ':' menu (row 0) and asks
+ * first, naming the recipients; removing the last attachment is row 2. */
+#define REVIEW_SEND(s) do { pty_send_str((s), ":"); \
+    pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
+    pty_send_key((s), PTY_KEY_ENTER); \
+    pty_wait_for((s), "Yes", 8000); pty_send_str((s), "y"); } while (0)
+#define REVIEW_UNATTACH(s) do { pty_send_str((s), ":"); \
+    pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
+    pty_send_key((s), PTY_KEY_DOWN); pty_send_key((s), PTY_KEY_DOWN); \
+    pty_send_key((s), PTY_KEY_ENTER); } while (0)
+
 /* ── Test infrastructure ─────────────────────────────────────────────── */
 
 #define COLS 120
@@ -303,7 +314,7 @@ static void test_compose_editor_send(void) {
     compose_fill_dialog(s, "recipient@example.com", "PTY test subject");
     ASSERT(pty_editor_type_and_leave(s, "Hello from editor mock test") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
-    pty_send_str(s, "s");
+    REVIEW_SEND(s);
     ASSERT_WAIT_FOR(s, "Message sent", WAIT_MS);
     pty_close(s);
 }
@@ -353,7 +364,7 @@ static void test_compose_sent_folder(void) {
     compose_fill_dialog(s, "recipient@example.com", "Sent folder test");
     ASSERT(pty_editor_type_and_leave(s, "Body for sent folder test") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
-    pty_send_str(s, "s");
+    REVIEW_SEND(s);
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
     pty_close(s);
 }

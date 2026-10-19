@@ -53,6 +53,7 @@ void test_html_render_url_isolation(void);
 void test_html_render_url_color(void);
 void test_input_line(void);
 void test_tui_frame(void);
+void test_key_table(void);
 void test_compose_draft(void);
 void test_path_complete(void);
 void run_json_util_tests(void);
@@ -159,6 +160,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_html_render_url_color);
     RUN_TEST(test_input_line);
     RUN_TEST(test_tui_frame);
+    RUN_TEST(test_key_table);
     RUN_TEST(test_compose_draft);
     RUN_TEST(test_path_complete);
     RUN_TEST(run_json_util_tests);

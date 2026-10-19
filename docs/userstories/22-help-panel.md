@@ -1,7 +1,7 @@
 # US-22 — Context-Sensitive Help Panel
 
 **As a** user who is unsure which keys are available in the current view,
-**I want to** press `h` or `?` in any view and see a popup listing all shortcuts,
+**I want to** press `?` in any view and see a popup listing all shortcuts,
 **so that** I can discover and use keyboard commands without leaving the application.
 
 ---
@@ -10,7 +10,7 @@
 
 | # | Criterion |
 |---|-----------|
-| 1 | Pressing `h` or `?` in any TUI view opens a two-column help overlay. |
+| 1 | Pressing `?` (not `h`) in any TUI view opens a two-column help overlay. |
 | 2 | The overlay is displayed centred over the current view without destroying it. |
 | 3 | The overlay title identifies the current view (e.g. "Message list shortcuts"). |
 | 4 | The left column shows the key name; the right column shows a short description. |
@@ -32,7 +32,7 @@
 | d | Delete selected account |
 | e | Edit SMTP settings |
 | ESC / q | Quit |
-| h / ? | Show this help |
+| ? | Show this help |
 
 ### Folder browser
 
@@ -44,7 +44,7 @@
 | t | Toggle tree / flat view |
 | Backspace | Go up one level (or back to accounts) |
 | ESC / q | Quit |
-| h / ? | Show this help |
+| ? | Show this help |
 
 ### Message list
 
@@ -62,7 +62,7 @@
 | R | Refresh after sync |
 | Backspace | Open folder browser |
 | ESC / q | Quit |
-| h / ? | Show this help |
+| ? | Show this help |
 
 ### Message reader
 
@@ -75,7 +75,7 @@
 | A | Save all attachments |
 | Backspace | Back to message list |
 | ESC / q | Back to message list |
-| h / ? | Show this help |
+| ? | Show this help |
 
 ---
 

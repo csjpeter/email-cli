@@ -5612,12 +5612,25 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             cursor = count > 0 ? count - 1 : 0;
             ACC_FREE(); continue;
         }
-        if (key == TERM_KEY_NEXT_LINE || key == TERM_KEY_NEXT_PAGE) {
+        if (key == TERM_KEY_NEXT_LINE) {
             if (cursor < count - 1) cursor++;
             ACC_FREE(); continue;
         }
-        if (key == TERM_KEY_PREV_LINE || key == TERM_KEY_PREV_PAGE) {
+        if (key == TERM_KEY_PREV_LINE) {
             if (cursor > 0) cursor--;
+            ACC_FREE(); continue;
+        }
+        /* EMAIL-159: PgDn/PgUp move by the visible rows, as in the other lists */
+        if (key == TERM_KEY_NEXT_PAGE) {
+            int page = (trows > 5) ? trows - 5 : 3;
+            cursor += page;
+            if (cursor > count - 1) cursor = count > 0 ? count - 1 : 0;
+            ACC_FREE(); continue;
+        }
+        if (key == TERM_KEY_PREV_PAGE) {
+            int page = (trows > 5) ? trows - 5 : 3;
+            cursor -= page;
+            if (cursor < 0) cursor = 0;
             ACC_FREE(); continue;
         }
         if (key == TERM_KEY_ENTER && count > 0) {

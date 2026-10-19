@@ -447,6 +447,30 @@ int email_service_trash(const Config *cfg, const char *uid, const char *folder);
 int email_service_archive(const Config *cfg, const char *uid, const char *folder);
 
 /**
+ * @brief The forward composition shared by the TUI ('F') and `email-cli
+ *        forward`: the subject "Fwd: <original>" and a body made of @p note
+ *        (may be NULL), a "--- Forwarded message ---" header (From, Date) and
+ *        the original text.
+ * @param raw  The original message, raw.
+ * @param subject_out,body_out  Set on success; release with free().
+ * @return 0 on success, -1 on error.
+ */
+int email_service_forward_compose(const char *raw, const char *note,
+                                  char **subject_out, char **body_out);
+
+/**
+ * @brief Forward a message (`email-cli forward`): compose as above, send it
+ *        to @p to (and @p cc), save it to Sent and set the original's
+ *        $Forwarded flag.
+ * @param folder  Folder the message is in; NULL = the account's.
+ * @param cc,note May be NULL.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_forward(const Config *cfg, const char *uid,
+                          const char *folder, const char *to, const char *cc,
+                          const char *note);
+
+/**
  * @brief Mark a message as not-junk/ham ($NotJunk / remove Gmail SPAM).
  * @return 0 on success, -1 on error.
  */

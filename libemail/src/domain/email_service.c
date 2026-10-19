@@ -7177,6 +7177,9 @@ int email_service_set_flag(const Config *cfg, const char *uid,
     } else if (flag_bit == MSG_FLAG_DONE) {
         flag_name = "$Done";
         imap_add  = add;
+    } else if (flag_bit == MSG_FLAG_FORWARDED) {
+        flag_name = "$Forwarded";
+        imap_add  = add;
     } else {
         fprintf(stderr, "Error: Unknown flag bit %d.\n", flag_bit);
         return -1;
@@ -7575,6 +7578,151 @@ int email_service_delete_folder(const Config *cfg, const char *name) {
 
     if (rc == 0)
         printf("Folder '%s' deleted.\n", name);
+    return rc;
+}
+
+/* ── Forward (the TUI's 'F', EMAIL-134) ───────────────────────────────── */
+
+int email_service_forward_compose(const char *raw, const char *note,
+                                  char **subject_out, char **body_out) {
+    if (!raw || !subject_out || !body_out) return -1;
+    *subject_out = NULL;
+    *body_out = NULL;
+
+    char *subj_raw = mime_get_header(raw, "Subject");
+    char *subj_dec = subj_raw ? mime_decode_words(subj_raw) : strdup("");
+    free(subj_raw);
+    size_t slen = strlen("Fwd: ") + (subj_dec ? strlen(subj_dec) : 0) + 1;
+    char *subject = malloc(slen);
+    if (!subject) { free(subj_dec); return -1; }
+    snprintf(subject, slen, "Fwd: %s", subj_dec ? subj_dec : "");
+    free(subj_dec);
+
+    char *body_text = NULL;
+    char *html_raw = mime_get_html_part(raw);
+    if (html_raw) {
+        body_text = html_render(html_raw, 72, 0);
+        free(html_raw);
+    }
+    if (!body_text) body_text = mime_get_text_body(raw);
+
+    char *from_raw = mime_get_header(raw, "From");
+    char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;
+    free(from_raw);
+    char *date_raw = mime_get_header(raw, "Date");
+    char *date_fmt = date_raw ? mime_format_date(date_raw) : NULL;
+    free(date_raw);
+
+    const char *n = note ? note : "";
+    size_t qcap = 4096 + strlen(n) + (body_text ? strlen(body_text) * 2 : 0);
+    char *quoted = malloc(qcap);
+    if (quoted) {
+        int off = snprintf(quoted, qcap,
+                           "%s\n\n--- Forwarded message ---\nFrom: %s\nDate: %s\n\n",
+                           n, from_dec ? from_dec : "?",
+                           date_fmt ? date_fmt : "?");
+        if (body_text && off > 0) {
+            int rest = (int)strlen(body_text);
+            if (off + rest < (int)qcap - 1) {
+                memcpy(quoted + off, body_text, (size_t)rest);
+                off += rest;
+                quoted[off] = '\0';
+            }
+        }
+    }
+    free(from_dec);
+    free(date_fmt);
+    free(body_text);
+    if (!quoted) { free(subject); return -1; }
+    *subject_out = subject;
+    *body_out = quoted;
+    return 0;
+}
+
+int email_service_forward(const Config *cfg, const char *uid,
+                          const char *folder, const char *to, const char *cc,
+                          const char *note) {
+    if (!to || !to[0]) {
+        fprintf(stderr, "Error: forward requires a recipient (--to).\n");
+        return -1;
+    }
+    const char *use_folder = folder ? folder
+                           : (cfg->folder ? cfg->folder : "INBOX");
+    local_store_init(cfg->host, cfg->user);
+
+    char *raw = NULL;
+    if (local_msg_exists(use_folder, uid)) {
+        raw = local_msg_load(use_folder, uid);
+    } else {
+        Config tmp = *cfg;
+        tmp.folder = (char *)use_folder;
+        raw = load_raw_message(&tmp, uid);
+    }
+    if (!raw) {
+        fprintf(stderr, "Error: Could not load message UID %s.\n", uid);
+        return -1;
+    }
+
+    char *subject = NULL, *body = NULL;
+    int rc = email_service_forward_compose(raw, note, &subject, &body);
+    free(raw);
+    if (rc != 0) {
+        fprintf(stderr, "Error: Failed to build the forwarded message.\n");
+        return -1;
+    }
+
+    const char *from = cfg->smtp_user ? cfg->smtp_user : cfg->user;
+    emc_message p = {.from = from, .to = to, .cc = cc,
+                     .subject = subject, .body = body};
+    char *msg = NULL;
+    size_t msg_len = 0;
+    if (mail_compose(&p, &msg, &msg_len) != 0) {
+        fprintf(stderr, "Error: Failed to build message.\n");
+        free(subject); free(body);
+        return -1;
+    }
+    free(subject); free(body);
+
+    /* Every recipient, To and Cc.  The SMTP adapter takes one envelope
+     * recipient per session, so an IMAP account sends the same message once
+     * per address; the Gmail API takes the recipients from the headers, so
+     * one call is enough. */
+    char rcpt[2048];
+    snprintf(rcpt, sizeof(rcpt), "%s%s%s", to,
+             (cc && cc[0]) ? "," : "", (cc && cc[0]) ? cc : "");
+    if (cfg->gmail_mode) {
+        rc = mail_send_wire(cfg, from, to, msg, msg_len);
+    } else {
+        rc = -1;
+        int sent = 0;
+        char *save = NULL;
+        for (char *tok = strtok_r(rcpt, ",", &save); tok;
+             tok = strtok_r(NULL, ",", &save)) {
+            while (*tok == ' ' || *tok == '\t') tok++;
+            char *lt = strchr(tok, '<');
+            char *gt = lt ? strchr(lt, '>') : NULL;
+            if (lt && gt) { tok = lt + 1; *gt = '\0'; }
+            else {
+                size_t n = strlen(tok);
+                while (n > 0 && (tok[n-1] == ' ' || tok[n-1] == '\t')) tok[--n] = '\0';
+            }
+            if (!tok[0]) continue;
+            rc = mail_send_wire(cfg, from, tok, msg, msg_len);
+            if (rc != 0) break;
+            sent++;
+        }
+        if (sent == 0) rc = -1;
+    }
+    if (rc == 0) {
+        printf("Message forwarded.\n");
+        if (email_service_save_sent(cfg, msg, msg_len) == 0)
+            printf("Saved.\n");
+        else
+            fprintf(stderr, "(Could not save to Sent folder - "
+                    "check EMAIL_SENT_FOLDER in config.)\n");
+        email_service_set_flag(cfg, uid, use_folder, MSG_FLAG_FORWARDED, 1);
+    }
+    free(msg);
     return rc;
 }
 

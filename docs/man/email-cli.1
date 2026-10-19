@@ -65,6 +65,9 @@ Move a message to the trash (IMAP: the trash folder; Gmail: the TRASH label); a 
 .BI archive " uid" "\fR [\fP\-\-folder " folder "\fR]\fP"
 Archive a message (IMAP: move to the archive folder, ARCHIVE_FOLDER, default Archive; Gmail: remove its labels and mark it read).
 .TP
+.BI forward " uid" " \-\-to " addr "\fR [\fP\-\-cc " addr "\fR] [\fP\-\-body " text "\fR] [\fP\-\-folder " folder "\fR]\fP"
+Forward a message (the TUI's F): sends "Fwd: subject" with the original included, saves a copy in Sent and flags the original forwarded.
+.TP
 .BI add\-label " uid label" "\fR, \fP" remove\-label " uid label"
 Gmail: add or remove a label.
 .TP

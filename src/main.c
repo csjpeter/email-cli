@@ -64,6 +64,7 @@ static void help_general(void) {
         "  mark-notjunk <uid>          Mark a message as not-junk (ham)\n"
         "  trash <uid>                 Move a message to the trash\n"
         "  archive <uid>               Archive a message\n"
+        "  forward <uid> --to <addr>   Forward a message\n"
         "\n"
         "\n"
         "Finding messages (see 'email-cli help list' for details):\n"
@@ -687,6 +688,30 @@ static void help_trash(void) {
     );
 }
 
+static void help_forward(void) {
+    printf(
+        "Usage: email-cli forward <uid> --to <addr> [--cc <addr>] [--body <text>]\n"
+        "                         [--folder <folder>]\n"
+        "\n"
+        "Forwards a message (the TUI's 'F'): sends \"Fwd: <subject>\" with the\n"
+        "original From, Date and text included, saves a copy in the Sent folder\n"
+        "and flags the original $Forwarded.\n"
+        "\n"
+        "  <uid>              Message UID (decimal or 16-char hex)\n"
+        "  --to <addr>        Recipient(s), comma separated (required)\n"
+        "  --cc <addr>        Cc recipient(s)\n"
+        "  --body <text>      A note placed above the forwarded message\n"
+        "  --folder <folder>  Folder (IMAP) or label (Gmail) the message is in;\n"
+        "                     default: the account's folder\n"
+        "\n"
+        "SMTP settings must be configured (run 'email-cli config smtp').\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli forward 12345 --to friend@example.org\n"
+        "  email-cli forward 12345 --to a@example.org --body \"FYI\" --folder INBOX\n"
+    );
+}
+
 static void help_mark_notjunk(void) {
     printf(
         "Usage: email-cli mark-notjunk <uid>\n"
@@ -878,6 +903,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "mark-junk")       == 0) { help_mark_junk();       return EXIT_SUCCESS; }
                 if (strcmp(cmd, "trash")           == 0 ||
                     strcmp(cmd, "archive")         == 0) { help_trash();          return EXIT_SUCCESS; }
+                if (strcmp(cmd, "forward")         == 0) { help_forward();         return EXIT_SUCCESS; }
                 if (strcmp(cmd, "mark-notjunk")    == 0) { help_mark_notjunk();    return EXIT_SUCCESS; }
                 if (strcmp(cmd, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
                 if (strcmp(cmd, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
@@ -931,6 +957,7 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "mark-junk")       == 0) { help_mark_junk();       return EXIT_SUCCESS; }
             if (strcmp(topic, "trash")           == 0 ||
                 strcmp(topic, "archive")         == 0) { help_trash();          return EXIT_SUCCESS; }
+            if (strcmp(topic, "forward")         == 0) { help_forward();         return EXIT_SUCCESS; }
             if (strcmp(topic, "mark-notjunk")    == 0) { help_mark_notjunk();    return EXIT_SUCCESS; }
             if (strcmp(topic, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
             if (strcmp(topic, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
@@ -1678,6 +1705,45 @@ int main(int argc, char *argv[]) {
                     result = email_service_trash(cfg, uid, folder);
                 else
                     result = email_service_archive(cfg, uid, folder);
+            }
+        }
+
+    } else if (strcmp(cmd, "forward") == 0) {
+        const char *uid_str = NULL, *folder = NULL;
+        const char *to = NULL, *cc = NULL, *note = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            const char *opt = argv[i];
+            const char **dst = NULL;
+            const char *what = NULL;
+            if      (strcmp(opt, "--to")     == 0) { dst = &to;     what = "an address"; }
+            else if (strcmp(opt, "--cc")     == 0) { dst = &cc;     what = "an address"; }
+            else if (strcmp(opt, "--body")   == 0) { dst = &note;   what = "text"; }
+            else if (strcmp(opt, "--folder") == 0) { dst = &folder; what = "a folder name"; }
+            if (dst) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: %s requires %s.\n", opt, what); ok = 0;
+                } else *dst = argv[++i];
+            } else if (!uid_str && opt[0] != '-') {
+                uid_str = opt;
+            } else {
+                unknown_option(cmd, opt); ok = 0;
+            }
+        }
+        if (ok) {
+            if (!uid_str) {
+                fprintf(stderr, "Error: 'forward' requires a UID argument.\n");
+                help_forward();
+            } else if (!to || !to[0]) {
+                fprintf(stderr, "Error: --to is required.\n");
+                help_forward();
+            } else {
+                char uid[17];
+                if (parse_uid(uid_str, uid) != 0)
+                    fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
+                else
+                    result = email_service_forward(cfg, uid, folder, to, cc, note);
             }
         }
 

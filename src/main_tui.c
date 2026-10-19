@@ -1519,56 +1519,17 @@ static int cmd_forward(Config *cfg, const char *uid, const char *folder) {
         return -1;
     }
 
-    /* Build "Fwd: " subject */
-    char *subj_raw = mime_get_header(raw, "Subject");
-    char *subj_dec = subj_raw ? mime_decode_words(subj_raw) : strdup("");
-    free(subj_raw);
-    char fwd_subject[512];
-    snprintf(fwd_subject, sizeof(fwd_subject), "Fwd: %s", subj_dec ? subj_dec : "");
-    free(subj_dec);
-
-    /* Build quoted body (attribution without "> " prefix — just inline) */
-    char *body_text = NULL;
-    {
-        char *html_raw = mime_get_html_part(raw);
-        if (html_raw) {
-            body_text = html_render(html_raw, 72, 0);
-            free(html_raw);
-        }
-        if (!body_text)
-            body_text = mime_get_text_body(raw);
-    }
-
-    char *quoted = NULL;
-    {
-        char *from_raw = mime_get_header(raw, "From");
-        char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;
-        free(from_raw);
-        char *date_raw = mime_get_header(raw, "Date");
-        char *date_fmt = date_raw ? mime_format_date(date_raw) : NULL;
-        free(date_raw);
-
-        size_t qcap = 4096 + (body_text ? strlen(body_text) * 2 : 0);
-        quoted = malloc(qcap);
-        if (quoted) {
-            int off = snprintf(quoted, qcap,
-                               "\n\n--- Forwarded message ---\nFrom: %s\nDate: %s\n\n",
-                               from_dec ? from_dec : "?",
-                               date_fmt ? date_fmt : "?");
-            if (body_text && off > 0) {
-                int rest = (int)strlen(body_text);
-                if (off + rest < (int)qcap - 1) {
-                    memcpy(quoted + off, body_text, (size_t)rest);
-                    off += rest;
-                    quoted[off] = '\0';
-                }
-            }
-        }
-        free(from_dec);
-        free(date_fmt);
-    }
-    free(body_text);
+    /* The composition is shared with `email-cli forward` (EMAIL-134). */
+    char *fwd_subj = NULL, *quoted = NULL;
+    int crc = email_service_forward_compose(raw, NULL, &fwd_subj, &quoted);
     free(raw);
+    if (crc != 0) {
+        fprintf(stderr, "Error: Could not compose the forward of UID %s.\n", uid);
+        return -1;
+    }
+    char fwd_subject[512];
+    snprintf(fwd_subject, sizeof(fwd_subject), "%s", fwd_subj);
+    free(fwd_subj);
 
     /* Show dialog with empty To, prefilled Subject */
     CDResult dlg = {0};

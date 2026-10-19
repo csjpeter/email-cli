@@ -319,7 +319,8 @@ static void handle_labels(int fd) {
     const char *user =
         ",{\"id\":\"Work\",\"name\":\"Work\",\"type\":\"user\"},"
         "{\"id\":\"Personal\",\"name\":\"Personal\",\"type\":\"user\"},"
-        "{\"id\":\"Label_Empty1\",\"name\":\"Empty Label\",\"type\":\"user\"}";
+        "{\"id\":\"Label_Empty1\",\"name\":\"Empty Label\",\"type\":\"user\"},"
+        "{\"id\":\"Label_Fail1\",\"name\":\"Fail Label\",\"type\":\"user\"}";
     char body[2048];
     snprintf(body, sizeof(body), "%s%s]}", sys, getenv("MOCK_GMAIL_NO_USER_LABELS") ? "" : user);
     send_json(fd, body);
@@ -597,6 +598,13 @@ static void handle_connection(int fd) {
     if (strstr(path, "/labels")) {
         /* DELETE /labels/{id} — delete a specific label */
         if (strstr(path, "/labels/") && strcmp(method, "DELETE") == 0) {
+            if (strstr(path, "/labels/Label_Fail1")) {   /* a delete that fails */
+                const char *resp =
+                    "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n"
+                    "Connection: close\r\n\r\n";
+                ssize_t r = write(fd, resp, strlen(resp)); (void)r;
+                return;
+            }
             send_json(fd, "{}");
             return;
         }

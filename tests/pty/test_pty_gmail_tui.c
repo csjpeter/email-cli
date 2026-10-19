@@ -722,6 +722,30 @@ static void test_label_browser_delete_label_uses_id(void) {
     pty_close(s);
 }
 
+/** EMAIL-161: a delete the server refuses is reported on the status line. */
+static void test_label_browser_delete_failure_is_shown(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label delete fail: reaches the label list");
+    if (!s) return;
+    int row = find_row(s, "Fail Label");
+    ASSERT(row >= 0, "label delete fail: Fail Label is listed");
+    for (int i = 0; row >= 0 && i < 30 && !on_cursor_row(s, row); i++) {
+        int cur = -1;
+        for (int r = 0; r < ROWS && cur < 0; r++)
+            if (on_cursor_row(s, r)) cur = r;
+        pty_send_key(s, cur > row ? PTY_KEY_UP : PTY_KEY_DOWN);
+        pty_settle(s, 100);
+    }
+    gm_menu_pick(s, 1);
+    ASSERT_WAIT_FOR(s, "Delete the label Fail Label", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Could not delete the label Fail Label", WAIT_MS);
+    ASSERT(mock_log_count("DELETE /gmail/v1/users/me/labels/Label_Fail1") == 1,
+           "label delete fail: the DELETE was sent for the id");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  TEST: 'a' key → row has yellow marker 'd' (immediate feedback)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -2506,6 +2530,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_label_browser_create_label_prompt);
     RUN_TEST(test_label_browser_create_label_confirmed);
     RUN_TEST(test_label_browser_delete_label_uses_id);
+    RUN_TEST(test_label_browser_delete_failure_is_shown);
 
     printf("--- Fresh sync (test 2) ---\n");
     if (reset_and_sync() != 0) {

@@ -48,6 +48,7 @@ recorded weakness, not coverage of the promise.
 | `email-cli mark-starred` | F:124.6 | |
 | `email-cli mark-unread` | F:124.4 | |
 | `email-cli migrate-credentials` | F:122.26 | |
+| `email-cli move` | F:124.29 | |
 | `email-cli remove-account` | F:122.22 | |
 | `email-cli remove-label` | F:124.24 | |
 | `email-cli remove-starred` | F:124.8 | |

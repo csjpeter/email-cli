@@ -424,6 +424,21 @@ int email_service_create_label(const Config *cfg, const char *name);
 int email_service_delete_label(const Config *cfg, const char *label_id);
 
 /**
+ * @brief Move a message to another folder (IMAP) or label (Gmail).
+ *
+ * IMAP: selects the source mailbox, copies the message to @p target and
+ * removes it from the source (also from the local manifest).
+ * Gmail: adds the label @p target and removes the source label.
+ *
+ * @param uid     16-char padded UID string.
+ * @param folder  Source mailbox (NULL = cfg->folder, else INBOX).
+ * @param target  Destination folder / label.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_move(const Config *cfg, const char *uid,
+                       const char *folder, const char *target);
+
+/**
  * @brief Mark a message as junk/spam ($Junk / Gmail SPAM).
  * @return 0 on success, -1 on error.
  */

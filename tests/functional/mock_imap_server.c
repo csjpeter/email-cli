@@ -23,6 +23,7 @@
  *   MOCK_IMAP_PORT_FILE - file the bound port is written to
  *   MOCK_IMAP_SUBJECT - Subject returned in FETCH responses (default "Test Message")
  *   MOCK_IMAP_COUNT   - Number of messages to simulate (default 1, backward compat)
+ *   MOCK_IMAP_ATTACHMENTS - Attachments per message, 0..30 (default 2)
  *   MOCK_IMAP_TO, MOCK_IMAP_CC - recipients written into the plain-text messages
  *
  * Launching two instances with different ports and subjects allows testing
@@ -39,6 +40,7 @@
 static int         g_port       = 0;
 static const char *g_subject    = "Test Message";
 static int         g_count      = 1;
+static int         g_attachments = 2;   /* MOCK_IMAP_ATTACHMENTS */
 static const char *g_msg_prefix = "Message"; /* MOCK_IMAP_MSG_PREFIX */
 static const char *g_long_url   = NULL;      /* MOCK_IMAP_LONG_URL */
 static const char *g_dmarc      = NULL;  /* MOCK_IMAP_DMARC: "pass" / "fail" / NULL */
@@ -396,6 +398,26 @@ static char *build_legacy_content(int is_header, const char **section_out) {
              "\r\n",
              g_subject, g_rcpt_hdr, ar_hdr);
 
+    /* The attachments: notes.txt, data.bin, then extraNN.bin up to
+     * MOCK_IMAP_ATTACHMENTS (default 2, 0 for none). */
+    char att_parts[8192];
+    att_parts[0] = '\0';
+    for (int ai = 0; ai < g_attachments; ai++) {
+        const char *an = ai == 0 ? "notes.txt" : ai == 1 ? "data.bin" : NULL;
+        const char *at = ai == 0 ? "text/plain" : "application/octet-stream";
+        const char *ad = ai == 0 ? "SGVsbG8gV29ybGQ=" : "dGVzdCBkYXRh";
+        char nbuf[32];
+        if (!an) { snprintf(nbuf, sizeof(nbuf), "extra%02d.bin", ai); an = nbuf; }
+        size_t used = strlen(att_parts);
+        snprintf(att_parts + used, sizeof(att_parts) - used,
+                 "--B001\r\n"
+                 "Content-Type: %s; name=\"%s\"\r\n"
+                 "Content-Disposition: attachment; filename=\"%s\"\r\n"
+                 "Content-Transfer-Encoding: base64\r\n"
+                 "\r\n"
+                 "%s\r\n", at, an, an, ad);
+    }
+
     char *full_msg = NULL;
     if (asprintf(&full_msg,
                  "From: =?UTF-8?Q?Test_User?= <test@example.com>\r\n"
@@ -442,21 +464,9 @@ static char *build_legacy_content(int is_header, const char **section_out) {
                  "<a href=\"https://click.example.com/test\">Click here</a>"
                  "</body>"
                  "</html>\r\n"
-                 "--B001\r\n"
-                 /* base64 attachment — exercises decode_transfer() base64 path */
-                 "Content-Type: text/plain; name=\"notes.txt\"\r\n"
-                 "Content-Disposition: attachment; filename=\"notes.txt\"\r\n"
-                 "Content-Transfer-Encoding: base64\r\n"
-                 "\r\n"
-                 "SGVsbG8gV29ybGQ=\r\n"
-                 "--B001\r\n"
-                 "Content-Type: application/octet-stream; name=\"data.bin\"\r\n"
-                 "Content-Disposition: attachment; filename=\"data.bin\"\r\n"
-                 "Content-Transfer-Encoding: base64\r\n"
-                 "\r\n"
-                 "dGVzdCBkYXRh\r\n"
+                 "%s"
                  "--B001--\r\n",
-                 g_subject, g_rcpt_hdr) == -1)
+                 g_subject, g_rcpt_hdr, att_parts) == -1)
         return NULL;
 
     if (is_header) {
@@ -891,6 +901,8 @@ int main(void) {
     if (subj_env && subj_env[0]) g_subject = subj_env;
     const char *count_env = getenv("MOCK_IMAP_COUNT");
     if (count_env && atoi(count_env) > 0) g_count = atoi(count_env);
+    const char *att_env = getenv("MOCK_IMAP_ATTACHMENTS");
+    if (att_env && atoi(att_env) >= 0 && atoi(att_env) <= 30) g_attachments = atoi(att_env);
     const char *prefix_env = getenv("MOCK_IMAP_MSG_PREFIX");
     if (prefix_env && prefix_env[0]) g_msg_prefix = prefix_env;
     const char *long_url_env = getenv("MOCK_IMAP_LONG_URL");

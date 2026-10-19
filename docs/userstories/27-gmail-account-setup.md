@@ -19,6 +19,7 @@
 | 7 | If the user cancels (`^C`) during the authorization, no partial config is saved. |
 | 8 | Built-in OAuth2 `client_id` / `client_secret` are compiled into the binary; users may override via config fields `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET`. |
 | 9 | If a refresh token expires or is revoked (`invalid_grant`), the failure names `email-cli config reauth`; the flow is not started automatically. |
+| 10 | In `email-tui`, `:` on the accounts screen with a Gmail account under the cursor opens its action menu; "Renew the authorization..." asks for the way (`b` browser, `l` address only, `p` paste), runs the flow of `config reauth` on the plain terminal, announces the wait (`^C` cancels it), and on success stores the token and tests it. A refusal or a cancel leaves the account unchanged (EMAIL-130). |
 
 ---
 

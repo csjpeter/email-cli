@@ -45,6 +45,7 @@ typedef enum {
     EA_SEND,          /**< menu: send the message                           */
     EA_UNATTACH,      /**< menu: remove the last attachment of the draft    */
     EA_EDIT_HEADERS,  /**< 'e'  edit the headers of the draft               */
+    EA_REAUTH,        /**< menu: renew a Gmail account's authorization (EMAIL-130) */
     EA_COUNT
 } EmailAction;
 
@@ -55,6 +56,9 @@ typedef enum {
 #define EKV_READ_GMAIL  "reader-gmail"
 #define EKV_LABELS      "labels"
 #define EKV_REVIEW      "review"
+/** The accounts screen with a Gmail account under the cursor: its ":" menu
+ *  holds the renewal of the authorization. */
+#define EKV_ACCOUNTS_GMAIL "accounts-gmail"
 
 /**
  * @brief Validates the table (once).  A program calls it at start and exits

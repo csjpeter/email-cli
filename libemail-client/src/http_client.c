@@ -235,30 +235,38 @@ int http_request(const HttpRequest *req, long *status, char **body_out,
     if (u.port == default_port) snprintf(hostline, sizeof(hostline), "%s", u.host);
     else snprintf(hostline, sizeof(hostline), "%s:%d", u.host, u.port);
     char tmp[128];
-    buf_add(&head, req->method, strlen(req->method));
-    buf_add(&head, " ", 1);
-    buf_add(&head, u.path, strlen(u.path));
-    buf_add(&head, " HTTP/1.1\r\nHost: ", 17);
-    buf_add(&head, hostline, strlen(hostline));
+    int herr = 0;                /* any failed append: the request is incomplete */
+    herr |= buf_add(&head, req->method, strlen(req->method));
+    herr |= buf_add(&head, " ", 1);
+    herr |= buf_add(&head, u.path, strlen(u.path));
+    herr |= buf_add(&head, " HTTP/1.1\r\nHost: ", 17);
+    herr |= buf_add(&head, hostline, strlen(hostline));
     static const char fixed[] = "\r\nUser-Agent: libemail-client\r\nAccept: */*\r\n"
                                 "Accept-Encoding: identity\r\nConnection: close\r\n";
-    buf_add(&head, fixed, sizeof(fixed) - 1);
+    herr |= buf_add(&head, fixed, sizeof(fixed) - 1);
     int has_len = 0;
     for (const char *const *h = req->headers; h && *h; h++) {
-        buf_add(&head, *h, strlen(*h));
-        buf_add(&head, "\r\n", 2);
+        herr |= buf_add(&head, *h, strlen(*h));
+        herr |= buf_add(&head, "\r\n", 2);
         if (strncasecmp(*h, "Content-Length:", 15) == 0) has_len = 1;
     }
     if (!has_len && (req->body_len || strcmp(req->method, "POST") == 0 ||
                      strcmp(req->method, "PUT") == 0)) {
         snprintf(tmp, sizeof(tmp), "Content-Length: %zu\r\n", req->body_len);
-        buf_add(&head, tmp, strlen(tmp));
+        herr |= buf_add(&head, tmp, strlen(tmp));
     }
-    buf_add(&head, "\r\n", 2);
+    herr |= buf_add(&head, "\r\n", 2);
+
+    if (herr) {
+        set_err(err, err_len, "Out of memory");
+        net_close(c);
+        free(head.p);
+        return -1;
+    }
 
     Buf body = {0};
     Reader *r = calloc(1, sizeof(*r));
-    if (!r) { net_close(c); free(head.p); return -1; }
+    if (!r) { set_err(err, err_len, "Out of memory"); net_close(c); free(head.p); return -1; }
     r->c = c;
     /* head and body go out in one write: a server that answers from the
      * headers alone then closes on no unread bytes (which would reset the
@@ -300,7 +308,10 @@ int http_request(const HttpRequest *req, long *status, char **body_out,
     else if (clen >= 0) rc = (size_t)clen > max ? -1 : rd_body_n(r, &body, (size_t)clen, max);
     else rc = rd_until_close(r, &body, max);
     if (rc != 0) { set_err(err, err_len, "Truncated or oversized HTTP body"); goto done; }
-    if (!body.p) buf_add(&body, "", 0);
+    if (!body.p && buf_add(&body, "", 0) != 0) {
+        set_err(err, err_len, "Out of memory");
+        goto done;
+    }
     if (status) *status = code;
     ok = 1;
 done:

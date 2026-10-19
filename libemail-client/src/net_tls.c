@@ -151,6 +151,29 @@ static int host_is_ip(const char *host)
     return inet_pton(AF_INET, host, b) == 1 || inet_pton(AF_INET6, host, b) == 1;
 }
 
+/** Block SIGPIPE in this thread; @p old receives the previous mask. */
+static void sigpipe_block(sigset_t *old)
+{
+    sigset_t block;
+    sigemptyset(&block);
+    sigaddset(&block, SIGPIPE);
+    pthread_sigmask(SIG_BLOCK, &block, old);
+}
+
+/** Drop a SIGPIPE raised while blocked, then restore the mask @p old. */
+static void sigpipe_unblock(const sigset_t *old)
+{
+    sigset_t pend, block;
+    sigemptyset(&block);
+    sigaddset(&block, SIGPIPE);
+    sigpending(&pend);
+    if (sigismember(&pend, SIGPIPE)) {
+        struct timespec ts = {0, 0};
+        sigtimedwait(&block, NULL, &ts);
+    }
+    pthread_sigmask(SIG_SETMASK, old, NULL);
+}
+
 /** TLS handshake on c->fd; fills c->ctx and c->ssl. 0 / -1. */
 static int tls_handshake(NetConn *c, const char *host, int verify,
                          char *err, size_t err_len)
@@ -176,11 +199,14 @@ static int tls_handshake(NetConn *c, const char *host, int verify,
         }
     }
     int hs;
+    sigset_t old;
+    sigpipe_block(&old);        /* a server that hangs up is an error, not a signal */
     do {
         errno = 0;
         hs = SSL_connect(c->ssl);
         /* an interrupted handshake read or write is continued, not failed */
     } while (hs != 1 && errno == EINTR);
+    sigpipe_unblock(&old);
     if (hs != 1) {
         long vr = SSL_get_verify_result(c->ssl);
         if (verify && vr != X509_V_OK) {
@@ -218,7 +244,7 @@ NetConn *net_connect(const char *host, int port, int use_tls, int verify,
     if (fd < 0) return NULL;
     set_timeouts(fd, timeout_s);
     NetConn *c = calloc(1, sizeof(*c));
-    if (!c) { close(fd); return NULL; }
+    if (!c) { set_err(err, err_len, "Out of memory"); close(fd); return NULL; }
     c->fd = fd;
     c->timeout_s = timeout_s;
     if (use_tls && tls_handshake(c, host, verify, err, err_len) != 0) {
@@ -262,13 +288,11 @@ ssize_t net_conn_read(NetConn *c, void *buf, size_t len)
     }
 }
 
-/** Run @p write_all with SIGPIPE blocked, so a closed peer is an error return. */
+/** Write all of @p p with SIGPIPE blocked, so a closed peer is an error return. */
 static int write_nosigpipe(NetConn *c, const unsigned char *p, size_t len)
 {
-    sigset_t block, old;
-    sigemptyset(&block);
-    sigaddset(&block, SIGPIPE);
-    pthread_sigmask(SIG_BLOCK, &block, &old);
+    sigset_t old;
+    sigpipe_block(&old);
     int rc = 0;
     while (len > 0) {
         if (c->ssl) {
@@ -291,15 +315,7 @@ static int write_nosigpipe(NetConn *c, const unsigned char *p, size_t len)
             break;
         }
     }
-    if (rc != 0) {                       /* swallow a SIGPIPE raised meanwhile */
-        sigset_t pend;
-        sigpending(&pend);
-        if (sigismember(&pend, SIGPIPE)) {
-            struct timespec ts = {0, 0};
-            sigtimedwait(&block, NULL, &ts);
-        }
-    }
-    pthread_sigmask(SIG_SETMASK, &old, NULL);
+    sigpipe_unblock(&old);
     return rc;
 }
 
@@ -312,7 +328,15 @@ int net_conn_write_all(NetConn *c, const void *buf, size_t len)
 void net_close(NetConn *c)
 {
     if (!c) return;
-    if (c->ssl) { SSL_shutdown(c->ssl); SSL_free(c->ssl); }
+    if (c->ssl) {
+        /* the close_notify goes to a peer that may be gone: that is not a
+         * reason to die of SIGPIPE */
+        sigset_t old;
+        sigpipe_block(&old);
+        SSL_shutdown(c->ssl);
+        sigpipe_unblock(&old);
+        SSL_free(c->ssl);
+    }
     if (c->ctx) SSL_CTX_free(c->ctx);
     if (c->fd >= 0) close(c->fd);
     free(c);

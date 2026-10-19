@@ -4986,6 +4986,20 @@ static int is_system_or_special_label(const char *name) {
     return 0;
 }
 
+/** Asks for a label name and creates the label.  Returns 1 when it was
+ *  created; a failure is put in @p flash for the status line (EMAIL-162). */
+static int label_create_prompt(const Config *cfg, int prompt_row,
+                               char *flash, size_t flash_sz) {
+    char new_name[256] = "";
+    InputLine il;
+    input_line_init(&il, new_name, sizeof(new_name), "");
+    int confirmed = input_line_run(&il, prompt_row, "New label name: ");
+    if (!confirmed || !new_name[0]) return 0;
+    if (email_service_create_label(cfg, new_name) == 0) return 1;
+    snprintf(flash, flash_sz, "  Could not create the label %s.", new_name);
+    return 0;
+}
+
 char *email_service_list_labels_interactive(const Config *cfg,
                                             const char *current_label,
                                             int *go_up) {
@@ -5270,12 +5284,8 @@ char *email_service_list_labels_interactive(const Config *cfg,
             }
             if (lact == EA_LABEL_CREATE) {
                 /* Create new label */
-                char new_name[256] = "";
-                InputLine il;
-                input_line_init(&il, new_name, sizeof(new_name), "");
-                int confirmed = input_line_run(&il, trows - 2, "New label name: ");
-                if (confirmed && new_name[0]) {
-                    if (email_service_create_label(cfg, new_name) == 0) {
+                {
+                    if (label_create_prompt(cfg, trows - 2, lbl_flash, sizeof(lbl_flash))) {
                         /* Reload label list on next iteration */
                         free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_hdr, lbl_count);
                         lbl_hdr = NULL;

@@ -28,6 +28,7 @@
 #include "ptytest.h"
 #include "pty_assert.h"
 #include "test_scratch.h"
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -742,6 +743,67 @@ static void test_label_browser_delete_failure_is_shown(void) {
     ASSERT_WAIT_FOR(s, "Could not delete the label Fail Label", WAIT_MS);
     ASSERT(mock_log_count("DELETE /gmail/v1/users/me/labels/Label_Fail1") == 1,
            "label delete fail: the DELETE was sent for the id");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** EMAIL-162: a create the server refuses is reported on the status line. */
+static void test_label_browser_create_failure_is_shown(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label create fail: reaches the label list");
+    if (!s) return;
+    gm_menu_pick(s, 0);                            /* Create a label... */
+    ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
+    pty_send_str(s, "FailNew");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Could not create the label FailNew", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Labels");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** Remove every label index of the local store, so the browser has no labels. */
+static void drop_label_indexes(void) {
+    char dir[700];
+    snprintf(dir, sizeof(dir), "%s/.local/share/email-cli/accounts/%s/labels",
+             g_test_home, GMAIL_TEST_EMAIL);
+    DIR *dp = opendir(dir);
+    if (!dp) { fprintf(stderr, "gmail-tui: cannot open %s: %s\n", dir, strerror(errno)); g_tests_failed++; return; }
+    struct dirent *e;
+    while ((e = readdir(dp)) != NULL) {
+        size_t n = strlen(e->d_name);
+        if (n > 4 && strcmp(e->d_name + n - 4, ".idx") == 0) {
+            char f[1100];
+            snprintf(f, sizeof(f), "%s/%s", dir, e->d_name);
+            if (unlink(f) != 0) { fprintf(stderr, "gmail-tui: unlink %s: %s\n", f, strerror(errno)); g_tests_failed++; }
+        }
+    }
+    closedir(dp);
+}
+
+/** EMAIL-162: with no user labels the ':' menu still creates the first one
+ *  (the browser always lists the system labels, so it is never empty). */
+static void test_label_browser_empty_can_create(void) {
+    int posts_before = mock_log_count("POST /gmail/v1/users/me/labels");
+    reset_and_sync();
+    drop_label_indexes();
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "empty labels: reaches the label browser");
+    if (!s) return;
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Work");
+    gm_menu_pick(s, 0);
+    ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
+    pty_send_str(s, "FailNew");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Could not create the label FailNew", WAIT_MS);
+    gm_menu_pick(s, 0);
+    ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
+    pty_send_str(s, "PtyFirst");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "PtyFirst", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(mock_log_count("POST /gmail/v1/users/me/labels") >= posts_before + 2,
+           "empty labels: both creates were sent");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -2532,6 +2594,8 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_label_browser_create_label_confirmed);
     RUN_TEST(test_label_browser_delete_label_uses_id);
     RUN_TEST(test_label_browser_delete_failure_is_shown);
+    RUN_TEST(test_label_browser_create_failure_is_shown);
+    RUN_TEST(test_label_browser_empty_can_create);
 
     printf("--- Fresh sync (test 2) ---\n");
     if (reset_and_sync() != 0) {

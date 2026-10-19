@@ -62,7 +62,7 @@ Bottom status bar (same position as normal list):
 When `sync_interval > 0` and the local manifest is empty the title line includes
 a warning:
 ```
-  0 of 0 message(s) in <Folder> (0 unread) [<user>].  ⚠ No cached data — run 'email-sync' or 's=sync'
+  0 of 0 message(s) in <Folder> (0 unread) [<user>].  ⚠ No cached data — run 'email-sync'
 ```
 The status bar shows only `s=sync  R=refresh` (no compose/reply keys).
 

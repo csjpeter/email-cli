@@ -791,9 +791,8 @@ static const int cur_list_narrow[3] = { 23, 79, 0 };
 static const char *const exp_list_empty[] = {
     "  0 of 0 message(s) in INBOX.Empty (0 unread) [testuser].",
     "",
-    "  Date              Sts     Subject                                     From",
-    "  ════════════════  ══════  ══════════════════════════════════════════  ════════════════════════════",
-    "═",
+    "  Date              Sts     Subject                                    From",
+    "  ════════════════  ══════  ═════════════════════════════════════════  ════════════════════════════",
     "",
     "  (empty)",
     "",
@@ -812,7 +811,8 @@ static const char *const exp_list_empty[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  * star  d trash  ? help",
+    "",
+    " Esc/q/BS folders  : actions  c compose  U refresh  l rules  ? help",
     NULL
 };
 static const char *const sty_list_empty[] = {
@@ -821,8 +821,8 @@ static const char *const sty_list_empty[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
     "  ddddddd                                                                                           ",
+    "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -2306,9 +2306,8 @@ static const int cur_gmail_unread[3] = { 23, 99, 0 };
 static const char *const exp_gmail_flagged[] = {
     "  0 of 0 message(s) in STARRED (0 unread) [screens@example.org].",
     "",
-    "  Date              Sts     Subject                                     From",
-    "  ════════════════  ══════  ══════════════════════════════════════════  ════════════════════════════",
-    "═",
+    "  Date              Sts     Subject                                    From",
+    "  ════════════════  ══════  ═════════════════════════════════════════  ════════════════════════════",
     "",
     "  (empty)",
     "",
@@ -2327,7 +2326,8 @@ static const char *const exp_gmail_flagged[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  * star  d trash  ? help",
+    "",
+    " Esc/q/BS labels  : actions  c compose  U refresh  l rules  ? help",
     NULL
 };
 static const char *const sty_gmail_flagged[] = {
@@ -2336,8 +2336,8 @@ static const char *const sty_gmail_flagged[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
     "  ddddddd                                                                                           ",
+    "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -2698,9 +2698,8 @@ static const int cur_gmail_inbox_marked[3] = { 23, 99, 0 };
 static const char *const exp_gmail_archive[] = {
     "  0 of 0 message(s) in Archive (0 unread) [screens@example.org].",
     "",
-    "  Date              Sts     Subject                                     From",
-    "  ════════════════  ══════  ══════════════════════════════════════════  ════════════════════════════",
-    "═",
+    "  Date              Sts     Subject                                    From",
+    "  ════════════════  ══════  ═════════════════════════════════════════  ════════════════════════════",
     "",
     "  (empty)",
     "",
@@ -2719,7 +2718,8 @@ static const char *const exp_gmail_archive[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  * star  d trash  ? help",
+    "",
+    " Esc/q/BS labels  : actions  c compose  U refresh  l rules  ? help",
     NULL
 };
 static const char *const sty_gmail_archive[] = {
@@ -2728,8 +2728,8 @@ static const char *const sty_gmail_archive[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
     "  ddddddd                                                                                           ",
+    "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -3202,9 +3202,8 @@ static const int cur_gmail_user_label[3] = { 23, 99, 0 };
 static const char *const exp_gmail_trash[] = {
     "  0 of 0 message(s) in Trash (0 unread) [screens@example.org].",
     "",
-    "  Date              Sts     Subject                                     From",
-    "  ════════════════  ══════  ══════════════════════════════════════════  ════════════════════════════",
-    "═",
+    "  Date              Sts     Subject                                    From",
+    "  ════════════════  ══════  ═════════════════════════════════════════  ════════════════════════════",
     "",
     "  (empty)",
     "",
@@ -3223,7 +3222,8 @@ static const char *const exp_gmail_trash[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  * star  d del  ? help",
+    "",
+    " Esc/q/BS labels  : actions  c compose  U refresh  l rules  ? help",
     NULL
 };
 static const char *const sty_gmail_trash[] = {
@@ -3232,8 +3232,8 @@ static const char *const sty_gmail_trash[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
     "  ddddddd                                                                                           ",
+    "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",

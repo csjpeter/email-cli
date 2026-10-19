@@ -375,20 +375,26 @@ static void list_status_line(int trows, int tcols, int is_gmail, int in_trash,
     tui_statusline_hint h[STATUS_LINE_MAX_HINTS];
     int nh = 0;
 #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
-    HINT("j/k", "step", 60);
-    HINT("PgDn/PgUp", "page", 40);
-    HINT("Enter", "open", 90);
+    /* With no message in the list only the keys that still work are offered
+     * (EMAIL-188). */
+    if (items) {
+        HINT("j/k", "step", 60);
+        HINT("PgDn/PgUp", "page", 40);
+        HINT("Enter", "open", 90);
+    }
     HINT("Esc/q/BS", is_gmail ? "labels" : "folders", SL_PRIO_KEEP);
     HINT(":", "actions", 80);
     HINT("c", "compose", 50);
-    HINT("r", "reply", 50);
-    HINT("F", "fwd", 30);
-    HINT("A", "r-all", 30);
-    HINT("*", "star", 45);
-    HINT("+/-", "read", 45);
-    HINT("!", "junk", 45);
-    HINT("d", in_trash ? "del" : "trash", 55);
-    if (is_gmail) HINT("t", "labels", 35);
+    if (items) {
+        HINT("r", "reply", 50);
+        HINT("F", "fwd", 30);
+        HINT("A", "r-all", 30);
+        HINT("*", "star", 45);
+        HINT("+/-", "read", 45);
+        HINT("!", "junk", 45);
+        HINT("d", in_trash ? "del" : "trash", 55);
+        if (is_gmail) HINT("t", "labels", 35);
+    }
     HINT("U", "refresh", 35);
     HINT("l", "rules", 30);
     if (items) {
@@ -2256,6 +2262,62 @@ static int is_virtual_folder_name(const char *f) {
     return f && f[0] == '_' && f[1] == '_';
 }
 
+/**
+ * The TUI screen of a list with no message: the title bar, the column
+ * headings, "(empty)" and the keys that still work: Esc, q and Backspace go
+ * back, ctrl-c quits, ':' opens the sync menu, '?' the help, c composes, U
+ * lists again and l opens the rules editor.
+ *
+ * @param note  Appended to the title bar (the no-cache advice), or NULL.
+ * @return 1 back, 0 quit, 2 compose, 4 refresh, 7 rules editor.
+ */
+static int list_empty_screen(const Config *cfg, const char *folder,
+                             const char *folder_display, const char *note) {
+    RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
+    int in_trash = cfg->gmail_mode && strcmp(folder, "_trash") == 0;
+    for (;;) {
+        int tcols = terminal_cols(); int trows = terminal_rows();
+        if (tcols <= 0) tcols = 80;
+        if (trows <= 0) trows = 24;
+        /* The columns take 30 characters beside Subject and From; one more is
+         * left so that the rule never reaches the last column (EMAIL-189). */
+        int avail = tcols - 31; if (avail < 40) avail = 40;
+        int subj_w = avail * 3 / 5, from_w = avail - subj_w;
+        printf("\033[H\033[2J");
+        char cl[512];
+        snprintf(cl, sizeof(cl), "  0 of 0 message(s) in %s (0 unread) [%s].%s",
+                 folder_display, cfg->user ? cfg->user : "?", note ? note : "");
+        printf("\033[1;1H" TUI_HDR_ON "%s", cl);
+        int used = visible_line_cols(cl, cl + strlen(cl));
+        for (int p = used; p < tcols; p++) putchar(' ');
+        printf("\033[0m");
+        printf("\033[3;1H  %-16s  %-6s  %-*s  %s\n",
+               "Date", "Sts", subj_w, "Subject", "From");
+        printf("  ");
+        print_dbar(16); printf("  ══════  ");
+        print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
+        printf("\n  \033[2m(empty)\033[0m\n");
+        fflush(stdout);
+        list_status_line(trows, tcols, cfg->gmail_mode, in_trash, 0, 0, 0, NULL);
+
+        TermKey key = terminal_read_key();
+        if (key == TERM_KEY_BACK || key == TERM_KEY_ESC ||
+            (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q'))
+            return 1;     /* back (Esc, q, Backspace) */
+        if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
+        if (key != TERM_KEY_IGNORE) continue;
+        int ch = terminal_last_printable();
+        if (ch == 'c') return 2; /* compose */
+        if (ch == ':') sync_menu(cfg, folder_display);
+        if (ch == '?')
+            ekeys_help(cfg->gmail_mode ? EKV_LIST_GMAIL : EKV_LIST_IMAP,
+                       cfg->gmail_mode ? "Message list shortcuts (Gmail)"
+                                       : "Message list shortcuts");
+        if (ch == 'U') return 4; /* refresh */
+        if (ch == 'l') return 7; /* rules editor */
+    }
+}
+
 /* Nothing is cached for this view: say so, and in the TUI offer a sync.
  *
  * Shared by the IMAP manifest branch and the Gmail label-index branch — both
@@ -2276,42 +2338,8 @@ static int list_empty_cache_view(const Config *cfg, const EmailListOpts *opts,
         }
         return 0;
     }
-    RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
-    {
-        int tcols = terminal_cols(); int trows = terminal_rows();
-        if (tcols <= 0) tcols = 80;
-        if (trows <= 0) trows = 24;
-        int avail = tcols - 29; if (avail < 40) avail = 40;
-        int subj_w = avail * 3 / 5, from_w = avail - subj_w;
-        printf("\033[H\033[2J");
-        char cl[512];
-        snprintf(cl, sizeof(cl),
-                 "  0 of 0 message(s) in %s (0 unread) [%s].  \u26a0 No cached data \u2014 run 'email-sync' or 's=sync'",
-                 folder_display, cfg->user ? cfg->user : "?");
-        printf("\033[1;1H" TUI_HDR_ON "%s", cl);
-        int used = visible_line_cols(cl, cl + strlen(cl));
-        for (int p = used; p < tcols; p++) putchar(' ');
-        printf("\033[0m");
-        printf("\033[3;1H  %-16s  %-6s  %-*s  %s\n",
-               "Date", "Sts", subj_w, "Subject", "From");
-        printf("  ");
-        print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
-        print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
-        printf("\n  \033[2m(empty)\033[0m\n");
-        fflush(stdout);
-        list_status_line(trows, tcols, cfg->gmail_mode, 0, 0, 0, 0, NULL);
-    }
-    for (;;) {
-        TermKey key = terminal_read_key();
-        if (key == TERM_KEY_BACK || key == TERM_KEY_ESC ||
-            (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q'))
-            return 1;     /* back (Esc, q, Backspace) */
-        if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
-        int ch = terminal_last_printable();
-        if (ch == ':') sync_menu(cfg, folder_display);
-        if (ch == 'U') return 4; /* refresh: re-list */
-        if (ch == 'l') return 7; /* rules editor */
-    }
+    return list_empty_screen(cfg, folder, folder_display,
+                             "  ⚠ No cached data — run 'email-sync'");
 }
 
 /* ── Bulk actions on the marked messages of the TUI list (EMAIL-86) ─────
@@ -3185,45 +3213,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 printf("No messages in %s.\n", folder_display);
                 return 0;
             }
-            RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
-            {
-                int tcols = terminal_cols(); int trows = terminal_rows();
-                if (tcols <= 0) tcols = 80;
-                if (trows <= 0) trows = 24;
-                int avail = tcols - 29; if (avail < 40) avail = 40;
-                int subj_w = avail * 3 / 5, from_w = avail - subj_w;
-                printf("\033[H\033[2J");
-                char cl[512];
-                snprintf(cl, sizeof(cl),
-                         "  0 of 0 message(s) in %s (0 unread) [%s].",
-                         folder_display, cfg->user ? cfg->user : "?");
-                printf("\033[1;1H" TUI_HDR_ON "%s", cl);
-                int used = visible_line_cols(cl, cl + strlen(cl));
-                for (int p = used; p < tcols; p++) putchar(' ');
-                printf("\033[0m");
-                printf("\033[3;1H  %-16s  %-6s  %-*s  %s\n",
-                       "Date", "Sts", subj_w, "Subject", "From");
-                printf("  ");
-                print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
-                print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
-                printf("\n  \033[2m(empty)\033[0m\n");
-                fflush(stdout);
-                list_status_line(trows, tcols, cfg->gmail_mode,
-                                 cfg->gmail_mode && strcmp(folder, "_trash") == 0,
-                                 0, 0, 0, NULL);
-            }
-            for (;;) {
-                TermKey key = terminal_read_key();
-                if (key == TERM_KEY_BACK || key == TERM_KEY_ESC ||
-                    (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q'))
-                    return 1;     /* back (Esc, q, Backspace) */
-                if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
-                int ch = terminal_last_printable();
-                if (ch == 'c') return 2; /* compose */
-                if (ch == ':') sync_menu(cfg, folder_display);
-                if (ch == 'U') return 4; /* refresh */
-                if (ch == 'l') return 7; /* rules editor */
-            }
+            return list_empty_screen(cfg, folder, folder_display, NULL);
         }
 
         /* Build tagged entry array */
@@ -3260,45 +3250,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             printf("No messages in %s.\n", folder_display);
             return 0;
         }
-        RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
-        {
-            int tcols = terminal_cols(); int trows = terminal_rows();
-            if (tcols <= 0) tcols = 80;
-            if (trows <= 0) trows = 24;
-            int avail = tcols - 29; if (avail < 40) avail = 40;
-            int subj_w = avail * 3 / 5, from_w = avail - subj_w;
-            printf("\033[H\033[2J");
-            char cl[512];
-            snprintf(cl, sizeof(cl),
-                     "  0 of 0 message(s) in %s (0 unread) [%s].",
-                     folder_display, cfg->user ? cfg->user : "?");
-            printf("\033[1;1H" TUI_HDR_ON "%s", cl);
-            int used = visible_line_cols(cl, cl + strlen(cl));
-            for (int p = used; p < tcols; p++) putchar(' ');
-            printf("\033[0m");
-            printf("\033[3;1H  %-16s  %-6s  %-*s  %s\n",
-                   "Date", "Sts", subj_w, "Subject", "From");
-            printf("  ");
-            print_dbar(16); printf("  \u2550\u2550\u2550\u2550\u2550\u2550  ");
-            print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
-            printf("\n  \033[2m(empty)\033[0m\n");
-            fflush(stdout);
-            list_status_line(trows, tcols, cfg->gmail_mode,
-                             cfg->gmail_mode && strcmp(folder, "_trash") == 0,
-                             0, 0, 0, NULL);
-        }
-        for (;;) {
-            TermKey key = terminal_read_key();
-            if (key == TERM_KEY_BACK || key == TERM_KEY_ESC ||
-                (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q'))
-                return 1;     /* back (Esc, q, Backspace) */
-            if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
-            int ch = terminal_last_printable();
-            if (ch == 'c') return 2; /* compose */
-            if (ch == ':') sync_menu(cfg, folder_display);
-            if (ch == 'U') return 4; /* refresh */
-            if (ch == 'l') return 7; /* rules editor */
-        }
+        return list_empty_screen(cfg, folder, folder_display, NULL);
     }
 
     /* Batch filters run before sorting and paging so that --limit/--offset and
@@ -3312,6 +3264,12 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     int cursor = (opts->offset > 1) ? opts->offset - 1 : 0;
     if (cursor >= show_count) cursor = 0;
     int wstart = cursor;   /* top of the visible window */
+    /* The TUI resumes at the message the user left (EMAIL-186): the window
+     * keeps it in the middle instead of at the top. */
+    if (opts->pager && cursor > 0) {
+        wstart = cursor - limit / 2;
+        if (wstart < 0) wstart = 0;
+    }
 
     /* Track entries with pending operations for immediate visual feedback.
      * pending_remove[i] = 1: row will be gone on next refresh (red strikethrough).
@@ -3950,6 +3908,7 @@ read_key_again: ;
                 filter_input = 0;
                 break;
             }
+            if (disp_count == 0) break;     /* an empty filter result: nothing to open */
             {
                 int ei_cur = (filter_active && fentries) ? fentries[cursor] : cursor;
                 const char *efolder = entries[ei_cur].folder[0] ? entries[ei_cur].folder : folder;
@@ -3976,6 +3935,7 @@ read_key_again: ;
                     }
                 }
                 if (ret == 1) { goto list_done; } /* ESC=exit → list_result=0 → quit */
+                opts->cursor_out = ei_cur + 1;
                 if (ret == 2) {
                     /* 'r' pressed in reader → reply to this message */
                     memcpy(opts->action_uid, entries[ei_cur].uid, 17);
@@ -4132,28 +4092,20 @@ read_key_again: ;
             }
 
             /* ── Normal action keys ─────────────────────────────────────── */
-            int ei_cur = (filter_active && fentries) ? fentries[cursor] : cursor;
+            /* With no row on the screen (an empty filter result) there is no
+             * message for r, A and F (EMAIL-184). */
+            int ei_cur = (filter_active && fentries && disp_count > 0)
+                         ? fentries[cursor] : cursor;
             const char *efolder = entries[ei_cur].folder[0] ? entries[ei_cur].folder : folder;
+            opts->cursor_out = ei_cur + 1;
             if (ch == 'c') {
                 list_result = 2;
                 goto list_done;
             }
-            if (ch == 'r') {
+            if ((ch == 'r' || ch == 'F' || ch == 'A') && disp_count > 0) {
                 memcpy(opts->action_uid, entries[ei_cur].uid, 17);
                 snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
-                list_result = 3;
-                goto list_done;
-            }
-            if (ch == 'F') {
-                memcpy(opts->action_uid, entries[ei_cur].uid, 17);
-                snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
-                list_result = 5;
-                goto list_done;
-            }
-            if (ch == 'A') {
-                memcpy(opts->action_uid, entries[ei_cur].uid, 17);
-                snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
-                list_result = 6;
+                list_result = ch == 'r' ? 3 : ch == 'F' ? 5 : 6;
                 goto list_done;
             }
             if (ch == 'U') {

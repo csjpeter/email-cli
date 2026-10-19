@@ -46,6 +46,54 @@ without attachments said nothing).  Already right: `Esc` and `Backspace` back,
 arrows, `Enter`, the save and cancel paths, the file name sanitising, the
 count in the status line.
 
+## Message list, IMAP account (EMAIL-143)
+
+The list opens with `Enter` on a folder of the folder browser.  The table has
+`rows - 5` data rows (19 at 80x24); the title bar names the range shown
+(`a-b of N message(s)`) and the status line ends with `[cursor/total]`, or
+`[N marked]` while rows are marked.  The help (`?`) is made from the key table
+view `list-imap` (`libemail/src/core/key_table.c`).  Tests are in
+`tests/pty/test_pty_views.c`, named `test_lk_*` (80x24, the mock with
+`MOCK_IMAP_COUNT=30`: 20 unread listed first, newest first, then 10 read).
+The Gmail list is studied in EMAIL-144.
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `Down`, `j` / `Up`, `k` | `j/k step` | cursor one row, stops at the last / first | `test_lk_navigation` |
+| `PgDn` / `PgUp` | `PgDn/PgUp page` | one page (the 19 rows of the table), clamped | `test_lk_navigation` |
+| `Home` / `End` | help: Top / Bottom | first / last message | `test_lk_navigation` |
+| `Enter` | `Enter open` | the reader on the cursor message; `Esc`, `q`, `Backspace` there return with the cursor kept | `test_lk_enter_opens_reader` |
+| `Esc`, `q`, `Backspace` | `Esc/q/BS folders` | back to the folder browser (`Esc` first drops marks, then the filter) | `test_lk_back_keys`, `test_lk_marks` |
+| `ctrl-c` | help: Quit | the program quits at once | `test_lk_back_keys` |
+| `c` | `c compose` | new message dialog; after it the list returns with the cursor kept | `test_lk_compose_reply_forward` |
+| `r` / `A` / `F` | `r reply`, `A r-all`, `F fwd` | the dialog for the cursor message (`Re: ...`, `Fwd: ...`); not on an empty filter result | `test_lk_compose_reply_forward`, `test_lk_filter_without_match` |
+| `U` | `U refresh` | lists the folder again | `test_lk_refresh_and_rules` |
+| `l` | `l rules` | the rules editor; `Esc` returns to the list | `test_lk_refresh_and_rules` |
+| `Space` / `x` | `Space mark` | marks the row and steps down / clears all marks | `test_lk_marks`, `test_lk_one_message` |
+| `/` | help: Filter | filter bar (Tab changes the scope); `Enter` commits, `Esc` clears | `test_tui_list_search_filter`, `test_lk_filter_without_match` |
+| `d`, `Delete` | `d trash` | asks first naming the message, No is the default; Trash: `del` | `test_lk_delete_asks`, `test_tui_list_bulk_delete_confirm` |
+| `*` `+` `-` `!` | `* star`, `+/- read`, `! junk` | act at once on the marked rows or the cursor row | `test_keys_registry_routine`, `test_keys_junk_toggle_imap` |
+| `:` | `: actions` | the action menu (star, read, unread, junk, delete, sync, move, `$Done`) | `test_tui_list_bulk_star_marked`, `test_tui_list_sync_and_refresh` |
+| `?` | `? help` | overlay from the key table; scrolls with `j`, `End`; `Esc`/`q` close only it | `test_lk_help_overlay` |
+| `n f s m D h R a t u v g G N`, `Left`, `Right`, `Tab` | | change nothing, show nothing | `test_lk_unbound_keys` |
+
+0 messages (the folder is empty): the status line offers only `Esc/q/BS`, `:`
+(the sync menu), `c`, `U`, `l` and `?`; those work, every other key is
+ignored (`test_lk_empty_folder`).  1 message: every cursor key stays on it,
+`Space` marks without stepping (`test_lk_one_message`).  30 messages:
+`test_lk_navigation`.
+
+Findings of the study, all fixed with EMAIL-143: EMAIL-184 (an empty filter
+result: `Enter` opened a hidden message, `r A F` replied to it), EMAIL-185
+(the title range counted 18 rows, the table shows 19), EMAIL-186 (the cursor
+went to the first message after `c r A F` and `l`), EMAIL-187 (the empty
+folder offered `? help` and ignored it), EMAIL-188 (the empty folder offered
+`j/k`, `Enter`, `d`, `r`), EMAIL-189 (the empty folder's rule row was 81
+columns wide; the no-cache hint named the dead key `s`).  Already right:
+`Esc`/`q`/`Backspace` back, `ctrl-c`, `j k` and the arrows, `PgUp`/`PgDn`
+clamping, `Space`/`x`/`Esc` marks, the delete confirmation with No as the
+default, `h` and the old keys doing nothing, `U`, `l`, the reader round trip.
+
 ## Accounts list (EMAIL-141)
 
 Header `Email Accounts (N)`; with no account the table says

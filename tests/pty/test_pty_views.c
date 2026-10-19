@@ -3062,6 +3062,552 @@ static void test_resize_on_every_screen(void) {
     pty_close(s);
 }
 
+
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  EMAIL-143: key study of the message list of an IMAP account (80x24)
+ *  docs/spec/tui-keys.md, "Message list, IMAP".  30 messages: 20 unread
+ *  (UIDs 1-20, listed first, newest first), 10 read.  The list window is 18
+ *  rows, so the cursor row numbers below are [n/30].
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Opens the list at 80x24 with @p count mock messages (0: the folder
+ *  INBOX.Empty); the caller closes the session and calls lk_env(0). */
+static void lk_env(int count) {
+    /* The messages of one test are not the messages of the next: the list
+     * reads the cached headers of INBOX before it asks the server. */
+    test_rmtree(TP("home/.local/share/email-cli/accounts/testuser"));
+    if (count > 1) {
+        char n[16];
+        snprintf(n, sizeof n, "%d", count);
+        setenv("MOCK_IMAP_COUNT", n, 1);
+    } else {
+        unsetenv("MOCK_IMAP_COUNT");
+    }
+}
+
+static PtySession *lk_open(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list_size(80, 24);
+    if (!s) return NULL;
+    if (pty_wait_for(s, "message(s) in", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+static PtySession *lk_open_empty(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list_size(80, 24);
+    if (!s) return NULL;
+    if (pty_wait_for(s, "message(s) in", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_send_key(s, PTY_KEY_BACK);
+    if (pty_wait_for(s, "Folders", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_DOWN);                 /* INBOX.AT&T */
+    pty_send_key(s, PTY_KEY_DOWN);                 /* INBOX.Empty */
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "0 of 0 message(s) in", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/** The text of the row under the cursor ('>' in column 0), or "". */
+static const char *lk_cursor_row(PtySession *s, char *buf, size_t size) {
+    buf[0] = '\0';
+    for (int r = 3; r < 23; r++) {
+        pty_row_text(s, r, buf, size);
+        if (buf[0] == '>') return buf;
+    }
+    buf[0] = '\0';
+    return buf;
+}
+
+/** Sends @p key, waits until the status line shows @p pos, e.g. "[3/30]". */
+static int lk_step(PtySession *s, PtyKey key, const char *pos) {
+    pty_send_key(s, key);
+    return pty_wait_for(s, pos, WAIT_MS) == 0;
+}
+
+static int lk_char(PtySession *s, const char *k, const char *pos) {
+    pty_send_str(s, k);
+    return pty_wait_for(s, pos, WAIT_MS) == 0;
+}
+
+static void lk_nav_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list nav: opens");
+    if (!s) return;
+    char row[200];
+    ASSERT_SCREEN_CONTAINS(s, "[1/30]");
+    ASSERT_SCREEN_CONTAINS(s, "1-19 of 30 message(s)");
+    ASSERT_ROW_CONTAINS(s, 22, "Message 2");           /* the 19th row is used */
+    ASSERT(strstr(lk_cursor_row(s, row, sizeof row), "Message 20") != NULL,
+           "list nav: the cursor starts on the newest unread message");
+    ASSERT(lk_char(s, "j", "[2/30]"), "list nav: j steps down");
+    ASSERT(lk_step(s, PTY_KEY_DOWN, "[3/30]"), "list nav: Down steps down");
+    ASSERT(lk_char(s, "k", "[2/30]"), "list nav: k steps up");
+    ASSERT(lk_step(s, PTY_KEY_UP, "[1/30]"), "list nav: Up steps up");
+    pty_send_key(s, PTY_KEY_UP);
+    pty_send_str(s, "k");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1/30]");              /* stops at the first */
+    ASSERT(lk_step(s, PTY_KEY_PGDN, "[20/30]"), "list nav: PgDn goes one page (19 rows) down");
+    ASSERT(lk_cursor_row(s, row, sizeof row)[0] == '>',
+           "list nav: the cursor row is on the screen after PgDn");
+    ASSERT(lk_step(s, PTY_KEY_PGDN, "[30/30]"), "list nav: PgDn stops at the last");
+    ASSERT(lk_step(s, PTY_KEY_PGUP, "[11/30]"), "list nav: PgUp goes one page up");
+    ASSERT(lk_step(s, PTY_KEY_END, "[30/30]"), "list nav: End goes to the last");
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_str(s, "j");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[30/30]");             /* stops at the last */
+    ASSERT(lk_step(s, PTY_KEY_HOME, "[1/30]"), "list nav: Home goes to the first");
+    ASSERT(strstr(lk_cursor_row(s, row, sizeof row), "Message 20") != NULL,
+           "list nav: Home scrolls back to the top");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+/* Every cursor key, with 30 messages; the page is the 19 rows of the table. */
+static void test_lk_navigation(void) {
+    lk_env(30);
+    lk_nav_body();
+    lk_env(0);
+}
+
+/* The header range "a-b of N" counts the rows on the screen after a scroll
+ * (EMAIL-185). */
+static void lk_range_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list range: opens");
+    if (!s) return;
+    pty_send_key(s, PTY_KEY_END);
+    ASSERT_WAIT_FOR(s, "[30/30]", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    int first = -1, last = -1;
+    for (int r = 4; r < 23; r++) {
+        char t[200];
+        pty_row_text(s, r, t, sizeof t);
+        if (strstr(t, "Message ") || strstr(t, "20")) { if (first < 0) first = r; last = r; }
+    }
+    int rows = last - first + 1;
+    char want[32];
+    char hdr[200];
+    pty_row_text(s, 0, hdr, sizeof hdr);
+    int a = 0, b = 0, n = 0;
+    ASSERT(sscanf(hdr, " %d-%d of %d", &a, &b, &n) == 3, "list range: the header has a range");
+    snprintf(want, sizeof want, "%d rows", b - a + 1);
+    ASSERT(b - a + 1 == rows, want);
+    ASSERT(b == 30, "list range: the range ends at the cursor message");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+static void test_lk_header_range_matches_rows(void) {
+    lk_env(30);
+    lk_range_body();
+    lk_env(0);
+}
+
+/** Waits for the compose dialog of a reply / forward, cancels it and returns
+ *  to the list. */
+static int lk_dialog_and_back(PtySession *s, const char *text) {
+    if (pty_wait_for(s, text, WAIT_MS) != 0) return 0;
+    pty_send_key(s, PTY_KEY_ESC);
+    /* A dialog with text in it (the reply's To:, the subject) asks first. */
+    for (int ms = 0; ms < WAIT_MS; ms += 100) {
+        pty_settle(s, 100);
+        if (pty_screen_contains(s, "Discard what was typed?")) { pty_send_str(s, "y"); break; }
+        if (pty_screen_contains(s, "Press any key to return")) break;
+    }
+    if (pty_wait_for(s, "Press any key to return", WAIT_MS) != 0) return 0;
+    pty_send_str(s, " ");
+    return pty_wait_for(s, "message(s) in", WAIT_MS) == 0;
+}
+
+/* c r A F act on the message under the cursor; Esc in the dialog returns to
+ * the list with the cursor where it was. */
+static void lk_compose_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list compose keys: opens");
+    if (!s) return;
+    ASSERT(lk_char(s, "j", "[2/30]"), "list compose keys: j");
+    pty_send_str(s, "c");
+    ASSERT(lk_dialog_and_back(s, "New Message"), "list compose keys: c opens the compose dialog");
+    ASSERT_SCREEN_CONTAINS(s, "[2/30]");
+    pty_send_str(s, "r");
+    ASSERT_WAIT_FOR(s, "Re: Message 19", WAIT_MS);
+    ASSERT(lk_dialog_and_back(s, "Re: Message 19"), "list compose keys: r replies to the cursor message");
+    ASSERT_SCREEN_CONTAINS(s, "[2/30]");
+    pty_send_str(s, "A");
+    ASSERT_WAIT_FOR(s, "Re: Message 19", WAIT_MS);
+    ASSERT(lk_dialog_and_back(s, "Re: Message 19"), "list compose keys: A replies to all");
+    pty_send_str(s, "F");
+    ASSERT_WAIT_FOR(s, "Fwd: Message 19", WAIT_MS);
+    ASSERT(lk_dialog_and_back(s, "Fwd: Message 19"), "list compose keys: F forwards the cursor message");
+    ASSERT_SCREEN_CONTAINS(s, "[2/30]");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+static void test_lk_compose_reply_forward(void) {
+    lk_env(30);
+    lk_compose_body();
+    lk_env(0);
+}
+
+/* Space marks and steps down, x clears, Esc drops the marks first and goes
+ * back only the second time. */
+static void lk_marks_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list marks: opens");
+    if (!s) return;
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[2/30]");              /* stepped down */
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[3/30]");
+    pty_send_str(s, "x");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    ASSERT_SCREEN_CONTAINS(s, "[3/30]");              /* x does not move */
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");       /* still in the list */
+    pty_send_key(s, PTY_KEY_END);
+    ASSERT_WAIT_FOR(s, "[30/30]", WAIT_MS);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[30/30]");             /* the last row: no step */
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+static void test_lk_marks(void) {
+    lk_env(30);
+    lk_marks_body();
+    lk_env(0);
+}
+
+/* Enter opens the reader on the cursor message; Backspace, Esc and q return
+ * to the list with the cursor where it was. */
+static void lk_enter_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list enter: opens");
+    if (!s) return;
+    ASSERT(lk_char(s, "j", "[2/30]"), "list enter: j");
+    ASSERT(lk_char(s, "j", "[3/30]"), "list enter: j");
+    const char *back[] = { NULL, "q", NULL };
+    for (int i = 0; i < 3; i++) {
+        pty_send_key(s, PTY_KEY_ENTER);
+        ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+        ASSERT_SCREEN_CONTAINS(s, "Message 18");
+        if (i == 0) pty_send_key(s, PTY_KEY_BACK);
+        else if (i == 1) pty_send_str(s, back[1]);
+        else pty_send_key(s, PTY_KEY_ESC);
+        ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_CONTAINS(s, "[3/30]");
+    }
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+static void test_lk_enter_opens_reader(void) {
+    lk_env(30);
+    lk_enter_body();
+    lk_env(0);
+}
+
+/* Esc, q and Backspace go back to the folders; ctrl-c quits at once. */
+static void lk_back_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list back: opens");
+    if (!s) return;
+    for (int i = 0; i < 3; i++) {
+        if (i == 0) pty_send_key(s, PTY_KEY_ESC);
+        else if (i == 1) pty_send_str(s, "q");
+        else pty_send_key(s, PTY_KEY_BACK);
+        ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        folders_goto_inbox(s);
+        pty_send_key(s, PTY_KEY_ENTER);
+        ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+    }
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "list back: ctrl-c quits at once");
+    pty_close(s);
+}
+
+static void test_lk_back_keys(void) {
+    lk_env(30);
+    lk_back_body();
+    lk_env(0);
+}
+
+/* U refreshes (the list is drawn again, the cursor starts over), l opens the
+ * rules editor and Esc returns to the list. */
+static void lk_refresh_rules_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list U l: opens");
+    if (!s) return;
+    ASSERT(lk_char(s, "j", "[2/30]"), "list U l: j");
+    pty_send_str(s, "U");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "of 30 message(s)");
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "Rules for", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "of 30 message(s)");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+static void test_lk_refresh_and_rules(void) {
+    lk_env(30);
+    lk_refresh_rules_body();
+    lk_env(0);
+}
+
+/* ? opens the help made from the key table, at 80x24 it scrolls; Esc closes
+ * it (and only it); h is not a help key; the movement keys scroll the
+ * overlay, not the list. */
+static void lk_help_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list help: opens");
+    if (!s) return;
+    pty_send_str(s, "h");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Down - move the cursor down");
+    pty_send_str(s, "j");
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_END);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Quit");               /* the last entry is reachable */
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");
+    ASSERT_SCREEN_CONTAINS(s, "[1/30]");              /* the list did not move */
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+static void test_lk_help_overlay(void) {
+    lk_env(30);
+    lk_help_body();
+    lk_env(0);
+}
+
+/* The keys of older versions and other views do nothing in the list: no
+ * dialog, no movement, no message. */
+static void lk_unbound_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list unbound: opens");
+    if (!s) return;
+    ASSERT(lk_char(s, "j", "[2/30]"), "list unbound: j");
+    const char *keys[] = { "n", "f", "s", "m", "D", "h", "R", "a", "t", "u", "v", "g", "G", "N", NULL };
+    for (int i = 0; keys[i]; i++) {
+        pty_send_str(s, keys[i]);
+        pty_settle(s, 300);
+        char what[64];
+        snprintf(what, sizeof what, "list unbound: %s changes nothing", keys[i]);
+        ASSERT(pty_screen_contains(s, "[2/30]") && pty_screen_contains(s, "message(s) in")
+               && !pty_screen_contains(s, "Actions") && !pty_screen_contains(s, "?]"), what);
+    }
+    pty_send_key(s, PTY_KEY_LEFT);
+    pty_send_key(s, PTY_KEY_RIGHT);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[2/30]");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+static void test_lk_unbound_keys(void) {
+    lk_env(30);
+    lk_unbound_body();
+    lk_env(0);
+}
+
+/* A filter that matches nothing leaves no message to act on: Enter, r, A, F,
+ * d and Space do nothing (and open nothing) (EMAIL-184). */
+static void lk_filter_nomatch_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list filter none: opens");
+    if (!s) return;
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Filter", WAIT_MS);
+    pty_send_str(s, "zzzz");
+    ASSERT_WAIT_FOR(s, "Showing 0 of", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                   /* commit the text */
+    pty_settle(s, SETTLE_MS);
+    const char *keys[] = { "\r", "r", "A", "F", "d", " ", NULL };
+    for (int i = 0; keys[i]; i++) {
+        pty_send_str(s, keys[i]);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_CONTAINS(s, "Showing 0 of");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "From:");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Re: ");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Fwd: ");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    }
+    pty_send_key(s, PTY_KEY_ESC);                     /* clears the filter */
+    ASSERT_WAIT_FOR(s, "of 30 message(s)", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+static void test_lk_filter_without_match(void) {
+    lk_env(30);
+    lk_filter_nomatch_body();
+    lk_env(0);
+}
+
+/* d and the Delete key ask first, naming the message of the cursor row, and
+ * No is the default; y moves it to the Trash. */
+static void lk_delete_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list delete: opens");
+    if (!s) return;
+    ASSERT(lk_char(s, "j", "[2/30]"), "list delete: j");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Message 19");
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    ASSERT_SCREEN_CONTAINS(s, "of 30 message(s)");
+    pty_send_key(s, PTY_KEY_DELETE);
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Message 19");
+    pty_send_key(s, PTY_KEY_ESC);                     /* Esc is No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+static void test_lk_delete_asks(void) {
+    lk_env(30);
+    lk_delete_body();
+    lk_env(0);
+}
+
+/* One message: every cursor key stays on it, Enter opens it, Space marks it
+ * and does not step. */
+static void test_lk_one_message(void) {
+    lk_env(1);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list one: opens");
+    if (!s) { lk_env(0); return; }
+    ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    const char *keys[] = { "j", "k", "G", NULL };
+    for (int i = 0; keys[i]; i++) pty_send_str(s, keys[i]);
+    PtyKey nav[] = { PTY_KEY_DOWN, PTY_KEY_UP, PTY_KEY_PGDN, PTY_KEY_PGUP, PTY_KEY_END, PTY_KEY_HOME };
+    for (size_t i = 0; i < sizeof nav / sizeof nav[0]; i++) pty_send_key(s, nav[i]);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    pty_send_str(s, "x");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+    lk_env(0);
+}
+
+/* The empty folder (0 messages): the status line offers only keys that work;
+ * ? opens the help; c, U, l, :, Esc/q/BS and ctrl-c work; the table header
+ * fits the 80 columns (EMAIL-187, EMAIL-188, EMAIL-189). */
+static void test_lk_empty_folder(void) {
+    lk_env(0);
+    PtySession *s = lk_open_empty();
+    ASSERT(s != NULL, "list empty: opens");
+    if (!s) return;
+    ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS folders");
+    ASSERT_ROW_CONTAINS(s, 23, "? help");
+    ASSERT_ROW_CONTAINS(s, 23, "c compose");
+    ASSERT(!pty_row_contains(s, 23, "Enter open"), "list empty: no Enter hint");
+    ASSERT(!pty_row_contains(s, 23, "j/k"), "list empty: no j/k hint");
+    ASSERT(!pty_row_contains(s, 23, "d trash"), "list empty: no d hint");
+    char r4[200];
+    pty_row_text(s, 4, r4, sizeof r4);
+    ASSERT(strstr(r4, "\xe2\x95\x90") == NULL, "list empty: the header rule does not wrap into the next row");
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+    ASSERT_SCREEN_CONTAINS(s, "0 of 0 message(s)");
+    const char *dead[] = { "j", "k", " ", "x", "d", "r", "A", "F", "*", "+", "-", "!", "/", "n", "s", "h", NULL };
+    for (int i = 0; dead[i]; i++) pty_send_str(s, dead[i]);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_PGDN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "0 of 0 message(s)");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "From:");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "0 of 0 message(s)");
+    pty_send_str(s, "U");
+    ASSERT_WAIT_FOR(s, "0 of 0 message(s)", WAIT_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "Rules for", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "0 of 0 message(s)", WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
 static void test_tui_list_esc_quit(void) {
     restart_mock();
     PtySession *s = tui_open_to_list();
@@ -6263,6 +6809,19 @@ int main(int argc, char *argv[]) {
     snprintf(g_cli_bin, sizeof(g_cli_bin), "%s", g_tui_bin);
 
     printf("\n--- email-tui: interactive ---\n");
+    RUN_TEST(test_lk_navigation);
+    RUN_TEST(test_lk_header_range_matches_rows);
+    RUN_TEST(test_lk_compose_reply_forward);
+    RUN_TEST(test_lk_marks);
+    RUN_TEST(test_lk_enter_opens_reader);
+    RUN_TEST(test_lk_back_keys);
+    RUN_TEST(test_lk_refresh_and_rules);
+    RUN_TEST(test_lk_help_overlay);
+    RUN_TEST(test_lk_unbound_keys);
+    RUN_TEST(test_lk_filter_without_match);
+    RUN_TEST(test_lk_delete_asks);
+    RUN_TEST(test_lk_one_message);
+    RUN_TEST(test_lk_empty_folder);
     RUN_TEST(test_tui_list_content);
     RUN_TEST(test_resize_list_redraws_at_once);
     RUN_TEST(test_statusline_one_row_hints_position);

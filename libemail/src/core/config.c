@@ -15,6 +15,7 @@ void config_free(Config *cfg) {
     free(cfg->pass);
     free(cfg->folder);
     free(cfg->sent_folder);
+    free(cfg->archive_folder);
     free(cfg->trash_folder);
     free(cfg->smtp_host);
     free(cfg->smtp_user);

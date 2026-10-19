@@ -48,6 +48,7 @@ recorded weakness, not coverage of the promise.
 | `email-cli mark-starred` | F:124.6 | |
 | `email-cli mark-unread` | F:124.4 | |
 | `email-cli migrate-credentials` | F:122.26 | |
+| `email-cli move` | F:124.29 | |
 | `email-cli remove-account` | F:122.22 | |
 | `email-cli remove-label` | F:124.24 | |
 | `email-cli remove-starred` | F:124.8 | |
@@ -57,6 +58,9 @@ recorded weakness, not coverage of the promise.
 | `email-cli rules list` | F:34.1 | `--json` F:122.16 |
 | `email-cli rules remove` | F:37.12 | |
 | `email-cli save-attachment` | F:15.2 | |
+| `email-cli reply` | F:133.3 F:133.8 | `--all` F:133.7 |
+| `email-cli trash` | F:132.2 F:132.6 | |
+| `email-cli archive` | F:132.5 F:132.13 | |
 | `email-cli send` | F:11.3 F:114.3 | SMTP mock receives the message; failure F:114.1 |
 | `email-cli show` | F:1.10 F:1.11 | |
 | `email-cli show --raw` | F:122.21 | |

@@ -7290,7 +7290,232 @@ for bin in email-cli email-cli-ro; do
 done
 OUT=$(w124 $GM create-folder X)
 check "124.27 create-folder on Gmail is refused with a reason"  "IMAP-only" "$OUT"
+OUT=$(w124 $IM move 1 Archive124 --folder INBOX)
+check "124.29 IMAP move reports it"                             "moved to 'Archive124'" "$OUT"
+check "124.30 IMAP move copies to the target"                   'UID COPY 0000000000000001 "Archive124"' "$(ilog)"
+check "124.31 IMAP move expunges the source"                    'EXPUNGE' "$(ilog)"
+OUT=$(w124 $IM move 1)
+check "124.32 move without a folder is refused"                 "requires a UID and a destination" "$OUT"
+OUT=$(w124 $IM move zz Archive124)
+check "124.33 move with a bad UID is refused"                   "invalid UID 'zz'" "$OUT"
+OUT=$(w124 $IM move 1 INBOX --folder INBOX)
+check "124.34 move onto the source is refused"                  "already in 'INBOX'" "$OUT"
+OUT=$(w124 $GM move 1 Work --folder INBOX)
+check "124.35 Gmail move exits 0"                               "exit-code=0" "$OUT"
+check "124.36 Gmail move adds the target label"                 'addLabelIds":\["Work"\]' "$(glog)"
+check "124.37 Gmail move removes the source label"              'removeLabelIds":\["INBOX"\]' "$(glog)"
+OUT=$( (export HOME="$H124"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+        "$BIN_DIR/email-cli-ro" "$GM" move 1 Work </dev/null 2>&1
+        echo "exit-code=$?") )
+check "124.38 email-cli-ro refuses move"                        "not available in read-only" "$OUT"
+OUT=$(w124 $IM help move)
+check "124.39 help move shows the usage"                        "Usage: email-cli move" "$OUT"
 kill "$IMAP124_PID" "$GMAIL124_PID"
+
+fi
+
+if phase_wanted 132; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 132 — trash and archive from the command line (EMAIL-132)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 132: trash / archive (EMAIL-132) ---"
+
+alloc_port IMAP132_PORT
+alloc_port GMAIL132_PORT
+IMAP132_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_132.log"
+GMAIL132_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_132.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP132_PORT MOCK_IMAP_SUBJECT="Phase132Msg" \
+    "$MOCK_SERVER_BIN") >"$IMAP132_LOG" 2>&1 &
+IMAP132_PID=$!
+(MOCK_GMAIL_PORT=$GMAIL132_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="w132@gmail.example" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL132_LOG" 2>&1 &
+GMAIL132_PID=$!
+sleep 1
+
+# The home is new for this run (the work directory carries the shell's PID).
+H132="./build/tests/functional/work-$$/homes/f132-$$"
+mkdir -p "$H132/.config/email-cli/accounts/w132@example.org" "$H132/.config/email-cli/accounts/w132@gmail.example"
+printf 'credential_obfuscation=false\n' > "$H132/.config/email-cli/settings.ini"
+cat > "$H132/.config/email-cli/accounts/w132@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP132_PORT
+EMAIL_USER=w132@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+ARCHIVE_FOLDER=Old132
+SSL_NO_VERIFY=1
+INI
+cat > "$H132/.config/email-cli/accounts/w132@gmail.example/config.ini" <<INI
+EMAIL_HOST=
+EMAIL_USER=w132@gmail.example
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=fakefaketoken
+INI
+chmod 0600 "$H132"/.config/email-cli/accounts/*/config.ini
+
+w132() {
+    local bin="$1" acc="$2"; shift 2
+    (export HOME="$H132"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     export GMAIL_TEST_TOKEN=testtoken
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL132_PORT/gmail/v1/users/me"
+     "$BIN_DIR/$bin" "$acc" "$@" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+IM=w132@example.org
+GM=w132@gmail.example
+ilog() { grep "Client requested" "$IMAP132_LOG"; }
+glog() { grep "MODIFY\|TRASH" "$GMAIL132_LOG"; }
+
+OUT=$(w132 email-cli $IM trash 2)
+check "132.1 IMAP trash reports it"                            "moved to the trash" "$OUT"
+check "132.2 IMAP trash copies the UID to Trash"               'UID COPY 0000000000000002 "Trash"' "$(ilog)"
+check "132.3 IMAP trash flags it \\Deleted"                    'UID STORE 0000000000000002 +FLAGS (.Deleted)' "$(ilog)"
+OUT=$(w132 email-cli $IM archive 3)
+check "132.4 IMAP archive reports it"                          "archived" "$OUT"
+check "132.5 IMAP archive copies the UID to ARCHIVE_FOLDER"    'UID COPY 0000000000000003 "Old132"' "$(ilog)"
+OUT=$(w132 email-cli $IM trash 4 --folder Trash)
+check "132.6 IMAP trash in the Trash deletes for good"         "deleted for good" "$OUT"
+check_not "132.7 IMAP trash in the Trash does not copy"        'UID COPY 0000000000000004' "$(ilog)"
+OUT=$(w132 email-cli $IM archive 5 --folder Old132)
+check "132.8 IMAP archive in the archive is a no-op"           "already in Old132" "$OUT"
+check_not "132.9 IMAP archive in the archive sends nothing"    'UID COPY 0000000000000005' "$(ilog)"
+
+OUT=$(w132 email-cli $GM trash 1)
+check "132.10 Gmail trash reports it"                          "moved to the trash" "$OUT"
+check "132.11 Gmail trash posts to the trash endpoint"         'TRASH 0000000000000001' "$(glog)"
+OUT=$(w132 email-cli $GM archive 2)
+check "132.12 Gmail archive exits 0"                           "exit-code=0" "$OUT"
+check "132.13 Gmail archive marks it read"                     'MODIFY 0000000000000002 .*removeLabelIds":\["UNREAD"\]' "$(glog)"
+
+OUT=$(w132 email-cli $IM trash)
+check "132.14 trash without a UID"                             "'trash' requires a UID" "$OUT"
+OUT=$(w132 email-cli $IM archive zz)
+check "132.15 archive with a bad UID"                          "invalid UID 'zz'" "$OUT"
+OUT=$(w132 email-cli $IM trash 1 2)
+check "132.16 trash with two UIDs"                             "Unknown option" "$OUT"
+OUT=$(w132 email-cli-ro $IM trash 1)
+check "132.17 email-cli-ro refuses trash"                      "not available in read-only mode" "$OUT"
+OUT=$(w132 email-cli-ro $IM archive 1)
+check "132.18 email-cli-ro refuses archive"                    "not available in read-only mode" "$OUT"
+OUT=$("$BIN_DIR/email-cli" trash --help 2>&1)
+check "132.19 trash --help describes both commands"            "archive <uid>" "$OUT"
+OUT=$("$BIN_DIR/email-cli" help archive 2>&1)
+check "132.20 help archive shows the page"                     "ARCHIVE_FOLDER" "$OUT"
+kill "$IMAP132_PID" "$GMAIL132_PID"
+
+fi
+
+if phase_wanted 133; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 133 — reply and reply to all from the command line (EMAIL-133)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 133: reply / reply --all (EMAIL-133) ---"
+
+alloc_port IMAP133_PORT
+alloc_port SMTP133_PORT
+IMAP133_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_133.log"
+SMTP133_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp_133.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP133_PORT MOCK_IMAP_MSG_PREFIX="Phase133Msg" \
+    MOCK_IMAP_COUNT=3 MOCK_IMAP_MSGID="<orig133@example.org>" \
+    MOCK_IMAP_TO="w133@example.org, other133@example.org" MOCK_IMAP_CC="third133@example.org" \
+    "$MOCK_SERVER_BIN") >"$IMAP133_LOG" 2>&1 &
+IMAP133_PID=$!
+(cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP133_PORT \
+    "$MOCK_SMTP_BIN") >"$SMTP133_LOG" 2>&1 &
+SMTP133_PID=$!
+sleep 1
+
+H133="./build/tests/functional/work-$$/homes/f133-$$"
+mkdir -p "$H133/.config/email-cli/accounts/w133@example.org"
+printf 'credential_obfuscation=false\n' > "$H133/.config/email-cli/settings.ini"
+cat > "$H133/.config/email-cli/accounts/w133@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP133_PORT
+EMAIL_USER=w133@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+EMAIL_SENT_FOLDER=INBOX.Sent
+SSL_NO_VERIFY=1
+SMTP_HOST=smtps://localhost:$SMTP133_PORT
+SMTP_USER=w133@example.org
+SMTP_PASS=testpass
+INI
+chmod 0600 "$H133"/.config/email-cli/accounts/*/config.ini
+
+w133() {
+    (export HOME="$H133"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/$1" w133@example.org "${@:2}" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+smtp133() { cat "$SMTP133_LOG"; }
+
+w133 email-cli list >/dev/null
+OUT=$(w133 email-cli reply 2 --body "My answer 133")
+check "133.1 reply reports it"                      "Reply sent" "$OUT"
+check "133.2 reply exits 0"                         "exit-code=0" "$OUT"
+check "133.3 reply goes to the sender"              "RCPT TO:<sender2@example.com>" "$(smtp133)"
+check "133.4 reply has the Re: subject"             "Subject: Re: Phase133Msg 2" "$(smtp133)"
+check "133.5 reply has In-Reply-To"                 "In-Reply-To: <orig133@example.org>" "$(smtp133)"
+check "133.6 reply has the References header"       "References: <orig133@example.org>" "$(smtp133)"
+check "133.7 reply quotes the original"             "wrote:" "$(smtp133)"
+check "133.8 reply carries the text"                "My answer 133" "$(smtp133)"
+check_not "133.9 reply does not go to the others"   "RCPT TO:<other133@example.org>" "$(smtp133)"
+check "133.10 reply marks the original answered"    "marked as answered" "$OUT"
+
+OUT=$(w133 email-cli reply 3 --all --body "All answer 133")
+check "133.11 reply --all exits 0"                  "exit-code=0" "$OUT"
+check "133.12 reply --all reaches the sender"       "RCPT TO:<sender3@example.com>" "$(smtp133)"
+check "133.13 reply --all reaches To"               "RCPT TO:<other133@example.org>" "$(smtp133)"
+check "133.14 reply --all reaches Cc"               "RCPT TO:<third133@example.org>" "$(smtp133)"
+check_not "133.15 reply --all leaves out the account itself" "RCPT TO:<w133@example.org>" "$(smtp133)"
+check "133.16 reply --all has the Cc header"        "Cc: other133@example.org, third133@example.org" "$(smtp133)"
+
+OUT=$(w133 email-cli reply)
+check "133.17 reply without a UID"                  "'reply' requires a UID" "$OUT"
+OUT=$(w133 email-cli reply zz)
+check "133.18 reply with a bad UID"                 "invalid UID 'zz'" "$OUT"
+OUT=$(w133 email-cli reply 1 2)
+check "133.19 reply with two UIDs"                  "Unknown option" "$OUT"
+OUT=$(w133 email-cli-ro reply 1)
+check "133.20 email-cli-ro refuses reply"           "not available in read-only mode" "$OUT"
+OUT=$("$BIN_DIR/email-cli" help reply 2>&1)
+check "133.21 help reply shows the page"            "reply <uid> \[--all\]" "$OUT"
+MF133=$(find "$H133" -name INBOX.tsv | head -1)
+ans133() { awk -F'\t' -v u="$1" '$1==u {print int($NF/16)%2}' "$MF133"; }
+check "133.22 the replied-to message is flagged answered"   "^1$" "$(ans133 0000000000000002)"
+check "133.23 the reply-all'd message is flagged answered"  "^1$" "$(ans133 0000000000000003)"
+check "133.24 another message is not flagged answered"      "^0$" "$(ans133 0000000000000001)"
+kill "$IMAP133_PID" "$SMTP133_PID"
+
+fi
+
+if phase_wanted 137; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 137 — help pages for migrate-credentials and help (EMAIL-137)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 137: migrate-credentials / help pages (EMAIL-137) ---"
+
+H137="$PROJECT_ROOT/build/functional-137-home"
+mkdir -p "$H137"
+h137() { ( export HOME="$H137"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+           "$@" </dev/null 2>&1; echo "exit-code=$?" ); }
+OUT=$(h137 "$BIN_DIR/email-cli" help migrate-credentials)
+check "137.1 help migrate-credentials shows the usage"   "Usage: email-cli migrate-credentials" "$OUT"
+check "137.2 help migrate-credentials exits 0"           "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli" migrate-credentials --help)
+[ "$OUT" = "$OUT2" ] && SAME137=same || SAME137=differs
+check "137.3 migrate-credentials --help equals the help page" "^same$" "$SAME137"
+OUT=$(h137 "$BIN_DIR/email-cli" help help)
+check "137.4 help help shows the usage"                  "Usage: email-cli help" "$OUT"
+check "137.5 help help exits 0"                          "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli" help --help)
+check "137.6 help --help equals help help"               "Usage: email-cli help" "$OUT2"
+OUT=$(h137 "$BIN_DIR/email-cli-ro" help help)
+check "137.7 email-cli-ro help help shows the usage"     "Usage: email-cli-ro help" "$OUT"
+check "137.8 email-cli-ro help help exits 0"             "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli-ro" help --help)
+check "137.9 email-cli-ro help --help shows the usage"   "Usage: email-cli-ro help" "$OUT2"
 
 fi
 

@@ -443,6 +443,7 @@ void test_config_store(void) {
             fprintf(fp, "EMAIL_USER=test@test.com\n");
             fprintf(fp, "EMAIL_PASS=password123\n");
             fprintf(fp, "TRASH_FOLDER=MyTrash\n");
+            fprintf(fp, "ARCHIVE_FOLDER=MyArchive\n");
             fclose(fp);
         }
         RAII_WITH_CLEANUP(config_cleanup) Config *loaded = config_load_from_store();
@@ -451,6 +452,9 @@ void test_config_store(void) {
             ASSERT(loaded->trash_folder &&
                    strcmp(loaded->trash_folder, "MyTrash") == 0,
                    "trash_folder: value matches");
+            ASSERT(loaded->archive_folder &&
+                   strcmp(loaded->archive_folder, "MyArchive") == 0,
+                   "archive_folder: value matches");
         }
         unlink(acct_path);
     }

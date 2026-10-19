@@ -424,10 +424,76 @@ int email_service_create_label(const Config *cfg, const char *name);
 int email_service_delete_label(const Config *cfg, const char *label_id);
 
 /**
+ * @brief Move a message to another folder (IMAP) or label (Gmail).
+ *
+ * IMAP: selects the source mailbox, copies the message to @p target and
+ * removes it from the source (also from the local manifest).
+ * Gmail: adds the label @p target and removes the source label.
+ *
+ * @param uid     16-char padded UID string.
+ * @param folder  Source mailbox (NULL = cfg->folder, else INBOX).
+ * @param target  Destination folder / label.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_move(const Config *cfg, const char *uid,
+                       const char *folder, const char *target);
+
+/**
  * @brief Mark a message as junk/spam ($Junk / Gmail SPAM).
  * @return 0 on success, -1 on error.
  */
 int email_service_mark_junk(const Config *cfg, const char *uid);
+
+/**
+ * @brief Build the quoted original for a reply: "On <date>, <from> wrote:"
+ *        and the body, each line prefixed "> ".  Shared by email-cli and
+ *        email-tui.
+ * @return Heap string (caller frees), NULL on error.
+ */
+char *email_service_reply_quote(const char *raw);
+
+/**
+ * @brief The Cc list of a reply to all: the original To and Cc minus @p own,
+ *        joined with "; ".
+ * @return Heap string (caller frees; may be empty), NULL on error.
+ */
+char *email_service_reply_all_cc(const char *raw, const char *own);
+
+/**
+ * @brief Set the local "answered" flag of a message in the folder's manifest.
+ *        Local until the next sync (the manifest is rewritten from the server).
+ * @return 0 on success, -1 when the manifest or the message is not there.
+ */
+int email_service_mark_answered(const Config *cfg, const char *folder, const char *uid);
+
+/**
+ * @brief Reply to a message without interaction (email-cli reply [--all]):
+ *        quoted original, "Re:" subject, In-Reply-To/References, sent, saved
+ *        in Sent, the original marked answered.
+ * @param folder NULL = the account's folder.
+ * @param all    1 = reply to all (original To/Cc, minus the account's address).
+ * @param body   Reply text placed above the quote; may be NULL.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_reply(const Config *cfg, const char *uid, const char *folder,
+                        int all, const char *body);
+
+/**
+ * @brief Move a message to the trash, or delete it for good when it is
+ *        already there (the TUI's 'D').  Gmail: TRASH label; IMAP: move to
+ *        the configured trash folder.
+ * @param folder Folder (IMAP) or label the message is in; NULL = the account's.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_trash(const Config *cfg, const char *uid, const char *folder);
+
+/**
+ * @brief Archive a message (the TUI's 'a').  Gmail: remove its labels and mark
+ *        it read; IMAP: move it to the configured archive folder.
+ * @param folder Folder (IMAP) or label the message is in; NULL = the account's.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_archive(const Config *cfg, const char *uid, const char *folder);
 
 /**
  * @brief Mark a message as not-junk/ham ($NotJunk / remove Gmail SPAM).

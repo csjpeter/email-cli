@@ -164,6 +164,30 @@ static int local_name(char *out, size_t cap)
 }
 
 /**
+ * Turn a recipient list ("A <a@x>, b@y; c@z") into the envelope form: one
+ * "<addr>" per line.  Commas and semicolons separate the entries.
+ */
+static void envelope_list(const char *list, char *out, size_t cap)
+{
+    size_t n = 0;
+    out[0] = '\0';
+    const char *p = list;
+    while (*p) {
+        size_t el = strcspn(p, ",;");
+        const char *lt = memchr(p, '<', el);
+        const char *gt = lt ? memchr(lt, '>', (size_t)(p + el - lt)) : NULL;
+        const char *a = p, *e = p + el;
+        if (lt && gt) { a = lt + 1; e = gt; }
+        while (a < e && isspace((unsigned char)*a)) a++;
+        while (e > a && isspace((unsigned char)e[-1])) e--;
+        if (e > a && n + (size_t)(e - a) + 4 < cap)
+            n += (size_t)snprintf(out + n, cap - n, "<%.*s>\n", (int)(e - a), a);
+        p += el;
+        if (*p) p++;
+    }
+}
+
+/**
  * Deliver one message.  @p url is smtps://host[:port] (implicit TLS) or
  * smtp://host[:port] (STARTTLS is required, a plain session is never used).
  * @return 0 on success, -1 on error with the reason in @p why.
@@ -249,7 +273,15 @@ static int smtp_deliver(const char *url, const char *user, const char *pass,
         }
     }
     if (link_cmd(&l, 2, why, why_len, "MAIL FROM:%s", from_env) != 0) goto out;
-    if (link_cmd(&l, 2, why, why_len, "RCPT TO:%s", to_env) != 0) goto out;
+    /* to_env is a newline-separated list of "<addr>" (envelope_list) */
+    for (const char *r = to_env; *r; ) {
+        size_t rl = strcspn(r, "\n");
+        if (rl == 0) { r++; continue; }
+        char one[600];
+        snprintf(one, sizeof(one), "%.*s", (int)rl, r);
+        if (link_cmd(&l, 2, why, why_len, "RCPT TO:%s", one) != 0) goto out;
+        r += rl;
+    }
     if (link_cmd(&l, 354, why, why_len, "%s", "DATA") != 0) goto out;
 
     /* the message: CRLF line ends, leading dots doubled, closed by "." */
@@ -337,16 +369,8 @@ int smtp_send(const Config *cfg,
         snprintf(from_env, sizeof(from_env), "<%s>", from);
     }
 
-    char to_env[512];
-    const char *lt2 = strchr(to, '<');
-    const char *gt2 = lt2 ? strchr(lt2, '>') : NULL;
-    if (lt2 && gt2 && gt2 > lt2) {
-        size_t alen = (size_t)(gt2 - lt2 - 1);
-        if (alen >= sizeof(to_env)) alen = sizeof(to_env) - 1;
-        snprintf(to_env, sizeof(to_env), "<%.*s>", (int)alen, lt2 + 1);
-    } else {
-        snprintf(to_env, sizeof(to_env), "<%s>", to);
-    }
+    char to_env[2048];
+    envelope_list(to, to_env, sizeof(to_env));
 
     char why[256] = "";
     int rc = smtp_deliver(url, smtp_user, smtp_pass, cfg->ssl_no_verify,

@@ -47,7 +47,7 @@ If `<command>` is given and unknown, prints an error to **stderr** and exits **1
 
 Supported topics: `list`, `show`, `list-folders`, `list-labels`, `list-attachments`,
 `save-attachment`, `send`, `create-folder`, `delete-folder`, `create-label`, `delete-label`,
-`mark-junk`, `mark-notjunk`, `config`.
+`move`, `mark-junk`, `mark-notjunk`, `trash`, `archive`, `reply`, `config`.
 
 ---
 
@@ -589,6 +589,32 @@ Use `delete-folder` for IMAP accounts.
 
 ---
 
+## `move`
+
+```
+email-cli [<account>] move <uid> <folder> [--folder <name>]
+```
+
+**User story:** As a user I want to move a message to another folder from a
+script, as the `m` key does in the TUI.
+
+* **IMAP:** selects the source mailbox (`--folder`, default the account's
+  folder), copies the message to `<folder>`, flags it `\Deleted` there and
+  expunges; the local manifest entry of the source is removed.
+* **Gmail:** adds the label `<folder>` and removes the source label.
+
+Moving a message to the mailbox it is already in is an error. Not available in
+`email-cli-ro`.
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Moved |
+| −1 | Missing or invalid argument, IMAP / API error |
+
+---
+
 ## `mark-junk`
 
 ```
@@ -646,6 +672,69 @@ Mark the message identified by `<uid>` as not junk.
 |------|-----------|
 | 0 | Flag set successfully |
 | −1 | IMAP / API error |
+
+---
+
+## `trash` and `archive`
+
+```
+email-cli [<account>] trash <uid> [--folder <folder>]
+email-cli [<account>] archive <uid> [--folder <folder>]
+```
+
+**User story:** As a user I want to delete or archive a message from a script
+with the result the TUI keys `D` and `a` give.
+
+* `trash` -- **IMAP:** moves the message from `--folder` (default: the
+  account's folder) to the trash folder (`TRASH_FOLDER`, default `Trash`).
+  **Gmail:** adds the `TRASH` label and removes the others. A message that is
+  already in the trash (`--folder` is the trash folder, or `TRASH` on Gmail) is
+  **deleted for good**, as `D` does in the TUI.
+* `archive` -- **IMAP:** moves the message to the archive folder
+  (`ARCHIVE_FOLDER`, default `Archive`). **Gmail:** removes the message's
+  labels (`INBOX` included) and marks it read, as `a` does in the TUI. A
+  message already in the archive is left alone (exit 0).
+
+Both are refused by `email-cli-ro`. The local cache is updated after the
+server accepted the change; with no connection the command fails (exit 1).
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Done (or nothing to do for `archive`) |
+| 1 | Missing or bad UID, no connection, IMAP / API error |
+
+---
+
+## `reply`
+
+```
+email-cli [<account>] reply <uid> [--all] [--body <text>] [--folder <folder>]
+```
+
+**User story:** As a user I want to reply to a message from a script with the
+result the TUI keys `r` and `R` give.
+
+The composition is the TUI's own (`email_service_reply_quote`,
+`email_service_reply_all_cc`): the reply goes to the Reply-To or From address,
+the subject is `Re: <subject>` (no second `Re:`), `In-Reply-To` and
+`References` carry the original Message-ID, and the text is `--body`, a blank
+line, then `On <date>, <from> wrote:` and the original with every line prefixed
+`> `. With `--all` the original To and Cc, minus the account's own address,
+become the Cc, and every one of them is a recipient of the SMTP envelope. The
+message is sent, saved in the Sent folder, and the original is marked answered
+in the local manifest. **The answered mark is local until the next sync**, which
+overwrites the manifest from the server.
+
+Refused by `email-cli-ro`.
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Sent |
+| 1 | Missing or bad UID, message not found, no SMTP, send failed |
 
 ---
 

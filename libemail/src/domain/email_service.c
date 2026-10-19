@@ -7327,6 +7327,173 @@ int email_service_mark_notjunk(const Config *cfg, const char *uid) {
     return rc;
 }
 
+int email_service_move(const Config *cfg, const char *uid,
+                       const char *folder, const char *target) {
+    const char *src = folder ? folder : (cfg->folder ? cfg->folder : "INBOX");
+    if (strcmp(src, target) == 0) {
+        fprintf(stderr, "Error: the message is already in '%s'.\n", target);
+        return -1;
+    }
+    local_store_init(cfg->host, cfg->user);
+    emc_client *mc = make_mail(cfg);
+    if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+
+    int rc;
+    if (cfg->gmail_mode) {
+        rc = emc_modify_label(mc, uid, target, 1);
+        if (rc == 0) rc = emc_modify_label(mc, uid, src, 0);
+        if (rc == 0) {
+            label_idx_add(target, uid);
+            local_hdr_update_labels("", uid, &target, 1, NULL, 0);
+            label_idx_remove(src, uid);
+            local_hdr_update_labels("", uid, NULL, 0, &src, 1);
+        }
+    } else {
+        rc = emc_select(mc, src);
+        if (rc == 0) rc = emc_move_to_folder(mc, uid, target);
+        if (rc == 0) {
+            Manifest *m = manifest_load(src);
+            if (m) {
+                manifest_remove(m, uid);
+                manifest_save(src, m);
+                manifest_free(m);
+            }
+        }
+    }
+    emc_close(mc);
+    if (rc == 0) printf("Message %s moved to '%s'.\n", uid, target);
+    else fprintf(stderr, "Error: could not move message %s to '%s'.\n", uid, target);
+    return rc == 0 ? 0 : -1;
+}
+
+/* ── trash and archive from the command line (EMAIL-132) ─────────────── */
+
+/** True when @p folder names the Gmail trash (the label id or the local index). */
+static int gmail_folder_is_trash(const char *folder) {
+    return folder && (strcmp(folder, "TRASH") == 0 || strcmp(folder, "_trash") == 0);
+}
+
+/** Drop @p uid from the local manifest of @p folder. */
+static void manifest_drop_uid(const char *folder, const char *uid) {
+    Manifest *m = manifest_load(folder);
+    if (!m) return;
+    manifest_remove(m, uid);
+    manifest_save(folder, m);
+    manifest_free(m);
+}
+
+int email_service_trash(const Config *cfg, const char *uid, const char *folder) {
+    const char *use_folder = folder ? folder
+                           : (cfg->folder ? cfg->folder : "INBOX");
+    local_store_init(cfg->host, cfg->user);
+    emc_client *mc = make_mail(cfg);
+    if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+    int rc;
+    int permanent;
+    if (cfg->gmail_mode) {
+        permanent = gmail_folder_is_trash(use_folder);
+        rc = permanent ? emc_delete(mc, uid) : emc_trash(mc, uid);
+    } else {
+        const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
+        permanent = strcmp(use_folder, trf) == 0;
+        rc = emc_select(mc, use_folder);
+        if (rc == 0)
+            rc = permanent ? emc_delete(mc, uid) : emc_move_to_folder(mc, uid, trf);
+    }
+    emc_close(mc);
+    if (rc != 0) {
+        fprintf(stderr, "Error: Could not %s message %s.\n",
+                permanent ? "delete" : "move to the trash", uid);
+        return -1;
+    }
+
+    if (cfg->gmail_mode) {
+        char **all_labels = NULL; int all_count = 0;
+        label_idx_list(&all_labels, &all_count);
+        for (int j = 0; j < all_count; j++) {
+            label_idx_remove(all_labels[j], uid);
+            free(all_labels[j]);
+        }
+        free(all_labels);
+        if (!permanent) label_idx_add("_trash", uid);
+    } else {
+        manifest_drop_uid(use_folder, uid);
+    }
+    if (permanent) printf("Message %s deleted for good.\n", uid);
+    else           printf("Message %s moved to the trash.\n", uid);
+    return 0;
+}
+
+int email_service_archive(const Config *cfg, const char *uid, const char *folder) {
+    const char *use_folder = folder ? folder
+                           : (cfg->folder ? cfg->folder : "INBOX");
+    local_store_init(cfg->host, cfg->user);
+
+    if (!cfg->gmail_mode) {
+        const char *arf = cfg->archive_folder ? cfg->archive_folder : "Archive";
+        if (strcmp(use_folder, arf) == 0) {
+            printf("Message %s is already in %s \xe2\x80\x94 no change.\n", uid, arf);
+            return 0;
+        }
+        emc_client *mc = make_mail(cfg);
+        if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+        int rc = emc_select(mc, use_folder);
+        if (rc == 0) rc = emc_move_to_folder(mc, uid, arf);
+        emc_close(mc);
+        if (rc != 0) {
+            fprintf(stderr, "Error: Could not move message %s to %s.\n", uid, arf);
+            return -1;
+        }
+        manifest_drop_uid(use_folder, uid);
+        printf("Message %s archived (moved to %s).\n", uid, arf);
+        return 0;
+    }
+
+    /* Gmail: remove every user-visible label (the TUI's 'a'), mark read. */
+    if (strcmp(use_folder, "_nolabel") == 0) {
+        printf("Message %s is already in the archive \xe2\x80\x94 no change.\n", uid);
+        return 0;
+    }
+    emc_client *mc = make_mail(cfg);
+    if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+    int rc = 0;
+    char *lbl_str = local_hdr_get_labels("", uid);
+    char *copy = lbl_str ? strdup(lbl_str) : NULL;
+    int n = 1;
+    if (lbl_str) for (const char *p = lbl_str; *p; p++) if (*p == ',') n++;
+    const char **rm = malloc((size_t)n * sizeof(char *));
+    int rm_n = 0;
+    if (copy && rm) {
+        char *tok = copy, *sep;
+        while (tok && *tok) {
+            sep = strchr(tok, ',');
+            if (sep) *sep = '\0';
+            if (tok[0] && tok[0] != '_') {
+                rm[rm_n++] = tok;
+                if (strcmp(tok, "IMPORTANT") != 0 &&
+                    strncmp(tok, "CATEGORY_", 9) != 0 &&
+                    emc_modify_label(mc, uid, tok, 0) != 0)
+                    rc = -1;
+            }
+            tok = sep ? sep + 1 : NULL;
+        }
+    }
+    if (rc == 0 && emc_set_flag(mc, uid, "\\Seen", 1) != 0) rc = -1;
+    emc_close(mc);
+    if (rc != 0) {
+        fprintf(stderr, "Error: Could not archive message %s.\n", uid);
+        free(copy); free(rm); free(lbl_str);
+        return -1;
+    }
+    for (int i = 0; i < rm_n; i++) label_idx_remove(rm[i], uid);
+    if (rm_n > 0) local_hdr_update_labels("", uid, NULL, 0, rm, rm_n);
+    label_idx_remove("UNREAD", uid);
+    label_idx_add("_nolabel", uid);
+    free(copy); free(rm); free(lbl_str);
+    printf("Message %s archived.\n", uid);
+    return 0;
+}
+
 int email_service_create_folder(const Config *cfg, const char *name) {
     if (cfg->gmail_mode) {
         fprintf(stderr, "Error: 'create-folder' is IMAP-only. Use 'create-label' for Gmail.\n");
@@ -7372,6 +7539,181 @@ int email_service_save_sent(const Config *cfg, const char *msg, size_t msg_len) 
 int email_service_save_draft(const Config *cfg, const char *msg, size_t msg_len) {
     local_store_init(cfg->host, cfg->user);
     return local_save_outgoing("Drafts", msg, msg_len);
+}
+
+/* ── Reply composition, shared by email-cli and email-tui (EMAIL-133) ─── */
+
+char *email_service_reply_quote(const char *raw) {
+    char *body_text = NULL;
+    char *html_raw = mime_get_html_part(raw);
+    if (html_raw) {
+        body_text = html_render(html_raw, 72, 0);
+        free(html_raw);
+    }
+    if (!body_text) body_text = mime_get_text_body(raw);
+
+    char *from_raw = mime_get_header(raw, "From");
+    char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;
+    free(from_raw);
+    char *date_raw = mime_get_header(raw, "Date");
+    char *date_fmt = date_raw ? mime_format_date(date_raw) : NULL;
+    free(date_raw);
+
+    /* "On <date>, <from> wrote:\n> line1\n> line2\n..." */
+    size_t qcap = 4096 + (body_text ? strlen(body_text) * 2 : 0);
+    char *quoted = malloc(qcap);
+    if (quoted) {
+        int off = snprintf(quoted, qcap, "On %s, %s wrote:\n",
+                           date_fmt ? date_fmt : "?", from_dec ? from_dec : "?");
+        if (body_text) {
+            const char *p = body_text;
+            while (*p && off < (int)qcap - 4) {
+                const char *nl = strchr(p, '\n');
+                size_t len = nl ? (size_t)(nl - p) : strlen(p);
+                size_t advance = len + (nl ? 1 : 0);
+                if (len > 0 && p[len - 1] == '\r') len--;
+                if (off + 2 + (int)len + 1 < (int)qcap) {
+                    quoted[off++] = '>';
+                    quoted[off++] = ' ';
+                    memcpy(quoted + off, p, len);
+                    off += (int)len;
+                    quoted[off++] = '\n';
+                    quoted[off]   = '\0';
+                }
+                p += advance;
+                if (!nl) break;
+            }
+        }
+    }
+    free(from_dec);
+    free(date_fmt);
+    free(body_text);
+    return quoted;
+}
+
+char *email_service_reply_all_cc(const char *raw, const char *own) {
+    char *orig_to = mime_get_header(raw, "To");
+    char *orig_cc = mime_get_header(raw, "Cc");
+    char *dec_to  = orig_to ? mime_decode_words(orig_to) : NULL;
+    char *dec_cc  = orig_cc ? mime_decode_words(orig_cc) : NULL;
+    free(orig_to); free(orig_cc);
+
+    char combined[2048] = "";
+    if (dec_to && dec_to[0])
+        strncpy(combined, dec_to, sizeof(combined) - 1);
+    if (dec_cc && dec_cc[0]) {
+        if (combined[0])
+            strncat(combined, ", ", sizeof(combined) - strlen(combined) - 1);
+        strncat(combined, dec_cc, sizeof(combined) - strlen(combined) - 1);
+    }
+    free(dec_to); free(dec_cc);
+
+    char cc_buf[1024] = "";
+    int cc_len = 0;
+    char *p = combined;
+    while (p && *p) {
+        while (*p == ' ') p++;
+        char *sep = strchr(p, ',');
+        int elen = sep ? (int)(sep - p) : (int)strlen(p);
+        while (elen > 0 && p[elen - 1] == ' ') elen--;
+        /* only this entry is searched for the own address, not the rest of the list */
+        char entry[512];
+        snprintf(entry, sizeof(entry), "%.*s", elen, p);
+        if (elen > 0 && !(own && own[0] && strcasestr(entry, own))) {
+            if (cc_len + elen + 3 < (int)sizeof(cc_buf) - 1) {
+                if (cc_len > 0) {
+                    cc_buf[cc_len++] = ';';
+                    cc_buf[cc_len++] = ' ';
+                }
+                memcpy(cc_buf + cc_len, p, (size_t)elen);
+                cc_len += elen;
+                cc_buf[cc_len] = '\0';
+            }
+        }
+        if (!sep) break;
+        p = sep + 1;
+    }
+    return strdup(cc_buf);
+}
+
+int email_service_mark_answered(const Config *cfg, const char *folder, const char *uid) {
+    local_store_init(cfg->host, cfg->user);
+    Manifest *mf = manifest_load(folder);
+    if (!mf) return -1;
+    int rc = -1;
+    ManifestEntry *me = manifest_find(mf, uid);
+    if (me) {
+        me->flags |= MSG_FLAG_ANSWERED;
+        manifest_save(folder, mf);
+        rc = 0;
+    }
+    manifest_free(mf);
+    return rc;
+}
+
+int email_service_reply(const Config *cfg, const char *uid, const char *folder,
+                        int all, const char *body) {
+    const char *use_folder = folder ? folder
+                           : (cfg->folder ? cfg->folder : "INBOX");
+    local_store_init(cfg->host, cfg->user);
+    char *raw = local_msg_exists(use_folder, uid)
+                    ? local_msg_load(use_folder, uid)
+                    : fetch_uid_content_in(cfg, use_folder, uid, 0);
+    if (!raw) {
+        fprintf(stderr, "Error: Could not load message UID %s.\n", uid);
+        return -1;
+    }
+    char *reply_to = NULL, *subject = NULL, *msg_id = NULL;
+    if (emc_reply_meta(raw, &reply_to, &subject, &msg_id) != EMC_OK) {
+        free(raw);
+        fprintf(stderr, "Error: Could not parse message headers.\n");
+        return -1;
+    }
+    const char *from = cfg->smtp_user ? cfg->smtp_user : cfg->user;
+    char *cc = all ? email_service_reply_all_cc(raw, from) : NULL;
+    char *quoted = email_service_reply_quote(raw);
+    free(raw);
+
+    size_t blen = (body ? strlen(body) : 0) + (quoted ? strlen(quoted) : 0) + 4;
+    char *text = malloc(blen);
+    char *rcpt = malloc(strlen(reply_to) + (cc ? strlen(cc) : 0) + 4);
+    if (!text || !rcpt) {
+        free(text); free(rcpt); free(cc); free(quoted);
+        free(reply_to); free(subject); free(msg_id);
+        return -1;
+    }
+    snprintf(text, blen, "%s%s%s", body ? body : "", body && body[0] ? "\n\n" : "",
+             quoted ? quoted : "");
+    snprintf(rcpt, strlen(reply_to) + (cc ? strlen(cc) : 0) + 4, "%s%s%s",
+             reply_to, cc && cc[0] ? "; " : "", cc ? cc : "");
+
+    int rc = -1;
+    /* the header list is comma separated (the dialog's "; " is for the eye) */
+    char *cc_hdr = cc && cc[0] ? strdup(cc) : NULL;
+    for (char *q = cc_hdr; q && *q; q++)
+        if (*q == ';') *q = ',';
+    emc_message p = {.from = from, .to = reply_to,
+                     .cc = cc_hdr,
+                     .subject = subject, .body = text,
+                     .in_reply_to = msg_id};
+    char *msg = NULL;
+    size_t msg_len = 0;
+    if (mail_compose(&p, &msg, &msg_len) != 0) {
+        fprintf(stderr, "Error: Failed to build message.\n");
+    } else if (mail_send_wire(cfg, from, rcpt, msg, msg_len) == 0) {
+        printf("Reply sent.\n");
+        if (email_service_save_sent(cfg, msg, msg_len) == 0)
+            printf("Saved.\n");
+        else
+            fprintf(stderr, "(Could not save to Sent folder \xe2\x80\x94 "
+                    "check EMAIL_SENT_FOLDER in config.)\n");
+        if (email_service_mark_answered(cfg, use_folder, uid) == 0)
+            printf("Message %s marked as answered (local until the next sync).\n", uid);
+        rc = 0;
+    }
+    free(msg); free(text); free(rcpt); free(cc); free(cc_hdr); free(quoted);
+    free(reply_to); free(subject); free(msg_id);
+    return rc;
 }
 
 void email_service_help_popup(const char *title, const char *rows[][2], int n) {

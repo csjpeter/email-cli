@@ -44,13 +44,13 @@ existing references and every `no` has a reason.
 | Star / unstar | yes | F:17.1 | yes (`f`) | P:test_feedback_f_star | |
 | Add / remove a Gmail label on a message | yes | F:60.1 | yes (`t` picker) | P:test_feedback_t_label_added | |
 | Mark junk / not junk | yes | F:52.2 | no | | the list has a `j` key, but no PTY test exercises it: a gap until tested; ticket to be opened by the owner |
-| Move a message to a folder | no | | yes (`m`) | P:test_screen_list_move_prompt | not built in the CLI; ticket to be opened by the owner |
-| Delete (trash) / archive a message | no | | yes (`d`, `D`, `a`) | P:test_tui_list_bulk_delete_confirm | not built in the CLI (Gmail: via `add-label`/`remove-label` only); ticket to be opened by the owner |
+| Move a message to a folder | yes (`move`) | F:124.29 | yes (`m`) | P:test_screen_list_move_prompt | |
+| Delete (trash) / archive a message | yes (`trash`, `archive`) | F:132.2 | yes (`d`, `D`, `a`) | P:test_tui_list_bulk_delete_confirm | |
 | Mark several messages at once | no (one UID per call; a script loops) | | yes (`Space`, `m`) | P:test_tui_list_bulk_star_marked | medium: a script loops; not a gap |
 | List attachments | yes | F:14.1 | yes | P:test_show_attachment_picker | |
 | Save an attachment / all attachments | yes | F:15.2 | yes (`a`, `A`) | P:test_show_save_single | |
 | Compose and send a new message | yes (`send`) | F:11.3 | yes (`c`) | P:test_review_s_sends_message | |
-| Reply, reply to all | no | | yes (`r`, `R`) | P:test_reply_all_send | `email-cli` has no reply; `email-tui reply <uid>` is the one-shot form; ticket to be opened by the owner |
+| Reply, reply to all | yes (`reply`, `reply --all`) | F:133.3 | yes (`r`, `R`) | P:test_reply_all_send | the answered mark is local until the next sync |
 | Forward | no | | yes (`F`) | P:test_forward_fill_to_opens_editor | not built in the CLI; ticket to be opened by the owner |
 | List accounts | yes | F:18.1 | yes | P:test_screen_accounts | |
 | Add an account (wizard) | yes | F:76.1 | yes (`n`) | P:test_wizard_complete | |

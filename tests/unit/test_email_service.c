@@ -4228,4 +4228,35 @@ void test_email_service(void) {
 
         local_store_init("imaps://test.example.com", "testuser");
     }
+    /* ── reply composition shared with the TUI (EMAIL-133) ───────────── */
+    {
+        const char *raw =
+            "From: Alice <alice@example.org>\r\n"
+            "To: me@example.org, Bob <bob@example.org>\r\n"
+            "Cc: carol@example.org, ME@EXAMPLE.ORG\r\n"
+            "Subject: Hello\r\n"
+            "Date: Thu, 26 Mar 2026 12:00:00 +0000\r\n"
+            "Message-ID: <m1@example.org>\r\n"
+            "Content-Type: text/plain; charset=UTF-8\r\n"
+            "\r\n"
+            "line one\r\nline two\r\n";
+        char *q = email_service_reply_quote(raw);
+        ASSERT(q != NULL, "reply_quote: built");
+        ASSERT(q && strstr(q, "wrote:\n> line one\n> line two\n"),
+               "reply_quote: attribution then '> ' prefixed lines");
+        ASSERT(q && strncmp(q, "On ", 3) == 0, "reply_quote: starts with 'On '");
+        free(q);
+
+        char *cc = email_service_reply_all_cc(raw, "me@example.org");
+        ASSERT(cc && strcmp(cc, "Bob <bob@example.org>; carol@example.org") == 0,
+               "reply_all_cc: own address dropped (any case), '; ' joined");
+        free(cc);
+        cc = email_service_reply_all_cc(raw, NULL);
+        ASSERT(cc && strstr(cc, "me@example.org") != NULL,
+               "reply_all_cc: no own address keeps everyone");
+        free(cc);
+        cc = email_service_reply_all_cc("From: a@b.c\r\n\r\nx\r\n", "me@example.org");
+        ASSERT(cc && cc[0] == '\0', "reply_all_cc: no To/Cc gives an empty list");
+        free(cc);
+    }
 }

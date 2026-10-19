@@ -50,6 +50,7 @@ static void help_general(void) {
         "\n"
         "Writing:\n"
         "  send                        Send a message non-interactively\n"
+        "  reply <uid> [--all]         Reply (to all) to a message\n"
         "  mark-read <uid>             Mark a message as read\n"
         "  mark-unread <uid>           Mark a message as unread\n"
         "  mark-starred <uid>          Star (flag) a message\n"
@@ -60,8 +61,11 @@ static void help_general(void) {
         "  delete-label <id>           Delete a Gmail label (Gmail only)\n"
         "  create-folder <name>        Create an IMAP folder (IMAP only)\n"
         "  delete-folder <name>        Delete an IMAP folder (IMAP only)\n"
+        "  move <uid> <folder>         Move a message to a folder (Gmail: label)\n"
         "  mark-junk <uid>             Mark a message as junk/spam\n"
         "  mark-notjunk <uid>          Mark a message as not-junk (ham)\n"
+        "  trash <uid>                 Move a message to the trash\n"
+        "  archive <uid>               Archive a message\n"
         "\n"
         "\n"
         "Finding messages (see 'email-cli help list' for details):\n"
@@ -646,6 +650,24 @@ static void help_delete_folder(void) {
     );
 }
 
+static void help_move(void) {
+    printf(
+        "Usage: email-cli move <uid> <folder> [--folder <name>]\n"
+        "\n"
+        "Move a message to another folder.\n"
+        "IMAP: copies it to <folder> and removes it from the source mailbox.\n"
+        "Gmail: adds the label <folder> and removes the source label.\n"
+        "\n"
+        "  <uid>             UID of the message (decimal or 16-char hex)\n"
+        "  <folder>          Destination folder (Gmail: label ID)\n"
+        "  --folder <name>   Source mailbox (default: the account's folder)\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli move 12345 Archive\n"
+        "  email-cli move 12345 Archive --folder INBOX\n"
+    );
+}
+
 static void help_mark_junk(void) {
     printf(
         "Usage: email-cli mark-junk <uid>\n"
@@ -658,6 +680,53 @@ static void help_mark_junk(void) {
         "\n"
         "Examples:\n"
         "  email-cli mark-junk 12345\n"
+    );
+}
+
+static void help_trash(void) {
+    printf(
+        "Usage: email-cli trash <uid> [--folder <folder>]\n"
+        "       email-cli archive <uid> [--folder <folder>]\n"
+        "\n"
+        "trash: move a message to the trash (the TUI's 'D').\n"
+        "  IMAP:  moves it to the trash folder (TRASH_FOLDER, default Trash).\n"
+        "  Gmail: adds the TRASH label and removes the others.\n"
+        "  A message that is already in the trash is deleted for good.\n"
+        "\n"
+        "archive: take a message out of the inbox (the TUI's 'a').\n"
+        "  IMAP:  moves it to the archive folder (ARCHIVE_FOLDER, default Archive).\n"
+        "  Gmail: removes its labels (INBOX included) and marks it read.\n"
+        "\n"
+        "  <uid>                Message UID (decimal or 16-char hex)\n"
+        "  --folder <folder>    Folder (IMAP) or label (Gmail) the message is in;\n"
+        "                       default: the account's folder\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli trash 12345\n"
+        "  email-cli archive 12345 --folder INBOX\n"
+    );
+}
+
+static void help_reply(void) {
+    printf(
+        "Usage: email-cli reply <uid> [--all] [--body <text>] [--folder <folder>]\n"
+        "\n"
+        "Reply to a message without interaction (the TUI's 'r' and 'R').\n"
+        "The reply goes to the Reply-To or From address with the subject\n"
+        "'Re: ...', In-Reply-To and References set, and the original quoted\n"
+        "under your text. It is saved in Sent and the original is marked\n"
+        "answered; that mark is local until the next sync.\n"
+        "\n"
+        "  <uid>                Message UID (decimal or 16-char hex)\n"
+        "  --all                Reply to all: the original To and Cc (minus\n"
+        "                       your own address) become the Cc\n"
+        "  --body <text>        Your reply text (default: only the quote)\n"
+        "  --folder <folder>    Folder (IMAP) or label (Gmail) the message is in;\n"
+        "                       default: the account's folder\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli reply 12345 --body \"Thanks, done.\"\n"
+        "  email-cli reply 12345 --all --body \"Agreed.\"\n"
     );
 }
 
@@ -713,6 +782,39 @@ static void help_remove_account(void) {
         "\n"
         "Examples:\n"
         "  email-cli remove-account user@example.com\n"
+    );
+}
+
+static void help_migrate_credentials(void) {
+    printf(
+        "Usage: email-cli migrate-credentials\n"
+        "\n"
+        "Re-encrypt (or decrypt) the stored passwords of all accounts so that\n"
+        "they match the current credential obfuscation setting.\n"
+        "\n"
+        "  obfuscation on   Stored passwords are written with the enc: prefix.\n"
+        "  obfuscation off  Stored passwords are written as plaintext.\n"
+        "\n"
+        "The command takes no arguments and acts on every configured account.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli migrate-credentials\n"
+    );
+}
+
+static void help_help(void) {
+    printf(
+        "Usage: email-cli help [<command>]\n"
+        "\n"
+        "Show the general help, or the detailed help page of one command.\n"
+        "'email-cli <command> --help' shows the same page as 'email-cli help <command>'.\n"
+        "\n"
+        "  <command>  A command word, e.g. list, send or rules apply\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli help\n"
+        "  email-cli help list\n"
+        "  email-cli help rules apply\n"
     );
 }
 
@@ -849,12 +951,18 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "delete-label")    == 0) { help_delete_label();    return EXIT_SUCCESS; }
                 if (strcmp(cmd, "create-folder")   == 0) { help_create_folder();   return EXIT_SUCCESS; }
                 if (strcmp(cmd, "delete-folder")   == 0) { help_delete_folder();   return EXIT_SUCCESS; }
+                if (strcmp(cmd, "move")            == 0) { help_move();            return EXIT_SUCCESS; }
                 if (strcmp(cmd, "mark-junk")       == 0) { help_mark_junk();       return EXIT_SUCCESS; }
+                if (strcmp(cmd, "trash")           == 0 ||
+                    strcmp(cmd, "archive")         == 0) { help_trash();          return EXIT_SUCCESS; }
+                if (strcmp(cmd, "reply")           == 0) { help_reply();           return EXIT_SUCCESS; }
                 if (strcmp(cmd, "mark-notjunk")    == 0) { help_mark_notjunk();    return EXIT_SUCCESS; }
                 if (strcmp(cmd, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
                 if (strcmp(cmd, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
                 if (strcmp(cmd, "rules")           == 0) { help_rules();           return EXIT_SUCCESS; }
+                if (strcmp(cmd, "migrate-credentials") == 0) { help_migrate_credentials(); return EXIT_SUCCESS; }
+                if (strcmp(cmd, "help")            == 0) { help_help();            return EXIT_SUCCESS; }
             }
             /* email-cli --help  or  email-cli help --help */
             help_general();
@@ -900,12 +1008,18 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "delete-label")    == 0) { help_delete_label();    return EXIT_SUCCESS; }
             if (strcmp(topic, "create-folder")   == 0) { help_create_folder();   return EXIT_SUCCESS; }
             if (strcmp(topic, "delete-folder")   == 0) { help_delete_folder();   return EXIT_SUCCESS; }
+            if (strcmp(topic, "move")            == 0) { help_move();            return EXIT_SUCCESS; }
             if (strcmp(topic, "mark-junk")       == 0) { help_mark_junk();       return EXIT_SUCCESS; }
+            if (strcmp(topic, "trash")           == 0 ||
+                strcmp(topic, "archive")         == 0) { help_trash();          return EXIT_SUCCESS; }
+            if (strcmp(topic, "reply")           == 0) { help_reply();           return EXIT_SUCCESS; }
             if (strcmp(topic, "mark-notjunk")    == 0) { help_mark_notjunk();    return EXIT_SUCCESS; }
             if (strcmp(topic, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
             if (strcmp(topic, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
             if (strcmp(topic, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
             if (strcmp(topic, "rules")           == 0) { help_rules();           return EXIT_SUCCESS; }
+            if (strcmp(topic, "migrate-credentials") == 0) { help_migrate_credentials(); return EXIT_SUCCESS; }
+            if (strcmp(topic, "help")            == 0) { help_help();            return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli help' for available commands.\n");
             return EXIT_FAILURE;
@@ -1596,6 +1710,38 @@ int main(int argc, char *argv[]) {
             result = email_service_delete_folder(cfg, name);
         }
 
+    } else if (strcmp(cmd, "move") == 0) {
+        const char *uid_str = NULL;
+        const char *target  = NULL;
+        const char *folder  = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--folder") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --folder requires a folder name.\n"); ok = 0;
+                } else folder = argv[++i];
+            } else if (!uid_str) {
+                uid_str = argv[i];
+            } else if (!target) {
+                target = argv[i];
+            } else {
+                unknown_option(cmd, argv[i]); ok = 0;
+            }
+        }
+        if (ok) {
+            if (!uid_str || !target) {
+                fprintf(stderr, "Error: 'move' requires a UID and a destination folder.\n");
+                help_move();
+            } else {
+                char uid[17];
+                if (parse_uid(uid_str, uid) != 0)
+                    fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
+                else
+                    result = email_service_move(cfg, uid, folder, target);
+            }
+        }
+
     } else if (strcmp(cmd, "mark-junk") == 0 || strcmp(cmd, "mark-notjunk") == 0) {
         const char *uid_str = NULL;
         int ok = 1;
@@ -1617,6 +1763,71 @@ int main(int argc, char *argv[]) {
                     result = email_service_mark_junk(cfg, uid);
                 else
                     result = email_service_mark_notjunk(cfg, uid);
+            }
+        }
+
+    } else if (strcmp(cmd, "trash") == 0 || strcmp(cmd, "archive") == 0) {
+        const char *uid_str = NULL;
+        const char *folder  = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--folder") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --folder requires a folder name.\n"); ok = 0;
+                } else folder = argv[++i];
+            } else if (!uid_str) {
+                uid_str = argv[i];
+            } else {
+                unknown_option(cmd, argv[i]); ok = 0;
+            }
+        }
+        if (ok) {
+            if (!uid_str) {
+                fprintf(stderr, "Error: '%s' requires a UID argument.\n", cmd);
+                help_trash();
+            } else {
+                char uid[17];
+                if (parse_uid(uid_str, uid) != 0)
+                    fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
+                else if (strcmp(cmd, "trash") == 0)
+                    result = email_service_trash(cfg, uid, folder);
+                else
+                    result = email_service_archive(cfg, uid, folder);
+            }
+        }
+
+    } else if (strcmp(cmd, "reply") == 0) {
+        const char *uid_str = NULL, *folder = NULL, *body = NULL;
+        int all = 0, ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--all") == 0) {
+                all = 1;
+            } else if (strcmp(argv[i], "--folder") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --folder requires a folder name.\n"); ok = 0;
+                } else folder = argv[++i];
+            } else if (strcmp(argv[i], "--body") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --body requires text.\n"); ok = 0;
+                } else body = argv[++i];
+            } else if (!uid_str) {
+                uid_str = argv[i];
+            } else {
+                unknown_option("reply", argv[i]); ok = 0;
+            }
+        }
+        if (ok) {
+            if (!uid_str) {
+                fprintf(stderr, "Error: 'reply' requires a UID argument.\n");
+                help_reply();
+            } else {
+                char uid[17];
+                if (parse_uid(uid_str, uid) != 0)
+                    fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
+                else
+                    result = email_service_reply(cfg, uid, folder, all, body);
             }
         }
 

@@ -2459,6 +2459,161 @@ static void test_keys_sync_asks(void) {
     pty_close(s);
 }
 
+/* ── EMAIL-129: creating and deleting an IMAP folder in the folder browser ── */
+
+/* Opens the folder browser of the IMAP account (from the list: Esc). */
+static PtySession *open_folder_browser(const char *what) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    int ok = s != NULL && pty_wait_for(s, "message(s) in", WAIT_MS) == 0;
+    if (ok) {
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        ok = pty_wait_for(s, "Folders", WAIT_MS) == 0;
+    }
+    g_tests_run++;
+    if (!ok) {
+        printf("  [FAIL] %s:%d: %s\n", __FILE__, __LINE__, what);
+        g_tests_failed++;
+        if (s) pty_close(s);
+        return NULL;
+    }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/* The menu lists both actions; the hint bar names the menu; the old letters
+ * stay harmless. */
+static void test_folder_menu_lists_actions(void) {
+    PtySession *s = open_folder_browser("folder menu: opens");
+    if (!s) return;
+    int sb = find_row(s, "step");
+    ASSERT(sb >= 0 && pty_row_contains(s, sb, ": actions"), "folder menu: the hint bar names the menu");
+    pty_send_str(s, "d");                          /* no direct delete key */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Delete the folder");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Create a folder...");
+    ASSERT_SCREEN_CONTAINS(s, "Delete the folder");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Create a folder...");
+    ASSERT_SCREEN_CONTAINS(s, "Folders");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* The help names the menu key. */
+static void test_folder_help_lists_menu(void) {
+    PtySession *s = open_folder_browser("folder help: opens");
+    if (!s) return;
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Actions");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* Create: the name is asked for, the server gets it and the list shows it. */
+static void test_folder_create(void) {
+    PtySession *s = open_folder_browser("folder create: opens");
+    if (!s) return;
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Projects");
+    menu_pick(s, 0);
+    ASSERT_WAIT_FOR(s, "New folder name:", WAIT_MS);
+    pty_send_str(s, "INBOX.Projects");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Folder INBOX.Projects created", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Projects");         /* listed from the server */
+    /* The folder list is cached in the test home, which the other tests share:
+     * delete the folder again so that they see the list they expect. */
+    pty_send_str(s, "j");
+    pty_settle(s, 200);
+    int pr = find_row(s, "Projects");
+    for (int i = 0; i < 12 && pr >= 0 && !pty_row_contains(s, pr, ">"); i++) {
+        pty_send_str(s, "j");
+        pty_settle(s, 200);
+        pr = find_row(s, "Projects");
+    }
+    ASSERT(pr >= 0 && pty_row_contains(s, pr, ">"), "folder create: the cursor reaches Projects");
+    menu_pick(s, 1);
+    ASSERT_WAIT_FOR(s, "Delete the folder INBOX.Projects on the server?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Folder INBOX.Projects deleted", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* Esc in the name prompt creates nothing. */
+static void test_folder_create_cancelled(void) {
+    PtySession *s = open_folder_browser("folder create cancel: opens");
+    if (!s) return;
+    menu_pick(s, 0);
+    ASSERT_WAIT_FOR(s, "New folder name:", WAIT_MS);
+    pty_send_str(s, "INBOX.Nope");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "New folder name:");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Nope");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* Delete asks first, naming the folder; No is the default; Yes deletes. */
+static void test_folder_delete_asks(void) {
+    PtySession *s = open_folder_browser("folder delete: opens");
+    if (!s) return;
+    int er = find_row(s, "Empty");
+    ASSERT(er >= 0, "folder delete: the Empty folder is listed");
+    for (int i = 0; i < 4 && er >= 0 && !pty_row_contains(s, er, ">"); i++) {
+        pty_send_str(s, "j");
+        pty_settle(s, 200);
+        er = find_row(s, "Empty");
+    }
+    ASSERT(er >= 0 && pty_row_contains(s, er, ">"), "folder delete: the cursor is on Empty");
+    menu_pick(s, 1);
+    ASSERT_WAIT_FOR(s, "Delete the folder INBOX.Empty on the server?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                /* Enter on the default: No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "on the server?");
+    ASSERT_SCREEN_CONTAINS(s, "Empty");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Folder INBOX.Empty deleted");
+    menu_pick(s, 1);
+    ASSERT_WAIT_FOR(s, "on the server?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Folder INBOX.Empty deleted", WAIT_MS);
+    pty_send_str(s, "j");                          /* the message goes with the next key */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Empty");
+    ASSERT_SCREEN_CONTAINS(s, "Sent");
+    /* The folder list is cached in the test home, which the other tests share:
+     * create the folder again so that they see the list they expect. */
+    menu_pick(s, 0);
+    ASSERT_WAIT_FOR(s, "New folder name:", WAIT_MS);
+    pty_send_str(s, "INBOX.Empty");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Folder INBOX.Empty created", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* On a virtual row there is no folder to delete. */
+static void test_folder_delete_needs_a_folder(void) {
+    PtySession *s = open_folder_browser("folder delete virtual: opens");
+    if (!s) return;
+    pty_send_key(s, PTY_KEY_HOME);                 /* the Unread row */
+    pty_settle(s, SETTLE_MS);
+    menu_pick(s, 1);
+    ASSERT_WAIT_FOR(s, "no folder selected", WAIT_MS);   /* the dialog names nothing */
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Select a folder to delete", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Empty");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ── EMAIL-97: resize and the minimum size ──────────────────────────── */
 
 static void test_resize_list_redraws_at_once(void) {
@@ -5551,6 +5706,12 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_keys_delete_dialog);
     RUN_TEST(test_keys_action_menu);
     RUN_TEST(test_keys_sync_asks);
+    RUN_TEST(test_folder_menu_lists_actions);
+    RUN_TEST(test_folder_help_lists_menu);
+    RUN_TEST(test_folder_create);
+    RUN_TEST(test_folder_create_cancelled);
+    RUN_TEST(test_folder_delete_asks);
+    RUN_TEST(test_folder_delete_needs_a_folder);
     RUN_TEST(test_tui_list_esc_quit);
     RUN_TEST(test_tui_show_esc_exits);
 

@@ -50,6 +50,7 @@ static void help_general(void) {
         "\n"
         "Writing:\n"
         "  send                        Send a message non-interactively\n"
+        "  reply <uid> [--all]         Reply (to all) to a message\n"
         "  mark-read <uid>             Mark a message as read\n"
         "  mark-unread <uid>           Mark a message as unread\n"
         "  mark-starred <uid>          Star (flag) a message\n"
@@ -707,6 +708,29 @@ static void help_trash(void) {
     );
 }
 
+static void help_reply(void) {
+    printf(
+        "Usage: email-cli reply <uid> [--all] [--body <text>] [--folder <folder>]\n"
+        "\n"
+        "Reply to a message without interaction (the TUI's 'r' and 'R').\n"
+        "The reply goes to the Reply-To or From address with the subject\n"
+        "'Re: ...', In-Reply-To and References set, and the original quoted\n"
+        "under your text. It is saved in Sent and the original is marked\n"
+        "answered; that mark is local until the next sync.\n"
+        "\n"
+        "  <uid>                Message UID (decimal or 16-char hex)\n"
+        "  --all                Reply to all: the original To and Cc (minus\n"
+        "                       your own address) become the Cc\n"
+        "  --body <text>        Your reply text (default: only the quote)\n"
+        "  --folder <folder>    Folder (IMAP) or label (Gmail) the message is in;\n"
+        "                       default: the account's folder\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli reply 12345 --body \"Thanks, done.\"\n"
+        "  email-cli reply 12345 --all --body \"Agreed.\"\n"
+    );
+}
+
 static void help_forward(void) {
     printf(
         "Usage: email-cli forward <uid> --to <addr> [--cc <addr>] [--body <text>]\n"
@@ -956,6 +980,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "mark-junk")       == 0) { help_mark_junk();       return EXIT_SUCCESS; }
                 if (strcmp(cmd, "trash")           == 0 ||
                     strcmp(cmd, "archive")         == 0) { help_trash();          return EXIT_SUCCESS; }
+                if (strcmp(cmd, "reply")           == 0) { help_reply();           return EXIT_SUCCESS; }
                 if (strcmp(cmd, "forward")         == 0) { help_forward();         return EXIT_SUCCESS; }
                 if (strcmp(cmd, "mark-notjunk")    == 0) { help_mark_notjunk();    return EXIT_SUCCESS; }
                 if (strcmp(cmd, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
@@ -1013,6 +1038,7 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "mark-junk")       == 0) { help_mark_junk();       return EXIT_SUCCESS; }
             if (strcmp(topic, "trash")           == 0 ||
                 strcmp(topic, "archive")         == 0) { help_trash();          return EXIT_SUCCESS; }
+            if (strcmp(topic, "reply")           == 0) { help_reply();           return EXIT_SUCCESS; }
             if (strcmp(topic, "forward")         == 0) { help_forward();         return EXIT_SUCCESS; }
             if (strcmp(topic, "mark-notjunk")    == 0) { help_mark_notjunk();    return EXIT_SUCCESS; }
             if (strcmp(topic, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
@@ -1795,6 +1821,40 @@ int main(int argc, char *argv[]) {
                     result = email_service_trash(cfg, uid, folder);
                 else
                     result = email_service_archive(cfg, uid, folder);
+            }
+        }
+
+    } else if (strcmp(cmd, "reply") == 0) {
+        const char *uid_str = NULL, *folder = NULL, *body = NULL;
+        int all = 0, ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--all") == 0) {
+                all = 1;
+            } else if (strcmp(argv[i], "--folder") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --folder requires a folder name.\n"); ok = 0;
+                } else folder = argv[++i];
+            } else if (strcmp(argv[i], "--body") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --body requires text.\n"); ok = 0;
+                } else body = argv[++i];
+            } else if (!uid_str) {
+                uid_str = argv[i];
+            } else {
+                unknown_option("reply", argv[i]); ok = 0;
+            }
+        }
+        if (ok) {
+            if (!uid_str) {
+                fprintf(stderr, "Error: 'reply' requires a UID argument.\n");
+                help_reply();
+            } else {
+                char uid[17];
+                if (parse_uid(uid_str, uid) != 0)
+                    fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
+                else
+                    result = email_service_reply(cfg, uid, folder, all, body);
             }
         }
 

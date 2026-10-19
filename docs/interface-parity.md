@@ -50,7 +50,7 @@ existing references and every `no` has a reason.
 | List attachments | yes | F:14.1 | yes | P:test_show_attachment_picker | |
 | Save an attachment / all attachments | yes | F:15.2 | yes (`a`, `A`) | P:test_show_save_single | |
 | Compose and send a new message | yes (`send`) | F:11.3 | yes (`c`) | P:test_review_s_sends_message | |
-| Reply, reply to all | no | | yes (`r`, `R`) | P:test_reply_all_send | `email-cli` has no reply; `email-tui reply <uid>` is the one-shot form; ticket to be opened by the owner |
+| Reply, reply to all | yes (`reply`, `reply --all`) | F:133.3 | yes (`r`, `R`) | P:test_reply_all_send | the answered mark is local until the next sync |
 | Forward | yes (`forward`) | F:134.1 | yes (`F`) | P:test_forward_fill_to_opens_editor | |
 | List accounts | yes | F:18.1 | yes | P:test_screen_accounts | |
 | Add an account (wizard) | yes | F:76.1 | yes (`n`) | P:test_wizard_complete | |

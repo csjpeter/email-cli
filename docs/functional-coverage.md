@@ -58,6 +58,7 @@ recorded weakness, not coverage of the promise.
 | `email-cli rules list` | F:34.1 | `--json` F:122.16 |
 | `email-cli rules remove` | F:37.12 | |
 | `email-cli save-attachment` | F:15.2 | |
+| `email-cli reply` | F:133.3 F:133.8 | `--all` F:133.7 |
 | `email-cli trash` | F:132.2 F:132.6 | |
 | `email-cli archive` | F:132.5 F:132.13 | |
 | `email-cli forward` | F:134.1 F:134.5 F:134.10 | SMTP mock receives Fwd: message with the original; `$Forwarded` flag F:134.10 |

@@ -7405,6 +7405,120 @@ kill "$IMAP132_PID" "$GMAIL132_PID"
 
 fi
 
+if phase_wanted 133; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 133 — reply and reply to all from the command line (EMAIL-133)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 133: reply / reply --all (EMAIL-133) ---"
+
+alloc_port IMAP133_PORT
+alloc_port SMTP133_PORT
+IMAP133_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_133.log"
+SMTP133_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp_133.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP133_PORT MOCK_IMAP_MSG_PREFIX="Phase133Msg" \
+    MOCK_IMAP_COUNT=3 MOCK_IMAP_MSGID="<orig133@example.org>" \
+    MOCK_IMAP_TO="w133@example.org, other133@example.org" MOCK_IMAP_CC="third133@example.org" \
+    "$MOCK_SERVER_BIN") >"$IMAP133_LOG" 2>&1 &
+IMAP133_PID=$!
+(cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP133_PORT \
+    "$MOCK_SMTP_BIN") >"$SMTP133_LOG" 2>&1 &
+SMTP133_PID=$!
+sleep 1
+
+H133="./build/tests/functional/work-$$/homes/f133-$$"
+mkdir -p "$H133/.config/email-cli/accounts/w133@example.org"
+printf 'credential_obfuscation=false\n' > "$H133/.config/email-cli/settings.ini"
+cat > "$H133/.config/email-cli/accounts/w133@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP133_PORT
+EMAIL_USER=w133@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+EMAIL_SENT_FOLDER=INBOX.Sent
+SSL_NO_VERIFY=1
+SMTP_HOST=smtps://localhost:$SMTP133_PORT
+SMTP_USER=w133@example.org
+SMTP_PASS=testpass
+INI
+chmod 0600 "$H133"/.config/email-cli/accounts/*/config.ini
+
+w133() {
+    (export HOME="$H133"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/$1" w133@example.org "${@:2}" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+smtp133() { cat "$SMTP133_LOG"; }
+
+w133 email-cli list >/dev/null
+OUT=$(w133 email-cli reply 2 --body "My answer 133")
+check "133.1 reply reports it"                      "Reply sent" "$OUT"
+check "133.2 reply exits 0"                         "exit-code=0" "$OUT"
+check "133.3 reply goes to the sender"              "RCPT TO:<sender2@example.com>" "$(smtp133)"
+check "133.4 reply has the Re: subject"             "Subject: Re: Phase133Msg 2" "$(smtp133)"
+check "133.5 reply has In-Reply-To"                 "In-Reply-To: <orig133@example.org>" "$(smtp133)"
+check "133.6 reply has the References header"       "References: <orig133@example.org>" "$(smtp133)"
+check "133.7 reply quotes the original"             "wrote:" "$(smtp133)"
+check "133.8 reply carries the text"                "My answer 133" "$(smtp133)"
+check_not "133.9 reply does not go to the others"   "RCPT TO:<other133@example.org>" "$(smtp133)"
+check "133.10 reply marks the original answered"    "marked as answered" "$OUT"
+
+OUT=$(w133 email-cli reply 3 --all --body "All answer 133")
+check "133.11 reply --all exits 0"                  "exit-code=0" "$OUT"
+check "133.12 reply --all reaches the sender"       "RCPT TO:<sender3@example.com>" "$(smtp133)"
+check "133.13 reply --all reaches To"               "RCPT TO:<other133@example.org>" "$(smtp133)"
+check "133.14 reply --all reaches Cc"               "RCPT TO:<third133@example.org>" "$(smtp133)"
+check_not "133.15 reply --all leaves out the account itself" "RCPT TO:<w133@example.org>" "$(smtp133)"
+check "133.16 reply --all has the Cc header"        "Cc: other133@example.org, third133@example.org" "$(smtp133)"
+
+OUT=$(w133 email-cli reply)
+check "133.17 reply without a UID"                  "'reply' requires a UID" "$OUT"
+OUT=$(w133 email-cli reply zz)
+check "133.18 reply with a bad UID"                 "invalid UID 'zz'" "$OUT"
+OUT=$(w133 email-cli reply 1 2)
+check "133.19 reply with two UIDs"                  "Unknown option" "$OUT"
+OUT=$(w133 email-cli-ro reply 1)
+check "133.20 email-cli-ro refuses reply"           "not available in read-only mode" "$OUT"
+OUT=$("$BIN_DIR/email-cli" help reply 2>&1)
+check "133.21 help reply shows the page"            "reply <uid> \[--all\]" "$OUT"
+MF133=$(find "$H133" -name INBOX.tsv | head -1)
+ans133() { awk -F'\t' -v u="$1" '$1==u {print int($NF/16)%2}' "$MF133"; }
+check "133.22 the replied-to message is flagged answered"   "^1$" "$(ans133 0000000000000002)"
+check "133.23 the reply-all'd message is flagged answered"  "^1$" "$(ans133 0000000000000003)"
+check "133.24 another message is not flagged answered"      "^0$" "$(ans133 0000000000000001)"
+kill "$IMAP133_PID" "$SMTP133_PID"
+
+fi
+
+if phase_wanted 137; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 137 — help pages for migrate-credentials and help (EMAIL-137)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 137: migrate-credentials / help pages (EMAIL-137) ---"
+
+H137="$PROJECT_ROOT/build/functional-137-home"
+mkdir -p "$H137"
+h137() { ( export HOME="$H137"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+           "$@" </dev/null 2>&1; echo "exit-code=$?" ); }
+OUT=$(h137 "$BIN_DIR/email-cli" help migrate-credentials)
+check "137.1 help migrate-credentials shows the usage"   "Usage: email-cli migrate-credentials" "$OUT"
+check "137.2 help migrate-credentials exits 0"           "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli" migrate-credentials --help)
+[ "$OUT" = "$OUT2" ] && SAME137=same || SAME137=differs
+check "137.3 migrate-credentials --help equals the help page" "^same$" "$SAME137"
+OUT=$(h137 "$BIN_DIR/email-cli" help help)
+check "137.4 help help shows the usage"                  "Usage: email-cli help" "$OUT"
+check "137.5 help help exits 0"                          "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli" help --help)
+check "137.6 help --help equals help help"               "Usage: email-cli help" "$OUT2"
+OUT=$(h137 "$BIN_DIR/email-cli-ro" help help)
+check "137.7 email-cli-ro help help shows the usage"     "Usage: email-cli-ro help" "$OUT"
+check "137.8 email-cli-ro help help exits 0"             "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli-ro" help --help)
+check "137.9 email-cli-ro help --help shows the usage"   "Usage: email-cli-ro help" "$OUT2"
+
+fi
+
 if phase_wanted 134; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 134 — forward from the command line (EMAIL-134)
@@ -7481,36 +7595,6 @@ check "134.20 forward --help describes it"           "Fwd: <subject>" "$OUT"
 OUT=$("$BIN_DIR/email-cli" help forward 2>&1)
 check "134.21 help forward shows the page"           "\$Forwarded" "$OUT"
 kill "$IMAP134_PID" "$SMTP134_PID"
-
-fi
-
-if phase_wanted 137; then
-# ════════════════════════════════════════════════════════════════════════════
-# Phase 137 — help pages for migrate-credentials and help (EMAIL-137)
-# ════════════════════════════════════════════════════════════════════════════
-echo ""
-echo "--- Phase 137: migrate-credentials / help pages (EMAIL-137) ---"
-
-H137="$PROJECT_ROOT/build/functional-137-home"
-mkdir -p "$H137"
-h137() { ( export HOME="$H137"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-           "$@" </dev/null 2>&1; echo "exit-code=$?" ); }
-OUT=$(h137 "$BIN_DIR/email-cli" help migrate-credentials)
-check "137.1 help migrate-credentials shows the usage"   "Usage: email-cli migrate-credentials" "$OUT"
-check "137.2 help migrate-credentials exits 0"           "exit-code=0" "$OUT"
-OUT2=$(h137 "$BIN_DIR/email-cli" migrate-credentials --help)
-[ "$OUT" = "$OUT2" ] && SAME137=same || SAME137=differs
-check "137.3 migrate-credentials --help equals the help page" "^same$" "$SAME137"
-OUT=$(h137 "$BIN_DIR/email-cli" help help)
-check "137.4 help help shows the usage"                  "Usage: email-cli help" "$OUT"
-check "137.5 help help exits 0"                          "exit-code=0" "$OUT"
-OUT2=$(h137 "$BIN_DIR/email-cli" help --help)
-check "137.6 help --help equals help help"               "Usage: email-cli help" "$OUT2"
-OUT=$(h137 "$BIN_DIR/email-cli-ro" help help)
-check "137.7 email-cli-ro help help shows the usage"     "Usage: email-cli-ro help" "$OUT"
-check "137.8 email-cli-ro help help exits 0"             "exit-code=0" "$OUT"
-OUT2=$(h137 "$BIN_DIR/email-cli-ro" help --help)
-check "137.9 email-cli-ro help --help shows the usage"   "Usage: email-cli-ro help" "$OUT2"
 
 fi
 

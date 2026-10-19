@@ -826,9 +826,13 @@ int main(void) {
     if (pass_env && pass_env[0]) g_password = pass_env;
     const char *to_env = getenv("MOCK_IMAP_TO");
     const char *cc_env = getenv("MOCK_IMAP_CC");
+    const char *mid_env = getenv("MOCK_IMAP_MSGID");
     if (to_env && to_env[0])
         snprintf(g_rcpt_hdr + strlen(g_rcpt_hdr), sizeof(g_rcpt_hdr) - strlen(g_rcpt_hdr),
                  "To: %s\r\n", to_env);
+    if (mid_env && mid_env[0])
+        snprintf(g_rcpt_hdr + strlen(g_rcpt_hdr), sizeof(g_rcpt_hdr) - strlen(g_rcpt_hdr),
+                 "Message-ID: %s\r\n", mid_env);
     if (cc_env && cc_env[0])
         snprintf(g_rcpt_hdr + strlen(g_rcpt_hdr), sizeof(g_rcpt_hdr) - strlen(g_rcpt_hdr),
                  "Cc: %s\r\n", cc_env);

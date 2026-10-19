@@ -47,7 +47,7 @@ If `<command>` is given and unknown, prints an error to **stderr** and exits **1
 
 Supported topics: `list`, `show`, `list-folders`, `list-labels`, `list-attachments`,
 `save-attachment`, `send`, `create-folder`, `delete-folder`, `create-label`, `delete-label`,
-`move`, `mark-junk`, `mark-notjunk`, `trash`, `archive`, `forward`, `config`.
+`move`, `mark-junk`, `mark-notjunk`, `trash`, `archive`, `reply`, `forward`, `config`.
 
 ---
 
@@ -704,6 +704,37 @@ server accepted the change; with no connection the command fails (exit 1).
 |------|-----------|
 | 0 | Done (or nothing to do for `archive`) |
 | 1 | Missing or bad UID, no connection, IMAP / API error |
+
+---
+
+## `reply`
+
+```
+email-cli [<account>] reply <uid> [--all] [--body <text>] [--folder <folder>]
+```
+
+**User story:** As a user I want to reply to a message from a script with the
+result the TUI keys `r` and `R` give.
+
+The composition is the TUI's own (`email_service_reply_quote`,
+`email_service_reply_all_cc`): the reply goes to the Reply-To or From address,
+the subject is `Re: <subject>` (no second `Re:`), `In-Reply-To` and
+`References` carry the original Message-ID, and the text is `--body`, a blank
+line, then `On <date>, <from> wrote:` and the original with every line prefixed
+`> `. With `--all` the original To and Cc, minus the account's own address,
+become the Cc, and every one of them is a recipient of the SMTP envelope. The
+message is sent, saved in the Sent folder, and the original is marked answered
+in the local manifest. **The answered mark is local until the next sync**, which
+overwrites the manifest from the server.
+
+Refused by `email-cli-ro`.
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Sent |
+| 1 | Missing or bad UID, message not found, no SMTP, send failed |
 
 ---
 

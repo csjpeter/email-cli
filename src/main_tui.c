@@ -1416,59 +1416,7 @@ static int cmd_reply(Config *cfg, const char *uid, const char *folder) {
         return -1;
     }
 
-    /* Extract body text for quoting (try HTML first, then plain text) */
-    char *body_text = NULL;
-    {
-        char *html_raw = mime_get_html_part(raw);
-        if (html_raw) {
-            body_text = html_render(html_raw, 72, 0);
-            free(html_raw);
-        }
-        if (!body_text)
-            body_text = mime_get_text_body(raw);
-    }
-
-    /* Build attribution + "> "-prefixed quoted block */
-    char *quoted = NULL;
-    {
-        char *from_raw = mime_get_header(raw, "From");
-        char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;
-        free(from_raw);
-        char *date_raw = mime_get_header(raw, "Date");
-        char *date_fmt = date_raw ? mime_format_date(date_raw) : NULL;
-        free(date_raw);
-
-        /* "On <date>, <from> wrote:\n> line1\n> line2\n..." */
-        size_t qcap = 4096 + (body_text ? strlen(body_text) * 2 : 0);
-        quoted = malloc(qcap);
-        if (quoted) {
-            int off = snprintf(quoted, qcap, "On %s, %s wrote:\n",
-                               date_fmt ? date_fmt : "?",
-                               from_dec ? from_dec : "?");
-            if (body_text) {
-                const char *p = body_text;
-                while (*p && off < (int)qcap - 4) {
-                    const char *nl = strchr(p, '\n');
-                    size_t len = nl ? (size_t)(nl - p) : strlen(p);
-                    size_t advance = len + (nl ? 1 : 0);  /* bytes to skip incl. \n */
-                    if (len > 0 && p[len - 1] == '\r') len--;  /* strip CR from output */
-                    if (off + 2 + (int)len + 1 < (int)qcap) {
-                        quoted[off++] = '>';
-                        quoted[off++] = ' ';
-                        memcpy(quoted + off, p, len);
-                        off += (int)len;
-                        quoted[off++] = '\n';
-                        quoted[off]   = '\0';
-                    }
-                    p += advance;
-                    if (!nl) break;
-                }
-            }
-        }
-        free(from_dec);
-        free(date_fmt);
-    }
-    free(body_text);
+    char *quoted = email_service_reply_quote(raw);
     free(raw);
 
     CDResult dlg = {0};
@@ -1476,18 +1424,8 @@ static int cmd_reply(Config *cfg, const char *uid, const char *folder) {
         rc = -1;
     } else {
         rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, msg_id, quoted, &dlg);
-        if (rc == 0) {
-            /* Mark original message as Replied */
-            Manifest *mf = manifest_load(folder);
-            if (mf) {
-                ManifestEntry *me = manifest_find(mf, uid);
-                if (me) {
-                    me->flags |= MSG_FLAG_ANSWERED;
-                    manifest_save(folder, mf);
-                }
-                manifest_free(mf);
-            }
-        }
+        if (rc == 0)
+            email_service_mark_answered(cfg, folder, uid);
     }
     free(quoted);
     free(reply_to);
@@ -1586,110 +1524,12 @@ static int cmd_reply_all(Config *cfg, const char *uid, const char *folder) {
         return -1;
     }
 
-    /* Extract original To + Cc, remove own address, join with "; " */
+    /* Original To + Cc minus own address, joined with "; " */
+    char *cc_all = email_service_reply_all_cc(raw, from_address(cfg));
     char cc_buf[1024] = "";
-    {
-        const char *own = from_address(cfg);
-        char *orig_to  = mime_get_header(raw, "To");
-        char *orig_cc  = mime_get_header(raw, "Cc");
-        char *dec_to   = orig_to ? mime_decode_words(orig_to)  : NULL;
-        char *dec_cc   = orig_cc ? mime_decode_words(orig_cc)  : NULL;
-        free(orig_to); free(orig_cc);
-
-        /* Combine dec_to and dec_cc separated by ", " */
-        char combined[2048] = "";
-        if (dec_to && dec_to[0]) {
-            strncpy(combined, dec_to, sizeof(combined) - 1);
-        }
-        if (dec_cc && dec_cc[0]) {
-            if (combined[0]) {
-                strncat(combined, ", ", sizeof(combined) - strlen(combined) - 1);
-            }
-            strncat(combined, dec_cc, sizeof(combined) - strlen(combined) - 1);
-        }
-        free(dec_to); free(dec_cc);
-
-        /* Build cc_buf: split on commas, skip own address */
-        int cc_len = 0;
-        char *p = combined;
-        while (p && *p) {
-            while (*p == ' ') p++;
-            char *sep = strchr(p, ',');
-            int elen;
-            if (sep) {
-                elen = (int)(sep - p);
-            } else {
-                elen = (int)strlen(p);
-            }
-            /* Trim trailing spaces */
-            while (elen > 0 && p[elen-1] == ' ') elen--;
-            if (elen > 0 && !(own && strcasestr(p, own ? own : ""))) {
-                if (cc_len + elen + 3 < (int)sizeof(cc_buf) - 1) {
-                    if (cc_len > 0) {
-                        cc_buf[cc_len++] = ';';
-                        cc_buf[cc_len++] = ' ';
-                    }
-                    memcpy(cc_buf + cc_len, p, (size_t)elen);
-                    cc_len += elen;
-                    cc_buf[cc_len] = '\0';
-                }
-            }
-            if (!sep) break;
-            p = sep + 1;
-        }
-    }
-
-    /* Extract body for quoting */
-    char *body_text = NULL;
-    {
-        char *html_raw = mime_get_html_part(raw);
-        if (html_raw) {
-            body_text = html_render(html_raw, 72, 0);
-            free(html_raw);
-        }
-        if (!body_text)
-            body_text = mime_get_text_body(raw);
-    }
-
-    char *quoted = NULL;
-    {
-        char *from_raw = mime_get_header(raw, "From");
-        char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;
-        free(from_raw);
-        char *date_raw = mime_get_header(raw, "Date");
-        char *date_fmt = date_raw ? mime_format_date(date_raw) : NULL;
-        free(date_raw);
-
-        size_t qcap = 4096 + (body_text ? strlen(body_text) * 2 : 0);
-        quoted = malloc(qcap);
-        if (quoted) {
-            int off = snprintf(quoted, qcap, "On %s, %s wrote:\n",
-                               date_fmt ? date_fmt : "?",
-                               from_dec ? from_dec : "?");
-            if (body_text) {
-                const char *bp = body_text;
-                while (*bp && off < (int)qcap - 4) {
-                    const char *nl = strchr(bp, '\n');
-                    size_t len = nl ? (size_t)(nl - bp) : strlen(bp);
-                    size_t advance = len + (nl ? 1 : 0);
-                    if (len > 0 && bp[len-1] == '\r') len--;
-                    if (off + 2 + (int)len + 1 < (int)qcap) {
-                        quoted[off++] = '>';
-                        quoted[off++] = ' ';
-                        memcpy(quoted + off, bp, len);
-                        off += (int)len;
-                        quoted[off++] = '\n';
-                        quoted[off]   = '\0';
-                    }
-                    bp += advance;
-                    if (!nl) break;
-                }
-            }
-        }
-        free(from_dec);
-        free(date_fmt);
-    }
-    free(body_text);
+    if (cc_all) snprintf(cc_buf, sizeof(cc_buf), "%s", cc_all);
+    free(cc_all);
+    char *quoted = email_service_reply_quote(raw);
     free(raw);
 
     CDResult dlg = {0};
@@ -1697,18 +1537,8 @@ static int cmd_reply_all(Config *cfg, const char *uid, const char *folder) {
         rc = -1;
     } else {
         rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, msg_id, quoted, &dlg);
-        if (rc == 0) {
-            /* Mark original message as Replied */
-            Manifest *mf = manifest_load(folder);
-            if (mf) {
-                ManifestEntry *me = manifest_find(mf, uid);
-                if (me) {
-                    me->flags |= MSG_FLAG_ANSWERED;
-                    manifest_save(folder, mf);
-                }
-                manifest_free(mf);
-            }
-        }
+        if (rc == 0)
+            email_service_mark_answered(cfg, folder, uid);
     }
     free(quoted);
     free(reply_to);

@@ -164,6 +164,20 @@ static const tui_keyentry g_entries[] = {
     M(EKV_ACCOUNTS_GMAIL, "Renew the authorization...", "Gmail access, in the browser or by paste",
       EA_REAUTH),
 
+    /* The attachment picker of the reader (EMAIL-147): no key changes state. */
+    H(EKV_ATTACH, 'j', "Down", "move down (also Down)"),
+    H(EKV_ATTACH, 'k', "Up", "move up (also Up)"),
+    H(EKV_ATTACH, TUI_KEY_PGDN, "Page down", NULL),
+    H(EKV_ATTACH, TUI_KEY_PGUP, "Page up", NULL),
+    H(EKV_ATTACH, TUI_KEY_HOME, "First attachment", "also g"),
+    H(EKV_ATTACH, TUI_KEY_END, "Last attachment", "also G"),
+    H(EKV_ATTACH, TUI_KEY_ENTER, "Choose", "then asked where to save it"),
+    H(EKV_ATTACH, '?', "Help", NULL),
+    H(EKV_ATTACH, 'q', "Back", "to the message"),
+    H(EKV_ATTACH, TUI_KEY_ESC, "Back", "to the message"),
+    H(EKV_ATTACH, TUI_KEY_BACKSPACE, "Back", "to the message"),
+    H(EKV_ATTACH, TUI_KC_QUIT, "Quit", NULL),
+
     /* The review of a composed message. */
     S(EKV_REVIEW, TUI_KC_NONE, TUI_VERB_NONE, "Send", "the message",
       "Send the message to %s?", EA_SEND),

@@ -783,7 +783,8 @@ static char *safe_filename_for_path(const char *name) {
 }
 
 /* Attachment picker: full-screen list, navigate with arrows, Enter to select.
- * Returns selected index (0-based), or -1 if Backspace (back), -2 if ESC/Quit. */
+ * Returns selected index (0-based), -1 for Backspace (back), -2 for Esc/q
+ * (back), -3 for ctrl-c (quit the program). */
 static int show_attachment_picker(const MimeAttachment *atts, int count,
                                   int tcols, int trows) {
     int cursor = 0;
@@ -815,19 +816,36 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
         }
 
         TermKey key = terminal_read_key();
+        int ch = key == TERM_KEY_IGNORE ? terminal_last_printable() : 0;
+        int page = trows > 6 ? trows - 4 : 1;
+        if (ch == 'q') return -2;
+        if (ch == 'j') key = TERM_KEY_NEXT_LINE;
+        else if (ch == 'k') key = TERM_KEY_PREV_LINE;
+        else if (ch == 'g') key = TERM_KEY_HOME;
+        else if (ch == 'G') key = TERM_KEY_END;
+        else if (ch == '?') {
+            ekeys_help(EKV_ATTACH, "Attachment picker shortcuts");
+            continue;
+        }
         switch (key) {
         case TERM_KEY_BACK:    return -1;
-        case TERM_KEY_ESC:
-        case TERM_KEY_QUIT:    return -2;
+        case TERM_KEY_ESC:     return -2;
+        case TERM_KEY_QUIT:    return -3;
         case TERM_KEY_ENTER:   return cursor;
         case TERM_KEY_NEXT_LINE:
-        case TERM_KEY_NEXT_PAGE:
             if (cursor < count - 1) cursor++;
             break;
         case TERM_KEY_PREV_LINE:
-        case TERM_KEY_PREV_PAGE:
             if (cursor > 0) cursor--;
             break;
+        case TERM_KEY_NEXT_PAGE:
+            cursor = cursor + page < count ? cursor + page : count - 1;
+            break;
+        case TERM_KEY_PREV_PAGE:
+            cursor = cursor - page > 0 ? cursor - page : 0;
+            break;
+        case TERM_KEY_HOME:    cursor = 0; break;
+        case TERM_KEY_END:     cursor = count - 1; break;
         default: break;
         }
     }
@@ -1476,6 +1494,10 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 if (att_count > 1) {
                     sel = show_attachment_picker(atts, att_count,
                                                  term_cols, term_rows);
+                    if (sel == -3) {
+                        result = 1;  /* ctrl-c: leave the program at once */
+                        goto show_int_done;
+                    }
                     if (sel == -2) {
                         break;       /* ESC/q → back to show view */
                     }
@@ -1505,6 +1527,9 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                                         : "  Save FAILED: %.1900s", dest);
                     }
                 }
+            } else if (ch == 'a') {
+                snprintf(info_msg, sizeof(info_msg), "No attachments");
+                break;
             } else if (act == EA_SAVE_ALL && att_count == 0) {
                 snprintf(info_msg, sizeof(info_msg), "No attachments");
                 break;

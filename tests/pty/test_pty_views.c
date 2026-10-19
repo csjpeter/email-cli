@@ -1720,6 +1720,198 @@ static void test_show_save_tab_completion(void) {
     remove(tab2);
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  ATTACHMENT PICKER KEYS (EMAIL-147), at 80x24
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** The reader of the message with @p n attachments, 80x24.  With attachments
+ *  the status line shows "a save(n)". */
+static PtySession *open_reader_n(int n) {
+    char nb[16];
+    snprintf(nb, sizeof(nb), "%d", n);
+    /* The client keeps the message it fetched before, with the number of
+     * attachments of that run: drop the cached copy. */
+    char cached[600];
+    snprintf(cached, sizeof(cached),
+             "%s/.local/share/email-cli/accounts/testuser/store/INBOX/1/0/0000000000000001.eml",
+             g_test_home);
+    if (access(cached, F_OK) == 0 && remove(cached) != 0) perror("remove cached message");
+    setenv("MOCK_IMAP_ATTACHMENTS", nb, 1);
+    restart_mock();
+    unsetenv("MOCK_IMAP_ATTACHMENTS");
+    PtySession *s = tui_open_to_list_size(80, 24);
+    if (!s) return NULL;
+    if (pty_wait_for(s, "Test Message", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, n > 0 ? "a save(" : "From:", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+static PtySession *open_picker_n(int n) {
+    PtySession *s = open_reader_n(n);
+    if (!s) return NULL;
+    pty_send_str(s, "a");
+    if (pty_wait_for(s, "Attachments (", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/** Picker, 80x24: the label says Esc/q/BS back; all three go back to the reader. */
+static void test_picker_back_keys(void) {
+    PtySession *s = open_picker_n(2);
+    ASSERT(s != NULL, "picker back: opens");
+    ASSERT_SCREEN_CONTAINS(s, "Esc/q/BS back");
+    ASSERT_SCREEN_CONTAINS(s, "[1/2]");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Attachments (", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Attachments (");
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Attachments (", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Attachments (");
+    pty_close(s);
+}
+
+/** Picker: ctrl-c quits the program at once. */
+static void test_picker_ctrl_c_quits(void) {
+    PtySession *s = open_picker_n(2);
+    ASSERT(s != NULL, "picker ctrl-c: opens");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, WAIT_MS) == 0, "picker: ctrl-c quits the program");
+    pty_close(s);
+}
+
+/** Picker with 25 rows: j k g G Home End PgUp PgDn move as in every list. */
+static void test_picker_navigation(void) {
+    PtySession *s = open_picker_n(25);
+    ASSERT(s != NULL, "picker navigation: opens");
+    ASSERT_SCREEN_CONTAINS(s, "Attachments (25)");
+    ASSERT_SCREEN_CONTAINS(s, "[1/25]");
+    pty_send_str(s, "j");     ASSERT_WAIT_FOR(s, "[2/25]", WAIT_MS);
+    pty_send_str(s, "k");     ASSERT_WAIT_FOR(s, "[1/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_DOWN); ASSERT_WAIT_FOR(s, "[2/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_UP);   ASSERT_WAIT_FOR(s, "[1/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_UP);   pty_settle(s, 200);
+    ASSERT_SCREEN_CONTAINS(s, "[1/25]");      /* stops at the top */
+    pty_send_str(s, "G");     ASSERT_WAIT_FOR(s, "[25/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_DOWN); pty_settle(s, 200);
+    ASSERT_SCREEN_CONTAINS(s, "[25/25]");     /* stops at the bottom */
+    pty_send_str(s, "g");     ASSERT_WAIT_FOR(s, "[1/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);  ASSERT_WAIT_FOR(s, "[25/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_HOME); ASSERT_WAIT_FOR(s, "[1/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGDN); ASSERT_WAIT_FOR(s, "[21/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGDN); ASSERT_WAIT_FOR(s, "[25/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGUP); ASSERT_WAIT_FOR(s, "[5/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGUP); ASSERT_WAIT_FOR(s, "[1/25]", WAIT_MS);
+    /* Enter chooses the row under the cursor */
+    pty_send_key(s, PTY_KEY_DOWN); ASSERT_WAIT_FOR(s, "[2/25]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "data.bin");
+    pty_close(s);
+}
+
+/** Picker: ? opens the help made from the key table, Esc closes only the help. */
+static void test_picker_help(void) {
+    PtySession *s = open_picker_n(2);
+    ASSERT(s != NULL, "picker help: opens");
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Attachment picker shortcuts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Choose");
+    ASSERT_SCREEN_CONTAINS(s, "Back");
+    ASSERT_SCREEN_CONTAINS(s, "Page down");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Attachment picker shortcuts");
+    ASSERT_SCREEN_CONTAINS(s, "Attachments (2)");
+    pty_close(s);
+}
+
+/** Picker: an unbound key changes nothing and shows nothing. */
+static void test_picker_unbound_key(void) {
+    PtySession *s = open_picker_n(2);
+    ASSERT(s != NULL, "picker unbound: opens");
+    pty_send_str(s, "x");
+    pty_send_str(s, "d");
+    pty_send_str(s, "h");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Attachments (2)");
+    ASSERT_SCREEN_CONTAINS(s, "[1/2]");
+    pty_close(s);
+}
+
+/** One attachment: a goes straight to the save prompt; Esc there cancels
+ *  without a file and returns to the reader. */
+static void test_a_one_attachment(void) {
+    PtySession *s = open_reader_n(1);
+    ASSERT(s != NULL, "one attachment: opens");
+    ASSERT_SCREEN_CONTAINS(s, "a save(1)");
+    char path[512];
+    snprintf(path, sizeof(path), "%s/notes.txt", g_test_home);
+    remove(path);
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Attachments (");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Save as:");
+    ASSERT(access(path, F_OK) != 0, "one attachment: Esc saved nothing");
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Saved:", WAIT_MS);
+    ASSERT(access(path, F_OK) == 0, "one attachment: Enter saved the file");
+    remove(path);
+    pty_close(s);
+}
+
+/** No attachment: a says so; nothing else happens. */
+static void test_a_without_attachments(void) {
+    PtySession *s = open_reader_n(0);
+    ASSERT(s != NULL, "no attachments: opens");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "a save(");
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "No attachments", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_close(s);
+}
+
+/** Picker, second row: Enter asks for data.bin; Esc in the prompt cancels
+ *  back to the reader and saves nothing; ctrl-c in the prompt is not tested
+ *  here (the line editor's own tests cover it). */
+static void test_picker_choose_second_then_cancel(void) {
+    PtySession *s = open_picker_n(2);
+    ASSERT(s != NULL, "picker choose: opens");
+    char path[512];
+    snprintf(path, sizeof(path), "%s/data.bin", g_test_home);
+    remove(path);
+    pty_send_key(s, PTY_KEY_DOWN);
+    ASSERT_WAIT_FOR(s, "[2/2]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "data.bin");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Save as:");
+    ASSERT(access(path, F_OK) != 0, "picker choose: Esc saved nothing");
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  email-cli-ro EXCLUSIVE TESTS
  * ══════════════════════════════════════════════════════════════════════ */
@@ -5742,6 +5934,14 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_show_save_all_confirm);
     RUN_TEST(test_show_save_input_line_cursor);
     RUN_TEST(test_show_save_tab_completion);
+    RUN_TEST(test_picker_back_keys);
+    RUN_TEST(test_picker_ctrl_c_quits);
+    RUN_TEST(test_picker_navigation);
+    RUN_TEST(test_picker_help);
+    RUN_TEST(test_picker_unbound_key);
+    RUN_TEST(test_a_one_attachment);
+    RUN_TEST(test_a_without_attachments);
+    RUN_TEST(test_picker_choose_second_then_cancel);
 
     printf("\n--- Empty folder ---\n");
     RUN_TEST(test_interactive_empty_folder);

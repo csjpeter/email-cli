@@ -60,6 +60,7 @@ typedef enum {
 #define EKV_LABELS      "labels"
 #define EKV_FOLDERS     "folders"
 #define EKV_REVIEW      "review"
+#define EKV_ATTACH      "attach-picker"
 /** The accounts screen with a Gmail account under the cursor: its ":" menu
  *  holds the renewal of the authorization. */
 #define EKV_ACCOUNTS_GMAIL "accounts-gmail"

@@ -600,31 +600,39 @@ static void accounts_extra(int n, int create) {
     }
 }
 
-static void test_accounts_pages_by_the_visible_rows(void) {
-    accounts_extra(40, 1);                     /* 41 accounts with testuser */
+static void accounts_paging_body(void) {
     const char *args[] = { g_tui_bin, NULL };
     PtySession *s = pty_open(COLS, ROWS);
     ASSERT(s != NULL, "accounts paging: pty");
-    if (!s) { accounts_extra(40, 0); return; }
+    if (!s) return;
     ASSERT(pty_run(s, args) == 0, "accounts paging: run");
     ASSERT_WAIT_FOR(s, "Email Accounts (41)", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "1/41");
+    pty_send_key(s, PTY_KEY_HOME);             /* the start row may be the default account */
+    ASSERT_WAIT_FOR(s, "[1/41]", WAIT_MS);
     pty_send_key(s, PTY_KEY_PGDN);
-    ASSERT_WAIT_FOR(s, "20/41", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "[20/41]", WAIT_MS);
     pty_send_key(s, PTY_KEY_PGDN);
-    ASSERT_WAIT_FOR(s, "39/41", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "[39/41]", WAIT_MS);
     pty_send_key(s, PTY_KEY_PGDN);
-    ASSERT_WAIT_FOR(s, "41/41", WAIT_MS);      /* stops at the last */
+    ASSERT_WAIT_FOR(s, "[41/41]", WAIT_MS);      /* stops at the last */
     pty_send_key(s, PTY_KEY_PGUP);
-    ASSERT_WAIT_FOR(s, "22/41", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "[22/41]", WAIT_MS);
     pty_send_key(s, PTY_KEY_PGUP);
-    ASSERT_WAIT_FOR(s, "3/41", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "[3/41]", WAIT_MS);
     pty_send_key(s, PTY_KEY_PGUP);
-    ASSERT_WAIT_FOR(s, "1/41", WAIT_MS);       /* stops at the first */
+    ASSERT_WAIT_FOR(s, "[1/41]", WAIT_MS);       /* stops at the first */
     pty_send_key(s, PTY_KEY_CTRL_C);
     pty_wait_exit(s, 5000);
     pty_close(s);
+}
+
+/* The extra accounts are removed whatever the assertions did (a failed ASSERT
+ * returns early), so that no later test sees them. */
+static void test_accounts_pages_by_the_visible_rows(void) {
+    accounts_extra(40, 0);
+    accounts_extra(40, 1);                     /* 41 accounts with testuser */
+    accounts_paging_body();
     accounts_extra(40, 0);
 }
 

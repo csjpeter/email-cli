@@ -2125,6 +2125,166 @@ static void test_keys_reader(void) {
 }
 
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  Renew a Gmail authorization from the accounts screen (EMAIL-130)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static char g_config_ini[600];
+
+/* The account of the other tests, with an OAuth2 client of its own and a
+ * refresh token that "has been revoked". */
+static void reauth_account(void) {
+    write_gmail_config();
+    snprintf(g_config_ini, sizeof(g_config_ini),
+             "%s/.config/email-cli/accounts/%s/config.ini", g_test_home, GMAIL_TEST_EMAIL);
+    FILE *fp = fopen(g_config_ini, "a");
+    if (!fp) { perror("fopen config.ini"); g_tests_failed++; return; }
+    fprintf(fp, "GMAIL_CLIENT_ID=pty.apps.googleusercontent.com\n"
+                "GMAIL_CLIENT_SECRET=pty-secret\n");
+    fclose(fp);
+    chmod(g_config_ini, 0600);
+    /* A readable config.ini: the test looks into it. */
+    char sp[600];
+    snprintf(sp, sizeof(sp), "%s/.config/email-cli/settings.ini", g_test_home);
+    FILE *sf = fopen(sp, "w");
+    if (sf) { fputs("credential_obfuscation=false\n", sf); fclose(sf); }
+    char url[300];
+    snprintf(url, sizeof(url), "http://localhost:%d/token", g_mock_port);
+    setenv("GMAIL_TEST_TOKEN_URL", url, 1);
+}
+
+/* 1 when config.ini holds @p line. */
+static int ini_has(const char *line) {
+    FILE *fp = fopen(g_config_ini, "r");
+    if (!fp) return 0;
+    char buf[512];
+    int found = 0;
+    while (fgets(buf, sizeof(buf), fp)) {
+        buf[strcspn(buf, "\r\n")] = '\0';
+        if (strcmp(buf, line) == 0) found = 1;
+    }
+    fclose(fp);
+    return found;
+}
+
+static PtySession *open_accounts(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    if (!s) return NULL;
+    if (pty_run(s, args) != 0) { pty_close(s); return NULL; }
+    if (pty_wait_for(s, "Email Accounts", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+static void test_reauth_menu_offers_the_renewal(void) {
+    reauth_account();
+    PtySession *s = open_accounts();
+    ASSERT(s != NULL, "reauth: accounts screen");
+    if (!s) return;
+    ASSERT_SCREEN_CONTAINS(s, "actions");               /* the hint names the menu */
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Actions");
+    pty_send_key(s, PTY_KEY_ESC);                       /* closing it changes nothing */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Renew the authorization");
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    ASSERT(ini_has("GMAIL_REFRESH_TOKEN=fake_refresh"), "reauth: token untouched");
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Actions of a Gmail account", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_reauth_paste_renews_the_token(void) {
+    reauth_account();
+    PtySession *s = open_accounts();
+    ASSERT(s != NULL, "reauth paste: accounts screen");
+    if (!s) return;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Renew the Gmail authorization of", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "paste the redirect address");
+    pty_send_str(s, "p");
+    ASSERT_WAIT_FOR(s, "Open this address in a browser", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Paste the address", WAIT_MS);
+    pty_send_str(s, "http://localhost:8089/callback?code=good&scope=x");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Gmail authorization renewed.", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    ASSERT(ini_has("GMAIL_REFRESH_TOKEN=mock-refresh"), "reauth paste: the new token is stored");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_reauth_refused_code_changes_nothing(void) {
+    reauth_account();
+    PtySession *s = open_accounts();
+    ASSERT(s != NULL, "reauth refused: accounts screen");
+    if (!s) return;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Choose:", WAIT_MS);
+    pty_send_str(s, "p");
+    ASSERT_WAIT_FOR(s, "Paste the address", WAIT_MS);
+    pty_send_str(s, "http://localhost:8089/callback?code=bad");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Press any key to return to accounts", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Error:");                 /* why, not hidden */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Authorization was not completed", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    ASSERT(ini_has("GMAIL_REFRESH_TOKEN=fake_refresh"), "reauth refused: token unchanged");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_reauth_wait_is_announced_and_cancellable(void) {
+    reauth_account();
+    PtySession *s = open_accounts();
+    ASSERT(s != NULL, "reauth wait: accounts screen");
+    if (!s) return;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Choose:", WAIT_MS);
+    pty_send_str(s, "l");                                /* no browser is started */
+    ASSERT_WAIT_FOR(s, "Waiting for Google", WAIT_MS);   /* the screen says why it waits */
+    ASSERT_WAIT_FOR(s, "Waiting for authorization", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Ctrl-C cancels");
+    pty_send_key(s, PTY_KEY_CTRL_C);                    /* Ctrl-C: ends the wait, not the program */
+    ASSERT_WAIT_FOR(s, "Press any key to return to accounts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    ASSERT(ini_has("GMAIL_REFRESH_TOKEN=fake_refresh"), "reauth wait: token unchanged");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static void test_reauth_choice_can_be_left(void) {
+    reauth_account();
+    PtySession *s = open_accounts();
+    ASSERT(s != NULL, "reauth esc: accounts screen");
+    if (!s) return;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Choose:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    ASSERT(ini_has("GMAIL_REFRESH_TOKEN=fake_refresh"), "reauth esc: token unchanged");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+
 int main(int argc, char *argv[]) {
     if (argc < 4) {
         fprintf(stderr,
@@ -2384,6 +2544,13 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_gmail_sync_force_reconcile);
     RUN_TEST(test_gmail_sync_pending_fetch_path);
     RUN_TEST(test_gmail_sync_pending_fetch_uid_format);
+
+    printf("\n--- Gmail TUI: renew the authorization (EMAIL-130) ---\n");
+    RUN_TEST(test_reauth_menu_offers_the_renewal);
+    RUN_TEST(test_reauth_paste_renews_the_token);
+    RUN_TEST(test_reauth_refused_code_changes_nothing);
+    RUN_TEST(test_reauth_wait_is_announced_and_cancellable);
+    RUN_TEST(test_reauth_choice_can_be_left);
 
     stop_gmail_mock();
 

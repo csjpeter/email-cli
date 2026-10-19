@@ -5545,6 +5545,8 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             HINT("d", "delete", 45);
             HINT("i", "IMAP", 40);
             HINT("e", "SMTP", 40);
+            if (count > 0 && accounts[cursor].cfg->gmail_mode)
+                HINT(":", "actions", 40);
             HINT("ESC", "quit", SL_PRIO_KEEP);
 #undef HINT
             status_line_draw(trows, tcols, h, nh, "?", count > 0 ? cursor + 1 : 0,
@@ -5605,9 +5607,11 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
                 { "e",               "Edit SMTP for account"       },
                 { "Esc",             "Quit"                        },
                 { "?",               "Show this help"              },
+                { ":",               "Actions of a Gmail account"  },
             };
-            show_help_popup("Accounts shortcuts",
-                            help, (int)(sizeof(help)/sizeof(help[0])));
+            int nhelp = (int)(sizeof(help)/sizeof(help[0]));
+            if (!(count > 0 && accounts[cursor].cfg->gmail_mode)) nhelp--;
+            show_help_popup("Accounts shortcuts", help, nhelp);
             ACC_FREE(); continue;
         }
         if (ch == 'i' && count > 0) {
@@ -5621,6 +5625,22 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             *cfg_out = accounts[cursor].cfg;
             accounts[cursor].cfg = NULL;
             ACC_FREE(); return 2;
+        }
+        if (ch == ':' && count > 0) {
+            if (!accounts[cursor].cfg->gmail_mode) {
+                snprintf(flash_note, sizeof(flash_note),
+                         "  No actions for an IMAP account here (i, e edit its settings).");
+                flash_msg = flash_note;
+                ACC_FREE(); continue;
+            }
+            const char *tt[EA_COUNT] = { NULL };
+            if (ekeys_menu(EKV_ACCOUNTS_GMAIL, tt) == EA_REAUTH) {
+                if (cursor_inout) *cursor_inout = cursor;
+                *cfg_out = accounts[cursor].cfg;
+                accounts[cursor].cfg = NULL;
+                ACC_FREE(); return 5;  /* caller renews the authorization */
+            }
+            ACC_FREE(); continue;
         }
         if (ch == 'n') {
             ACC_FREE(); return 3;  /* caller runs setup wizard */

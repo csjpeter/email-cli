@@ -47,6 +47,7 @@ typedef enum {
     EA_EDIT_HEADERS,  /**< 'e'  edit the headers of the draft               */
     EA_FOLDER_CREATE, /**< menu: create an IMAP folder (EMAIL-129)          */
     EA_FOLDER_DELETE, /**< menu: delete an IMAP folder (EMAIL-129)          */
+    EA_REAUTH,        /**< menu: renew a Gmail account's authorization (EMAIL-130) */
     EA_COUNT
 } EmailAction;
 
@@ -58,6 +59,9 @@ typedef enum {
 #define EKV_LABELS      "labels"
 #define EKV_FOLDERS     "folders"
 #define EKV_REVIEW      "review"
+/** The accounts screen with a Gmail account under the cursor: its ":" menu
+ *  holds the renewal of the authorization. */
+#define EKV_ACCOUNTS_GMAIL "accounts-gmail"
 
 /**
  * @brief Validates the table (once).  A program calls it at start and exits

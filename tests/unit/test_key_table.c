@@ -47,6 +47,8 @@ void test_key_table(void) {
     /* the label browser and the review screen have no direct state keys but e */
     ASSERT(find(EKV_LABELS, 'c') == EA_NONE, "key table: c does not create a label");
     ASSERT(find(EKV_LABELS, 'd') == EA_NONE, "key table: d does not delete a label");
+    ASSERT(find(EKV_ACCOUNTS_GMAIL, 'r') == EA_NONE, "key table: r does not renew an authorization");
+    ASSERT(find(EKV_ACCOUNTS_GMAIL, ':') == EA_NONE, "key table: ':' on the accounts screen is a harmless key");
     ASSERT(find(EKV_REVIEW, 's') == EA_NONE, "key table: s does not send");
     ASSERT(find(EKV_REVIEW, 'd') == EA_NONE, "key table: d does not remove an attachment");
     ASSERT(find(EKV_REVIEW, 'e') == EA_EDIT_HEADERS, "key table: e edits the headers");

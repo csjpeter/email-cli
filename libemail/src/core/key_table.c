@@ -152,6 +152,17 @@ static const tui_keyentry g_entries[] = {
       "Delete the folder %s on the server? Its messages are lost there.",
       EA_FOLDER_DELETE),
 
+    /* The accounts screen, a Gmail account under the cursor (EMAIL-130).  The
+     * other keys of that screen (n, d, i, e) are the screen's own. */
+    H(EKV_ACCOUNTS_GMAIL, 'j', "Down", "move down (also Down)"),
+    H(EKV_ACCOUNTS_GMAIL, 'k', "Up", "move up (also Up)"),
+    H(EKV_ACCOUNTS_GMAIL, TUI_KEY_ENTER, "Open", "the labels of the account"),
+    H(EKV_ACCOUNTS_GMAIL, '?', "Help", NULL),
+    H(EKV_ACCOUNTS_GMAIL, ':', "Actions", "the menu of everything that changes state"),
+    H(EKV_ACCOUNTS_GMAIL, TUI_KEY_ESC, "Quit", NULL),
+    M(EKV_ACCOUNTS_GMAIL, "Renew the authorization...", "Gmail access, in the browser or by paste",
+      EA_REAUTH),
+
     /* The review of a composed message. */
     S(EKV_REVIEW, TUI_KC_NONE, TUI_VERB_NONE, "Send", "the message",
       "Send the message to %s?", EA_SEND),

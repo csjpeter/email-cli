@@ -2960,6 +2960,25 @@ static void test_tui_folder_cursor_persisted(void) {
     }
 }
 
+static void test_tui_accounts_colon_on_imap_account(void) {
+    /* EMAIL-130: the ':' menu of the accounts screen holds the renewal of a
+     * Gmail authorization; an IMAP account has none, and says so. */
+    restart_mock();
+    const char *args[] = {g_tui_bin, NULL};
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "accounts colon: pty_open");
+    if (pty_run(s, args) != 0) { pty_close(s); return; }
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "actions");        /* no hint on an IMAP account */
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "No actions for an IMAP account", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Renew the authorization");
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  HELP PANEL (US-22)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -5499,6 +5518,7 @@ int main(int argc, char *argv[]) {
     printf("\n--- email-tui: help panel (US-22) ---\n");
     restart_mock();
     RUN_TEST(test_tui_accounts_help_panel);
+    RUN_TEST(test_tui_accounts_colon_on_imap_account);
     RUN_TEST(test_tui_list_help_panel);
     RUN_TEST(test_tui_show_help_panel);
     RUN_TEST(test_tui_folders_help_panel);

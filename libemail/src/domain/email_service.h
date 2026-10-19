@@ -166,7 +166,8 @@ char *email_service_list_labels_interactive(const Config *cfg,
  *                     return the current cursor index is written back so the
  *                     caller can restore it on the next call.  Pass NULL to
  *                     always start at position 0.
- * @return 0 = quit, 1 = open account, 2 = edit SMTP, 3 = add new account.
+ * @return 0 = quit, 1 = open account, 2 = edit SMTP, 3 = add new account,
+ *         4 = edit IMAP, 5 = renew the Gmail authorization (':' menu, EMAIL-130).
  */
 int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
                                       const char *flash_msg);

@@ -22,6 +22,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -2959,6 +2960,25 @@ static void test_tui_folder_cursor_persisted(void) {
     }
 }
 
+static void test_tui_accounts_colon_on_imap_account(void) {
+    /* EMAIL-130: the ':' menu of the accounts screen holds the renewal of a
+     * Gmail authorization; an IMAP account has none, and says so. */
+    restart_mock();
+    const char *args[] = {g_tui_bin, NULL};
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "accounts colon: pty_open");
+    if (pty_run(s, args) != 0) { pty_close(s); return; }
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "actions");        /* no hint on an IMAP account */
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "No actions for an IMAP account", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Renew the authorization");
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  HELP PANEL (US-22)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -3611,6 +3631,46 @@ static void test_pending_flags_offline_queue(void) {
            "pending flags: INBOX.tsv written to disk after offline flag change");
 
     /* Restore standard config (no sync_interval) */
+    write_config();
+    restart_mock();
+}
+
+/* EMAIL-160: with no connection, 'D' must queue the move to the Trash for
+ * the next sync (and say so), not drop the message locally and lose it. */
+static void test_delete_offline_queues_move(void) {
+    restart_mock();
+    { const char *a[] = {NULL};
+      PtySession *s = sync_run(a);
+      ASSERT(s != NULL, "offline D: sync opens");
+      ASSERT_WAIT_FOR(s, "Sync complete", WAIT_MS);
+      pty_close(s); }
+
+    char pm_path[512];
+    snprintf(pm_path, sizeof(pm_path),
+             "%s/.local/share/email-cli/accounts/testuser/pending_moves/INBOX.tsv",
+             g_test_home);
+    if (unlink(pm_path) != 0 && errno != ENOENT)
+        perror("offline D: unlink stale pending_moves");
+
+    write_config_with_interval(5);
+    stop_mock_server();
+
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "offline D: tui opens offline");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_screen_contains(s, "Moved to Trash"),
+           "offline D: feedback says the message was moved to Trash");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    ASSERT(access(pm_path, F_OK) == 0,
+           "offline D: pending_moves/INBOX.tsv written for the next sync");
+
     write_config();
     restart_mock();
 }
@@ -5458,6 +5518,7 @@ int main(int argc, char *argv[]) {
     printf("\n--- email-tui: help panel (US-22) ---\n");
     restart_mock();
     RUN_TEST(test_tui_accounts_help_panel);
+    RUN_TEST(test_tui_accounts_colon_on_imap_account);
     RUN_TEST(test_tui_list_help_panel);
     RUN_TEST(test_tui_show_help_panel);
     RUN_TEST(test_tui_folders_help_panel);
@@ -5499,6 +5560,7 @@ int main(int argc, char *argv[]) {
     printf("\n--- pending flags offline queue (US-26) ---\n");
     restart_mock();
     RUN_TEST(test_pending_flags_offline_queue);
+    RUN_TEST(test_delete_offline_queues_move);
 
     printf("\n--- virtual Unread/Flagged list ---\n");
     restart_mock();

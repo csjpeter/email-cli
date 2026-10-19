@@ -841,6 +841,93 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
  *   does not carry a flags field).
  * flags_out: if non-NULL, receives the final flag state on exit.
  */
+/** IMAP trash / permanent delete of @p uid in @p folder from the TUI.
+ *  With a connection the server is told at once; without one (offline
+ *  mode) a move to the trash is queued as a pending move for the next sync,
+ *  and a permanent delete, which cannot be queued, is refused.
+ *  Fills @p msg with the feedback.  Returns 0 when the message is done or
+ *  queued (the caller may drop it locally), -1 when nothing was done. */
+static int imap_trash_or_queue(emc_client *mc, const Config *cfg,
+                               const char *folder, const char *uid,
+                               char *msg, size_t msg_sz) {
+    const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
+    if (strcmp(folder, trf) == 0) {
+        if (!mc) {
+            snprintf(msg, msg_sz, "No connection: not deleted");
+            return -1;
+        }
+        if (emc_delete(mc, uid) != 0) {
+            snprintf(msg, msg_sz, "Could not delete the message");
+            return -1;
+        }
+        snprintf(msg, msg_sz, "Permanently deleted");
+        return 0;
+    }
+    if (mc && emc_move_to_folder(mc, uid, trf) == 0) {
+        snprintf(msg, msg_sz, "Moved to Trash");
+        return 0;
+    }
+    if (local_pending_move_add(folder, uid, trf) != 0) {
+        snprintf(msg, msg_sz, "Could not move to Trash");
+        return -1;
+    }
+    snprintf(msg, msg_sz, "Moved to Trash (queued, no connection)");
+    return 0;
+}
+
+/** Gmail without a connection in the TUI: queue the removal of every real
+ *  label the message carries (the same set the online archive removes) for
+ *  the next sync.  Must run before the .hdr labels are rewritten. */
+static void gmail_queue_label_removals(const char *uid) {
+    char *labels = local_hdr_get_labels("", uid);
+    if (!labels) return;
+    char *tok = labels, *sep;
+    while (tok && *tok) {
+        sep = strchr(tok, ',');
+        if (sep) *sep = '\0';
+        if (tok[0] && tok[0] != '_' && strcmp(tok, "IMPORTANT") != 0 &&
+            strncmp(tok, "CATEGORY_", 9) != 0)
+            local_pending_label_add(uid, tok, 0);
+        tok = sep ? sep + 1 : NULL;
+    }
+    free(labels);
+}
+
+/** Drops one queued label change of @p uid; returns 1 when it was queued.
+ *  Used by undo, so a trash that never reached the server is cancelled
+ *  instead of followed by its opposite in the same push. */
+static int gmail_unqueue_label(const char *uid, const char *label, int add) {
+    int n = 0, found = 0;
+    PendingLabel *q = local_pending_label_load(&n);
+    if (!q || n == 0) { free(q); return 0; }
+    local_pending_label_clear();
+    for (int i = 0; i < n; i++) {
+        if (!found && strcmp(q[i].uid, uid) == 0 && q[i].add == add &&
+            strcmp(q[i].label, label) == 0) { found = 1; continue; }
+        local_pending_label_add(q[i].uid, q[i].label, q[i].add);
+    }
+    free(q);
+    return found;
+}
+
+/** Gmail TUI trash: with a connection the server is told at once, without
+ *  one the trash is queued for the next sync. */
+static void gmail_trash_or_queue(emc_client *mc, const char *uid) {
+    if (mc && emc_trash(mc, uid) == 0) return;
+    gmail_queue_label_removals(uid);
+    local_pending_label_add(uid, "_trash", 1);
+}
+
+/** Gmail permanent delete: cannot be queued, so it needs a connection (the
+ *  list's own, or a one-shot one).  Returns 0 when the server did it. */
+static int gmail_delete_now(const Config *cfg, emc_client *mc, const char *uid) {
+    emc_client *c = mc ? mc : mail_connect(cfg);
+    if (!c) return -1;
+    int rc = emc_delete(c, uid);
+    if (!mc) emc_close(c);
+    return rc;
+}
+
 static int show_uid_interactive(const Config *cfg, emc_client *mc,
                                 const char *folder,
                                 const char *uid, int page_size,
@@ -1203,14 +1290,18 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                     break;
                 }
                 if (strcmp(folder, "_trash") == 0) {
-                    /* In Trash: permanently delete */
-                    if (mc) emc_delete(mc, uid);
+                    /* In Trash: permanently delete (needs a connection) */
+                    if (gmail_delete_now(cfg, mc, uid) != 0) {
+                        snprintf(info_msg, sizeof(info_msg),
+                                 "No connection: not deleted");
+                        break;
+                    }
                     label_idx_remove("_trash", uid);
                     result = 6;   /* signal list loop to mark entry removed */
                     goto show_int_done;
                 }
-                /* Trash: Gmail compound trash operation */
-                if (mc) emc_trash(mc, uid);
+                /* Trash: Gmail compound trash operation (queued offline) */
+                gmail_trash_or_queue(mc, uid);
                 char **all_labels = NULL; int all_count = 0;
                 label_idx_list(&all_labels, &all_count);
                 for (int j = 0; j < all_count; j++) {
@@ -1243,10 +1334,11 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                             if (tok[0] && tok[0] != '_') {
                                 label_idx_remove(tok, uid);
                                 rm[rm_n++] = tok;
-                                if (mc &&
-                                    strcmp(tok, "IMPORTANT") != 0 &&
-                                    strncmp(tok, "CATEGORY_", 9) != 0)
-                                    emc_modify_label(mc, uid, tok, 0);
+                                if (strcmp(tok, "IMPORTANT") != 0 &&
+                                    strncmp(tok, "CATEGORY_", 9) != 0) {
+                                    if (mc) emc_modify_label(mc, uid, tok, 0);
+                                    else local_pending_label_add(uid, tok, 0);
+                                }
                             }
                             tok = sep ? sep + 1 : NULL;
                         }
@@ -1260,6 +1352,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 local_hdr_update_flags("", uid, new_flags);
                 reader_flags = new_flags;
                 if (mc) emc_set_flag(mc, uid, "\\Seen", 1);
+                else local_pending_label_add(uid, "UNREAD", 0);
                 label_idx_add("_nolabel", uid);
                 free(show_labels);
                 show_labels = local_hdr_get_labels("", uid);
@@ -1353,12 +1446,9 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                     snprintf(info_msg, sizeof(info_msg), "Not deleted");
                     break;
                 }
-                const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
-                if (strcmp(folder, trf) == 0) {
-                    if (mc) emc_delete(mc, uid);
-                } else {
-                    if (mc) emc_move_to_folder(mc, uid, trf);
-                }
+                if (imap_trash_or_queue(mc, cfg, folder, uid,
+                                        info_msg, sizeof(info_msg)) != 0)
+                    break;    /* nothing done: stay in the reader */
                 result = 6;   /* signal list loop to mark entry removed */
                 goto show_int_done;
             } else if (ch == 'r') {
@@ -2278,6 +2368,7 @@ static int bulk_label(BulkCtx *b, int ei, const char *label, int on) {
     const char *uid = b->entries[ei].uid;
     int rc = 0;
     if (b->mc) rc = emc_modify_label(b->mc, uid, label, on);
+    else rc = local_pending_label_add(uid, label, on);   /* offline: queue */
     if (on) {
         label_idx_add(label, uid);
         local_hdr_update_labels("", uid, &label, 1, NULL, 0);
@@ -2302,6 +2393,8 @@ static int bulk_move(BulkCtx *b, int ei, const char *target) {
         return rc == 0 ? 0 : -1;
     }
     if (b->mc) rc = emc_move_to_folder(b->mc, uid, target);
+    if (rc != 0 || !b->mc)   /* no connection or refused: queue for the sync */
+        rc = local_pending_move_add(efolder, uid, target);
     if (rc == 0) {
         manifest_remove(b->manifest, uid);
         if (b->pend_remove) b->pend_remove[ei] = 1;
@@ -2319,10 +2412,10 @@ static int bulk_delete(BulkCtx *b, int ei) {
     if (b->is_gmail) {
         int in_trash = strcmp(b->folder, "_trash") == 0;
         if (in_trash) {
-            if (b->mc) rc = emc_delete(b->mc, uid);
-            label_idx_remove("_trash", uid);
+            rc = gmail_delete_now(b->cfg, b->mc, uid);
+            if (rc == 0) label_idx_remove("_trash", uid);
         } else {
-            if (b->mc) rc = emc_trash(b->mc, uid);
+            gmail_trash_or_queue(b->mc, uid);
             char **all_labels = NULL;
             int all_count = 0;
             label_idx_list(&all_labels, &all_count);
@@ -2334,12 +2427,8 @@ static int bulk_delete(BulkCtx *b, int ei) {
             label_idx_add("_trash", uid);
         }
     } else {
-        const char *trf = b->cfg->trash_folder ? b->cfg->trash_folder : "Trash";
-        if (strcmp(efolder, trf) == 0) {
-            if (b->mc) rc = emc_delete(b->mc, uid);
-        } else {
-            if (b->mc) rc = emc_move_to_folder(b->mc, uid, trf);
-        }
+        char msg[80];
+        rc = imap_trash_or_queue(b->mc, b->cfg, efolder, uid, msg, sizeof(msg));
     }
     if (rc == 0) {
         manifest_remove(b->manifest, uid);
@@ -2393,10 +2482,11 @@ static void gmail_archive_one(BulkCtx *b, int ei) {
                 if (tok[0]) {
                     if (tok[0] != '_') label_idx_remove(tok, uid);
                     rm[rm_n++] = tok;
-                    if (b->mc &&
-                        strcmp(tok, "IMPORTANT") != 0 &&
-                        strncmp(tok, "CATEGORY_", 9) != 0)
-                        emc_modify_label(b->mc, uid, tok, 0);
+                    if (strcmp(tok, "IMPORTANT") != 0 &&
+                        strncmp(tok, "CATEGORY_", 9) != 0) {
+                        if (b->mc) emc_modify_label(b->mc, uid, tok, 0);
+                        else local_pending_label_add(uid, tok, 0);
+                    }
                 }
                 tok = sep ? sep + 1 : NULL;
             }
@@ -2411,6 +2501,7 @@ static void gmail_archive_one(BulkCtx *b, int ei) {
         b->entries[ei].flags = new_flags;
     }
     if (b->mc) emc_set_flag(b->mc, uid, "\\Seen", 1);
+    else local_pending_label_add(uid, "UNREAD", 0);
     label_idx_add("_nolabel", uid);
     if (b->pend_label) b->pend_label[ei] = 1;
 }
@@ -2428,6 +2519,11 @@ static void gmail_restore_one(BulkCtx *b, int ei) {
     if (b->mc) {
         emc_modify_label(b->mc, uid, "TRASH", 0);
         emc_modify_label(b->mc, uid, "INBOX", 1);
+    } else {
+        /* Offline: a trash still queued is cancelled, else queue the restore */
+        if (!gmail_unqueue_label(uid, "_trash", 1))
+            local_pending_label_add(uid, "_trash", 0);
+        local_pending_label_add(uid, "INBOX", 1);
     }
     if (b->pend_restore) b->pend_restore[ei] = 1;
 }
@@ -5365,6 +5461,8 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             HINT("d", "delete", 45);
             HINT("i", "IMAP", 40);
             HINT("e", "SMTP", 40);
+            if (count > 0 && accounts[cursor].cfg->gmail_mode)
+                HINT(":", "actions", 40);
             HINT("ESC", "quit", SL_PRIO_KEEP);
 #undef HINT
             status_line_draw(trows, tcols, h, nh, "?", count > 0 ? cursor + 1 : 0,
@@ -5425,9 +5523,11 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
                 { "e",               "Edit SMTP for account"       },
                 { "Esc",             "Quit"                        },
                 { "?",               "Show this help"              },
+                { ":",               "Actions of a Gmail account"  },
             };
-            show_help_popup("Accounts shortcuts",
-                            help, (int)(sizeof(help)/sizeof(help[0])));
+            int nhelp = (int)(sizeof(help)/sizeof(help[0]));
+            if (!(count > 0 && accounts[cursor].cfg->gmail_mode)) nhelp--;
+            show_help_popup("Accounts shortcuts", help, nhelp);
             ACC_FREE(); continue;
         }
         if (ch == 'i' && count > 0) {
@@ -5441,6 +5541,22 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             *cfg_out = accounts[cursor].cfg;
             accounts[cursor].cfg = NULL;
             ACC_FREE(); return 2;
+        }
+        if (ch == ':' && count > 0) {
+            if (!accounts[cursor].cfg->gmail_mode) {
+                snprintf(flash_note, sizeof(flash_note),
+                         "  No actions for an IMAP account here (i, e edit its settings).");
+                flash_msg = flash_note;
+                ACC_FREE(); continue;
+            }
+            const char *tt[EA_COUNT] = { NULL };
+            if (ekeys_menu(EKV_ACCOUNTS_GMAIL, tt) == EA_REAUTH) {
+                if (cursor_inout) *cursor_inout = cursor;
+                *cfg_out = accounts[cursor].cfg;
+                accounts[cursor].cfg = NULL;
+                ACC_FREE(); return 5;  /* caller renews the authorization */
+            }
+            ACC_FREE(); continue;
         }
         if (ch == 'n') {
             ACC_FREE(); return 3;  /* caller runs setup wizard */

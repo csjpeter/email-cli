@@ -56,7 +56,7 @@ existing references and every `no` has a reason.
 | Add an account (wizard) | yes | F:76.1 | yes (`n`) | P:test_wizard_complete | |
 | Remove an account | yes | F:122.22 | yes (`d`) | P:test_screen_account_delete | |
 | Edit account settings (IMAP, SMTP) | yes (`config imap`, `config smtp`) | F:73.3 | yes (`e`, the wizard) | P:test_wizard_with_smtp | |
-| Renew a Gmail authorization | yes (`config reauth`) | F:89.21 | no | | the TUI tells to re-add the account; ticket to be opened by the owner |
+| Renew a Gmail authorization | yes (`config reauth`) | F:89.21 | yes (`:` menu on the accounts screen) | P:test_reauth_paste_renews_the_token | browser, address only or paste, as the CLI; `--import-token` stays CLI-only |
 | Re-encrypt stored credentials | yes (`migrate-credentials`) | F:122.26 | no | | maintenance, run by hand; `n/a` in a screen, not a gap |
 | List sorting rules | yes | F:34.1 | yes (`l`) | P:test_screen_rules_list | |
 | Add a sorting rule | yes | F:37.1 | yes | P:test_tui_rules_add_form_saves_new_rule | |

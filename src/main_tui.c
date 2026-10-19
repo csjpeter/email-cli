@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include "config_store.h"
 #include "setup_wizard.h"
+#include "gmail_login.h"
 #include "email_service.h"
 #include "help_gmail.h"
 #include "platform/terminal.h"
@@ -2348,6 +2349,85 @@ static void help_reply(void) {
 #define EMAIL_CLI_VERSION "unknown"
 #endif
 
+/* ── Renew a Gmail authorization (EMAIL-130) ─────────────────────────── */
+
+static volatile sig_atomic_t g_reauth_cancelled;
+
+static void reauth_on_sigint(int sig) { (void)sig; g_reauth_cancelled = 1; }
+
+/**
+ * Renews the OAuth2 authorization of the Gmail account @p cfg: the flow of
+ * 'email-cli config reauth' (browser, loopback without a browser, paste),
+ * run on the plain terminal so that its messages and the pasted line work as
+ * they do in the CLI.  Every step that waits says so on the screen.
+ *
+ * @return a one-line notice for the accounts screen (static storage).
+ */
+static const char *tui_reauth_gmail(Config *cfg) {
+    static char note[300];
+    printf("\033[2J\033[H\n  Renew the Gmail authorization of %s\n\n"
+           "    b   open the browser here, wait for the authorization\n"
+           "    l   show the address only (no browser; for an SSH forward)\n"
+           "    p   paste the redirect address (browser on another machine)\n"
+           "    Esc cancel\n\n"
+           "  Choose: ", cfg->user ? cfg->user : "(unknown)");
+    fflush(stdout);
+
+    GmailLoginMode mode = GMAIL_LOGIN_BROWSER;
+    for (;;) {
+        TermRawState *raw = terminal_raw_enter();
+        TermKey k = terminal_read_key();
+        int ch = terminal_last_printable();
+        terminal_raw_exit(&raw);
+        if (k == TERM_KEY_ESC || k == TERM_KEY_QUIT) return "  Cancelled — the authorization is unchanged.";
+        if (k != TERM_KEY_IGNORE) continue;
+        if (ch == 'b') { mode = GMAIL_LOGIN_BROWSER;  break; }
+        if (ch == 'l') { mode = GMAIL_LOGIN_LOOPBACK; break; }
+        if (ch == 'p') { mode = GMAIL_LOGIN_PASTE;    break; }
+    }
+    printf("%c\n", mode == GMAIL_LOGIN_BROWSER ? 'b'
+                    : mode == GMAIL_LOGIN_LOOPBACK ? 'l' : 'p');
+    if (mode != GMAIL_LOGIN_PASTE)
+        printf("\n  Waiting for Google: the screen stays here until the browser has\n"
+               "  returned the authorization, or Ctrl-C cancels (5 minutes at most).\n");
+    fflush(stdout);
+
+    /* Ctrl-C ends the wait, not the program: a handler without SA_RESTART
+     * makes the blocking accept() return, which the library reports as a
+     * failure. */
+    struct sigaction sa, old;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = reauth_on_sigint;
+    sigemptyset(&sa.sa_mask);
+    g_reauth_cancelled = 0;
+    sigaction(SIGINT, &sa, &old);
+    int rc = gmail_login(cfg, mode, stdin);
+    sigaction(SIGINT, &old, NULL);
+
+    if (rc != 0) {
+        snprintf(note, sizeof note, "  %s — the account is unchanged.",
+                 g_reauth_cancelled ? "Cancelled" : "Authorization was not completed");
+        fprintf(stderr, "\n  Press any key to return to accounts...\n");
+        fflush(stderr);
+        TermRawState *raw = terminal_raw_enter();
+        char c; ssize_t n = read(STDIN_FILENO, &c, 1); (void)n;
+        terminal_raw_exit(&raw);
+        return note;
+    }
+    if (config_save_account(cfg) != 0) {
+        fprintf(stderr, "  Error: the authorization succeeded but the new token"
+                        " could not be saved.\n  Press any key to return to accounts...\n");
+        fflush(stderr);
+        TermRawState *raw = terminal_raw_enter();
+        char c; ssize_t n = read(STDIN_FILENO, &c, 1); (void)n;
+        terminal_raw_exit(&raw);
+        return "  The new token could not be saved.";
+    }
+    if (email_service_check_credential(cfg) != 0)
+        return "  Authorization renewed, but the account does not answer yet.";
+    return "  Gmail authorization renewed.";
+}
+
 int main(int argc, char *argv[]) {
     /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
@@ -2612,6 +2692,12 @@ int main(int argc, char *argv[]) {
                 continue;  /* re-display accounts screen */
             }
             if (!sel_cfg) continue;
+            if (acc == 5) {
+                /* ':' menu → renew the Gmail authorization of the account */
+                acc_flash = tui_reauth_gmail(sel_cfg);
+                config_free(sel_cfg);
+                continue;
+            }
             if (acc == 4) {
                 /* 'i' → edit IMAP settings for selected account */
                 if (setup_wizard_imap(sel_cfg) == 0) {

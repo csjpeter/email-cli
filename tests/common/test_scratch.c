@@ -103,10 +103,7 @@ static void register_at_exit(void)
 const char *test_scratch_dir(void)
 {
     if (g_root[0] == '\0') {
-        /* The number is padded to the seven digits a pid can have (pid_max is
-         * 4194304), so the length of every test path, and the screens that show
-         * one, does not depend on how far the host's pid counter has come. */
-        snprintf(g_root, sizeof(g_root), "%s/tests/%s/work-%07d",
+        snprintf(g_root, sizeof(g_root), "%s/tests/%s/work-%d",
                  TEST_BUILD_DIR, TEST_CATEGORY, (int)getpid());
         g_owner = getpid();
         if (mkdir_p(g_root) != 0) {

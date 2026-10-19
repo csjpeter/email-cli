@@ -132,6 +132,26 @@ static const tui_keyentry g_entries[] = {
       "Delete the label %s on the server? Its messages keep their other labels.",
       EA_LABEL_DELETE),
 
+    /* The IMAP folder browser (EMAIL-129): creating and deleting a folder are
+     * rare, so they are in the menu only; deleting names the folder and asks.
+     * 't' (tree / flat) is a registry key (move): the table refuses it as a
+     * harmless key, so the browser handles it outside the table. */
+    H(EKV_FOLDERS, 'j', "Down", "move down (also Down)"),
+    H(EKV_FOLDERS, 'k', "Up", "move up (also Up)"),
+    H(EKV_FOLDERS, TUI_KEY_PGDN, "Page down", NULL),
+    H(EKV_FOLDERS, TUI_KEY_PGUP, "Page up", NULL),
+    H(EKV_FOLDERS, TUI_KEY_ENTER, "Open", "the folder, or step into its subfolders"),
+    H(EKV_FOLDERS, '/', "Search", "cross-folder content search"),
+    H(EKV_FOLDERS, 'c', "Compose", "a new message"),
+    H(EKV_FOLDERS, '?', "Help", NULL),
+    H(EKV_FOLDERS, ':', "Actions", "the menu of everything that changes state"),
+    H(EKV_FOLDERS, 'q', "Back", "up one level; the accounts at the top"),
+    H(EKV_FOLDERS, TUI_KEY_ESC, "Back", "up one level; the accounts at the top"),
+    M(EKV_FOLDERS, "Create a folder...", "on the server, name asked for", EA_FOLDER_CREATE),
+    S(EKV_FOLDERS, TUI_KC_NONE, TUI_VERB_NONE, "Delete the folder", "on the server",
+      "Delete the folder %s on the server? Its messages are lost there.",
+      EA_FOLDER_DELETE),
+
     /* The accounts screen, a Gmail account under the cursor (EMAIL-130).  The
      * other keys of that screen (n, d, i, e) are the screen's own. */
     H(EKV_ACCOUNTS_GMAIL, 'j', "Down", "move down (also Down)"),

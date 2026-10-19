@@ -11,7 +11,7 @@
 
 /**
  * @file test_scratch.h
- * @brief Every path a C test uses lives under build/tests/<category>/work-<pid, 7 digits>.
+ * @brief Every path a C test uses lives under build/tests/<category>/work-<pid>.
  *
  * A test never uses the shared system temp directory: a fixed path is read back from the previous run and
  * collides between users.  The directory is removed when the process ends

@@ -37,7 +37,7 @@ existing references and every `no` has a reason.
 | Raw message source | yes (`show --raw`) | F:122.21 | yes (`v`) | P:test_interactive_show_source_toggle | |
 | List IMAP folders (counts, tree) | yes | F:25.13 | yes | P:test_screen_folders | |
 | List Gmail labels | yes | F:26.11 | yes | P:test_screen_gmail_labels | |
-| Create / delete an IMAP folder | yes | F:51.2 | no | | not built in the TUI; ticket to be opened by the owner |
+| Create / delete an IMAP folder | yes | F:51.2 | yes (`:` menu of the folder browser; delete asks first) | P:test_folder_create P:test_folder_delete_asks | |
 | Create a Gmail label | yes | F:122.24 | yes (`c` in the label browser) | P:test_label_browser_create_label_confirmed | |
 | Delete a Gmail label | yes | F:122.25 | no | | the label browser has a `d` key, but it passes the label name as the id (`TODO` in `email_service_labels_interactive`; Gmail needs the id) and no test deletes a label there: a gap until fixed and tested; ticket to be opened by the owner |
 | Mark read / unread | yes | F:16.1 | yes (`n`) | P:test_feedback_n_read | |

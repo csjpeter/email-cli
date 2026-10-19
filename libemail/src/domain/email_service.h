@@ -445,6 +445,23 @@ int email_service_move(const Config *cfg, const char *uid,
 int email_service_mark_junk(const Config *cfg, const char *uid);
 
 /**
+ * @brief Move a message to the trash, or delete it for good when it is
+ *        already there (the TUI's 'D').  Gmail: TRASH label; IMAP: move to
+ *        the configured trash folder.
+ * @param folder Folder (IMAP) or label the message is in; NULL = the account's.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_trash(const Config *cfg, const char *uid, const char *folder);
+
+/**
+ * @brief Archive a message (the TUI's 'a').  Gmail: remove its labels and mark
+ *        it read; IMAP: move it to the configured archive folder.
+ * @param folder Folder (IMAP) or label the message is in; NULL = the account's.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_archive(const Config *cfg, const char *uid, const char *folder);
+
+/**
  * @brief Mark a message as not-junk/ham ($NotJunk / remove Gmail SPAM).
  * @return 0 on success, -1 on error.
  */

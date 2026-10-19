@@ -47,7 +47,7 @@ If `<command>` is given and unknown, prints an error to **stderr** and exits **1
 
 Supported topics: `list`, `show`, `list-folders`, `list-labels`, `list-attachments`,
 `save-attachment`, `send`, `create-folder`, `delete-folder`, `create-label`, `delete-label`,
-`move`, `mark-junk`, `mark-notjunk`, `config`.
+`move`, `mark-junk`, `mark-notjunk`, `trash`, `archive`, `config`.
 
 ---
 
@@ -672,6 +672,38 @@ Mark the message identified by `<uid>` as not junk.
 |------|-----------|
 | 0 | Flag set successfully |
 | −1 | IMAP / API error |
+
+---
+
+## `trash` and `archive`
+
+```
+email-cli [<account>] trash <uid> [--folder <folder>]
+email-cli [<account>] archive <uid> [--folder <folder>]
+```
+
+**User story:** As a user I want to delete or archive a message from a script
+with the result the TUI keys `D` and `a` give.
+
+* `trash` -- **IMAP:** moves the message from `--folder` (default: the
+  account's folder) to the trash folder (`TRASH_FOLDER`, default `Trash`).
+  **Gmail:** adds the `TRASH` label and removes the others. A message that is
+  already in the trash (`--folder` is the trash folder, or `TRASH` on Gmail) is
+  **deleted for good**, as `D` does in the TUI.
+* `archive` -- **IMAP:** moves the message to the archive folder
+  (`ARCHIVE_FOLDER`, default `Archive`). **Gmail:** removes the message's
+  labels (`INBOX` included) and marks it read, as `a` does in the TUI. A
+  message already in the archive is left alone (exit 0).
+
+Both are refused by `email-cli-ro`. The local cache is updated after the
+server accepted the change; with no connection the command fails (exit 1).
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Done (or nothing to do for `archive`) |
+| 1 | Missing or bad UID, no connection, IMAP / API error |
 
 ---
 

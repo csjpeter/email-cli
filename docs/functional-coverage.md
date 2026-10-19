@@ -58,6 +58,8 @@ recorded weakness, not coverage of the promise.
 | `email-cli rules list` | F:34.1 | `--json` F:122.16 |
 | `email-cli rules remove` | F:37.12 | |
 | `email-cli save-attachment` | F:15.2 | |
+| `email-cli trash` | F:132.2 F:132.6 | |
+| `email-cli archive` | F:132.5 F:132.13 | |
 | `email-cli send` | F:11.3 F:114.3 | SMTP mock receives the message; failure F:114.1 |
 | `email-cli show` | F:1.10 F:1.11 | |
 | `email-cli show --raw` | F:122.21 | |

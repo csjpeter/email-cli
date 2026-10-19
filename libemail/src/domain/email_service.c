@@ -7453,6 +7453,134 @@ int email_service_move(const Config *cfg, const char *uid,
     return rc == 0 ? 0 : -1;
 }
 
+/* ── trash and archive from the command line (EMAIL-132) ─────────────── */
+
+/** True when @p folder names the Gmail trash (the label id or the local index). */
+static int gmail_folder_is_trash(const char *folder) {
+    return folder && (strcmp(folder, "TRASH") == 0 || strcmp(folder, "_trash") == 0);
+}
+
+/** Drop @p uid from the local manifest of @p folder. */
+static void manifest_drop_uid(const char *folder, const char *uid) {
+    Manifest *m = manifest_load(folder);
+    if (!m) return;
+    manifest_remove(m, uid);
+    manifest_save(folder, m);
+    manifest_free(m);
+}
+
+int email_service_trash(const Config *cfg, const char *uid, const char *folder) {
+    const char *use_folder = folder ? folder
+                           : (cfg->folder ? cfg->folder : "INBOX");
+    local_store_init(cfg->host, cfg->user);
+    emc_client *mc = make_mail(cfg);
+    if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+    int rc;
+    int permanent;
+    if (cfg->gmail_mode) {
+        permanent = gmail_folder_is_trash(use_folder);
+        rc = permanent ? emc_delete(mc, uid) : emc_trash(mc, uid);
+    } else {
+        const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
+        permanent = strcmp(use_folder, trf) == 0;
+        rc = emc_select(mc, use_folder);
+        if (rc == 0)
+            rc = permanent ? emc_delete(mc, uid) : emc_move_to_folder(mc, uid, trf);
+    }
+    emc_close(mc);
+    if (rc != 0) {
+        fprintf(stderr, "Error: Could not %s message %s.\n",
+                permanent ? "delete" : "move to the trash", uid);
+        return -1;
+    }
+
+    if (cfg->gmail_mode) {
+        char **all_labels = NULL; int all_count = 0;
+        label_idx_list(&all_labels, &all_count);
+        for (int j = 0; j < all_count; j++) {
+            label_idx_remove(all_labels[j], uid);
+            free(all_labels[j]);
+        }
+        free(all_labels);
+        if (!permanent) label_idx_add("_trash", uid);
+    } else {
+        manifest_drop_uid(use_folder, uid);
+    }
+    if (permanent) printf("Message %s deleted for good.\n", uid);
+    else           printf("Message %s moved to the trash.\n", uid);
+    return 0;
+}
+
+int email_service_archive(const Config *cfg, const char *uid, const char *folder) {
+    const char *use_folder = folder ? folder
+                           : (cfg->folder ? cfg->folder : "INBOX");
+    local_store_init(cfg->host, cfg->user);
+
+    if (!cfg->gmail_mode) {
+        const char *arf = cfg->archive_folder ? cfg->archive_folder : "Archive";
+        if (strcmp(use_folder, arf) == 0) {
+            printf("Message %s is already in %s \xe2\x80\x94 no change.\n", uid, arf);
+            return 0;
+        }
+        emc_client *mc = make_mail(cfg);
+        if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+        int rc = emc_select(mc, use_folder);
+        if (rc == 0) rc = emc_move_to_folder(mc, uid, arf);
+        emc_close(mc);
+        if (rc != 0) {
+            fprintf(stderr, "Error: Could not move message %s to %s.\n", uid, arf);
+            return -1;
+        }
+        manifest_drop_uid(use_folder, uid);
+        printf("Message %s archived (moved to %s).\n", uid, arf);
+        return 0;
+    }
+
+    /* Gmail: remove every user-visible label (the TUI's 'a'), mark read. */
+    if (strcmp(use_folder, "_nolabel") == 0) {
+        printf("Message %s is already in the archive \xe2\x80\x94 no change.\n", uid);
+        return 0;
+    }
+    emc_client *mc = make_mail(cfg);
+    if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+    int rc = 0;
+    char *lbl_str = local_hdr_get_labels("", uid);
+    char *copy = lbl_str ? strdup(lbl_str) : NULL;
+    int n = 1;
+    if (lbl_str) for (const char *p = lbl_str; *p; p++) if (*p == ',') n++;
+    const char **rm = malloc((size_t)n * sizeof(char *));
+    int rm_n = 0;
+    if (copy && rm) {
+        char *tok = copy, *sep;
+        while (tok && *tok) {
+            sep = strchr(tok, ',');
+            if (sep) *sep = '\0';
+            if (tok[0] && tok[0] != '_') {
+                rm[rm_n++] = tok;
+                if (strcmp(tok, "IMPORTANT") != 0 &&
+                    strncmp(tok, "CATEGORY_", 9) != 0 &&
+                    emc_modify_label(mc, uid, tok, 0) != 0)
+                    rc = -1;
+            }
+            tok = sep ? sep + 1 : NULL;
+        }
+    }
+    if (rc == 0 && emc_set_flag(mc, uid, "\\Seen", 1) != 0) rc = -1;
+    emc_close(mc);
+    if (rc != 0) {
+        fprintf(stderr, "Error: Could not archive message %s.\n", uid);
+        free(copy); free(rm); free(lbl_str);
+        return -1;
+    }
+    for (int i = 0; i < rm_n; i++) label_idx_remove(rm[i], uid);
+    if (rm_n > 0) local_hdr_update_labels("", uid, NULL, 0, rm, rm_n);
+    label_idx_remove("UNREAD", uid);
+    label_idx_add("_nolabel", uid);
+    free(copy); free(rm); free(lbl_str);
+    printf("Message %s archived.\n", uid);
+    return 0;
+}
+
 int email_service_create_folder(const Config *cfg, const char *name) {
     if (cfg->gmail_mode) {
         fprintf(stderr, "Error: 'create-folder' is IMAP-only. Use 'create-label' for Gmail.\n");

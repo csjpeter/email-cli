@@ -61,6 +61,11 @@ Toggle the junk state.
 .TP
 .BI move " uid folder" " \fR[\fP" \-\-folder " source\fR]\fP"
 Move a message to another folder (Gmail: add the label, remove the source label).
+.BI trash " uid" "\fR [\fP\-\-folder " folder "\fR]\fP"
+Move a message to the trash (IMAP: the trash folder; Gmail: the TRASH label); a message already in the trash is deleted for good.
+.TP
+.BI archive " uid" "\fR [\fP\-\-folder " folder "\fR]\fP"
+Archive a message (IMAP: move to the archive folder, ARCHIVE_FOLDER, default Archive; Gmail: remove its labels and mark it read).
 .TP
 .BI add\-label " uid label" "\fR, \fP" remove\-label " uid label"
 Gmail: add or remove a label.

@@ -7489,6 +7489,36 @@ kill "$IMAP133_PID" "$SMTP133_PID"
 
 fi
 
+if phase_wanted 137; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 137 — help pages for migrate-credentials and help (EMAIL-137)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 137: migrate-credentials / help pages (EMAIL-137) ---"
+
+H137="$PROJECT_ROOT/build/functional-137-home"
+mkdir -p "$H137"
+h137() { ( export HOME="$H137"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+           "$@" </dev/null 2>&1; echo "exit-code=$?" ); }
+OUT=$(h137 "$BIN_DIR/email-cli" help migrate-credentials)
+check "137.1 help migrate-credentials shows the usage"   "Usage: email-cli migrate-credentials" "$OUT"
+check "137.2 help migrate-credentials exits 0"           "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli" migrate-credentials --help)
+[ "$OUT" = "$OUT2" ] && SAME137=same || SAME137=differs
+check "137.3 migrate-credentials --help equals the help page" "^same$" "$SAME137"
+OUT=$(h137 "$BIN_DIR/email-cli" help help)
+check "137.4 help help shows the usage"                  "Usage: email-cli help" "$OUT"
+check "137.5 help help exits 0"                          "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli" help --help)
+check "137.6 help --help equals help help"               "Usage: email-cli help" "$OUT2"
+OUT=$(h137 "$BIN_DIR/email-cli-ro" help help)
+check "137.7 email-cli-ro help help shows the usage"     "Usage: email-cli-ro help" "$OUT"
+check "137.8 email-cli-ro help help exits 0"             "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli-ro" help --help)
+check "137.9 email-cli-ro help --help shows the usage"   "Usage: email-cli-ro help" "$OUT2"
+
+fi
+
 if phase_wanted 96; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)

@@ -785,6 +785,39 @@ static void help_remove_account(void) {
     );
 }
 
+static void help_migrate_credentials(void) {
+    printf(
+        "Usage: email-cli migrate-credentials\n"
+        "\n"
+        "Re-encrypt (or decrypt) the stored passwords of all accounts so that\n"
+        "they match the current credential obfuscation setting.\n"
+        "\n"
+        "  obfuscation on   Stored passwords are written with the enc: prefix.\n"
+        "  obfuscation off  Stored passwords are written as plaintext.\n"
+        "\n"
+        "The command takes no arguments and acts on every configured account.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli migrate-credentials\n"
+    );
+}
+
+static void help_help(void) {
+    printf(
+        "Usage: email-cli help [<command>]\n"
+        "\n"
+        "Show the general help, or the detailed help page of one command.\n"
+        "'email-cli <command> --help' shows the same page as 'email-cli help <command>'.\n"
+        "\n"
+        "  <command>  A command word, e.g. list, send or rules apply\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli help\n"
+        "  email-cli help list\n"
+        "  email-cli help rules apply\n"
+    );
+}
+
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
 static int parse_uid(const char *s, char uid_out[17]) {
@@ -928,6 +961,8 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
                 if (strcmp(cmd, "rules")           == 0) { help_rules();           return EXIT_SUCCESS; }
+                if (strcmp(cmd, "migrate-credentials") == 0) { help_migrate_credentials(); return EXIT_SUCCESS; }
+                if (strcmp(cmd, "help")            == 0) { help_help();            return EXIT_SUCCESS; }
             }
             /* email-cli --help  or  email-cli help --help */
             help_general();
@@ -983,6 +1018,8 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
             if (strcmp(topic, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
             if (strcmp(topic, "rules")           == 0) { help_rules();           return EXIT_SUCCESS; }
+            if (strcmp(topic, "migrate-credentials") == 0) { help_migrate_credentials(); return EXIT_SUCCESS; }
+            if (strcmp(topic, "help")            == 0) { help_help();            return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli help' for available commands.\n");
             return EXIT_FAILURE;

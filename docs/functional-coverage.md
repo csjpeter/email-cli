@@ -117,6 +117,7 @@ recorded weakness, not coverage of the promise.
 
 | Capability | Tests | Notes |
 |------------|-------|-------|
+| `email-tui` folder browser: create / delete a folder (`:` menu) | P:test_folder_create P:test_folder_create_cancelled P:test_folder_delete_asks P:test_folder_delete_needs_a_folder P:test_folder_menu_lists_actions | the server gets `CREATE` / `DELETE` and lists the result; delete names the folder and defaults to No |
 | `email-tui` interactive screens | P:test_screen_list P:test_screen_reader P:test_screen_folders P:test_screen_accounts | the per-operation list with tests is `docs/interface-parity.md`, checked by `run_parity.sh`; element-level checks are `docs/spec/tui-elements.md` |
 | `email-tui` compose, reply, forward | P:test_review_s_sends_message P:test_reply_all_send P:test_forward_fill_to_opens_editor | |
 | `email-tui send` | F:114.3 | |

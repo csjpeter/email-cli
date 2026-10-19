@@ -79,6 +79,42 @@ static int         g_changed_count    = 0;
 static int g_flagged_uids[MOCK_MAX_FLAGGED];
 static int g_flagged_count = 0;
 
+/* Folders the client created or deleted (EMAIL-129): a created one is listed
+ * by LIST, a deleted one is left out of it. */
+#define MOCK_MAX_FOLDERS 16
+static char g_created[MOCK_MAX_FOLDERS][256];
+static int  g_created_count = 0;
+static char g_deleted[MOCK_MAX_FOLDERS][256];
+static int  g_deleted_count = 0;
+
+/* The mailbox name of "tag CREATE name" / "tag DELETE name", unquoted. */
+static void mock_mailbox_arg(const char *buffer, const char *verb, char *out, size_t sz) {
+    out[0] = '\0';
+    const char *p = strstr(buffer, verb);
+    if (!p) return;
+    p += strlen(verb);
+    while (*p == ' ') p++;
+    if (*p == '"') p++;
+    size_t n = 0;
+    while (*p && *p != '"' && *p != '\r' && *p != '\n' && n + 1 < sz) out[n++] = *p++;
+    out[n] = '\0';
+}
+
+static void mock_name_list_remove(char l[][256], int *count, const char *name) {
+    for (int i = 0; i < *count; i++) {
+        if (strcmp(l[i], name) != 0) continue;
+        memcpy(l[i], l[*count - 1], 256);
+        (*count)--;
+        return;
+    }
+}
+
+static int mock_name_list_has(char l[][256], int count, const char *name) {
+    for (int i = 0; i < count; i++)
+        if (strcmp(l[i], name) == 0) return 1;
+    return 0;
+}
+
 static int mock_is_flagged(int uid) {
     for (int i = 0; i < g_flagged_count; i++)
         if (g_flagged_uids[i] == uid) return 1;
@@ -580,7 +616,34 @@ static void handle_client(SSL *ssl) {
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.&Ti0-\"\r\n"
                 /* U+1F600 (emoji, 4-byte UTF-8); surrogate pair + digit '2','3', lowercase 'e' */
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.&2D3eAA-\"\r\n";
-            SSL_write(ssl, list_resp, (int)strlen(list_resp));
+            /* The list is one text with a LIST line per folder; a deleted
+             * folder's line is cut out, a created one is added. */
+            char listbuf[4096];
+            size_t ll = 0;
+            listbuf[0] = '\0';
+            for (const char *ln = list_resp; *ln; ) {
+                const char *eol = strstr(ln, "\r\n");
+                size_t len = eol ? (size_t)(eol - ln) + 2 : strlen(ln);
+                int hidden = 0;
+                for (int i = 0; i < g_deleted_count && !hidden; i++) {
+                    char q[300];
+                    snprintf(q, sizeof(q), "\"%.250s\"", g_deleted[i]);
+                    for (const char *f = ln; f + strlen(q) <= ln + len; f++)
+                        if (strncmp(f, q, strlen(q)) == 0) { hidden = 1; break; }
+                }
+                if (!hidden && ll + len < sizeof(listbuf)) {
+                    memcpy(listbuf + ll, ln, len);
+                    ll += len;
+                    listbuf[ll] = '\0';
+                }
+                ln += len;
+            }
+            for (int i = 0; i < g_created_count; i++) {
+                int n = snprintf(listbuf + ll, sizeof(listbuf) - ll,
+                                 "* LIST (\\HasNoChildren) \".\" \"%s\"\r\n", g_created[i]);
+                if (n > 0 && ll + (size_t)n < sizeof(listbuf)) ll += (size_t)n;
+            }
+            SSL_write(ssl, listbuf, (int)strlen(listbuf));
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK LIST completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
@@ -679,10 +742,22 @@ static void handle_client(SSL *ssl) {
             snprintf(ok, sizeof(ok), "%s OK STORE completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "CREATE")) {
+            char nm[256];
+            mock_mailbox_arg(buffer, "CREATE", nm, sizeof(nm));
+            mock_name_list_remove(g_deleted, &g_deleted_count, nm);
+            if (nm[0] && g_created_count < MOCK_MAX_FOLDERS &&
+                !mock_name_list_has(g_created, g_created_count, nm))
+                snprintf(g_created[g_created_count++], 256, "%s", nm);
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK CREATE completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "DELETE")) {
+            char nm[256];
+            mock_mailbox_arg(buffer, "DELETE", nm, sizeof(nm));
+            if (mock_name_list_has(g_created, g_created_count, nm))
+                mock_name_list_remove(g_created, &g_created_count, nm);
+            else if (nm[0] && g_deleted_count < MOCK_MAX_FOLDERS)
+                snprintf(g_deleted[g_deleted_count++], 256, "%s", nm);
             char ok[64];
             snprintf(ok, sizeof(ok), "%s OK DELETE completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));

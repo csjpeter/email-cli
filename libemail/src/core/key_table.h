@@ -45,6 +45,8 @@ typedef enum {
     EA_SEND,          /**< menu: send the message                           */
     EA_UNATTACH,      /**< menu: remove the last attachment of the draft    */
     EA_EDIT_HEADERS,  /**< 'e'  edit the headers of the draft               */
+    EA_FOLDER_CREATE, /**< menu: create an IMAP folder (EMAIL-129)          */
+    EA_FOLDER_DELETE, /**< menu: delete an IMAP folder (EMAIL-129)          */
     EA_COUNT
 } EmailAction;
 
@@ -54,6 +56,7 @@ typedef enum {
 #define EKV_READ_IMAP   "reader-imap"
 #define EKV_READ_GMAIL  "reader-gmail"
 #define EKV_LABELS      "labels"
+#define EKV_FOLDERS     "folders"
 #define EKV_REVIEW      "review"
 
 /**

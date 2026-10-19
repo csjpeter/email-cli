@@ -4166,6 +4166,8 @@ int email_service_list_folders(const Config *cfg, int tree) {
     return 0;
 }
 
+static int change_folder(const Config *cfg, const char *name, int create, int quiet);
+
 char *email_service_list_folders_interactive(const Config *cfg,
                                              const char *current_folder,
                                              int *go_up) {
@@ -4240,6 +4242,8 @@ char *email_service_list_folders_interactive(const Config *cfg,
     }
     int vcount = 0;                  /* flat view: number of visible entries */
     char *selected = NULL;
+    EmailAction fdefer = EA_NONE;   /* a menu action that prompts runs after a redraw */
+    char fmsg[600] = "";            /* the result of the last folder action */
 
     RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
 
@@ -4313,19 +4317,24 @@ char *email_service_list_folders_interactive(const Config *cfg,
             HINT("\u2191\u2193", "step", 60);
             HINT("PgDn/PgUp", "page", 40);
             HINT("Enter", "open/select", 90);
+            HINT(":", "actions", 80);
             HINT("t", up ? "tree" : (tree_mode ? "flat" : "tree"), 50);
             HINT("Esc/q/BS", up ? "up" : "back", SL_PRIO_KEEP);
 #undef HINT
             status_line_draw(trows_f, tcols_f, h, nh, "?",
-                             display_count > 0 ? cursor + 1 : 0, display_count, NULL);
+                             display_count > 0 ? cursor + 1 : 0, display_count,
+                             fmsg[0] ? fmsg : NULL);
+            fmsg[0] = '\0';          /* shown until the next key */
         }
 
-        TermKey key = terminal_read_key();
-        if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q')
+        EmailAction fdeferred = fdefer;
+        fdefer = EA_NONE;
+        TermKey key = fdeferred ? TERM_KEY_IGNORE : terminal_read_key();
+        if (key == TERM_KEY_IGNORE && !fdeferred && terminal_last_printable() == 'q')
             key = TERM_KEY_ESC;      /* q is Esc: back, never quit */
-        if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'j')
+        if (key == TERM_KEY_IGNORE && !fdeferred && terminal_last_printable() == 'j')
             key = TERM_KEY_NEXT_LINE;    /* j and k move (EMAIL-175) */
-        if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'k')
+        if (key == TERM_KEY_IGNORE && !fdeferred && terminal_last_printable() == 'k')
             key = TERM_KEY_PREV_LINE;
 
         switch (key) {
@@ -4421,8 +4430,55 @@ char *email_service_list_folders_interactive(const Config *cfg,
         case TERM_KEY_TAB:
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
-            int ch = terminal_last_printable();
-            if (ch == '/') {
+            int ch = fdeferred ? 0 : terminal_last_printable();
+            EmailAction fact = fdeferred;
+            if (ch == ':') {
+                /* Creating and deleting a folder are in the menu (EMAIL-129);
+                 * deleting names the folder and asks, No being the default. */
+                const char *tt[EA_COUNT] = { NULL };
+                const char *at = NULL;
+                if (cursor >= VPREFIX) {
+                    if (tree_mode && cursor - VPREFIX < count)
+                        at = folders[cursor - VPREFIX];
+                    else if (!tree_mode && cursor - VPREFIX < vcount)
+                        at = folders[vis[cursor - VPREFIX]];
+                }
+                tt[EA_FOLDER_DELETE] = at ? at : "(no folder selected)";
+                fact = ekeys_menu(EKV_FOLDERS, tt);
+                if (fact == EA_FOLDER_DELETE && !at) {
+                    snprintf(fmsg, sizeof(fmsg), "Select a folder to delete");
+                    fact = EA_NONE;
+                }
+                if (fact == EA_FOLDER_CREATE) {
+                    fdefer = fact;      /* draw the folders, then ask for the name */
+                    fact = EA_NONE;
+                }
+                if (fact == EA_FOLDER_DELETE) {
+                    char dname[512];
+                    snprintf(dname, sizeof(dname), "%s", at);
+                    if (change_folder(cfg, dname, 0, 1) == 0)
+                        snprintf(fmsg, sizeof(fmsg), "Folder %s deleted", dname);
+                    else
+                        snprintf(fmsg, sizeof(fmsg), "Could not delete %s", dname);
+                    goto folders_reload;
+                }
+            } else if (fact == EA_FOLDER_CREATE) {
+                char nname[512] = "";
+                if (!tree_mode && current_prefix[0])
+                    snprintf(nname, sizeof(nname), "%s%c", current_prefix, sep);
+                InputLine il;
+                input_line_init(&il, nname, sizeof(nname), nname);
+                int trw = terminal_rows();
+                if (trw <= 0) trw = 24;
+                int okn = input_line_run(&il, trw - 2, "New folder name: ");
+                if (okn && nname[0]) {
+                    if (change_folder(cfg, nname, 1, 1) == 0)
+                        snprintf(fmsg, sizeof(fmsg), "Folder %s created", nname);
+                    else
+                        snprintf(fmsg, sizeof(fmsg), "Could not create %s", nname);
+                    goto folders_reload;
+                }
+            } else if (ch == '/') {
                 /* Cross-folder content search */
                 static const char *snames[] = {"Subject","From","To","Body"};
                 int sscope = 0;
@@ -4478,6 +4534,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
                     { "/",                 "Cross-folder content search"             },
                     { "c",                 "Compose new message"                     },
                     { "t",                 "Toggle tree / flat view"                 },
+                    { ":",                 "Actions: create or delete a folder"      },
                     { "Esc / q / BS",        "Up one level (accounts at the top)"      },
                     { "?",                 "Show this help"                          },
                 };
@@ -4485,6 +4542,33 @@ char *email_service_list_folders_interactive(const Config *cfg,
                                 help, (int)(sizeof(help)/sizeof(help[0])));
             }
             break;
+        }
+        }
+        continue;
+
+    folders_reload: {
+        /* A folder was created or deleted: read the list again (the cache
+         * was refreshed by the change) and the counters of every folder. */
+        free(statuses);
+        free(vis);
+        for (int i = 0; i < count; i++) free(folders[i]);
+        free(folders);
+        statuses = NULL;
+        vis = NULL;
+        count = 0;
+        folders = fetch_folder_list(cfg, &count, &sep);
+        if (!folders || count == 0) {
+            free(folders);
+            return NULL;
+        }
+        qsort(folders, (size_t)count, sizeof(char *), cmp_str);
+        statuses = fetch_all_folder_statuses(cfg, folders, count);
+        vis = malloc((size_t)count * sizeof(int));
+        if (!vis) {
+            free(statuses);
+            for (int i = 0; i < count; i++) free(folders[i]);
+            free(folders);
+            return NULL;
         }
         }
     }
@@ -7497,9 +7581,26 @@ int email_service_archive(const Config *cfg, const char *uid, const char *folder
     return 0;
 }
 
-int email_service_create_folder(const Config *cfg, const char *name) {
+/* Re-reads the folder list from the server into the local cache, so that
+ * the lists the programs show (cached after the first read) follow a folder
+ * that was just created or deleted (EMAIL-129). */
+static void refresh_folder_cache(emc_client *mc) {
+    char **names = NULL;
+    int n = 0;
+    char sep = '.';
+    if (emc_list_names(mc, &names, &n, &sep) != 0) return;
+    if (n > 0) local_folder_list_save((const char **)names, n, sep);
+    for (int i = 0; i < n; i++) free(names[i]);
+    free(names);
+}
+
+/* Creates (@p create = 1) or deletes the IMAP folder @p name.  @p quiet:
+ * no text on stdout (the TUI shows its own message). */
+static int change_folder(const Config *cfg, const char *name, int create, int quiet) {
+    const char *verb = create ? "create-folder" : "delete-folder";
     if (cfg->gmail_mode) {
-        fprintf(stderr, "Error: 'create-folder' is IMAP-only. Use 'create-label' for Gmail.\n");
+        fprintf(stderr, "Error: '%s' is IMAP-only. Use '%s' for Gmail.\n", verb,
+                create ? "create-label" : "delete-label");
         return -1;
     }
     emc_client *mc = make_mail(cfg);
@@ -7507,30 +7608,24 @@ int email_service_create_folder(const Config *cfg, const char *name) {
         fprintf(stderr, "Error: Could not connect.\n");
         return -1;
     }
-    int rc = emc_create_folder(mc, name);
+    int rc = create ? emc_create_folder(mc, name) : emc_delete_folder(mc, name);
+    if (rc == 0) {
+        local_store_init(cfg->host, cfg->user);
+        refresh_folder_cache(mc);
+    }
     emc_close(mc);
 
-    if (rc == 0)
-        printf("Folder '%s' created.\n", name);
+    if (rc == 0 && !quiet)
+        printf("Folder '%s' %s.\n", name, create ? "created" : "deleted");
     return rc;
 }
 
-int email_service_delete_folder(const Config *cfg, const char *name) {
-    if (cfg->gmail_mode) {
-        fprintf(stderr, "Error: 'delete-folder' is IMAP-only. Use 'delete-label' for Gmail.\n");
-        return -1;
-    }
-    emc_client *mc = make_mail(cfg);
-    if (!mc) {
-        fprintf(stderr, "Error: Could not connect.\n");
-        return -1;
-    }
-    int rc = emc_delete_folder(mc, name);
-    emc_close(mc);
+int email_service_create_folder(const Config *cfg, const char *name) {
+    return change_folder(cfg, name, 1, 0);
+}
 
-    if (rc == 0)
-        printf("Folder '%s' deleted.\n", name);
-    return rc;
+int email_service_delete_folder(const Config *cfg, const char *name) {
+    return change_folder(cfg, name, 0, 0);
 }
 
 /* The text of a message as the reply quote and the forward show it: the

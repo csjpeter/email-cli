@@ -20,16 +20,22 @@ or
 .SH NAVIGATION
 Arrow keys or
 .BR j / k
-move,
+move down and up in every list and scroll the reader,
 .B Enter
 opens,
-.BR Backspace ", " ESC " and " q
-go back one level (on the account list, ESC quits and q does nothing),
+.BR Backspace ", " Esc " and " q
+go back one level,
+.B Esc
+on the account list (the top level) quits,
 .B Ctrl\-C
-quits at once, and
-.BR ? " or " h
-shows the full shortcut list for the current view \- that popup is the
-authoritative key reference and is kept in sync with the code.
+quits at once from anywhere, and
+.B ?
+shows the shortcut list of the current view.
+.B q
+never quits the program and
+.B h
+is not a help key.  The help overlay and the key handler are made from one
+table, so the help lists exactly the keys the view has.
 .PP
 The browser starts on the
 .B Unread
@@ -37,6 +43,125 @@ virtual label; the folder list also offers
 .BR Flagged ", " Junk ", " Phishing ", " Answered " and " Forwarded .
 .B /
 starts a content search in the current view.
+.SH KEYS
+.SS Message list
+.TP
+.BR j " or " Down ", " k " or " Up
+Move the cursor.
+.TP
+.BR PgDn ", " PgUp ", " Home ", " End
+Page down, page up, first message, last message.
+.TP
+.B Enter
+Open the message.
+.TP
+.B /
+Filter the list; Tab changes the scope, Esc clears the filter.
+.TP
+.B Space
+Mark the message and step down;
+.B x
+clears the marks.  The keys that change a message act on the marked
+messages, or on the one under the cursor when none is marked.
+.TP
+.BR c ", " r ", " A ", " F
+Compose, reply, reply to all, forward.
+.TP
+.BR U ", " l
+Refresh after a sync, open the rules editor.
+.TP
+.B *
+Star or unstar (toggle the flag), in the list and on the server at once.
+.TP
+.BR + " and " \-
+Mark read and mark unread, at once.
+.TP
+.B !
+Toggle junk, at once.
+.TP
+.BR d " or " Delete
+Delete: move to Trash, or delete for good when the message is in Trash.
+Asks first, naming the message by sender and subject; the default answer is
+No.
+.TP
+.B t
+Gmail only: pick the labels of the message.
+.TP
+.B :
+Open the action menu: every action that changes state, with its direct key
+where it has one.  The menu also holds what has no key: start a background
+sync (asks, naming the account and folder), move to a folder or label, toggle
+Done (IMAP), and for Gmail archive, restore from Trash, remove the current
+label, add or remove a named label.
+.TP
+.B ?
+Help for the view.
+.SS Message reader
+.TP
+.BR j " or " Down ", " k " or " Up ", " PgDn ", " PgUp ", " Home ", " End
+Scroll.
+.TP
+.BR r ", " F
+Reply, forward.
+.TP
+.B v
+Toggle rendered text and raw source.
+.TP
+.BR / ", " n ", " N
+Search the body, next and previous match.
+.TP
+.B a
+Save an attachment.
+.TP
+.BR * ", " + ", " \- ", " ! ", " d " or " Delete ", " t
+As in the list, on the open message.
+.TP
+.B :
+The action menu: toggle Done (IMAP), Gmail archive and remove the current
+label, and
+.B Save all attachments.
+.SS Label browser (Gmail)
+.TP
+.BR j " or " Down ", " k " or " Up ", " PgDn ", " PgUp
+Move.
+.TP
+.B Enter
+Open the label.
+.TP
+.B /
+Search across folders.
+.TP
+.B :
+The action menu: create a label, delete the label under the cursor (asks,
+naming the label; the default answer is No).
+.SS Accounts and folders
+.TP
+.BR j " or " Down ", " k " or " Up ", " PgDn ", " PgUp ", " Home ", " End
+Move.
+.TP
+.B Enter
+Open.
+.TP
+.BR n ", " d ", " i ", " e
+Accounts: add, delete (asks), edit IMAP, edit SMTP.
+.TP
+.BR t ", " c ", " /
+Folders: tree or flat view, compose, search.
+.SS Compose and review
+.TP
+.B Esc
+In the compose dialog: asks before it throws away what was typed (the default
+answer is No).
+.B Ctrl\-C
+leaves at once.
+.TP
+.B :
+On the review screen: send the message (asks, naming the recipients; the
+default answer is No) or remove the last attachment.
+.TP
+.BR e ", " b ", " a ", " q
+Review screen: edit the headers, edit the body, add an attachment, discard
+the draft (asks).
 .SH SUBCOMMANDS
 .TP
 .B compose

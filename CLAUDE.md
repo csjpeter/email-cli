@@ -146,7 +146,7 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, and libssl (OpenSSL).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
 The one library of the workspace used at run time is **libtuikit**
-(`deps/libtuikit`, a git submodule pinned to a release tag, now v0.6.1), linked
+(`deps/libtuikit`, a git submodule pinned to a release tag, now v0.9.0), linked
 **statically**: the binaries carry no run-time dependency on it, and the
 package declares none.  It replaces this project's own terminal code module by
 module (EMAIL-28).  Migrated: terminal size, raw mode, key decoding and

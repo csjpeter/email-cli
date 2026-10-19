@@ -37,6 +37,7 @@
 #include "mail_account.h"
 #include "input_line.h"
 #include "tui_frame.h"
+#include "key_table.h"
 #include "status_line.h"
 #include "body_editor.h"
 #include "compose_draft.h"
@@ -487,6 +488,24 @@ static int cd_render(const char *title,
     return active_row;
 }
 
+/** 1 when the compose dialog holds anything Esc would throw away. */
+static int cd_has_text(char bufs[CD_NFIELDS][CD_FIELD_BUFSZ], int attach_count) {
+    if (attach_count > 0) return 1;
+    for (int f = 0; f < CD_NFIELDS; f++)
+        if (bufs[f][0]) return 1;
+    return 0;
+}
+
+/** Asks "Discard what was typed?" over the dialog; No is the default (EMAIL-175). */
+static int cd_confirm_discard(void) {
+    tui_dialog d;
+    if (tui_dialog_confirm(&d, "Discard", "Discard what was typed?", 0) != 0) return 1;
+    tui_frame_run_dialog(&d);
+    int yes = d.state == TUI_DIALOG_OK && d.answer == 1;
+    tui_dialog_free(&d);
+    return yes;
+}
+
 /** Pre-compose dialog: collect To, Cc, Bcc, Subject, and optional Attach paths.
  *  Returns 1 if confirmed, 0 if cancelled (ESC).
  *  out->attach_paths/attach_count on entry are used to pre-populate the attach list. */
@@ -583,6 +602,11 @@ static int compose_dialog(const Config *cfg,
                     dd_hidden = 1;      /* dismiss dropdown, keep typed text */
                     continue;
                 }
+                /* Esc asks before it throws typed text away (EMAIL-175);
+                 * ctrl-c leaves at once. */
+                if (key == TERM_KEY_ESC && cd_has_text(bufs, attach_state.count) &&
+                    !cd_confirm_discard())
+                    continue;
                 result = 0;
                 goto dialog_done;
             }
@@ -929,14 +953,13 @@ static void pcr_render(const char *from, const char *to, const char *cc,
         printf("  \033[31m%s\033[0m\n\n", status_msg);
 
     static const tui_statusline_hint h[] = {
-        { "s", "send", SL_PRIO_KEEP },
+        { ":", "actions (send)", SL_PRIO_KEEP },
         { "e", "edit headers", SL_PRIO_HIGH },
         { "b", "edit body", SL_PRIO_HIGH },
         { "a", "add attachment", SL_PRIO_MID },
-        { "d", "remove last", SL_PRIO_LOW },
         { "q", "discard", SL_PRIO_KEEP },
     };
-    screen_bar(h, 6, NULL, NULL);
+    screen_bar(h, 5, NULL, NULL);
 }
 
 /* Inline single-field attachment picker used by [a] key in review.
@@ -1070,13 +1093,25 @@ static int post_compose_review(const char *from, const char *to,
         TermKey key = terminal_read_key();
         int ch = (key == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
 
-        if (ch == 's') {
-            if (!to || !to[0]) {
-                snprintf(status_msg, sizeof(status_msg),
-                         "To: is empty — fill in recipient before sending.");
-                continue;
+        if (ch == ':') {
+            /* Sending, and removing an attachment, are in the action menu;
+             * sending asks first, naming the recipients (EMAIL-175). */
+            const char *tt[EA_COUNT] = { NULL };
+            tt[EA_SEND] = (to && to[0]) ? to : "(nobody)";
+            EmailAction act = ekeys_menu(EKV_REVIEW, tt);
+            if (act == EA_SEND) {
+                if (!to || !to[0]) {
+                    snprintf(status_msg, sizeof(status_msg),
+                             "To: is empty — fill in recipient before sending.");
+                    continue;
+                }
+                return PCR_SEND;
             }
-            return PCR_SEND;
+            if (act == EA_UNATTACH && *attach_count > 0) {
+                (*attach_count)--;
+                attach_paths[*attach_count][0] = '\0';
+            }
+            continue;
         }
 
         if (ch == 'e') return PCR_EDIT_HEADERS;
@@ -1084,14 +1119,6 @@ static int post_compose_review(const char *from, const char *to,
 
         if (ch == 'a') {
             pcr_pick_attach_raw(attach_paths, attach_count);
-            continue;
-        }
-
-        if (ch == 'd') {
-            if (*attach_count > 0) {
-                (*attach_count)--;
-                attach_paths[*attach_count][0] = '\0';
-            }
             continue;
         }
 
@@ -1666,7 +1693,7 @@ static void when_list_render(const WhenAtomList *wl, int vis_rows, const char *t
             { "q", "confirm", SL_PRIO_KEEP },
             { "Esc", "cancel", SL_PRIO_KEEP },
         };
-        screen_bar(h, 6, "h", g_when_err[0] ? g_when_err : NULL);
+        screen_bar(h, 6, "?", g_when_err[0] ? g_when_err : NULL);
     }
     g_when_err[0] = '\0';
 }
@@ -1718,7 +1745,7 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
             when_list_join(&wl, buf, bufsz);
             return 1;
         }
-        if (ch == 'h' || ch == '?') {
+        if (ch == '?') {
             static const char *help[][2] = {
                 { "j / \u2193",   "Next condition"                  },
                 { "k / \u2191",   "Previous condition"              },
@@ -1727,7 +1754,7 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                 { "d",            "Delete the condition"            },
                 { "q",            "Done: go on to the actions"      },
                 { "Esc",          "Cancel the rule"                 },
-                { "h / ?",        "Show this help"                  },
+                { "?",            "Show this help"                  },
             };
             email_service_help_popup("Conditions shortcuts", help, 8);
             continue;
@@ -2008,7 +2035,7 @@ static void tui_rules_detail(const char *account, int idx)
                 { "d", "delete", SL_PRIO_HIGH },
                 { "Esc/q", "back", SL_PRIO_KEEP },
             };
-            screen_bar(h, 3, "h", NULL);
+            screen_bar(h, 3, "?", NULL);
         }
 
         TermKey key;
@@ -2033,11 +2060,11 @@ static void tui_rules_detail(const char *account, int idx)
             break;
         }
 
-        if (ch == 'h' || ch == '?') {
+        if (ch == '?') {
             static const char *help[][2] = {
                 { "e",            "Edit the rule (conditions, then actions)" },
                 { "d",            "Delete the rule (asks first)"             },
-                { "h / ?",        "Show this help"                           },
+                { "?",            "Show this help"                           },
                 { "Esc / q",      "Back to the rules list"                   },
             };
             mail_rules_free(rules);
@@ -2168,7 +2195,7 @@ static void tui_rules_editor(const Config *cfg)
                 { "A", "apply now", SL_PRIO_MID },
                 { "Esc/q", "back", SL_PRIO_KEEP },
             };
-            screen_bar(h, 7, "h", NULL);
+            screen_bar(h, 7, "?", NULL);
         }
 
         TermKey key;
@@ -2198,7 +2225,7 @@ static void tui_rules_editor(const Config *cfg)
             break;
         }
 
-        if (ch == 'h' || ch == '?') {
+        if (ch == '?') {
             static const char *help[][2] = {
                 { "j / \u2193",   "Next rule"                     },
                 { "k / \u2191",   "Previous rule"                 },
@@ -2207,7 +2234,7 @@ static void tui_rules_editor(const Config *cfg)
                 { "d",            "Delete the rule (asks first)"  },
                 { "p",            "Preview what the rules would do (dry run)" },
                 { "A",            "Apply the rules now (asks first)" },
-                { "h / ?",        "Show this help"                },
+                { "?",            "Show this help"                },
                 { "Esc / q",      "Back to the message list"      },
             };
             mail_rules_free(rules);
@@ -2325,6 +2352,14 @@ int main(int argc, char *argv[]) {
     /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
     setlocale(LC_ALL, "");
+    {
+        /* The key table is checked against the keyboard policy at start. */
+        char why[200] = "";
+        if (ekeys_init(why, sizeof(why)) != 0) {
+            fprintf(stderr, "email-tui: key table: %s\n", why);
+            return EXIT_FAILURE;
+        }
+    }
 
     /* Ensure SIGTERM causes a clean exit so atexit() handlers run (e.g. gcov). */
     signal(SIGTERM, exit);

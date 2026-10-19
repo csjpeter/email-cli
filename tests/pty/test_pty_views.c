@@ -51,6 +51,26 @@ static char  g_batch_cli_bin[512];  /* email-cli (batch), never changes */
 #define ROWS 24
 #define COLS 100
 
+/** Opens the ':' action menu, moves to row @p row (0 is the first) and
+ *  presses Enter.  The rows are the entries of the view's key table that
+ *  change state, in table order (libemail/src/core/key_table.c). */
+static void menu_pick(PtySession *s, int row) {
+    pty_send_str(s, ":");
+    pty_wait_for(s, "Actions", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    for (int i = 0; i < row; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_ENTER);
+}
+
+#define MENU_IMAP_STAR 0
+#define MENU_IMAP_READ 1
+#define MENU_IMAP_UNREAD 2
+#define MENU_IMAP_JUNK 3
+#define MENU_IMAP_SYNC 6
+#define MENU_IMAP_MOVE 7
+#define MENU_IMAP_DONE 8
+#define MENU_READER_SAVE_ALL 6
+
 static void write_config(void) {
     char d1[300], d2[300], d3[350], d4[400], path[450];
     snprintf(d1, sizeof(d1), "%s/.config", g_test_home);
@@ -612,14 +632,14 @@ static void test_interactive_list_flags(void) {
     ASSERT(s != NULL, "list flags: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    /* Flag keys: n=new, f=flagged, d=done — server accepts silently */
-    pty_send_str(s, "n");
+    /* Registry keys: '-' unread, '*' star, '!' junk — server accepts silently */
+    pty_send_str(s, "-");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Test Message");
-    pty_send_str(s, "f");
+    pty_send_str(s, "*");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Test Message");
-    pty_send_str(s, "d");
+    pty_send_str(s, "!");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Test Message");
     pty_send_key(s, PTY_KEY_ESC);
@@ -1421,7 +1441,7 @@ static PtySession *open_show_view(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     /* Wait for the attachment status bar — proves the full show view rendered */
-    if (pty_wait_for(s, "A save-all", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    if (pty_wait_for(s, "a save(", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
     return s;
 }
@@ -1431,8 +1451,9 @@ static void test_show_attachment_statusbar(void) {
     PtySession *s = open_show_view();
     ASSERT(s != NULL, "att statusbar: opens");
 
-    ASSERT_SCREEN_CONTAINS(s, "a save");
-    ASSERT_SCREEN_CONTAINS(s, "A save-all(2)");
+    ASSERT_SCREEN_CONTAINS(s, "a save(2)");
+    /* saving all of them is in the ':' menu, not on a key */
+    ASSERT_SCREEN_NOT_CONTAINS(s, "A save-all");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1493,7 +1514,7 @@ static void test_show_save_all_cancel(void) {
     snprintf(path, sizeof(path), "%s/data.bin", g_test_home);
     remove(path);
 
-    pty_send_str(s, "A");
+    menu_pick(s, MENU_READER_SAVE_ALL);
     ASSERT_WAIT_FOR(s, "Save all to:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
@@ -1513,7 +1534,7 @@ static void test_show_save_all_confirm(void) {
     PtySession *s = open_show_view();
     ASSERT(s != NULL, "save-all confirm: opens");
 
-    pty_send_str(s, "A");
+    menu_pick(s, MENU_READER_SAVE_ALL);
     ASSERT_WAIT_FOR(s, "Save all to:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
@@ -1582,7 +1603,7 @@ static void test_show_save_tab_completion(void) {
     PtySession *s = open_show_view();
     ASSERT(s != NULL, "tab complete: opens show view");
 
-    pty_send_str(s, "A");                     /* "Save all to:" dialog */
+    menu_pick(s, MENU_READER_SAVE_ALL);       /* "Save all to:" dialog */
     ASSERT_WAIT_FOR(s, "Save all to:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
@@ -2197,10 +2218,9 @@ static void test_tui_list_bulk_star_marked(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, " ");
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "m");
-    ASSERT_WAIT_FOR(s, "1 marked message(s)", WAIT_MS);
-    pty_send_str(s, "f");
-    ASSERT_WAIT_FOR(s, "1 message(s) starred", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
+    menu_pick(s, MENU_IMAP_STAR);
+    ASSERT_WAIT_FOR(s, "tarred", WAIT_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -2212,10 +2232,8 @@ static void test_tui_list_bulk_cursor_row(void) {
     ASSERT(s != NULL, "bulk cursor: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "m");
-    ASSERT_WAIT_FOR(s, "1 message(s):", WAIT_MS);
-    pty_send_str(s, "u");
-    ASSERT_WAIT_FOR(s, "1 message(s) marked unread", WAIT_MS);
+    menu_pick(s, MENU_IMAP_UNREAD);
+    ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -2228,16 +2246,17 @@ static void test_tui_list_bulk_cancel(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, " ");
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "m");
-    ASSERT_WAIT_FOR(s, "Esc=cancel", WAIT_MS);
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Esc=cancel");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Mark unread");
     ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
 
+/* 'd' on a marked message asks, naming the message, and No is the default. */
 static void test_tui_list_bulk_delete_confirm(void) {
     restart_mock();
     PtySession *s = tui_open_to_list();
@@ -2246,20 +2265,138 @@ static void test_tui_list_bulk_delete_confirm(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, " ");
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "m");
-    ASSERT_WAIT_FOR(s, "Esc=cancel", WAIT_MS);
-    pty_send_str(s, "D");
-    ASSERT_WAIT_FOR(s, "1 message(s)? (y/N)", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");        /* names the subject */
     pty_send_str(s, "n");
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "(y/N)");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
     ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
-    pty_send_str(s, "m");
-    ASSERT_WAIT_FOR(s, "Esc=cancel", WAIT_MS);
-    pty_send_str(s, "D");
-    ASSERT_WAIT_FOR(s, "(y/N)", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                   /* Enter on the default: No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
     pty_send_str(s, "y");
-    ASSERT_WAIT_FOR(s, "1 message(s) deleted", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ── EMAIL-175: the keyboard policy of the message list ─────────────── */
+
+/* The registry keys act at once, with no confirmation, and say what they did. */
+static void test_keys_registry_routine(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "registry: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "+");
+    ASSERT_WAIT_FOR(s, "Marked as read", WAIT_MS);
+    pty_send_str(s, "-");
+    ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as junk", WAIT_MS);
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as not-junk", WAIT_MS);
+    pty_send_str(s, "*");
+    ASSERT_WAIT_FOR(s, "tarred", WAIT_MS);
+    pty_send_str(s, "*");
+    ASSERT_WAIT_FOR(s, "nstarred", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* The old letters that wrote to the server are gone: they change nothing. */
+static void test_keys_old_letters_unbound(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "old letters: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    const char *old = "fnDjausm";
+    for (const char *c = old; *c; c++) {
+        char k[2] = { *c, 0 };
+        pty_send_str(s, k);
+        pty_settle(s, 200);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Marked");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "tarred");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Moved to Trash");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "syncing");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Start a background sync");
+    }
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* Delete and 'd' ask, name the message and default to No. */
+static void test_keys_delete_dialog(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "delete dialog: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_DELETE);
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Delete");       /* the title */
+    ASSERT_SCREEN_CONTAINS(s, "Test Message"); /* the subject */
+    ASSERT_SCREEN_CONTAINS(s, "No");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Moved to Trash");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);            /* the default is No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Moved to Trash");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* ':' lists every state-changing action with its direct key. */
+static void test_keys_action_menu(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list_size(COLS, 40);
+    ASSERT(s != NULL, "action menu: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Star");
+    ASSERT_SCREEN_CONTAINS(s, "Mark read");
+    ASSERT_SCREEN_CONTAINS(s, "Mark unread");
+    ASSERT_SCREEN_CONTAINS(s, "Junk");
+    ASSERT_SCREEN_CONTAINS(s, "Delete");
+    ASSERT_SCREEN_CONTAINS(s, "Start a sync");
+    ASSERT_SCREEN_CONTAINS(s, "Move to...");
+    ASSERT_SCREEN_CONTAINS(s, "Toggle Done");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Start a sync");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* Starting a sync asks, naming the account; the default answer is No. */
+static void test_keys_sync_asks(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "sync asks: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    menu_pick(s, MENU_IMAP_SYNC);
+    ASSERT_WAIT_FOR(s, "Start a background sync", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "testuser");
+    pty_send_key(s, PTY_KEY_ENTER);            /* Enter on the default: No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Start a background sync");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "syncing");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -2307,7 +2444,7 @@ static void test_statusline_message_replaces_hints(void) {
     ASSERT(s != NULL, "status message: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "f");
+    pty_send_str(s, "*");
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_row_contains(s, 23, "arred"), "status message: shown on the last row");
     ASSERT(!pty_row_contains(s, 23, "Enter open"), "status message: replaces the hints");
@@ -2836,7 +2973,10 @@ static void test_tui_accounts_help_panel(void) {
     if (pty_run(s, args) != 0) { pty_close(s); return; }
     ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "h");
+    pty_send_str(s, "h");                    /* h is not a help key */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Accounts shortcuts");
+    pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Accounts shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Open selected account");
@@ -2862,10 +3002,15 @@ static void test_tui_list_help_panel(void) {
     ASSERT(s != NULL, "list help: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "h");
+    pty_send_str(s, "h");                    /* h is not a help key */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+    pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Compose new message");
+    ASSERT_SCREEN_CONTAINS(s, "Compose");
+    ASSERT_SCREEN_CONTAINS(s, "Delete");
+    ASSERT_SCREEN_CONTAINS(s, "Actions");
     pty_send_key(s, PTY_KEY_ENTER);          /* not a closing key */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Message list shortcuts");
@@ -2888,10 +3033,10 @@ static void test_tui_show_help_panel(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "h");
+    pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Message reader shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Reply to this message");
+    ASSERT_SCREEN_CONTAINS(s, "Reply");
     pty_send_key(s, PTY_KEY_BACK);           /* Backspace closes it */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Message reader shortcuts");
@@ -2912,7 +3057,7 @@ static void test_tui_folders_help_panel(void) {
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "h");
+    pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Toggle tree");
@@ -3146,7 +3291,12 @@ static void test_tui_list_sync_and_refresh(void) {
     ASSERT(s != NULL, "tui sync+refresh: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "s");            /* start background sync */
+    pty_send_str(s, "s");            /* 's' does nothing any more */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "syncing");
+    menu_pick(s, MENU_IMAP_SYNC);    /* start background sync: asks first */
+    ASSERT_WAIT_FOR(s, "Start a background sync", WAIT_MS);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "syncing", WAIT_MS);
     /* Sync completes quickly: no IMAP conflict since TUI holds no connection.
      * 3 s settle ensures SIGCHLD fires before the DOWN keypress. */
@@ -3443,8 +3593,8 @@ static void test_pending_flags_offline_queue(void) {
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    /* Press 'f' to toggle Flagged on the first message */
-    pty_send_str(s, "f");
+    /* Press '*' to toggle Flagged on the first message */
+    pty_send_str(s, "*");
     pty_settle(s, SETTLE_MS);
     /* 'f' toggles Flagged; message may already be flagged from earlier tests,
      * so either "Starred" or "Unstarred" is acceptable feedback. */
@@ -3797,8 +3947,8 @@ static void test_virtual_n_marks_message_read(void) {
     /* Status column must show 'N' (unread marker) before toggling */
     ASSERT_SCREEN_CONTAINS(s, "N");
 
-    /* Press 'n' to mark as read */
-    pty_send_str(s, "n");
+    /* Press '+' to mark as read */
+    pty_send_str(s, "+");
     pty_settle(s, SETTLE_MS);
 
     /* 'N' status marker must disappear; message should show as read "----" */
@@ -3908,7 +4058,7 @@ static void test_unread_count_refreshes_after_mark(void) {
     ASSERT_SCREEN_CONTAINS(s, "Single Unread");
 
     /* Mark it as read */
-    pty_send_str(s, "n");
+    pty_send_str(s, "+");
     pty_settle(s, SETTLE_MS);
 
     /* Go back to folder browser via Backspace */
@@ -4752,7 +4902,7 @@ static void test_tui_rules_edit_form_saves(void) {
     pty_send_str(s, "x");
     pty_send_key(s, PTY_KEY_ENTER);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "h");                       /* the help popup */
+    pty_send_str(s, "?");                       /* the help popup */
     ASSERT_WAIT_FOR(s, "Conditions shortcuts", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
@@ -5316,6 +5466,11 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_tui_list_bulk_cursor_row);
     RUN_TEST(test_tui_list_bulk_cancel);
     RUN_TEST(test_tui_list_bulk_delete_confirm);
+    RUN_TEST(test_keys_registry_routine);
+    RUN_TEST(test_keys_old_letters_unbound);
+    RUN_TEST(test_keys_delete_dialog);
+    RUN_TEST(test_keys_action_menu);
+    RUN_TEST(test_keys_sync_asks);
     RUN_TEST(test_tui_list_esc_quit);
     RUN_TEST(test_tui_show_esc_exits);
 

@@ -36,6 +36,17 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+/* EMAIL-175: sending is in the review screen's ':' menu (row 0) and asks
+ * first, naming the recipients; removing the last attachment is row 2. */
+#define REVIEW_SEND(s) do { pty_send_str((s), ":"); \
+    pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
+    pty_send_key((s), PTY_KEY_ENTER); \
+    pty_wait_for((s), "Yes", 8000); pty_send_str((s), "y"); } while (0)
+#define REVIEW_UNATTACH(s) do { pty_send_str((s), ":"); \
+    pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
+    pty_send_key((s), PTY_KEY_DOWN); pty_send_key((s), PTY_KEY_DOWN); \
+    pty_send_key((s), PTY_KEY_ENTER); } while (0)
+
 /* ── Test globals ────────────────────────────────────────────────────── */
 
 int g_tests_run    = 0;
@@ -233,7 +244,7 @@ static void pcr_send(PtySession *s) {
         printf("  [WARN] pcr_send: editor did not appear\n");
     if (pty_wait_for(s, "Review: Message", WAIT_MS) != 0)
         printf("  [WARN] pcr_send: review screen did not appear\n");
-    pty_send_str(s, "s");
+    REVIEW_SEND(s);
 }
 
 /* The same, but copies the autosaved compose draft to @p capture first, so a
@@ -254,7 +265,7 @@ static void pcr_send_capture(PtySession *s, const char *capture) {
     }
     if (in) fclose(in);
     if (out) fclose(out);
-    pty_send_str(s, "s");
+    REVIEW_SEND(s);
 }
 
 static PtySession *tui_open_to_inbox(void) {
@@ -353,6 +364,61 @@ static void test_compose_esc_cancels(void) {
     ASSERT_SCREEN_NOT_CONTAINS(s, "~"); /* vim empty-buffer tilde markers */
 
     pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* EMAIL-175: Esc asks before it throws typed text away; No is the default. */
+static void test_compose_esc_asks_before_discarding(void) {
+    restart_imap();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "esc asks: reached inbox");
+
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "ann@example.org");
+    pty_settle(s, 300);
+
+    pty_send_key(s, PTY_KEY_ESC);                 /* first Esc closes the drop-down, if any */
+    pty_settle(s, 300);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);               /* Enter on the default: No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Discard what was typed?");
+    ASSERT_SCREEN_CONTAINS(s, "New Message");     /* still in the dialog */
+    ASSERT_SCREEN_CONTAINS(s, "ann@example.org"); /* nothing lost */
+
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);                 /* Esc answers No, too */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "ann@example.org");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
+    pty_send_str(s, "y");                         /* Yes discards */
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* Ctrl-C leaves the dialog at once, without asking. */
+static void test_compose_ctrl_c_does_not_ask(void) {
+    restart_imap();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "ctrl-c: reached inbox");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "bob@example.org");
+    pty_settle(s, 300);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Discard what was typed?");
     pty_close(s);
 }
 
@@ -493,7 +559,7 @@ static void test_body_editor_type_and_esc_saves(void) {
     ASSERT_SCREEN_CONTAINS(s, "Editor basics");
     pty_send_str(s, "n");              /* declined: still in review, draft kept */
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "s send");
+    ASSERT_SCREEN_CONTAINS(s, "actions (send)");
     ASSERT(draft_contains("second line"), "body editor: declining keeps the draft");
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
@@ -522,7 +588,7 @@ static void test_body_editor_reopen_restores(void) {
     pty_send_str(s, "kept across sessions");
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     pty_close(s);                       /* the review is left without sending */
 
     s = tui_open_to_inbox();
@@ -541,7 +607,7 @@ static void test_body_editor_reopen_restores(void) {
     ASSERT_WAIT_FOR(s, PTY_EDITOR_MARK, WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "kept across sessions");
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "alice@example.com");
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
@@ -556,7 +622,7 @@ static void test_body_editor_resume_declined(void) {
     pty_send_str(s, "old text");
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     pty_close(s);
 
     s = tui_open_to_inbox();
@@ -575,7 +641,7 @@ static void test_body_editor_resume_declined(void) {
     ASSERT_SCREEN_NOT_CONTAINS(s, "old text");
     ASSERT_SCREEN_CONTAINS(s, "New one");
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
     pty_send_str(s, "y");
@@ -612,7 +678,7 @@ static void test_body_editor_long_line_scrolls(void) {
     pty_send_str(s, line);
     ASSERT_WAIT_FOR(s, "END", WAIT_MS);   /* scrolled horizontally to the cursor */
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     ASSERT(draft_contains("END"), "long line: the whole line was saved");
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
@@ -630,7 +696,7 @@ static void test_body_editor_ctrl_s_saves_and_stays(void) {
     ASSERT(draft_contains("text one"), "ctrl-s: written");
     ASSERT_SCREEN_CONTAINS(s, "Message body");      /* the editor's title bar: still in the editor */
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
     pty_send_str(s, "y");
@@ -655,7 +721,7 @@ static void test_body_editor_resize_and_too_small(void) {
     ASSERT_WAIT_FOR(s, "kept text", WAIT_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "hidden");
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Discard draft?", WAIT_MS);
     pty_send_str(s, "y");
@@ -669,9 +735,9 @@ static void test_send_removes_draft(void) {
     pty_send_str(s, "to be sent");
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     ASSERT(draft_contains("to be sent"), "send: the draft exists before sending");
-    pty_send_str(s, "s");
+    REVIEW_SEND(s);
     ASSERT_WAIT_FOR(s, "Message sent", WAIT_MS);
     pty_settle(s, 200);
     ASSERT(!draft_contains("Subject:"), "send: the draft is gone after sending");
@@ -1273,6 +1339,9 @@ static void test_reply_esc_cancels(void) {
     pty_settle(s, SETTLE_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
+    /* Esc asks before it throws away the prefilled text (EMAIL-175). */
+    ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
@@ -1545,6 +1614,9 @@ static void test_reply_all_esc_cancels(void) {
     ASSERT_WAIT_FOR(s, "Reply All", WAIT_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
+    /* Esc asks before it throws away the prefilled text (EMAIL-175). */
+    ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
@@ -1559,7 +1631,7 @@ static void test_reply_all_in_help_panel(void) {
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "reply-all help: reached inbox");
 
-    pty_send_str(s, "h");
+    pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Reply-all", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "A");
@@ -1746,6 +1818,9 @@ static void test_forward_esc_cancels(void) {
     ASSERT_WAIT_FOR(s, "Forward", WAIT_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
+    /* Esc asks before it throws away the prefilled text (EMAIL-175). */
+    ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
@@ -1760,7 +1835,7 @@ static void test_forward_in_help_panel(void) {
     PtySession *s = tui_open_to_inbox();
     ASSERT(s != NULL, "forward help: reached inbox");
 
-    pty_send_str(s, "h");
+    pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Forward", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "F");
@@ -2045,6 +2120,9 @@ static void test_reader_reply_opens_compose(void) {
 
     /* ESC → dialog closed; main_tui shows "[Press any key]" prompt */
     pty_send_key(s, PTY_KEY_ESC);
+    /* Esc asks before it throws away the prefilled text (EMAIL-175). */
+    ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
@@ -2233,6 +2311,8 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_compose_dialog_title);
     RUN_TEST(test_compose_dialog_status_line);
     RUN_TEST(test_compose_esc_cancels);
+    RUN_TEST(test_compose_esc_asks_before_discarding);
+    RUN_TEST(test_compose_ctrl_c_does_not_ask);
     RUN_TEST(test_compose_empty_to_error);
     RUN_TEST(test_compose_empty_subject_warning);
     RUN_TEST(test_compose_empty_subject_y_opens_editor);

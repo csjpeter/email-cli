@@ -577,6 +577,65 @@ static void test_interactive_list_q_goes_back(void) {
     pty_close(s);
 }
 
+/* EMAIL-159: PgDn/PgUp in the accounts list move by the visible rows (24-row
+ * terminal: 19), not by one; they stop at the last and the first account. */
+static void accounts_extra(int n, int create) {
+    for (int i = 1; i <= n; i++) {
+        char d[450], f[470];
+        snprintf(d, sizeof(d), "%s/.config/email-cli/accounts/pg%02d", g_test_home, i);
+        snprintf(f, sizeof(f), "%s/config.ini", d);
+        if (create) {
+            mkdir(d, 0700);
+            FILE *fp = fopen(f, "w");
+            if (!fp) continue;
+            fprintf(fp, "EMAIL_HOST=imaps://localhost:%d\nEMAIL_USER=pg%02d\n"
+                        "EMAIL_PASS=x\nEMAIL_FOLDER=INBOX\nSSL_NO_VERIFY=1\n",
+                    g_imap_port, i);
+            fclose(fp);
+            chmod(f, 0600);
+        } else {
+            unlink(f);
+            rmdir(d);
+        }
+    }
+}
+
+static void accounts_paging_body(void) {
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "accounts paging: pty");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "accounts paging: run");
+    ASSERT_WAIT_FOR(s, "Email Accounts (41)", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_HOME);             /* the start row may be the default account */
+    ASSERT_WAIT_FOR(s, "[1/41]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGDN);
+    ASSERT_WAIT_FOR(s, "[20/41]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGDN);
+    ASSERT_WAIT_FOR(s, "[39/41]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGDN);
+    ASSERT_WAIT_FOR(s, "[41/41]", WAIT_MS);      /* stops at the last */
+    pty_send_key(s, PTY_KEY_PGUP);
+    ASSERT_WAIT_FOR(s, "[22/41]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGUP);
+    ASSERT_WAIT_FOR(s, "[3/41]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGUP);
+    ASSERT_WAIT_FOR(s, "[1/41]", WAIT_MS);       /* stops at the first */
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+/* The extra accounts are removed whatever the assertions did (a failed ASSERT
+ * returns early), so that no later test sees them. */
+static void test_accounts_pages_by_the_visible_rows(void) {
+    accounts_extra(40, 0);
+    accounts_extra(40, 1);                     /* 41 accounts with testuser */
+    accounts_paging_body();
+    accounts_extra(40, 0);
+}
+
 static void test_interactive_list_ctrl_c_quits_at_once(void) {
     restart_mock();
     PtySession *s = tui_open_to_list();
@@ -5574,6 +5633,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_list_statusbar);
     RUN_TEST(test_interactive_list_esc_quit);
     RUN_TEST(test_interactive_list_q_goes_back);
+    RUN_TEST(test_accounts_pages_by_the_visible_rows);
     RUN_TEST(test_interactive_list_ctrl_c_quits_at_once);
     RUN_TEST(test_interactive_header_bar_palette);
     RUN_TEST(test_interactive_list_nav);

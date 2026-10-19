@@ -646,6 +646,16 @@ static void handle_connection(int fd) {
                 send_json(fd, "{}");
                 return;
             }
+            if (strcmp(method, "DELETE") == 0) {
+                /* Permanent delete: 204 No Content, like the real API */
+                static const char nc[] = "HTTP/1.1 204 No Content\r\n"
+                                         "Connection: close\r\n\r\n";
+                ssize_t wr = write(fd, nc, sizeof(nc) - 1); (void)wr;
+                printf("Mock Gmail: DELETE %.*s\n",
+                       (int)(id_end - id_start), id_start);
+                fflush(stdout);
+                return;
+            }
             char id_buf[64] = {0};
             size_t id_len = (size_t)(id_end - id_start);
             if (id_len >= sizeof(id_buf)) id_len = sizeof(id_buf) - 1;

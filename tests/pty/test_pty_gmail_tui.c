@@ -1656,6 +1656,66 @@ static void test_feedback_a_noop(void) {
     }
 }
 
+/* ── Pending label queue (EMAIL-160) ───────────────────────────────────
+ * The Gmail list works on the local cache; trash and archive must reach the
+ * server through the pending-label queue the next sync flushes. */
+
+/** Reads the account's pending_labels.tsv into @p buf ("" when absent). */
+static void read_pending_labels(char *buf, size_t sz) {
+    char path[700];
+    snprintf(path, sizeof(path),
+             "%s/.local/share/email-cli/accounts/%s/pending_labels.tsv",
+             g_test_home, GMAIL_TEST_EMAIL);
+    buf[0] = '\0';
+    FILE *fp = fopen(path, "r");
+    if (!fp) return;
+    size_t n = fread(buf, 1, sz - 1, fp);
+    buf[n] = '\0';
+    fclose(fp);
+}
+
+/** 'D' on a message queues "_trash" (add) for the next sync. */
+static void test_D_queues_trash_for_sync(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "queue-D: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "queue-D: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "queue-D: navigate_to_inbox");
+    gm_trash(s);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    char q[4096];
+    read_pending_labels(q, sizeof(q));
+    ASSERT(strstr(q, "\t_trash\t1") != NULL,
+           "queue-D: the trash is queued in pending_labels.tsv");
+    ASSERT(strstr(q, "\tINBOX\t0") != NULL,
+           "queue-D: the INBOX label removal is queued");
+}
+
+/** 'a' queues the label removals and the read mark for the next sync. */
+static void test_a_queues_archive_for_sync(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "queue-a: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "queue-a: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "queue-a: navigate_to_inbox");
+    gm_archive(s);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    char q[4096];
+    read_pending_labels(q, sizeof(q));
+    ASSERT(strstr(q, "\tINBOX\t0") != NULL,
+           "queue-a: the INBOX removal is queued");
+    ASSERT(strstr(q, "\tUNREAD\t0") != NULL,
+           "queue-a: the read mark is queued");
+}
+
 /** After 'f' (first press = star), feedback line shows "Starred". */
 static void test_feedback_f_star(void) {
     reset_and_sync();
@@ -2360,6 +2420,8 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_feedback_d_label_removed);
     RUN_TEST(test_feedback_d_undo);
     RUN_TEST(test_feedback_a_archive);
+    RUN_TEST(test_D_queues_trash_for_sync);
+    RUN_TEST(test_a_queues_archive_for_sync);
     RUN_TEST(test_feedback_a_noop);
     RUN_TEST(test_feedback_f_star);
     RUN_TEST(test_feedback_n_read);

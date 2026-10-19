@@ -47,7 +47,7 @@ If `<command>` is given and unknown, prints an error to **stderr** and exits **1
 
 Supported topics: `list`, `show`, `list-folders`, `list-labels`, `list-attachments`,
 `save-attachment`, `send`, `create-folder`, `delete-folder`, `create-label`, `delete-label`,
-`move`, `mark-junk`, `mark-notjunk`, `trash`, `archive`, `reply`, `config`.
+`move`, `mark-junk`, `mark-notjunk`, `trash`, `archive`, `reply`, `forward`, `config`.
 
 ---
 
@@ -735,6 +735,33 @@ Refused by `email-cli-ro`.
 |------|-----------|
 | 0 | Sent |
 | 1 | Missing or bad UID, message not found, no SMTP, send failed |
+
+---
+
+## `forward`
+
+```
+email-cli [<account>] forward <uid> --to <addr> [--cc <addr>] [--body <text>] [--folder <folder>]
+```
+
+**User story:** As a user I want to forward a message from a script with the
+result the TUI key `F` gives.
+
+Composes the message exactly as the TUI does (one shared function,
+`email_service_forward_compose`): subject `Fwd: <original subject>`, and a body
+made of the optional `--body` note, a `--- Forwarded message ---` header with
+the original From and Date, and the original text. The message is sent to
+`--to` (and `--cc`) over SMTP (Gmail: the Gmail API), a copy is saved in the
+Sent folder, and the original gets the `$Forwarded` flag (locally and on the
+IMAP server). `--folder` names the folder (IMAP) or label (Gmail) the message
+is in; default: the account's folder. Refused by `email-cli-ro`.
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Forwarded |
+| 1 | Missing UID or `--to`, bad UID, message not found, send failure |
 
 ---
 

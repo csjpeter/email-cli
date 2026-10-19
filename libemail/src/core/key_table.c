@@ -122,6 +122,8 @@ static const tui_keyentry g_entries[] = {
     H(EKV_LABELS, 'k', "Up", "move up (also Up)"),
     H(EKV_LABELS, TUI_KEY_PGDN, "Page down", NULL),
     H(EKV_LABELS, TUI_KEY_PGUP, "Page up", NULL),
+    H(EKV_LABELS, TUI_KEY_HOME, "First label", NULL),
+    H(EKV_LABELS, TUI_KEY_END, "Last label", NULL),
     H(EKV_LABELS, TUI_KEY_ENTER, "Open", "the messages of the label"),
     H(EKV_LABELS, '/', "Search", "cross-folder content search"),
     H(EKV_LABELS, '?', "Help", NULL),
@@ -141,7 +143,9 @@ static const tui_keyentry g_entries[] = {
     H(EKV_FOLDERS, 'k', "Up", "move up (also Up)"),
     H(EKV_FOLDERS, TUI_KEY_PGDN, "Page down", NULL),
     H(EKV_FOLDERS, TUI_KEY_PGUP, "Page up", NULL),
-    H(EKV_FOLDERS, TUI_KEY_ENTER, "Open", "the folder, or step into its subfolders"),
+    H(EKV_FOLDERS, TUI_KEY_HOME, "First folder", NULL),
+    H(EKV_FOLDERS, TUI_KEY_END, "Last folder", NULL),
+    H(EKV_FOLDERS, TUI_KEY_ENTER, "Open", "the folder, or step into its subfolders; t: tree / flat view"),
     H(EKV_FOLDERS, '/', "Search", "cross-folder content search"),
     H(EKV_FOLDERS, 'c', "Compose", "a new message"),
     H(EKV_FOLDERS, '?', "Help", NULL),
@@ -157,6 +161,10 @@ static const tui_keyentry g_entries[] = {
      * other keys of that screen (n, d, i, e) are the screen's own. */
     H(EKV_ACCOUNTS_GMAIL, 'j', "Down", "move down (also Down)"),
     H(EKV_ACCOUNTS_GMAIL, 'k', "Up", "move up (also Up)"),
+    H(EKV_ACCOUNTS_GMAIL, TUI_KEY_PGDN, "Page down", NULL),
+    H(EKV_ACCOUNTS_GMAIL, TUI_KEY_PGUP, "Page up", NULL),
+    H(EKV_ACCOUNTS_GMAIL, TUI_KEY_HOME, "First account", NULL),
+    H(EKV_ACCOUNTS_GMAIL, TUI_KEY_END, "Last account", NULL),
     H(EKV_ACCOUNTS_GMAIL, TUI_KEY_ENTER, "Open", "the labels of the account"),
     H(EKV_ACCOUNTS_GMAIL, '?', "Help", NULL),
     H(EKV_ACCOUNTS_GMAIL, ':', "Actions", "the menu of everything that changes state"),
@@ -277,4 +285,12 @@ void ekeys_help(const char *view, const char *title) {
     if (tui_keyhelp_open(&h, &g_table, view, title) != 0) return;
     tui_frame_run_dialog(&h.dialog);
     tui_keyhelp_free(&h);
+}
+
+int ekeys_help_has(const char *view, tui_keycode key) {
+    for (int i = 0; i < N_ENTRIES; i++)
+        if (g_entries[i].key == key && g_entries[i].view &&
+            strcmp(g_entries[i].view, view) == 0)
+            return 1;
+    return 0;
 }

@@ -7290,6 +7290,26 @@ for bin in email-cli email-cli-ro; do
 done
 OUT=$(w124 $GM create-folder X)
 check "124.27 create-folder on Gmail is refused with a reason"  "IMAP-only" "$OUT"
+OUT=$(w124 $IM move 1 Archive124 --folder INBOX)
+check "124.29 IMAP move reports it"                             "moved to 'Archive124'" "$OUT"
+check "124.30 IMAP move copies to the target"                   'UID COPY 0000000000000001 "Archive124"' "$(ilog)"
+check "124.31 IMAP move expunges the source"                    'EXPUNGE' "$(ilog)"
+OUT=$(w124 $IM move 1)
+check "124.32 move without a folder is refused"                 "requires a UID and a destination" "$OUT"
+OUT=$(w124 $IM move zz Archive124)
+check "124.33 move with a bad UID is refused"                   "invalid UID 'zz'" "$OUT"
+OUT=$(w124 $IM move 1 INBOX --folder INBOX)
+check "124.34 move onto the source is refused"                  "already in 'INBOX'" "$OUT"
+OUT=$(w124 $GM move 1 Work --folder INBOX)
+check "124.35 Gmail move exits 0"                               "exit-code=0" "$OUT"
+check "124.36 Gmail move adds the target label"                 'addLabelIds":\["Work"\]' "$(glog)"
+check "124.37 Gmail move removes the source label"              'removeLabelIds":\["INBOX"\]' "$(glog)"
+OUT=$( (export HOME="$H124"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+        "$BIN_DIR/email-cli-ro" "$GM" move 1 Work </dev/null 2>&1
+        echo "exit-code=$?") )
+check "124.38 email-cli-ro refuses move"                        "not available in read-only" "$OUT"
+OUT=$(w124 $IM help move)
+check "124.39 help move shows the usage"                        "Usage: email-cli move" "$OUT"
 kill "$IMAP124_PID" "$GMAIL124_PID"
 
 fi
@@ -7461,6 +7481,36 @@ check "134.20 forward --help describes it"           "Fwd: <subject>" "$OUT"
 OUT=$("$BIN_DIR/email-cli" help forward 2>&1)
 check "134.21 help forward shows the page"           "\$Forwarded" "$OUT"
 kill "$IMAP134_PID" "$SMTP134_PID"
+
+fi
+
+if phase_wanted 137; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 137 — help pages for migrate-credentials and help (EMAIL-137)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 137: migrate-credentials / help pages (EMAIL-137) ---"
+
+H137="$PROJECT_ROOT/build/functional-137-home"
+mkdir -p "$H137"
+h137() { ( export HOME="$H137"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+           "$@" </dev/null 2>&1; echo "exit-code=$?" ); }
+OUT=$(h137 "$BIN_DIR/email-cli" help migrate-credentials)
+check "137.1 help migrate-credentials shows the usage"   "Usage: email-cli migrate-credentials" "$OUT"
+check "137.2 help migrate-credentials exits 0"           "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli" migrate-credentials --help)
+[ "$OUT" = "$OUT2" ] && SAME137=same || SAME137=differs
+check "137.3 migrate-credentials --help equals the help page" "^same$" "$SAME137"
+OUT=$(h137 "$BIN_DIR/email-cli" help help)
+check "137.4 help help shows the usage"                  "Usage: email-cli help" "$OUT"
+check "137.5 help help exits 0"                          "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli" help --help)
+check "137.6 help --help equals help help"               "Usage: email-cli help" "$OUT2"
+OUT=$(h137 "$BIN_DIR/email-cli-ro" help help)
+check "137.7 email-cli-ro help help shows the usage"     "Usage: email-cli-ro help" "$OUT"
+check "137.8 email-cli-ro help help exits 0"             "exit-code=0" "$OUT"
+OUT2=$(h137 "$BIN_DIR/email-cli-ro" help --help)
+check "137.9 email-cli-ro help --help shows the usage"   "Usage: email-cli-ro help" "$OUT2"
 
 fi
 

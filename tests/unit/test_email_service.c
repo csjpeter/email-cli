@@ -4257,3 +4257,36 @@ void test_email_service(void) {
         free(cc);
     }
 }
+
+/* EMAIL-134: the forward composition shared by the TUI and `email-cli forward` */
+void test_forward_compose(void) {
+    const char *raw =
+        "From: Alice <alice@example.org>\r\n"
+        "Date: Mon, 01 Jan 2024 10:00:00 +0000\r\n"
+        "Subject: Hello there\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "Original body line.\r\n";
+    char *subj = NULL, *body = NULL;
+
+    ASSERT(email_service_forward_compose(raw, "FYI note", &subj, &body) == 0,
+           "forward_compose succeeds");
+    ASSERT(subj && strcmp(subj, "Fwd: Hello there") == 0,
+           "forward_compose: subject is 'Fwd: ' + the original");
+    ASSERT(body && strncmp(body, "FYI note\n\n--- Forwarded message ---\n", 36) == 0,
+           "forward_compose: note, then the forwarded-message header");
+    ASSERT(body && strstr(body, "From: Alice <alice@example.org>") != NULL,
+           "forward_compose: original From included");
+    ASSERT(body && strstr(body, "Original body line.") != NULL,
+           "forward_compose: original text included");
+    free(subj); free(body);
+
+    ASSERT(email_service_forward_compose(raw, NULL, &subj, &body) == 0,
+           "forward_compose without a note succeeds");
+    ASSERT(body && strncmp(body, "\n\n--- Forwarded message ---", 27) == 0,
+           "forward_compose: no note leaves the TUI's layout");
+    free(subj); free(body);
+
+    ASSERT(email_service_forward_compose(NULL, NULL, &subj, &body) == -1,
+           "forward_compose: NULL message is refused");
+}

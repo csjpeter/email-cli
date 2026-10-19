@@ -33,6 +33,13 @@ void test_key_table(void) {
         for (const char *c = old; *c; c++)
             ASSERT(find(lists[i], *c) == EA_NONE, "key table: an old state-changing letter is unbound");
 
+    /* EMAIL-156: no key stands for "save all" or for a second label removal;
+     * both are in the ':' menu, in IMAP and Gmail readers alike */
+    ASSERT(find(EKV_READ_IMAP, 'A') == EA_NONE, "key table: A is no key in the IMAP reader");
+    ASSERT(find(EKV_READ_GMAIL, 'A') == EA_NONE, "key table: A is no key in the Gmail reader");
+    ASSERT(find(EKV_READ_GMAIL, 'r') == EA_NONE, "key table: r removes no label in the Gmail reader");
+    ASSERT(find(EKV_READ_GMAIL, 'a') == EA_NONE, "key table: a is a plain key (save), not an action");
+
     /* the labels picker is Gmail's alone */
     ASSERT(find(EKV_LIST_GMAIL, 't') == EA_LABELS, "key table: t is the Gmail label picker");
     ASSERT(find(EKV_LIST_IMAP, 't') == EA_NONE, "key table: t is unbound on IMAP");

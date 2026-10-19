@@ -2321,7 +2321,7 @@ static void test_reauth_paste_renews_the_token(void) {
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Renew the Gmail authorization of", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "paste the redirect address");
+    ASSERT_WAIT_FOR(s, "paste the redirect address", WAIT_MS);   /* the title is drawn before the text */
     pty_send_str(s, "p");
     ASSERT_WAIT_FOR(s, "Open this address in a browser", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Paste the address", WAIT_MS);

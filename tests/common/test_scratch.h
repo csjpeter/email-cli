@@ -73,6 +73,18 @@ void test_set_home(const char *home);
 pid_t test_spawn_mock(const char *bin, const char *prefix, int want_port,
                       int *port_out);
 
+/** @brief The log file of a mock started by test_spawn_mock(), by its pid (NULL if unknown). */
+const char *test_mock_log(pid_t pid);
+
+/** @brief How many lines of the file @p path contain @p needle (0 if unreadable). */
+int test_log_count(const char *path, const char *needle);
+
+/**
+ * @brief Waits up to @p ms for @p want lines of @p path to contain @p needle.
+ * @return 0 when they do, -1 on timeout.
+ */
+int test_log_wait(const char *path, const char *needle, int want, int ms);
+
 /** @brief A loopback port nobody listens on at this moment. */
 int test_unused_port(void);
 

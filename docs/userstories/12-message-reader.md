@@ -25,7 +25,7 @@ Pressing Enter on a message in the interactive message list.
    | Backspace | Return to message list |
 6. A status bar at the bottom shows:
    `-- [page/total] PgDn/↓=scroll  PgUp/↑=back  r=reply  Backspace/ESC/q=list --`
-   (attachments add `a=save  A=save-all(N)` before `Backspace`)
+   (attachments add `a=save(N)` before `Backspace`; saving all is in the `:` menu)
 
 ## Caching
 - Raw message is saved to `~/.local/share/email-cli/accounts/<host>/messages/<folder>/<uid>.eml`

@@ -39,11 +39,11 @@ existing references and every `no` has a reason.
 | List Gmail labels | yes | F:26.11 | yes | P:test_screen_gmail_labels | |
 | Create / delete an IMAP folder | yes | F:51.2 | yes (`:` menu of the folder browser; delete asks first) | P:test_folder_create P:test_folder_delete_asks | |
 | Create a Gmail label | yes | F:122.24 | yes (`c` in the label browser) | P:test_label_browser_create_label_confirmed | |
-| Delete a Gmail label | yes | F:122.25 | no | | the label browser has a `d` key, but it passes the label name as the id (`TODO` in `email_service_labels_interactive`; Gmail needs the id) and no test deletes a label there: a gap until fixed and tested; ticket to be opened by the owner |
+| Delete a Gmail label | yes | F:122.25 | yes (`:` menu, `Delete the label`, asks first) | P:test_label_browser_delete_label_uses_id | the TUI sends the label id, not its name |
 | Mark read / unread | yes | F:16.1 | yes (`n`) | P:test_feedback_n_read | |
 | Star / unstar | yes | F:17.1 | yes (`f`) | P:test_feedback_f_star | |
 | Add / remove a Gmail label on a message | yes | F:60.1 | yes (`t` picker) | P:test_feedback_t_label_added | |
-| Mark junk / not junk | yes | F:52.2 | no | | the list has a `j` key, but no PTY test exercises it: a gap until tested; ticket to be opened by the owner |
+| Mark junk / not junk | yes | F:52.2 | yes | P:test_keys_junk_toggle_imap | the `!` key (registry); the PTY tests check the server requests (IMAP STORE; Gmail: test_keys_junk_toggle_gmail) |
 | Move a message to a folder | yes (`move`) | F:124.29 | yes (`m`) | P:test_screen_list_move_prompt | |
 | Delete (trash) / archive a message | yes (`trash`, `archive`) | F:132.2 | yes (`d`, `D`, `a`) | P:test_tui_list_bulk_delete_confirm | |
 | Mark several messages at once | no (one UID per call; a script loops) | | yes (`Space`, `m`) | P:test_tui_list_bulk_star_marked | medium: a script loops; not a gap |

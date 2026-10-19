@@ -663,6 +663,65 @@ static void test_label_browser_create_label_confirmed(void) {
     pty_close(s);
 }
 
+/** Count the lines of the mock's request log that contain @p needle (the
+ *  first mock started by this test is the Gmail mock). */
+static int mock_log_count(const char *needle) {
+    FILE *fp = fopen(TP("mock-MOCK_GMAIL-1.log"), "r");
+    if (!fp) return -1;
+    char line[1024];
+    int n = 0;
+    while (fgets(line, sizeof(line), fp))
+        if (strstr(line, needle)) n++;
+    fclose(fp);
+    return n;
+}
+
+/** True when the row starts with the cursor mark ">". */
+static int on_cursor_row(PtySession *s, int row) {
+    char buf[COLS * 4 + 4];
+    pty_row_text(s, row, buf, sizeof(buf));
+    return buf[0] == '>';
+}
+
+/** EMAIL-135: deleting a user label from the label browser asks first (No
+ *  declines, nothing is sent) and, on Yes, sends DELETE for the label's id
+ *  (Label_Empty1), not for the name shown ("Empty Label"). */
+static void test_label_browser_delete_label_uses_id(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label delete: reaches the label list");
+    if (!s) return;
+    int row = find_row(s, "Empty Label");
+    ASSERT(row >= 0, "label delete: Empty Label is listed");
+    /* The cursor starts where the previous visit left it: walk to the row. */
+    for (int i = 0; row >= 0 && i < 30 && !on_cursor_row(s, row); i++) {
+        int cur = -1;
+        for (int r = 0; r < ROWS && cur < 0; r++)
+            if (on_cursor_row(s, r)) cur = r;
+        pty_send_key(s, cur > row ? PTY_KEY_UP : PTY_KEY_DOWN);
+        pty_settle(s, 100);
+    }
+    ASSERT(row >= 0 && on_cursor_row(s, row),
+           "label delete: cursor on Empty Label");
+
+    gm_menu_pick(s, 1);                            /* Delete the label */
+    ASSERT_WAIT_FOR(s, "Delete the label Empty Label", WAIT_MS);
+    pty_send_str(s, "n");                          /* declined */
+    pty_settle(s, SETTLE_MS);
+    ASSERT(mock_log_count("DELETE ") == 0,
+           "label delete: No sends no DELETE request");
+
+    gm_menu_pick(s, 1);
+    ASSERT_WAIT_FOR(s, "Delete the label Empty Label", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(mock_log_count("DELETE /gmail/v1/users/me/labels/Label_Empty1") == 1,
+           "label delete: Yes sends DELETE for the label id Label_Empty1");
+    ASSERT(mock_log_count("labels/Empty") == 0,
+           "label delete: the name is not used as the id");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  TEST: 'a' key → row has yellow marker 'd' (immediate feedback)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -1434,6 +1493,61 @@ static void test_D_permanent_delete_in_trash_view(void) {
 
 
 /**
+ * EMAIL-157: 'd' on a message in Trash asks before deleting for good, the
+ * question says so, and answering 'n' deletes nothing.  The same in the reader.
+ */
+static void test_delete_in_trash_asks_for_good(void) {
+    reset_and_sync();
+    {
+        const char *args[] = { g_tui_bin, NULL };
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "perm-ask: pty_open s1");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "perm-ask: pty_run s1");
+        ASSERT(navigate_to_inbox(s) == 0, "perm-ask: nav inbox s1");
+        gm_trash(s);
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "perm-ask: pty_open s2");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "perm-ask: pty_run s2");
+    ASSERT(navigate_to_trash(s) == 0, "perm-ask: navigate_to_trash");
+    pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* List: the question names "for good"; 'n' deletes nothing. */
+    pty_send_str(s, "d");
+    ASSERT(pty_wait_for(s, "for good", WAIT_MS) == 0,
+           "perm-ask: list question says 'for good'");
+    pty_send_str(s, "n");
+    ASSERT(pty_wait_for(s, "Not deleted", WAIT_MS) == 0,
+           "perm-ask: list 'n' answers 'Not deleted'");
+    pty_settle(s, SETTLE_MS);
+    int row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "perm-ask: message still listed after 'n'");
+    if (row >= 0)
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "D") != 0,
+               "perm-ask: no 'D' marker after 'n'");
+
+    /* Reader: the same question and the same answer. */
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "d");
+    ASSERT(pty_wait_for(s, "for good", WAIT_MS) == 0,
+           "perm-ask: reader question says 'for good'");
+    pty_send_str(s, "n");
+    ASSERT(pty_wait_for(s, "Not deleted", WAIT_MS) == 0,
+           "perm-ask: reader 'n' answers 'Not deleted'");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/**
  * After 'D' (trash) + 'd' (label remove), row shows yellow 'd' marker — not red 'D'.
  * 'd' overrides the pending-remove state.
  */
@@ -2092,6 +2206,61 @@ static void test_keys_label_delete_asks(void) {
     pty_close(s);
 }
 
+/* Column of the junk letter of row @p row's status cell ("J-----"), or -1. */
+static int junk_col(PtySession *s, int row) {
+    char rt[256];
+    pty_row_text(s, row, rt, sizeof rt);
+    const char *p = strstr(rt, " J-----");
+    return p ? (int)(p - rt) + 1 : -1;
+}
+
+/**
+ * EMAIL-136: '!' toggles junk on a Gmail account.  The request to Google adds
+ * SPAM and removes INBOX, then the reverse; the feedback line says what was
+ * done and the status column shows a yellow J while the message is junk.
+ */
+static void test_keys_junk_toggle_gmail(void) {
+    reset_and_sync();
+    const char *log = test_mock_log(g_mock_pid);
+    ASSERT(log != NULL, "junk gmail: the mock has a log");
+    if (!log) return;
+    int before = test_log_count(log, "MODIFY");
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "junk gmail: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "junk gmail: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "junk gmail: navigate_to_inbox");
+    int row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "junk gmail: " GMAIL_TOP_MSG " present");
+
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as junk", WAIT_MS);
+    ASSERT(test_log_wait(log, "\"addLabelIds\":[\"SPAM\"]", 1, WAIT_MS) == 0,
+           "junk gmail: modify request adds SPAM");
+    ASSERT(test_log_count(log, "\"removeLabelIds\":[\"INBOX\"]") == 1,
+           "junk gmail: modify request removes INBOX");
+    ASSERT(test_log_count(log, "MODIFY") == before + 1, "junk gmail: one request per press");
+    if (row >= 0) {
+        int jc = junk_col(s, row);
+        ASSERT(jc >= 0, "junk gmail: status column shows J");
+        if (jc >= 0)
+            ASSERT(fg_is(pty_cell_fg(s, row, jc), PTY_FG_YELLOW), "junk gmail: J is yellow");
+    }
+
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as not-junk", WAIT_MS);
+    ASSERT(test_log_wait(log, "\"addLabelIds\":[\"INBOX\"]", 1, WAIT_MS) == 0,
+           "junk gmail: modify request adds INBOX back");
+    ASSERT(test_log_count(log, "\"removeLabelIds\":[\"SPAM\"]") == 1,
+           "junk gmail: modify request removes SPAM");
+    ASSERT(test_log_count(log, "MODIFY") == before + 2, "junk gmail: two requests in all");
+    if (row >= 0)
+        ASSERT(junk_col(s, row) < 0, "junk gmail: J gone after the toggle back");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /** Gmail's reader: '*' stars, '+'/'-' mark, 'd' asks; no letter writes. */
 static void test_keys_reader(void) {
     reset_and_sync();
@@ -2207,7 +2376,7 @@ static void test_reauth_paste_renews_the_token(void) {
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Renew the Gmail authorization of", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "paste the redirect address");
+    ASSERT_WAIT_FOR(s, "paste the redirect address", WAIT_MS);   /* the title is drawn before the text */
     pty_send_str(s, "p");
     ASSERT_WAIT_FOR(s, "Open this address in a browser", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Paste the address", WAIT_MS);
@@ -2336,6 +2505,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_label_browser_lists_a_label_without_messages);
     RUN_TEST(test_label_browser_create_label_prompt);
     RUN_TEST(test_label_browser_create_label_confirmed);
+    RUN_TEST(test_label_browser_delete_label_uses_id);
 
     printf("--- Fresh sync (test 2) ---\n");
     if (reset_and_sync() != 0) {
@@ -2505,6 +2675,7 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_D_permanent_delete_in_trash_view);
+    RUN_TEST(test_delete_in_trash_asks_for_good);
 
     printf("--- Fresh sync (test 21: D+D undo) ---\n");
     if (reset_and_sync() != 0) {
@@ -2533,6 +2704,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_keys_gmail_menu);
     RUN_TEST(test_keys_label_delete_asks);
     RUN_TEST(test_keys_reader);
+    RUN_TEST(test_keys_junk_toggle_gmail);
 
     /* ── US-72: Gmail Smart Sync Orchestration ── */
     printf("\n--- Gmail Smart Sync orchestration (US-72) ---\n");

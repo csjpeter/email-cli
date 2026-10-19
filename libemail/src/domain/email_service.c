@@ -7628,6 +7628,181 @@ int email_service_save_draft(const Config *cfg, const char *msg, size_t msg_len)
     return local_save_outgoing("Drafts", msg, msg_len);
 }
 
+/* ── Reply composition, shared by email-cli and email-tui (EMAIL-133) ─── */
+
+char *email_service_reply_quote(const char *raw) {
+    char *body_text = NULL;
+    char *html_raw = mime_get_html_part(raw);
+    if (html_raw) {
+        body_text = html_render(html_raw, 72, 0);
+        free(html_raw);
+    }
+    if (!body_text) body_text = mime_get_text_body(raw);
+
+    char *from_raw = mime_get_header(raw, "From");
+    char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;
+    free(from_raw);
+    char *date_raw = mime_get_header(raw, "Date");
+    char *date_fmt = date_raw ? mime_format_date(date_raw) : NULL;
+    free(date_raw);
+
+    /* "On <date>, <from> wrote:\n> line1\n> line2\n..." */
+    size_t qcap = 4096 + (body_text ? strlen(body_text) * 2 : 0);
+    char *quoted = malloc(qcap);
+    if (quoted) {
+        int off = snprintf(quoted, qcap, "On %s, %s wrote:\n",
+                           date_fmt ? date_fmt : "?", from_dec ? from_dec : "?");
+        if (body_text) {
+            const char *p = body_text;
+            while (*p && off < (int)qcap - 4) {
+                const char *nl = strchr(p, '\n');
+                size_t len = nl ? (size_t)(nl - p) : strlen(p);
+                size_t advance = len + (nl ? 1 : 0);
+                if (len > 0 && p[len - 1] == '\r') len--;
+                if (off + 2 + (int)len + 1 < (int)qcap) {
+                    quoted[off++] = '>';
+                    quoted[off++] = ' ';
+                    memcpy(quoted + off, p, len);
+                    off += (int)len;
+                    quoted[off++] = '\n';
+                    quoted[off]   = '\0';
+                }
+                p += advance;
+                if (!nl) break;
+            }
+        }
+    }
+    free(from_dec);
+    free(date_fmt);
+    free(body_text);
+    return quoted;
+}
+
+char *email_service_reply_all_cc(const char *raw, const char *own) {
+    char *orig_to = mime_get_header(raw, "To");
+    char *orig_cc = mime_get_header(raw, "Cc");
+    char *dec_to  = orig_to ? mime_decode_words(orig_to) : NULL;
+    char *dec_cc  = orig_cc ? mime_decode_words(orig_cc) : NULL;
+    free(orig_to); free(orig_cc);
+
+    char combined[2048] = "";
+    if (dec_to && dec_to[0])
+        strncpy(combined, dec_to, sizeof(combined) - 1);
+    if (dec_cc && dec_cc[0]) {
+        if (combined[0])
+            strncat(combined, ", ", sizeof(combined) - strlen(combined) - 1);
+        strncat(combined, dec_cc, sizeof(combined) - strlen(combined) - 1);
+    }
+    free(dec_to); free(dec_cc);
+
+    char cc_buf[1024] = "";
+    int cc_len = 0;
+    char *p = combined;
+    while (p && *p) {
+        while (*p == ' ') p++;
+        char *sep = strchr(p, ',');
+        int elen = sep ? (int)(sep - p) : (int)strlen(p);
+        while (elen > 0 && p[elen - 1] == ' ') elen--;
+        /* only this entry is searched for the own address, not the rest of the list */
+        char entry[512];
+        snprintf(entry, sizeof(entry), "%.*s", elen, p);
+        if (elen > 0 && !(own && own[0] && strcasestr(entry, own))) {
+            if (cc_len + elen + 3 < (int)sizeof(cc_buf) - 1) {
+                if (cc_len > 0) {
+                    cc_buf[cc_len++] = ';';
+                    cc_buf[cc_len++] = ' ';
+                }
+                memcpy(cc_buf + cc_len, p, (size_t)elen);
+                cc_len += elen;
+                cc_buf[cc_len] = '\0';
+            }
+        }
+        if (!sep) break;
+        p = sep + 1;
+    }
+    return strdup(cc_buf);
+}
+
+int email_service_mark_answered(const Config *cfg, const char *folder, const char *uid) {
+    local_store_init(cfg->host, cfg->user);
+    Manifest *mf = manifest_load(folder);
+    if (!mf) return -1;
+    int rc = -1;
+    ManifestEntry *me = manifest_find(mf, uid);
+    if (me) {
+        me->flags |= MSG_FLAG_ANSWERED;
+        manifest_save(folder, mf);
+        rc = 0;
+    }
+    manifest_free(mf);
+    return rc;
+}
+
+int email_service_reply(const Config *cfg, const char *uid, const char *folder,
+                        int all, const char *body) {
+    const char *use_folder = folder ? folder
+                           : (cfg->folder ? cfg->folder : "INBOX");
+    local_store_init(cfg->host, cfg->user);
+    char *raw = local_msg_exists(use_folder, uid)
+                    ? local_msg_load(use_folder, uid)
+                    : fetch_uid_content_in(cfg, use_folder, uid, 0);
+    if (!raw) {
+        fprintf(stderr, "Error: Could not load message UID %s.\n", uid);
+        return -1;
+    }
+    char *reply_to = NULL, *subject = NULL, *msg_id = NULL;
+    if (emc_reply_meta(raw, &reply_to, &subject, &msg_id) != EMC_OK) {
+        free(raw);
+        fprintf(stderr, "Error: Could not parse message headers.\n");
+        return -1;
+    }
+    const char *from = cfg->smtp_user ? cfg->smtp_user : cfg->user;
+    char *cc = all ? email_service_reply_all_cc(raw, from) : NULL;
+    char *quoted = email_service_reply_quote(raw);
+    free(raw);
+
+    size_t blen = (body ? strlen(body) : 0) + (quoted ? strlen(quoted) : 0) + 4;
+    char *text = malloc(blen);
+    char *rcpt = malloc(strlen(reply_to) + (cc ? strlen(cc) : 0) + 4);
+    if (!text || !rcpt) {
+        free(text); free(rcpt); free(cc); free(quoted);
+        free(reply_to); free(subject); free(msg_id);
+        return -1;
+    }
+    snprintf(text, blen, "%s%s%s", body ? body : "", body && body[0] ? "\n\n" : "",
+             quoted ? quoted : "");
+    snprintf(rcpt, strlen(reply_to) + (cc ? strlen(cc) : 0) + 4, "%s%s%s",
+             reply_to, cc && cc[0] ? "; " : "", cc ? cc : "");
+
+    int rc = -1;
+    /* the header list is comma separated (the dialog's "; " is for the eye) */
+    char *cc_hdr = cc && cc[0] ? strdup(cc) : NULL;
+    for (char *q = cc_hdr; q && *q; q++)
+        if (*q == ';') *q = ',';
+    emc_message p = {.from = from, .to = reply_to,
+                     .cc = cc_hdr,
+                     .subject = subject, .body = text,
+                     .in_reply_to = msg_id};
+    char *msg = NULL;
+    size_t msg_len = 0;
+    if (mail_compose(&p, &msg, &msg_len) != 0) {
+        fprintf(stderr, "Error: Failed to build message.\n");
+    } else if (mail_send_wire(cfg, from, rcpt, msg, msg_len) == 0) {
+        printf("Reply sent.\n");
+        if (email_service_save_sent(cfg, msg, msg_len) == 0)
+            printf("Saved.\n");
+        else
+            fprintf(stderr, "(Could not save to Sent folder \xe2\x80\x94 "
+                    "check EMAIL_SENT_FOLDER in config.)\n");
+        if (email_service_mark_answered(cfg, use_folder, uid) == 0)
+            printf("Message %s marked as answered (local until the next sync).\n", uid);
+        rc = 0;
+    }
+    free(msg); free(text); free(rcpt); free(cc); free(cc_hdr); free(quoted);
+    free(reply_to); free(subject); free(msg_id);
+    return rc;
+}
+
 void email_service_help_popup(const char *title, const char *rows[][2], int n) {
     show_help_popup(title, rows, n);
 }

@@ -753,7 +753,7 @@ int main(int argc, char *argv[]) {
             "mark-read", "mark-unread", "mark-starred", "remove-starred",
             "add-label", "remove-label", "create-label", "delete-label",
             "create-folder", "delete-folder",
-            "mark-junk", "mark-notjunk", "trash", "archive", "move",
+            "mark-junk", "mark-notjunk", "trash", "archive", "move", "reply",
             "add-account", "remove-account", NULL
         };
         int blocked = 0;

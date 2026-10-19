@@ -1313,7 +1313,7 @@ static const char *const exp_w140_review_long_to[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_w140_review_long_to[] = {
@@ -1668,7 +1668,7 @@ static const char *const exp_review_menu[] = {
     "                     ┌─ Actions ─────────────────────────────────────────────┐",
     "                     │ >    Send - the message                               │",
     "                     │   e  Edit headers - To, Cc, Bcc, Subject, attachments │",
-    "                     │      Remove last attachment                           │",
+    "                     │      Remove an attachment                             │",
     "                     └───────────────────────────────────────────────────────┘",
     "",
     "",
@@ -1679,7 +1679,7 @@ static const char *const exp_review_menu[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_menu[] = {
@@ -1735,7 +1735,7 @@ static const char *const exp_review_send_ask[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_send_ask[] = {
@@ -2106,7 +2106,7 @@ static const char *const exp_review[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review[] = {
@@ -4175,7 +4175,7 @@ static const char *const exp_review_full[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_full[] = {
@@ -4231,7 +4231,7 @@ static const char *const exp_review_long_to[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_long_to[] = {
@@ -4343,7 +4343,7 @@ static const char *const exp_review_attach_removed[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_attach_removed[] = {
@@ -4399,7 +4399,7 @@ static const char *const exp_review_send_failed[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_send_failed[] = {
@@ -7689,7 +7689,7 @@ static const char *const exp_w140_review[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_w140_review[] = {

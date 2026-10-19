@@ -56,6 +56,9 @@ void test_key_table(void) {
     ASSERT(find(EKV_LABELS, 'd') == EA_NONE, "key table: d does not delete a label");
     ASSERT(find(EKV_ACCOUNTS_GMAIL, 'r') == EA_NONE, "key table: r does not renew an authorization");
     ASSERT(find(EKV_ACCOUNTS_GMAIL, ':') == EA_NONE, "key table: ':' on the accounts screen is a harmless key");
+    /* EMAIL-147: the attachment picker has keys, none of them changes state */
+    for (const char *c = "jkgGq?a"; *c; c++)
+        ASSERT(find(EKV_ATTACH, *c) == EA_NONE, "key table: a picker key changes no state");
     ASSERT(find(EKV_REVIEW, 's') == EA_NONE, "key table: s does not send");
     ASSERT(find(EKV_REVIEW, 'd') == EA_NONE, "key table: d does not remove an attachment");
     ASSERT(find(EKV_REVIEW, 'e') == EA_EDIT_HEADERS, "key table: e edits the headers");
@@ -79,5 +82,6 @@ void test_key_table(void) {
                               EKV_LABELS, EKV_FOLDERS };
     for (int i = 0; i < 6; i++)
         ASSERT(ekeys_help_has(finders[i], '/'), "key table: help lists / (filter, search)");
+    ASSERT(ekeys_help_has(EKV_REVIEW, '?'), "key table: the review screen has a help");
     ASSERT(!ekeys_help_has(EKV_FOLDERS, 'd'), "key table: help lists no key that does nothing");
 }

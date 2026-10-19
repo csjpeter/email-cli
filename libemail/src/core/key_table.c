@@ -172,6 +172,20 @@ static const tui_keyentry g_entries[] = {
     M(EKV_ACCOUNTS_GMAIL, "Renew the authorization...", "Gmail access, in the browser or by paste",
       EA_REAUTH),
 
+    /* The attachment picker of the reader (EMAIL-147): no key changes state. */
+    H(EKV_ATTACH, 'j', "Down", "move down (also Down)"),
+    H(EKV_ATTACH, 'k', "Up", "move up (also Up)"),
+    H(EKV_ATTACH, TUI_KEY_PGDN, "Page down", NULL),
+    H(EKV_ATTACH, TUI_KEY_PGUP, "Page up", NULL),
+    H(EKV_ATTACH, TUI_KEY_HOME, "First attachment", "also g"),
+    H(EKV_ATTACH, TUI_KEY_END, "Last attachment", "also G"),
+    H(EKV_ATTACH, TUI_KEY_ENTER, "Choose", "then asked where to save it"),
+    H(EKV_ATTACH, '?', "Help", NULL),
+    H(EKV_ATTACH, 'q', "Back", "to the message"),
+    H(EKV_ATTACH, TUI_KEY_ESC, "Back", "to the message"),
+    H(EKV_ATTACH, TUI_KEY_BACKSPACE, "Back", "to the message"),
+    H(EKV_ATTACH, TUI_KC_QUIT, "Quit", NULL),
+
     /* The review of a composed message. */
     S(EKV_REVIEW, TUI_KC_NONE, TUI_VERB_NONE, "Send", "the message",
       "Send the message to %s?", EA_SEND),
@@ -179,10 +193,11 @@ static const tui_keyentry g_entries[] = {
       EA_EDIT_HEADERS),
     H(EKV_REVIEW, 'b', "Edit body", NULL),
     H(EKV_REVIEW, 'a', "Add attachment", NULL),
+    H(EKV_REVIEW, '?', "Help", NULL),
     H(EKV_REVIEW, ':', "Actions", "send the message, remove an attachment"),
     H(EKV_REVIEW, 'q', "Discard", "asks first"),
     H(EKV_REVIEW, TUI_KEY_ESC, "Discard", "asks first"),
-    M(EKV_REVIEW, "Remove last attachment", NULL, EA_UNATTACH),
+    M(EKV_REVIEW, "Remove an attachment", NULL, EA_UNATTACH),
 };
 
 #define N_ENTRIES ((int)(sizeof g_entries / sizeof g_entries[0]))

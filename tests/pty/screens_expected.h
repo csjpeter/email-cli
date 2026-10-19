@@ -1313,7 +1313,7 @@ static const char *const exp_w140_review_long_to[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_w140_review_long_to[] = {
@@ -1668,7 +1668,7 @@ static const char *const exp_review_menu[] = {
     "                     ┌─ Actions ─────────────────────────────────────────────┐",
     "                     │ >    Send - the message                               │",
     "                     │   e  Edit headers - To, Cc, Bcc, Subject, attachments │",
-    "                     │      Remove last attachment                           │",
+    "                     │      Remove an attachment                             │",
     "                     └───────────────────────────────────────────────────────┘",
     "",
     "",
@@ -1679,7 +1679,7 @@ static const char *const exp_review_menu[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_menu[] = {
@@ -1735,7 +1735,7 @@ static const char *const exp_review_send_ask[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_send_ask[] = {
@@ -2106,7 +2106,7 @@ static const char *const exp_review[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review[] = {
@@ -4175,7 +4175,7 @@ static const char *const exp_review_full[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_full[] = {
@@ -4231,7 +4231,7 @@ static const char *const exp_review_long_to[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_long_to[] = {
@@ -4343,7 +4343,7 @@ static const char *const exp_review_attach_removed[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_attach_removed[] = {
@@ -4399,7 +4399,7 @@ static const char *const exp_review_send_failed[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_send_failed[] = {
@@ -6247,19 +6247,19 @@ static const char *const exp_rules_help[] = {
     "> SpamFilter",
     "  Newsletters",
     "",
-    "",
-    "                       ┌─ Rules shortcuts ──────────────────────────────────┐",
-    "                       │ j / ↓    Next rule                                 │",
-    "                       │ k / ↑    Previous rule                             │",
-    "                       │ Enter    Open the rule                             │",
-    "                       │ a        Add a rule                                │",
-    "                       │ d        Delete the rule (asks first)              │",
-    "                       │ p        Preview what the rules would do (dry run) │",
-    "                       │ A        Apply the rules now (asks first)          │",
-    "                       │ ?        Show this help                            │",
-    "                       │ Esc / q  Back to the message list                  │",
-    "                       └────────────────────────────────────────────────────┘",
-    "",
+    "                     ┌─ Rules shortcuts ──────────────────────────────────────┐",
+    "                     │ j / ↓        Next rule                                 │",
+    "                     │ k / ↑        Previous rule                             │",
+    "                     │ Home / End   First / last rule                         │",
+    "                     │ PgUp / PgDn  Page up / down                            │",
+    "                     │ Enter        Open the rule                             │",
+    "                     │ a            Add a rule                                │",
+    "                     │ d            Delete the rule (asks first)              │",
+    "                     │ p            Preview what the rules would do (dry run) │",
+    "                     │ A            Apply the rules now (asks first)          │",
+    "                     │ ?            Show this help                            │",
+    "                     │ Esc / q      Back to the message list                  │",
+    "                     └────────────────────────────────────────────────────────┘",
     "",
     "",
     "",
@@ -6274,19 +6274,19 @@ static const char *const sty_rules_help[] = {
     "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
-    "                       TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                       ",
-    "                       T bbbbb                                              T                       ",
-    "                       T bbbbb                                              T                       ",
-    "                       T bbbbb                                              T                       ",
-    "                       T b                                                  T                       ",
-    "                       T b                                                  T                       ",
-    "                       T b                                                  T                       ",
-    "                       T b                                                  T                       ",
-    "                       T b                                                  T                       ",
-    "                       T bbbbbbb                                            T                       ",
-    "                       TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                       ",
-    "                                                                                                    ",
+    "                     TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                     ",
+    "                     T bbbbb                                                  T                     ",
+    "                     T bbbbb                                                  T                     ",
+    "                     T bbbbbbbbbb                                             T                     ",
+    "                     T bbbbbbbbbbb                                            T                     ",
+    "                     T bbbbb                                                  T                     ",
+    "                     T b                                                      T                     ",
+    "                     T b                                                      T                     ",
+    "                     T b                                                      T                     ",
+    "                     T b                                                      T                     ",
+    "                     T b                                                      T                     ",
+    "                     T bbbbbbb                                                T                     ",
+    "                     TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                     ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -6295,7 +6295,7 @@ static const char *const sty_rules_help[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rules_help[3] = { 16, 77, 1 };
+static const int cur_rules_help[3] = { 17, 79, 1 };
 
 static const char *const exp_rule_detail_help[] = {
     "Rule: SpamFilter",
@@ -6360,18 +6360,18 @@ static const char *const exp_rule_when_help[] = {
     "",
     "",
     "",
-    "",
-    "                             ┌─ Conditions shortcuts ────────────────┐",
-    "                             │ j / ↓      Next condition             │",
-    "                             │ k / ↑      Previous condition         │",
-    "                             │ Enter / e  Edit the condition         │",
-    "                             │ a          Add a condition            │",
-    "                             │ d          Delete the condition       │",
-    "                             │ q          Done: go on to the actions │",
-    "                             │ Esc        Cancel the rule            │",
-    "                             │ ?          Show this help             │",
-    "                             └───────────────────────────────────────┘",
-    "",
+    "                            ┌─ Conditions shortcuts ──────────────────┐",
+    "                            │ j / ↓        Next condition             │",
+    "                            │ k / ↑        Previous condition         │",
+    "                            │ Home / End   First / last condition     │",
+    "                            │ PgUp / PgDn  Page up / down             │",
+    "                            │ Enter / e    Edit the condition         │",
+    "                            │ a            Add a condition            │",
+    "                            │ d            Delete the condition       │",
+    "                            │ q            Done: go on to the actions │",
+    "                            │ Esc          Cancel the rule            │",
+    "                            │ ?            Show this help             │",
+    "                            └─────────────────────────────────────────┘",
     "",
     "",
     "",
@@ -6387,18 +6387,18 @@ static const char *const sty_rule_when_help[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
-    "                             TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                              ",
-    "                             T bbbbb                                 T                              ",
-    "                             T bbbbb                                 T                              ",
-    "                             T bbbbbbbbb                             T                              ",
-    "                             T b                                     T                              ",
-    "                             T b                                     T                              ",
-    "                             T b                                     T                              ",
-    "                             T bbb                                   T                              ",
-    "                             T b                                     T                              ",
-    "                             TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                              ",
-    "                                                                                                    ",
+    "                            TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                             ",
+    "                            T bbbbb                                   T                             ",
+    "                            T bbbbb                                   T                             ",
+    "                            T bbbbbbbbbb                              T                             ",
+    "                            T bbbbbbbbbbb                             T                             ",
+    "                            T bbbbbbbbb                               T                             ",
+    "                            T b                                       T                             ",
+    "                            T b                                       T                             ",
+    "                            T b                                       T                             ",
+    "                            T bbb                                     T                             ",
+    "                            T b                                       T                             ",
+    "                            TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                             ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -6407,7 +6407,7 @@ static const char *const sty_rule_when_help[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_rule_when_help[3] = { 16, 70, 0 };
+static const int cur_rule_when_help[3] = { 17, 71, 0 };
 
 static const char *const exp_rules_delete_ask[] = {
     "Rules for testuser (2 rules)",
@@ -7689,7 +7689,7 @@ static const char *const exp_w140_review[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_w140_review[] = {

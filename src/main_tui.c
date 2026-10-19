@@ -290,6 +290,18 @@ static void cd_complete(char *buf, int *cur, const char *addr) {
     *cur = tok_start + addr_len;
 }
 
+/**
+ * Read the answer of a (y/N) prompt through the key decoder, so an arrow key's
+ * escape bytes are consumed as one key and do not leak into the next read.
+ * @return 'y' for y/Y, otherwise 'n'.
+ */
+static char tui_read_confirm(void)
+{
+    (void)terminal_read_key();
+    int c = terminal_last_printable();
+    return (c == 'y' || c == 'Y') ? 'y' : 'n';
+}
+
 /* The bottom status line of a screen of this program (EMAIL-111): the hints
  * that fit the width, in reverse video on the last row, a message in their
  * place when there is one.  The same widget as the lists' status line. */
@@ -958,9 +970,10 @@ static void pcr_render(const char *from, const char *to, const char *cc,
         { "e", "edit headers", SL_PRIO_HIGH },
         { "b", "edit body", SL_PRIO_HIGH },
         { "a", "add attachment", SL_PRIO_MID },
+        { "?", "help", SL_PRIO_LOW },
         { "q", "discard", SL_PRIO_KEEP },
     };
-    screen_bar(h, 5, NULL, NULL);
+    screen_bar(h, 6, NULL, NULL);
 }
 
 /* Inline single-field attachment picker used by [a] key in review.
@@ -1072,6 +1085,26 @@ static int pcr_pick_attach_raw(char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_S
     }
 }
 
+/* Ask which attachment to remove: the numbers on the screen, 1..count.
+ * Returns the index, or -1 when cancelled (Esc or any other key). */
+static int pcr_ask_attachment(char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_SZ],
+                              int count)
+{
+    (void)attach_paths;
+    printf("\033[2J\033[H");
+    for (int i = 0; i < count; i++) {
+        const char *fname = strrchr(attach_paths[i], '/');
+        fname = fname ? fname + 1 : attach_paths[i];
+        printf("  %d  %s\n", i + 1, fname);
+    }
+    printf("\n  Remove which attachment? [1-%d, Esc cancels] ", count);
+    fflush(stdout);
+    TermKey k = terminal_read_key();
+    int ch = (k == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
+    if (ch >= '1' && ch < '1' + count) return ch - '1';
+    return -1;
+}
+
 /* Post-compose review screen.
  * Runs its own key loop; attach_paths/attach_count are modified in place.
  * Returns PCR_SEND, PCR_CANCEL, PCR_EDIT_BODY, or PCR_EDIT_HEADERS. */
@@ -1109,9 +1142,21 @@ static int post_compose_review(const char *from, const char *to,
                 return PCR_SEND;
             }
             if (act == EA_UNATTACH && *attach_count > 0) {
+                int which = *attach_count - 1;
+                if (*attach_count > 1) {
+                    which = pcr_ask_attachment(attach_paths, *attach_count);
+                    if (which < 0) continue;
+                }
+                for (int i = which; i < *attach_count - 1; i++)
+                    memcpy(attach_paths[i], attach_paths[i + 1], CD_ATTACH_PATH_SZ);
                 (*attach_count)--;
                 attach_paths[*attach_count][0] = '\0';
             }
+            continue;
+        }
+
+        if (ch == '?') {
+            ekeys_help(EKV_REVIEW, "Review shortcuts");
             continue;
         }
 
@@ -1750,6 +1795,8 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
             static const char *help[][2] = {
                 { "j / \u2193",   "Next condition"                  },
                 { "k / \u2191",   "Previous condition"              },
+                { "Home / End",   "First / last condition"          },
+                { "PgUp / PgDn",  "Page up / down"                  },
                 { "Enter / e",    "Edit the condition"              },
                 { "a",            "Add a condition"                 },
                 { "d",            "Delete the condition"            },
@@ -1757,7 +1804,7 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                 { "Esc",          "Cancel the rule"                 },
                 { "?",            "Show this help"                  },
             };
-            email_service_help_popup("Conditions shortcuts", help, 8);
+            email_service_help_popup("Conditions shortcuts", help, 10);
             continue;
         }
 
@@ -1771,6 +1818,20 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                 wl.cursor--;
                 if (wl.cursor < wl.scroll) wl.scroll--;
             }
+        } else if (key == TERM_KEY_HOME || key == TERM_KEY_END ||
+                   key == TERM_KEY_PREV_PAGE || key == TERM_KEY_NEXT_PAGE) {
+            /* Home/End jump to the edges, PgUp/PgDn move a page (EMAIL-164). */
+            if (key == TERM_KEY_HOME) wl.cursor = 0;
+            else if (key == TERM_KEY_END) wl.cursor = wl.count > 0 ? wl.count - 1 : 0;
+            else if (key == TERM_KEY_PREV_PAGE) {
+                wl.cursor -= vis_rows;
+                if (wl.cursor < 0) wl.cursor = 0;
+            } else {
+                wl.cursor += vis_rows;
+                if (wl.cursor > wl.count - 1) wl.cursor = wl.count > 0 ? wl.count - 1 : 0;
+            }
+            if (wl.cursor < wl.scroll) wl.scroll = wl.cursor;
+            if (wl.cursor >= wl.scroll + vis_rows) wl.scroll = wl.cursor - vis_rows + 1;
         } else if (key == TERM_KEY_ENTER || ch == 'e') {
             if (wl.count == 0) {
                 when_list_do_add(&wl, vis_rows, title);
@@ -1917,7 +1978,7 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
         if (!cancelled) {
             printf("\033[23;1H\033[2KSave? (y/N) ");
             fflush(stdout);
-            ssize_t cn = read(STDIN_FILENO, &confirm_char, 1); (void)cn;
+            confirm_char = tui_read_confirm();
             if (confirm_char != 'y' && confirm_char != 'Y') cancelled = 1;
         }
     }
@@ -2052,7 +2113,7 @@ static void tui_rules_detail(const char *account, int idx)
                 printf("\033[%d;1H\033[2K  Delete \"%s\"? (y/N) ",
                        footer, r->name ? r->name : "?");
                 fflush(stdout);
-                ssize_t _nd = read(STDIN_FILENO, &del_confirm, 1); (void)_nd;
+                del_confirm = tui_read_confirm();
             }
         }
 
@@ -2083,9 +2144,12 @@ static void tui_rules_detail(const char *account, int idx)
             if (del_confirm == 'y' || del_confirm == 'Y') {
                 rules_free_at(rules, idx);
                 mail_rules_save(account, rules);
+                mail_rules_free(rules);
+                break;
             }
+            /* Anything but 'y' cancels the delete and stays in the detail. */
             mail_rules_free(rules);
-            break;
+            continue;
         }
 
         mail_rules_free(rules);
@@ -2210,14 +2274,14 @@ static void tui_rules_editor(const Config *cfg)
                 printf("\033[%d;1H\033[2K  Apply the rules to the cached messages now? (y/N) ",
                        rows);
                 fflush(stdout);
-                ssize_t _na = read(STDIN_FILENO, &del_confirm, 1); (void)_na;
+                del_confirm = tui_read_confirm();
             }
             if (ch == 'd' && count > 0) {
                 const char *rname = rules->rules[cursor].name
                                   ? rules->rules[cursor].name : "?";
                 printf("\033[%d;1H\033[2K  Delete \"%s\"? (y/N) ", rows, rname);
                 fflush(stdout);
-                ssize_t _nd = read(STDIN_FILENO, &del_confirm, 1); (void)_nd;
+                del_confirm = tui_read_confirm();
             }
         }
 
@@ -2230,6 +2294,8 @@ static void tui_rules_editor(const Config *cfg)
             static const char *help[][2] = {
                 { "j / \u2193",   "Next rule"                     },
                 { "k / \u2191",   "Previous rule"                 },
+                { "Home / End",   "First / last rule"             },
+                { "PgUp / PgDn",  "Page up / down"                },
                 { "Enter",        "Open the rule"                 },
                 { "a",            "Add a rule"                    },
                 { "d",            "Delete the rule (asks first)"  },
@@ -2239,7 +2305,7 @@ static void tui_rules_editor(const Config *cfg)
                 { "Esc / q",      "Back to the message list"      },
             };
             mail_rules_free(rules);
-            email_service_help_popup("Rules shortcuts", help, 9);
+            email_service_help_popup("Rules shortcuts", help, 11);
             continue;
         }
 
@@ -2251,6 +2317,19 @@ static void tui_rules_editor(const Config *cfg)
 
         if (key == TERM_KEY_PREV_LINE || ch == 'k') {
             if (cursor > 0) cursor--;
+            mail_rules_free(rules);
+            continue;
+        }
+
+        /* Home/End jump to the edges, PgUp/PgDn move a page (EMAIL-164). */
+        if (key == TERM_KEY_HOME || key == TERM_KEY_END ||
+            key == TERM_KEY_PREV_PAGE || key == TERM_KEY_NEXT_PAGE) {
+            int page = rows - 4;
+            if (page < 1) page = 1;
+            if (key == TERM_KEY_HOME) cursor = 0;
+            else if (key == TERM_KEY_END) cursor = count > 0 ? count - 1 : 0;
+            else if (key == TERM_KEY_PREV_PAGE) cursor = cursor > page ? cursor - page : 0;
+            else cursor = cursor + page < count ? cursor + page : (count > 0 ? count - 1 : 0);
             mail_rules_free(rules);
             continue;
         }

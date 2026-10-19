@@ -1258,7 +1258,7 @@ static const char *const exp_w80_review_long_to[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
     NULL
 };
 static const char *const sty_w80_review_long_to[] = {
@@ -1668,7 +1668,7 @@ static const char *const exp_review_menu[] = {
     "                     ┌─ Actions ─────────────────────────────────────────────┐",
     "                     │ >    Send - the message                               │",
     "                     │   e  Edit headers - To, Cc, Bcc, Subject, attachments │",
-    "                     │      Remove an attachment                               │",
+    "                     │      Remove an attachment                             │",
     "                     └───────────────────────────────────────────────────────┘",
     "",
     "",
@@ -7188,7 +7188,7 @@ static const char *const exp_w80_review[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
     NULL
 };
 static const char *const sty_w80_review[] = {

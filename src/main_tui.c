@@ -958,7 +958,7 @@ static void pcr_render(const char *from, const char *to, const char *cc,
         { "e", "edit headers", SL_PRIO_HIGH },
         { "b", "edit body", SL_PRIO_HIGH },
         { "a", "add attachment", SL_PRIO_MID },
-        { "?", "help", SL_PRIO_MID },
+        { "?", "help", SL_PRIO_LOW },
         { "q", "discard", SL_PRIO_KEEP },
     };
     screen_bar(h, 6, NULL, NULL);

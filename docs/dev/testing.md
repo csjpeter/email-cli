@@ -395,6 +395,13 @@ table when a release is tagged (copy the line of the last run on that commit):
 |------|------------------|------|------------------|----------|-----------|
 | 2026-10-16 | baseline (before EMAIL-112..117) | 79.2% | 80.2% | 89.7% | 98.7% |
 | 2026-10-17 | c74cca59df85 (after EMAIL-119) | 80.1% | 82.2% | 92.3% | 98.7% |
+| 2026-10-19 | efbff31f163f (after EMAIL-139) | 80.4% | 82.8% | 93.0% | 99.2% |
+
+`libemail-client/src/` alone (the library the goal of EMAIL-139 names), combined
+functional + PTY + unit, line coverage: 93.2% before EMAIL-139 (net_tls.c 81%,
+compose_service.c 89%, gmail_auth.c 90%), 95.4% at efbff31f163f.  The goal is
+95%; the lines left are allocations by `asprintf`/`strdup`/`open_memstream`
+(libc-internal, not injectable) and the IMAP/Gmail paths that need a server.
 
 The published badges are the combined figure and the functional + PTY figure,
 both line coverage over the same code.

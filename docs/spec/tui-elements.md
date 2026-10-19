@@ -23,7 +23,7 @@ is the end of the text of its row.
 
 | View (test) | Reached by | Elements | Keys named on the screen |
 |---|---|---|---|
-| Accounts (`accounts`) | start | header bar with count; column heads Unread, Flagged, Account, Type, Server, Send via; ruler; one row per account, `>` and the dark blue selection on the cursor row; status bar | ↑↓ Enter n d i e Esc |
+| Accounts (`accounts`) | start | header bar with count; column heads Unread, Flagged, Account, Type, Server, Send via; ruler; one row per account, `>` and the dark blue selection on the cursor row; status bar | ↑↓ PgUp/PgDn (a page of visible rows) Enter n d i e Esc |
 | Accounts help (`accounts_help`) | `h` on accounts | boxed overlay (libtuikit `tui_dialog_help`, EMAIL-110) over the view: title, key in bold and description rows; Esc, q and Backspace close it, the movement keys scroll it, any other key changes nothing | Esc q BS |
 | Delete asked (`account_delete_ask`) | `d` on accounts | information line `Delete account NAME? (y/N)`, the list unchanged | y, any other key |
 | Account deleted (`account_delete`) | `d`, `y` on accounts | "No accounts configured." | n |
@@ -38,7 +38,7 @@ is the end of the text of its row.
 | List search (`list_search`) | `/` | filter line "Filter [Subject|From|To|Body|Since|Before]: _  Showing n of N" | text (Since/Before take YYYY-MM-DD, as the CLI --since/--before), Tab, Enter, Esc |
 | Message reader (`reader`, `reader_source`, `reader_search`) | Enter on a message | header block From, Subject, Date, UID, File, DMARC; rule; body; status line "-- [1/1] …" with the keys | ↑↓ PgUp/PgDn Home End r F f n d D a A v / h Esc q BS |
 | Reader help (`reader_help`) | `h` | overlay (as the accounts help) | Esc q BS |
-| Rules editor (`rules_empty`, `rules_list`, `rules_second`) | `l` on the list | title "Rules for account (n rules)"; "(no rules …)" or one row per rule, `>` and the selection on the cursor; status line (`j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q back  h help`) | j k ↑↓ Enter a d Esc q |
+| Rules editor (`rules_empty`, `rules_list`, `rules_second`) | `l` on the list | title "Rules for account (n rules)"; "(no rules …)" or one row per rule, `>` and the selection on the cursor; status line (`j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q back  h help`) | j k ↑↓ Home End PgUp PgDn (EMAIL-164) Enter a d Esc q |
 | Rule detail (`rule_detail`) | Enter on a rule | "Rule:", "Account:", `when:` and the `then-*` rows; status line (`e edit  d delete  Esc/q back  h help`) | e d Esc q |
 | Rule edit (`rule_edit_form`) | `e` on a rule | condition list editor step 1/2 prefilled | j k Enter e a d q Esc |
 | Rule add, conditions (`rule_add_when`) | `a` in the rules editor | step 1/2 title, status line, "(empty — press 'a' …)" | a q Esc |

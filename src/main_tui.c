@@ -1783,6 +1783,8 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
             static const char *help[][2] = {
                 { "j / \u2193",   "Next condition"                  },
                 { "k / \u2191",   "Previous condition"              },
+                { "Home / End",   "First / last condition"          },
+                { "PgUp / PgDn",  "Page up / down"                  },
                 { "Enter / e",    "Edit the condition"              },
                 { "a",            "Add a condition"                 },
                 { "d",            "Delete the condition"            },
@@ -1790,7 +1792,7 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                 { "Esc",          "Cancel the rule"                 },
                 { "?",            "Show this help"                  },
             };
-            email_service_help_popup("Conditions shortcuts", help, 8);
+            email_service_help_popup("Conditions shortcuts", help, 10);
             continue;
         }
 
@@ -1804,6 +1806,20 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                 wl.cursor--;
                 if (wl.cursor < wl.scroll) wl.scroll--;
             }
+        } else if (key == TERM_KEY_HOME || key == TERM_KEY_END ||
+                   key == TERM_KEY_PREV_PAGE || key == TERM_KEY_NEXT_PAGE) {
+            /* Home/End jump to the edges, PgUp/PgDn move a page (EMAIL-164). */
+            if (key == TERM_KEY_HOME) wl.cursor = 0;
+            else if (key == TERM_KEY_END) wl.cursor = wl.count > 0 ? wl.count - 1 : 0;
+            else if (key == TERM_KEY_PREV_PAGE) {
+                wl.cursor -= vis_rows;
+                if (wl.cursor < 0) wl.cursor = 0;
+            } else {
+                wl.cursor += vis_rows;
+                if (wl.cursor > wl.count - 1) wl.cursor = wl.count > 0 ? wl.count - 1 : 0;
+            }
+            if (wl.cursor < wl.scroll) wl.scroll = wl.cursor;
+            if (wl.cursor >= wl.scroll + vis_rows) wl.scroll = wl.cursor - vis_rows + 1;
         } else if (key == TERM_KEY_ENTER || ch == 'e') {
             if (wl.count == 0) {
                 when_list_do_add(&wl, vis_rows, title);
@@ -2263,6 +2279,8 @@ static void tui_rules_editor(const Config *cfg)
             static const char *help[][2] = {
                 { "j / \u2193",   "Next rule"                     },
                 { "k / \u2191",   "Previous rule"                 },
+                { "Home / End",   "First / last rule"             },
+                { "PgUp / PgDn",  "Page up / down"                },
                 { "Enter",        "Open the rule"                 },
                 { "a",            "Add a rule"                    },
                 { "d",            "Delete the rule (asks first)"  },
@@ -2272,7 +2290,7 @@ static void tui_rules_editor(const Config *cfg)
                 { "Esc / q",      "Back to the message list"      },
             };
             mail_rules_free(rules);
-            email_service_help_popup("Rules shortcuts", help, 9);
+            email_service_help_popup("Rules shortcuts", help, 11);
             continue;
         }
 
@@ -2284,6 +2302,19 @@ static void tui_rules_editor(const Config *cfg)
 
         if (key == TERM_KEY_PREV_LINE || ch == 'k') {
             if (cursor > 0) cursor--;
+            mail_rules_free(rules);
+            continue;
+        }
+
+        /* Home/End jump to the edges, PgUp/PgDn move a page (EMAIL-164). */
+        if (key == TERM_KEY_HOME || key == TERM_KEY_END ||
+            key == TERM_KEY_PREV_PAGE || key == TERM_KEY_NEXT_PAGE) {
+            int page = rows - 4;
+            if (page < 1) page = 1;
+            if (key == TERM_KEY_HOME) cursor = 0;
+            else if (key == TERM_KEY_END) cursor = count > 0 ? count - 1 : 0;
+            else if (key == TERM_KEY_PREV_PAGE) cursor = cursor > page ? cursor - page : 0;
+            else cursor = cursor + page < count ? cursor + page : (count > 0 ? count - 1 : 0);
             mail_rules_free(rules);
             continue;
         }

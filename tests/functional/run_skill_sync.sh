@@ -20,7 +20,7 @@ bad() { echo "  [FAIL] $1"; FAILED=$((FAILED + 1)); }
 
 # Commands that have no page of their own for 'help <command>' (the usage is in
 # the general help): listed here so that a new gap is not taken for one.
-NO_PAGE=" migrate-credentials help "
+NO_PAGE=" "
 
 pages=""      # all the help text
 cmds=""       # command words

@@ -268,6 +268,21 @@ static void help_list_accounts(void) {
     );
 }
 
+static void help_help(void) {
+    printf(
+        "Usage: email-cli-ro help [<command>]\n"
+        "\n"
+        "Show the general help, or the detailed help page of one command.\n"
+        "'email-cli-ro <command> --help' shows the same page as 'email-cli-ro help <command>'.\n"
+        "\n"
+        "  <command>  A command word, e.g. list, show or list-folders\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli-ro help\n"
+        "  email-cli-ro help list\n"
+    );
+}
+
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
 static int parse_uid(const char *s, char uid_out[17]) {
@@ -381,6 +396,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
                 if (strcmp(cmd, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
+                if (strcmp(cmd, "help")            == 0) { help_help();            return EXIT_SUCCESS; }
             }
             help_general();
             return EXIT_SUCCESS;
@@ -398,6 +414,7 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "save-attachment") == 0) { help_save_attachment(); return EXIT_SUCCESS; }
             if (strcmp(topic, "list-labels")     == 0) { help_list_labels();     return EXIT_SUCCESS; }
             if (strcmp(topic, "list-accounts")   == 0) { help_list_accounts();   return EXIT_SUCCESS; }
+            if (strcmp(topic, "help")            == 0) { help_help();            return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
             fprintf(stderr, "Run 'email-cli-ro help' for available commands.\n");
             return EXIT_FAILURE;

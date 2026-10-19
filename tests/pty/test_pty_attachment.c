@@ -563,7 +563,7 @@ static void test_review_send_asks_default_no(void)
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Send");
     ASSERT_SCREEN_CONTAINS(s, "Edit headers");
-    ASSERT_SCREEN_CONTAINS(s, "Remove last attachment");
+    ASSERT_SCREEN_CONTAINS(s, "Remove an attachment");
     pty_send_key(s, PTY_KEY_ENTER);                 /* Send */
     ASSERT_WAIT_FOR(s, "alice@example.com?", WAIT_MS);   /* names the recipient */
     pty_send_key(s, PTY_KEY_ENTER);                 /* Enter on the default: No */
@@ -792,6 +792,45 @@ static void test_review_d_removes_attachment(void)
     pty_close(s);
 }
 
+/* EMAIL-168: '?' opens the review screen's help; with several attachments
+ * the menu asks which one to remove; 'd' and 's' do nothing by themselves. */
+static void test_review_help_and_pick_attachment(void)
+{
+    restart_servers();
+    PtySession *s = compose_to_review("alice@example.com", "Pick attach test");
+    ASSERT(s != NULL, "EMAIL-168: review reached");
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Review shortcuts", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Edit headers");
+    ASSERT_SCREEN_CONTAINS(s, "Discard");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, 200);
+    ASSERT_SCREEN_CONTAINS(s, "Review");
+    pty_send_str(s, "a");
+    pty_settle(s, 200);
+    pty_send_str(s, g_attach_file1);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "report.pdf", WAIT_MS);
+    pty_send_str(s, "a");
+    pty_settle(s, 200);
+    pty_send_str(s, g_attach_file2);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
+    pty_send_str(s, "d");                       /* d does nothing */
+    pty_settle(s, 200);
+    ASSERT_SCREEN_CONTAINS(s, "report.pdf");
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");
+    REVIEW_UNATTACH(s);
+    ASSERT_WAIT_FOR(s, "Remove which attachment", WAIT_MS);
+    pty_send_str(s, "1");                       /* the first, not the last */
+    pty_settle(s, 300);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "report.pdf");
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");
+    pty_send_str(s, "q");
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
 /* TC-PCR-12: [q] asks discard confirmation; [n] returns to review */
 static void test_review_q_asks_discard_confirm(void)
 {
@@ -941,6 +980,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_review_picker_max_attachments);
     RUN_TEST(test_attach_field_max_attachments);
     RUN_TEST(test_review_d_removes_attachment);
+    RUN_TEST(test_review_help_and_pick_attachment);
     RUN_TEST(test_review_q_asks_discard_confirm);
     RUN_TEST(test_review_q_y_cancels);
     RUN_TEST(test_review_esc_asks_discard_confirm);

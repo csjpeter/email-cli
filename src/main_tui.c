@@ -958,9 +958,10 @@ static void pcr_render(const char *from, const char *to, const char *cc,
         { "e", "edit headers", SL_PRIO_HIGH },
         { "b", "edit body", SL_PRIO_HIGH },
         { "a", "add attachment", SL_PRIO_MID },
+        { "?", "help", SL_PRIO_MID },
         { "q", "discard", SL_PRIO_KEEP },
     };
-    screen_bar(h, 5, NULL, NULL);
+    screen_bar(h, 6, NULL, NULL);
 }
 
 /* Inline single-field attachment picker used by [a] key in review.
@@ -1072,6 +1073,26 @@ static int pcr_pick_attach_raw(char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_S
     }
 }
 
+/* Ask which attachment to remove: the numbers on the screen, 1..count.
+ * Returns the index, or -1 when cancelled (Esc or any other key). */
+static int pcr_ask_attachment(char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_SZ],
+                              int count)
+{
+    (void)attach_paths;
+    printf("\033[2J\033[H");
+    for (int i = 0; i < count; i++) {
+        const char *fname = strrchr(attach_paths[i], '/');
+        fname = fname ? fname + 1 : attach_paths[i];
+        printf("  %d  %s\n", i + 1, fname);
+    }
+    printf("\n  Remove which attachment? [1-%d, Esc cancels] ", count);
+    fflush(stdout);
+    TermKey k = terminal_read_key();
+    int ch = (k == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
+    if (ch >= '1' && ch < '1' + count) return ch - '1';
+    return -1;
+}
+
 /* Post-compose review screen.
  * Runs its own key loop; attach_paths/attach_count are modified in place.
  * Returns PCR_SEND, PCR_CANCEL, PCR_EDIT_BODY, or PCR_EDIT_HEADERS. */
@@ -1109,9 +1130,21 @@ static int post_compose_review(const char *from, const char *to,
                 return PCR_SEND;
             }
             if (act == EA_UNATTACH && *attach_count > 0) {
+                int which = *attach_count - 1;
+                if (*attach_count > 1) {
+                    which = pcr_ask_attachment(attach_paths, *attach_count);
+                    if (which < 0) continue;
+                }
+                for (int i = which; i < *attach_count - 1; i++)
+                    memcpy(attach_paths[i], attach_paths[i + 1], CD_ATTACH_PATH_SZ);
                 (*attach_count)--;
                 attach_paths[*attach_count][0] = '\0';
             }
+            continue;
+        }
+
+        if (ch == '?') {
+            ekeys_help(EKV_REVIEW, "Review shortcuts");
             continue;
         }
 

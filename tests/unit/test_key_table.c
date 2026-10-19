@@ -79,5 +79,6 @@ void test_key_table(void) {
                               EKV_LABELS, EKV_FOLDERS };
     for (int i = 0; i < 6; i++)
         ASSERT(ekeys_help_has(finders[i], '/'), "key table: help lists / (filter, search)");
+    ASSERT(ekeys_help_has(EKV_REVIEW, '?'), "key table: the review screen has a help");
     ASSERT(!ekeys_help_has(EKV_FOLDERS, 'd'), "key table: help lists no key that does nothing");
 }

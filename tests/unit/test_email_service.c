@@ -4252,7 +4252,7 @@ void test_forward_compose(void) {
 
     ASSERT(email_service_forward_compose(raw, NULL, &subj, &body) == 0,
            "forward_compose without a note succeeds");
-    ASSERT(body && strncmp(body, "\n\n--- Forwarded message ---", 29) == 0,
+    ASSERT(body && strncmp(body, "\n\n--- Forwarded message ---", 27) == 0,
            "forward_compose: no note leaves the TUI's layout");
     free(subj); free(body);
 

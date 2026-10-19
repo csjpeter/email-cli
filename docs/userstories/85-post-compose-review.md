@@ -20,7 +20,7 @@ attachments I forgot during the header phase.
 | 6 | Pressing `e` reopens the pre-compose dialog (US-CD-1) pre-filled with the current To, Cc, Bcc, Subject, and attachment list. After confirming the dialog the editor does **not** reopen; the review screen is shown again with updated headers. |
 | 7 | Pressing `b` reopens the built-in body editor (US-87) with the current text. After Esc the review screen is shown again with the updated body line count. |
 | 8 | Pressing `a` opens an attachment picker (the same file-browser field from US-84) overlaid on the review screen. The picked file is appended to the attachment list and the review screen is redisplayed. |
-| 9 | Pressing `d` removes the last attachment from the list and redisplays the review screen. If there are no attachments `d` is a no-op (no error). |
+| 9 | The `:` menu entry "Remove an attachment" removes the only attachment, or, with several, asks for its number (1-8; any other key cancels), and redisplays the review screen. `d` does nothing. `?` opens the help overlay listing the keys of the review screen (EMAIL-168). |
 | 10 | Pressing `q` or `Esc` asks `Discard message? [y/n]` and cancels on `y`. |
 | 11 | If the To field is empty (e.g. the user deleted it in the editor) the review screen shows an inline error `To: is required` and `s` is disabled until the user presses `e` to fix it. |
 | 12 | The review screen replaces the current terminal content cleanly (no leftover editor artifacts). |
@@ -42,7 +42,7 @@ attachments I forgot during the header phase.
 │  Body:        12 lines                                                   │
 │                                                                          │
 │  [s] Send   [e] Edit headers   [b] Edit body   [a] Add attachment        │
-│  [d] Remove last attachment    [q] Cancel                                │
+│  [?] Help   [:] Actions (send, remove attachment)   [q] Cancel                                │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 

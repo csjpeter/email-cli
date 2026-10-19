@@ -193,10 +193,11 @@ static const tui_keyentry g_entries[] = {
       EA_EDIT_HEADERS),
     H(EKV_REVIEW, 'b', "Edit body", NULL),
     H(EKV_REVIEW, 'a', "Add attachment", NULL),
+    H(EKV_REVIEW, '?', "Help", NULL),
     H(EKV_REVIEW, ':', "Actions", "send the message, remove an attachment"),
     H(EKV_REVIEW, 'q', "Discard", "asks first"),
     H(EKV_REVIEW, TUI_KEY_ESC, "Discard", "asks first"),
-    M(EKV_REVIEW, "Remove last attachment", NULL, EA_UNATTACH),
+    M(EKV_REVIEW, "Remove an attachment", NULL, EA_UNATTACH),
 };
 
 #define N_ENTRIES ((int)(sizeof g_entries / sizeof g_entries[0]))

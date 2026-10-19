@@ -23,7 +23,7 @@ is the end of the text of its row.
 
 | View (test) | Reached by | Elements | Keys named on the screen |
 |---|---|---|---|
-| Accounts (`accounts`) | start | header bar with count; column heads Unread, Flagged, Account, Type, Server, Send via; ruler; one row per account, `>` and the dark blue selection on the cursor row; status bar | ↑↓ Enter n d i e Esc |
+| Accounts (`accounts`) | start | header bar with count; column heads Unread, Flagged, Account, Type, Server, Send via; ruler; one row per account, `>` and the dark blue selection on the cursor row; status bar | ↑↓ PgUp/PgDn (a page of visible rows) Enter n d i e Esc |
 | Accounts help (`accounts_help`) | `h` on accounts | boxed overlay (libtuikit `tui_dialog_help`, EMAIL-110) over the view: title, key in bold and description rows; Esc, q and Backspace close it, the movement keys scroll it, any other key changes nothing | Esc q BS |
 | Delete asked (`account_delete_ask`) | `d` on accounts | information line `Delete account NAME? (y/N)`, the list unchanged | y, any other key |
 | Account deleted (`account_delete`) | `d`, `y` on accounts | "No accounts configured." | n |

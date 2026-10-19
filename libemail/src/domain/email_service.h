@@ -27,6 +27,10 @@
  *              value is 3/5/6 = reply/fwd/reply-all). Unused otherwise.
  * action_folder Output: physical IMAP folder of action_uid (may differ from
  *              the virtual/search folder the list was opened with).
+ * cursor_out    Output (pager): 1-based index of the message under the cursor
+ *              when the list returned 2/3/5/6/7 (compose, reply, forward,
+ *              reply-all, rules).  The caller passes it as @c offset when it
+ *              lists again, so the cursor is where the user left it.
  */
 typedef struct {
     int         all;
@@ -42,6 +46,7 @@ typedef struct {
     int         json;           /**< 1 = emit JSON instead of the text table */
     char        action_uid[17];  /**< Output: UID for reply/fwd/reply-all */
     char        action_folder[512]; /**< Output: physical folder for action_uid */
+    int         cursor_out;     /**< Output (pager): cursor message, 1-based */
 } EmailListOpts;
 
 /**

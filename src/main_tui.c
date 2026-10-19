@@ -45,7 +45,7 @@
 #include "mail_rules.h"
 
 /* Number of non-data lines printed around the message table */
-#define LIST_HEADER_LINES 6
+#define LIST_HEADER_LINES 5
 
 static int detect_page_size(void) {
     int rows = terminal_rows();
@@ -2855,12 +2855,19 @@ int main(int argc, char *argv[]) {
         }
 
         int back_to_accounts = 0;
+        int resume_at = 0;      /* 1-based message to put the cursor on again */
         for (;;) {  /* inner: message list + folder browser */
             EmailListOpts opts = {0};
             opts.folder = tui_folder;
             opts.limit  = page_size;
             opts.pager  = 1;
+            opts.offset = resume_at;
+            resume_at   = 0;
             int ret = email_service_list(sel_cfg, &opts);
+            /* After a compose, a reply, a forward or the rules editor the list
+             * comes back with the cursor where it was (EMAIL-186). */
+            if (ret == 2 || ret == 3 || ret == 5 || ret == 6 || ret == 7)
+                resume_at = opts.cursor_out;
             if (ret == 1) {
                 /* Backspace from message list → folder/label browser */
                 char *sel = sel_cfg->gmail_mode

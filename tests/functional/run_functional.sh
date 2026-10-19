@@ -7601,6 +7601,85 @@ check "137.9 email-cli-ro help --help shows the usage"   "Usage: email-cli-ro he
 
 fi
 
+if phase_wanted 134; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 134 — forward from the command line (EMAIL-134)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 134: forward (EMAIL-134) ---"
+
+alloc_port IMAP134_PORT
+alloc_port SMTP134_PORT
+IMAP134_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_134.log"
+SMTP134_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp_134.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP134_PORT MOCK_IMAP_SUBJECT="Phase134Msg" \
+    "$MOCK_SERVER_BIN") >"$IMAP134_LOG" 2>&1 &
+IMAP134_PID=$!
+(cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP134_PORT "$MOCK_SMTP_BIN") >"$SMTP134_LOG" 2>&1 &
+SMTP134_PID=$!
+sleep 1
+
+H134="./build/tests/functional/work-$$/homes/f134-$$"
+mkdir -p "$H134/.config/email-cli/accounts/w134@example.org"
+printf 'credential_obfuscation=false\n' > "$H134/.config/email-cli/settings.ini"
+cat > "$H134/.config/email-cli/accounts/w134@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP134_PORT
+EMAIL_USER=w134@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SMTP_HOST=smtps://localhost:$SMTP134_PORT
+SMTP_PORT=$SMTP134_PORT
+SMTP_USER=w134@example.org
+SMTP_PASS=testpass
+SSL_NO_VERIFY=1
+INI
+chmod 0600 "$H134"/.config/email-cli/accounts/*/config.ini
+
+w134() {
+    local bin="$1"; shift
+    (export HOME="$H134"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/$bin" w134@example.org "$@" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+
+OUT=$(w134 email-cli forward 2 --to bob@example.org --body "FYI134")
+check "134.1 forward reports it"                     "Message forwarded." "$OUT"
+check "134.2 forward exits 0"                        "exit-code=0" "$OUT"
+check "134.3 forward saves a copy in Sent"           "Saved." "$OUT"
+check "134.4 SMTP mock receives the message"         "RECEIVED" "$(cat "$SMTP134_LOG")"
+check "134.5 the subject is Fwd: + the original"     "Subject: Fwd: Phase134Msg" "$(cat "$SMTP134_LOG")"
+check "134.6 the recipient is the --to address"      "RCPT TO:<bob@example.org>" "$(cat "$SMTP134_LOG")"
+check "134.7 the message names the forwarded part"   "Forwarded message" "$(cat "$SMTP134_LOG")"
+check "134.8 the original is included"               "Hello from Mock Server" "$(cat "$SMTP134_LOG")"
+check "134.9 the note is included"                   "FYI134" "$(cat "$SMTP134_LOG")"
+check "134.10 the original is flagged \$Forwarded"   'UID STORE 0000000000000002 +FLAGS (.Forwarded)' "$(grep 'Client requested' "$IMAP134_LOG")"
+
+OUT=$(w134 email-cli forward 3 --to c@example.org --cc d@example.org --folder INBOX)
+check "134.11 forward with --cc and --folder"        "Message forwarded." "$OUT"
+check "134.12 the Cc address is a recipient too"     "RCPT TO:<d@example.org>" "$(cat "$SMTP134_LOG")"
+check "134.22 the To address got the message as well" "RCPT TO:<c@example.org>" "$(cat "$SMTP134_LOG")"
+check "134.23 the Cc header is in the message"       "Cc: d@example.org" "$(cat "$SMTP134_LOG")"
+OUT=$(w134 email-cli forward 3)
+check "134.13 forward without --to"                  "Error: --to is required" "$OUT"
+check "134.14 and exits non-zero"                    "exit-code=1" "$OUT"
+OUT=$(w134 email-cli forward --to a@example.org)
+check "134.15 forward without a UID"                 "'forward' requires a UID" "$OUT"
+OUT=$(w134 email-cli forward zz --to a@example.org)
+check "134.16 forward with a bad UID"                "invalid UID 'zz'" "$OUT"
+OUT=$(w134 email-cli forward 1 2 --to a@example.org)
+check "134.17 forward with two UIDs"                 "Unknown option" "$OUT"
+OUT=$(w134 email-cli forward 1 --to)
+check "134.18 --to without a value"                  "Error: --to requires an address" "$OUT"
+OUT=$(w134 email-cli-ro forward 1 --to a@example.org)
+check "134.19 email-cli-ro refuses forward"          "not available in read-only mode" "$OUT"
+OUT=$("$BIN_DIR/email-cli" forward --help 2>&1)
+check "134.20 forward --help describes it"           "Fwd: <subject>" "$OUT"
+OUT=$("$BIN_DIR/email-cli" help forward 2>&1)
+check "134.21 help forward shows the page"           "\$Forwarded" "$OUT"
+kill "$IMAP134_PID" "$SMTP134_PID"
+
+fi
+
 if phase_wanted 96; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)

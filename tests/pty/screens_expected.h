@@ -457,7 +457,7 @@ static const char *const exp_reader_help[] = {
     "Subject: Message ┌─ Message reader shortcuts ────────────────────────────────────┐",
     "Date:    2020-01-│ j         Down - scroll a line (also Down)                    │",
     "UID:     00000000│ k         Up - scroll a line (also Up)                        │",
-    "%File:    │ PageDown  Page down                                           │ail-cli/accounts/t",
+    "%File:    │ PageDown  Page down                                           │mail-cli/accounts/",
     "%",
     "DMARC:   Not eval│ Home      Top                                                 │",
     "─────────────────│ End       Bottom                                              │",
@@ -4039,7 +4039,7 @@ static const char *const sty_att_save_prompt[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_att_save_prompt[3] = { 22, 82, 1 };
+static const int cur_att_save_prompt[3] = { 22, 83, 1 };
 
 static const char *const exp_att_saved[] = {
     "From:    Test User <test@example.com>",
@@ -4820,7 +4820,7 @@ static const char *const sty_path_many[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_path_many[3] = { 6, 79, 1 };
+static const int cur_path_many[3] = { 6, 80, 1 };
 
 static const char *const exp_path_one[] = {
     "  New Message",
@@ -4876,7 +4876,7 @@ static const char *const sty_path_one[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_path_one[3] = { 6, 78, 1 };
+static const int cur_path_one[3] = { 6, 79, 1 };
 
 static const char *const exp_err_connect[] = {
     "~>                testuser                         IMAP  …aps://localhost:# …ps://localhost:#",

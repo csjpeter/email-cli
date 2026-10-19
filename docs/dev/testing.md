@@ -30,7 +30,7 @@ matches nothing fails the run.
 
 No test uses `/tmp` and no test has a fixed port.
 
-- Every fixture is under `build/tests/<category>/work-<pid>/`, removed when the
+- Every fixture is under `build/tests/<category>/work-<pid>/` (the pid padded to 7 digits, so a path on a screen has the same length on every run), removed when the
   process ends (the unit and PTY suites through `tests/common/test_scratch.h`,
   the functional and integration scripts through their exit trap).  A killed run
   leaves its directory under `build/`, and `./manage.sh clean` takes it.

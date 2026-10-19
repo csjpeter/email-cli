@@ -1624,7 +1624,7 @@ static void test_D_queues_trash_for_sync(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "queue-D: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "queue-D: navigate_to_inbox");
-    pty_send_str(s, "D");
+    gm_trash(s);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1645,7 +1645,7 @@ static void test_a_queues_archive_for_sync(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "queue-a: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "queue-a: navigate_to_inbox");
-    pty_send_str(s, "a");
+    gm_archive(s);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);

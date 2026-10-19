@@ -3640,7 +3640,9 @@ static void test_delete_offline_queues_move(void) {
     ASSERT(s != NULL, "offline D: tui opens offline");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "D");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_str(s, "y");
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_screen_contains(s, "queued"),
            "offline D: feedback says the move is queued");

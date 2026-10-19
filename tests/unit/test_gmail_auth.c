@@ -6,6 +6,7 @@
 #include "gmail_auth.h"
 #include "config.h"
 #include "gmail_login.h"
+#include "fault_alloc.h"
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -920,6 +921,270 @@ static void test_refresh_invalid_grant_message(void) {
     wait_child(pid);
 }
 
+/* ── The failures of the authorization (EMAIL-139) ──────────────────── */
+
+static Config *fi_cfg(Config *cfg) {
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->gmail_client_id     = strdup("test-client-id.apps.googleusercontent.com");
+    cfg->gmail_client_secret = strdup("test-client-secret");
+    return cfg;
+}
+
+static void fi_cfg_free(Config *cfg) {
+    free(cfg->gmail_client_id);
+    free(cfg->gmail_client_secret);
+    free(cfg->gmail_refresh_token);
+}
+
+static void test_authorize_all_loopback_ports_busy(void) {
+    int held[REDIRECT_PORT_LAST - REDIRECT_PORT_FIRST + 1];
+    int n = 0;
+    for (int port = REDIRECT_PORT_FIRST; port <= REDIRECT_PORT_LAST; port++) {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));   /* as the library does */
+        struct sockaddr_in a = {0};
+        a.sin_family      = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        a.sin_port        = htons((uint16_t)port);
+        if (bind(fd, (struct sockaddr *)&a, sizeof(a)) == 0 && listen(fd, 1) == 0)
+            held[n++] = fd;
+        else
+            close(fd);      /* somebody else holds it: just as busy */
+    }
+    Config cfg;
+    fi_cfg(&cfg);
+    int rc = authorize_run(&cfg, 0, NULL);
+    for (int i = 0; i < n; i++) close(held[i]);
+    fi_cfg_free(&cfg);
+    ASSERT(n == REDIRECT_PORT_LAST - REDIRECT_PORT_FIRST + 1, "all the loopback ports were held");
+    ASSERT(rc == -1, "no free loopback port: the authorization fails");
+    ASSERT(strstr(g_auth_ui.error, "listener") != NULL, "and says no listener could be opened");
+    ASSERT(g_auth_shown == 0, "the person was not sent to a browser that cannot reach us");
+}
+
+static volatile sig_atomic_t g_auth_ticks;
+static void auth_tick(int sig) { (void)sig; g_auth_ticks++; }
+
+static void test_authorize_waiting_for_the_redirect_is_interrupted(void) {
+    struct sigaction sa, old;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = auth_tick;
+    sigemptyset(&sa.sa_mask);
+    g_auth_ticks = 0;
+    sigaction(SIGALRM, &sa, &old);
+    struct itimerval it = { {0, 0}, {0, 300000} };
+    setitimer(ITIMER_REAL, &it, NULL);
+
+    Config cfg;
+    fi_cfg(&cfg);
+    int rc = authorize_run(&cfg, 0, NULL);
+
+    struct itimerval off = { {0, 0}, {0, 0} };
+    setitimer(ITIMER_REAL, &off, NULL);
+    sigaction(SIGALRM, &old, NULL);
+    ASSERT(g_auth_ticks > 0, "the signal arrived while waiting for the redirect");
+    ASSERT(rc == -1, "a wait that ends without a connection fails the authorization");
+    ASSERT(strstr(g_auth_ui.error, "timed out") != NULL, "and says the code did not come");
+    fi_cfg_free(&cfg);
+}
+
+static void test_authorize_redirect_connection_without_a_request(void) {
+    pid_t pid = fork();
+    if (pid == 0) redirect_child("", 4000);
+    Config cfg;
+    fi_cfg(&cfg);
+    int rc = authorize_run(&cfg, 0, NULL);
+    kill(pid, SIGKILL);
+    wait_child(pid);
+    ASSERT(rc == -1, "a browser that connects and sends nothing fails the authorization");
+    ASSERT(strstr(g_auth_ui.error, "Did not receive the authorization code") != NULL,
+           "and the reason is named");
+    fi_cfg_free(&cfg);
+}
+
+static void test_authorize_token_response_without_access_token(void) {
+    const int mock_port = mock_listen();
+    const char *resp =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+        "{\"refresh_token\":\"only_refresh\"}";
+    pid_t srv = fork();
+    if (srv == 0) run_mock_token_server(mock_port, resp);
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
+    setenv("GMAIL_TEST_TOKEN_URL", url, 1);
+    Config cfg;
+    fi_cfg(&cfg);
+    int rc = authorize_run(&cfg, 1, "code=abc");
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+    kill(srv, SIGKILL);
+    wait_child(srv);
+    ASSERT(rc == -1, "a token reply without access_token fails the authorization");
+    ASSERT(strstr(g_auth_ui.error, "missing access_token") != NULL, "and says what is missing");
+    ASSERT(cfg.gmail_refresh_token == NULL, "no half-token is stored");
+    fi_cfg_free(&cfg);
+}
+
+static void test_refresh_invalid_client_message(void) {
+    const int mock_port = mock_listen();
+    const char *resp =
+        "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\n\r\n"
+        "{\"error\":\"invalid_client\"}";
+    pid_t pid = fork();
+    if (pid == 0) run_mock_token_server(mock_port, resp);
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
+    setenv("GMAIL_TEST_TOKEN_URL", url, 1);
+
+    char errfile[PATH_MAX];
+    snprintf(errfile, sizeof(errfile), "%s/invalid-client-XXXXXX", test_scratch_dir());
+    int efd = mkstemp(errfile);
+    ASSERT(efd >= 0, "invalid_client: temp file for stderr");
+    Config cfg = {0};
+    cfg.gmail_refresh_token = strdup("some_token");
+    fflush(stderr);
+    int saved = dup(2);
+    dup2(efd, 2);
+    char *tok = gmail_auth_refresh(&cfg);
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
+    ASSERT(tok == NULL, "invalid_client: returns NULL");
+    char buf[1024] = {0};
+    lseek(efd, 0, SEEK_SET);
+    ssize_t rd = read(efd, buf, sizeof(buf) - 1);
+    close(efd);
+    unlink(errfile);
+    ASSERT(rd > 0 && strstr(buf, "client credentials are invalid") != NULL,
+           "invalid_client: says the client credentials are invalid");
+    ASSERT(strstr(buf, "email-cli help gmail") != NULL,
+           "invalid_client: names the guide that creates them");
+    free(cfg.gmail_refresh_token);
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+    wait_child(pid);
+}
+
+/**
+ * Every allocation point of the paste-mode authorization fails in turn: the
+ * result is a clean failure (the token endpoint is not there), never a crash,
+ * and the leak checker sees every path release what it took.
+ */
+static void test_authorize_every_allocation_failing_in_turn(void) {
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", test_unused_port());
+    setenv("GMAIL_TEST_TOKEN_URL", url, 1);
+    int swept = 0, oom = 0;
+    for (long k = 1; k < 300; k++) {
+        Config cfg;
+        fi_cfg(&cfg);
+        fault_alloc_arm(k);
+        int rc = authorize_run(&cfg, 1, "code=abc");
+        int fired = fault_alloc_disarm();
+        if (strstr(g_auth_ui.error, "Out of memory")) oom++;
+        fi_cfg_free(&cfg);
+        ASSERT(rc == -1, "the token endpoint is down: the authorization fails");
+        if (!fired) { swept = 1; break; }
+    }
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+    ASSERT(swept, "the sweep reached the end of the allocations");
+    ASSERT(oom > 0, "a failed allocation is reported as out of memory");
+}
+
+/* ── gmail_login(): what the person sees, and the stored token (EMAIL-139) ── */
+
+/** Run gmail_login() with stderr captured into @p text. */
+static int login_captured(Config *cfg, GmailLoginMode mode, const char *input,
+                          char *text, size_t cap) {
+    char errfile[PATH_MAX];
+    snprintf(errfile, sizeof(errfile), "%s/login-err-XXXXXX", test_scratch_dir());
+    int efd = mkstemp(errfile);
+    if (efd < 0) return -2;
+    /* an empty stream is /dev/null: fmemopen() refuses a zero size, and a NULL
+     * stream would make gmail_login() read the real stdin */
+    FILE *in = (input && input[0]) ? fmemopen((void *)input, strlen(input), "r")
+                                   : fopen("/dev/null", "r");
+    if (!in) return -2;
+    fflush(stderr);
+    int saved = dup(2);
+    dup2(efd, 2);
+    int rc = gmail_login(cfg, mode, in);
+    fclose(in);
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
+    lseek(efd, 0, SEEK_SET);
+    ssize_t n = read(efd, text, cap - 1);
+    text[n > 0 ? n : 0] = '\0';
+    close(efd);
+    unlink(errfile);
+    return rc;
+}
+
+static const char *const k_login_token_reply =
+    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+    "{\"access_token\":\"a\",\"refresh_token\":\"login_refresh\"}";
+
+static void test_gmail_login_paste_mode(void) {
+    const int mock_port = mock_listen();
+    pid_t srv = fork();
+    if (srv == 0) run_mock_token_server(mock_port, k_login_token_reply);
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
+    setenv("GMAIL_TEST_TOKEN_URL", url, 1);
+    Config cfg;
+    fi_cfg(&cfg);
+    char text[4096];
+    int rc = login_captured(&cfg, GMAIL_LOGIN_PASTE,
+                            "http://localhost:8089/callback?code=PASTED&scope=x\n", text, sizeof(text));
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+    kill(srv, SIGKILL);
+    wait_child(srv);
+    ASSERT(rc == 0, "paste login succeeds");
+    ASSERT(cfg.gmail_refresh_token && strcmp(cfg.gmail_refresh_token, "login_refresh") == 0,
+           "the refresh token is stored in the account");
+    ASSERT(strstr(text, "Open this address in a browser") != NULL, "the person is told where to go");
+    ASSERT(strstr(text, "Paste the address") != NULL, "and asked for the redirect");
+    ASSERT(strstr(text, "Authorization successful") != NULL, "and told it worked");
+    fi_cfg_free(&cfg);
+}
+
+static void test_gmail_login_paste_nothing_given(void) {
+    Config cfg;
+    fi_cfg(&cfg);
+    char text[4096];
+    int rc = login_captured(&cfg, GMAIL_LOGIN_PASTE, "", text, sizeof(text));
+    ASSERT(rc == -1, "an empty paste fails the login");
+    ASSERT(strstr(text, "Error:") != NULL, "and the error is printed");
+    ASSERT(cfg.gmail_refresh_token == NULL, "no token is stored");
+    fi_cfg_free(&cfg);
+}
+
+static void test_gmail_login_loopback_mode(void) {
+    const int mock_port = mock_listen();
+    pid_t srv = fork();
+    if (srv == 0) run_mock_token_server(mock_port, k_login_token_reply);
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
+    setenv("GMAIL_TEST_TOKEN_URL", url, 1);
+    pid_t br = fork();
+    if (br == 0) redirect_child("GET /callback?code=LOOPED HTTP/1.1\r\n\r\n", 8000);
+    Config cfg;
+    fi_cfg(&cfg);
+    char text[4096];
+    int rc = login_captured(&cfg, GMAIL_LOGIN_LOOPBACK, NULL, text, sizeof(text));
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+    kill(br, SIGKILL);
+    wait_child(br);
+    kill(srv, SIGKILL);
+    wait_child(srv);
+    ASSERT(rc == 0, "loopback login succeeds");
+    ASSERT(cfg.gmail_refresh_token && strcmp(cfg.gmail_refresh_token, "login_refresh") == 0,
+           "the refresh token is stored in the account");
+    ASSERT(strstr(text, "Waiting for authorization") != NULL, "the person is told it is waiting");
+    ASSERT(strstr(text, "ssh -L") != NULL, "and how to reach it from another machine");
+    fi_cfg_free(&cfg);
+}
+
 void test_gmail_auth(void) {
     RUN_TEST(test_refresh_no_token);
     RUN_TEST(test_refresh_empty_token);
@@ -942,4 +1207,13 @@ void test_gmail_auth(void) {
     RUN_TEST(test_refresh_invalid_grant_message);
     RUN_TEST(test_refresh_via_mock_server_curl_error);
     RUN_TEST(test_device_flow_full_mock);
+    RUN_TEST(test_authorize_all_loopback_ports_busy);
+    RUN_TEST(test_authorize_waiting_for_the_redirect_is_interrupted);
+    RUN_TEST(test_authorize_redirect_connection_without_a_request);
+    RUN_TEST(test_authorize_token_response_without_access_token);
+    RUN_TEST(test_refresh_invalid_client_message);
+    RUN_TEST(test_authorize_every_allocation_failing_in_turn);
+    RUN_TEST(test_gmail_login_paste_mode);
+    RUN_TEST(test_gmail_login_paste_nothing_given);
+    RUN_TEST(test_gmail_login_loopback_mode);
 }

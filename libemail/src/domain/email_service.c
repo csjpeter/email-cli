@@ -5113,6 +5113,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
     while (cursor < lbl_count - 1 && lbl_hdr[cursor]) cursor++;
 
     RAII_TERM_RAW TermRawState *tui_raw = terminal_raw_enter();
+    char lbl_flash[300] = "";
 
     for (;;) {
         int trows = terminal_rows();
@@ -5186,8 +5187,10 @@ char *email_service_list_labels_interactive(const Config *cfg,
             HINT(":", "actions", 80);
             HINT("Esc/q/BS", "accounts", SL_PRIO_KEEP);
 #undef HINT
-            status_line_draw(trows, tcols, h, nh, "?", cursor + 1, lbl_count, NULL);
+            status_line_draw(trows, tcols, h, nh, "?", cursor + 1, lbl_count,
+                             lbl_flash[0] ? lbl_flash : NULL);
         }
+        lbl_flash[0] = '\0';           /* the notice lives until the next key */
 
         EmailAction lbl_deferred = lbl_defer;
         lbl_defer = EA_NONE;
@@ -5349,7 +5352,10 @@ char *email_service_list_labels_interactive(const Config *cfg,
                  * name shown for a user label (EMAIL-135). */
                 const char *del_id = lbl_ids[cursor];
                 if (del_id) {
-                    email_service_delete_label(cfg, del_id);
+                    if (email_service_delete_label(cfg, del_id) != 0)
+                        snprintf(lbl_flash, sizeof(lbl_flash),
+                                 "  Could not delete the label %s.",
+                                 lbl_names[cursor]);
                     /* Rebuild display after deletion */
                     free_label_display(lbl_ids, lbl_names, lbl_seps, lbl_hdr, lbl_count);
                     lbl_hdr = NULL;

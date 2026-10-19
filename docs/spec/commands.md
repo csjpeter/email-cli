@@ -408,6 +408,10 @@ can carry zero or more **labels** (e.g. `INBOX`, `Work`, `Invoices`).  Labels
 are created with `create-label` and removed with `delete-label`.  The label
 ID (needed for `delete-label`) is obtained from `list-labels`.
 
+In the label browser, deleting a label is a row of the `:` menu; it asks
+(No is the default), deletes by the label's ID, and shows "Could not delete the
+label X." on the status line when the server refuses (EMAIL-161).
+
 ### Flags as a fixed label set (IMAP)
 
 IMAP defines a small, **server-defined** set of message flags.  The set

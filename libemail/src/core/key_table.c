@@ -71,6 +71,7 @@
     H(V, TUI_KEY_HOME, "Top", NULL),                                                \
     H(V, TUI_KEY_END, "Bottom", NULL),                                              \
     H(V, 'r', "Reply", NULL),                                                       \
+    H(V, 'A', "Reply-all", NULL),                                                   \
     H(V, 'F', "Forward", NULL),                                                     \
     H(V, 'v', "Source", "toggle rendered / raw source"),                            \
     H(V, '/', "Search", "in the message body"),                                     \

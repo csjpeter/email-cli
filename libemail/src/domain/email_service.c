@@ -1465,6 +1465,12 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                     local_msg_save(folder, uid, raw, strlen(raw));
                 result = 5;      /* forward this message */
                 goto show_int_done;
+            } else if (ch == 'A') {
+                /* Reply-all: same key as in the list (EMAIL-155). */
+                if (!local_msg_exists(folder, uid))
+                    local_msg_save(folder, uid, raw, strlen(raw));
+                result = 7;      /* reply to all of this message */
+                goto show_int_done;
             } else if (att_count > 0 && ch == 'a') {
                 int sel = 0;
                 if (att_count > 1) {
@@ -3952,6 +3958,13 @@ read_key_again: ;
                     list_result = 3;
                     goto list_done;
                 }
+                if (ret == 7) {
+                    /* 'A' pressed in reader -> reply to all */
+                    memcpy(opts->action_uid, entries[ei_cur].uid, 17);
+                    snprintf(opts->action_folder, sizeof(opts->action_folder), "%s", efolder);
+                    list_result = 6;
+                    goto list_done;
+                }
                 if (ret == 5) {
                     /* 'F' pressed in reader → forward this message */
                     memcpy(opts->action_uid, entries[ei_cur].uid, 17);
@@ -5320,10 +5333,9 @@ char *email_service_list_labels_interactive(const Config *cfg,
                 }
             }
             if (lact == EA_LABEL_DELETE && lbl_count > 0 && !lbl_hdr[cursor]) {
-                /* Delete selected label — use the label name as ID (best effort).
-                 * TODO: use label ID instead of name for Gmail (ID != name for
-                 *       user-defined labels). For IMAP this is correct (name == ID). */
-                const char *del_id = lbl_names[cursor];
+                /* Gmail deletes a label by its id, which differs from the
+                 * name shown for a user label (EMAIL-135). */
+                const char *del_id = lbl_ids[cursor];
                 if (del_id) {
                     email_service_delete_label(cfg, del_id);
                     /* Rebuild display after deletion */

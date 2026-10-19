@@ -71,8 +71,10 @@
 | PgDn / ↓ | Scroll down one page / one line |
 | PgUp / ↑ | Scroll up one page / one line |
 | r | Reply to this message |
+| A | Reply to all (same key as in the list) |
+| F | Forward this message |
 | a | Save an attachment |
-| A | Save all attachments |
+| : | Actions menu (includes Save all attachments) |
 | Backspace | Back to message list |
 | ESC / q | Back to message list |
 | ? | Show this help |

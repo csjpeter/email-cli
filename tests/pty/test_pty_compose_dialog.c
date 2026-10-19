@@ -2099,6 +2099,34 @@ static void test_multiple_cc_semicolon_separated(void) {
  *  TC-CD-66 / TC-CD-67: Reader-view 'r' reply and Sent folder saving
  * ══════════════════════════════════════════════════════════════════════ */
 
+static void test_reader_reply_all_opens_compose(void) {
+    /* EMAIL-155: 'A' in the reader is reply-all, as in the list */
+    restart_imap();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "reader reply-all: reached inbox");
+
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    pty_send_str(s, "A");
+    ASSERT_WAIT_FOR(s, "Reply All", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "To:");
+    ASSERT_SCREEN_CONTAINS(s, "Cc:");
+    ASSERT_SCREEN_CONTAINS(s, "Re:");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 static void test_reader_reply_opens_compose(void) {
     /* TC-CD-66: 'r' pressed inside the message reader opens the reply dialog */
     restart_imap();
@@ -2421,6 +2449,7 @@ int main(int argc, char *argv[]) {
     printf("\n--- Reader reply / Send + Sent ---\n");
     restart_imap();
     RUN_TEST(test_reader_reply_opens_compose);
+    RUN_TEST(test_reader_reply_all_opens_compose);
     RUN_TEST(test_reply_send_saves_to_sent);
 
     /* ── Answered / Forwarded status markers (US-CD-13 / US-CD-14) ───── */

@@ -644,7 +644,7 @@ static const char *const exp_account_delete[] = {
     "",
     "",
     "",
-    " j/k select  Enter open  n add  d delete  i IMAP  e SMTP  ESC quit  ? help",
+    "%   Account removed. Local messages preserved: ",
     NULL
 };
 static const char *const sty_account_delete[] = {

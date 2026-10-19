@@ -5815,6 +5815,229 @@ static void test_accounts_screen_wizards_can_be_abandoned(void) {
     restore_accounts("wz");
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  EMAIL-141: key study of the accounts list (docs/spec/tui-keys.md)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Another account in the HOME that only_account() made. */
+static void add_account_here(const char *name) {
+    char p[900], ini[600];
+    const char *home = getenv("HOME");
+    snprintf(p, sizeof(p), "%s/.config/email-cli/accounts/%s", home, name);
+    mkdir(p, 0700);
+    snprintf(p, sizeof(p), "%s/.config/email-cli/accounts/%s/config.ini", home, name);
+    snprintf(ini, sizeof(ini),
+             "EMAIL_HOST=imaps://localhost:%d\nEMAIL_USER=%s\nEMAIL_PASS=x\n"
+             "EMAIL_FOLDER=INBOX\nSSL_NO_VERIFY=1\nSMTP_HOST=smtps://localhost:%d\n",
+             g_imap_port, name, g_dead_port);
+    FILE *f = fopen(p, "w");
+    if (f) { fputs(ini, f); fclose(f); }
+    chmod(p, 0600);
+}
+
+static void study_account(const char *name) {
+    char ini[600];
+    snprintf(ini, sizeof(ini),
+             "EMAIL_HOST=imaps://localhost:%d\nEMAIL_USER=%s\nEMAIL_PASS=x\n"
+             "EMAIL_FOLDER=INBOX\nSSL_NO_VERIFY=1\nSMTP_HOST=smtps://localhost:%d\n",
+             g_imap_port, name, g_dead_port);
+    only_account(name, ini);
+}
+
+/* The cursor keys with three accounts (a@, b@, c@ sort in this order). */
+static void test_accounts_keys_cursor(void) {
+    restart_mock();
+    study_account("a@example.org");
+    add_account_here("b@example.org");
+    add_account_here("c@example.org");
+    PtySession *s = cli_open_size(80, 24, NULL);
+    ASSERT(s != NULL, "accounts keys cursor: started");
+    ASSERT_WAIT_FOR(s, "Email Accounts (3)", WAIT_MS);
+    pty_send_key(s, PTY_KEY_HOME);
+    ASSERT_WAIT_FOR(s, "[1/3]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_UP);                         /* stops at the first */
+    pty_send_str(s, "k");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1/3]");
+    pty_send_key(s, PTY_KEY_DOWN);
+    ASSERT_WAIT_FOR(s, "[2/3]", WAIT_MS);
+    pty_send_str(s, "j");
+    ASSERT_WAIT_FOR(s, "[3/3]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_DOWN);                       /* stops at the last */
+    pty_send_str(s, "j");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[3/3]");
+    pty_send_str(s, "k");
+    ASSERT_WAIT_FOR(s, "[2/3]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_UP);
+    ASSERT_WAIT_FOR(s, "[1/3]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);
+    ASSERT_WAIT_FOR(s, "[3/3]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_HOME);
+    ASSERT_WAIT_FOR(s, "[1/3]", WAIT_MS);
+    /* the hints at 80 columns keep Esc */
+    ASSERT_SCREEN_CONTAINS(s, "ESC");
+    /* a key that is bound to nothing changes nothing */
+    pty_send_str(s, "x");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts (3)");
+    ASSERT_SCREEN_CONTAINS(s, "[1/3]");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "accounts keys cursor: Esc quits");
+    pty_close(s);
+    restore_accounts("a");
+}
+
+/* One account: Enter, ?, i and e save, d asks and removes, at 80x24. */
+static void test_accounts_keys_one_account(void) {
+    restart_mock();
+    study_account("one@example.org");
+    PtySession *s = cli_open_size(80, 24, NULL);
+    ASSERT(s != NULL, "accounts keys one: started");
+    ASSERT_WAIT_FOR(s, "Email Accounts (1)", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "[1/1]", WAIT_MS);
+    pty_send_str(s, "j");                                /* nowhere to go */
+    pty_send_key(s, PTY_KEY_PGDN);
+    pty_send_key(s, PTY_KEY_END);
+    pty_send_key(s, PTY_KEY_PGUP);
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+
+    pty_send_str(s, "?");                                /* help at 80x24 */
+    ASSERT_WAIT_FOR(s, "Accounts shortcuts", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Edit SMTP for account");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Actions of a Gmail account");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Accounts shortcuts");
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts (1)");
+
+    pty_send_str(s, "i");                                /* keep every field */
+    ASSERT_WAIT_FOR(s, "IMAP Host [current:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "IMAP Username [current:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "IMAP Password [Enter=keep current]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Default Folder [current:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "IMAP settings saved.", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "one@example.org");
+
+    pty_send_str(s, "e");                                /* keep every field */
+    ASSERT_WAIT_FOR(s, "SMTP Host [", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "SMTP Port [", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "SMTP Username [", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "SMTP Password [", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "SMTP settings saved.", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "one@example.org");
+
+    pty_send_str(s, "d");                                /* d, y: no accounts */
+    ASSERT_WAIT_FOR(s, "Delete account one@example.org? (y/N)", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "No accounts configured.", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts (0)");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "accounts keys one: Esc quits");
+    pty_close(s);
+    restore_accounts("one");
+}
+
+/* No account: every key that works on an account does nothing and breaks
+ * nothing; n, ? and Esc still work. */
+static void test_accounts_keys_no_account(void) {
+    restart_mock();
+    study_account("gone@example.org");
+    PtySession *s = cli_open_size(80, 24, NULL);
+    ASSERT(s != NULL, "accounts keys none: started");
+    ASSERT_WAIT_FOR(s, "Email Accounts (1)", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "(y/N)", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "No accounts configured.", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    const char *inert[] = { "d", "i", "e", ":", "j", "k", "x", NULL };
+    for (int i = 0; inert[i]; i++) {
+        pty_send_str(s, inert[i]);
+        pty_settle(s, 150);
+        ASSERT_SCREEN_CONTAINS(s, "Email Accounts (0)");
+        ASSERT_SCREEN_CONTAINS(s, "No accounts configured.");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "(y/N)");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "current:");
+    }
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_UP);
+    pty_send_key(s, PTY_KEY_PGDN);
+    pty_send_key(s, PTY_KEY_PGUP);
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_send_key(s, PTY_KEY_END);
+    pty_send_key(s, PTY_KEY_BACK);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts (0)");
+    ASSERT_SCREEN_CONTAINS(s, "No accounts configured.");
+
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Accounts shortcuts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts (0)");
+
+    pty_send_str(s, "n");
+    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts (0)");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "accounts keys none: Esc quits");
+    pty_close(s);
+    restore_accounts("gone");
+}
+
+/* d, y at the end and at the start of the list: the account goes, the cursor
+ * stays on the list. */
+static void test_accounts_keys_delete_position(void) {
+    restart_mock();
+    study_account("a@example.org");
+    add_account_here("b@example.org");
+    add_account_here("c@example.org");
+    PtySession *s = cli_open_size(80, 24, NULL);
+    ASSERT(s != NULL, "accounts keys delete: started");
+    ASSERT_WAIT_FOR(s, "Email Accounts (3)", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);
+    ASSERT_WAIT_FOR(s, "[3/3]", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "Delete account c@example.org? (y/N)", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Email Accounts (2)", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "c@example.org");
+    ASSERT_WAIT_FOR(s, "Local messages preserved", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "[2/2]", WAIT_MS);                /* the new last row */
+    pty_send_key(s, PTY_KEY_HOME);
+    ASSERT_WAIT_FOR(s, "[1/2]", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "Delete account a@example.org? (y/N)", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Email Accounts (1)", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "b@example.org");
+    ASSERT_WAIT_FOR(s, "[1/1]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                      /* the one left opens */
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+    restore_accounts("a");
+}
+
 int main(int argc, char *argv[]) {
     printf("--- email-cli PTY View Tests ---\n\n");
 
@@ -6224,6 +6447,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_account_unreachable_returns_to_accounts);
     RUN_TEST(test_account_imap_gmail_host_is_explained);
     RUN_TEST(test_accounts_screen_wizards_can_be_abandoned);
+    RUN_TEST(test_accounts_keys_cursor);
+    RUN_TEST(test_accounts_keys_one_account);
+    RUN_TEST(test_accounts_keys_no_account);
+    RUN_TEST(test_accounts_keys_delete_position);
 
 done:
     stop_mock_server();

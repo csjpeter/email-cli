@@ -610,6 +610,13 @@ static void handle_connection(int fd) {
         }
         /* POST /labels — create a new label */
         if (strcmp(method, "POST") == 0) {
+            if (strstr(buf, "FailNew")) {   /* a create the server refuses (EMAIL-162) */
+                const char *resp =
+                    "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n"
+                    "Connection: close\r\n\r\n";
+                ssize_t r = write(fd, resp, strlen(resp)); (void)r;
+                return;
+            }
             send_json(fd,
                 "{\"id\":\"Label_Test001\","
                 "\"name\":\"TestLabel\","

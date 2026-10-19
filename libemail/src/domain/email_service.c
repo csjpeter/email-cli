@@ -5686,14 +5686,12 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             ACC_FREE();
             if (cursor > 0) cursor--;
 
-            /* Show preservation notice */
+            /* Preservation notice: the next redraw owns the last row, so the
+             * notice goes out as the status line message (EMAIL-141). */
             if (data_path[0]) {
-                int trows2 = terminal_rows();
-                int tcols2 = terminal_cols();
-                char notice[2200];
-                snprintf(notice, sizeof(notice),
-                         "Account removed. Local messages preserved: %s", data_path);
-                print_infoline(trows2, tcols2, notice);
+                snprintf(flash_note, sizeof(flash_note),
+                         "  Account removed. Local messages preserved: %.500s", data_path);
+                flash_msg = flash_note;
             }
             continue;  /* re-render */
         }

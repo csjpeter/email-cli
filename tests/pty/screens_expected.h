@@ -89,7 +89,7 @@ static const char *const exp_folders[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  t flat  Esc/q/BS back  ? help                   [2/16]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help        [2/16]",
     NULL
 };
 static const char *const sty_folders[] = {
@@ -348,14 +348,14 @@ static const char *const exp_folders_help[] = {
     "  ══════ ═══════ ═══════════════════════════════════════════════════════════════════════════ ═══════",
     "  Tags / Flags ─────────────────────────────────────────────────────────────────────────────────────",
     ">      0       - Unread                                                                            -",
-    "       0       - Flagged                                                                           -",
-    "       0       - Junk┌─ Folder browser shortcuts ────────────────────────────┐                     -",
-    "       0       - Phis│ j / k         Move cursor down / up (also the arrows) │                     -",
-    "       0       - Answ│ PgUp / PgDn   Move cursor one page up / down          │                     -",
-    "       0       - Forw│ Enter         Open folder / navigate into subfolder   │                     -",
-    "  Folders ───────────│ /             Cross-folder content search             │──────────────────────",
-    "                 └── │ c             Compose new message                     │",
-    "                     │ t             Toggle tree / flat view                 │",
+    "       0       - Flag┌─ Folder browser shortcuts ────────────────────────────┐                     -",
+    "       0       - Junk│ j / k         Move cursor down / up (also the arrows) │                     -",
+    "       0       - Phis│ PgUp / PgDn   Move cursor one page up / down          │                     -",
+    "       0       - Answ│ Enter         Open folder / navigate into subfolder   │                     -",
+    "       0       - Forw│ /             Cross-folder content search             │                     -",
+    "  Folders ───────────│ c             Compose new message                     │──────────────────────",
+    "                 └── │ t             Toggle tree / flat view                 │",
+    "                     │ :             Actions: create or delete a folder      │",
     "                     │ Esc / q / BS  Up one level (accounts at the top)      │",
     "                     │ ?             Show this help                          │",
     "                     └───────────────────────────────────────────────────────┘",
@@ -365,7 +365,7 @@ static const char *const exp_folders_help[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  t flat  Esc/q/BS back  ? help                   [2/16]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help        [2/16]",
     NULL
 };
 static const char *const sty_folders_help[] = {
@@ -375,11 +375,11 @@ static const char *const sty_folders_help[] = {
     "                                                                                                    ",
     "  dddddddddddd ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
-    "       d       d ddddddd                                                                           d",
     "       d       d ddddTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                     d",
     "       d       d ddddT bbbbb                                                 T                     d",
     "       d       d ddddT bbbbbbbbbbb                                           T                     d",
     "       d       d ddddT bbbbb                                                 T                     d",
+    "       d       d ddddT b                                                     T                     d",
     "  ddddddd dddddddddddT b                                                     Tdddddddddddddddddddddd",
     "                 ddddT b                                                     T                      ",
     "                 ddddT b                                                     T                      ",
@@ -867,7 +867,7 @@ static const char *const exp_folders_flat[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  t tree  Esc/q/BS back  ? help                    [9/9]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t tree  Esc/q/BS back  ? help         [9/9]",
     NULL
 };
 static const char *const sty_folders_flat[] = {
@@ -923,7 +923,7 @@ static const char *const exp_folders_search[] = {
     "",
     "",
     "  Search [Subject]: _",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  t flat  Esc/q/BS back  ? help                   [2/16]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help        [2/16]",
     NULL
 };
 static const char *const sty_folders_search[] = {
@@ -4039,7 +4039,7 @@ static const char *const sty_att_save_prompt[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_att_save_prompt[3] = { 22, -1, 1 };  /* end of its row: the path holds a pid */
+static const int cur_att_save_prompt[3] = { 22, -1, 1 };
 
 static const char *const exp_att_saved[] = {
     "From:    Test User <test@example.com>",
@@ -4820,7 +4820,7 @@ static const char *const sty_path_many[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_path_many[3] = { 6, -1, 1 };  /* end of its row: the path holds a pid */
+static const int cur_path_many[3] = { 6, -1, 1 };
 
 static const char *const exp_path_one[] = {
     "  New Message",
@@ -4876,7 +4876,7 @@ static const char *const sty_path_one[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_path_one[3] = { 6, -1, 1 };  /* end of its row: the path holds a pid */
+static const int cur_path_one[3] = { 6, -1, 1 };
 
 static const char *const exp_err_connect[] = {
     "~>                testuser                         IMAP  …aps://localhost:# …ps://localhost:#",
@@ -6880,7 +6880,7 @@ static const char *const exp_w80_folders[] = {
     "",
     "",
     "",
-    " ↑↓ step  Enter open/select  t flat  Esc/q/BS back  ? help               [2/16]",
+    " ↑↓ step  Enter open/select  : actions  t flat  Esc/q/BS back  ? help    [2/16]",
     NULL
 };
 static const char *const sty_w80_folders[] = {
@@ -7355,7 +7355,7 @@ static const char *const exp_w140_folders[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  t flat  Esc/q/BS back  ? help                                                           [2/16]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help                                                [2/16]",
     NULL
 };
 static const char *const sty_w140_folders[] = {
@@ -7856,7 +7856,7 @@ static const char *const exp_folders_second_row[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  t flat  Esc/q/BS back  ? help                   [3/16]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help        [3/16]",
     NULL
 };
 static const char *const sty_folders_second_row[] = {
@@ -8134,7 +8134,7 @@ static const char *const exp_folders_8colour[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  t flat  Esc/q/BS back  ? help                   [2/16]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help        [2/16]",
     NULL
 };
 static const char *const sty_folders_8colour[] = {

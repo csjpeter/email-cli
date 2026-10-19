@@ -5703,7 +5703,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
              * notice goes out as the status line message (EMAIL-141). */
             if (data_path[0]) {
                 snprintf(flash_note, sizeof(flash_note),
-                         "  Account removed. Local messages preserved: %s", data_path);
+                         "  Account removed. Local messages preserved: %.500s", data_path);
                 flash_msg = flash_note;
             }
             continue;  /* re-render */

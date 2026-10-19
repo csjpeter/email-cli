@@ -37,6 +37,13 @@ void test_key_table(void) {
     ASSERT(find(EKV_LIST_GMAIL, 't') == EA_LABELS, "key table: t is the Gmail label picker");
     ASSERT(find(EKV_LIST_IMAP, 't') == EA_NONE, "key table: t is unbound on IMAP");
 
+    /* the folder browser (EMAIL-129): creating and deleting are in the menu only */
+    ASSERT(find(EKV_FOLDERS, 'c') == EA_NONE, "key table: c composes, creates no folder");
+    ASSERT(find(EKV_FOLDERS, 'd') == EA_NONE, "key table: d does not delete a folder");
+    ASSERT(find(EKV_FOLDERS, 'n') == EA_NONE, "key table: n does not create a folder");
+    ASSERT(ekeys_find(EKV_FOLDERS, TERM_KEY_DELETE, 0) == EA_NONE,
+           "key table: Delete does not delete a folder");
+
     /* the label browser and the review screen have no direct state keys but e */
     ASSERT(find(EKV_LABELS, 'c') == EA_NONE, "key table: c does not create a label");
     ASSERT(find(EKV_LABELS, 'd') == EA_NONE, "key table: d does not delete a label");

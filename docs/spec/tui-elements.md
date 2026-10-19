@@ -28,7 +28,7 @@ is the end of the text of its row.
 | Delete asked (`account_delete_ask`) | `d` on accounts | information line `Delete account NAME? (y/N)`, the list unchanged | y, any other key |
 | Account deleted (`account_delete`) | `d`, `y` on accounts | "No accounts configured." | n |
 | Wizard type (`wizard_type`) | `n` on accounts | plain prompt: account type menu, `Choice [1]:` | 1, 2 |
-| Folder browser (`folders`, `folders_flat`) | Enter on an account | header bar with count; heads Unread, Flagged, Folder, Total; "Tags / Flags" section (dim, 6 virtual rows) and "Folders" tree; cursor row selected (dark blue, `>`); status bar with `[n/N]` | ↑↓ PgUp/PgDn Enter t / h Esc q BS |
+| Folder browser (`folders`, `folders_flat`) | Enter on an account | header bar with count; heads Unread, Flagged, Folder, Total; "Tags / Flags" section (dim, 6 virtual rows) and "Folders" tree; cursor row selected (dark blue, `>`); status bar with `[n/N]` | ↑↓ PgUp/PgDn Enter t / h : Esc q BS; `:` menu: create a folder (name asked), delete the folder (asks, No default) |
 | Folder help (`folders_help`) | `h` | overlay (as the accounts help) | Esc q BS |
 | Folder search (`folders_search`) | `/` | filter prompt line | text, Enter, Esc |
 | Message list (`list`, `list_second_row`, `list_narrow`) | Enter on INBOX | header bar "1-3 of 3 message(s) in INBOX (3 unread) [account]."; heads Date, Sts, Subject, From; ruler; rows with status column (`N` green = unread); status bar; marked rows carry `*` and the header adds `[N marked]` (US-86) | ↑↓ PgUp/PgDn Enter c r F A n f j d D s U l / h Esc q BS |

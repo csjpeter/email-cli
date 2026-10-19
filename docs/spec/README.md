@@ -18,6 +18,7 @@ It is written at a level of detail sufficient to re-implement the program from s
 | [email-sync.md](email-sync.md) | email-sync binary: background sync and cron management |
 | [manifest-cache.md](manifest-cache.md) | Manifest cache for instant folder listing on warm start |
 | [gmail-api.md](gmail-api.md) | Gmail native API: OAuth2, label model, local store, sync, TUI behaviour |
+| [tui-keys.md](tui-keys.md) | Key table of each TUI view: key, label on screen, behaviour, test (key study, EMAIL-140) |
 
 ## Relationship to other docs
 

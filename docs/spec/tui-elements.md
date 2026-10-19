@@ -75,8 +75,7 @@ row above it any more.
   the way back (`Esc/q/BS …`), the open key and the position stay.
 - **Position** `[n/N]` is right-aligned and always kept; with no items it is
   not shown.  The reader shows its page `[page/pages]`.
-- **Help**: `?` help (`h help` in the label browser and the accounts list)
-  is the last hint.
+- **Help**: `?` help is the last hint (`h` is not a help key in any view).
 - **Message**: an action's feedback (`Moved to Trash`, `Label removed: …`),
   a search miss in the reader, a prompt (`Delete account NAME? (y/N)`, the
   bulk menu and its confirmations) and a flash notice replace the hints on

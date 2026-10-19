@@ -462,6 +462,7 @@ static const char *const exp_reader_help[] = {
     "DMARC:   Not eval│ Home      Top                                                 │",
     "─────────────────│ End       Bottom                                              │",
     "Body of message 3│ r         Reply                                               │",
+    "                 │ A         Reply-all                                           │",
     "                 │ F         Forward                                             │",
     "                 │ v         Source - toggle rendered / raw source               │",
     "                 │ /         Search - in the message body                        │",
@@ -474,7 +475,6 @@ static const char *const exp_reader_help[] = {
     "                 │ d         Delete - to Trash; in Trash for good                │",
     "                 │ Delete    Delete (Delete key)                                 │",
     "                 │ ?         Help                                                │",
-    "                 │ :         Actions - the menu of everything that changes state │",
     "                 └───────────────────────────────────────────────────────────────┘",
     NULL
 };

@@ -7,6 +7,7 @@
 
 #include "platform/terminal.h"
 
+#include <tuikit/actions.h>
 #include <stddef.h>
 
 /**
@@ -94,5 +95,9 @@ int ekeys_confirm(const char *view, EmailAction a, const char *target);
 
 /** @brief The help overlay of @p view, made from the table; returns when closed. */
 void ekeys_help(const char *view, const char *title);
+
+/** @brief 1 when the help overlay of @p view has a row for @p key (the
+ *        table row the handler is checked against). */
+int ekeys_help_has(const char *view, tui_keycode key);
 
 #endif /* CORE_KEY_TABLE_H */

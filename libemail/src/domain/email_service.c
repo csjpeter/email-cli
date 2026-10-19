@@ -4623,19 +4623,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 selected = strdup("__compose__");
                 goto folders_int_done;
             } else if (ch == '?') {
-                static const char *help[][2] = {
-                    { "j / k",             "Move cursor down / up (also the arrows)" },
-                    { "PgUp / PgDn",        "Move cursor one page up / down"          },
-                    { "Enter",             "Open folder / navigate into subfolder"   },
-                    { "/",                 "Cross-folder content search"             },
-                    { "c",                 "Compose new message"                     },
-                    { "t",                 "Toggle tree / flat view"                 },
-                    { ":",                 "Actions: create or delete a folder"      },
-                    { "Esc / q / BS",        "Up one level (accounts at the top)"      },
-                    { "?",                 "Show this help"                          },
-                };
-                show_help_popup("Folder browser shortcuts",
-                                help, (int)(sizeof(help)/sizeof(help[0])));
+                ekeys_help(EKV_FOLDERS, "Folder browser shortcuts");
             }
             break;
         }
@@ -5600,6 +5588,8 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
         if (ch == '?') {
             static const char *help[][2] = {
                 { "j / k",           "Move cursor down / up (also the arrows)" },
+                { "PgUp / PgDn",      "Move cursor up / down"       },
+                { "Home / End",       "First / last account"        },
                 { "Enter",            "Open selected account"       },
                 { "n",               "Add new account"             },
                 { "d",               "Delete selected account"     },

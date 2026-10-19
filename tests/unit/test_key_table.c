@@ -56,4 +56,21 @@ void test_key_table(void) {
     /* a key the table does not know changes nothing */
     ASSERT(find(EKV_LIST_IMAP, 'Z') == EA_NONE, "key table: an unknown key is nothing");
     ASSERT(ekeys_find(EKV_LIST_IMAP, TERM_KEY_ESC, 0) == EA_NONE, "key table: Esc is not an action");
+
+    /* EMAIL-158: the help is made from the table, so a key the handler of a
+     * view has must be a row of that view's table (and so of its help). */
+    const char *movers[] = { EKV_LIST_IMAP, EKV_LIST_GMAIL, EKV_READ_IMAP, EKV_READ_GMAIL,
+                             EKV_LABELS, EKV_FOLDERS, EKV_ACCOUNTS_GMAIL };
+    for (int i = 0; i < 7; i++) {
+        ASSERT(ekeys_help_has(movers[i], TUI_KEY_HOME), "key table: help lists Home");
+        ASSERT(ekeys_help_has(movers[i], TUI_KEY_END), "key table: help lists End");
+        ASSERT(ekeys_help_has(movers[i], TUI_KEY_PGUP), "key table: help lists PgUp");
+        ASSERT(ekeys_help_has(movers[i], TUI_KEY_PGDN), "key table: help lists PgDn");
+        ASSERT(ekeys_help_has(movers[i], '?'), "key table: help lists ?");
+    }
+    const char *finders[] = { EKV_LIST_IMAP, EKV_LIST_GMAIL, EKV_READ_IMAP, EKV_READ_GMAIL,
+                              EKV_LABELS, EKV_FOLDERS };
+    for (int i = 0; i < 6; i++)
+        ASSERT(ekeys_help_has(finders[i], '/'), "key table: help lists / (filter, search)");
+    ASSERT(!ekeys_help_has(EKV_FOLDERS, 'd'), "key table: help lists no key that does nothing");
 }

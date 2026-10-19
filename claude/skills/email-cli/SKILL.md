@@ -61,6 +61,7 @@ be combined with it. `list-folders --tree` is the human view of the folders.
 email-cli send --to a@example.org --subject "Hi" --body "Text" [--attach FILE]...
 email-cli mark-read 42 | mark-unread 42 | mark-starred 42 | remove-starred 42
 email-cli mark-junk 42 | mark-notjunk 42
+email-cli move 42 FOLDER [--folder SOURCE]   # Gmail: FOLDER is a label ID
 email-cli create-folder NAME | delete-folder NAME          # IMAP
 email-cli create-label NAME | delete-label ID | add-label 42 LABEL | remove-label 42 LABEL   # Gmail
 email-cli rules list | rules apply [--dry-run] [--verbose] | rules remove --name N

@@ -47,7 +47,7 @@ If `<command>` is given and unknown, prints an error to **stderr** and exits **1
 
 Supported topics: `list`, `show`, `list-folders`, `list-labels`, `list-attachments`,
 `save-attachment`, `send`, `create-folder`, `delete-folder`, `create-label`, `delete-label`,
-`mark-junk`, `mark-notjunk`, `config`.
+`move`, `mark-junk`, `mark-notjunk`, `config`.
 
 ---
 
@@ -586,6 +586,32 @@ Use `delete-folder` for IMAP accounts.
 |------|-----------|
 | 0 | Label deleted |
 | −1 | API call failed or called on an IMAP account |
+
+---
+
+## `move`
+
+```
+email-cli [<account>] move <uid> <folder> [--folder <name>]
+```
+
+**User story:** As a user I want to move a message to another folder from a
+script, as the `m` key does in the TUI.
+
+* **IMAP:** selects the source mailbox (`--folder`, default the account's
+  folder), copies the message to `<folder>`, flags it `\Deleted` there and
+  expunges; the local manifest entry of the source is removed.
+* **Gmail:** adds the label `<folder>` and removes the source label.
+
+Moving a message to the mailbox it is already in is an error. Not available in
+`email-cli-ro`.
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Moved |
+| −1 | Missing or invalid argument, IMAP / API error |
 
 ---
 

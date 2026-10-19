@@ -6,6 +6,7 @@
 #include "config_store.h"
 #include "input_line.h"
 #include "tui_frame.h"
+#include "key_table.h"
 #include "status_line.h"
 #include <tuikit/text.h>
 #include <tuikit/dialog.h>
@@ -224,6 +225,7 @@ static void show_label_picker(emc_client *mc, const char *uid,
 static int is_system_or_special_label(const char *name);
 static void flag_push_background(const Config *cfg, const char *uid,
                                   const char *flag_name, int add_flag);
+static void junk_push_background(const Config *cfg, const char *uid, int mark_junk);
 
 /**
  * Pager prompt for the standalone `show` command.
@@ -350,6 +352,18 @@ static void print_infoline(int trows, int width, const char *text) {
     status_line_draw(trows, width, NULL, 0, NULL, 0, 0, text);
 }
 
+/** Copies @p src into @p dst (size @p n), cutting at a character boundary. */
+static void cut_utf8(char *dst, size_t n, const char *src, size_t max) {
+    size_t len = strlen(src);
+    if (len > max) {
+        len = max;
+        while (len > 0 && ((unsigned char)src[len] & 0xC0) == 0x80) len--;
+    }
+    if (len >= n) len = n - 1;
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
 /**
  * The status line of a message list: the key hints of the list (Gmail or
  * IMAP, Trash or not), the position [cur/total] and an optional message that
@@ -361,42 +375,24 @@ static void list_status_line(int trows, int tcols, int is_gmail, int in_trash,
     tui_statusline_hint h[STATUS_LINE_MAX_HINTS];
     int nh = 0;
 #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
-    HINT("\u2191\u2193", "step", 60);
+    HINT("j/k", "step", 60);
     HINT("PgDn/PgUp", "page", 40);
     HINT("Enter", "open", 90);
     HINT("Esc/q/BS", is_gmail ? "labels" : "folders", SL_PRIO_KEEP);
-    if (is_gmail) {
-        if (in_trash) {
-            HINT("D", "del", 70);
-            HINT("u", "restore", 70);
-        } else {
-            HINT("c", "compose", 50);
-            HINT("r", "reply", 50);
-            HINT("F", "fwd", 30);
-            HINT("A", "r-all", 30);
-            HINT("a", "archive", 45);
-            HINT("d", "rm-label", 45);
-            HINT("D", "trash", 45);
-        }
-        HINT("n", "unread", 45);
-        HINT("f", "star", 45);
-        HINT("t", "labels", 35);
-    } else {
-        HINT("c", "compose", 50);
-        HINT("r", "reply", 50);
-        HINT("F", "fwd", 30);
-        HINT("A", "r-all", 30);
-        HINT("n", "new", 45);
-        HINT("f", "flag", 45);
-        HINT("d", "done", 45);
-        HINT("D", in_trash ? "del" : "trash", 45);
-    }
-    HINT("s", "sync", 40);
+    HINT(":", "actions", 80);
+    HINT("c", "compose", 50);
+    HINT("r", "reply", 50);
+    HINT("F", "fwd", 30);
+    HINT("A", "r-all", 30);
+    HINT("*", "star", 45);
+    HINT("+/-", "read", 45);
+    HINT("!", "junk", 45);
+    HINT("d", in_trash ? "del" : "trash", 55);
+    if (is_gmail) HINT("t", "labels", 35);
     HINT("U", "refresh", 35);
     HINT("l", "rules", 30);
     if (items) {
         HINT("Space", "mark", 35);
-        HINT("m", "bulk", 35);
     }
 #undef HINT
     status_line_draw(trows, tcols, h, nh, "?", cur, total, msg);
@@ -980,6 +976,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
 
     /* Persistent info message — stays until replaced by a newer one */
     char info_msg[2048] = "";
+    EmailAction deferred_act = EA_NONE;   /* a menu action that prompts runs after a redraw */
 
     int result = 0;
     for (int cur_line = 0;;) {
@@ -1035,32 +1032,19 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
             char attlbl[32];
 #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
             snprintf(attlbl, sizeof(attlbl), "save-all(%d)", att_count);
-            HINT("\u2191\u2193", "scroll", 60);
+            HINT("j/k", "scroll", 60);
             HINT("Esc/q/BS", "list", SL_PRIO_KEEP);
-            if (cfg->gmail_mode) {
-                HINT("F", "fwd", 40);
-                HINT("r", "rm-label", 45);
-                HINT("d", "rm", 45);
-                HINT("D", "trash", 45);
-                HINT("f", "star", 45);
-                HINT("n", "unread", 45);
-                HINT("a", "arch", 45);
-                HINT("t", "labels", 35);
-                if (att_count > 0) {
-                    snprintf(attlbl, sizeof(attlbl), "save(%d)", att_count);
-                    HINT("A", attlbl, 55);
-                }
-            } else {
-                HINT("r", "reply", 50);
-                HINT("F", "fwd", 40);
-                HINT("f", "star", 45);
-                HINT("n", "unread", 45);
-                HINT("d", "done", 45);
-                HINT("D", "trash", 45);
-                if (att_count > 0) {
-                    HINT("a", "save", 55);
-                    HINT("A", attlbl, 55);
-                }
+            HINT(":", "actions", 80);
+            HINT("r", "reply", 50);
+            HINT("F", "fwd", 40);
+            HINT("*", "star", 45);
+            HINT("+/-", "read", 45);
+            HINT("!", "junk", 45);
+            HINT("d", "del", 55);
+            if (cfg->gmail_mode) HINT("t", "labels", 35);
+            if (att_count > 0) {
+                snprintf(attlbl, sizeof(attlbl), "save(%d)", att_count);
+                HINT("a", attlbl, 55);
             }
             HINT("/", "search", 55);
             HINT("v", view_raw ? "rendered" : "source", 35);
@@ -1068,7 +1052,9 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                              total_pages, info_msg);
         }
 
-        TermKey key = terminal_read_key();
+        EmailAction deferred_now = deferred_act;
+        deferred_act = EA_NONE;
+        TermKey key = deferred_now ? TERM_KEY_IGNORE : terminal_read_key();
         fprintf(stderr, "\r\033[K");
         fflush(stderr);
         /* The message lives until the next key. */
@@ -1115,9 +1101,42 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
             int is_gmail = cfg->gmail_mode;
+            /* The keys that change state come from the key table, and so
+             * does the ':' menu (EMAIL-175). */
+            const char *rview = is_gmail ? EKV_READ_GMAIL : EKV_READ_IMAP;
+            if (deferred_now) ch = 0;
+            EmailAction act = deferred_now ? deferred_now : ekeys_find(rview, key, ch);
+            char del_q[600] = "";
+            {
+                char fr[128], su[160];
+                cut_utf8(fr, sizeof(fr), from ? from : "(no from)", 80);
+                cut_utf8(su, sizeof(su), subject ? subject : "(no subject)", 120);
+                int trash_here = is_gmail ? strcmp(folder, "_trash") == 0
+                    : strcmp(folder, cfg->trash_folder ? cfg->trash_folder : "Trash") == 0;
+                snprintf(del_q, sizeof(del_q), trash_here ? "Delete \"%s - %s\" for good"
+                                                          : "Move \"%s - %s\" to Trash",
+                         fr, su);
+            }
+            int menu_confirmed = deferred_now != EA_NONE;
+            if (ch == ':') {
+                const char *tt[EA_COUNT] = { NULL };
+                tt[EA_DELETE] = del_q;
+                act = ekeys_menu(rview, tt);
+                menu_confirmed = 1;
+                if (act == EA_SAVE_ALL) {
+                    deferred_act = act;      /* draw the message, then ask */
+                    break;
+                }
+            }
             if (ch == 'q') {
                 result = 0;      /* back to list */
                 goto show_int_done;
+            } else if (ch == 'j') {
+                if (cur_line < body_vrows - 1) cur_line++;
+                break;
+            } else if (ch == 'k') {
+                if (cur_line > 0) cur_line--;
+                break;
             } else if (ch == 'v') {
                 view_raw = !view_raw;
                 cur_line = 0;
@@ -1163,53 +1182,11 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 if (ml >= 0) { cur_line = ml; info_msg[0] = '\0'; }
                 else snprintf(info_msg, sizeof(info_msg), "No more matches");
                 break;
-            } else if (ch == 'h' || ch == '?') {
-                if (is_gmail) {
-                    static const char *ghelp[][2] = {
-                        { "PgDn / \u2193",   "Scroll down one page / one line"          },
-                        { "PgUp / \u2191",   "Scroll up one page / one line"            },
-                        { "Home / End",      "Jump to top / bottom of message"          },
-                        { "F",              "Forward this message"                      },
-                        { "r",              "Remove current label"                      },
-                        { "d",              "Remove current label"                      },
-                        { "D",              "Move to Trash"                             },
-                        { "f",              "Toggle Starred label"                      },
-                        { "n",              "Toggle Unread label"                       },
-                        { "a",              "Archive (remove all labels)"               },
-                        { "t",              "Toggle labels (picker)"                    },
-                        { "A",              "Save attachment"                           },
-                        { "v",              "Toggle rendered / raw source view"         },
-                        { "/",              "Search in message body"                    },
-                        { "n / N",          "Next / previous search match"             },
-                        { "Esc / q / BS",   "Back to message list"                      },
-                        { "h / ?",          "Show this help"                            },
-                    };
-                    show_help_popup("Message reader shortcuts (Gmail)",
-                                    ghelp, (int)(sizeof(ghelp)/sizeof(ghelp[0])));
-                } else {
-                    static const char *help[][2] = {
-                        { "PgDn / \u2193",   "Scroll down one page / one line"          },
-                        { "PgUp / \u2191",   "Scroll up one page / one line"            },
-                        { "Home / End",      "Jump to top / bottom of message"          },
-                        { "r",              "Reply to this message"                     },
-                        { "F",              "Forward this message"                      },
-                        { "f",              "Toggle Flagged (starred)"                  },
-                        { "n",              "Toggle Unread flag"                        },
-                        { "d",              "Toggle Done flag"                          },
-                        { "D",              "Move to Trash (del if in Trash)"           },
-                        { "a",              "Save an attachment"                        },
-                        { "A",              "Save all attachments"                      },
-                        { "v",              "Toggle rendered / raw source view"         },
-                        { "/",              "Search in message body"                    },
-                        { "n / N",          "Next / previous search match"             },
-                        { "Esc / q / BS",  "Back to message list"                      },
-                        { "h / ?",          "Show this help"                            },
-                    };
-                    show_help_popup("Message reader shortcuts",
-                                    help, (int)(sizeof(help)/sizeof(help[0])));
-                }
+            } else if (ch == '?') {
+                ekeys_help(rview, is_gmail ? "Message reader shortcuts (Gmail)"
+                                           : "Message reader shortcuts");
                 break;
-            } else if (is_gmail && (ch == 'r' || ch == 'd') && folder[0] != '_') {
+            } else if (act == EA_RM_LABEL && folder[0] != '_') {
                 /* Remove current label from this message */
                 const char *lbl = folder;
                 label_idx_remove(lbl, uid);
@@ -1220,7 +1197,11 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 free(show_labels);
                 show_labels = local_hdr_get_labels("", uid);
                 break;
-            } else if (is_gmail && ch == 'D') {
+            } else if (act == EA_DELETE && is_gmail) {
+                if (!menu_confirmed && !ekeys_confirm(rview, EA_DELETE, del_q)) {
+                    snprintf(info_msg, sizeof(info_msg), "Not deleted");
+                    break;
+                }
                 if (strcmp(folder, "_trash") == 0) {
                     /* In Trash: permanently delete */
                     if (mc) emc_delete(mc, uid);
@@ -1240,7 +1221,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 label_idx_add("_trash", uid);
                 result = 6;   /* go back to list; entry will be marked removed */
                 goto show_int_done;
-            } else if (is_gmail && ch == 'a') {
+            } else if (act == EA_ARCHIVE) {
                 /* Archive: remove all labels from this message */
                 if (strcmp(folder, "_nolabel") == 0) {
                     snprintf(info_msg, sizeof(info_msg),
@@ -1284,12 +1265,12 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 show_labels = local_hdr_get_labels("", uid);
                 snprintf(info_msg, sizeof(info_msg), "Archived");
                 break;
-            } else if (is_gmail && ch == 't') {
+            } else if (act == EA_LABELS) {
                 show_label_picker(mc, uid, info_msg, sizeof(info_msg));
                 free(show_labels);
                 show_labels = local_hdr_get_labels("", uid);
                 break;
-            } else if (ch == 'f') {
+            } else if (act == EA_STAR) {
                 /* Toggle starred / flagged */
                 int currently = reader_flags & MSG_FLAG_FLAGGED;
                 int add_flag  = currently ? 0 : 1;
@@ -1314,9 +1295,14 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Unstarred" : "Starred");
                 break;
-            } else if (ch == 'n') {
-                /* Toggle unread / read */
+            } else if (act == EA_READ || act == EA_UNREAD) {
+                /* Mark read ('+') or unread ('-') */
                 int currently = reader_flags & MSG_FLAG_UNSEEN;
+                if ((act == EA_UNREAD) == (currently != 0)) {
+                    snprintf(info_msg, sizeof(info_msg),
+                             currently ? "Already unread" : "Already read");
+                    break;
+                }
                 int add_flag  = currently ? 1 : 0; /* add \\Seen if currently unseen */
                 reader_flags ^= MSG_FLAG_UNSEEN;
                 if (is_gmail) local_hdr_update_flags("", uid, reader_flags);
@@ -1339,7 +1325,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Marked as read" : "Marked as unread");
                 break;
-            } else if (!is_gmail && ch == 'd') {
+            } else if (act == EA_DONE) {
                 /* IMAP only: toggle Done flag */
                 int currently = reader_flags & MSG_FLAG_DONE;
                 int add_flag  = currently ? 0 : 1;
@@ -1350,8 +1336,23 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Marked not done" : "Marked done");
                 break;
-            } else if (!is_gmail && ch == 'D') {
+            } else if (act == EA_JUNK) {
+                int want = !(reader_flags & MSG_FLAG_JUNK);
+                reader_flags ^= MSG_FLAG_JUNK;
+                if (is_gmail) junk_push_background(cfg, uid, want);
+                else if (mc) {
+                    if (want) emc_mark_junk(mc, uid);
+                    else      emc_mark_notjunk(mc, uid);
+                }
+                snprintf(info_msg, sizeof(info_msg),
+                         want ? "Marked as junk" : "Marked as not-junk");
+                break;
+            } else if (act == EA_DELETE) {
                 /* IMAP trash / permanent delete from reader */
+                if (!menu_confirmed && !ekeys_confirm(rview, EA_DELETE, del_q)) {
+                    snprintf(info_msg, sizeof(info_msg), "Not deleted");
+                    break;
+                }
                 const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
                 if (strcmp(folder, trf) == 0) {
                     if (mc) emc_delete(mc, uid);
@@ -1360,7 +1361,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 }
                 result = 6;   /* signal list loop to mark entry removed */
                 goto show_int_done;
-            } else if (!is_gmail && ch == 'r') {
+            } else if (ch == 'r') {
                 /* Ensure the raw message is in the local cache so cmd_reply
                  * can reload it without requiring a live IMAP connection. */
                 if (!local_msg_exists(folder, uid))
@@ -1374,7 +1375,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                     local_msg_save(folder, uid, raw, strlen(raw));
                 result = 5;      /* forward this message */
                 goto show_int_done;
-            } else if (att_count > 0 && ((is_gmail && ch == 'A') || (!is_gmail && ch == 'a'))) {
+            } else if (att_count > 0 && ch == 'a') {
                 int sel = 0;
                 if (att_count > 1) {
                     sel = show_attachment_picker(atts, att_count,
@@ -1408,7 +1409,10 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                                         : "  Save FAILED: %.1900s", dest);
                     }
                 }
-            } else if (ch == 'A' && att_count > 0) {
+            } else if (act == EA_SAVE_ALL && att_count == 0) {
+                snprintf(info_msg, sizeof(info_msg), "No attachments");
+                break;
+            } else if (act == EA_SAVE_ALL) {
                 /* Save ALL attachments to a chosen directory */
                 char *def_dir = attachment_save_dir();
                 char dest_dir[2048];
@@ -1485,6 +1489,21 @@ void email_service_set_json(int on) { g_json_out = on ? 1 : 0; }
 void email_service_print_json_string(const char *s) { print_json_string(s); }
 
 /* True when no batch filter is configured — the common case, kept cheap. */
+/**
+ * The ':' menu of a list with no rows: only a sync can be started, after a
+ * confirmation that names the account and the folder (EMAIL-175).
+ */
+static int sync_start_background(void);
+static void sync_menu(const Config *cfg, const char *folder_display) {
+    char t[400];
+    const char *tt[EA_COUNT] = { NULL };
+    snprintf(t, sizeof(t), "%s (%s)", folder_display ? folder_display : "?",
+             cfg->user ? cfg->user : "?");
+    tt[EA_SYNC] = t;
+    if (ekeys_menu(cfg->gmail_mode ? EKV_LIST_GMAIL : EKV_LIST_IMAP, tt) == EA_SYNC)
+        sync_start_background();
+}
+
 static int list_filters_off(const EmailListOpts *o) {
     return !(o->filter_from   && o->filter_from[0])
         && !(o->filter_since  && o->filter_since[0])
@@ -2168,7 +2187,7 @@ static int list_empty_cache_view(const Config *cfg, const EmailListOpts *opts,
             return 1;     /* back (Esc, q, Backspace) */
         if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
         int ch = terminal_last_printable();
-        if (ch == 's') { sync_start_background(); }
+        if (ch == ':') sync_menu(cfg, folder_display);
         if (ch == 'U') return 4; /* refresh: re-list */
         if (ch == 'l') return 7; /* rules editor */
     }
@@ -2192,6 +2211,7 @@ typedef struct {
     int           is_virtual_search;
     int          *pend_remove;      /* may be NULL */
     int          *pend_label;       /* may be NULL */
+    int          *pend_restore;     /* may be NULL */
 } BulkCtx;
 
 static const char *bulk_folder(const BulkCtx *b, int ei) {
@@ -2328,6 +2348,288 @@ static int bulk_delete(BulkCtx *b, int ei) {
             manifest_save(efolder, b->manifest);
     }
     return rc == 0 ? 0 : -1;
+}
+
+/* ── The keys that change state in the message list (EMAIL-175) ──────────
+ *
+ * The registry keys ('*', '+', '-', '!', 'd', Delete) and the actions of the
+ * ':' menu act on the marked rows, or on the row under the cursor when none
+ * is marked.  Routine ones happen at once, in the list and on the server; a
+ * delete asks first, naming the message; the actions that start a process
+ * or cannot be undone are confirmed by the table (key_table.c). */
+
+/** Sets (@p want 1) or clears (0) the junk flag of entry @p ei, locally and on the server. */
+static int bulk_junk(BulkCtx *b, int ei, int want) {
+    MsgEntry *e = &b->entries[ei];
+    int is_junk = (e->flags & MSG_FLAG_JUNK) != 0;
+    if (is_junk == (want != 0)) return 0;
+    const char *uid = e->uid;
+    if (want) e->flags |= MSG_FLAG_JUNK;
+    else      e->flags &= ~MSG_FLAG_JUNK;
+    bulk_save_flags(b, ei);
+    int rc = 0;
+    if (b->is_gmail)
+        junk_push_background(b->cfg, uid, want != 0);
+    else if (b->mc)
+        rc = want ? emc_mark_junk(b->mc, uid) : emc_mark_notjunk(b->mc, uid);
+    return rc == 0 ? 0 : -1;
+}
+
+/** Gmail archive: takes every label off entry @p ei and files it as archived. */
+static void gmail_archive_one(BulkCtx *b, int ei) {
+    const char *uid = b->entries[ei].uid;
+    char *lbl_str = local_hdr_get_labels("", uid);
+    if (lbl_str) {
+        int n = 1;
+        for (const char *p = lbl_str; *p; p++) if (*p == ',') n++;
+        char **rm   = malloc((size_t)n * sizeof(char *));
+        char *copy  = strdup(lbl_str);
+        int   rm_n  = 0;
+        if (rm && copy) {
+            char *tok = copy, *sep;
+            while (tok && *tok) {
+                sep = strchr(tok, ',');
+                if (sep) *sep = '\0';
+                if (tok[0]) {
+                    if (tok[0] != '_') label_idx_remove(tok, uid);
+                    rm[rm_n++] = tok;
+                    if (b->mc &&
+                        strcmp(tok, "IMPORTANT") != 0 &&
+                        strncmp(tok, "CATEGORY_", 9) != 0)
+                        emc_modify_label(b->mc, uid, tok, 0);
+                }
+                tok = sep ? sep + 1 : NULL;
+            }
+            local_hdr_update_labels("", uid, NULL, 0, (const char **)rm, rm_n);
+        }
+        free(copy); free(rm); free(lbl_str);
+    }
+    label_idx_remove("UNREAD", uid);
+    {
+        int new_flags = b->entries[ei].flags & ~MSG_FLAG_UNSEEN;
+        local_hdr_update_flags("", uid, new_flags);
+        b->entries[ei].flags = new_flags;
+    }
+    if (b->mc) emc_set_flag(b->mc, uid, "\\Seen", 1);
+    label_idx_add("_nolabel", uid);
+    if (b->pend_label) b->pend_label[ei] = 1;
+}
+
+/** Gmail restore from Trash to the inbox. */
+static void gmail_restore_one(BulkCtx *b, int ei) {
+    const char *uid = b->entries[ei].uid;
+    label_idx_remove("_trash", uid);
+    label_idx_add("INBOX", uid);
+    {
+        const char *add_lbl = "INBOX";
+        const char *rm_lbl  = "TRASH";
+        local_hdr_update_labels("", uid, &add_lbl, 1, &rm_lbl, 1);
+    }
+    if (b->mc) {
+        emc_modify_label(b->mc, uid, "TRASH", 0);
+        emc_modify_label(b->mc, uid, "INBOX", 1);
+    }
+    if (b->pend_restore) b->pend_restore[ei] = 1;
+}
+
+/** Gmail: takes the current label (the list's folder) off entry @p ei; the
+ *  second time on the same row puts it back. */
+static void gmail_rm_label_one(BulkCtx *b, int ei, char *fb, size_t fsz) {
+    const char *folder = b->folder;
+    if (folder[0] == '_') return;
+    const char *uid = b->entries[ei].uid;
+    if (b->pend_label && b->pend_label[ei]) {
+        if (b->mc) emc_modify_label(b->mc, uid, folder, 1);
+        label_idx_add(folder, uid);
+        local_hdr_update_labels("", uid, &folder, 1, NULL, 0);
+        label_idx_remove("_nolabel", uid);
+        b->pend_label[ei] = 0;
+        snprintf(fb, fsz, "Undo: %s restored", folder);
+        return;
+    }
+    if (b->mc) emc_modify_label(b->mc, uid, folder, 0);
+    label_idx_remove(folder, uid);
+    local_hdr_update_labels("", uid, NULL, 0, &folder, 1);
+    char *lbl = local_hdr_get_labels("", uid);
+    int has_real = 0;
+    if (lbl) {
+        char *tok = lbl, *s;
+        while (tok && *tok) {
+            s = strchr(tok, ',');
+            size_t tl = s ? (size_t)(s - tok) : strlen(tok);
+            char lb[64];
+            if (tl >= sizeof(lb)) tl = sizeof(lb) - 1;
+            memcpy(lb, tok, tl); lb[tl] = '\0';
+            if (strcmp(lb, folder) != 0 && strcmp(lb, "UNREAD") != 0 &&
+                strcmp(lb, "IMPORTANT") != 0 && strncmp(lb, "CATEGORY_", 9) != 0)
+                has_real = 1;
+            tok = s ? s + 1 : NULL;
+        }
+        free(lbl);
+    }
+    if (!has_real) label_idx_add("_nolabel", uid);
+    if (b->pend_remove) b->pend_remove[ei] = 0;
+    if (b->pend_label)  b->pend_label[ei]  = 1;
+    snprintf(fb, fsz, "Label removed: %s", folder);
+}
+
+/** "Sender - Subject" of entry @p ei, for a dialog that names the message. */
+static void msg_describe(const BulkCtx *b, int ei, char *out, size_t sz) {
+    ManifestEntry *me = manifest_find(b->manifest, b->entries[ei].uid);
+    char from[128], subj[160];
+    cut_utf8(from, sizeof(from),
+             (me && me->from && me->from[0]) ? me->from : "(no from)", 80);
+    cut_utf8(subj, sizeof(subj),
+             (me && me->subject && me->subject[0]) ? me->subject : "(no subject)", 120);
+    snprintf(out, sz, "\"%s - %s\"", from, subj);
+}
+
+/** Whether entry @p ei lies in the Trash (a delete there is for good). */
+static int bulk_in_trash(const BulkCtx *b, int ei) {
+    if (b->is_gmail) return strcmp(b->folder, "_trash") == 0;
+    const char *trf = b->cfg->trash_folder ? b->cfg->trash_folder : "Trash";
+    return strcmp(bulk_folder(b, ei), trf) == 0;
+}
+
+/** The question of the delete dialog: it names the message (sender and
+ *  subject), or the count of messages. */
+static void delete_question(const BulkCtx *b, const int *tg, int nt, int marked,
+                            char *out, size_t sz) {
+    int for_good = bulk_in_trash(b, tg[0]);
+    if (nt == 1) {
+        char d[400];
+        msg_describe(b, tg[0], d, sizeof(d));
+        snprintf(out, sz, for_good ? "Delete %s for good" : "Move %s to Trash", d);
+    } else {
+        snprintf(out, sz, for_good ? "Delete %d %smessages for good"
+                                   : "Move %d %smessages to Trash",
+                 nt, marked ? "marked " : "");
+    }
+}
+
+/** Asks for one line on the bottom rows; returns 1 when entered and not empty. */
+static int ask_line(const char *prompt, char *buf, size_t size) {
+    int trows = terminal_rows();
+    if (trows <= 0) trows = 24;
+    InputLine il = {0};
+    buf[0] = '\0';
+    input_line_init(&il, buf, size, NULL);
+    return input_line_run(&il, trows - 1, prompt) && buf[0];
+}
+
+/**
+ * Performs @p act on the @p nt entries @p tg (indexes into the entries), the
+ * marked rows or the row under the cursor, and leaves a message in @p fb.
+ * @param view       The table's view, for the confirmation.
+ * @param confirmed  1 when the ':' menu has asked already.
+ * @return 1 when the marks should be cleared (something was done), else 0.
+ */
+static int list_act(EmailAction act, BulkCtx *b, const int *tg, int nt, int marked,
+                    const char *view, int confirmed, char *fb, size_t fsz) {
+    int done = 0, failed = 0;
+    const char *one = "", *many = "";      /* the message for one / several */
+    char argbuf[256] = "";
+    int first_flags = b->entries[tg[0]].flags;
+
+    switch (act) {
+    case EA_STAR: {
+        int want = !(first_flags & MSG_FLAG_FLAGGED);
+        for (int i = 0; i < nt; i++)
+            if (bulk_set_flag(b, tg[i], MSG_FLAG_FLAGGED, "\\Flagged", want) == 0) done++; else failed++;
+        one = want ? "Starred" : "Unstarred";
+        many = want ? "starred" : "unstarred";
+        break;
+    }
+    case EA_READ:
+    case EA_UNREAD: {
+        int unseen = act == EA_UNREAD;
+        for (int i = 0; i < nt; i++)
+            if (bulk_set_flag(b, tg[i], MSG_FLAG_UNSEEN, "\\Seen", unseen) == 0) done++; else failed++;
+        one = unseen ? "Marked as unread" : "Marked as read";
+        many = unseen ? "marked unread" : "marked read";
+        break;
+    }
+    case EA_DONE: {
+        int want = !(first_flags & MSG_FLAG_DONE);
+        for (int i = 0; i < nt; i++)
+            if (bulk_set_flag(b, tg[i], MSG_FLAG_DONE, "$Done", want) == 0) done++; else failed++;
+        one = want ? "Marked done" : "Marked not done";
+        many = want ? "marked done" : "marked not done";
+        break;
+    }
+    case EA_JUNK: {
+        int want = !(first_flags & MSG_FLAG_JUNK);
+        for (int i = 0; i < nt; i++)
+            if (bulk_junk(b, tg[i], want) == 0) done++; else failed++;
+        one = want ? "Marked as junk" : "Marked as not-junk";
+        many = want ? "marked junk" : "marked not junk";
+        break;
+    }
+    case EA_DELETE: {
+        char q[600];
+        delete_question(b, tg, nt, marked, q, sizeof(q));
+        if (!confirmed && !ekeys_confirm(view, EA_DELETE, q)) {
+            snprintf(fb, fsz, "Not deleted");
+            return 0;
+        }
+        int for_good = bulk_in_trash(b, tg[0]);
+        for (int i = 0; i < nt; i++)
+            if (bulk_delete(b, tg[i]) == 0) done++; else failed++;
+        one = for_good ? "Permanently deleted" : "Moved to Trash";
+        many = for_good ? "deleted for good" : "moved to Trash";
+        break;
+    }
+    case EA_ARCHIVE:
+        if (strcmp(b->folder, "_nolabel") == 0) {
+            snprintf(fb, fsz, "Already in Archive \xe2\x80\x94 no change");
+            return 0;
+        }
+        for (int i = 0; i < nt; i++) { gmail_archive_one(b, tg[i]); done++; }
+        one = "Archived"; many = "archived";
+        break;
+    case EA_RESTORE:
+        for (int i = 0; i < nt; i++) { gmail_restore_one(b, tg[i]); done++; }
+        one = "Restored to Inbox"; many = "restored to Inbox";
+        break;
+    case EA_RM_LABEL:
+        if (b->folder[0] == '_') {
+            snprintf(fb, fsz, "Not in a label \xe2\x80\x94 no change");
+            return 0;
+        }
+        if (nt == 1) {
+            gmail_rm_label_one(b, tg[0], fb, fsz);
+            return 1;
+        }
+        for (int i = 0; i < nt; i++) { gmail_rm_label_one(b, tg[i], fb, fsz); done++; }
+        many = "label removed from";
+        break;
+    case EA_ADD_LABEL:
+    case EA_REMOVE_LABEL:
+        if (!ask_line(act == EA_ADD_LABEL ? "Add label: " : "Remove label: ",
+                      argbuf, sizeof(argbuf)))
+            return 0;
+        for (int i = 0; i < nt; i++)
+            if (bulk_label(b, tg[i], argbuf, act == EA_ADD_LABEL) == 0) done++; else failed++;
+        one = many = act == EA_ADD_LABEL ? "labelled" : "label removed from";
+        break;
+    case EA_MOVE:
+        if (!ask_line(b->is_gmail ? "Move to label: " : "Move to folder: ",
+                      argbuf, sizeof(argbuf)))
+            return 0;
+        for (int i = 0; i < nt; i++)
+            if (bulk_move(b, tg[i], argbuf) == 0) done++; else failed++;
+        one = many = "moved";
+        break;
+    default:
+        return 0;
+    }
+    if (failed)
+        snprintf(fb, fsz, "%d message(s) %s, %d failed", done, many, failed);
+    else if (nt == 1 && one[0])
+        snprintf(fb, fsz, "%s", one);
+    else
+        snprintf(fb, fsz, "%d message(s) %s", done, many);
+    return done > 0;
 }
 
 /* Model of the message list's table (tui_table) in the TUI: the rows are the
@@ -2791,7 +3093,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
                 int ch = terminal_last_printable();
                 if (ch == 'c') return 2; /* compose */
-                if (ch == 's') { sync_start_background(); }
+                if (ch == ':') sync_menu(cfg, folder_display);
                 if (ch == 'U') return 4; /* refresh */
                 if (ch == 'l') return 7; /* rules editor */
             }
@@ -2866,7 +3168,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
             int ch = terminal_last_printable();
             if (ch == 'c') return 2; /* compose */
-            if (ch == 's') { sync_start_background(); }
+            if (ch == ':') sync_menu(cfg, folder_display);
             if (ch == 'U') return 4; /* refresh */
             if (ch == 'l') return 7; /* rules editor */
         }
@@ -2904,6 +3206,10 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     /* Feedback message shown on the second-to-last row after each operation.
      * Cleared only when the list is re-opened (R/ESC/Backspace restart the view). */
     char feedback_msg[256] = "";
+    /* An action of the ':' menu that asks for a line (move, add or remove a
+     * label) runs after the view has been drawn again, so that no part of the
+     * menu is left on the screen under the prompt (EMAIL-175). */
+    EmailAction deferred_act = EA_NONE;
 
     /* ── Live filter state ──────────────────────────────────────────── */
     int   filter_active = 0;   /* filter bar is visible */
@@ -3453,7 +3759,9 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
          * The notification will appear the next time the user presses a key. */
 read_key_again: ;
         int prev_sync_done = bg_sync_done;
-        TermKey key = terminal_read_key();
+        EmailAction deferred_now = deferred_act;
+        deferred_act = EA_NONE;
+        TermKey key = deferred_now ? TERM_KEY_IGNORE : terminal_read_key();
         fprintf(stderr, "\r\033[K"); fflush(stderr);
         /* The message lives until the next key (not until the next redraw). */
         if (key != TERM_KEY_IGNORE || terminal_last_printable())
@@ -3462,7 +3770,7 @@ read_key_again: ;
          * returns TERM_KEY_IGNORE with no printable char).  If SIGCHLD fired
          * between prev_sync_done and read(), the real key is not TERM_KEY_IGNORE
          * and must be processed — otherwise the keypress is silently consumed. */
-        if (bg_sync_done && !prev_sync_done && key == TERM_KEY_IGNORE
+        if (!deferred_now && bg_sync_done && !prev_sync_done && key == TERM_KEY_IGNORE
                 && !terminal_last_printable()) {
             goto read_key_again;
         }
@@ -3578,8 +3886,6 @@ read_key_again: ;
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
-            /* Physical Delete key → same action as 'D' (trash) outside filter */
-            if (key == TERM_KEY_DELETE && !filter_input && ch == 0) ch = 'D';
 
             /* ── Filter input mode: Tab cycles scope, printable chars typed ── */
             if (filter_input && key == TERM_KEY_TAB) {
@@ -3619,91 +3925,73 @@ read_key_again: ;
                 tui_table_clear_marks(&ltbl);
                 break;
             }
-            if (ch == 'm' && !filter_input && disp_count > 0) {
-                /* Action menu on the marked messages (or the one under the
-                 * cursor).  One key chooses; Esc leaves. */
-                int *targets = malloc((size_t)disp_count * sizeof(int));
+            /* ── Movement: j and k (EMAIL-175) ───────────────────────────── */
+            if (!filter_input && ch == 'j') {
+                if (cursor < disp_count - 1) cursor++;
+                break;
+            }
+            if (!filter_input && ch == 'k') {
+                if (cursor > 0) cursor--;
+                break;
+            }
+
+            /* ── Keys that change state and the ':' menu (EMAIL-175) ──────
+             * Every one of them comes from the key table (key_table.c); the
+             * routine ones act at once on the marked rows, or on the row
+             * under the cursor, a delete asks first naming the message, and
+             * the rest is in the menu. */
+            const char *list_view = is_gmail ? EKV_LIST_GMAIL : EKV_LIST_IMAP;
+            if (deferred_now) ch = 0;
+            EmailAction act = deferred_now ? deferred_now
+                            : filter_input ? EA_NONE : ekeys_find(list_view, key, ch);
+            if (!filter_input && (ch == ':' || act != EA_NONE)) {
+                int *targets = malloc((size_t)(disp_count > 0 ? disp_count : 1) * sizeof(int));
                 int nt = 0;
                 for (int di = 0; targets && di < disp_count; di++)
                     if (tui_table_marked(&ltbl, di))
                         targets[nt++] = (filter_active && fentries) ? fentries[di] : di;
                 int on_marked = nt > 0;
-                if (targets && nt == 0)
+                if (targets && nt == 0 && disp_count > 0)
                     targets[nt++] = (filter_active && fentries) ? fentries[cursor] : cursor;
-                int trows_m = terminal_rows();
-                if (trows_m <= 0) trows_m = 24;
-                int tcols_m = terminal_cols();
-                if (tcols_m <= 0) tcols_m = 80;
                 BulkCtx bctx = { cfg, list_mc, manifest, entries, folder, is_gmail,
                                  is_virtual_flags, is_virtual_search,
-                                 pending_remove, pending_label };
-                char ask[400];
-                snprintf(ask, sizeof(ask),
-                         "  %d %smessage(s): r=read u=unread f=star F=unstar %sm=move D=%s  Esc=cancel",
-                         nt, on_marked ? "marked " : "",
-                         is_gmail ? "l=+label L=-label " : "",
-                         is_gmail && strcmp(folder, "_trash") == 0 ? "delete" : "trash");
-                print_infoline(trows_m, tcols_m, ask);
-                TermKey mk = terminal_read_key();
-                int mc2 = terminal_last_printable();
-                fprintf(stderr, "\r\033[K"); fflush(stderr);
-                int done = 0, failed = 0;
-                const char *what = NULL;
-                char argbuf[256] = "";
-                int act = 0;   /* 1 flags, 2 label add, 3 label rm, 4 move, 5 delete */
-                if (targets && mk == TERM_KEY_IGNORE) {
-                    if (mc2 == 'r' || mc2 == 'u' || mc2 == 'f' || mc2 == 'F') act = 1;
-                    else if (mc2 == 'l' && is_gmail) act = 2;
-                    else if (mc2 == 'L' && is_gmail) act = 3;
-                    else if (mc2 == 'm') act = 4;
-                    else if (mc2 == 'D') act = 5;
-                }
-                if (act == 2 || act == 3 || act == 4) {
-                    InputLine il = {0};
-                    input_line_init(&il, argbuf, sizeof(argbuf), NULL);
-                    const char *prompt = act == 2 ? "Add label: "
-                                       : act == 3 ? "Remove label: "
-                                       : is_gmail ? "Move to label: " : "Move to folder: ";
-                    if (!input_line_run(&il, trows_m - 1, prompt) || !argbuf[0]) act = 0;
-                }
-                if (act == 5) {
-                    int in_trash = is_gmail ? strcmp(folder, "_trash") == 0
-                                            : strcmp(cfg->trash_folder ? cfg->trash_folder
-                                                                       : "Trash", folder) == 0;
-                    char q[300];
-                    snprintf(q, sizeof(q), "  %s %d message(s)? (y/N)",
-                             in_trash ? "Delete for good" : "Move to Trash", nt);
-                    print_infoline(trows_m, tcols_m, q);
-                    TermKey ck = terminal_read_key();
-                    int cch = terminal_last_printable();
-                    fprintf(stderr, "\r\033[K"); fflush(stderr);
-                    if (!(ck == TERM_KEY_IGNORE && (cch == 'y' || cch == 'Y'))) act = 0;
-                }
-                for (int ti = 0; act && ti < nt; ti++) {
-                    int rc = 0;
-                    int ei = targets[ti];
-                    switch (act) {
-                    case 1:
-                        if (mc2 == 'r')      { rc = bulk_set_flag(&bctx, ei, MSG_FLAG_UNSEEN,  "\\Seen",    0); what = "marked read"; }
-                        else if (mc2 == 'u') { rc = bulk_set_flag(&bctx, ei, MSG_FLAG_UNSEEN,  "\\Seen",    1); what = "marked unread"; }
-                        else if (mc2 == 'f') { rc = bulk_set_flag(&bctx, ei, MSG_FLAG_FLAGGED, "\\Flagged", 1); what = "starred"; }
-                        else                 { rc = bulk_set_flag(&bctx, ei, MSG_FLAG_FLAGGED, "\\Flagged", 0); what = "unstarred"; }
-                        break;
-                    case 2: rc = bulk_label(&bctx, ei, argbuf, 1); what = "labelled"; break;
-                    case 3: rc = bulk_label(&bctx, ei, argbuf, 0); what = "label removed from"; break;
-                    case 4: rc = bulk_move(&bctx, ei, argbuf); what = "moved"; break;
-                    case 5: rc = bulk_delete(&bctx, ei); what = "deleted"; break;
+                                 pending_remove, pending_label, pending_restore };
+                int confirmed = deferred_now != EA_NONE;
+                if (ch == ':') {
+                    char sync_t[400], del_t[600];
+                    const char *tt[EA_COUNT] = { NULL };
+                    snprintf(sync_t, sizeof(sync_t), "%s (%s)", folder_display,
+                             cfg->user ? cfg->user : "?");
+                    tt[EA_SYNC] = sync_t;
+                    if (targets && nt > 0) {
+                        delete_question(&bctx, targets, nt, on_marked, del_t, sizeof(del_t));
+                        tt[EA_DELETE] = del_t;
                     }
-                    if (rc == 0) done++; else failed++;
+                    act = ekeys_menu(list_view, tt);
+                    confirmed = 1;      /* the menu asked what needed asking */
+                    if (act == EA_MOVE || act == EA_ADD_LABEL || act == EA_REMOVE_LABEL) {
+                        deferred_act = act;         /* draw the list, then ask */
+                        free(targets);
+                        break;
+                    }
                 }
-                if (act) {
-                    if (failed)
-                        snprintf(feedback_msg, sizeof(feedback_msg),
-                                 "%d message(s) %s, %d failed", done, what, failed);
-                    else
-                        snprintf(feedback_msg, sizeof(feedback_msg),
-                                 "%d message(s) %s", done, what);
-                    tui_table_clear_marks(&ltbl);
+                if (act == EA_SYNC) {
+                    sync_start_background();   /* the confirmation was the menu's */
+                } else if (act == EA_LABELS && targets && nt > 0) {
+                    const char *uid = entries[targets[0]].uid;
+                    /* Remember whether this message is currently in Archive or Trash
+                     * so we can show green feedback if a label addition removes it. */
+                    int was_archived = label_idx_contains("_nolabel", uid);
+                    int was_trashed  = label_idx_contains("_trash",   uid);
+                    show_label_picker(list_mc, uid, feedback_msg, sizeof(feedback_msg));
+                    if ((was_archived && !label_idx_contains("_nolabel", uid)) ||
+                        (was_trashed  && !label_idx_contains("_trash",   uid)))
+                        if (pending_restore) pending_restore[targets[0]] = 1;
+                } else if (act != EA_NONE && targets && nt > 0) {
+                    if (list_act(act, &bctx, targets, nt, on_marked, list_view,
+                                 confirmed, feedback_msg, sizeof(feedback_msg))
+                        && on_marked)
+                        tui_table_clear_marks(&ltbl);
                 }
                 free(targets);
                 break;
@@ -3734,10 +4022,6 @@ read_key_again: ;
                 list_result = 6;
                 goto list_done;
             }
-            if (ch == 's') {
-                sync_start_background();
-                break; /* re-render: shows ⟳ syncing... indicator */
-            }
             if (ch == 'U') {
                 /* Explicit refresh after sync notification */
                 bg_sync_done = 0;
@@ -3749,393 +4033,9 @@ read_key_again: ;
                 list_result = 7;
                 goto list_done;
             }
-            if (ch == 'h' || ch == '?') {
-                if (is_gmail) {
-                    static const char *ghelp[][2] = {
-                        { "\u2191 / \u2193",   "Move cursor up / down"           },
-                        { "PgUp / PgDn",        "Page up / down"                  },
-                        { "Enter",             "Open selected message"           },
-                        { "r",                 "Reply to selected message"       },
-                        { "A",                 "Reply-all to selected message"   },
-                        { "F",                 "Forward selected message"        },
-                        { "c",                 "Compose new message"             },
-                        { "Space",             "Mark / unmark and step down"     },
-                        { "x",                 "Clear all marks"                 },
-                        { "m",                 "Actions on the marked messages"  },
-                        { "n",                 "Toggle Unread label"             },
-                        { "f",                 "Toggle Starred label"            },
-                        { "a",                 "Archive (remove INBOX label)"    },
-                        { "d",                 "Remove current label"            },
-                        { "D / Delete",        "Move to Trash"                   },
-                        { "u",                 "Untrash (restore to INBOX)"      },
-                        { "t",                 "Toggle labels (picker)"          },
-                        { "s",                 "Start background sync"           },
-                        { "U",                 "Refresh after sync"              },
-                        { "l",                 "Open rules editor"               },
-                        { "Esc / q / BS",        "Back to the label browser"      },
-                        { "h / ?",             "Show this help"                  },
-                        { "────────────",      "──────────────────────────────" },
-                        { "Sts col 1:",        "P=phish  J=junk  N=unread  -"   },
-                        { "Sts col 2:",        "\u2605=starred  -=normal"         },
-                        { "Sts col 3:",        "D=done  -=normal"               },
-                        { "Sts col 4:",        "A=attachment  -=none"           },
-                        { "Sts col 5:",        "R=replied  F=fwd  -=neither"    },
-                        { "Sts col 6:",        "\u2713=DMARC ok  \u2717=fail  -=?" },
-                    };
-                    show_help_popup("Message list shortcuts (Gmail)",
-                                    ghelp, (int)(sizeof(ghelp)/sizeof(ghelp[0])));
-                } else {
-                    static const char *help[][2] = {
-                        { "\u2191 / \u2193",   "Move cursor up / down"           },
-                        { "PgUp / PgDn",        "Page up / down"                  },
-                        { "Enter",             "Open selected message"           },
-                        { "r",                 "Reply to selected message"       },
-                        { "A",                 "Reply-all to selected message"   },
-                        { "F",                 "Forward selected message"        },
-                        { "c",                 "Compose new message"             },
-                        { "Space",             "Mark / unmark and step down"     },
-                        { "x",                 "Clear all marks"                 },
-                        { "m",                 "Actions on the marked messages"  },
-                        { "n",                 "Toggle New (unread) flag"        },
-                        { "f",                 "Toggle Flagged (starred) flag"   },
-                        { "j",                 "Toggle Junk (spam) flag"         },
-                        { "d",                 "Toggle Done flag"                },
-                        { "D / Delete",        "Move to Trash (del if in Trash)" },
-                        { "s",                 "Start background sync"           },
-                        { "U",                 "Refresh after sync"              },
-                        { "l",                 "Open rules editor"               },
-                        { "Esc / q / BS",        "Back to the folder browser"      },
-                        { "h / ?",             "Show this help"                  },
-                        { "────────────",      "──────────────────────────────" },
-                        { "Sts col 1:",        "P=phish  J=junk  N=unread  -"   },
-                        { "Sts col 2:",        "\u2605=starred  -=normal"         },
-                        { "Sts col 3:",        "D=done  -=normal"               },
-                        { "Sts col 4:",        "A=attachment  -=none"           },
-                        { "Sts col 5:",        "R=replied  F=fwd  -=neither"    },
-                        { "Sts col 6:",        "\u2713=DMARC ok  \u2717=fail  -=?" },
-                    };
-                    show_help_popup("Message list shortcuts",
-                                    help, (int)(sizeof(help)/sizeof(help[0])));
-                }
-                break;
-            }
-            if (ch == 'a' && is_gmail) {
-                /* Archive: remove ALL labels from this message.
-                 * Gmail "archive" = no labels → message lives only in All Mail.
-                 * If already in Archive view, the message is already archived — no-op. */
-                if (strcmp(folder, "_nolabel") == 0) {
-                    snprintf(feedback_msg, sizeof(feedback_msg),
-                             "Already in Archive \xe2\x80\x94 no change");
-                    break;
-                }
-                const char *uid = entries[ei_cur].uid;
-                char *lbl_str = local_hdr_get_labels("", uid);
-                if (lbl_str) {
-                    /* Build remove array and strip each label from indexes */
-                    int n = 1;
-                    for (const char *p = lbl_str; *p; p++) if (*p == ',') n++;
-                    char **rm   = malloc((size_t)n * sizeof(char *));
-                    char *copy  = strdup(lbl_str);
-                    int   rm_n  = 0;
-                    if (rm && copy) {
-                        char *tok = copy, *sep;
-                        while (tok && *tok) {
-                            sep = strchr(tok, ',');
-                            if (sep) *sep = '\0';
-                            if (tok[0]) {
-                                /* Remove from local index (skip meta _* labels) */
-                                if (tok[0] != '_') label_idx_remove(tok, uid);
-                                rm[rm_n++] = tok;
-                                /* Remove via Gmail API (skip IMPORTANT/CATEGORY_) */
-                                if (list_mc &&
-                                    strcmp(tok, "IMPORTANT") != 0 &&
-                                    strncmp(tok, "CATEGORY_", 9) != 0)
-                                    emc_modify_label(list_mc, uid, tok, 0);
-                            }
-                            tok = sep ? sep + 1 : NULL;
-                        }
-                        /* Clear labels field in .hdr atomically */
-                        local_hdr_update_labels("", uid, NULL, 0,
-                                                (const char **)rm, rm_n);
-                    }
-                    free(copy); free(rm); free(lbl_str);
-                }
-                /* Ensure UNREAD index is also cleared (belt-and-suspenders) */
-                label_idx_remove("UNREAD", uid);
-                /* Clear UNSEEN bit in .hdr flags field so the message is not
-                 * displayed as unread when browsing Archive. */
-                {
-                    int new_flags = entries[ei_cur].flags & ~MSG_FLAG_UNSEEN;
-                    local_hdr_update_flags("", uid, new_flags);
-                    entries[ei_cur].flags = new_flags;
-                }
-                /* Mark as read via API */
-                if (list_mc) emc_set_flag(list_mc, uid, "\\Seen", 1);
-                /* Put in archive */
-                label_idx_add("_nolabel", uid);
-                /* Mark for immediate visual feedback (yellow strikethrough) */
-                if (pending_label) pending_label[ei_cur] = 1;
-                snprintf(feedback_msg, sizeof(feedback_msg), "Archived");
-                break;
-            }
-            if (ch == 'D' && is_gmail) {
-                const char *uid = entries[ei_cur].uid;
-                /* In Trash: permanently delete */
-                if (strcmp(folder, "_trash") == 0) {
-                    if (list_mc) emc_delete(list_mc, uid);
-                    label_idx_remove("_trash", uid);
-                    manifest_remove(manifest, uid);
-                    if (pending_remove) pending_remove[ei_cur] = 1;
-                    if (!is_virtual_flags && !is_virtual_search) manifest_save(efolder, manifest);
-                    snprintf(feedback_msg, sizeof(feedback_msg), "Permanently deleted");
-                    break;
-                }
-                if (pending_remove && pending_remove[ei_cur]) {
-                    /* Undo: second 'D' restores from Trash back to current folder */
-                    label_idx_remove("_trash", uid);
-                    const char *restore_lbl = (folder[0] != '_') ? folder : "INBOX";
-                    label_idx_add(restore_lbl, uid);
-                    /* Update .hdr: remove TRASH, add current folder label */
-                    {
-                        const char *add_lbl = restore_lbl;
-                        const char *rm_lbl  = "TRASH";
-                        local_hdr_update_labels("", uid, &add_lbl, 1, &rm_lbl, 1);
-                    }
-                    /* Gmail API: remove TRASH label, add folder label back */
-                    if (list_mc) {
-                        emc_modify_label(list_mc, uid, "TRASH", 0);
-                        emc_modify_label(list_mc, uid, restore_lbl, 1);
-                    }
-                    pending_remove[ei_cur] = 0;
-                    snprintf(feedback_msg, sizeof(feedback_msg),
-                             "Undo: %s restored", restore_lbl);
-                } else {
-                    /* First 'D': Gmail compound trash operation */
-                    if (list_mc) emc_trash(list_mc, uid);
-                    /* Remove from all local label indexes */
-                    {
-                        char **all_labels = NULL;
-                        int all_count = 0;
-                        label_idx_list(&all_labels, &all_count);
-                        for (int j = 0; j < all_count; j++) {
-                            label_idx_remove(all_labels[j], uid);
-                            free(all_labels[j]);
-                        }
-                        free(all_labels);
-                    }
-                    label_idx_add("_trash", uid);
-                    /* Mark for immediate visual feedback (red strikethrough) */
-                    if (pending_remove) pending_remove[ei_cur] = 1;
-                    snprintf(feedback_msg, sizeof(feedback_msg), "Moved to Trash");
-                }
-                break;
-            }
-            if (ch == 'D' && !is_gmail) {
-                /* IMAP trash / permanent delete */
-                const char *uid = entries[ei_cur].uid;
-                const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
-                if (strcmp(efolder, trf) == 0) {
-                    /* Already in Trash: permanently delete */
-                    if (list_mc) emc_delete(list_mc, uid);
-                } else {
-                    /* Move to Trash folder */
-                    if (list_mc) emc_move_to_folder(list_mc, uid, trf);
-                }
-                manifest_remove(manifest, uid);
-                if (pending_remove) pending_remove[ei_cur] = 1;
-                if (!is_virtual_flags && !is_virtual_search) manifest_save(efolder, manifest);
-                snprintf(feedback_msg, sizeof(feedback_msg),
-                         strcmp(efolder, trf) == 0 ? "Permanently deleted" : "Moved to Trash");
-                break;
-            }
-            if (ch == 'u' && is_gmail) {
-                /* Untrash: restore from Trash to INBOX. */
-                const char *uid = entries[ei_cur].uid;
-                label_idx_remove("_trash", uid);
-                label_idx_add("INBOX", uid);
-                /* Update .hdr: remove TRASH from labels, add INBOX */
-                {
-                    const char *add_lbl = "INBOX";
-                    const char *rm_lbl  = "TRASH";
-                    local_hdr_update_labels("", uid, &add_lbl, 1, &rm_lbl, 1);
-                }
-                /* Gmail API: remove TRASH label, add INBOX */
-                if (list_mc) {
-                    emc_modify_label(list_mc, uid, "TRASH", 0);
-                    emc_modify_label(list_mc, uid, "INBOX", 1);
-                }
-                /* Mark for immediate visual feedback (green strikethrough) */
-                if (pending_restore) pending_restore[ei_cur] = 1;
-                snprintf(feedback_msg, sizeof(feedback_msg), "Restored to Inbox");
-                break;
-            }
-            if (ch == 't' && is_gmail) {
-                const char *uid = entries[ei_cur].uid;
-                /* Remember whether this message is currently in Archive or Trash
-                 * so we can show green feedback if a label addition removes it. */
-                int was_archived = label_idx_contains("_nolabel", uid);
-                int was_trashed  = label_idx_contains("_trash",   uid);
-                show_label_picker(list_mc, uid, feedback_msg, sizeof(feedback_msg));
-                /* If the picker added a real label that moved the message out
-                 * of Archive (_nolabel) or Trash (_trash), mark row green. */
-                if ((was_archived && !label_idx_contains("_nolabel", uid)) ||
-                    (was_trashed  && !label_idx_contains("_trash",   uid)))
-                    if (pending_restore) pending_restore[ei_cur] = 1;
-                break;
-            }
-            if (ch == 'd' && is_gmail) {
-                /* Toggle: first 'd' removes the label (yellow pending_label);
-                 * second 'd' on the same row restores it (undo).
-                 * Restricted to non-meta labels (no underscore prefix). */
-                if (folder[0] != '_') {
-                    const char *uid = entries[ei_cur].uid;
-                    if (pending_label && pending_label[ei_cur]) {
-                        /* Undo: restore the label that was removed */
-                        if (list_mc)
-                            emc_modify_label(list_mc, uid, folder, 1);
-                        label_idx_add(folder, uid);
-                        local_hdr_update_labels("", uid, &folder, 1, NULL, 0);
-                        /* Remove from archive fallback if it was added */
-                        label_idx_remove("_nolabel", uid);
-                        pending_label[ei_cur] = 0;
-                        snprintf(feedback_msg, sizeof(feedback_msg),
-                                 "Undo: %s restored", folder);
-                    } else {
-                        /* Remove label from this message */
-                        if (list_mc)
-                            emc_modify_label(list_mc, uid, folder, 0);
-                        label_idx_remove(folder, uid);
-                        local_hdr_update_labels("", uid, NULL, 0, &folder, 1);
-                        /* If no other real labels remain, put in archive */
-                        char *lbl = local_hdr_get_labels("", uid);
-                        int has_real = 0;
-                        if (lbl) {
-                            char *tok = lbl, *s;
-                            while (tok && *tok) {
-                                s = strchr(tok, ',');
-                                size_t tl = s ? (size_t)(s - tok) : strlen(tok);
-                                char lb[64];
-                                if (tl >= sizeof(lb)) tl = sizeof(lb) - 1;
-                                memcpy(lb, tok, tl); lb[tl] = '\0';
-                                if (strcmp(lb, folder) != 0 &&
-                                    strcmp(lb, "UNREAD") != 0 &&
-                                    strcmp(lb, "IMPORTANT") != 0 &&
-                                    strncmp(lb, "CATEGORY_", 9) != 0)
-                                    has_real = 1;
-                                tok = s ? s + 1 : NULL;
-                            }
-                            free(lbl);
-                        }
-                        if (!has_real) label_idx_add("_nolabel", uid);
-                        /* Mark row for immediate visual feedback (yellow strikethrough).
-                         * Also clear pending_remove so yellow takes priority over red
-                         * if 'D' was pressed before 'd' on this row. */
-                        if (pending_remove) pending_remove[ei_cur] = 0;
-                        if (pending_label)  pending_label[ei_cur]  = 1;
-                        snprintf(feedback_msg, sizeof(feedback_msg),
-                                 "Label removed: %s", folder);
-                    }
-                }
-                break;
-            }
-            if (ch == 'j') {
-                /* Toggle junk: uses dedicated mark_junk / mark_notjunk */
-                const char *uid = entries[ei_cur].uid;
-                int is_junk = entries[ei_cur].flags & MSG_FLAG_JUNK;
-                if (is_junk) {
-                    entries[ei_cur].flags &= ~MSG_FLAG_JUNK;
-                } else {
-                    entries[ei_cur].flags |= MSG_FLAG_JUNK;
-                }
-                ManifestEntry *me = manifest_find(manifest, uid);
-                if (me) me->flags = entries[ei_cur].flags;
-                if (is_virtual_flags) {
-                    Manifest *fm = manifest_load(efolder);
-                    if (fm) {
-                        ManifestEntry *fme = manifest_find(fm, uid);
-                        if (fme) { fme->flags = entries[ei_cur].flags; manifest_save(efolder, fm); }
-                        manifest_free(fm);
-                    }
-                } else if (!is_virtual_search) {
-                    manifest_save(efolder, manifest);
-                }
-                if (is_gmail) {
-                    junk_push_background(cfg, uid, !is_junk);
-                } else if (list_mc) {
-                    if (is_junk)
-                        emc_mark_notjunk(list_mc, uid);
-                    else
-                        emc_mark_junk(list_mc, uid);
-                }
-                snprintf(feedback_msg, sizeof(feedback_msg),
-                         is_junk ? "Marked as not-junk" : "Marked as junk");
-            } else if (ch == 'n' || ch == 'f' || ch == 'd') {
-                const char *uid = entries[ei_cur].uid;
-                int bit;
-                const char *flag_name;
-                if (ch == 'n') {
-                    bit = MSG_FLAG_UNSEEN;  flag_name = "\\Seen";
-                } else if (ch == 'f') {
-                    bit = MSG_FLAG_FLAGGED; flag_name = "\\Flagged";
-                } else {
-                    bit = MSG_FLAG_DONE;    flag_name = "$Done";
-                }
-                int currently = entries[ei_cur].flags & bit;
-                /* Determine the IMAP add/remove direction */
-                int add_flag = (ch == 'n') ? (currently ? 1 : 0) : (!currently ? 1 : 0);
-
-                /* Local update first — instant UI response regardless of network */
-                local_pending_flag_add(efolder, uid, flag_name, add_flag);
-                entries[ei_cur].flags ^= bit;
-                ManifestEntry *me = manifest_find(manifest, uid);
-                if (me) me->flags = entries[ei_cur].flags;
-                if (is_virtual_flags) {
-                    /* Virtual list: save the real per-folder manifest, not the
-                     * synthesized one — only then will manifest_count_all_flags
-                     * return updated counts for the folder list. */
-                    Manifest *fm = manifest_load(efolder);
-                    if (fm) {
-                        ManifestEntry *fme = manifest_find(fm, uid);
-                        if (fme) { fme->flags = entries[ei_cur].flags; manifest_save(efolder, fm); }
-                        manifest_free(fm);
-                    }
-                } else if (!is_virtual_search) {
-                    manifest_save(efolder, manifest);
-                }
-
-                /* Gmail: update local label indexes and .hdr (both labels CSV
-                 * and flags integer), then kick background sync. */
-                if (is_gmail) {
-                    const char *lbl = (ch == 'n') ? "UNREAD"
-                                    : (ch == 'f') ? "STARRED" : NULL;
-                    if (lbl) {
-                        /* n/f: label-backed flag — keep .idx and .hdr in sync */
-                        if (currently) {
-                            label_idx_remove(lbl, uid);
-                            local_hdr_update_labels("", uid, NULL, 0, &lbl, 1);
-                        } else {
-                            label_idx_add(lbl, uid);
-                            local_hdr_update_labels("", uid, &lbl, 1, NULL, 0);
-                        }
-                    } else {
-                        /* d: $Done is an IMAP keyword, not a Gmail label */
-                        local_hdr_update_flags("", uid, entries[ei_cur].flags);
-                    }
-                    flag_push_background(cfg, uid, flag_name, add_flag);
-                } else if (list_mc) {
-                    /* IMAP online mode: connection already open, push immediately */
-                    emc_set_flag(list_mc, uid, flag_name, add_flag);
-                }
-                /* Feedback message */
-                if (ch == 'n')
-                    snprintf(feedback_msg, sizeof(feedback_msg),
-                             currently ? "Marked as read" : "Marked as unread");
-                else if (ch == 'f')
-                    snprintf(feedback_msg, sizeof(feedback_msg),
-                             currently ? "Unstarred" : "Starred");
-                else /* 'd' IMAP done toggle */
-                    snprintf(feedback_msg, sizeof(feedback_msg),
-                             currently ? "Marked not done" : "Marked done");
+            if (ch == '?') {
+                ekeys_help(list_view, is_gmail ? "Message list shortcuts (Gmail)"
+                                               : "Message list shortcuts");
             }
             break;
         }
@@ -4423,6 +4323,10 @@ char *email_service_list_folders_interactive(const Config *cfg,
         TermKey key = terminal_read_key();
         if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q')
             key = TERM_KEY_ESC;      /* q is Esc: back, never quit */
+        if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'j')
+            key = TERM_KEY_NEXT_LINE;    /* j and k move (EMAIL-175) */
+        if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'k')
+            key = TERM_KEY_PREV_LINE;
 
         switch (key) {
         case TERM_KEY_QUIT:          /* ctrl-c: out at once, no go_up */
@@ -4566,16 +4470,16 @@ char *email_service_list_folders_interactive(const Config *cfg,
             } else if (ch == 'c') {
                 selected = strdup("__compose__");
                 goto folders_int_done;
-            } else if (ch == 'h' || ch == '?') {
+            } else if (ch == '?') {
                 static const char *help[][2] = {
-                    { "\u2191 / \u2193",   "Move cursor up / down"                   },
+                    { "j / k",             "Move cursor down / up (also the arrows)" },
                     { "PgUp / PgDn",        "Move cursor one page up / down"          },
                     { "Enter",             "Open folder / navigate into subfolder"   },
                     { "/",                 "Cross-folder content search"             },
                     { "c",                 "Compose new message"                     },
                     { "t",                 "Toggle tree / flat view"                 },
                     { "Esc / q / BS",        "Up one level (accounts at the top)"      },
-                    { "h / ?",             "Show this help"                          },
+                    { "?",                 "Show this help"                          },
                 };
                 show_help_popup("Folder browser shortcuts",
                                 help, (int)(sizeof(help)/sizeof(help[0])));
@@ -4929,6 +4833,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
                                             int *go_up) {
     local_store_init(cfg->host, cfg->user);
     if (go_up) *go_up = 0;
+    EmailAction lbl_defer = EA_NONE;   /* a menu action that prompts runs after a redraw */
 
     /* Collect user and category labels from locally synced .idx files. */
     char **user_labels = NULL;
@@ -5083,19 +4988,24 @@ char *email_service_list_labels_interactive(const Config *cfg,
             tui_statusline_hint h[6];
             int nh = 0;
             #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
-            HINT("\u2191\u2193", "select", 60);
+            HINT("j/k", "select", 60);
             HINT("Enter", "open", 90);
-            HINT("c", "create", 45);
-            HINT("d", "delete", 45);
+            HINT(":", "actions", 80);
             HINT("Esc/q/BS", "accounts", SL_PRIO_KEEP);
 #undef HINT
-            status_line_draw(trows, tcols, h, nh, "h", cursor + 1, lbl_count, NULL);
+            status_line_draw(trows, tcols, h, nh, "?", cursor + 1, lbl_count, NULL);
         }
 
-        TermKey key = terminal_read_key();
+        EmailAction lbl_deferred = lbl_defer;
+        lbl_defer = EA_NONE;
+        TermKey key = lbl_deferred ? TERM_KEY_IGNORE : terminal_read_key();
         fprintf(stderr, "\r\033[K"); fflush(stderr);
-        if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q')
+        if (key == TERM_KEY_IGNORE && !lbl_deferred && terminal_last_printable() == 'q')
             key = TERM_KEY_ESC;      /* q is Esc: back, never quit */
+        if (key == TERM_KEY_IGNORE && !lbl_deferred && terminal_last_printable() == 'j')
+            key = TERM_KEY_NEXT_LINE;    /* j and k move (EMAIL-175) */
+        if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'k')
+            key = TERM_KEY_PREV_LINE;
 
         switch (key) {
         case TERM_KEY_BACK:
@@ -5182,21 +5092,22 @@ char *email_service_list_labels_interactive(const Config *cfg,
                 }
                 break;
             }
-            if (ch == 'h' || ch == '?') {
-                static const char *help[][2] = {
-                    { "\u2191 / \u2193",   "Move cursor up / down"      },
-                    { "PgUp / PgDn",       "Page up / down"             },
-                    { "Enter",             "Open selected label"        },
-                    { "/",                 "Cross-folder content search"},
-                    { "c",                 "Create new label"           },
-                    { "d",                 "Delete selected label"      },
-                    { "Esc / q / BS",        "Back to accounts"           },
-                    { "h / ?",             "Show this help"             },
-                };
-                show_help_popup("Label browser shortcuts",
-                                help, (int)(sizeof(help)/sizeof(help[0])));
+            EmailAction lact = EA_NONE;
+            if (lbl_deferred) { ch = 0; lact = lbl_deferred; }
+            if (ch == '?')
+                ekeys_help(EKV_LABELS, "Label browser shortcuts");
+            if (ch == ':') {
+                /* Creating and deleting a label are in the menu (EMAIL-175);
+                 * deleting names the label and asks, No being the default. */
+                const char *tt[EA_COUNT] = { NULL };
+                if (lbl_count > 0 && !lbl_hdr[cursor]) tt[EA_LABEL_DELETE] = lbl_names[cursor];
+                lact = ekeys_menu(EKV_LABELS, tt);
+                if (lact == EA_LABEL_CREATE) {
+                    lbl_defer = lact;       /* draw the labels, then ask for the name */
+                    lact = EA_NONE;
+                }
             }
-            if (ch == 'c') {
+            if (lact == EA_LABEL_CREATE) {
                 /* Create new label */
                 char new_name[256] = "";
                 InputLine il;
@@ -5240,7 +5151,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
                     }
                 }
             }
-            if (ch == 'd' && lbl_count > 0 && !lbl_hdr[cursor]) {
+            if (lact == EA_LABEL_DELETE && lbl_count > 0 && !lbl_hdr[cursor]) {
                 /* Delete selected label — use the label name as ID (best effort).
                  * TODO: use label ID instead of name for Gmail (ID != name for
                  *       user-defined labels). For IMAP this is correct (name == ID). */
@@ -5448,7 +5359,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             tui_statusline_hint h[8];
             int nh = 0;
             #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
-            HINT("\u2191\u2193", "select", 60);
+            HINT("j/k", "select", 60);
             HINT("Enter", "open", 90);
             HINT("n", "add", 50);
             HINT("d", "delete", 45);
@@ -5456,7 +5367,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             HINT("e", "SMTP", 40);
             HINT("ESC", "quit", SL_PRIO_KEEP);
 #undef HINT
-            status_line_draw(trows, tcols, h, nh, "h", count > 0 ? cursor + 1 : 0,
+            status_line_draw(trows, tcols, h, nh, "?", count > 0 ? cursor + 1 : 0,
                              count, flash_msg);
         }
 
@@ -5466,6 +5377,8 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             flash_msg = NULL;          /* the notice lives until the next key */
 
         int ch = terminal_last_printable();
+        if (key == TERM_KEY_IGNORE && ch == 'j') key = TERM_KEY_NEXT_LINE;  /* EMAIL-175 */
+        if (key == TERM_KEY_IGNORE && ch == 'k') key = TERM_KEY_PREV_LINE;
 
 #define ACC_FREE() do { free(acc_unseen); free(acc_flagged); \
                         config_free_account_list(accounts, count); } while(0)
@@ -5502,16 +5415,16 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
         }
 
         /* Printable keys */
-        if (ch == 'h' || ch == '?') {
+        if (ch == '?') {
             static const char *help[][2] = {
-                { "\u2191 / \u2193",   "Move cursor up / down"      },
+                { "j / k",           "Move cursor down / up (also the arrows)" },
                 { "Enter",            "Open selected account"       },
                 { "n",               "Add new account"             },
                 { "d",               "Delete selected account"     },
                 { "i",               "Edit IMAP for account"       },
                 { "e",               "Edit SMTP for account"       },
                 { "Esc",             "Quit"                        },
-                { "h / ?",           "Show this help"              },
+                { "?",               "Show this help"              },
             };
             show_help_popup("Accounts shortcuts",
                             help, (int)(sizeof(help)/sizeof(help[0])));
@@ -7177,6 +7090,9 @@ int email_service_set_flag(const Config *cfg, const char *uid,
     } else if (flag_bit == MSG_FLAG_DONE) {
         flag_name = "$Done";
         imap_add  = add;
+    } else if (flag_bit == MSG_FLAG_FORWARDED) {
+        flag_name = "$Forwarded";
+        imap_add  = add;
     } else {
         fprintf(stderr, "Error: Unknown flag bit %d.\n", flag_bit);
         return -1;
@@ -7617,6 +7533,134 @@ int email_service_delete_folder(const Config *cfg, const char *name) {
     return rc;
 }
 
+/* The text of a message as the reply quote and the forward show it: the
+ * rendered HTML part when there is one, else the plain text.  free()able. */
+static char *original_text(const char *raw) {
+    char *body_text = NULL;
+    char *html_raw = mime_get_html_part(raw);
+    if (html_raw) {
+        body_text = html_render(html_raw, 72, 0);
+        free(html_raw);
+    }
+    if (!body_text) body_text = mime_get_text_body(raw);
+    return body_text;
+}
+
+/* ── Forward (the TUI's 'F', EMAIL-134) ───────────────────────────────── */
+
+int email_service_forward_compose(const char *raw, const char *note,
+                                  char **subject_out, char **body_out) {
+    if (!raw || !subject_out || !body_out) return -1;
+    *subject_out = NULL;
+    *body_out = NULL;
+
+    char *subj_raw = mime_get_header(raw, "Subject");
+    char *subj_dec = subj_raw ? mime_decode_words(subj_raw) : strdup("");
+    free(subj_raw);
+    size_t slen = strlen("Fwd: ") + (subj_dec ? strlen(subj_dec) : 0) + 1;
+    char *subject = malloc(slen);
+    if (!subject) { free(subj_dec); return -1; }
+    snprintf(subject, slen, "Fwd: %s", subj_dec ? subj_dec : "");
+    free(subj_dec);
+
+    char *body_text = original_text(raw);
+
+    char *from_raw = mime_get_header(raw, "From");
+    char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;
+    free(from_raw);
+    char *date_raw = mime_get_header(raw, "Date");
+    char *date_fmt = date_raw ? mime_format_date(date_raw) : NULL;
+    free(date_raw);
+
+    const char *n = note ? note : "";
+    size_t qcap = 4096 + strlen(n) + (body_text ? strlen(body_text) * 2 : 0);
+    char *quoted = malloc(qcap);
+    if (quoted) {
+        int off = snprintf(quoted, qcap,
+                           "%s\n\n--- Forwarded message ---\nFrom: %s\nDate: %s\n\n",
+                           n, from_dec ? from_dec : "?",
+                           date_fmt ? date_fmt : "?");
+        if (body_text && off > 0) {
+            int rest = (int)strlen(body_text);
+            if (off + rest < (int)qcap - 1) {
+                memcpy(quoted + off, body_text, (size_t)rest);
+                off += rest;
+                quoted[off] = '\0';
+            }
+        }
+    }
+    free(from_dec);
+    free(date_fmt);
+    free(body_text);
+    if (!quoted) { free(subject); return -1; }
+    *subject_out = subject;
+    *body_out = quoted;
+    return 0;
+}
+
+int email_service_forward(const Config *cfg, const char *uid,
+                          const char *folder, const char *to, const char *cc,
+                          const char *note) {
+    if (!to || !to[0]) {
+        fprintf(stderr, "Error: forward requires a recipient (--to).\n");
+        return -1;
+    }
+    const char *use_folder = folder ? folder
+                           : (cfg->folder ? cfg->folder : "INBOX");
+    local_store_init(cfg->host, cfg->user);
+
+    char *raw = NULL;
+    if (local_msg_exists(use_folder, uid)) {
+        raw = local_msg_load(use_folder, uid);
+    } else {
+        Config tmp = *cfg;
+        tmp.folder = (char *)use_folder;
+        raw = load_raw_message(&tmp, uid);
+    }
+    if (!raw) {
+        fprintf(stderr, "Error: Could not load message UID %s.\n", uid);
+        return -1;
+    }
+
+    char *subject = NULL, *body = NULL;
+    int rc = email_service_forward_compose(raw, note, &subject, &body);
+    free(raw);
+    if (rc != 0) {
+        fprintf(stderr, "Error: Failed to build the forwarded message.\n");
+        return -1;
+    }
+
+    const char *from = cfg->smtp_user ? cfg->smtp_user : cfg->user;
+    emc_message p = {.from = from, .to = to, .cc = cc,
+                     .subject = subject, .body = body};
+    char *msg = NULL;
+    size_t msg_len = 0;
+    if (mail_compose(&p, &msg, &msg_len) != 0) {
+        fprintf(stderr, "Error: Failed to build message.\n");
+        free(subject); free(body);
+        return -1;
+    }
+    free(subject); free(body);
+
+    /* The envelope carries every recipient, To and Cc; the library sends to
+     * all of them in one session (EMAIL-133). */
+    char rcpt[2048];
+    snprintf(rcpt, sizeof(rcpt), "%s%s%s", to,
+             (cc && cc[0]) ? "," : "", (cc && cc[0]) ? cc : "");
+    rc = mail_send_wire(cfg, from, rcpt, msg, msg_len);
+    if (rc == 0) {
+        printf("Message forwarded.\n");
+        if (email_service_save_sent(cfg, msg, msg_len) == 0)
+            printf("Saved.\n");
+        else
+            fprintf(stderr, "(Could not save to Sent folder - "
+                    "check EMAIL_SENT_FOLDER in config.)\n");
+        email_service_set_flag(cfg, uid, use_folder, MSG_FLAG_FORWARDED, 1);
+    }
+    free(msg);
+    return rc;
+}
+
 int email_service_save_sent(const Config *cfg, const char *msg, size_t msg_len) {
     local_store_init(cfg->host, cfg->user);
     const char *folder = cfg->sent_folder ? cfg->sent_folder : "Sent";
@@ -7631,13 +7675,7 @@ int email_service_save_draft(const Config *cfg, const char *msg, size_t msg_len)
 /* ── Reply composition, shared by email-cli and email-tui (EMAIL-133) ─── */
 
 char *email_service_reply_quote(const char *raw) {
-    char *body_text = NULL;
-    char *html_raw = mime_get_html_part(raw);
-    if (html_raw) {
-        body_text = html_render(html_raw, 72, 0);
-        free(html_raw);
-    }
-    if (!body_text) body_text = mime_get_text_body(raw);
+    char *body_text = original_text(raw);
 
     char *from_raw = mime_get_header(raw, "From");
     char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;

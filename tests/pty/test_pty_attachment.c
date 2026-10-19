@@ -36,6 +36,17 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+/* EMAIL-175: sending is in the review screen's ':' menu (row 0) and asks
+ * first, naming the recipients; removing the last attachment is row 2. */
+#define REVIEW_SEND(s) do { pty_send_str((s), ":"); \
+    pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
+    pty_send_key((s), PTY_KEY_ENTER); \
+    pty_wait_for((s), "Yes", 8000); pty_send_str((s), "y"); } while (0)
+#define REVIEW_UNATTACH(s) do { pty_send_str((s), ":"); \
+    pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
+    pty_send_key((s), PTY_KEY_DOWN); pty_send_key((s), PTY_KEY_DOWN); \
+    pty_send_key((s), PTY_KEY_ENTER); } while (0)
+
 /* ── Test globals ───────────────────────────────────────────────────── */
 
 int g_tests_run    = 0;
@@ -448,7 +459,7 @@ static PtySession *compose_to_review(const char *to, const char *subject)
     /* Wait for the footer, which pcr_render() prints last — waiting for the
      * title alone can return while the body/attachment lines are still being
      * written. */
-    if (pty_wait_for(s, "s send", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    if (pty_wait_for(s, "actions (send)", WAIT_MS) != 0) { pty_close(s); return NULL; }
     return s;
 }
 
@@ -532,7 +543,35 @@ static void test_review_s_sends_message(void)
     restart_servers();
     PtySession *s = compose_to_review("alice@example.com", "Send via review");
     ASSERT(s != NULL, "TC-PCR-07: review screen reached");
+    REVIEW_SEND(s);
+    ASSERT_WAIT_FOR(s, "sent", WAIT_MS);
+    pty_close(s);
+}
+
+/* EMAIL-175: 's' no longer sends; the ':' menu does, after asking with the
+ * recipient named, and No is the default. */
+static void test_review_send_asks_default_no(void)
+{
+    restart_servers();
+    PtySession *s = compose_to_review("alice@example.com", "Ask before send");
+    ASSERT(s != NULL, "send asks: review screen reached");
     pty_send_str(s, "s");
+    pty_settle(s, 500);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Sending");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "sent");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Send");
+    ASSERT_SCREEN_CONTAINS(s, "Edit headers");
+    ASSERT_SCREEN_CONTAINS(s, "Remove last attachment");
+    pty_send_key(s, PTY_KEY_ENTER);                 /* Send */
+    ASSERT_WAIT_FOR(s, "alice@example.com?", WAIT_MS);   /* names the recipient */
+    pty_send_key(s, PTY_KEY_ENTER);                 /* Enter on the default: No */
+    pty_settle(s, 500);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "alice@example.com?");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "sent");
+    ASSERT_SCREEN_CONTAINS(s, "Review: Message");
+    REVIEW_SEND(s);                                 /* Yes sends */
     ASSERT_WAIT_FOR(s, "sent", WAIT_MS);
     pty_close(s);
 }
@@ -574,7 +613,7 @@ static void test_review_e_applies_changes(void)
     pty_send_key(s, PTY_KEY_TAB);               /* Bcc -> Subject */
     pty_send_str(s, " changed");
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);      /* the footer is drawn last */
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);      /* the footer is drawn last */
     ASSERT_SCREEN_CONTAINS(s, "Before edit changed");
     ASSERT_SCREEN_CONTAINS(s, "carol@example.com");
     ASSERT_SCREEN_CONTAINS(s, "notes.txt");
@@ -639,7 +678,7 @@ static void test_review_picker_errors(void)
     pty_settle(s, 200);
     ASSERT_SCREEN_NOT_CONTAINS(s, "File not found");
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);      /* back on the review screen */
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);      /* back on the review screen */
 
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
@@ -650,12 +689,12 @@ static void test_review_picker_errors(void)
     pty_settle(s, 200);
     ASSERT_SCREEN_CONTAINS(s, "Not a file:");
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
 
     pty_send_str(s, "a");                       /* an empty path gives up */
     ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     pty_send_str(s, "q");
     pty_send_str(s, "y");
     pty_close(s);
@@ -678,7 +717,7 @@ static void test_review_picker_tab_and_backspace(void)
     pty_send_key(s, PTY_KEY_BACK);              /* ... and Backspace edits it */
     pty_send_str(s, "f");
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "report.pdf");
     pty_send_str(s, "q");
     pty_send_str(s, "y");
@@ -695,7 +734,7 @@ static void test_review_picker_max_attachments(void)
         ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
         pty_send_str(s, g_attach_file2);
         pty_send_key(s, PTY_KEY_ENTER);
-        ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+        ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
         pty_settle(s, 100);
     }
     pty_send_str(s, "a");
@@ -704,7 +743,7 @@ static void test_review_picker_max_attachments(void)
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Max attachments (8) reached", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "s send", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     pty_send_str(s, "q");
     pty_send_str(s, "y");
     pty_close(s);
@@ -743,8 +782,8 @@ static void test_review_d_removes_attachment(void)
     pty_send_str(s, g_attach_file1);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "report.pdf", WAIT_MS);
-    /* Remove via [d] */
-    pty_send_str(s, "d");
+    /* Remove via the ':' menu */
+    REVIEW_UNATTACH(s);
     pty_settle(s, 200);
     ASSERT_SCREEN_NOT_CONTAINS(s, "report.pdf");
     ASSERT_SCREEN_CONTAINS(s, "(none)");
@@ -892,6 +931,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_review_shows_body_lines);
     RUN_TEST(test_review_no_attachments_shown);
     RUN_TEST(test_review_s_sends_message);
+    RUN_TEST(test_review_send_asks_default_no);
     RUN_TEST(test_review_e_reopens_header_dialog);
     RUN_TEST(test_review_e_applies_changes);
     RUN_TEST(test_review_b_reopens_editor);

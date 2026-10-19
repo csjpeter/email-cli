@@ -37,6 +37,17 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+/* EMAIL-175: sending is in the review screen's ':' menu (row 0) and asks
+ * first, naming the recipients; removing the last attachment is row 2. */
+#define REVIEW_SEND(s) do { pty_send_str((s), ":"); \
+    pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
+    pty_send_key((s), PTY_KEY_ENTER); \
+    pty_wait_for((s), "Yes", 8000); pty_send_str((s), "y"); } while (0)
+#define REVIEW_UNATTACH(s) do { pty_send_str((s), ":"); \
+    pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
+    pty_send_key((s), PTY_KEY_DOWN); pty_send_key((s), PTY_KEY_DOWN); \
+    pty_send_key((s), PTY_KEY_ENTER); } while (0)
+
 /* ── Test globals ────────────────────────────────────────────────────── */
 
 int g_tests_run    = 0;
@@ -266,7 +277,7 @@ static void test_successful_send_saves_locally(void) {
      * prompt; 's' sends from there. */
     ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
-    pty_send_str(s, "s");
+    REVIEW_SEND(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Message sent.", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
@@ -304,7 +315,7 @@ static void test_failed_send_saves_to_drafts(void) {
      * prompt; 's' sends from there. */
     ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
-    pty_send_str(s, "s");
+    REVIEW_SEND(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Saved to Drafts", WAIT_MS);
 
@@ -338,7 +349,7 @@ static void test_sync_uploads_pending_and_clears_queue(void) {
      * prompt; 's' sends from there. */
     ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
-    pty_send_str(s, "s");
+    REVIEW_SEND(s);
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
     pty_close(s);
 
@@ -378,7 +389,7 @@ static void test_pending_queue_survives_restart(void) {
      * prompt; 's' sends from there. */
     ASSERT(pty_editor_type_and_leave(s, "Test body") == 0, "body editor opens");
     ASSERT_WAIT_FOR(s, "Review: Message", WAIT_MS * 2);
-    pty_send_str(s, "s");
+    REVIEW_SEND(s);
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
     pty_close(s);
 

@@ -2834,8 +2834,9 @@ void test_email_service(void) {
         int cursor2 = 0;
         int saved_stdin;
         /* Down (cursor++ clamped to 0), Up (no-op), Backspace (continue),
-         * h (help popup), q (dismiss popup), n (return 3 = add account) */
-        INJECT_STDIN("\033[B\033[A\x7fhqn", 10, saved_stdin);
+         * ? (help popup), q (dismiss popup), n (return 3 = add account);
+         * h is not a help key (EMAIL-175) */
+        INJECT_STDIN("\033[B\033[A\x7fhh?qn", 12, saved_stdin);
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
         int aret2 = email_service_account_interactive(&acc_out2, &cursor2, NULL);
@@ -3932,7 +3933,7 @@ void test_email_service(void) {
         int saved_stdin;
         int sout, serr;
 
-        /* 'r' = remove current label (1153-1163), then ESC */
+        /* 'r' = reply (EMAIL-175: no longer removes the label), returns at once */
         INJECT_STDIN("r\033x", 4, saved_stdin);
         SUPPRESS_OUT(sout, serr);
         show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
@@ -3946,8 +3947,8 @@ void test_email_service(void) {
         label_idx_add("UNREAD", gr_uid);
         local_msg_save("INBOX", gr_uid, gr_msg, strlen(gr_msg));
 
-        /* 'D' = trash (1164-1176), then ESC */
-        INJECT_STDIN("D\033x", 4, saved_stdin);
+        /* 'd' = delete: asks (No is the default), 'y' confirms; the reader returns */
+        INJECT_STDIN("dy", 2, saved_stdin);
         SUPPRESS_OUT(sout, serr);
         show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
         RESTORE_OUT(sout, serr);
@@ -3960,8 +3961,8 @@ void test_email_service(void) {
         label_idx_add("UNREAD", gr_uid);
         local_msg_save("INBOX", gr_uid, gr_msg, strlen(gr_msg));
 
-        /* 'a' = archive (1177-1220), then ESC */
-        INJECT_STDIN("a\033x", 4, saved_stdin);
+        /* ':' menu, Archive (row 8 of the Gmail reader menu), then ESC (EMAIL-175) */
+        INJECT_STDIN(":\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\r\033x", 28, saved_stdin);
         SUPPRESS_OUT(sout, serr);
         int gr_r = show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
         RESTORE_OUT(sout, serr);
@@ -3990,9 +3991,9 @@ void test_email_service(void) {
         label_idx_add("UNREAD", gr_uid);
         local_msg_save("INBOX", gr_uid, gr_msg, strlen(gr_msg));
 
-        /* 'f' = toggle starred (1226-1250): message not starred → add STARRED label */
-        /* 'n' = toggle unread (1251-1275): message is UNREAD → mark as read */
-        INJECT_STDIN("fn\033x", 5, saved_stdin);
+        /* '*' = toggle starred: message not starred → add STARRED label */
+        /* '+' = mark read: message is UNREAD → mark as read */
+        INJECT_STDIN("*+\033x", 4, saved_stdin);
         SUPPRESS_OUT(sout, serr);
         show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
         RESTORE_OUT(sout, serr);
@@ -4093,10 +4094,12 @@ void test_email_service(void) {
         lr_opts.pager  = 1;
 
         int saved_stdin;
-        /* 'd' removes INBOX label from message → no real labels remain → _nolabel
+        /* the menu's "Remove this label" removes INBOX label from message → no real labels remain → _nolabel
          * 'd' again on same entry → undo (restore) path
          * then ESC to exit */
-        INJECT_STDIN("dd\033x", 5, saved_stdin);
+        INJECT_STDIN(":\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\r"
+                     ":\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\r"
+                     "\033x", 72, saved_stdin);
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
         int lr_r = email_service_list(&lr_cfg, &lr_opts);
@@ -4256,4 +4259,37 @@ void test_email_service(void) {
         ASSERT(cc && cc[0] == '\0', "reply_all_cc: no To/Cc gives an empty list");
         free(cc);
     }
+}
+
+/* EMAIL-134: the forward composition shared by the TUI and `email-cli forward` */
+void test_forward_compose(void) {
+    const char *raw =
+        "From: Alice <alice@example.org>\r\n"
+        "Date: Mon, 01 Jan 2024 10:00:00 +0000\r\n"
+        "Subject: Hello there\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "Original body line.\r\n";
+    char *subj = NULL, *body = NULL;
+
+    ASSERT(email_service_forward_compose(raw, "FYI note", &subj, &body) == 0,
+           "forward_compose succeeds");
+    ASSERT(subj && strcmp(subj, "Fwd: Hello there") == 0,
+           "forward_compose: subject is 'Fwd: ' + the original");
+    ASSERT(body && strncmp(body, "FYI note\n\n--- Forwarded message ---\n", 36) == 0,
+           "forward_compose: note, then the forwarded-message header");
+    ASSERT(body && strstr(body, "From: Alice <alice@example.org>") != NULL,
+           "forward_compose: original From included");
+    ASSERT(body && strstr(body, "Original body line.") != NULL,
+           "forward_compose: original text included");
+    free(subj); free(body);
+
+    ASSERT(email_service_forward_compose(raw, NULL, &subj, &body) == 0,
+           "forward_compose without a note succeeds");
+    ASSERT(body && strncmp(body, "\n\n--- Forwarded message ---", 27) == 0,
+           "forward_compose: no note leaves the TUI's layout");
+    free(subj); free(body);
+
+    ASSERT(email_service_forward_compose(NULL, NULL, &subj, &body) == -1,
+           "forward_compose: NULL message is refused");
 }

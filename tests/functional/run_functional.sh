@@ -3737,29 +3737,58 @@ if phase_wanted 58; then
 echo ""
 echo "--- Phase 58: virtual flag views ---"
 
-VF_UNREAD=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder __unread__ 2>&1 || true) )
-check_not "58.1 list --folder __unread__: no crash" "Segmentation\|Abort" "$VF_UNREAD"
+# A cached store with one message per flag, in two folders.  The views read
+# the cache only, so no server is involved.
+make_vf_home() {
+    local h="./build/tests/functional/work-$$/homes/vf58" acct="vf58@test.local" m
+    case "$h" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe path" >&2; exit 1 ;; esac
+    mkdir -p "$h/.config/email-cli/accounts/$acct"
+    cat > "$h/.config/email-cli/accounts/$acct/config.ini" <<CFGVF
+EMAIL_HOST=imaps://localhost:$DEAD_PORT
+EMAIL_USER=$acct
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+SYNC_INTERVAL=5
+CFGVF
+    m="$h/.local/share/email-cli/accounts/$acct/manifests"
+    mkdir -p "$m"
+    # uid, from, subject, date, flags (1 unseen, 2 flagged, 16 answered, 32 forwarded, 64 junk, 128 phishing)
+    {
+      printf "0000000000000001\tAlice <alice@shop.example>\tUnreadOne\t2024-01-10 10:00\t1\n"
+      printf "0000000000000002\tBob <bob@other.example>\tStarTwo\t2024-03-15 10:00\t2\n"
+      printf "0000000000000004\tCarl <carl@other.example>\tJunkFour\t2024-03-16 10:00\t64\n"
+      printf "0000000000000005\tDora <dora@phish.example>\tPhishFive\t2024-03-17 10:00\t128\n"
+      printf "0000000000000006\tEve <eve@fwd.example>\tFwdSix\t2024-03-18 10:00\t32\n"
+    } > "$m/INBOX.tsv"
+    printf "0000000000000003\tAlice <alice@shop.example>\tAnswerThree\t2024-02-20 10:00\t16\n" > "$m/INBOX.Sent.tsv"
+    H_VF="$h"
+}
+make_vf_home
+vf() { (export HOME="$H_VF"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+        "$BIN_DIR/email-cli" --batch list --folder "$1" 2>&1 || true); }
 
-VF_FLAGGED=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder __flagged__ 2>&1 || true) )
-check_not "58.2 list --folder __flagged__: no crash" "Segmentation\|Abort" "$VF_FLAGGED"
-
-VF_JUNK=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder __junk__ 2>&1 || true) )
-check_not "58.3 list --folder __junk__: no crash" "Segmentation\|Abort" "$VF_JUNK"
-
-VF_PHISHING=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder __phishing__ 2>&1 || true) )
-check_not "58.4 list --folder __phishing__: no crash" "Segmentation\|Abort" "$VF_PHISHING"
-
-VF_ANSWERED=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder __answered__ 2>&1 || true) )
-check_not "58.5 list --folder __answered__: no crash" "Segmentation\|Abort" "$VF_ANSWERED"
-
-VF_FORWARDED=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder __forwarded__ 2>&1 || true) )
-check_not "58.6 list --folder __forwarded__: no crash" "Segmentation\|Abort" "$VF_FORWARDED"
+# Each view lists exactly the messages carrying its flag, from every folder.
+VF_UNREAD=$(vf __unread__)
+check     "58.1 __unread__ lists the unread message"   "UnreadOne"   "$VF_UNREAD"
+check     "58.1a __unread__ is titled and counted"     "1 message(s) in Unread" "$VF_UNREAD"
+check_not "58.1b __unread__ lists only unread"         "StarTwo\|JunkFour\|AnswerThree" "$VF_UNREAD"
+VF_FLAGGED=$(vf __flagged__)
+check     "58.2 __flagged__ lists the starred message" "StarTwo"     "$VF_FLAGGED"
+check_not "58.2a __flagged__ lists only starred"       "UnreadOne\|JunkFour" "$VF_FLAGGED"
+VF_JUNK=$(vf __junk__)
+check     "58.3 __junk__ lists the junk message"       "JunkFour"    "$VF_JUNK"
+check_not "58.3a __junk__ lists only junk"             "UnreadOne\|StarTwo\|PhishFive" "$VF_JUNK"
+VF_PHISHING=$(vf __phishing__)
+check     "58.4 __phishing__ lists the phishing message" "PhishFive" "$VF_PHISHING"
+check_not "58.4a __phishing__ lists only phishing"     "JunkFour\|UnreadOne" "$VF_PHISHING"
+VF_ANSWERED=$(vf __answered__)
+check     "58.5 __answered__ lists the answered message from another folder" "AnswerThree" "$VF_ANSWERED"
+check     "58.5a __answered__ names its folder"        "INBOX.Sent"  "$VF_ANSWERED"
+check_not "58.5b __answered__ lists only answered"     "FwdSix\|UnreadOne" "$VF_ANSWERED"
+VF_FORWARDED=$(vf __forwarded__)
+check     "58.6 __forwarded__ lists the forwarded message" "FwdSix" "$VF_FORWARDED"
+check_not "58.6a __forwarded__ lists only forwarded"   "AnswerThree\|UnreadOne" "$VF_FORWARDED"
 
 fi
 
@@ -3770,25 +3799,32 @@ if phase_wanted 59; then
 echo ""
 echo "--- Phase 59: content search ---"
 
-SRCH_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder "__search__:0:Alpha" 2>&1 || true) )
-check_not "59.1 search by subject: no crash"   "Segmentation\|Abort"  "$SRCH_OUT"
+make_vf_home
+vf() { (export HOME="$H_VF"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+        "$BIN_DIR/email-cli" --batch list --folder "$1" 2>&1 || true); }
 
-SRCH_FROM=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder "__search__:1:sender" 2>&1 || true) )
-check_not "59.2 search by from: no crash"      "Segmentation\|Abort"  "$SRCH_FROM"
+# scope 0 subject, 1 from, 2 to (no recipient in the cache: finds nothing)
+SRCH_OUT=$(vf "__search__:0:Star")
+check     "59.1 search by subject finds the match"   "StarTwo"      "$SRCH_OUT"
+check     "59.1a search by subject names the search" "Search: \"Star\" \[Subject\]" "$SRCH_OUT"
+check_not "59.1b search by subject skips others"     "UnreadOne\|JunkFour" "$SRCH_OUT"
 
-SRCH_TO=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder "__search__:2:testuser" 2>&1 || true) )
-check_not "59.3 search by to: no crash"        "Segmentation\|Abort"  "$SRCH_TO"
+SRCH_FROM=$(vf "__search__:1:alice")
+check     "59.2 search by from finds INBOX match"    "UnreadOne"     "$SRCH_FROM"
+check     "59.2a search spans folders"               "AnswerThree"   "$SRCH_FROM"
+check     "59.2b search counts the matches"          "2 message(s) in Search" "$SRCH_FROM"
+check_not "59.2c search by from skips others"        "StarTwo"       "$SRCH_FROM"
 
-SRCH_BODY=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder "__search__:3:Body" 2>&1 || true) )
-check_not "59.4 search by body: no crash"      "Segmentation\|Abort"  "$SRCH_BODY"
+SRCH_TO=$(vf "__search__:2:nobody@nowhere.example")
+check     "59.3 search by to with no match says so"  "No messages in Search" "$SRCH_TO"
 
-SRCH_EMPTY=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch list --folder "__search__:0:ZZZNOMATCH99" 2>&1 || true) )
-check_not "59.5 search no result: no crash"    "Segmentation\|Abort"  "$SRCH_EMPTY"
+SRCH_BODY=$(vf "__search__:3:ZZZBODYNOMATCH")
+check     "59.4 search by body (nothing cached) says so" "No messages in Search" "$SRCH_BODY"
+check     "59.4a search by body names the scope"     "\[Body\]"      "$SRCH_BODY"
+
+SRCH_EMPTY=$(vf "__search__:0:ZZZNOMATCH99")
+check     "59.5 search no result says so"            "No messages in Search: \"ZZZNOMATCH99\"" "$SRCH_EMPTY"
+check_not "59.5a search no result lists no message"  "UnreadOne\|StarTwo" "$SRCH_EMPTY"
 
 fi
 
@@ -4275,6 +4311,17 @@ TB_PROFILE="$H_IMPRT/.thunderbird/default-profile"
 TB_IMAP_DIR="$TB_PROFILE/ImapMail/imap.test.local"
 mkdir -p "$TB_IMAP_DIR"
 
+# The importer maps the account to its Thunderbird directory through the host
+# of the account and the profile's prefs.js: both must agree.
+sed -i "s#^EMAIL_HOST=.*#EMAIL_HOST=imaps://imap.test.local#" \
+    "$H_IMPRT/.config/email-cli/accounts/$ACCT_IMPRT/config.ini"
+cat > "$TB_PROFILE/prefs.js" <<TBPREFS
+user_pref("mail.server.server1.hostname", "imap.test.local");
+user_pref("mail.server.server1.userName", "$ACCT_IMPRT");
+user_pref("mail.server.server1.directory-rel", "[ProfD]ImapMail/imap.test.local");
+TBPREFS
+RULES_INI69="$H_IMPRT/.config/email-cli/accounts/$ACCT_IMPRT/rules.ini"
+
 cat > "$TB_IMAP_DIR/msgFilterRules.dat" <<'TBFILTER'
 version="9"
 logging="no"
@@ -4286,20 +4333,25 @@ actionValue="imap://imap.test.local/Newsletters"
 condition="AND (from,contains,newsletter@)"
 TBFILTER
 
+# Import with --dry-run: the rule is shown, nothing is written
+DRYRUN69=$( (export HOME="$H_IMPRT"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-import-rules" \
+        --thunderbird-path "$TB_PROFILE" \
+        --account "$ACCT_IMPRT" \
+        --dry-run 2>&1; echo "exit-code=$?") )
+check     "69.2 import-rules --dry-run shows the rule"  "Found 1 rule(s)" "$DRYRUN69"
+check     "69.4 --dry-run shows the converted when"     "when *= from:\*newsletter@\*" "$DRYRUN69"
+check     "69.5 --dry-run says nothing was saved"       "\[dry-run\] Rules NOT saved" "$DRYRUN69"
+check     "69.6 --dry-run exits 0"                      "exit-code=0" "$DRYRUN69"
+check_not "69.7 --dry-run writes no rules.ini"          "rules.ini" "$(ls "$(dirname "$RULES_INI69")")"
+
 # Import without --dry-run: should write rules.ini
 IMPRT69=$( (export HOME="$H_IMPRT"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
     "$BIN_DIR/email-import-rules" \
         --thunderbird-path "$TB_PROFILE" \
         --account "$ACCT_IMPRT" 2>&1 || true) )
-check_not "69.1 import-rules: no crash"  "Segmentation\|Abort"  "$IMPRT69"
-
-# Import with --dry-run
-DRYRUN69=$( (export HOME="$H_IMPRT"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-import-rules" \
-        --thunderbird-path "$TB_PROFILE" \
-        --account "$ACCT_IMPRT" \
-        --dry-run 2>&1 || true) )
-check_not "69.2 import-rules --dry-run: no crash"   "Segmentation\|Abort" "$DRYRUN69"
+check     "69.1 import-rules saves the rules"   "Rules saved to" "$IMPRT69"
+check     "69.8 rules.ini holds the imported rule" "Move newsletters" "$(cat "$RULES_INI69" 2>&1)"
 
 # Import --help
 HELP69=$( "$BIN_DIR/email-import-rules" --help 2>&1 || true )
@@ -5486,6 +5538,36 @@ check "84.31 refusal suggests a shell loop"       "list-accounts"      "$OUT84_1
 
 OUT84_18=$( "$BIN_DIR/email-cli-ro" help list 2>&1 || true )
 check "84.32 help documents --all-accounts"       "\-\-all-accounts"  "$OUT84_18"
+
+# The same options through email-cli itself (the shared read code, the
+# read-write binary): a mutation of one front end must not go unnoticed.
+f84rw() { (export HOME="$H_F84"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+           "$BIN_DIR/email-cli" --batch list --all "$@" 2>&1 || true); }
+OUTRW=$(f84rw --from alice)
+check     "84.33 email-cli --from matches sender"          "OrderAlpha" "$OUTRW"
+check_not "84.34 email-cli --from excludes other senders"  "OrderBeta"  "$OUTRW"
+OUTRW=$(f84rw --since 2024-03-15)
+check     "84.35 email-cli --since includes the bound day" "OrderBeta"  "$OUTRW"
+check_not "84.36 email-cli --since drops earlier mail"     "OrderAlpha" "$OUTRW"
+OUTRW=$(f84rw --before 2024-03-15)
+check     "84.37 email-cli --before keeps earlier mail"    "OrderAlpha" "$OUTRW"
+check_not "84.38 email-cli --before excludes the bound day" "OrderBeta" "$OUTRW"
+OUTRW=$(f84rw --json)
+check_not "84.39 email-cli --json: no count line on stdout" "message(s) in" "$OUTRW"
+JSON_RW=$(printf '%s' "$OUTRW" | python3 -c "
+import json,sys
+try:
+    d = json.load(sys.stdin)
+    print('PARSED', len(d), d[0].get('uid') is not None)
+except Exception as e:
+    print('BROKEN', e)
+" || echo "BROKEN")
+check     "84.40 email-cli --json parses with the uid field" "PARSED 2 True" "$JSON_RW"
+OUTRW=$( (export HOME="$H_F84B"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" --batch list --all --all-accounts 2>&1 || true) )
+check     "84.41 email-cli --all-accounts lists first account"  "SubjectOne" "$OUTRW"
+check     "84.42 email-cli --all-accounts lists second account" "SubjectTwo" "$OUTRW"
+check     "84.43 email-cli --all-accounts prints headings" "=== second@test.local ===" "$OUTRW"
 
 export HOME="$H_ALPHA"
 
@@ -7516,6 +7598,85 @@ check "137.7 email-cli-ro help help shows the usage"     "Usage: email-cli-ro he
 check "137.8 email-cli-ro help help exits 0"             "exit-code=0" "$OUT"
 OUT2=$(h137 "$BIN_DIR/email-cli-ro" help --help)
 check "137.9 email-cli-ro help --help shows the usage"   "Usage: email-cli-ro help" "$OUT2"
+
+fi
+
+if phase_wanted 134; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 134 — forward from the command line (EMAIL-134)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 134: forward (EMAIL-134) ---"
+
+alloc_port IMAP134_PORT
+alloc_port SMTP134_PORT
+IMAP134_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_134.log"
+SMTP134_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp_134.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP134_PORT MOCK_IMAP_SUBJECT="Phase134Msg" \
+    "$MOCK_SERVER_BIN") >"$IMAP134_LOG" 2>&1 &
+IMAP134_PID=$!
+(cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP134_PORT "$MOCK_SMTP_BIN") >"$SMTP134_LOG" 2>&1 &
+SMTP134_PID=$!
+sleep 1
+
+H134="./build/tests/functional/work-$$/homes/f134-$$"
+mkdir -p "$H134/.config/email-cli/accounts/w134@example.org"
+printf 'credential_obfuscation=false\n' > "$H134/.config/email-cli/settings.ini"
+cat > "$H134/.config/email-cli/accounts/w134@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP134_PORT
+EMAIL_USER=w134@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SMTP_HOST=smtps://localhost:$SMTP134_PORT
+SMTP_PORT=$SMTP134_PORT
+SMTP_USER=w134@example.org
+SMTP_PASS=testpass
+SSL_NO_VERIFY=1
+INI
+chmod 0600 "$H134"/.config/email-cli/accounts/*/config.ini
+
+w134() {
+    local bin="$1"; shift
+    (export HOME="$H134"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     "$BIN_DIR/$bin" w134@example.org "$@" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+
+OUT=$(w134 email-cli forward 2 --to bob@example.org --body "FYI134")
+check "134.1 forward reports it"                     "Message forwarded." "$OUT"
+check "134.2 forward exits 0"                        "exit-code=0" "$OUT"
+check "134.3 forward saves a copy in Sent"           "Saved." "$OUT"
+check "134.4 SMTP mock receives the message"         "RECEIVED" "$(cat "$SMTP134_LOG")"
+check "134.5 the subject is Fwd: + the original"     "Subject: Fwd: Phase134Msg" "$(cat "$SMTP134_LOG")"
+check "134.6 the recipient is the --to address"      "RCPT TO:<bob@example.org>" "$(cat "$SMTP134_LOG")"
+check "134.7 the message names the forwarded part"   "Forwarded message" "$(cat "$SMTP134_LOG")"
+check "134.8 the original is included"               "Hello from Mock Server" "$(cat "$SMTP134_LOG")"
+check "134.9 the note is included"                   "FYI134" "$(cat "$SMTP134_LOG")"
+check "134.10 the original is flagged \$Forwarded"   'UID STORE 0000000000000002 +FLAGS (.Forwarded)' "$(grep 'Client requested' "$IMAP134_LOG")"
+
+OUT=$(w134 email-cli forward 3 --to c@example.org --cc d@example.org --folder INBOX)
+check "134.11 forward with --cc and --folder"        "Message forwarded." "$OUT"
+check "134.12 the Cc address is a recipient too"     "RCPT TO:<d@example.org>" "$(cat "$SMTP134_LOG")"
+check "134.22 the To address got the message as well" "RCPT TO:<c@example.org>" "$(cat "$SMTP134_LOG")"
+check "134.23 the Cc header is in the message"       "Cc: d@example.org" "$(cat "$SMTP134_LOG")"
+OUT=$(w134 email-cli forward 3)
+check "134.13 forward without --to"                  "Error: --to is required" "$OUT"
+check "134.14 and exits non-zero"                    "exit-code=1" "$OUT"
+OUT=$(w134 email-cli forward --to a@example.org)
+check "134.15 forward without a UID"                 "'forward' requires a UID" "$OUT"
+OUT=$(w134 email-cli forward zz --to a@example.org)
+check "134.16 forward with a bad UID"                "invalid UID 'zz'" "$OUT"
+OUT=$(w134 email-cli forward 1 2 --to a@example.org)
+check "134.17 forward with two UIDs"                 "Unknown option" "$OUT"
+OUT=$(w134 email-cli forward 1 --to)
+check "134.18 --to without a value"                  "Error: --to requires an address" "$OUT"
+OUT=$(w134 email-cli-ro forward 1 --to a@example.org)
+check "134.19 email-cli-ro refuses forward"          "not available in read-only mode" "$OUT"
+OUT=$("$BIN_DIR/email-cli" forward --help 2>&1)
+check "134.20 forward --help describes it"           "Fwd: <subject>" "$OUT"
+OUT=$("$BIN_DIR/email-cli" help forward 2>&1)
+check "134.21 help forward shows the page"           "\$Forwarded" "$OUT"
+kill "$IMAP134_PID" "$SMTP134_PID"
 
 fi
 

@@ -59,6 +59,32 @@ int g_tests_failed = 0;
 #define COLS 120
 #define FEEDBACK_ROW (ROWS - 1)   /* 0-indexed PTY row of the status line */
 
+/* The keys of the keyboard policy (EMAIL-175): the registry keys act at once
+ * ('*' star, '+' read, '-' unread), 'd' asks before it deletes, and the rest
+ * of the actions that change state are in the ':' menu.  The rows of the
+ * Gmail message list menu, in table order (libemail/src/core/key_table.c). */
+#define GM_MENU_ARCHIVE   9
+#define GM_MENU_RESTORE   10
+#define GM_MENU_RM_LABEL  11
+
+static void gm_menu_pick(PtySession *s, int row) {
+    pty_send_str(s, ":");
+    pty_wait_for(s, "Actions", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    for (int i = 0; i < row; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_ENTER);
+}
+static void gm_archive(PtySession *s)   { gm_menu_pick(s, GM_MENU_ARCHIVE); }
+static void gm_restore(PtySession *s)   { gm_menu_pick(s, GM_MENU_RESTORE); }
+static void gm_rm_label(PtySession *s)  { gm_menu_pick(s, GM_MENU_RM_LABEL); }
+/* 'd', then Yes to the dialog that names the message. */
+static void gm_trash(PtySession *s) {
+    pty_send_str(s, "d");
+    pty_wait_for(s, "Yes", WAIT_MS);      /* the dialog names the message */
+    pty_send_str(s, "y");
+}
+
+
 /* ── Global state ────────────────────────────────────────────────────── */
 
 /* The selected row is drawn by the table widget with the bright variant of a
@@ -309,7 +335,7 @@ static void test_d_key_row_stays_visible(void) {
     ASSERT(navigate_to_inbox(s) == 0, "d-vis: navigate_to_inbox");
 
     /* Press 'd' — removes current label (INBOX) from the cursor row */
-    pty_send_str(s, "d");
+    gm_rm_label(s);
     pty_settle(s, SETTLE_MS);
 
     /* The cursor row (GMAIL_TOP_MSG) must still be visible after label removal */
@@ -350,7 +376,7 @@ static void test_d_key_row_strikethrough(void) {
     }
 
     /* Press 'd' — removes INBOX label from the cursor row */
-    pty_send_str(s, "d");
+    gm_rm_label(s);
     pty_settle(s, SETTLE_MS);
 
     /* The cursor row must still be visible (pending-remove keeps it) */
@@ -398,7 +424,7 @@ static void test_d_key_cursor_row_has_reverse(void) {
                "d-rev: no marker before d");
     }
 
-    pty_send_str(s, "d");
+    gm_rm_label(s);
     pty_settle(s, SETTLE_MS);
 
     int row_after = find_row(s, GMAIL_TOP_MSG);
@@ -436,7 +462,7 @@ static void test_d_key_toggle_undo(void) {
     ASSERT(navigate_to_inbox(s) == 0, "d-undo: navigate_to_inbox");
 
     /* First 'd': mark for removal */
-    pty_send_str(s, "d");
+    gm_rm_label(s);
     pty_settle(s, SETTLE_MS);
 
     int row1 = find_row(s, GMAIL_TOP_MSG);
@@ -446,7 +472,7 @@ static void test_d_key_toggle_undo(void) {
                "d-undo: 'd' marker set after first d");
 
     /* Second 'd': undo */
-    pty_send_str(s, "d");
+    gm_rm_label(s);
     pty_settle(s, SETTLE_MS);
 
     int row2 = find_row(s, GMAIL_TOP_MSG);
@@ -609,7 +635,7 @@ static void test_label_browser_lists_a_label_without_messages(void) {
 static void test_label_browser_create_label_prompt(void) {
     PtySession *s = open_label_browser();
     ASSERT(s != NULL, "label browser: reaches the label list");
-    pty_send_str(s, "c");
+    gm_menu_pick(s, 0);                            /* Create a label... */
     ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
     pty_send_str(s, "PtyMade");
     pty_settle(s, SETTLE_MS);
@@ -624,7 +650,7 @@ static void test_label_browser_create_label_prompt(void) {
 static void test_label_browser_create_label_confirmed(void) {
     PtySession *s = open_label_browser();
     ASSERT(s != NULL, "label browser: reaches the label list");
-    pty_send_str(s, "c");
+    gm_menu_pick(s, 0);                            /* Create a label... */
     ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
     pty_send_str(s, "PtyMade");
     pty_send_key(s, PTY_KEY_ENTER);
@@ -659,7 +685,7 @@ static void test_archive_row_has_strikethrough(void) {
         ASSERT(strcmp(pty_cell_text(s, row_before, 1), " ") == 0,
                "arch-strike: no pending marker before a");
 
-    pty_send_str(s, "a");
+    gm_archive(s);
     pty_settle(s, SETTLE_MS);
 
     int row_after = find_row(s, GMAIL_TOP_MSG);
@@ -685,7 +711,7 @@ static void test_archive_removes_from_inbox(void) {
     ASSERT(pty_run(s, args) == 0, "arch-gone: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "arch-gone: navigate_to_inbox");
 
-    pty_send_str(s, "a");
+    gm_archive(s);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "U");
     pty_wait_for(s, GMAIL_BOT_MSG, WAIT_MS);  /* wait for list to reload */
@@ -716,7 +742,7 @@ static void test_archive_message_in_archive_view(void) {
     ASSERT(navigate_to_inbox(s) == 0, "arch-view: navigate_to_inbox");
 
     /* Archive top message */
-    pty_send_str(s, "a");
+    gm_archive(s);
     pty_settle(s, SETTLE_MS);
     /* Press 'R' so the inbox index is refreshed and the row is removed */
     pty_send_str(s, "U");
@@ -759,7 +785,7 @@ static void test_label_picker_unarchive(void) {
     ASSERT(navigate_to_inbox(s) == 0, "unarchive: navigate_to_inbox");
 
     /* Archive Message 5 */
-    pty_send_str(s, "a");
+    gm_archive(s);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "U");
     pty_settle(s, SETTLE_MS);
@@ -800,7 +826,7 @@ static void test_label_picker_unarchive(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
- *  TEST: Trash statusbar shows u restore hint
+ *  TEST: Trash statusbar points at the action menu
  * ══════════════════════════════════════════════════════════════════════ */
 
 /**
@@ -815,8 +841,11 @@ static void test_trash_statusbar_restore_hint(void) {
     ASSERT(pty_run(s, args) == 0, "trash-sb: pty_run");
     ASSERT(navigate_to_trash(s) == 0, "trash-sb: navigate_to_trash");
 
-    /* The status bar (last row) must contain "u restore" */
-    ASSERT_SCREEN_CONTAINS(s, "u restore");
+    /* The status bar (last row) points at the action menu, where the restore
+     * is (EMAIL-175: no direct key writes to the server but the registry's). */
+    ASSERT_SCREEN_CONTAINS(s, ": actions");
+    ASSERT_SCREEN_CONTAINS(s, "d del");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "u restore");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -882,7 +911,7 @@ static void test_D_key_row_has_strikethrough(void) {
         ASSERT(strcmp(pty_cell_text(s, row_before, 1), " ") == 0,
                "D-strike: no pending marker before D");
 
-    pty_send_str(s, "D");
+    gm_trash(s);
     pty_settle(s, SETTLE_MS);
 
     int row_after = find_row(s, GMAIL_TOP_MSG);
@@ -914,7 +943,7 @@ static void test_u_key_row_has_strikethrough(void) {
         if (!s) return;
         ASSERT(pty_run(s, args) == 0, "u-strike: pty_run (s1)");
         ASSERT(navigate_to_inbox(s) == 0, "u-strike: navigate_to_inbox");
-        pty_send_str(s, "D");   /* trash Message 5 */
+        gm_trash(s);   /* trash Message 5 */
         pty_settle(s, SETTLE_MS);
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -937,7 +966,7 @@ static void test_u_key_row_has_strikethrough(void) {
             ASSERT(strcmp(pty_cell_text(s, row_before, 1), " ") == 0,
                    "u-strike: no pending marker before u");
 
-        pty_send_str(s, "u");   /* restore from trash */
+        gm_restore(s);   /* restore from trash */
         pty_settle(s, SETTLE_MS);
 
         int row_after = find_row(s, GMAIL_TOP_MSG);
@@ -966,7 +995,7 @@ static void test_u_key_row_gone_after_refresh(void) {
         if (!s) return;
         ASSERT(pty_run(s, args) == 0, "u-gone: pty_run (s1)");
         ASSERT(navigate_to_inbox(s) == 0, "u-gone: navigate_to_inbox");
-        pty_send_str(s, "D");
+        gm_trash(s);
         pty_settle(s, SETTLE_MS);
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -983,7 +1012,7 @@ static void test_u_key_row_gone_after_refresh(void) {
         pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
         pty_settle(s, SETTLE_MS);
 
-        pty_send_str(s, "u");
+        gm_restore(s);
         pty_settle(s, SETTLE_MS);
         pty_send_str(s, "U");
         pty_settle(s, WAIT_MS / 4);
@@ -1033,7 +1062,7 @@ static void test_d_key_row_gone_after_refresh(void) {
            "d-gone: " GMAIL_BOT_MSG " visible before d");
 
     /* Remove INBOX label from the cursor row (GMAIL_BOT_MSG) */
-    pty_send_str(s, "d");
+    gm_rm_label(s);
     pty_settle(s, SETTLE_MS);
 
     /* 'R' re-reads the list from INBOX.idx — the UID is no longer there */
@@ -1071,7 +1100,7 @@ static void test_d_row_yellow_fg(void) {
     int row = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row >= 0, "d-yellow: " GMAIL_TOP_MSG " present");
 
-    pty_send_str(s, "d");
+    gm_rm_label(s);
     pty_settle(s, SETTLE_MS);
 
     row = find_row(s, GMAIL_TOP_MSG);
@@ -1105,7 +1134,7 @@ static void test_D_row_red_fg(void) {
     int row = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row >= 0, "D-red: " GMAIL_TOP_MSG " present");
 
-    pty_send_str(s, "D");
+    gm_trash(s);
     pty_settle(s, SETTLE_MS);
 
     row = find_row(s, GMAIL_TOP_MSG);
@@ -1139,7 +1168,7 @@ static void test_a_row_yellow_fg(void) {
     int row = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row >= 0, "a-yellow: " GMAIL_TOP_MSG " present");
 
-    pty_send_str(s, "a");
+    gm_archive(s);
     pty_settle(s, SETTLE_MS);
 
     row = find_row(s, GMAIL_TOP_MSG);
@@ -1172,7 +1201,7 @@ static void test_a_in_archive_no_strikethrough(void) {
         if (!s) return;
         ASSERT(pty_run(s, args) == 0, "a-noop: pty_run s1");
         ASSERT(navigate_to_inbox(s) == 0, "a-noop: navigate_to_inbox");
-        pty_send_str(s, "a");   /* archive top message */
+        gm_archive(s);   /* archive top message */
         pty_settle(s, SETTLE_MS);
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -1198,7 +1227,7 @@ static void test_a_in_archive_no_strikethrough(void) {
         ASSERT(row >= 0, "a-noop: " GMAIL_TOP_MSG " visible in Archive");
 
         /* Press 'a' — message is already archived, must be a no-op */
-        pty_send_str(s, "a");
+        gm_archive(s);
         pty_settle(s, SETTLE_MS);
 
         row = find_row(s, GMAIL_TOP_MSG);
@@ -1232,7 +1261,7 @@ static void test_label_picker_unarchive_green_fg(void) {
         if (!s) return;
         ASSERT(pty_run(s, args) == 0, "unarch-green: pty_run s1");
         ASSERT(navigate_to_inbox(s) == 0, "unarch-green: nav inbox");
-        pty_send_str(s, "a");
+        gm_archive(s);
         pty_settle(s, SETTLE_MS);
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -1299,7 +1328,7 @@ static void test_label_picker_untrash_green_fg(void) {
         if (!s) return;
         ASSERT(pty_run(s, args) == 0, "untrash-green: pty_run s1");
         ASSERT(navigate_to_inbox(s) == 0, "untrash-green: nav inbox");
-        pty_send_str(s, "D");   /* trash Message 5 */
+        gm_trash(s);   /* trash Message 5 */
         pty_settle(s, SETTLE_MS);
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -1365,7 +1394,7 @@ static void test_D_permanent_delete_in_trash_view(void) {
         if (!s) return;
         ASSERT(pty_run(s, args) == 0, "D-noop: pty_run s1");
         ASSERT(navigate_to_inbox(s) == 0, "D-noop: nav inbox s1");
-        pty_send_str(s, "D");
+        gm_trash(s);
         pty_settle(s, SETTLE_MS);
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -1384,7 +1413,7 @@ static void test_D_permanent_delete_in_trash_view(void) {
         int row = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row >= 0, "D-perm: " GMAIL_TOP_MSG " visible in Trash");
 
-        pty_send_str(s, "D");
+        gm_trash(s);
         pty_settle(s, SETTLE_MS);
 
         /* The row stays visible with a red 'D' marker until the next refresh,
@@ -1402,63 +1431,7 @@ static void test_D_permanent_delete_in_trash_view(void) {
     }
 }
 
-/**
- * First 'D' moves to Trash (red 'D' pending marker).
- * Second 'D' undoes the trash: row returns to normal, no pending marker.
- */
-static void test_D_D_undo_clears_strikethrough(void) {
-    const char *args[] = { g_tui_bin, NULL };
-    PtySession *s = pty_open(COLS, ROWS);
-    ASSERT(s != NULL, "D-undo: pty_open");
-    if (!s) return;
-    ASSERT(pty_run(s, args) == 0, "D-undo: pty_run");
-    ASSERT(navigate_to_inbox(s) == 0, "D-undo: navigate_to_inbox");
 
-    int row = find_row(s, GMAIL_TOP_MSG);
-    ASSERT(row >= 0, "D-undo: " GMAIL_TOP_MSG " present");
-
-    /* First D: trash */
-    pty_send_str(s, "D");
-    pty_settle(s, SETTLE_MS);
-    row = find_row(s, GMAIL_TOP_MSG);
-    ASSERT(row >= 0, "D-undo: row visible after first D");
-    if (row >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row, 1), "D") == 0,
-               "D-undo: 'D' marker after first D");
-
-    /* Second D: undo trash */
-    pty_send_str(s, "D");
-    pty_settle(s, SETTLE_MS);
-    row = find_row(s, GMAIL_TOP_MSG);
-    ASSERT(row >= 0, "D-undo: row still visible after undo");
-    if (row >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row, 1), " ") == 0,
-               "D-undo: no pending marker after second D (undo)");
-
-    pty_send_key(s, PTY_KEY_ESC);
-    pty_close(s);
-}
-
-/**
- * After 'D','D' (undo trash), feedback shows "Undo: INBOX restored".
- */
-static void test_D_D_undo_feedback(void) {
-    reset_and_sync();
-    const char *args[] = { g_tui_bin, NULL };
-    PtySession *s = pty_open(COLS, ROWS);
-    ASSERT(s != NULL, "D-undo-fb: pty_open");
-    if (!s) return;
-    ASSERT(pty_run(s, args) == 0, "D-undo-fb: pty_run");
-    ASSERT(navigate_to_inbox(s) == 0, "D-undo-fb: navigate_to_inbox");
-    pty_send_str(s, "D");
-    pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "D");   /* undo */
-    pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Undo: INBOX restored"),
-           "D-undo-fb: feedback shows 'Undo: INBOX restored'");
-    pty_send_key(s, PTY_KEY_ESC);
-    pty_close(s);
-}
 
 /**
  * After 'D' (trash) + 'd' (label remove), row shows yellow 'd' marker — not red 'D'.
@@ -1472,9 +1445,9 @@ static void test_D_then_d_shows_yellow(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "D-d-yellow: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "D-d-yellow: navigate_to_inbox");
-    pty_send_str(s, "D");   /* trash first */
+    gm_trash(s);   /* trash first */
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "d");   /* remove label: should override red 'D' → yellow 'd' */
+    gm_rm_label(s);   /* remove label: should override red 'D' → yellow 'd' */
     pty_settle(s, SETTLE_MS);
     int row = find_row(s, GMAIL_TOP_MSG);
     ASSERT(row >= 0, "D-d-yellow: row still visible");
@@ -1524,7 +1497,7 @@ static void test_feedback_D_trash(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "fb-D: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "fb-D: navigate_to_inbox");
-    pty_send_str(s, "D");
+    gm_trash(s);
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Moved to Trash"),
            "fb-D: feedback row shows 'Moved to Trash'");
@@ -1541,7 +1514,7 @@ static void test_feedback_d_label_removed(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "fb-d: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "fb-d: navigate_to_inbox");
-    pty_send_str(s, "d");
+    gm_rm_label(s);
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Label removed: INBOX"),
            "fb-d: feedback row shows 'Label removed: INBOX'");
@@ -1558,9 +1531,9 @@ static void test_feedback_d_undo(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "fb-dundo: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "fb-dundo: navigate_to_inbox");
-    pty_send_str(s, "d");
+    gm_rm_label(s);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "d");  /* undo */
+    gm_rm_label(s);  /* undo */
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Undo: INBOX restored"),
            "fb-dundo: feedback row shows 'Undo: INBOX restored'");
@@ -1577,7 +1550,7 @@ static void test_feedback_a_archive(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "fb-arch: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "fb-arch: navigate_to_inbox");
-    pty_send_str(s, "a");
+    gm_archive(s);
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Archived"),
            "fb-arch: feedback row shows 'Archived'");
@@ -1596,7 +1569,7 @@ static void test_feedback_a_noop(void) {
         if (!s) return;
         ASSERT(pty_run(s, args) == 0, "fb-anoop: pty_run s1");
         ASSERT(navigate_to_inbox(s) == 0, "fb-anoop: nav inbox s1");
-        pty_send_str(s, "a");   /* archive Message 5 */
+        gm_archive(s);   /* archive Message 5 */
         pty_settle(s, SETTLE_MS);
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -1615,7 +1588,7 @@ static void test_feedback_a_noop(void) {
         navigate_labels_to_archive(s);
         pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
         pty_settle(s, SETTLE_MS);
-        pty_send_str(s, "a");   /* no-op: already in Archive */
+        gm_archive(s);   /* no-op: already in Archive */
         pty_settle(s, SETTLE_MS);
         ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Already in Archive"),
                "fb-anoop: feedback shows 'Already in Archive'");
@@ -1633,7 +1606,7 @@ static void test_feedback_f_star(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "fb-f: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "fb-f: navigate_to_inbox");
-    pty_send_str(s, "f");   /* message 5 is not starred → becomes starred */
+    pty_send_str(s, "*");   /* message 5 is not starred → becomes starred */
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Starred"),
            "fb-f: feedback row shows 'Starred'");
@@ -1651,7 +1624,7 @@ static void test_feedback_n_read(void) {
     ASSERT(pty_run(s, args) == 0, "fb-n: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "fb-n: navigate_to_inbox");
     /* Message 5 starts with UNREAD label → pressing 'n' marks it as read */
-    pty_send_str(s, "n");
+    pty_send_str(s, "+");
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Marked as read"),
            "fb-n: feedback row shows 'Marked as read'");
@@ -1670,7 +1643,7 @@ static void test_feedback_u_restore(void) {
         if (!s) return;
         ASSERT(pty_run(s, args) == 0, "fb-u: pty_run s1");
         ASSERT(navigate_to_inbox(s) == 0, "fb-u: nav inbox s1");
-        pty_send_str(s, "D");   /* trash Message 5 */
+        gm_trash(s);   /* trash Message 5 */
         pty_settle(s, SETTLE_MS);
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -1685,7 +1658,7 @@ static void test_feedback_u_restore(void) {
         ASSERT(navigate_to_trash(s) == 0, "fb-u: navigate_to_trash");
         pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
         pty_settle(s, SETTLE_MS);
-        pty_send_str(s, "u");   /* restore from trash */
+        gm_restore(s);   /* restore from trash */
         pty_settle(s, SETTLE_MS);
         ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Restored to Inbox"),
                "fb-u: feedback row shows 'Restored to Inbox'");
@@ -1930,6 +1903,168 @@ static void test_gmail_sync_pending_fetch_uid_format(void) {
  *  main
  * ══════════════════════════════════════════════════════════════════════ */
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  EMAIL-175: the keyboard policy
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** 'j' and 'k' move the cursor on the message list; they change nothing else. */
+static void test_keys_jk_move(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "jk: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "jk: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "jk: navigate_to_inbox");
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "[1/"), "jk: starts on the first row");
+    pty_send_str(s, "j");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "[2/"), "jk: j moves down");
+    pty_send_str(s, "j");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "[3/"), "jk: j moves down again");
+    pty_send_str(s, "k");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "[2/"), "jk: k moves up");
+    pty_send_str(s, "k");
+    pty_send_str(s, "k");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "[1/"), "jk: no wrap above the first row");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** 'd' asks, naming the message; No (the default) leaves everything as it was. */
+static void test_keys_d_asks_default_no(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "d-asks: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "d-asks: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "d-asks: navigate_to_inbox");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, GMAIL_TOP_MSG);       /* the subject is named */
+    pty_send_key(s, PTY_KEY_ENTER);                 /* Enter on the default */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    int row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "d-asks: message still listed");
+    if (row >= 0)
+        ASSERT(strcmp(pty_cell_text(s, row, 1), " ") == 0, "d-asks: no pending mark");
+    ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Moved to Trash"), "d-asks: nothing moved");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** The old direct keys that wrote to the server do nothing now. */
+static void test_keys_old_letters_do_nothing(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "old: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "old: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "old: navigate_to_inbox");
+    const char *old = "fnDaus";
+    for (const char *c = old; *c; c++) {
+        char k[2] = { *c, 0 };
+        pty_send_str(s, k);
+        pty_settle(s, 300);
+        int row = find_row(s, GMAIL_TOP_MSG);
+        ASSERT(row >= 0 && strcmp(pty_cell_text(s, row, 1), " ") == 0,
+               "old: no pending mark after an old letter");
+        ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Archived") &&
+               !pty_row_contains(s, FEEDBACK_ROW, "Moved") &&
+               !pty_row_contains(s, FEEDBACK_ROW, "Marked") &&
+               !pty_row_contains(s, FEEDBACK_ROW, "tarred") &&
+               !pty_row_contains(s, FEEDBACK_ROW, "Restored"),
+               "old: no feedback after an old letter");
+    }
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** The Gmail menu lists archive, restore, labels and the sync, with the keys. */
+static void test_keys_gmail_menu(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, 40);
+    ASSERT(s != NULL, "menu: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "menu: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "menu: navigate_to_inbox");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Archive");
+    ASSERT_SCREEN_CONTAINS(s, "Restore from Trash");
+    ASSERT_SCREEN_CONTAINS(s, "Remove this label");
+    ASSERT_SCREEN_CONTAINS(s, "Start a sync");
+    ASSERT_SCREEN_CONTAINS(s, "Labels");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** Deleting a label is in the menu of the label browser, and asks first. */
+static void test_keys_label_delete_asks(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label delete: reaches the label list");
+    if (!s) return;
+    pty_send_str(s, "c");                     /* no longer creates a label */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "New label name:");
+    pty_send_str(s, "d");                     /* no longer deletes */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Delete the label");
+    gm_menu_pick(s, 1);                       /* Delete the label */
+    ASSERT_WAIT_FOR(s, "on the server?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);           /* the default is No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "on the server?");
+    ASSERT_SCREEN_CONTAINS(s, "Labels");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** Gmail's reader: '*' stars, '+'/'-' mark, 'd' asks; no letter writes. */
+static void test_keys_reader(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "reader: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "reader: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "reader: navigate_to_inbox");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "*");
+    ASSERT_WAIT_FOR(s, "tarred", WAIT_MS);
+    pty_send_str(s, "n");
+    pty_settle(s, 300);
+    pty_send_str(s, "a");
+    pty_settle(s, 300);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Archived");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                 /* No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    ASSERT_SCREEN_CONTAINS(s, "From:");             /* still reading */
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Message reader shortcuts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+
 int main(int argc, char *argv[]) {
     if (argc < 4) {
         fprintf(stderr,
@@ -2157,8 +2292,6 @@ int main(int argc, char *argv[]) {
         stop_gmail_mock();
         goto done;
     }
-    RUN_TEST(test_D_D_undo_clears_strikethrough);
-    RUN_TEST(test_D_D_undo_feedback);
     RUN_TEST(test_D_then_d_shows_yellow);
 
     /* ── Feedback line tests (US-44 / US-52-56) ── */
@@ -2172,6 +2305,12 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_feedback_n_read);
     RUN_TEST(test_feedback_u_restore);
     RUN_TEST(test_feedback_t_label_added);
+    RUN_TEST(test_keys_jk_move);
+    RUN_TEST(test_keys_d_asks_default_no);
+    RUN_TEST(test_keys_old_letters_do_nothing);
+    RUN_TEST(test_keys_gmail_menu);
+    RUN_TEST(test_keys_label_delete_asks);
+    RUN_TEST(test_keys_reader);
 
     /* ── US-72: Gmail Smart Sync Orchestration ── */
     printf("\n--- Gmail Smart Sync orchestration (US-72) ---\n");

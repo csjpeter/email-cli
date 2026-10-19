@@ -5861,6 +5861,71 @@ static void test_tui_rules_detail_delete(void) {
     remove_rules_ini();
 }
 
+static void test_tui_rules_detail_delete_cancel_stays(void) {
+    /* EMAIL-165: 'd' then 'n' or an arrow key cancels the delete and stays in
+     * the detail view; the answer is read through the key decoder. */
+    remove_rules_ini();
+    write_rules_ini();
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rule detail cancel: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "SpamFilter", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "(y/N)", RULES_WAIT_MS);
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Rule:");
+    ASSERT(pty_screen_contains(s, "(y/N)") == 0,
+           "rule detail cancel: prompt gone after 'n'");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "(y/N)", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Rule:");
+    ASSERT(pty_screen_contains(s, "(y/N)") == 0,
+           "rule detail cancel: prompt gone after an arrow key");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "SpamFilter");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    remove_rules_ini();
+}
+
+static void test_tui_rules_list_delete_arrow_cancels(void) {
+    /* EMAIL-165: in the rules list 'd' then an arrow key cancels the delete. */
+    remove_rules_ini();
+    write_rules_ini();
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "rules list cancel: reaches message list");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "SpamFilter", RULES_WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "(y/N)", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "SpamFilter");
+    ASSERT(pty_screen_contains(s, "(y/N)") == 0,
+           "rules list cancel: prompt gone after an arrow key");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in", RULES_WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    remove_rules_ini();
+}
+
 /* ── US-80: rule edit form with inline editing ───────────────────────── */
 
 static void test_tui_rules_edit_form_opens(void) {
@@ -6699,6 +6764,8 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_tui_rules_detail_shows_fields);
     RUN_TEST(test_tui_rules_detail_esc_back);
     RUN_TEST(test_tui_rules_detail_delete);
+    RUN_TEST(test_tui_rules_detail_delete_cancel_stays);
+    RUN_TEST(test_tui_rules_list_delete_arrow_cancels);
 
     /* ── TUI rule edit form (US-80) ─────────────────────────────────── */
     printf("\n--- email-tui: rule edit form inline editing (US-80) ---\n");

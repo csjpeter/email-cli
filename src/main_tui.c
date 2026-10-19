@@ -290,6 +290,18 @@ static void cd_complete(char *buf, int *cur, const char *addr) {
     *cur = tok_start + addr_len;
 }
 
+/**
+ * Read the answer of a (y/N) prompt through the key decoder, so an arrow key's
+ * escape bytes are consumed as one key and do not leak into the next read.
+ * @return 'y' for y/Y, otherwise 'n'.
+ */
+static char tui_read_confirm(void)
+{
+    (void)terminal_read_key();
+    int c = terminal_last_printable();
+    return (c == 'y' || c == 'Y') ? 'y' : 'n';
+}
+
 /* The bottom status line of a screen of this program (EMAIL-111): the hints
  * that fit the width, in reverse video on the last row, a message in their
  * place when there is one.  The same widget as the lists' status line. */
@@ -1933,7 +1945,7 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
         if (!cancelled) {
             printf("\033[23;1H\033[2KSave? (y/N) ");
             fflush(stdout);
-            ssize_t cn = read(STDIN_FILENO, &confirm_char, 1); (void)cn;
+            confirm_char = tui_read_confirm();
             if (confirm_char != 'y' && confirm_char != 'Y') cancelled = 1;
         }
     }
@@ -2068,7 +2080,7 @@ static void tui_rules_detail(const char *account, int idx)
                 printf("\033[%d;1H\033[2K  Delete \"%s\"? (y/N) ",
                        footer, r->name ? r->name : "?");
                 fflush(stdout);
-                ssize_t _nd = read(STDIN_FILENO, &del_confirm, 1); (void)_nd;
+                del_confirm = tui_read_confirm();
             }
         }
 
@@ -2099,9 +2111,12 @@ static void tui_rules_detail(const char *account, int idx)
             if (del_confirm == 'y' || del_confirm == 'Y') {
                 rules_free_at(rules, idx);
                 mail_rules_save(account, rules);
+                mail_rules_free(rules);
+                break;
             }
+            /* Anything but 'y' cancels the delete and stays in the detail. */
             mail_rules_free(rules);
-            break;
+            continue;
         }
 
         mail_rules_free(rules);
@@ -2226,14 +2241,14 @@ static void tui_rules_editor(const Config *cfg)
                 printf("\033[%d;1H\033[2K  Apply the rules to the cached messages now? (y/N) ",
                        rows);
                 fflush(stdout);
-                ssize_t _na = read(STDIN_FILENO, &del_confirm, 1); (void)_na;
+                del_confirm = tui_read_confirm();
             }
             if (ch == 'd' && count > 0) {
                 const char *rname = rules->rules[cursor].name
                                   ? rules->rules[cursor].name : "?";
                 printf("\033[%d;1H\033[2K  Delete \"%s\"? (y/N) ", rows, rname);
                 fflush(stdout);
-                ssize_t _nd = read(STDIN_FILENO, &del_confirm, 1); (void)_nd;
+                del_confirm = tui_read_confirm();
             }
         }
 

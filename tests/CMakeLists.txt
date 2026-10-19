@@ -65,6 +65,9 @@ set(SCRATCH ${CMAKE_SOURCE_DIR}/tests/common/test_scratch.c)
 
 project_test(unit test-runner SOURCES ${UNIT_TEST_SOURCES} INCLUDES ${UNIT_TEST_INCLUDES} LINK email-client-static ${EMAIL_TUIKIT_LIB} NEEDS test-tls-certs
     DEFINES TEST_CERT_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.crt" TEST_KEY_PATH="${CMAKE_BINARY_DIR}/tests/certs/test.key")
+# The failing allocator hook (tests/common/fault_alloc.c) replaces the allocators of everything
+# linked into the runner, to test the out-of-memory branches (EMAIL-139).
+target_link_options(test-runner PRIVATE -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc)
 
 project_test(functional run_functional SCRIPT functional/run_functional.sh)
 project_test(functional run_manage_sh SCRIPT functional/run_manage_sh.sh)

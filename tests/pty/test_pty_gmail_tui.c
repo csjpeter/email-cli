@@ -1493,6 +1493,61 @@ static void test_D_permanent_delete_in_trash_view(void) {
 
 
 /**
+ * EMAIL-157: 'd' on a message in Trash asks before deleting for good, the
+ * question says so, and answering 'n' deletes nothing.  The same in the reader.
+ */
+static void test_delete_in_trash_asks_for_good(void) {
+    reset_and_sync();
+    {
+        const char *args[] = { g_tui_bin, NULL };
+        PtySession *s = pty_open(COLS, ROWS);
+        ASSERT(s != NULL, "perm-ask: pty_open s1");
+        if (!s) return;
+        ASSERT(pty_run(s, args) == 0, "perm-ask: pty_run s1");
+        ASSERT(navigate_to_inbox(s) == 0, "perm-ask: nav inbox s1");
+        gm_trash(s);
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_close(s);
+    }
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "perm-ask: pty_open s2");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "perm-ask: pty_run s2");
+    ASSERT(navigate_to_trash(s) == 0, "perm-ask: navigate_to_trash");
+    pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+
+    /* List: the question names "for good"; 'n' deletes nothing. */
+    pty_send_str(s, "d");
+    ASSERT(pty_wait_for(s, "for good", WAIT_MS) == 0,
+           "perm-ask: list question says 'for good'");
+    pty_send_str(s, "n");
+    ASSERT(pty_wait_for(s, "Not deleted", WAIT_MS) == 0,
+           "perm-ask: list 'n' answers 'Not deleted'");
+    pty_settle(s, SETTLE_MS);
+    int row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "perm-ask: message still listed after 'n'");
+    if (row >= 0)
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "D") != 0,
+               "perm-ask: no 'D' marker after 'n'");
+
+    /* Reader: the same question and the same answer. */
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "d");
+    ASSERT(pty_wait_for(s, "for good", WAIT_MS) == 0,
+           "perm-ask: reader question says 'for good'");
+    pty_send_str(s, "n");
+    ASSERT(pty_wait_for(s, "Not deleted", WAIT_MS) == 0,
+           "perm-ask: reader 'n' answers 'Not deleted'");
+
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/**
  * After 'D' (trash) + 'd' (label remove), row shows yellow 'd' marker — not red 'D'.
  * 'd' overrides the pending-remove state.
  */
@@ -2620,6 +2675,7 @@ int main(int argc, char *argv[]) {
         goto done;
     }
     RUN_TEST(test_D_permanent_delete_in_trash_view);
+    RUN_TEST(test_delete_in_trash_asks_for_good);
 
     printf("--- Fresh sync (test 21: D+D undo) ---\n");
     if (reset_and_sync() != 0) {

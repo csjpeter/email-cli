@@ -4636,19 +4636,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 selected = strdup("__compose__");
                 goto folders_int_done;
             } else if (ch == '?') {
-                static const char *help[][2] = {
-                    { "j / k",             "Move cursor down / up (also the arrows)" },
-                    { "PgUp / PgDn",        "Move cursor one page up / down"          },
-                    { "Enter",             "Open folder / navigate into subfolder"   },
-                    { "/",                 "Cross-folder content search"             },
-                    { "c",                 "Compose new message"                     },
-                    { "t",                 "Toggle tree / flat view"                 },
-                    { ":",                 "Actions: create or delete a folder"      },
-                    { "Esc / q / BS",        "Up one level (accounts at the top)"      },
-                    { "?",                 "Show this help"                          },
-                };
-                show_help_popup("Folder browser shortcuts",
-                                help, (int)(sizeof(help)/sizeof(help[0])));
+                ekeys_help(EKV_FOLDERS, "Folder browser shortcuts");
             }
             break;
         }
@@ -5609,12 +5597,25 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             cursor = count > 0 ? count - 1 : 0;
             ACC_FREE(); continue;
         }
-        if (key == TERM_KEY_NEXT_LINE || key == TERM_KEY_NEXT_PAGE) {
+        if (key == TERM_KEY_NEXT_LINE) {
             if (cursor < count - 1) cursor++;
             ACC_FREE(); continue;
         }
-        if (key == TERM_KEY_PREV_LINE || key == TERM_KEY_PREV_PAGE) {
+        if (key == TERM_KEY_PREV_LINE) {
             if (cursor > 0) cursor--;
+            ACC_FREE(); continue;
+        }
+        /* EMAIL-159: PgDn/PgUp move by the visible rows, as in the other lists */
+        if (key == TERM_KEY_NEXT_PAGE) {
+            int page = (trows > 5) ? trows - 5 : 3;
+            cursor += page;
+            if (cursor > count - 1) cursor = count > 0 ? count - 1 : 0;
+            ACC_FREE(); continue;
+        }
+        if (key == TERM_KEY_PREV_PAGE) {
+            int page = (trows > 5) ? trows - 5 : 3;
+            cursor -= page;
+            if (cursor < 0) cursor = 0;
             ACC_FREE(); continue;
         }
         if (key == TERM_KEY_ENTER && count > 0) {
@@ -5628,6 +5629,8 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
         if (ch == '?') {
             static const char *help[][2] = {
                 { "j / k",           "Move cursor down / up (also the arrows)" },
+                { "PgUp / PgDn",      "Move cursor up / down"       },
+                { "Home / End",       "First / last account"        },
                 { "Enter",            "Open selected account"       },
                 { "n",               "Add new account"             },
                 { "d",               "Delete selected account"     },

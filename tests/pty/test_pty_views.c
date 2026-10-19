@@ -3321,7 +3321,7 @@ static void test_tui_folders_help_panel(void) {
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Toggle tree");
+    ASSERT_SCREEN_CONTAINS(s, "tree / flat view");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser shortcuts");

@@ -59,6 +59,7 @@ be combined with it. `list-folders --tree` is the human view of the folders.
 
 ```
 email-cli send --to a@example.org --subject "Hi" --body "Text" [--attach FILE]...
+email-cli reply 42 [--all] [--body "Text"] [--folder F]   # quoted, Re:, In-Reply-To; marks answered locally until next sync
 email-cli mark-read 42 | mark-unread 42 | mark-starred 42 | remove-starred 42
 email-cli mark-junk 42 | mark-notjunk 42
 email-cli move 42 FOLDER [--folder SOURCE]   # Gmail: FOLDER is a label ID

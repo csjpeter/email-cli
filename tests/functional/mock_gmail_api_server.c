@@ -637,6 +637,11 @@ static void handle_connection(int fd) {
                 if (strncmp(id_end, "/modify", 7) == 0)
                     log_modify_body(fd, buf, buf_len, id_start,
                                     (int)(id_end - id_start));
+                else if (strncmp(id_end, "/trash", 6) == 0) {
+                    printf("Mock Gmail: TRASH %.*s\n",
+                           (int)(id_end - id_start), id_start);
+                    fflush(stdout);
+                }
                 send_json(fd, "{}");
                 return;
             }

@@ -7414,6 +7414,45 @@ int email_service_mark_notjunk(const Config *cfg, const char *uid) {
     return rc;
 }
 
+int email_service_move(const Config *cfg, const char *uid,
+                       const char *folder, const char *target) {
+    const char *src = folder ? folder : (cfg->folder ? cfg->folder : "INBOX");
+    if (strcmp(src, target) == 0) {
+        fprintf(stderr, "Error: the message is already in '%s'.\n", target);
+        return -1;
+    }
+    local_store_init(cfg->host, cfg->user);
+    emc_client *mc = make_mail(cfg);
+    if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+
+    int rc;
+    if (cfg->gmail_mode) {
+        rc = emc_modify_label(mc, uid, target, 1);
+        if (rc == 0) rc = emc_modify_label(mc, uid, src, 0);
+        if (rc == 0) {
+            label_idx_add(target, uid);
+            local_hdr_update_labels("", uid, &target, 1, NULL, 0);
+            label_idx_remove(src, uid);
+            local_hdr_update_labels("", uid, NULL, 0, &src, 1);
+        }
+    } else {
+        rc = emc_select(mc, src);
+        if (rc == 0) rc = emc_move_to_folder(mc, uid, target);
+        if (rc == 0) {
+            Manifest *m = manifest_load(src);
+            if (m) {
+                manifest_remove(m, uid);
+                manifest_save(src, m);
+                manifest_free(m);
+            }
+        }
+    }
+    emc_close(mc);
+    if (rc == 0) printf("Message %s moved to '%s'.\n", uid, target);
+    else fprintf(stderr, "Error: could not move message %s to '%s'.\n", uid, target);
+    return rc == 0 ? 0 : -1;
+}
+
 /* ── trash and archive from the command line (EMAIL-132) ─────────────── */
 
 /** True when @p folder names the Gmail trash (the label id or the local index). */

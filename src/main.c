@@ -61,6 +61,7 @@ static void help_general(void) {
         "  delete-label <id>           Delete a Gmail label (Gmail only)\n"
         "  create-folder <name>        Create an IMAP folder (IMAP only)\n"
         "  delete-folder <name>        Delete an IMAP folder (IMAP only)\n"
+        "  move <uid> <folder>         Move a message to a folder (Gmail: label)\n"
         "  mark-junk <uid>             Mark a message as junk/spam\n"
         "  mark-notjunk <uid>          Mark a message as not-junk (ham)\n"
         "  trash <uid>                 Move a message to the trash\n"
@@ -649,6 +650,24 @@ static void help_delete_folder(void) {
     );
 }
 
+static void help_move(void) {
+    printf(
+        "Usage: email-cli move <uid> <folder> [--folder <name>]\n"
+        "\n"
+        "Move a message to another folder.\n"
+        "IMAP: copies it to <folder> and removes it from the source mailbox.\n"
+        "Gmail: adds the label <folder> and removes the source label.\n"
+        "\n"
+        "  <uid>             UID of the message (decimal or 16-char hex)\n"
+        "  <folder>          Destination folder (Gmail: label ID)\n"
+        "  --folder <name>   Source mailbox (default: the account's folder)\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli move 12345 Archive\n"
+        "  email-cli move 12345 Archive --folder INBOX\n"
+    );
+}
+
 static void help_mark_junk(void) {
     printf(
         "Usage: email-cli mark-junk <uid>\n"
@@ -899,6 +918,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "delete-label")    == 0) { help_delete_label();    return EXIT_SUCCESS; }
                 if (strcmp(cmd, "create-folder")   == 0) { help_create_folder();   return EXIT_SUCCESS; }
                 if (strcmp(cmd, "delete-folder")   == 0) { help_delete_folder();   return EXIT_SUCCESS; }
+                if (strcmp(cmd, "move")            == 0) { help_move();            return EXIT_SUCCESS; }
                 if (strcmp(cmd, "mark-junk")       == 0) { help_mark_junk();       return EXIT_SUCCESS; }
                 if (strcmp(cmd, "trash")           == 0 ||
                     strcmp(cmd, "archive")         == 0) { help_trash();          return EXIT_SUCCESS; }
@@ -953,6 +973,7 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "delete-label")    == 0) { help_delete_label();    return EXIT_SUCCESS; }
             if (strcmp(topic, "create-folder")   == 0) { help_create_folder();   return EXIT_SUCCESS; }
             if (strcmp(topic, "delete-folder")   == 0) { help_delete_folder();   return EXIT_SUCCESS; }
+            if (strcmp(topic, "move")            == 0) { help_move();            return EXIT_SUCCESS; }
             if (strcmp(topic, "mark-junk")       == 0) { help_mark_junk();       return EXIT_SUCCESS; }
             if (strcmp(topic, "trash")           == 0 ||
                 strcmp(topic, "archive")         == 0) { help_trash();          return EXIT_SUCCESS; }
@@ -1650,6 +1671,38 @@ int main(int argc, char *argv[]) {
             help_delete_folder();
         } else {
             result = email_service_delete_folder(cfg, name);
+        }
+
+    } else if (strcmp(cmd, "move") == 0) {
+        const char *uid_str = NULL;
+        const char *target  = NULL;
+        const char *folder  = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--folder") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: --folder requires a folder name.\n"); ok = 0;
+                } else folder = argv[++i];
+            } else if (!uid_str) {
+                uid_str = argv[i];
+            } else if (!target) {
+                target = argv[i];
+            } else {
+                unknown_option(cmd, argv[i]); ok = 0;
+            }
+        }
+        if (ok) {
+            if (!uid_str || !target) {
+                fprintf(stderr, "Error: 'move' requires a UID and a destination folder.\n");
+                help_move();
+            } else {
+                char uid[17];
+                if (parse_uid(uid_str, uid) != 0)
+                    fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
+                else
+                    result = email_service_move(cfg, uid, folder, target);
+            }
         }
 
     } else if (strcmp(cmd, "mark-junk") == 0 || strcmp(cmd, "mark-notjunk") == 0) {

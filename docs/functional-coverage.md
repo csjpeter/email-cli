@@ -33,11 +33,11 @@ recorded weakness, not coverage of the promise.
 | `email-cli --help` | F:1.1 | |
 | `email-cli --version` | F:74.1 | |
 | `email-cli list` | F:1.4 F:1.6 | |
-| `email-cli list --all-accounts` | F:84.26 | exercised through `email-cli-ro`, which shares the code |
-| `email-cli list --folder` | F:58.1 F:59.1 | virtual folders and search; weak: asserts no crash |
-| `email-cli list --from` | F:84.2 | through `email-cli-ro` |
-| `email-cli list --json` | F:84.17 F:116.5 | through `email-cli-ro`; the other `--json` commands F:122.1 |
-| `email-cli list --since/--before` | F:84.5 F:116.1 | |
+| `email-cli list --all-accounts` | F:84.41 F:84.42 | also through `email-cli-ro` F:84.26 |
+| `email-cli list --folder` | F:58.1 F:59.1 | virtual folders (each flag view lists exactly its messages) and search (subject, from, no match) |
+| `email-cli list --from` | F:84.34 | also through `email-cli-ro` F:84.2 |
+| `email-cli list --json` | F:84.40 F:116.5 | also through `email-cli-ro` F:84.17; the other `--json` commands F:122.1 |
+| `email-cli list --since/--before` | F:84.36 F:84.38 F:116.1 | also through `email-cli-ro` F:84.5 |
 | `email-cli list-accounts` | F:18.1 | |
 | `email-cli list-attachments` | F:14.1 F:14.2 | |
 | `email-cli list-folders` | F:25.13 F:1.14 | |
@@ -106,7 +106,7 @@ recorded weakness, not coverage of the promise.
 | Capability | Tests | Notes |
 |------------|-------|-------|
 | `email-import-rules --account` | F:116.60 F:116.65 | |
-| `email-import-rules --dry-run` | F:69.2 | weak: asserts no crash |
+| `email-import-rules --dry-run` | F:69.2 F:69.7 | shows the rule, saves nothing |
 | `email-import-rules --help` | F:38.10 F:69.3 | |
 | `email-import-rules --output` | F:116.60 F:116.62 | |
 | `email-import-rules --thunderbird-path` | F:116.58 F:116.64 | |

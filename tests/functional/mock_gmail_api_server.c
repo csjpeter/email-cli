@@ -563,6 +563,7 @@ static void handle_connection(int fd) {
     if (sscanf(buf, "%7s %4095s", method, path) != 2) return;
 
     printf("Mock Gmail: %s %s\n", method, path);
+    fflush(stdout);
 
     /* The OAuth2 token endpoint (EMAIL-113): POST /token exchanges the
      * authorization code.  Only code=good is accepted, as Google would

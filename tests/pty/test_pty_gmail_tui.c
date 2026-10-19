@@ -663,6 +663,65 @@ static void test_label_browser_create_label_confirmed(void) {
     pty_close(s);
 }
 
+/** Count the lines of the mock's request log that contain @p needle (the
+ *  first mock started by this test is the Gmail mock). */
+static int mock_log_count(const char *needle) {
+    FILE *fp = fopen(TP("mock-MOCK_GMAIL-1.log"), "r");
+    if (!fp) return -1;
+    char line[1024];
+    int n = 0;
+    while (fgets(line, sizeof(line), fp))
+        if (strstr(line, needle)) n++;
+    fclose(fp);
+    return n;
+}
+
+/** True when the row starts with the cursor mark ">". */
+static int on_cursor_row(PtySession *s, int row) {
+    char buf[COLS * 4 + 4];
+    pty_row_text(s, row, buf, sizeof(buf));
+    return buf[0] == '>';
+}
+
+/** EMAIL-135: deleting a user label from the label browser asks first (No
+ *  declines, nothing is sent) and, on Yes, sends DELETE for the label's id
+ *  (Label_Empty1), not for the name shown ("Empty Label"). */
+static void test_label_browser_delete_label_uses_id(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "label delete: reaches the label list");
+    if (!s) return;
+    int row = find_row(s, "Empty Label");
+    ASSERT(row >= 0, "label delete: Empty Label is listed");
+    /* The cursor starts where the previous visit left it: walk to the row. */
+    for (int i = 0; row >= 0 && i < 30 && !on_cursor_row(s, row); i++) {
+        int cur = -1;
+        for (int r = 0; r < ROWS && cur < 0; r++)
+            if (on_cursor_row(s, r)) cur = r;
+        pty_send_key(s, cur > row ? PTY_KEY_UP : PTY_KEY_DOWN);
+        pty_settle(s, 100);
+    }
+    ASSERT(row >= 0 && on_cursor_row(s, row),
+           "label delete: cursor on Empty Label");
+
+    gm_menu_pick(s, 1);                            /* Delete the label */
+    ASSERT_WAIT_FOR(s, "Delete the label Empty Label", WAIT_MS);
+    pty_send_str(s, "n");                          /* declined */
+    pty_settle(s, SETTLE_MS);
+    ASSERT(mock_log_count("DELETE ") == 0,
+           "label delete: No sends no DELETE request");
+
+    gm_menu_pick(s, 1);
+    ASSERT_WAIT_FOR(s, "Delete the label Empty Label", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(mock_log_count("DELETE /gmail/v1/users/me/labels/Label_Empty1") == 1,
+           "label delete: Yes sends DELETE for the label id Label_Empty1");
+    ASSERT(mock_log_count("labels/Empty") == 0,
+           "label delete: the name is not used as the id");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  TEST: 'a' key → row has yellow marker 'd' (immediate feedback)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -2116,6 +2175,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_label_browser_lists_a_label_without_messages);
     RUN_TEST(test_label_browser_create_label_prompt);
     RUN_TEST(test_label_browser_create_label_confirmed);
+    RUN_TEST(test_label_browser_delete_label_uses_id);
 
     printf("--- Fresh sync (test 2) ---\n");
     if (reset_and_sync() != 0) {

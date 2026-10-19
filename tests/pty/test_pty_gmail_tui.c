@@ -925,9 +925,10 @@ static void test_trash_statusbar_restore_hint(void) {
     ASSERT(navigate_to_trash(s) == 0, "trash-sb: navigate_to_trash");
 
     /* The status bar (last row) points at the action menu, where the restore
-     * is (EMAIL-175: no direct key writes to the server but the registry's). */
+     * is (EMAIL-175: no direct key writes to the server but the registry's).
+     * An empty Trash has nothing to delete, so no "d del" hint (EMAIL-188). */
     ASSERT_SCREEN_CONTAINS(s, ": actions");
-    ASSERT_SCREEN_CONTAINS(s, "d del");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "d del");
     ASSERT_SCREEN_NOT_CONTAINS(s, "u restore");
 
     pty_send_key(s, PTY_KEY_ESC);

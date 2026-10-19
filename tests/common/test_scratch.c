@@ -166,6 +166,10 @@ static int read_file(const char *path, char *buf, size_t n)
     return 0;
 }
 
+#define MAX_MOCK_LOGS 16
+static struct { pid_t pid; char path[PATH_MAX]; } g_mock_logs[MAX_MOCK_LOGS];
+static int g_nmock_logs;
+
 pid_t test_spawn_mock(const char *bin, const char *prefix, int want_port,
                       int *port_out)
 {
@@ -208,6 +212,10 @@ pid_t test_spawn_mock(const char *bin, const char *prefix, int want_port,
             int p = atoi(buf);
             if (p > 0) {
                 if (port_out) *port_out = p;
+                int slot = g_nmock_logs % MAX_MOCK_LOGS;
+                g_mock_logs[slot].pid = pid;
+                snprintf(g_mock_logs[slot].path, PATH_MAX, "%s", logfile);
+                g_nmock_logs++;
                 return pid;
             }
         }
@@ -226,6 +234,35 @@ pid_t test_spawn_mock(const char *bin, const char *prefix, int want_port,
     kill(pid, SIGKILL);
     waitpid(pid, NULL, 0);
     return -1;
+}
+
+const char *test_mock_log(pid_t pid)
+{
+    for (int i = 0; i < MAX_MOCK_LOGS && i < g_nmock_logs; i++)
+        if (g_mock_logs[i].pid == pid) return g_mock_logs[i].path;
+    return NULL;
+}
+
+int test_log_count(const char *path, const char *needle)
+{
+    FILE *fp = fopen(path, "r");
+    if (!fp) return 0;
+    char line[4096];
+    int n = 0;
+    while (fgets(line, sizeof(line), fp))
+        if (strstr(line, needle)) n++;
+    fclose(fp);
+    return n;
+}
+
+int test_log_wait(const char *path, const char *needle, int want, int ms)
+{
+    for (int waited = 0; ; waited += 50) {
+        if (test_log_count(path, needle) >= want) return 0;
+        if (waited >= ms) return -1;
+        struct timespec ts = {0, 50 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+    }
 }
 
 int test_unused_port(void)

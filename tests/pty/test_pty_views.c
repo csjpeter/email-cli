@@ -2311,6 +2311,53 @@ static void test_keys_registry_routine(void) {
     pty_close(s);
 }
 
+/* EMAIL-136: '!' toggles junk on an IMAP account.  The server gets the flag
+ * STOREs ($Junk set and $NotJunk cleared, then the reverse), the feedback line
+ * says what was done, and the status column shows J (yellow) while junk. */
+static void test_keys_junk_toggle_imap(void) {
+    restart_mock();
+    const char *log = test_mock_log(g_mock_pid);
+    ASSERT(log != NULL, "junk imap: the mock has a log");
+    if (!log) return;
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "junk imap: opens");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(test_log_count(log, "STORE") == 0, "junk imap: no STORE before the key");
+
+    int row = -1;
+    for (int r = 0; r < 30; r++)
+        if (pty_row_contains(s, r, "Test Message")) { row = r; break; }
+    ASSERT(row >= 0, "junk imap: the message row is listed");
+
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as junk", WAIT_MS);
+    ASSERT(test_log_wait(log, "STORE 1 +FLAGS ($Junk)", 1, WAIT_MS) == 0,
+           "junk imap: server got +FLAGS ($Junk)");
+    ASSERT(test_log_count(log, "STORE 1 -FLAGS ($NotJunk)") == 1,
+           "junk imap: server got -FLAGS ($NotJunk)");
+    ASSERT(test_log_count(log, "+FLAGS ($NotJunk)") == 0,
+           "junk imap: $NotJunk is not set when marking junk");
+    if (row >= 0) {
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "J") == 0, "junk imap: status column shows J");
+        int fg = pty_cell_fg(s, row, 1);
+        ASSERT(fg == PTY_FG_YELLOW || fg == PTY_FG_YELLOW + 60, "junk imap: J is yellow");
+    }
+
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as not-junk", WAIT_MS);
+    ASSERT(test_log_wait(log, "STORE 1 +FLAGS ($NotJunk)", 1, WAIT_MS) == 0,
+           "junk imap: server got +FLAGS ($NotJunk)");
+    ASSERT(test_log_count(log, "STORE 1 -FLAGS ($Junk)") == 1,
+           "junk imap: server got -FLAGS ($Junk)");
+    ASSERT(test_log_count(log, "STORE 1 +FLAGS ($Junk)") == 1,
+           "junk imap: $Junk was set only once");
+    if (row >= 0)
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "J") != 0, "junk imap: J is gone after the toggle back");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* The old letters that wrote to the server are gone: they change nothing. */
 static void test_keys_old_letters_unbound(void) {
     restart_mock();
@@ -5488,6 +5535,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_tui_list_bulk_cancel);
     RUN_TEST(test_tui_list_bulk_delete_confirm);
     RUN_TEST(test_keys_registry_routine);
+    RUN_TEST(test_keys_junk_toggle_imap);
     RUN_TEST(test_keys_old_letters_unbound);
     RUN_TEST(test_keys_delete_dialog);
     RUN_TEST(test_keys_action_menu);

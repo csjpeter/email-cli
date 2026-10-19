@@ -2092,6 +2092,51 @@ static void test_keys_label_delete_asks(void) {
     pty_close(s);
 }
 
+/**
+ * EMAIL-136: '!' toggles junk on a Gmail account.  The request to Google adds
+ * SPAM and removes INBOX, then the reverse; the feedback line says what was
+ * done and the status column shows a yellow J while the message is junk.
+ */
+static void test_keys_junk_toggle_gmail(void) {
+    reset_and_sync();
+    const char *log = test_mock_log(g_mock_pid);
+    ASSERT(log != NULL, "junk gmail: the mock has a log");
+    if (!log) return;
+    int before = test_log_count(log, "MODIFY");
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "junk gmail: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "junk gmail: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "junk gmail: navigate_to_inbox");
+    int row = find_row(s, GMAIL_TOP_MSG);
+    ASSERT(row >= 0, "junk gmail: " GMAIL_TOP_MSG " present");
+
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as junk", WAIT_MS);
+    ASSERT(test_log_wait(log, "\"addLabelIds\":[\"SPAM\"]", 1, WAIT_MS) == 0,
+           "junk gmail: modify request adds SPAM");
+    ASSERT(test_log_count(log, "\"removeLabelIds\":[\"INBOX\"]") == 1,
+           "junk gmail: modify request removes INBOX");
+    ASSERT(test_log_count(log, "MODIFY") == before + 1, "junk gmail: one request per press");
+    if (row >= 0) {
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "J") == 0, "junk gmail: status column shows J");
+        ASSERT(fg_is(pty_cell_fg(s, row, 1), PTY_FG_YELLOW), "junk gmail: J is yellow");
+    }
+
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as not-junk", WAIT_MS);
+    ASSERT(test_log_wait(log, "\"addLabelIds\":[\"INBOX\"]", 1, WAIT_MS) == 0,
+           "junk gmail: modify request adds INBOX back");
+    ASSERT(test_log_count(log, "\"removeLabelIds\":[\"SPAM\"]") == 1,
+           "junk gmail: modify request removes SPAM");
+    ASSERT(test_log_count(log, "MODIFY") == before + 2, "junk gmail: two requests in all");
+    if (row >= 0)
+        ASSERT(strcmp(pty_cell_text(s, row, 1), "J") != 0, "junk gmail: J gone after the toggle back");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /** Gmail's reader: '*' stars, '+'/'-' mark, 'd' asks; no letter writes. */
 static void test_keys_reader(void) {
     reset_and_sync();
@@ -2533,6 +2578,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_keys_gmail_menu);
     RUN_TEST(test_keys_label_delete_asks);
     RUN_TEST(test_keys_reader);
+    RUN_TEST(test_keys_junk_toggle_gmail);
 
     /* ── US-72: Gmail Smart Sync Orchestration ── */
     printf("\n--- Gmail Smart Sync orchestration (US-72) ---\n");

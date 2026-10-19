@@ -2311,6 +2311,14 @@ static void test_keys_registry_routine(void) {
     pty_close(s);
 }
 
+/* Column of the junk letter of row @p row's status cell ("J-----"), or -1. */
+static int junk_col(PtySession *s, int row) {
+    char rt[256];
+    pty_row_text(s, row, rt, sizeof rt);
+    const char *p = strstr(rt, " J-----");
+    return p ? (int)(p - rt) + 1 : -1;
+}
+
 /* EMAIL-136: '!' toggles junk on an IMAP account.  The server gets the flag
  * STOREs ($Junk set and $NotJunk cleared, then the reverse), the feedback line
  * says what was done, and the status column shows J (yellow) while junk. */
@@ -2332,28 +2340,31 @@ static void test_keys_junk_toggle_imap(void) {
 
     pty_send_str(s, "!");
     ASSERT_WAIT_FOR(s, "Marked as junk", WAIT_MS);
-    ASSERT(test_log_wait(log, "STORE 1 +FLAGS ($Junk)", 1, WAIT_MS) == 0,
+    ASSERT(test_log_wait(log, "UID STORE 0000000000000001 +FLAGS ($Junk)", 1, WAIT_MS) == 0,
            "junk imap: server got +FLAGS ($Junk)");
-    ASSERT(test_log_count(log, "STORE 1 -FLAGS ($NotJunk)") == 1,
+    ASSERT(test_log_count(log, "UID STORE 0000000000000001 -FLAGS ($NotJunk)") == 1,
            "junk imap: server got -FLAGS ($NotJunk)");
     ASSERT(test_log_count(log, "+FLAGS ($NotJunk)") == 0,
            "junk imap: $NotJunk is not set when marking junk");
     if (row >= 0) {
-        ASSERT(strcmp(pty_cell_text(s, row, 1), "J") == 0, "junk imap: status column shows J");
-        int fg = pty_cell_fg(s, row, 1);
-        ASSERT(fg == PTY_FG_YELLOW || fg == PTY_FG_YELLOW + 60, "junk imap: J is yellow");
+        int jc = junk_col(s, row);
+        ASSERT(jc >= 0, "junk imap: status column shows J");
+        if (jc >= 0) {
+            int fg = pty_cell_fg(s, row, jc);
+            ASSERT(fg == PTY_FG_YELLOW || fg == PTY_FG_YELLOW + 60, "junk imap: J is yellow");
+        }
     }
 
     pty_send_str(s, "!");
     ASSERT_WAIT_FOR(s, "Marked as not-junk", WAIT_MS);
-    ASSERT(test_log_wait(log, "STORE 1 +FLAGS ($NotJunk)", 1, WAIT_MS) == 0,
+    ASSERT(test_log_wait(log, "UID STORE 0000000000000001 +FLAGS ($NotJunk)", 1, WAIT_MS) == 0,
            "junk imap: server got +FLAGS ($NotJunk)");
-    ASSERT(test_log_count(log, "STORE 1 -FLAGS ($Junk)") == 1,
+    ASSERT(test_log_count(log, "UID STORE 0000000000000001 -FLAGS ($Junk)") == 1,
            "junk imap: server got -FLAGS ($Junk)");
-    ASSERT(test_log_count(log, "STORE 1 +FLAGS ($Junk)") == 1,
+    ASSERT(test_log_count(log, "UID STORE 0000000000000001 +FLAGS ($Junk)") == 1,
            "junk imap: $Junk was set only once");
     if (row >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row, 1), "J") != 0, "junk imap: J is gone after the toggle back");
+        ASSERT(junk_col(s, row) < 0, "junk imap: J is gone after the toggle back");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }

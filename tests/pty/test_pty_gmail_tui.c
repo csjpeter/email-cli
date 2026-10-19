@@ -2092,6 +2092,14 @@ static void test_keys_label_delete_asks(void) {
     pty_close(s);
 }
 
+/* Column of the junk letter of row @p row's status cell ("J-----"), or -1. */
+static int junk_col(PtySession *s, int row) {
+    char rt[256];
+    pty_row_text(s, row, rt, sizeof rt);
+    const char *p = strstr(rt, " J-----");
+    return p ? (int)(p - rt) + 1 : -1;
+}
+
 /**
  * EMAIL-136: '!' toggles junk on a Gmail account.  The request to Google adds
  * SPAM and removes INBOX, then the reverse; the feedback line says what was
@@ -2120,8 +2128,10 @@ static void test_keys_junk_toggle_gmail(void) {
            "junk gmail: modify request removes INBOX");
     ASSERT(test_log_count(log, "MODIFY") == before + 1, "junk gmail: one request per press");
     if (row >= 0) {
-        ASSERT(strcmp(pty_cell_text(s, row, 1), "J") == 0, "junk gmail: status column shows J");
-        ASSERT(fg_is(pty_cell_fg(s, row, 1), PTY_FG_YELLOW), "junk gmail: J is yellow");
+        int jc = junk_col(s, row);
+        ASSERT(jc >= 0, "junk gmail: status column shows J");
+        if (jc >= 0)
+            ASSERT(fg_is(pty_cell_fg(s, row, jc), PTY_FG_YELLOW), "junk gmail: J is yellow");
     }
 
     pty_send_str(s, "!");
@@ -2132,7 +2142,7 @@ static void test_keys_junk_toggle_gmail(void) {
            "junk gmail: modify request removes SPAM");
     ASSERT(test_log_count(log, "MODIFY") == before + 2, "junk gmail: two requests in all");
     if (row >= 0)
-        ASSERT(strcmp(pty_cell_text(s, row, 1), "J") != 0, "junk gmail: J gone after the toggle back");
+        ASSERT(junk_col(s, row) < 0, "junk gmail: J gone after the toggle back");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }

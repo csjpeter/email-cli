@@ -4465,7 +4465,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
             } else if (fact == EA_FOLDER_CREATE) {
                 char nname[512] = "";
                 if (!tree_mode && current_prefix[0])
-                    snprintf(nname, sizeof(nname), "%s%c", current_prefix, sep);
+                    snprintf(nname, sizeof(nname), "%.500s%c", current_prefix, sep);
                 InputLine il;
                 input_line_init(&il, nname, sizeof(nname), nname);
                 int trw = terminal_rows();

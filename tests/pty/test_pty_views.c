@@ -972,6 +972,35 @@ static void test_interactive_show_search_no_match(void) {
     pty_close(s);
 }
 
+/* EMAIL-154: after a search, n is only "next match"; the read state keeps its
+ * own keys (+ and -) in the reader. */
+static void test_interactive_show_search_then_unread_keys(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "search then flags: opens");
+    ASSERT_WAIT_FOR(s, "Test Message", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "/");
+    pty_settle(s, SETTLE_MS / 2);
+    pty_send_str(s, "Mock");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Marked as");
+    pty_send_str(s, "+");
+    ASSERT_WAIT_FOR(s, "Marked as read", WAIT_MS);
+    pty_send_str(s, "-");
+    ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /*
  * ══════════════════════════════════════════════════════════════════════
  * US-RD-04: As a user, I want URLs rendered in blue so they stand out
@@ -5565,6 +5594,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_show_source_toggle);
     RUN_TEST(test_interactive_show_search_finds);
     RUN_TEST(test_interactive_show_search_no_match);
+    RUN_TEST(test_interactive_show_search_then_unread_keys);
     RUN_TEST(test_interactive_show_url_rendered);
 
     printf("\n--- Interactive list-folders ---\n");

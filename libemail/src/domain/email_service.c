@@ -980,7 +980,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
     char *ar_hdr    = mime_get_header(raw, "Authentication-Results");
     char *show_dmarc = mime_describe_dmarc(ar_hdr);
     free(ar_hdr);
-    /* Load current flags for 'f' / 'n' / 'd' toggle operations.
+    /* Load current flags for the star / read / delete operations.
      * For Gmail: .hdr contains a flags field — use it if available.
      * For IMAP:  .hdr contains raw RFC 2822 headers without flags — use
      *            the caller-supplied initial_flags instead. */

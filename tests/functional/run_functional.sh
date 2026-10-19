@@ -7294,6 +7294,97 @@ kill "$IMAP124_PID" "$GMAIL124_PID"
 
 fi
 
+if phase_wanted 132; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 132 — trash and archive from the command line (EMAIL-132)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 132: trash / archive (EMAIL-132) ---"
+
+alloc_port IMAP132_PORT
+alloc_port GMAIL132_PORT
+IMAP132_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_132.log"
+GMAIL132_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_132.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP132_PORT MOCK_IMAP_SUBJECT="Phase132Msg" \
+    "$MOCK_SERVER_BIN") >"$IMAP132_LOG" 2>&1 &
+IMAP132_PID=$!
+(MOCK_GMAIL_PORT=$GMAIL132_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="w132@gmail.example" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL132_LOG" 2>&1 &
+GMAIL132_PID=$!
+sleep 1
+
+# The home is new for this run (the work directory carries the shell's PID).
+H132="./build/tests/functional/work-$$/homes/f132-$$"
+mkdir -p "$H132/.config/email-cli/accounts/w132@example.org" "$H132/.config/email-cli/accounts/w132@gmail.example"
+printf 'credential_obfuscation=false\n' > "$H132/.config/email-cli/settings.ini"
+cat > "$H132/.config/email-cli/accounts/w132@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP132_PORT
+EMAIL_USER=w132@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+ARCHIVE_FOLDER=Old132
+SSL_NO_VERIFY=1
+INI
+cat > "$H132/.config/email-cli/accounts/w132@gmail.example/config.ini" <<INI
+EMAIL_HOST=
+EMAIL_USER=w132@gmail.example
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=fakefaketoken
+INI
+chmod 0600 "$H132"/.config/email-cli/accounts/*/config.ini
+
+w132() {
+    local bin="$1" acc="$2"; shift 2
+    (export HOME="$H132"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     export GMAIL_TEST_TOKEN=testtoken
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL132_PORT/gmail/v1/users/me"
+     "$BIN_DIR/$bin" "$acc" "$@" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+IM=w132@example.org
+GM=w132@gmail.example
+ilog() { grep "Client requested" "$IMAP132_LOG"; }
+glog() { grep "MODIFY\|TRASH" "$GMAIL132_LOG"; }
+
+OUT=$(w132 email-cli $IM trash 2)
+check "132.1 IMAP trash reports it"                            "moved to the trash" "$OUT"
+check "132.2 IMAP trash copies the UID to Trash"               'UID COPY 0000000000000002 "Trash"' "$(ilog)"
+check "132.3 IMAP trash flags it \\Deleted"                    'UID STORE 0000000000000002 +FLAGS (.Deleted)' "$(ilog)"
+OUT=$(w132 email-cli $IM archive 3)
+check "132.4 IMAP archive reports it"                          "archived" "$OUT"
+check "132.5 IMAP archive copies the UID to ARCHIVE_FOLDER"    'UID COPY 0000000000000003 "Old132"' "$(ilog)"
+OUT=$(w132 email-cli $IM trash 4 --folder Trash)
+check "132.6 IMAP trash in the Trash deletes for good"         "deleted for good" "$OUT"
+check_not "132.7 IMAP trash in the Trash does not copy"        'UID COPY 0000000000000004' "$(ilog)"
+OUT=$(w132 email-cli $IM archive 5 --folder Old132)
+check "132.8 IMAP archive in the archive is a no-op"           "already in Old132" "$OUT"
+check_not "132.9 IMAP archive in the archive sends nothing"    'UID COPY 0000000000000005' "$(ilog)"
+
+OUT=$(w132 email-cli $GM trash 1)
+check "132.10 Gmail trash reports it"                          "moved to the trash" "$OUT"
+check "132.11 Gmail trash posts to the trash endpoint"         'TRASH 0000000000000001' "$(glog)"
+OUT=$(w132 email-cli $GM archive 2)
+check "132.12 Gmail archive exits 0"                           "exit-code=0" "$OUT"
+check "132.13 Gmail archive marks it read"                     'MODIFY 0000000000000002 .*removeLabelIds":\["UNREAD"\]' "$(glog)"
+
+OUT=$(w132 email-cli $IM trash)
+check "132.14 trash without a UID"                             "'trash' requires a UID" "$OUT"
+OUT=$(w132 email-cli $IM archive zz)
+check "132.15 archive with a bad UID"                          "invalid UID 'zz'" "$OUT"
+OUT=$(w132 email-cli $IM trash 1 2)
+check "132.16 trash with two UIDs"                             "Unknown option" "$OUT"
+OUT=$(w132 email-cli-ro $IM trash 1)
+check "132.17 email-cli-ro refuses trash"                      "not available in read-only mode" "$OUT"
+OUT=$(w132 email-cli-ro $IM archive 1)
+check "132.18 email-cli-ro refuses archive"                    "not available in read-only mode" "$OUT"
+OUT=$("$BIN_DIR/email-cli" trash --help 2>&1)
+check "132.19 trash --help describes both commands"            "archive <uid>" "$OUT"
+OUT=$("$BIN_DIR/email-cli" help archive 2>&1)
+check "132.20 help archive shows the page"                     "ARCHIVE_FOLDER" "$OUT"
+kill "$IMAP132_PID" "$GMAIL132_PID"
+
+fi
+
 if phase_wanted 96; then
 # ════════════════════════════════════════════════════════════════════════════
 # Phase 96: the assertion helpers can fail (EMAIL-13)

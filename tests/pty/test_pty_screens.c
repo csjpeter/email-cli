@@ -884,6 +884,65 @@ VIEW(reader_source,    at_reader(), (pty_send_str(s, "v"), pty_settle(s, SETTLE_
 VIEW(reader_search,    at_reader(), (pty_send_str(s, "/"), pty_settle(s, SETTLE_MS)))
 VIEW(rules_second,     (write_rules(), at_rules()),
      (pty_send_str(s, "j"), pty_settle(s, SETTLE_MS)))
+/* EMAIL-164: Home, End, PgUp and PgDn move the rules list; the screens are
+ * those of the list with the first and with the second rule selected. */
+#define SAMEVIEW(name, open_expr, setup, gold) \
+    static void test_screen_##name(void) { \
+        restart_mock(); \
+        use_home(#name); \
+        PtySession *s = (open_expr); \
+        ASSERT(s != NULL, #name ": the view opens"); \
+        setup; \
+        if (g_record) { pty_close(s); return; } \
+        check_view(s, exp_##gold, sty_##gold, cur_##gold); \
+        pty_close(s); \
+    }
+SAMEVIEW(rules_end,  (write_rules(), at_rules()),
+         (pty_send_key(s, PTY_KEY_END), pty_settle(s, SETTLE_MS)), rules_second)
+SAMEVIEW(rules_pgdn, (write_rules(), at_rules()),
+         (pty_send_key(s, PTY_KEY_PGDN), pty_settle(s, SETTLE_MS)), rules_second)
+SAMEVIEW(rules_home, (write_rules(), at_rules()),
+         (pty_send_key(s, PTY_KEY_END), pty_send_key(s, PTY_KEY_HOME), pty_settle(s, SETTLE_MS)),
+         rules_list)
+SAMEVIEW(rules_pgup, (write_rules(), at_rules()),
+         (pty_send_key(s, PTY_KEY_END), pty_send_key(s, PTY_KEY_PGUP), pty_settle(s, SETTLE_MS)),
+         rules_list)
+
+/* The condition list: End selects the last condition, so 'd' removes it;
+ * Home selects the first, so 'd' removes that one. */
+static void conditions_after(const char *keys_name, int end_key, const char *gone,
+                             const char *kept) {
+    restart_mock();
+    use_home(keys_name);
+    write_rules();
+    PtySession *s = at_rules();
+    ASSERT(s != NULL, "conditions keys: the rules list opens");
+    if (g_record) { pty_close(s); return; }
+    pty_send_str(s, "j");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "e");
+    ASSERT(pty_wait_for(s, "conditions", WAIT_MS) == 0, "conditions keys: the list opens");
+    pty_settle(s, SETTLE_MS);
+    if (end_key == PTY_KEY_HOME || end_key == PTY_KEY_PGUP) {
+        pty_send_key(s, PTY_KEY_END);
+        pty_settle(s, SETTLE_MS);
+    }
+    pty_send_key(s, end_key);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "d");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(pty_screen_contains(s, kept), "conditions keys: the other condition stays");
+    ASSERT(!pty_screen_contains(s, gone), "conditions keys: the selected condition is gone");
+    pty_close(s);
+}
+static void test_conditions_end_home(void) {
+    conditions_after("cond_end", PTY_KEY_END, "from:*@news.example.com", "subject:");
+    conditions_after("cond_home", PTY_KEY_HOME, "subject:", "from:*@news.example.com");
+    conditions_after("cond_pgdn", PTY_KEY_PGDN, "from:*@news.example.com", "subject:");
+    conditions_after("cond_pgup", PTY_KEY_PGUP, "subject:", "from:*@news.example.com");
+}
+
 VIEW(rule_edit_form,   (write_rules(), at_rules()),
      (pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS),
       pty_send_str(s, "e"), pty_settle(s, SETTLE_MS)))
@@ -1210,6 +1269,11 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_reader_source);
     RUN_TEST(test_screen_reader_search);
     RUN_TEST(test_screen_rules_second);
+    RUN_TEST(test_screen_rules_end);
+    RUN_TEST(test_screen_rules_pgdn);
+    RUN_TEST(test_screen_rules_home);
+    RUN_TEST(test_screen_rules_pgup);
+    RUN_TEST(test_conditions_end_home);
     RUN_TEST(test_screen_rule_edit_form);
     RUN_TEST(test_screen_compose_typed);
     RUN_TEST(test_screen_compose_empty_to);

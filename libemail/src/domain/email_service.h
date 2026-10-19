@@ -430,6 +430,40 @@ int email_service_delete_label(const Config *cfg, const char *label_id);
 int email_service_mark_junk(const Config *cfg, const char *uid);
 
 /**
+ * @brief Build the quoted original for a reply: "On <date>, <from> wrote:"
+ *        and the body, each line prefixed "> ".  Shared by email-cli and
+ *        email-tui.
+ * @return Heap string (caller frees), NULL on error.
+ */
+char *email_service_reply_quote(const char *raw);
+
+/**
+ * @brief The Cc list of a reply to all: the original To and Cc minus @p own,
+ *        joined with "; ".
+ * @return Heap string (caller frees; may be empty), NULL on error.
+ */
+char *email_service_reply_all_cc(const char *raw, const char *own);
+
+/**
+ * @brief Set the local "answered" flag of a message in the folder's manifest.
+ *        Local until the next sync (the manifest is rewritten from the server).
+ * @return 0 on success, -1 when the manifest or the message is not there.
+ */
+int email_service_mark_answered(const Config *cfg, const char *folder, const char *uid);
+
+/**
+ * @brief Reply to a message without interaction (email-cli reply [--all]):
+ *        quoted original, "Re:" subject, In-Reply-To/References, sent, saved
+ *        in Sent, the original marked answered.
+ * @param folder NULL = the account's folder.
+ * @param all    1 = reply to all (original To/Cc, minus the account's address).
+ * @param body   Reply text placed above the quote; may be NULL.
+ * @return 0 on success, -1 on error.
+ */
+int email_service_reply(const Config *cfg, const char *uid, const char *folder,
+                        int all, const char *body);
+
+/**
  * @brief Move a message to the trash, or delete it for good when it is
  *        already there (the TUI's 'D').  Gmail: TRASH label; IMAP: move to
  *        the configured trash folder.

@@ -59,6 +59,9 @@ Toggle the star / flagged state.
 .BI mark\-junk " uid" "\fR, \fP" mark\-notjunk " uid"
 Toggle the junk state.
 .TP
+.BI reply " uid" "\fR [\fP\-\-all\fR] [\fP\-\-body " text "\fR] [\fP\-\-folder " folder "\fR]\fP"
+Reply to a message (reply to all with \-\-all): quoted original, "Re:" subject, In\-Reply\-To and References, saved in Sent; the original is marked answered locally until the next sync.
+.TP
 .BI trash " uid" "\fR [\fP\-\-folder " folder "\fR]\fP"
 Move a message to the trash (IMAP: the trash folder; Gmail: the TRASH label); a message already in the trash is deleted for good.
 .TP

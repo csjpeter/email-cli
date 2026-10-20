@@ -49,8 +49,12 @@ starts a content search in the current view.
 .BR j " or " Down ", " k " or " Up
 Move the cursor.
 .TP
-.BR PgDn ", " PgUp ", " Home ", " End
+.BR PgDn ", " PgUp ", " Home " or " g ", " End " or " G
 Page down, page up, first message, last message.
+.TP
+.BR Esc ", " q ", " Backspace ", " Left ", " h
+Back to the folders or labels; Esc, q, Left and h drop the marks, then the
+filter, first.
 .TP
 .B Enter
 Open the message.
@@ -92,7 +96,9 @@ Open the action menu: every action that changes state, with its direct key
 where it has one.  The menu also holds what has no key: start a background
 sync (asks, naming the account and folder), move to a folder or label, toggle
 Done (IMAP), and for Gmail archive, restore from Trash, remove the current
-label, add or remove a named label.
+label, add or remove a named label.  The menu lists only what applies in the
+view: restore in the Trash only, archive in every view but the Archive,
+remove the current label in the view of a label only.
 .TP
 .B ?
 Help for the view.

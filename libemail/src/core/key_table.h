@@ -55,7 +55,10 @@ typedef enum {
 
 /** The views of the table. */
 #define EKV_LIST_IMAP   "list-imap"
-#define EKV_LIST_GMAIL  "list-gmail"
+#define EKV_LIST_GMAIL  "list-gmail"                /* the view of a label    */
+#define EKV_LIST_GMAIL_VIRTUAL "list-gmail-virtual"  /* Unread, Flagged, search */
+#define EKV_LIST_GMAIL_ARCHIVE "list-gmail-archive"
+#define EKV_LIST_GMAIL_TRASH   "list-gmail-trash"
 #define EKV_READ_IMAP   "reader-imap"
 #define EKV_READ_GMAIL  "reader-gmail"
 #define EKV_LABELS      "labels"
@@ -101,5 +104,9 @@ void ekeys_help(const char *view, const char *title);
 /** @brief 1 when the help overlay of @p view has a row for @p key (the
  *        table row the handler is checked against). */
 int ekeys_help_has(const char *view, tui_keycode key);
+
+/** @brief 1 when the table of @p view has an entry for the action @p a (a key
+ *         or a row of the ':' menu), 0 when the view does not offer it. */
+int ekeys_menu_has(const char *view, EmailAction a);
 
 #endif /* CORE_KEY_TABLE_H */

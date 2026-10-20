@@ -31,7 +31,7 @@ is the end of the text of its row.
 | Folder browser (`folders`, `folders_flat`) | Enter on an account | header bar with count; heads Unread, Flagged, Folder, Total; "Tags / Flags" section (dim, 6 virtual rows) and "Folders" tree; cursor row selected (dark blue, `>`); status bar with `[n/N]` | ↑↓ g G PgUp/PgDn Home End Enter t h l / : Esc q BS; `:` menu: create a folder (name asked), delete the folder (asks, No default) |
 | Folder help (`folders_help`) | `?` | overlay (as the accounts help) | Esc q BS |
 | Folder search (`folders_search`) | `/` | filter prompt line | text, Enter, Esc |
-| Message list (`list`, `list_second_row`, `list_narrow`) | Enter on INBOX | header bar "1-3 of 3 message(s) in INBOX (3 unread) [account]."; heads Date, Sts, Subject, From; ruler; rows with status column (`N` green = unread); status bar; marked rows carry `*` and the header adds `[N marked]` (US-86) | ↑↓ PgUp/PgDn Enter c r F A n f j d D s U l / h Esc q BS |
+| Message list (`list`, `list_second_row`, `list_narrow`) | Enter on INBOX | header bar "1-3 of 3 message(s) in INBOX (3 unread) [account]."; heads Date, Sts, Subject, From; ruler; rows with status column (`N` green = unread); status bar; marked rows carry `*` and the header adds `[N marked]` (US-86) | ↑↓ jk g G PgUp/PgDn Home End Enter c r F A U l * + - ! d t Space x / : ? h Left Esc q BS |
 | Bulk action prompt (US-86) | `m` on the message list | information line `N [marked ]message(s): r=read u=unread f=star F=unstar m=move D=trash  Esc=cancel`; Gmail adds `l=+label L=-label`; `D` asks `(y/N)` | r u f F l L m D Esc |
 | Empty folder (`list_empty`) | Enter on an empty folder | header "0 of 0 message(s) …", "(empty)" | |
 | List help (`list_help`) | `h` | overlay with key rows and the Sts legend | Esc q BS |

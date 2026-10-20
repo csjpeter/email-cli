@@ -1147,7 +1147,7 @@ GVIEW(gmail_inbox,      at_gmail_entry(2), (void)0)
 GVIEW(gmail_inbox_second, at_gmail_entry(2),
       (pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_d,    at_gmail_entry(2),
-      (menu_row(s, 11), pty_settle(s, SETTLE_MS)))
+      (menu_row(s, 10), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_trash_mark, at_gmail_entry(2),
       (pty_send_str(s, "d"), pty_wait_for(s, "Yes", WAIT_MS), pty_send_str(s, "y"),
        pty_settle(s, SETTLE_MS)))
@@ -1160,7 +1160,7 @@ GVIEW(gmail_delete_ask, at_gmail_entry(2),
 GVIEW(gmail_inbox_marked, at_gmail_entry(2),
       (pty_send_str(s, " "), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_d_off, at_gmail_entry(2),
-      (menu_row(s, 11), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+      (menu_row(s, 10), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_trash_off, at_gmail_entry(2),
       (pty_send_str(s, "d"), pty_wait_for(s, "Yes", WAIT_MS), pty_send_str(s, "y"),
        pty_settle(s, 300), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
@@ -1179,7 +1179,7 @@ GVIEW(gmail_archive_filled, at_gmail_entry(2),
 /* A label exists in the browser once a message carries it: add "Work" to the
  * first message through the action menu ("Add a label..."). */
 static void gmail_add_work_label(PtySession *s) {
-    menu_row(s, 12);
+    menu_row(s, 11);
     pty_wait_for(s, "Add label", WAIT_MS);
     pty_send_str(s, "Work");
     pty_send_key(s, PTY_KEY_ENTER);

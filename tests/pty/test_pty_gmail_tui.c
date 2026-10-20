@@ -66,7 +66,7 @@ int g_tests_failed = 0;
  * Gmail message list menu, in table order (libemail/src/core/key_table.c). */
 #define GM_MENU_ARCHIVE   9
 #define GM_MENU_RESTORE   10
-#define GM_MENU_RM_LABEL  11
+#define GM_MENU_RM_LABEL  10
 
 static void gm_menu_pick(PtySession *s, int row) {
     pty_send_str(s, ":");
@@ -1334,8 +1334,8 @@ static void test_a_row_yellow_fg(void) {
  * ══════════════════════════════════════════════════════════════════════ */
 
 /**
- * Pressing 'a' while already in the Archive (_nolabel) view is a no-op:
- * the message is already archived, so no pending marker must appear.
+ * The Archive (_nolabel) view does not offer Archive (EMAIL-206): the
+ * message is already archived, so no pending marker can appear.
  */
 static void test_a_in_archive_no_strikethrough(void) {
     const char *args[] = { g_tui_bin, NULL };
@@ -1372,8 +1372,13 @@ static void test_a_in_archive_no_strikethrough(void) {
         int row = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row >= 0, "a-noop: " GMAIL_TOP_MSG " visible in Archive");
 
-        /* Press 'a' — message is already archived, must be a no-op */
-        gm_archive(s);
+        /* The message is archived already: the menu does not offer Archive
+         * (EMAIL-206), so there is nothing to press and no marker appears. */
+        pty_send_str(s, ":");
+        pty_wait_for(s, "Actions", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Archive - remove every label");
+        pty_send_key(s, PTY_KEY_ESC);
         pty_settle(s, SETTLE_MS);
 
         row = find_row(s, GMAIL_TOP_MSG);
@@ -1759,7 +1764,7 @@ static void test_feedback_a_archive(void) {
     pty_close(s);
 }
 
-/** After 'a' in Archive view (already archived), feedback shows "Already in Archive". */
+/** The Archive view does not offer Archive; nothing is said or done (EMAIL-206). */
 static void test_feedback_a_noop(void) {
     /* First archive a message */
     reset_and_sync();
@@ -1789,10 +1794,14 @@ static void test_feedback_a_noop(void) {
         navigate_labels_to_archive(s);
         pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
         pty_settle(s, SETTLE_MS);
-        gm_archive(s);   /* no-op: already in Archive */
+        pty_send_str(s, ":");
+        pty_wait_for(s, "Actions", WAIT_MS);
         pty_settle(s, SETTLE_MS);
-        ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Already in Archive"),
-               "fb-anoop: feedback shows 'Already in Archive'");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Archive - remove every label");   /* EMAIL-206 */
+        pty_send_key(s, PTY_KEY_ESC);
+        pty_settle(s, SETTLE_MS);
+        ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Already in Archive"),
+               "fb-anoop: nothing was archived again");
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
     }
@@ -2264,7 +2273,7 @@ static void test_keys_gmail_menu(void) {
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Archive");
-    ASSERT_SCREEN_CONTAINS(s, "Restore from Trash");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Restore from Trash");   /* the Trash's alone (EMAIL-206) */
     ASSERT_SCREEN_CONTAINS(s, "Remove this label");
     ASSERT_SCREEN_CONTAINS(s, "Start a sync");
     ASSERT_SCREEN_CONTAINS(s, "Labels");
@@ -2541,6 +2550,693 @@ static void test_reauth_choice_can_be_left(void) {
 }
 
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  EMAIL-144: key study of the message list of a Gmail account (80x24)
+ *  docs/spec/tui-keys.md, "Message list, Gmail account".  The mock has N
+ *  messages: 1-40 unread (listed first, newest first), 41-45 read, 41-45
+ *  also labelled Work.  The list window is 19 rows.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Restarts the mock with @p count messages and syncs; 0 on success. */
+static int gk_mock(int count) {
+    stop_gmail_mock();
+    char n[16];
+    snprintf(n, sizeof n, "%d", count);
+    setenv("MOCK_GMAIL_COUNT", n, 1);
+    setenv("MOCK_GMAIL_EMAIL", GMAIL_TEST_EMAIL, 1);
+    g_mock_pid = test_spawn_mock(g_mock_bin, "MOCK_GMAIL", 0, &g_mock_port);
+    unsetenv("MOCK_GMAIL_COUNT");
+    unsetenv("MOCK_GMAIL_EMAIL");
+    if (g_mock_pid < 0) return -1;
+    snprintf(g_api_url, sizeof(g_api_url),
+             "http://localhost:%d/gmail/v1/users/me", g_mock_port);
+    setenv("GMAIL_API_BASE_URL", g_api_url, 1);
+    return reset_and_sync();
+}
+
+/** Opens email-tui at 80x24 on the label browser of the account, then on the
+ *  label @p which: "inbox", "work", "archive", "trash" or "unread". */
+static PtySession *gk_open(const char *which) {
+    write_folder_pref("INBOX");                       /* the labels start on Inbox */
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(80, 24);
+    if (!s || pty_run(s, args) != 0) { if (s) pty_close(s); return NULL; }
+    if (pty_wait_for(s, "Email Accounts", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "Labels", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    if (strcmp(which, "work") == 0) pty_send_key(s, PTY_KEY_UP);
+    else if (strcmp(which, "unread") == 0) pty_send_key(s, PTY_KEY_HOME);
+    else if (strcmp(which, "trash") == 0) pty_send_key(s, PTY_KEY_END);
+    else if (strcmp(which, "archive") == 0) {
+        for (int i = 0; i < 3; i++) pty_send_key(s, PTY_KEY_DOWN);
+    }
+    pty_settle(s, 300);
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "message(s) in", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/** The text of the row under the cursor ('>' in column 0), or "". */
+static const char *gk_cursor_row(PtySession *s, char *buf, size_t size) {
+    buf[0] = '\0';
+    for (int r = 3; r < 23; r++) {
+        pty_row_text(s, r, buf, size);
+        if (buf[0] == '>') return buf;
+    }
+    buf[0] = '\0';
+    return buf;
+}
+
+static int gk_step(PtySession *s, PtyKey key, const char *pos) {
+    pty_send_key(s, key);
+    return pty_wait_for(s, pos, WAIT_MS) == 0;
+}
+
+static int gk_char(PtySession *s, const char *k, const char *pos) {
+    pty_send_str(s, k);
+    return pty_wait_for(s, pos, WAIT_MS) == 0;
+}
+
+/** Leaves a compose dialog opened from the list (Esc, and y when it asks). */
+static int gk_dialog_and_back(PtySession *s, const char *text) {
+    if (pty_wait_for(s, text, WAIT_MS) != 0) return 0;
+    pty_send_key(s, PTY_KEY_ESC);
+    for (int ms = 0; ms < WAIT_MS; ms += 100) {
+        pty_settle(s, 100);
+        if (pty_screen_contains(s, "Discard what was typed?")) { pty_send_str(s, "y"); break; }
+        if (pty_screen_contains(s, "Press any key to return")) break;
+    }
+    if (pty_wait_for(s, "Press any key to return", WAIT_MS) != 0) return 0;
+    pty_send_str(s, " ");
+    return pty_wait_for(s, "message(s) in", WAIT_MS) == 0;
+}
+
+/** Quits the program with ctrl-c and closes the session. */
+static void gk_quit(PtySession *s) {
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+/** Opens the ':' menu and returns 1 when it lists @p name. */
+static int gk_menu_lists(PtySession *s, const char *name) {
+    pty_send_str(s, ":");
+    if (pty_wait_for(s, "Actions", WAIT_MS) != 0) return 0;
+    pty_settle(s, 300);
+    return pty_screen_contains(s, name);
+}
+
+static void gk_menu_close(PtySession *s) {
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+}
+
+/* j k Down Up stop at the ends; PgDn and PgUp move one page (19 rows) and
+ * stop at the ends; Home g and End G go to the first and the last. */
+static void test_gk_navigation(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list nav: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list nav: opens");
+    if (!s) return;
+    char row[256];
+    ASSERT_SCREEN_CONTAINS(s, "[1/45]");
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), "Message 40") != NULL,
+           "gmail list nav: the cursor starts on the first message");
+    ASSERT(gk_char(s, "j", "[2/45]"), "gmail list nav: j steps down");
+    ASSERT(gk_step(s, PTY_KEY_DOWN, "[3/45]"), "gmail list nav: Down steps down");
+    ASSERT(gk_char(s, "k", "[2/45]"), "gmail list nav: k steps up");
+    ASSERT(gk_step(s, PTY_KEY_UP, "[1/45]"), "gmail list nav: Up steps up");
+    pty_send_key(s, PTY_KEY_UP);
+    pty_send_str(s, "k");
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "[1/45]");              /* no wrap above the first row */
+    ASSERT(gk_step(s, PTY_KEY_PGDN, "[20/45]"), "gmail list nav: PgDn goes one page down");
+    ASSERT(gk_step(s, PTY_KEY_PGDN, "[39/45]"), "gmail list nav: PgDn goes one page down again");
+    ASSERT(gk_step(s, PTY_KEY_PGDN, "[45/45]"), "gmail list nav: PgDn stops at the last");
+    ASSERT(gk_step(s, PTY_KEY_PGUP, "[26/45]"), "gmail list nav: PgUp goes one page up");
+    ASSERT(gk_step(s, PTY_KEY_HOME, "[1/45]"), "gmail list nav: Home goes to the first");
+    ASSERT(gk_step(s, PTY_KEY_END, "[45/45]"), "gmail list nav: End goes to the last");
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_str(s, "j");
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "[45/45]");             /* no wrap below the last row */
+    ASSERT(gk_char(s, "g", "[1/45]"), "gmail list nav: g goes to the first (EMAIL-201)");
+    ASSERT(gk_char(s, "G", "[45/45]"), "gmail list nav: G goes to the last (EMAIL-201)");
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), "Message 41") != NULL,
+           "gmail list nav: the last message is on the cursor row");
+    gk_quit(s);
+}
+
+/* Esc, q, Backspace, Left and h go back to the labels (marks first); ctrl-c
+ * quits at once. */
+static void test_gk_back_keys(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list back: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list back: opens");
+    if (!s) return;
+    for (int i = 0; i < 5; i++) {
+        if (i == 0) pty_send_key(s, PTY_KEY_ESC);
+        else if (i == 1) pty_send_str(s, "q");
+        else if (i == 2) pty_send_key(s, PTY_KEY_BACK);
+        else if (i == 3) pty_send_key(s, PTY_KEY_LEFT);
+        else pty_send_str(s, "h");
+        ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        pty_send_key(s, PTY_KEY_ENTER);                 /* the cursor is on Inbox again */
+        ASSERT_WAIT_FOR(s, "message(s) in INBOX", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+    }
+    /* With marks, Left and h drop the marks first, as Esc does. */
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_LEFT);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in INBOX");
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    pty_send_str(s, "h");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in INBOX");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "gmail list back: ctrl-c quits at once");
+    pty_close(s);
+}
+
+/* Space marks and steps down (on the last row it does not step), x and Esc
+ * clear the marks, a registry key acts on all marked rows. */
+static void test_gk_marks(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list marks: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list marks: opens");
+    if (!s) return;
+    ASSERT(gk_char(s, " ", "[2/45]"), "gmail list marks: Space steps down");
+    ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
+    ASSERT(pty_cell_text(s, 4, 1)[0] == '*', "gmail list marks: the marked row carries a star");
+    ASSERT(gk_char(s, " ", "[3/45]"), "gmail list marks: Space steps down again");
+    ASSERT_SCREEN_CONTAINS(s, "[2 marked]");
+    pty_send_str(s, "x");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    pty_send_str(s, "  ");
+    ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in INBOX");  /* the first Esc only drops the marks */
+    /* A registry key acts on both marked rows. */
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_send_str(s, "  ");
+    ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
+    pty_send_str(s, "*");
+    ASSERT_WAIT_FOR(s, "2 message(s) starred", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    /* On the last row Space marks without stepping. */
+    ASSERT(gk_step(s, PTY_KEY_END, "[45/45]"), "gmail list marks: End");
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[45/45]");
+    gk_quit(s);
+}
+
+/* Enter opens the reader on the cursor message; Esc, q and Backspace return
+ * with the cursor kept. */
+static void test_gk_enter_opens_reader(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list enter: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list enter: opens");
+    if (!s) return;
+    ASSERT(gk_char(s, "j", "[2/45]"), "gmail list enter: j");
+    ASSERT(gk_char(s, "j", "[3/45]"), "gmail list enter: j");
+    for (int i = 0; i < 3; i++) {
+        pty_send_key(s, PTY_KEY_ENTER);
+        ASSERT_WAIT_FOR(s, "Subject: Message 38", WAIT_MS);
+        if (i == 0) pty_send_key(s, PTY_KEY_ESC);
+        else if (i == 1) pty_send_str(s, "q");
+        else pty_send_key(s, PTY_KEY_BACK);
+        ASSERT_WAIT_FOR(s, "message(s) in INBOX", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_CONTAINS(s, "[3/45]");
+    }
+    gk_quit(s);
+}
+
+/* c r A F act on the message under the cursor; the list comes back with the
+ * cursor where it was.  U lists again and keeps the cursor (EMAIL-203); l
+ * opens the rules editor and Esc returns. */
+static void test_gk_compose_refresh_rules(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list compose: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list compose: opens");
+    if (!s) return;
+    ASSERT(gk_char(s, "j", "[2/45]"), "gmail list compose: j");
+    pty_send_str(s, "c");
+    ASSERT(gk_dialog_and_back(s, "New Message"), "gmail list compose: c opens the dialog");
+    ASSERT_SCREEN_CONTAINS(s, "[2/45]");
+    pty_send_str(s, "r");
+    ASSERT(gk_dialog_and_back(s, "Re: Message 39"), "gmail list compose: r replies to the cursor message");
+    ASSERT_SCREEN_CONTAINS(s, "[2/45]");
+    pty_send_str(s, "A");
+    ASSERT(gk_dialog_and_back(s, "Re: Message 39"), "gmail list compose: A replies to all");
+    ASSERT_SCREEN_CONTAINS(s, "[2/45]");
+    pty_send_str(s, "F");
+    ASSERT(gk_dialog_and_back(s, "Fwd: Message 39"), "gmail list compose: F forwards");
+    ASSERT_SCREEN_CONTAINS(s, "[2/45]");
+    ASSERT(gk_char(s, "j", "[3/45]"), "gmail list compose: j");
+    pty_send_str(s, "U");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_WAIT_FOR(s, "of 45 message(s)", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[3/45]");
+    pty_send_str(s, "l");
+    ASSERT_WAIT_FOR(s, "Rules for", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "message(s) in INBOX", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[3/45]");
+    gk_quit(s);
+}
+
+/* / opens the filter bar; the status line counts the rows shown (EMAIL-204);
+ * Enter commits, Esc clears; with no match nothing can be acted on. */
+static void test_gk_filter(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list filter: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list filter: opens");
+    if (!s) return;
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Filter [", WAIT_MS);
+    pty_send_str(s, "3");
+    ASSERT_WAIT_FOR(s, "Showing 14 of 45", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1/14]");
+    pty_send_str(s, "h");                              /* text, not Left */
+    ASSERT_WAIT_FOR(s, "Showing 0 of 45", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Filter [");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "/45]");
+    pty_send_key(s, PTY_KEY_BACK);                     /* edits the text */
+    ASSERT_WAIT_FOR(s, "Showing 14 of 45", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                    /* commit */
+    pty_settle(s, SETTLE_MS);
+    ASSERT(gk_step(s, PTY_KEY_END, "[14/14]"), "gmail list filter: End is the last shown row");
+    ASSERT(gk_char(s, "g", "[1/14]"), "gmail list filter: g");
+    ASSERT(gk_char(s, "j", "[2/14]"), "gmail list filter: j");
+    pty_send_key(s, PTY_KEY_ESC);                      /* clears the filter */
+    ASSERT_WAIT_FOR(s, "of 45 message(s)", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1/45]");
+    /* No match: nothing to open, answer, delete or mark. */
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Filter [", WAIT_MS);
+    pty_send_str(s, "zzzz");
+    ASSERT_WAIT_FOR(s, "Showing 0 of 45", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    const char *keys[] = { "\r", "r", "A", "F", "d", " ", "t", "*", NULL };
+    for (int i = 0; keys[i]; i++) {
+        pty_send_str(s, keys[i]);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_CONTAINS(s, "Showing 0 of");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "From:");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Re: ");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Fwd: ");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    }
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "of 45 message(s)", WAIT_MS);
+    gk_quit(s);
+}
+
+/* d and the Delete key ask first, naming the message, No is the default;
+ * Esc and n decline; y moves it to the Trash and the row stays, marked D. */
+static void test_gk_delete(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list delete: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list delete: opens");
+    if (!s) return;
+    ASSERT(gk_char(s, "j", "[2/45]"), "gmail list delete: j");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Message 39");
+    pty_send_key(s, PTY_KEY_ENTER);                    /* the default is No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash?");
+    ASSERT_SCREEN_CONTAINS(s, "Not deleted");
+    pty_send_key(s, PTY_KEY_DELETE);
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash?");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);                      /* Esc is No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash?");
+    ASSERT_SCREEN_CONTAINS(s, "of 45 message(s)");
+    pty_send_key(s, PTY_KEY_DELETE);
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[2/45]");
+    ASSERT(pty_cell_text(s, 5, 1)[0] == 'D', "gmail list delete: the row is marked D until the next list");
+    /* Two marked rows: one question for both. */
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_send_str(s, "  ");
+    ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "Move 2 marked messages to Trash?", WAIT_MS);
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[2 marked]");           /* declined: the marks stay */
+    gk_quit(s);
+}
+
+/* * + - ! act at once on the cursor row, the status column and the feedback
+ * follow, and the second press undoes the first. */
+static void test_gk_registry_keys(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list registry: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list registry: opens");
+    if (!s) return;
+    ASSERT(gk_char(s, "j", "[2/45]"), "gmail list registry: j");
+    char row[256];
+    pty_send_str(s, "*");
+    ASSERT_WAIT_FOR(s, "Starred", WAIT_MS);
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), "N\xe2\x98\x85") != NULL,
+           "gmail list registry: * shows the star");
+    pty_send_str(s, "*");
+    ASSERT_WAIT_FOR(s, "Unstarred", WAIT_MS);
+    pty_send_str(s, "+");
+    ASSERT_WAIT_FOR(s, "Marked as read", WAIT_MS);
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), " ------ ") != NULL,
+           "gmail list registry: + clears the unread letter");
+    pty_send_str(s, "-");
+    ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), " N----- ") != NULL,
+           "gmail list registry: - sets the unread letter");
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as junk", WAIT_MS);
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), " J----- ") != NULL,
+           "gmail list registry: ! shows the junk letter");
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as not-junk", WAIT_MS);
+    gk_quit(s);
+}
+
+/* The keys of older versions and of other views do nothing in the list. */
+static void test_gk_unbound_keys(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list unbound: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list unbound: opens");
+    if (!s) return;
+    ASSERT(gk_char(s, "j", "[2/45]"), "gmail list unbound: j");
+    const char *keys[] = { "D", "a", "u", "f", "n", "m", "s", "v", "R", "N", "e", "i", "p", "o", NULL };
+    for (int i = 0; keys[i]; i++) {
+        pty_send_str(s, keys[i]);
+        pty_settle(s, 300);
+        char what[64];
+        snprintf(what, sizeof what, "gmail list unbound: %s changes nothing", keys[i]);
+        ASSERT(pty_screen_contains(s, "[2/45]") && pty_screen_contains(s, "message(s) in INBOX")
+               && !pty_screen_contains(s, "Actions") && !pty_screen_contains(s, "marked]")
+               && !pty_screen_contains(s, "Moved") && !pty_screen_contains(s, "Archived"), what);
+    }
+    pty_send_key(s, PTY_KEY_RIGHT);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_INSERT);
+    pty_send_key(s, PTY_KEY_F1);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[2/45]");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in INBOX");
+    gk_quit(s);
+}
+
+/* ? opens the help made from the key table; it scrolls; Esc, q and Backspace
+ * close it and only it; any other key changes nothing. */
+static void test_gk_help(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list help: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list help: opens");
+    if (!s) return;
+    ASSERT(gk_char(s, "j", "[2/45]"), "gmail list help: j");
+    for (int i = 0; i < 3; i++) {
+        pty_send_str(s, "?");
+        ASSERT_WAIT_FOR(s, "Message list shortcuts (Gmail)", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_CONTAINS(s, "Down - move the cursor down");
+        ASSERT_SCREEN_CONTAINS(s, "First message - also g");
+        pty_send_str(s, "x");                           /* changes nothing */
+        pty_settle(s, 300);
+        ASSERT_SCREEN_CONTAINS(s, "Message list shortcuts (Gmail)");
+        pty_send_key(s, PTY_KEY_END);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_CONTAINS(s, "Labels - pick the labels");   /* the last entry */
+        ASSERT_SCREEN_CONTAINS(s, "Back - also h and Left");
+        if (i == 0) pty_send_key(s, PTY_KEY_ESC);
+        else if (i == 1) pty_send_str(s, "q");
+        else pty_send_key(s, PTY_KEY_BACK);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+        ASSERT_SCREEN_CONTAINS(s, "[2/45]");
+    }
+    gk_quit(s);
+}
+
+/* t opens the label picker of the message; Esc closes it and changes nothing,
+ * the cursor stays.  (The picker itself is studied in EMAIL-145.) */
+static void test_gk_t_picker(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list t: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list t: opens");
+    if (!s) return;
+    ASSERT(gk_char(s, "j", "[2/45]"), "gmail list t: j");
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "Toggle Labels", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[x] INBOX");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
+    ASSERT_SCREEN_CONTAINS(s, "[2/45]");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Label added");
+    gk_quit(s);
+}
+
+/* The ':' menu lists what applies in the view and no more (EMAIL-206). */
+static void test_gk_menu_by_view(void) {
+    ASSERT(gk_mock(45) == 0, "gmail list menu: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list menu: opens");
+    if (!s) return;
+    ASSERT(gk_menu_lists(s, "Archive"), "gmail list menu: Inbox lists Archive");
+    ASSERT_SCREEN_CONTAINS(s, "Remove this label");
+    ASSERT_SCREEN_CONTAINS(s, "Add a label...");
+    ASSERT_SCREEN_CONTAINS(s, "Start a sync");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Restore from Trash");
+    gk_menu_close(s);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
+    /* A search result is no label. */
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [", WAIT_MS);
+    pty_send_str(s, "5");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "in Search:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(gk_menu_lists(s, "Archive"), "gmail list menu: a search lists Archive");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Remove this label");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Restore from Trash");
+    gk_menu_close(s);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);                       /* Trash */
+    pty_settle(s, 300);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Trash", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    gk_quit(s);
+    /* The Trash and the Archive have rows only after something is put there. */
+    s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail list menu: reopens");
+    if (!s) return;
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_send_str(s, "j");
+    ASSERT(gk_menu_lists(s, "Archive"), "gmail list menu: Inbox lists Archive");
+    for (int i = 0; i < 9; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_ENTER);                     /* Archive */
+    ASSERT_WAIT_FOR(s, "Archived", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);                       /* Trash */
+    pty_settle(s, 300);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Trash", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(gk_menu_lists(s, "Restore from Trash"), "gmail list menu: Trash lists Restore");
+    ASSERT_SCREEN_CONTAINS(s, "Archive");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Remove this label");
+    gk_menu_close(s);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
+    for (int i = 0; i < 2; i++) pty_send_key(s, PTY_KEY_UP);   /* Archive */
+    pty_settle(s, 300);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "in Archive", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(gk_menu_lists(s, "Add a label..."), "gmail list menu: Archive lists the label actions");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Archive -");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Restore from Trash");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Remove this label");
+    gk_menu_close(s);
+    gk_quit(s);
+}
+
+/* The Trash: the header note is whole at 80 columns (EMAIL-205), d asks to
+ * delete for good, the menu restores. */
+static void test_gk_trash_view(void) {
+    ASSERT(gk_mock(45) == 0, "gmail trash: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail trash: opens");
+    if (!s) return;
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);
+    pty_settle(s, 300);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "in Trash", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 0, "auto-delete: 30 days");
+    ASSERT_SCREEN_CONTAINS(s, "d del");
+    ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "for good?", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Message 40");
+    pty_send_key(s, PTY_KEY_ENTER);                     /* the default is No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "for good?");
+    ASSERT_SCREEN_CONTAINS(s, "Not deleted");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Restore from Trash", WAIT_MS);
+    for (int i = 0; i < 10; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Restored to Inbox", WAIT_MS);
+    ASSERT(pty_cell_text(s, 4, 1)[0] == 'u', "gmail trash: the restored row is marked u");
+    gk_quit(s);
+}
+
+/* A label view: the menu takes the label off the message, the second time
+ * puts it back; Archive files the message away. */
+static void test_gk_label_and_archive_views(void) {
+    ASSERT(gk_mock(45) == 0, "gmail label view: mock");
+    PtySession *s = gk_open("work");
+    ASSERT(s != NULL, "gmail label view: opens Work");
+    if (!s) return;
+    ASSERT_SCREEN_CONTAINS(s, "of 5 message(s) in Work");
+    ASSERT_SCREEN_CONTAINS(s, "[1/5]");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Remove this label", WAIT_MS);
+    for (int i = 0; i < 10; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Label removed: Work", WAIT_MS);
+    ASSERT(pty_cell_text(s, 4, 1)[0] == 'd', "gmail label view: the row is marked d");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Remove this label", WAIT_MS);
+    for (int i = 0; i < 10; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Undo: Work restored", WAIT_MS);
+    gk_quit(s);
+}
+
+/* An empty list says so and says what fills it (EMAIL-207); only the keys
+ * that still work are offered; the others do nothing. */
+static void test_gk_empty_views(void) {
+    ASSERT(gk_mock(45) == 0, "gmail empty: mock");
+    PtySession *s = gk_open("trash");
+    ASSERT(s != NULL, "gmail empty: opens Trash");
+    if (!s) return;
+    ASSERT_SCREEN_CONTAINS(s, "0 of 0 message(s) in Trash");
+    ASSERT_SCREEN_CONTAINS(s, "(empty)  d on a message moves it here.");
+    ASSERT_SCREEN_CONTAINS(s, "Esc/q/BS labels");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "d del");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "j/k step");
+    const char *keys[] = { "j", "k", "d", "r", "A", "F", "t", "*", "g", "G", " ", "x", "\r", NULL };
+    for (int i = 0; keys[i]; i++) {
+        pty_send_str(s, keys[i]);
+        pty_settle(s, 300);
+        char what[64];
+        snprintf(what, sizeof what, "gmail empty: %s does nothing", keys[i]);
+        ASSERT(pty_screen_contains(s, "0 of 0 message(s) in Trash") &&
+               !pty_screen_contains(s, "Delete") && !pty_screen_contains(s, "Re: ") &&
+               !pty_screen_contains(s, "Toggle Labels"), what);
+    }
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Message list shortcuts (Gmail)", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Start a sync", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Restore from Trash");
+    gk_menu_close(s);
+    pty_send_key(s, PTY_KEY_LEFT);
+    ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);              /* Left goes back here too */
+    pty_send_key(s, PTY_KEY_UP);
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, 300);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "in Archive", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "The Archive action of the : menu files a message here.");
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
+    gk_quit(s);
+}
+
+/* One message: every cursor key stays on it, Space marks without stepping. */
+static void test_gk_one_message(void) {
+    ASSERT(gk_mock(1) == 0, "gmail one: mock");
+    PtySession *s = gk_open("inbox");
+    ASSERT(s != NULL, "gmail one: opens");
+    if (!s) return;
+    ASSERT_SCREEN_CONTAINS(s, "1-1 of 1 message(s) in INBOX");
+    ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    PtyKey ks[] = { PTY_KEY_DOWN, PTY_KEY_UP, PTY_KEY_PGDN, PTY_KEY_PGUP, PTY_KEY_END, PTY_KEY_HOME };
+    for (size_t i = 0; i < sizeof ks / sizeof ks[0]; i++) {
+        pty_send_key(s, ks[i]);
+        pty_settle(s, 200);
+        ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    }
+    const char *cs[] = { "j", "k", "g", "G" };
+    for (size_t i = 0; i < sizeof cs / sizeof cs[0]; i++) {
+        pty_send_str(s, cs[i]);
+        pty_settle(s, 200);
+        ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    }
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    pty_send_str(s, "x");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
+    gk_quit(s);
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 4) {
         fprintf(stderr,
@@ -2795,6 +3491,29 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_keys_label_delete_asks);
     RUN_TEST(test_keys_reader);
     RUN_TEST(test_keys_junk_toggle_gmail);
+
+    printf("\n--- Gmail TUI: key study of the message list at 80x24 (EMAIL-144) ---\n");
+    RUN_TEST(test_gk_navigation);
+    RUN_TEST(test_gk_back_keys);
+    RUN_TEST(test_gk_marks);
+    RUN_TEST(test_gk_enter_opens_reader);
+    RUN_TEST(test_gk_compose_refresh_rules);
+    RUN_TEST(test_gk_filter);
+    RUN_TEST(test_gk_delete);
+    RUN_TEST(test_gk_registry_keys);
+    RUN_TEST(test_gk_unbound_keys);
+    RUN_TEST(test_gk_help);
+    RUN_TEST(test_gk_t_picker);
+    RUN_TEST(test_gk_menu_by_view);
+    RUN_TEST(test_gk_trash_view);
+    RUN_TEST(test_gk_label_and_archive_views);
+    RUN_TEST(test_gk_empty_views);
+    RUN_TEST(test_gk_one_message);
+    if (gk_mock(GMAIL_PTY_COUNT) != 0) {           /* the mock of the tests that follow */
+        fprintf(stderr, "FATAL: cannot restart the mock after the key study\n");
+        g_tests_failed++;
+        goto done;
+    }
 
     /* ── US-72: Gmail Smart Sync Orchestration ── */
     printf("\n--- Gmail Smart Sync orchestration (US-72) ---\n");

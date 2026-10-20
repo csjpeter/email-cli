@@ -2934,9 +2934,9 @@ int main(int argc, char *argv[]) {
             opts.offset = resume_at;
             resume_at   = 0;
             int ret = email_service_list(sel_cfg, &opts);
-            /* After a compose, a reply, a forward or the rules editor the list
+            /* After a compose, a reply, a forward, U or the rules editor the list
              * comes back with the cursor where it was (EMAIL-186). */
-            if (ret == 2 || ret == 3 || ret == 5 || ret == 6 || ret == 7)
+            if (ret == 2 || ret == 3 || ret == 4 || ret == 5 || ret == 6 || ret == 7)
                 resume_at = opts.cursor_out;
             if (ret == 1) {
                 /* Backspace from message list → folder/label browser */

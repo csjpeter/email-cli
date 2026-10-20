@@ -34,8 +34,8 @@
     H(V, 'k', "Up", "move the cursor up (also Up)"),                                \
     H(V, TUI_KEY_PGDN, "Page down", NULL),                                          \
     H(V, TUI_KEY_PGUP, "Page up", NULL),                                            \
-    H(V, TUI_KEY_HOME, "First message", NULL),                                      \
-    H(V, TUI_KEY_END, "Last message", NULL),                                        \
+    H(V, TUI_KEY_HOME, "First message", "also g"),                                  \
+    H(V, TUI_KEY_END, "Last message", "also G"),                                    \
     H(V, TUI_KEY_ENTER, "Open", "read the message"),                                \
     H(V, '/', "Filter", "type to filter; Esc clears it"),                           \
     H(V, ' ', "Mark", "mark the message and step down"),                            \
@@ -59,9 +59,22 @@
     M(V, "Move to...", "a folder or label, asked for", EA_MOVE),                    \
     H(V, '?', "Help", NULL),                                                        \
     H(V, ':', "Actions", "the menu of everything that changes state"),              \
-    H(V, 'q', "Back", NULL),                                                        \
+    H(V, 'q', "Back", "also h and Left"),                                           \
     H(V, TUI_KEY_ESC, "Back", "first clears marks and filter"),                     \
     H(V, TUI_KC_QUIT, "Quit", NULL)
+
+/* The entries only the Gmail list has (EMAIL-206). */
+#define GMAIL_LIST_T(V)                                                             \
+    R(V, 't', TUI_VERB_MOVE, "Labels", "pick the labels of the message", EA_LABELS)
+#define GMAIL_LIST_ARCHIVE(V)                                                       \
+    M(V, "Archive", "remove every label", EA_ARCHIVE)
+#define GMAIL_LIST_RESTORE(V)                                                       \
+    M(V, "Restore from Trash", "back to the inbox", EA_RESTORE)
+#define GMAIL_LIST_RM_LABEL(V)                                                      \
+    M(V, "Remove this label", "from the message", EA_RM_LABEL)
+#define GMAIL_LIST_LABELS(V)                                                        \
+    M(V, "Add a label...", "to the messages, asked for", EA_ADD_LABEL),             \
+    M(V, "Remove a label...", "from the messages, asked for", EA_REMOVE_LABEL)
 
 #define READER_COMMON(V)                                                            \
     H(V, 'j', "Down", "scroll a line (also Down)"),                                 \
@@ -97,16 +110,33 @@ static const tui_keyentry g_entries[] = {
     LIST_COMMON(EKV_LIST_IMAP),
     M(EKV_LIST_IMAP, "Toggle Done", "the $Done flag", EA_DONE),
 
-    /* The message list of a Gmail account. */
+    /* The message list of a Gmail account.  The menu lists what applies at
+     * the cursor and no more (EMAIL-206): Restore from Trash only in the
+     * Trash, Archive in every view but the Archive, Remove this label only
+     * in the view of a real label.  The view follows the list's folder. */
     LIST_COMMON(EKV_LIST_GMAIL),
-    R(EKV_LIST_GMAIL, 't', TUI_VERB_MOVE, "Labels", "pick the labels of the message",
-      EA_LABELS),
-    M(EKV_LIST_GMAIL, "Archive", "remove every label", EA_ARCHIVE),
-    M(EKV_LIST_GMAIL, "Restore from Trash", "back to the inbox", EA_RESTORE),
-    M(EKV_LIST_GMAIL, "Remove this label", "from the message", EA_RM_LABEL),
-    M(EKV_LIST_GMAIL, "Add a label...", "to the messages, asked for", EA_ADD_LABEL),
-    M(EKV_LIST_GMAIL, "Remove a label...", "from the messages, asked for",
-      EA_REMOVE_LABEL),
+    GMAIL_LIST_T(EKV_LIST_GMAIL),
+    GMAIL_LIST_ARCHIVE(EKV_LIST_GMAIL),
+    GMAIL_LIST_RM_LABEL(EKV_LIST_GMAIL),
+    GMAIL_LIST_LABELS(EKV_LIST_GMAIL),
+
+    /* A view that is no label: Unread, Flagged, a search result. */
+    LIST_COMMON(EKV_LIST_GMAIL_VIRTUAL),
+    GMAIL_LIST_T(EKV_LIST_GMAIL_VIRTUAL),
+    GMAIL_LIST_ARCHIVE(EKV_LIST_GMAIL_VIRTUAL),
+    GMAIL_LIST_LABELS(EKV_LIST_GMAIL_VIRTUAL),
+
+    /* The Archive: a message there is archived already and has no label. */
+    LIST_COMMON(EKV_LIST_GMAIL_ARCHIVE),
+    GMAIL_LIST_T(EKV_LIST_GMAIL_ARCHIVE),
+    GMAIL_LIST_LABELS(EKV_LIST_GMAIL_ARCHIVE),
+
+    /* The Trash: the only view that can restore. */
+    LIST_COMMON(EKV_LIST_GMAIL_TRASH),
+    GMAIL_LIST_T(EKV_LIST_GMAIL_TRASH),
+    GMAIL_LIST_ARCHIVE(EKV_LIST_GMAIL_TRASH),
+    GMAIL_LIST_RESTORE(EKV_LIST_GMAIL_TRASH),
+    GMAIL_LIST_LABELS(EKV_LIST_GMAIL_TRASH),
 
     /* The message reader. */
     READER_COMMON(EKV_READ_IMAP),
@@ -309,6 +339,14 @@ void ekeys_help(const char *view, const char *title) {
 int ekeys_help_has(const char *view, tui_keycode key) {
     for (int i = 0; i < N_ENTRIES; i++)
         if (g_entries[i].key == key && g_entries[i].view &&
+            strcmp(g_entries[i].view, view) == 0)
+            return 1;
+    return 0;
+}
+
+int ekeys_menu_has(const char *view, EmailAction a) {
+    for (int i = 0; i < N_ENTRIES; i++)
+        if ((int)g_entries[i].id == (int)a && g_entries[i].view &&
             strcmp(g_entries[i].view, view) == 0)
             return 1;
     return 0;

@@ -3165,6 +3165,8 @@ static void lk_nav_body(void) {
     ASSERT(lk_step(s, PTY_KEY_HOME, "[1/30]"), "list nav: Home goes to the first");
     ASSERT(strstr(lk_cursor_row(s, row, sizeof row), "Message 20") != NULL,
            "list nav: Home scrolls back to the top");
+    ASSERT(lk_char(s, "G", "[30/30]"), "list nav: G goes to the last, as End (EMAIL-201)");
+    ASSERT(lk_char(s, "g", "[1/30]"), "list nav: g goes to the first, as Home (EMAIL-201)");
     pty_send_key(s, PTY_KEY_CTRL_C);
     pty_wait_exit(s, 5000);
     pty_close(s);
@@ -3329,15 +3331,18 @@ static void test_lk_enter_opens_reader(void) {
     lk_env(0);
 }
 
-/* Esc, q and Backspace go back to the folders; ctrl-c quits at once. */
+/* Esc, q, Backspace, Left and h go back to the folders (EMAIL-202); ctrl-c
+ * quits at once. */
 static void lk_back_body(void) {
     PtySession *s = lk_open();
     ASSERT(s != NULL, "list back: opens");
     if (!s) return;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 5; i++) {
         if (i == 0) pty_send_key(s, PTY_KEY_ESC);
         else if (i == 1) pty_send_str(s, "q");
-        else pty_send_key(s, PTY_KEY_BACK);
+        else if (i == 2) pty_send_key(s, PTY_KEY_BACK);
+        else if (i == 3) pty_send_key(s, PTY_KEY_LEFT);
+        else pty_send_str(s, "h");
         ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
         pty_settle(s, SETTLE_MS);
         folders_goto_inbox(s);
@@ -3367,6 +3372,7 @@ static void lk_refresh_rules_body(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "of 30 message(s)");
+    ASSERT_SCREEN_CONTAINS(s, "[2/30]");              /* the cursor stays (EMAIL-203) */
     pty_send_str(s, "l");
     ASSERT_WAIT_FOR(s, "Rules for", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
@@ -3385,13 +3391,13 @@ static void test_lk_refresh_and_rules(void) {
 }
 
 /* ? opens the help made from the key table, at 80x24 it scrolls; Esc closes
- * it (and only it); h is not a help key; the movement keys scroll the
+ * it (and only it); ? is the only help key; the movement keys scroll the
  * overlay, not the list. */
 static void lk_help_body(void) {
     PtySession *s = lk_open();
     ASSERT(s != NULL, "list help: opens");
     if (!s) return;
-    pty_send_str(s, "h");
+    pty_send_str(s, "z");                             /* no help key but ? */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
     pty_send_str(s, "?");
@@ -3426,7 +3432,7 @@ static void lk_unbound_body(void) {
     ASSERT(s != NULL, "list unbound: opens");
     if (!s) return;
     ASSERT(lk_char(s, "j", "[2/30]"), "list unbound: j");
-    const char *keys[] = { "n", "f", "s", "m", "D", "h", "R", "a", "t", "u", "v", "g", "G", "N", NULL };
+    const char *keys[] = { "n", "f", "s", "m", "D", "R", "a", "t", "u", "v", "N", NULL };
     for (int i = 0; keys[i]; i++) {
         pty_send_str(s, keys[i]);
         pty_settle(s, 300);
@@ -3435,7 +3441,6 @@ static void lk_unbound_body(void) {
         ASSERT(pty_screen_contains(s, "[2/30]") && pty_screen_contains(s, "message(s) in")
                && !pty_screen_contains(s, "Actions") && !pty_screen_contains(s, "?]"), what);
     }
-    pty_send_key(s, PTY_KEY_LEFT);
     pty_send_key(s, PTY_KEY_RIGHT);
     pty_send_key(s, PTY_KEY_TAB);
     pty_settle(s, SETTLE_MS);
@@ -3570,6 +3575,7 @@ static void test_lk_empty_folder(void) {
     ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS folders");
     ASSERT_ROW_CONTAINS(s, 23, "? help");
     ASSERT_ROW_CONTAINS(s, 23, "c compose");
+    ASSERT_SCREEN_CONTAINS(s, "(empty)  U lists again after a sync.");   /* EMAIL-207 */
     ASSERT(!pty_row_contains(s, 23, "Enter open"), "list empty: no Enter hint");
     ASSERT(!pty_row_contains(s, 23, "j/k"), "list empty: no j/k hint");
     ASSERT(!pty_row_contains(s, 23, "d trash"), "list empty: no d hint");
@@ -3582,7 +3588,7 @@ static void test_lk_empty_folder(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
     ASSERT_SCREEN_CONTAINS(s, "0 of 0 message(s)");
-    const char *dead[] = { "j", "k", " ", "x", "d", "r", "A", "F", "*", "+", "-", "!", "/", "n", "s", "h", NULL };
+    const char *dead[] = { "j", "k", " ", "x", "d", "r", "A", "F", "*", "+", "-", "!", "/", "n", "s", "g", "G", NULL };
     for (int i = 0; dead[i]; i++) pty_send_str(s, dead[i]);
     pty_send_key(s, PTY_KEY_ENTER);
     pty_send_key(s, PTY_KEY_DOWN);
@@ -3601,7 +3607,7 @@ static void test_lk_empty_folder(void) {
     ASSERT_WAIT_FOR(s, "Rules for", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "0 of 0 message(s)", WAIT_MS);
-    pty_send_str(s, "q");
+    pty_send_str(s, "h");                             /* back, as q and Left (EMAIL-202) */
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_send_key(s, PTY_KEY_CTRL_C);
     pty_wait_exit(s, 5000);
@@ -4547,7 +4553,7 @@ static void test_tui_list_help_panel(void) {
     ASSERT(s != NULL, "list help: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "h");                    /* h is not a help key */
+    pty_send_str(s, "z");                    /* ? is the only help key */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
     pty_send_str(s, "?");

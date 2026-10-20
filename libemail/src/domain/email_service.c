@@ -1621,13 +1621,28 @@ void email_service_print_json_string(const char *s) { print_json_string(s); }
  * confirmation that names the account and the folder (EMAIL-175).
  */
 static int sync_start_background(void);
-static void sync_menu(const Config *cfg, const char *folder_display) {
+
+/**
+ * The key-table view of a message list: the IMAP list, or one of the Gmail
+ * lists by the folder shown (EMAIL-206): the Trash restores, the Archive
+ * cannot archive or take a label off, a view that is no label (Unread,
+ * Flagged, a search) cannot take a label off.
+ */
+static const char *list_view_for(const Config *cfg, const char *folder) {
+    if (!cfg->gmail_mode) return EKV_LIST_IMAP;
+    if (strcmp(folder, "_trash") == 0)   return EKV_LIST_GMAIL_TRASH;
+    if (strcmp(folder, "_nolabel") == 0) return EKV_LIST_GMAIL_ARCHIVE;
+    if (folder[0] == '_')                return EKV_LIST_GMAIL_VIRTUAL;
+    return EKV_LIST_GMAIL;
+}
+
+static void sync_menu(const Config *cfg, const char *folder, const char *folder_display) {
     char t[400];
     const char *tt[EA_COUNT] = { NULL };
     snprintf(t, sizeof(t), "%s (%s)", folder_display ? folder_display : "?",
              cfg->user ? cfg->user : "?");
     tt[EA_SYNC] = t;
-    if (ekeys_menu(cfg->gmail_mode ? EKV_LIST_GMAIL : EKV_LIST_IMAP, tt) == EA_SYNC)
+    if (ekeys_menu(list_view_for(cfg, folder), tt) == EA_SYNC)
         sync_start_background();
 }
 
@@ -2296,21 +2311,27 @@ static int list_empty_screen(const Config *cfg, const char *folder,
         printf("  ");
         print_dbar(16); printf("  ══════  ");
         print_dbar(subj_w); printf("  "); print_dbar(from_w); printf("\n");
-        printf("\n  \033[2m(empty)\033[0m\n");
+        /* Say what fills the list (EMAIL-207). */
+        const char *fills = in_trash ? "d on a message moves it here."
+                          : (cfg->gmail_mode && strcmp(folder, "_nolabel") == 0)
+                            ? "The Archive action of the : menu files a message here."
+                            : "U lists again after a sync.";
+        printf("\n  \033[2m(empty)\033[0m  %s\n", fills);
         fflush(stdout);
         list_status_line(trows, tcols, cfg->gmail_mode, in_trash, 0, 0, 0, NULL);
 
         TermKey key = terminal_read_key();
-        if (key == TERM_KEY_BACK || key == TERM_KEY_ESC ||
-            (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q'))
-            return 1;     /* back (Esc, q, Backspace) */
+        if (key == TERM_KEY_BACK || key == TERM_KEY_ESC || key == TERM_KEY_LEFT ||
+            (key == TERM_KEY_IGNORE && (terminal_last_printable() == 'q' ||
+                                        terminal_last_printable() == 'h')))
+            return 1;     /* back (Esc, q, Backspace, Left, h) */
         if (key == TERM_KEY_QUIT) return 0;   /* ctrl-c: quit at once */
         if (key != TERM_KEY_IGNORE) continue;
         int ch = terminal_last_printable();
         if (ch == 'c') return 2; /* compose */
-        if (ch == ':') sync_menu(cfg, folder_display);
+        if (ch == ':') sync_menu(cfg, folder, folder_display);
         if (ch == '?')
-            ekeys_help(cfg->gmail_mode ? EKV_LIST_GMAIL : EKV_LIST_IMAP,
+            ekeys_help(list_view_for(cfg, folder),
                        cfg->gmail_mode ? "Message list shortcuts (Gmail)"
                                        : "Message list shortcuts");
         if (ch == 'U') return 4; /* refresh */
@@ -3466,18 +3487,27 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 suffix = "  \u26a0 auto-delete: 30 days";
             else
                 suffix = "";
-            if (filter_active) {
-                static const char *scn[] = {"Subject","From","To","Body","Since","Before"};
-                snprintf(cl, sizeof(cl),
-                         "  Showing %d of %d  [filter:%s]  %s (%d unread) [%s].%s",
-                         fcount, show_count, scn[filter_scope],
-                         folder_display, unseen_count,
-                         cfg->user ? cfg->user : "?", suffix);
-            } else {
-                snprintf(cl, sizeof(cl),
-                         "  %d-%d of %d message(s) in %s (%d unread) [%s].%s",
-                         wstart + 1, wend, show_count, folder_display, unseen_count,
-                         cfg->user ? cfg->user : "?", suffix);
+            /* The account in brackets goes first when the line does not fit
+             * (the Trash note must stay whole, EMAIL-205). */
+            for (int with_user = 1; with_user >= 0; with_user--) {
+                char acct[96] = "";
+                if (with_user)
+                    snprintf(acct, sizeof(acct), " [%s]", cfg->user ? cfg->user : "?");
+                if (filter_active) {
+                    static const char *scn[] = {"Subject","From","To","Body","Since","Before"};
+                    snprintf(cl, sizeof(cl),
+                             "  Showing %d of %d  [filter:%s]  %s (%d unread)%s.%s",
+                             fcount, show_count, scn[filter_scope],
+                             folder_display, unseen_count, acct, suffix);
+                } else {
+                    snprintf(cl, sizeof(cl),
+                             "  %d-%d of %d message(s) in %s (%d unread)%s.%s",
+                             wstart + 1, wend, show_count, folder_display,
+                             unseen_count, acct, suffix);
+                }
+                if (!opts->pager || tcols <= 0 ||
+                    visible_line_cols(cl, cl + strlen(cl)) <= tcols)
+                    break;
             }
             if (opts->pager) {
                 /* TUI mode: the header bar is drawn with the table */
@@ -3809,8 +3839,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             int in_trash = is_gmail ? strcmp(folder, "_trash") == 0
                                     : strcmp(folder, imap_trf) == 0;
             /* One line: a message replaces the hints until the next key. */
+            /* The position counts the rows the list holds: the filtered ones
+             * while a filter is on (EMAIL-204). */
+            int pos_total = filter_active ? fcount : show_count;
             list_status_line(trows, tcols, is_gmail, in_trash, 1,
-                             show_count > 0 ? cursor + 1 : 0, show_count,
+                             pos_total > 0 ? cursor + 1 : 0, pos_total,
                              feedback_msg);
         }
 
@@ -3864,6 +3897,12 @@ read_key_again: ;
          * it is just a character. */
         if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'q' &&
             !filter_input)
+            key = TERM_KEY_ESC;
+        /* h and Left go back like Esc: the list has no horizontal move
+         * (EMAIL-202). */
+        if (!filter_input && !deferred_now &&
+            (key == TERM_KEY_LEFT ||
+             (key == TERM_KEY_IGNORE && terminal_last_printable() == 'h')))
             key = TERM_KEY_ESC;
 
         switch (key) {
@@ -4019,6 +4058,15 @@ read_key_again: ;
                 tui_table_clear_marks(&ltbl);
                 break;
             }
+            /* ── g and G: first and last message, as Home and End (EMAIL-201) ── */
+            if (!filter_input && !deferred_now && ch == 'g') {
+                cursor = 0;
+                break;
+            }
+            if (!filter_input && !deferred_now && ch == 'G') {
+                cursor = disp_count > 0 ? disp_count - 1 : 0;
+                break;
+            }
             /* ── Movement: j and k (EMAIL-175) ───────────────────────────── */
             if (!filter_input && ch == 'j') {
                 if (cursor < disp_count - 1) cursor++;
@@ -4034,7 +4082,7 @@ read_key_again: ;
              * routine ones act at once on the marked rows, or on the row
              * under the cursor, a delete asks first naming the message, and
              * the rest is in the menu. */
-            const char *list_view = is_gmail ? EKV_LIST_GMAIL : EKV_LIST_IMAP;
+            const char *list_view = list_view_for(cfg, folder);
             if (deferred_now) ch = 0;
             EmailAction act = deferred_now ? deferred_now
                             : filter_input ? EA_NONE : ekeys_find(list_view, key, ch);

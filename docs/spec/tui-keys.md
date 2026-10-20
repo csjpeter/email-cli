@@ -61,13 +61,13 @@ The Gmail list is studied in EMAIL-144.
 |---|---|---|---|
 | `Down`, `j` / `Up`, `k` | `j/k step` | cursor one row, stops at the last / first | `test_lk_navigation` |
 | `PgDn` / `PgUp` | `PgDn/PgUp page` | one page (the 19 rows of the table), clamped | `test_lk_navigation` |
-| `Home` / `End` | help: Top / Bottom | first / last message | `test_lk_navigation` |
+| `Home`, `g` / `End`, `G` | help: First / Last message | first / last message (`g` `G` since EMAIL-201) | `test_lk_navigation` |
 | `Enter` | `Enter open` | the reader on the cursor message; `Esc`, `q`, `Backspace` there return with the cursor kept | `test_lk_enter_opens_reader` |
-| `Esc`, `q`, `Backspace` | `Esc/q/BS folders` | back to the folder browser (`Esc` first drops marks, then the filter) | `test_lk_back_keys`, `test_lk_marks` |
+| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q/BS folders` | back to the folder browser (`Esc` first drops marks, then the filter; `Left` and `h` since EMAIL-202) | `test_lk_back_keys`, `test_lk_marks` |
 | `ctrl-c` | help: Quit | the program quits at once | `test_lk_back_keys` |
 | `c` | `c compose` | new message dialog; after it the list returns with the cursor kept | `test_lk_compose_reply_forward` |
 | `r` / `A` / `F` | `r reply`, `A r-all`, `F fwd` | the dialog for the cursor message (`Re: ...`, `Fwd: ...`); not on an empty filter result | `test_lk_compose_reply_forward`, `test_lk_filter_without_match` |
-| `U` | `U refresh` | lists the folder again | `test_lk_refresh_and_rules` |
+| `U` | `U refresh` | lists the folder again, the cursor stays (EMAIL-203) | `test_lk_refresh_and_rules` |
 | `l` | `l rules` | the rules editor; `Esc` returns to the list | `test_lk_refresh_and_rules` |
 | `Space` / `x` | `Space mark` | marks the row and steps down / clears all marks | `test_lk_marks`, `test_lk_one_message` |
 | `/` | help: Filter | filter bar (Tab changes the scope); `Enter` commits, `Esc` clears | `test_tui_list_search_filter`, `test_lk_filter_without_match` |
@@ -75,7 +75,7 @@ The Gmail list is studied in EMAIL-144.
 | `*` `+` `-` `!` | `* star`, `+/- read`, `! junk` | act at once on the marked rows or the cursor row | `test_keys_registry_routine`, `test_keys_junk_toggle_imap` |
 | `:` | `: actions` | the action menu (star, read, unread, junk, delete, sync, move, `$Done`) | `test_tui_list_bulk_star_marked`, `test_tui_list_sync_and_refresh` |
 | `?` | `? help` | overlay from the key table; scrolls with `j`, `End`; `Esc`/`q` close only it | `test_lk_help_overlay` |
-| `n f s m D h R a t u v g G N`, `Left`, `Right`, `Tab` | | change nothing, show nothing | `test_lk_unbound_keys` |
+| `n f s m D R a t u v N`, `Right`, `Tab` | | change nothing, show nothing | `test_lk_unbound_keys` |
 
 0 messages (the folder is empty): the status line offers only `Esc/q/BS`, `:`
 (the sync menu), `c`, `U`, `l` and `?`; those work, every other key is
@@ -92,7 +92,83 @@ folder offered `? help` and ignored it), EMAIL-188 (the empty folder offered
 columns wide; the no-cache hint named the dead key `s`).  Already right:
 `Esc`/`q`/`Backspace` back, `ctrl-c`, `j k` and the arrows, `PgUp`/`PgDn`
 clamping, `Space`/`x`/`Esc` marks, the delete confirmation with No as the
-default, `h` and the old keys doing nothing, `U`, `l`, the reader round trip.
+default, the old keys doing nothing, `U`, `l`, the reader round trip.
+
+## Message list, Gmail account (EMAIL-144)
+
+The list opens with `Enter` on a label of the label browser (a label, Inbox,
+Unread, Archive, Trash, a search result).  The code of the list is the one of
+the IMAP list (above); this section is what Gmail adds.  The table has 19 data
+rows at 80x24, the title bar names the range (`a-b of N message(s)`, or
+`Showing n of N [filter:...]` with a filter) and the status line ends with
+`[cursor/rows]`.  The help (`?`) and the `:` menu are made from the key table
+views of `libemail/src/core/key_table.c`: `list-gmail` (a label), `list-gmail-virtual`
+(a search result), `list-gmail-archive`, `list-gmail-trash`.  Tests are in
+`tests/pty/test_pty_gmail_tui.c`, named `test_gk_*` (80x24; the mock with 45
+messages: 1-40 unread, listed first, newest first, then 41-45 read; 41-45 also
+carry the label Work, so Work has 5).
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `Down`, `j` / `Up`, `k` | `j/k step` | cursor one row, stops at the last / first | `test_gk_navigation` |
+| `PgDn` / `PgUp` | `PgDn/PgUp page` | one page (19 rows), clamped | `test_gk_navigation` |
+| `Home`, `g` / `End`, `G` | help: First / Last message (also g / also G) | first / last message | `test_gk_navigation`, `test_gk_filter`, `test_gk_one_message` |
+| `Enter` | `Enter open` | the reader on the cursor message; `Esc`, `q`, `Backspace` there return with the cursor kept | `test_gk_enter_opens_reader` |
+| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q/BS labels` | back to the label browser; `Esc`, `q`, `Left`, `h` drop the marks, then the filter, first; `Backspace` leaves at once | `test_gk_back_keys`, `test_gk_empty_views` |
+| `ctrl-c` | help: Quit | the program quits at once | `test_gk_back_keys` |
+| `Space` / `x` | `Space mark` | marks the row and steps down (on the last row it stays) / clears all marks | `test_gk_marks`, `test_gk_one_message` |
+| `/` | help: Filter | filter bar; the status line counts the rows shown; `Enter` commits, `Esc` clears; with no match nothing can be opened, answered, deleted or marked; `g G h` type text | `test_gk_filter` |
+| `c` `r` `A` `F` | `c compose`, `r reply`, `A r-all`, `F fwd` | the dialog for the cursor message; the list returns with the cursor kept | `test_gk_compose_refresh_rules`, `test_gk_filter` |
+| `U` | `U refresh` | lists again, the cursor stays | `test_gk_compose_refresh_rules` |
+| `l` | `l rules` | the rules editor; `Esc` returns with the cursor kept | `test_gk_compose_refresh_rules` |
+| `*` `+` `-` `!` | `* star`, `+/- read`, `! junk` | act at once on the marked rows or the cursor row; the status column and the feedback line follow; a second press undoes | `test_gk_registry_keys`, `test_gk_marks`, `test_keys_junk_toggle_gmail` |
+| `d`, `Delete` | `d trash` (`d del` in the Trash) | asks first naming the message ("Move ... to Trash?", in the Trash "Delete ... for good?"), No is the default (`Enter`, `Esc`, `n`); `y` moves it, the row stays marked `D` until the next list; marked rows: one question for all | `test_gk_delete`, `test_gk_trash_view`, `test_keys_d_asks_default_no` |
+| `t` | `t labels` | the label picker of the message (studied in EMAIL-145); `Esc` closes it and changes nothing | `test_gk_t_picker`, `test_feedback_t_label_added` |
+| `:` | `: actions` | the action menu of what applies in the view (below) | `test_gk_menu_by_view`, `test_keys_gmail_menu` |
+| `?` | `? help` | overlay `Message list shortcuts (Gmail)`; scrolls with `j`, `End`; `Esc`, `q`, `Backspace` close only it; other keys change nothing | `test_gk_help` |
+| `D a u f n m s v R N e i p o`, `Right`, `Tab`, `Insert`, `F1` | | change nothing, show nothing | `test_gk_unbound_keys` |
+
+The `:` menu of each view (table order): `* + - ! d Delete`, `Start a sync`,
+`Move to...`, `t Labels`, then `Archive`, `Restore from Trash`, `Remove this
+label`, `Add a label...`, `Remove a label...` as far as they apply:
+
+| View | Archive | Restore from Trash | Remove this label |
+|---|---|---|---|
+| a label (Inbox, Sent, Work, Unread...) | yes | no | yes (`Label removed: Work`; the second time `Undo: Work restored`) |
+| search result | yes | no | no |
+| Archive | no | no | no |
+| Trash | yes | yes (`Restored to Inbox`, the row is marked `u`) | no |
+
+Tests: `test_gk_menu_by_view`, `test_gk_label_and_archive_views`,
+`test_gk_trash_view`, the key table in `tests/unit/test_key_table.c`.
+
+Trash header at 80 columns: `1-1 of 1 message(s) in Trash (1 unread).  auto-delete: 30 days`
+(the account in brackets is dropped from the title when it does not fit;
+`test_gk_trash_view`).  Empty Trash, Archive or other list: `(empty)` and one
+line saying what fills it (Trash: `d on a message moves it here.`; Archive: the
+Archive action of the `:` menu; others: `U lists again after a sync.`); the status
+line offers only `Esc/q/BS`, `:`, `c`, `U`, `l`, `?`, and every other key does
+nothing (`test_gk_empty_views`).  1 message: every cursor key stays on it,
+`Space` marks without stepping (`test_gk_one_message`).
+
+Findings of the study, all fixed with EMAIL-144: EMAIL-201 (`g`, `G` did nothing,
+IMAP list too), EMAIL-202 (`Left` and `h` did not go back, also in the empty
+list), EMAIL-203 (`U` threw the cursor to the first message, IMAP list too),
+EMAIL-204 (with a filter the position counted the unfiltered list, `[1/45]` for
+14 rows and for none), EMAIL-205 (the Trash header note was cut at 80 columns),
+EMAIL-206 (the menu offered Restore outside the Trash, Archive in the Archive,
+Remove this label where there is none), EMAIL-207 (an empty list did not say
+what fills it).  Already right: `j k Down Up`, `PgUp`/`PgDn` clamping by 19,
+`Home`/`End`, `Enter` and the reader round trip, `Esc`/`q`/`Backspace` back and
+the marks first, `ctrl-c`, `Space`/`x`/`Esc` marks, `*` `+` `-` `!` with their
+status column and feedback, the delete dialog with No as the default and the
+named message, the Trash dialog `for good`, `c r A F l` keeping the cursor, the
+filter and its no-match case, the old letters `D a u f n` doing nothing, the
+help overlay and its closing keys, the Archive messages (`Archived`), `Label
+removed` and `Undo`.  Not in this view's scope: the label picker (`t`) does not
+close with `q` or `Backspace` and shows no status line (EMAIL-145), the help
+overlay has no description or search (EMAIL-181, TUI-59), does not list
+`Backspace` (EMAIL-183) and takes no `ctrl-c` (EMAIL-153).
 
 ## Accounts list (EMAIL-141)
 

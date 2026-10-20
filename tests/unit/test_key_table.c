@@ -10,6 +10,10 @@ static EmailAction find(const char *view, int ch) {
     return ekeys_find(view, TERM_KEY_IGNORE, ch);
 }
 
+static int menu_has(const char *view, EmailAction a) {
+    return ekeys_menu_has(view, a);
+}
+
 void test_key_table(void) {
     char why[200] = "";
     ASSERT(ekeys_init(why, sizeof(why)) == 0, "key table: passes the policy check");
@@ -39,6 +43,30 @@ void test_key_table(void) {
     ASSERT(find(EKV_READ_GMAIL, 'A') == EA_NONE, "key table: A is no key in the Gmail reader");
     ASSERT(find(EKV_READ_GMAIL, 'r') == EA_NONE, "key table: r removes no label in the Gmail reader");
     ASSERT(find(EKV_READ_GMAIL, 'a') == EA_NONE, "key table: a is a plain key (save), not an action");
+
+    /* EMAIL-206: the Gmail lists differ in what the menu offers */
+    ASSERT(menu_has(EKV_LIST_GMAIL_TRASH, EA_RESTORE), "key table: the Trash menu restores");
+    ASSERT(!menu_has(EKV_LIST_GMAIL, EA_RESTORE), "key table: a label view cannot restore");
+    ASSERT(!menu_has(EKV_LIST_GMAIL_VIRTUAL, EA_RESTORE), "key table: Unread cannot restore");
+    ASSERT(!menu_has(EKV_LIST_GMAIL_ARCHIVE, EA_RESTORE), "key table: the Archive cannot restore");
+    ASSERT(menu_has(EKV_LIST_GMAIL, EA_ARCHIVE), "key table: a label view archives");
+    ASSERT(menu_has(EKV_LIST_GMAIL_VIRTUAL, EA_ARCHIVE), "key table: Unread archives");
+    ASSERT(menu_has(EKV_LIST_GMAIL_TRASH, EA_ARCHIVE), "key table: the Trash archives");
+    ASSERT(!menu_has(EKV_LIST_GMAIL_ARCHIVE, EA_ARCHIVE), "key table: the Archive cannot archive");
+    ASSERT(menu_has(EKV_LIST_GMAIL, EA_RM_LABEL), "key table: a label view takes its label off");
+    ASSERT(!menu_has(EKV_LIST_GMAIL_VIRTUAL, EA_RM_LABEL), "key table: Unread has no label to take off");
+    ASSERT(!menu_has(EKV_LIST_GMAIL_ARCHIVE, EA_RM_LABEL), "key table: the Archive has no label to take off");
+    ASSERT(!menu_has(EKV_LIST_GMAIL_TRASH, EA_RM_LABEL), "key table: the Trash has no label to take off");
+    const char *glists[] = { EKV_LIST_GMAIL, EKV_LIST_GMAIL_VIRTUAL, EKV_LIST_GMAIL_ARCHIVE, EKV_LIST_GMAIL_TRASH };
+    for (int i = 0; i < 4; i++) {
+        ASSERT(find(glists[i], 't') == EA_LABELS, "key table: t is the label picker in every Gmail list");
+        ASSERT(find(glists[i], 'd') == EA_DELETE, "key table: d deletes in every Gmail list");
+        ASSERT(find(glists[i], 'x') == EA_NONE, "key table: x is no action");
+        ASSERT(menu_has(glists[i], EA_ADD_LABEL), "key table: every Gmail list adds a label");
+        ASSERT(menu_has(glists[i], EA_SYNC), "key table: every Gmail list starts a sync");
+        ASSERT(ekeys_help_has(glists[i], TUI_KEY_HOME) && ekeys_help_has(glists[i], '/'),
+               "key table: every Gmail list has the list keys");
+    }
 
     /* the labels picker is Gmail's alone */
     ASSERT(find(EKV_LIST_GMAIL, 't') == EA_LABELS, "key table: t is the Gmail label picker");

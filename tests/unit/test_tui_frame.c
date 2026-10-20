@@ -80,4 +80,31 @@ void test_tui_frame(void) {
     out = draw_to_file("x", 1, 24, 0, 0, NULL, NULL, &rc);
     free(out);
     ASSERT(rc == -1, "tui_frame: zero columns are refused");
+
+    /* The keys every modal list has (EMAIL-210..212, EMAIL-219). */
+    tui_event ev;
+    memset(&ev, 0, sizeof ev);
+    ev.type = TUI_EV_KEY; ev.key = TUI_KEY_CHAR; ev.cp = 'q';
+    tui_frame_modal_key(&ev, 1);
+    ASSERT(ev.key == TUI_KEY_ESC, "tui_frame: q in a modal is Esc");
+    memset(&ev, 0, sizeof ev);
+    ev.type = TUI_EV_KEY; ev.key = TUI_KEY_BACKSPACE;
+    tui_frame_modal_key(&ev, 0);
+    ASSERT(ev.key == TUI_KEY_ESC, "tui_frame: Backspace in a modal is Esc");
+    memset(&ev, 0, sizeof ev);
+    ev.type = TUI_EV_KEY; ev.key = TUI_KEY_CHAR; ev.cp = 'g';
+    tui_frame_modal_key(&ev, 1);
+    ASSERT(ev.key == TUI_KEY_HOME, "tui_frame: g in a modal list is Home");
+    memset(&ev, 0, sizeof ev);
+    ev.type = TUI_EV_KEY; ev.key = TUI_KEY_CHAR; ev.cp = 'G';
+    tui_frame_modal_key(&ev, 1);
+    ASSERT(ev.key == TUI_KEY_END, "tui_frame: G in a modal list is End");
+    memset(&ev, 0, sizeof ev);
+    ev.type = TUI_EV_KEY; ev.key = TUI_KEY_CHAR; ev.cp = 'g';
+    tui_frame_modal_key(&ev, 0);
+    ASSERT(ev.key == TUI_KEY_CHAR && ev.cp == 'g', "tui_frame: g outside a list stays a letter");
+    memset(&ev, 0, sizeof ev);
+    ev.type = TUI_EV_KEY; ev.key = TUI_KEY_CHAR; ev.cp = 'x';
+    tui_frame_modal_key(&ev, 1);
+    ASSERT(ev.key == TUI_KEY_CHAR && ev.cp == 'x', "tui_frame: another letter is left alone");
 }

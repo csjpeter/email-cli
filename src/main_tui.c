@@ -2865,8 +2865,10 @@ int main(int argc, char *argv[]) {
         if (tui_folder && strncmp(tui_folder, "__search__:", 11) != 0)
             ui_pref_set_str(fc_key, tui_folder);  /* persist selected folder */
 
-        if (!tui_folder && go_up == 0 && !sel_cfg->gmail_mode) {
-            /* ctrl-c in the folder browser: out at once (EMAIL-190) */
+        if (!tui_folder && go_up == 0) {
+            /* ctrl-c in the folder or label browser: out at once (EMAIL-190,
+             * EMAIL-220); the label browser reads the local store only and has no
+             * other way to end without a choice */
             config_free(sel_cfg);
             break;
         }

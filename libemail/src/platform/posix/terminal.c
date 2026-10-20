@@ -151,9 +151,21 @@ static int wait_input_or_resize(void) {
 /** Map a decoded key of libtuikit to the program's TermKey.  A key with a
  *  modifier that this program has no meaning for is ignored; Alt+character is
  *  the ESC it has always been (the character is consumed with it). */
+static volatile int g_quit_requested;
+
+void terminal_request_quit(void) {
+    g_quit_requested = 1;
+}
+
+void terminal_clear_quit_request(void) {
+    g_quit_requested = 0;
+}
+
 TermKey terminal_read_key(void) {
     g_last_printable = 0;
     g_last_utf8[0]   = '\0';
+
+    if (g_quit_requested) return TERM_KEY_QUIT;     /* ctrl-c in a modal (EMAIL-219) */
 
     if (too_small()) {
         /* The notice stays until the window is large enough; only Esc and

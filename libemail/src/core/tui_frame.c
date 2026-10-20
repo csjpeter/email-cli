@@ -5,6 +5,7 @@
 #include "tui_frame.h"
 #include "key_events.h"
 #include "platform/terminal.h"
+#include "status_line.h"
 
 #include <tuikit/buf.h>
 #include <tuikit/canvas.h>
@@ -93,6 +94,37 @@ static void draw_dialog(tui_canvas c, void *ctx) {
     tui_dialog_render((tui_dialog *)ctx, c);
 }
 
+void tui_frame_modal_key(tui_event *ev, int is_list) {
+    if (!ev || ev->type != TUI_EV_KEY) return;
+    if (TUI_EV_IS_CTRL(ev, 'c')) {
+        terminal_request_quit();
+        ev->key = TUI_KEY_ESC; ev->mods = 0; ev->cp = 0; ev->utf8[0] = '\0';
+    } else if (TUI_EV_IS_CHAR(ev, 'q') ||
+               (ev->key == TUI_KEY_BACKSPACE && ev->mods == 0)) {
+        ev->key = TUI_KEY_ESC; ev->mods = 0; ev->cp = 0; ev->utf8[0] = '\0';
+    } else if (is_list && TUI_EV_IS_CHAR(ev, 'g')) {
+        ev->key = TUI_KEY_HOME; ev->cp = 0; ev->utf8[0] = '\0';
+    } else if (is_list && TUI_EV_IS_CHAR(ev, 'G')) {
+        ev->key = TUI_KEY_END; ev->cp = 0; ev->utf8[0] = '\0';
+    }
+}
+
+void tui_frame_modal_status(const char *const verbs[][2], int nverbs,
+                            int selected, int total) {
+    int rows = terminal_rows(), cols = terminal_cols();
+    if (rows <= 0) rows = 24;
+    if (cols <= 0) cols = 80;
+    tui_statusline_hint h[8];
+    int n = 0;
+    for (int i = 0; i < nverbs && n < 8; i++) {
+        h[n].key = verbs[i][0];
+        h[n].label = verbs[i][1];
+        h[n].priority = i == nverbs - 1 ? SL_PRIO_KEEP : 90 - 10 * i;
+        n++;
+    }
+    status_line_draw(rows, cols, h, n, NULL, total > 0 ? selected : 0, total, NULL);
+}
+
 tui_dialog_state tui_frame_run_dialog(tui_dialog *d) {
     tui_decoder dec;
     tui_decoder_init(&dec);
@@ -102,6 +134,17 @@ tui_dialog_state tui_frame_run_dialog(tui_dialog *d) {
         int rows = terminal_rows(), cols = terminal_cols();
         if (rows <= 0) rows = 24;
         if (cols <= 0) cols = 80;
+        int pick = d->kind == TUI_DIALOG_CHECKLIST || d->kind == TUI_DIALOG_MENU;
+        if (d->kind == TUI_DIALOG_CHECKLIST) {
+            static const char *const v[][2] = {
+                { "j/k", "select" }, { "Space", "tick" }, { "Enter", "apply" },
+                { "Esc/q/BS", "cancel" } };
+            tui_frame_modal_status(v, 4, d->list.selected + 1, d->nitems);
+        } else if (d->kind == TUI_DIALOG_MENU) {
+            static const char *const v[][2] = {
+                { "j/k", "select" }, { "Enter", "choose" }, { "Esc/q/BS", "close" } };
+            tui_frame_modal_status(v, 3, d->list.selected + 1, d->nitems);
+        }
         tui_frame_overlay(draw_dialog, d, rows, cols);
         tui_event ev;
         int r = key_events_next(STDIN_FILENO, &dec, &ev, -1);
@@ -110,6 +153,7 @@ tui_dialog_state tui_frame_run_dialog(tui_dialog *d) {
             break;
         }
         if (ev.type == TUI_EV_RESIZE) continue;
+        if (pick) tui_frame_modal_key(&ev, 1);
         tui_dialog_handle(d, &ev);
     }
     key_events_end(&winch);

@@ -2205,6 +2205,7 @@ void test_email_service(void) {
         show_label_picker(NULL, "0000000000001234", NULL, 0);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
+        terminal_clear_quit_request();            /* ctrl-c in a modal asks to quit (EMAIL-219) */
         ASSERT(1, "show_label_picker: ESC exits cleanly");
 
         /* EMAIL-110: Space ticks, Enter applies, Ctrl-C leaves everything */
@@ -2214,6 +2215,7 @@ void test_email_service(void) {
         show_label_picker(NULL, "0000000000001234", NULL, 0);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
+        terminal_clear_quit_request();
         ASSERT(label_idx_contains("INBOX", "0000000000001234"),
                "show_label_picker: cancelled, the label stays");
         char fb[128] = "";
@@ -3983,6 +3985,7 @@ void test_email_service(void) {
         show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
+        terminal_clear_quit_request();   /* the picker's ctrl-c asked to quit (EMAIL-219) */
 
         /* Restore for 'f' (star) test */
         local_store_init(NULL, "gmailreader@test.com");

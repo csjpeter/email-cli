@@ -95,6 +95,17 @@ static inline void terminal_raw_exit_ptr(TermRawState **p) {
 TermKey terminal_read_key(void);
 
 /**
+ * Ask the program to quit at once (EMAIL-219): ctrl-c pressed in a modal
+ * (a menu, a picker, a prompt) closes it, and the next terminal_read_key()
+ * of the view underneath returns TERM_KEY_QUIT, as if ctrl-c had been
+ * pressed there.  The request is never cleared.
+ */
+void terminal_request_quit(void);
+
+/** Forget the request (for tests that press ctrl-c in a modal and go on). */
+void terminal_clear_quit_request(void);
+
+/**
  * Returns the last printable ASCII character (32–126) that caused
  * terminal_read_key() to return TERM_KEY_IGNORE.
  * Returns 0 if the last ignored keystroke was not a printable character.

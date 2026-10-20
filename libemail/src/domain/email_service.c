@@ -4316,6 +4316,9 @@ static int change_folder(const Config *cfg, const char *name, int create, int qu
  * search (EMAIL-195): a search result is no row, so the browser, called again
  * with the search as the current folder, comes back to this one. */
 static char g_fb_row[512];
+/* The label the browser stood on when a search started, for the way back
+ * (EMAIL-216). */
+static char g_lb_row[512];
 
 /* The name that identifies table row @p cursor of the folder browser, for a
  * return to it: a virtual list, or a folder; NULL for a heading. */
@@ -4839,6 +4842,8 @@ static void show_label_picker(emc_client *mc, const char *uid,
     char **all_labels = NULL;
     int all_count = 0;
     label_idx_list(&all_labels, &all_count);
+    /* In the order of the label browser: by name (EMAIL-213). */
+    if (all_count > 1) qsort(all_labels, (size_t)all_count, sizeof(char *), cmp_str);
 
     /* Build display: system labels (UNREAD, INBOX, STARRED, SENT, DRAFTS) first,
      * then user-defined labels.  Skip _nolabel, _spam, _trash (system-managed). */
@@ -5129,7 +5134,17 @@ static int label_create_prompt(const Config *cfg, int prompt_row,
     char new_name[256] = "";
     InputLine il;
     input_line_init(&il, new_name, sizeof(new_name), "");
+    {
+        /* the prompt's own keys, not the browser's (EMAIL-215) */
+        tui_statusline_hint sh[2] = {
+            { "Enter", "create", 90 },
+            { "Esc", "cancel", SL_PRIO_KEEP },
+        };
+        int rr = terminal_rows(), cc = terminal_cols();
+        status_line_draw(rr > 0 ? rr : 24, cc > 0 ? cc : 80, sh, 2, NULL, 0, 0, NULL);
+    }
     int confirmed = input_line_run(&il, prompt_row, "New label name: ");
+    if (input_line_ctrl_c()) terminal_request_quit();     /* ctrl-c quits (EMAIL-219) */
     if (!confirmed || !new_name[0]) return 0;
     if (email_service_create_label(cfg, new_name) == 0) return 1;
     snprintf(flash, flash_sz, "  Could not create the label %s.", new_name);
@@ -5141,6 +5156,8 @@ char *email_service_list_labels_interactive(const Config *cfg,
                                             int *go_up) {
     local_store_init(cfg->host, cfg->user);
     if (go_up) *go_up = 0;
+    if (current_label && strncmp(current_label, "__search__:", 11) == 0)
+        current_label = g_lb_row;       /* back from a search: the row it started from */
     EmailAction lbl_defer = EA_NONE;   /* a menu action that prompts runs after a redraw */
 
     /* Collect user and category labels from locally synced .idx files. */
@@ -5317,6 +5334,13 @@ char *email_service_list_labels_interactive(const Config *cfg,
             key = TERM_KEY_NEXT_LINE;    /* j and k move (EMAIL-175) */
         if (key == TERM_KEY_IGNORE && terminal_last_printable() == 'k')
             key = TERM_KEY_PREV_LINE;
+        if (key == TERM_KEY_LEFT) key = TERM_KEY_ESC;      /* Left goes back (EMAIL-209) */
+        if (key == TERM_KEY_IGNORE && !lbl_deferred) {
+            int pc = terminal_last_printable();
+            if (pc == 'h') key = TERM_KEY_ESC;              /* h as Left */
+            else if (pc == 'g') key = TERM_KEY_HOME;        /* g, G (EMAIL-208) */
+            else if (pc == 'G') key = TERM_KEY_END;
+        }
 
         switch (key) {
         case TERM_KEY_BACK:
@@ -5372,14 +5396,27 @@ char *email_service_list_labels_interactive(const Config *cfg,
                 int slen = 0;
                 int srows = trows;
                 for (;;) {
+                    {
+                        /* the prompt's own keys, not the browser's (EMAIL-215);
+                         * drawn first, so the cursor ends in the prompt */
+                        tui_statusline_hint sh[3] = {
+                            { "Enter", "search", 90 },
+                            { "Tab", "scope", 70 },
+                            { "Esc", "cancel", SL_PRIO_KEEP },
+                        };
+                        status_line_draw(srows, tcols, sh, 3, NULL, 0, 0, NULL);
+                    }
                     printf("\033[%d;1H\033[K  Search [%s]: %s_",
                            srows - 1, snames[sscope], sbuf);
                     fflush(stdout);
                     TermKey ikey = terminal_read_key();
-                    if (ikey == TERM_KEY_ESC || ikey == TERM_KEY_QUIT) break;
+                    if (ikey == TERM_KEY_QUIT)          /* ctrl-c quits at once (EMAIL-214) */
+                        goto labels_done;
+                    if (ikey == TERM_KEY_ESC) break;
                     if (ikey == TERM_KEY_ENTER) {
                         if (sbuf[0]) {
                             char sfolder[512];
+                            snprintf(g_lb_row, sizeof g_lb_row, "%s", lbl_ids[cursor]);
                             snprintf(sfolder, sizeof(sfolder),
                                      "__search__:%d:%s", sscope, sbuf);
                             selected = strdup(sfolder);
@@ -5411,8 +5448,11 @@ char *email_service_list_labels_interactive(const Config *cfg,
                 /* Creating and deleting a label are in the menu (EMAIL-175);
                  * deleting names the label and asks, No being the default. */
                 const char *tt[EA_COUNT] = { NULL };
-                if (lbl_count > 0 && !lbl_hdr[cursor]) tt[EA_LABEL_DELETE] = lbl_names[cursor];
-                lact = ekeys_menu(EKV_LABELS, tt);
+                /* Only a label of the user's own can be deleted (EMAIL-218). */
+                int own_label = lbl_count > 0 && !lbl_hdr[cursor] &&
+                                !is_system_or_special_label(lbl_ids[cursor]);
+                if (own_label) tt[EA_LABEL_DELETE] = lbl_names[cursor];
+                lact = ekeys_menu(own_label ? EKV_LABELS : EKV_LABELS_SYSTEM, tt);
                 if (lact == EA_LABEL_CREATE) {
                     lbl_defer = lact;       /* draw the labels, then ask for the name */
                     lact = EA_NONE;

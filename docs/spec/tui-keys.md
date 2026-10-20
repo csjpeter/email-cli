@@ -248,3 +248,81 @@ back, `j k` and the arrows stopping at the ends, `PgUp`/`PgDn` by 19 rows,
 `?` and its closing keys, the `:` menu, unbound keys.  Not in this view's
 scope: the help overlay takes no `ctrl-c` (EMAIL-153), has no description or
 search (EMAIL-181, TUI-59) and does not list `Backspace` (EMAIL-183).
+
+## Gmail label browser and label picker (EMAIL-145)
+
+Opens with `Enter` on a Gmail account.  Title `Labels - USER  (N)`: N counts the
+table rows, the labels and the two headings (`Tags / Flags`, `Folders`); the
+mock has 12 labels and so 14 rows, 10 without a label of the user's own.  The
+table has `rows - 5` data rows (19 at 80x24); the status line ends with
+`[cursor/rows]`.  The cursor starts on the label last left (Inbox), the
+headings are never selectable, the user's labels are sorted by name, the
+system labels (Unread, Flagged, Inbox, Sent, Drafts, the categories, Archive,
+Spam, Trash) come in fixed places.  The help (`?`) and the `:` menu are made
+from the key table views `labels` (a label of the user's own) and
+`labels-system` (any other row) of `libemail/src/core/key_table.c`.  Tests are
+in `tests/pty/test_pty_gmail_tui.c`, named `test_lb_*` (browser) and `test_lp_*`
+(picker), at 80x24 with the mock's 45 messages (`lb_add_labels` adds 36 more
+labels for the paging tests).
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `Down`, `j` / `Up`, `k` | `j/k select` | cursor one selectable row, stops at the last / first, skips the headings | `test_lb_navigation` |
+| `PgDn` / `PgUp` | help: Page down / Page up | one page (19 rows), clamped; on the first row the `Tags / Flags` heading is on the screen | `test_lb_navigation` (14 and 50 rows) |
+| `Home`, `g` / `End`, `G` | help: First label (also g) / Last label (also G) | first selectable row (Unread) / last row (Trash) | `test_lb_navigation`, `test_lb_no_user_labels` |
+| `Enter` | `Enter open` | the message list of the label (`Work`: `1-5 of 5 message(s) in Work`); `Esc` there returns to the same row | `test_lb_navigation` |
+| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q/BS accounts` | back to the accounts | `test_lb_back_keys` |
+| `ctrl-c` | help: none | the program quits at once, status 0, nothing printed | `test_lb_back_keys`, `test_lb_search`, `test_lb_menu` |
+| `/` | help: Search | prompt `Search [Subject]: _`; text (also `q j t g`), `Backspace` deletes, `Tab` Subject/From/To/Body, `Enter` searches (empty: cancels), `Esc` cancels, `ctrl-c` quits; the status line shows `Enter search  Tab scope  Esc cancel`; a result returns to the row the search started from | `test_lb_search` |
+| `:` | `: actions` | menu: `Create a label...` on every row, `Delete the label` on a label of the user's own only; `j k g G Home End` move, `Enter` chooses, `Esc`, `q`, `Backspace` close; status line `j/k select  Enter choose  Esc/q/BS close [n/N]` | `test_lb_menu` |
+| `Create a label...` | prompt `New label name:` | status line `Enter create  Esc cancel`; `Enter` creates, `Esc` cancels, `ctrl-c` quits; `q` is text | `test_lb_menu`, `test_label_browser_create_*` |
+| `Delete the label` | `Delete the label X on the server? ...  [Yes] [No]` | No is the default; `y` deletes by id, `n`, `Esc`, `q`, `Backspace` refuse; status line `y yes  n no  Esc/q/BS cancel`; `ctrl-c` quits, nothing deleted | `test_lb_menu`, `test_label_browser_delete_label_uses_id` |
+| `?` | `? help` | overlay `Label browser shortcuts`; `Esc`, `q`, `Backspace` close it, other keys change nothing | `test_lb_help_and_status` |
+| resize | | redrawn at once, the status line on the new last row | `test_lb_help_and_status` |
+| `Space c d t x n r e i D l a u U 1 -`, `Right`, `Tab`, `Insert`, `Delete`, `F1` | | change nothing, show nothing (`c` and `d` are in the `:` menu) | `test_lb_unbound_keys` |
+
+Without a label of the user's own the browser has 10 rows and works the same
+(`test_lb_no_user_labels`); there is no 0-row or 1-row browser, the system
+labels are always listed.
+
+### Label picker (`t` in a Gmail list or reader)
+
+A modal `Toggle Labels` over the list: a checklist of UNREAD, INBOX, STARRED,
+SENT, DRAFTS, then the user's labels sorted by name; the labels the message
+has are ticked.  The status line is the picker's own while it is open.
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `Down`, `j` / `Up`, `k` | `j/k select` | cursor one row, stops at the ends; `[n/N]` at the right | `test_lp_keys` |
+| `Home`, `g` / `End`, `G`, `PgUp`, `PgDn` | | first / last row, a page; the long list scrolls inside the box | `test_lp_keys`, `test_lp_order` |
+| `Space` | `Space tick` | ticks / unticks the row, changes nothing yet | `test_lp_keys` |
+| `Enter` | `Enter apply` | applies what was ticked (`Label removed: INBOX`, `Labels updated`), nothing when nothing changed | `test_lp_keys`, `test_feedback_t_label_added` |
+| `Esc`, `q`, `Backspace` | `Esc/q/BS cancel` | close and discard the ticks | `test_lp_keys`, `test_lp_reader` |
+| `ctrl-c` | | quits at once, applies nothing | `test_lp_keys` |
+| any other key | | changes nothing | `test_lp_keys` |
+
+The same `q`, `Backspace`, `g`, `G`, `ctrl-c` and status line serve the `:`
+menu and its confirmation in every view (`tui_frame_modal_key`,
+`tui_frame_modal_status`; `terminal_request_quit()` makes the view underneath
+quit on its next read).  A picker with 0 or 1 labels does not exist: the five
+system labels are always listed.
+
+Findings of the study, fixed with EMAIL-145: EMAIL-208 (`g`, `G` did nothing),
+EMAIL-209 (`Left`, `h` did not go back), EMAIL-210 (the `:` menu and its
+confirmation did not close with `q` or `Backspace`), EMAIL-211 (the picker did
+not close with `q` or `Backspace`), EMAIL-212 (`g`, `G` in the picker and the
+menu), EMAIL-213 (the picker and the menu had no status line), EMAIL-214
+(ctrl-c in the search prompt only closed it), EMAIL-215 (the prompts had no
+status line), EMAIL-216 (a search result lost the row), EMAIL-217 (the picker
+listed the labels in directory order), EMAIL-218 (`Delete the label` was offered
+on system labels), EMAIL-219 (ctrl-c in a modal only closed it), EMAIL-220
+(ctrl-c in the label browser printed `Connection failed`).  Already right:
+`j k Down Up` stopping at the ends and skipping the headings, `PgUp`/`PgDn` by 19
+rows and clamped, `Home`/`End`, `Enter` and the return to the same row, `Esc`,
+`q`, `Backspace` back, the search prompt's editing keys and scopes, the empty
+search, create (prompt, failure notice) and delete (asks first, by id, No the
+default, failure notice), `?` and its closing keys, the cursor row marked with
+`>`, unbound keys, a resize.  Not in this view's scope: the help overlay has no
+description or search (EMAIL-181, TUI-59), does not list `Backspace` (EMAIL-183)
+and takes no `ctrl-c` (EMAIL-153); the status line of the browser omits `/` and
+the page keys (EMAIL-163).

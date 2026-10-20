@@ -105,6 +105,23 @@
     H(V, TUI_KEY_ESC, "Back", "to the list"),                                       \
     H(V, TUI_KC_QUIT, "Quit", NULL)
 
+/* The entries of the Gmail label browser, for a label of the user's own and
+ * for a system label alike (EMAIL-208, EMAIL-209, EMAIL-218). */
+#define LABELS_COMMON(V)                                                            \
+    H(V, 'j', "Down", "move down (also Down)"),                                     \
+    H(V, 'k', "Up", "move up (also Up)"),                                           \
+    H(V, TUI_KEY_PGDN, "Page down", NULL),                                          \
+    H(V, TUI_KEY_PGUP, "Page up", NULL),                                            \
+    H(V, TUI_KEY_HOME, "First label", "also g"),                                    \
+    H(V, TUI_KEY_END, "Last label", "also G"),                                      \
+    H(V, TUI_KEY_ENTER, "Open", "the messages of the label"),                       \
+    H(V, '/', "Search", "cross-folder content search"),                             \
+    H(V, '?', "Help", NULL),                                                        \
+    H(V, ':', "Actions", "the menu of everything that changes state"),              \
+    H(V, 'q', "Back", "to the accounts (also h and Left)"),                         \
+    H(V, TUI_KEY_ESC, "Back", "to the accounts"),                                   \
+    M(V, "Create a label...", "on the server, name asked for", EA_LABEL_CREATE)
+
 static const tui_keyentry g_entries[] = {
     /* The message list of an IMAP account. */
     LIST_COMMON(EKV_LIST_IMAP),
@@ -147,23 +164,14 @@ static const tui_keyentry g_entries[] = {
     M(EKV_READ_GMAIL, "Archive", "remove every label", EA_ARCHIVE),
     M(EKV_READ_GMAIL, "Remove this label", "from the message", EA_RM_LABEL),
 
-    /* The Gmail label browser. */
-    H(EKV_LABELS, 'j', "Down", "move down (also Down)"),
-    H(EKV_LABELS, 'k', "Up", "move up (also Up)"),
-    H(EKV_LABELS, TUI_KEY_PGDN, "Page down", NULL),
-    H(EKV_LABELS, TUI_KEY_PGUP, "Page up", NULL),
-    H(EKV_LABELS, TUI_KEY_HOME, "First label", NULL),
-    H(EKV_LABELS, TUI_KEY_END, "Last label", NULL),
-    H(EKV_LABELS, TUI_KEY_ENTER, "Open", "the messages of the label"),
-    H(EKV_LABELS, '/', "Search", "cross-folder content search"),
-    H(EKV_LABELS, '?', "Help", NULL),
-    H(EKV_LABELS, ':', "Actions", "the menu of everything that changes state"),
-    H(EKV_LABELS, 'q', "Back", "to the accounts"),
-    H(EKV_LABELS, TUI_KEY_ESC, "Back", "to the accounts"),
-    M(EKV_LABELS, "Create a label...", "on the server, name asked for", EA_LABEL_CREATE),
+    /* The Gmail label browser.  On a label of the user's own the menu also
+     * deletes it; on a system label (Unread, Inbox, Trash...) it cannot be
+     * deleted, so the menu does not offer it (EMAIL-218). */
+    LABELS_COMMON(EKV_LABELS),
     S(EKV_LABELS, TUI_KC_NONE, TUI_VERB_NONE, "Delete the label", "on the server",
       "Delete the label %s on the server? Its messages keep their other labels.",
       EA_LABEL_DELETE),
+    LABELS_COMMON(EKV_LABELS_SYSTEM),
 
     /* The IMAP folder browser (EMAIL-129): creating and deleting a folder are
      * rare, so they are in the menu only; deleting names the folder and asks.
@@ -280,6 +288,15 @@ static void run_actionmenu(tui_actionmenu *m, const char *const targets[EA_COUNT
         int rows = terminal_rows(), cols = terminal_cols();
         if (rows <= 0) rows = 24;
         if (cols <= 0) cols = 80;
+        if (m->confirming) {
+            static const char *const v[][2] = {
+                { "y", "yes" }, { "n", "no" }, { "Esc/q/BS", "cancel" } };
+            tui_frame_modal_status(v, 3, 0, 0);
+        } else {
+            static const char *const v[][2] = {
+                { "j/k", "select" }, { "Enter", "choose" }, { "Esc/q/BS", "close" } };
+            tui_frame_modal_status(v, 3, m->dialog.list.selected + 1, m->dialog.nitems);
+        }
         tui_frame_overlay(draw_menu, m, rows, cols);
         tui_event ev;
         int r = key_events_next(STDIN_FILENO, &dec, &ev, -1);
@@ -288,6 +305,7 @@ static void run_actionmenu(tui_actionmenu *m, const char *const targets[EA_COUNT
             break;
         }
         if (ev.type == TUI_EV_RESIZE) continue;
+        tui_frame_modal_key(&ev, !m->confirming);
         if (targets && !m->confirming && m->idx && m->dialog.list.selected >= 0) {
             int id = g_entries[m->idx[m->dialog.list.selected]].id;
             if (id > 0 && id < EA_COUNT && targets[id]) m->target = targets[id];

@@ -57,4 +57,10 @@ static inline void input_line_init(InputLine *il, char *buf, size_t bufsz,
  */
 int input_line_run(InputLine *il, int trow, const char *prompt);
 
+/**
+ * @brief True when the last input_line_run() ended on ctrl-c (EMAIL-219), so
+ *        a caller can quit the program instead of only going back.
+ */
+int input_line_ctrl_c(void);
+
 #endif /* CORE_INPUT_LINE_H */

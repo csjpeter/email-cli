@@ -5327,11 +5327,13 @@ char *email_service_list_labels_interactive(const Config *cfg,
         fflush(stdout);
 
         {
-            tui_statusline_hint h[6];
+            tui_statusline_hint h[8];
             int nh = 0;
             #define HINT(k, l, p) do { h[nh].key = (k); h[nh].label = (l); h[nh].priority = (p); nh++; } while (0)
             HINT("j/k", "select", 60);
+            HINT("PgDn/PgUp", "page", 40);
             HINT("Enter", "open", 90);
+            HINT("/", "search", 50);
             HINT(":", "actions", 80);
             HINT("Esc/q/BS", "accounts", SL_PRIO_KEEP);
 #undef HINT

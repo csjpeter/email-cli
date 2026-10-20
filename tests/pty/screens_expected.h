@@ -2223,7 +2223,7 @@ static const char *const exp_gmail_labels[] = {
     "",
     "",
     "",
-    " j/k select  Enter open  : actions  Esc/q/BS accounts  ? help                                [2/10]",
+    " j/k select  PgDn/PgUp page  Enter open  / search  : actions  Esc/q/BS accounts  ? help      [2/10]",
     NULL
 };
 static const char *const sty_gmail_labels[] = {
@@ -3119,7 +3119,7 @@ static const char *const exp_gmail_label_user[] = {
     "",
     "",
     "",
-    " j/k select  Enter open  : actions  Esc/q/BS accounts  ? help                                [6/11]",
+    " j/k select  PgDn/PgUp page  Enter open  / search  : actions  Esc/q/BS accounts  ? help      [6/11]",
     NULL
 };
 static const char *const sty_gmail_label_user[] = {

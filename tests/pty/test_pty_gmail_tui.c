@@ -3315,6 +3315,9 @@ static void test_lb_navigation(void) {
     char row[200];
     ASSERT(strstr(gk_cursor_row(s, row, sizeof row), "Inbox") != NULL, "label browser nav: starts on Inbox");
     ASSERT_SCREEN_CONTAINS(s, "Tags / Flags");
+    /* EMAIL-163: the hint line names search; the page hint (lowest priority)
+     * is dropped at 80 columns and is pinned by the 100-column screens test */
+    ASSERT_SCREEN_CONTAINS(s, "/ search");
     ASSERT(gk_char(s, "j", "[10/14]"), "label browser nav: j");
     ASSERT(gk_step(s, PTY_KEY_DOWN, "[11/14]"), "label browser nav: Down");
     ASSERT(gk_char(s, "k", "[10/14]"), "label browser nav: k");

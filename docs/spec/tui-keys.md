@@ -594,3 +594,26 @@ SIGPIPE and fail instead (`test_bk_quit_after_server_dropped`).  Ticketed:
 EMAIL-223 (wizard prompts: `Esc` and ctrl-c are text, and after one given-up
 wizard every later wizard of the session aborts at once).  Document only: the
 button keys `Left` `Right` `Tab` are not on the prompt's status line.
+
+## Help overlays in every view (EMAIL-153)
+
+The help of a view is a libtuikit modal made from the view's key table
+(`ekeys_help()`, `libemail/src/core/key_table.c`) or, in the accounts list and
+the rules editor, from a literal table in the view's code.  Every view that has
+one names the key on its status line (`? help`).  Only `?` opens it; `h` is not
+a help key (in the lists it goes back).  Tests are in
+`tests/pty/test_pty_help_keys.c` (`./manage.sh pty help-keys`), at 80x24; the
+overlay is checked in each view named below, for each of the three closing keys,
+and with the rules list at 0 and 1 rules.  The attachment picker and the review
+screen are covered by their own sections (EMAIL-147, EMAIL-151).
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `?` | `? help` (status line) | opens `<View> shortcuts` over the view; the view stays visible behind it | `test_hk_accounts`, `_folders`, `_list`, `_reader`, `_rules_list` (0 and 1 rules), `_rule_detail`, `_conditions` |
+| `Esc`, `q`, `Backspace` | help: close | closes the overlay; the view is as it was (cursor, page, state) | the same |
+| `PgDn` `PgUp` `Home` `End` `Down` `Up` `j` `k` | | scroll the overlay when it is longer than the screen (the message list help is 20 rows plus rows below the 80x24 frame: `End` shows the last, `Home` the first); never close it | the same; `test_hk_list` for the long one |
+| `x` `h` `Enter` `Tab` `F1` `?` `Left` `Right` `Del` | | change nothing: the overlay stays, the view behind does not move | the same |
+| `h` outside the overlay | | is "back" in a list, never help | `test_hk_h_is_not_help` |
+
+Findings: none; every view behaves the same.  Not changed (known from
+EMAIL-146): the overlays do not list `Backspace`, `Left`, `h`.

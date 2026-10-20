@@ -451,3 +451,56 @@ A resize keeps the form on screen (`test_rk_form_name_required_and_resize`).
 Findings of the study: no defect that this ticket fixes; the form has no help
 overlay (`?` is a typed character in a field) and no step back to an earlier
 field, which the status line (`Enter next field`, `Esc cancel`) states.
+
+## Body editor and review screen (EMAIL-151)
+
+Reached with `c` (new message), `r`, `A`, `F`: the compose dialog (separate
+study), then the body editor, then the review screen.  Tested at 80x24 against
+the mock servers (`tests/pty/test_pty_review_keys.c`, suite `review-keys`).
+
+### Body editor
+
+Title bar `Message body - To: ... Subject: ...`, status line `Esc save and
+continue  Ctrl-S save`.  The editor is libtuikit's `tui_textedit`; a letter is
+text here, so there is no `?` help, no `:` menu and no `q`.  Below 80x24 only
+`Terminal too small` is shown and nothing is edited, `Esc` still leaves.
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| printable keys, `Enter`, `Tab`, paste | | insert text (bracketed paste, wide and accented characters) | `test_ed_unbound_keys_are_text`, `test_body_editor_paste_and_wide` |
+| `Left` `Right` `Up` `Down` `Home` `End` `Backspace` `Delete` | | move and delete | `test_ed_cursor_and_delete_keys` |
+| `PgUp` / `PgDn` | | one page: the cursor goes to the top / bottom of the view, the next press scrolls | `test_ed_many_lines_paging` |
+| `Esc` | `Esc save and continue` | saves the draft and goes to the review screen; with an empty body too | `test_ed_esc_saves_and_leaves`, `test_ed_empty_body_esc` |
+| `Ctrl-S` | `Ctrl-S save` | saves the draft, stays; the status line says `saved` until the next key | `test_ed_ctrl_s_note` |
+| `ctrl-c` | | saves the draft and quits the program at once | `test_ed_ctrl_c` |
+| idle with unsaved changes | | autosave, status line `autosaved` | `test_body_editor_autosave_while_typing` |
+
+0 lines: `test_ed_empty_body_esc`; 1 line: `test_ed_esc_saves_and_leaves`;
+60 lines (paging): `test_ed_many_lines_paging`; resize: `test_ed_resize`.
+
+### Review screen
+
+Status line `: actions (send)  e edit headers  b edit body  a add attachment
+? help  q discard` (what fits at the width).  Sending is in the `:` menu
+(`Send`, then `Send the message to ...?` Yes/No); there is no `s` and no `d`.
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `:` | `actions (send)` | menu `Send` / `Edit headers` / `Remove an attachment`; `Esc` closes only the menu; Remove with nothing attached does nothing | `test_rv_colon_menu` |
+| `Send` in the menu | | asks naming the recipients; Yes sends, removes the draft; `Esc` or No returns to the review | `test_rv_send_asks_and_declines`, `test_rv_send_yes` |
+| `e` | `edit headers` | the dialog `Edit Message`, prefilled; `Esc` asks `Discard what was typed?`, Yes returns to the review | `test_rv_e_edit_headers` |
+| `b` | `edit body` | the body editor with the text kept; the line count follows | `test_rv_b_edit_body` |
+| `a` | `add attachment` | prompt `Add Attachment`: `Enter` adds, `Esc` or an empty `Enter` cancels, `Tab` completes, an error (`File not found`) clears when the path is edited | `test_rv_a_attach_prompt`, `test_rv_a_tab_completes` |
+| `?` | `help` | overlay `Review shortcuts` from the key table; `Esc` closes only the overlay | `test_rv_help` |
+| `q`, `Esc` | `q discard` | asks `Discard draft? To: .., Subject: .., N line(s), N attachment(s) [y/n]`; `y`/`Y` discards and removes the draft, anything else stays | `test_rv_discard_keys` |
+| `ctrl-c` | | quits the program at once; the draft stays | `test_rv_ctrl_c` |
+| any other key (`s`, `d`, `x`, arrows, `Enter`, `Tab`, space) | | changes nothing | `test_rv_unbound_keys` |
+
+Layout (From, To, Subject, Body count, Attach) at 80x24 and a resize:
+`test_rv_layout`, `test_rv_resize`.
+
+Findings of the study, fixed in this ticket (no separate tickets, EMAIL-140
+rule): `ctrl-c` in the review screen asked `Discard draft?` like `q` instead of
+quitting (now quits, the draft stays); `ctrl-c` in the body editor was ignored
+(now saves and quits); after a compose, reply or forward the pause `[Press any
+key to return to inbox]` swallowed a pending quit (now skipped).

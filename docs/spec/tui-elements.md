@@ -38,8 +38,8 @@ is the end of the text of its row.
 | List search (`list_search`) | `/` | filter line "Filter [Subject|From|To|Body|Since|Before]: _  Showing n of N" | text (Since/Before take YYYY-MM-DD, as the CLI --since/--before), Tab, Enter, Esc |
 | Message reader (`reader`, `reader_source`, `reader_search`) | Enter on a message | header block From, Subject, Date, UID, File, DMARC; rule; body; status line "-- [1/1] …" with the keys | ↑↓ PgUp/PgDn Home End r F f n d D a A v / h Esc q BS |
 | Reader help (`reader_help`) | `h` | overlay (as the accounts help) | Esc q BS |
-| Rules editor (`rules_empty`, `rules_list`, `rules_second`) | `l` on the list | title "Rules for account (n rules)"; "(no rules …)" or one row per rule, `>` and the selection on the cursor; status line (`j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q back  h help`) | j k ↑↓ Home End PgUp PgDn (EMAIL-164) Enter a d Esc q |
-| Rule detail (`rule_detail`) | Enter on a rule | "Rule:", "Account:", `when:` and the `then-*` rows; status line (`e edit  d delete  Esc/q back  h help`) | e d Esc q |
+| Rules editor (`rules_empty`, `rules_list`, `rules_second`) | `l` on the list | title "Rules for account (n rules)"; "(no rules …)" or one row per rule, `>` and the selection on the cursor; status line (`j/k navigate  Enter open  a add  d delete  p preview  A apply now  Esc/q/BS back  ? help`) | j k ↑↓ Home End PgUp PgDn (EMAIL-164) Enter a d Esc q |
+| Rule detail (`rule_detail`) | Enter on a rule | "Rule:", "Account:", `when:` and the `then-*` rows; status line (`e edit  d delete  Esc/q/BS back  ? help`) | e d Esc q |
 | Rule edit (`rule_edit_form`) | `e` on a rule | condition list editor step 1/2 prefilled | j k Enter e a d q Esc |
 | Rule add, conditions (`rule_add_when`) | `a` in the rules editor | step 1/2 title, status line, "(empty — press 'a' …)" | a q Esc |
 | Rule add, actions (`rule_add_actions`) | `q` in step 1 | step 2/2 title; Name; add-label 1–3; rm-label 1–3; then-move-folder; then-forward-to | Enter Esc |

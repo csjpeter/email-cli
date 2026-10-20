@@ -297,8 +297,9 @@ static void cd_complete(char *buf, int *cur, const char *addr) {
  */
 static char tui_read_confirm(void)
 {
-    (void)terminal_read_key();
+    TermKey k = terminal_read_key();
     int c = terminal_last_printable();
+    if (k == TERM_KEY_QUIT) terminal_request_quit();   /* ctrl-c quits at once (EMAIL-148) */
     return (c == 'y' || c == 'Y') ? 'y' : 'n';
 }
 
@@ -1622,6 +1623,20 @@ static int cmd_reply_all(Config *cfg, const char *uid, const char *folder) {
 
 /* ── Rules editor ────────────────────────────────────────────────────── */
 
+/* Keys that leave a rules view like Esc does (EMAIL-148): Esc, q, Backspace,
+ * Left and h.  ctrl-c is not one of them: it quits the program. */
+static int rules_back_key(TermKey key, int ch) {
+    return key == TERM_KEY_ESC || key == TERM_KEY_BACK || key == TERM_KEY_LEFT ||
+           ch == 'q' || ch == 'h';
+}
+
+/* g and G are Home and End in every list (EMAIL-148). */
+static TermKey rules_nav_key(TermKey key, int ch) {
+    if (ch == 'g') return TERM_KEY_HOME;
+    if (ch == 'G') return TERM_KEY_END;
+    return key;
+}
+
 /* Number of then-add/rm-label slots shown in the edit form. */
 #define RULES_FORM_LABEL_SLOTS 3
 
@@ -1753,7 +1768,9 @@ static void when_list_do_add(WhenAtomList *wl, int vis_rows, const char *title) 
     int maxrow = terminal_rows() - 2;
     if (nrow > maxrow) nrow = maxrow;
     when_list_render(wl, vis_rows, title);
-    if (!input_line_run(&il, nrow, "new:  ")) return;
+    int added = input_line_run(&il, nrow, "new:  ");
+    if (input_line_ctrl_c()) terminal_request_quit();      /* ctrl-c quits (EMAIL-148) */
+    if (!added) return;
     char *s = tmp;
     while (*s == ' ') s++;
     size_t sl = strlen(s);
@@ -1782,8 +1799,11 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
 
         TermKey key = terminal_read_key();
         int ch = (key == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
+        TermKey nav = rules_nav_key(key, ch);
 
-        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT) {
+        if (key == TERM_KEY_QUIT) terminal_request_quit();
+        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || key == TERM_KEY_BACK ||
+            key == TERM_KEY_LEFT || ch == 'h') {
             when_list_join(&wl, buf, bufsz);
             return 0;
         }
@@ -1797,14 +1817,15 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                 { "k / \u2191",   "Previous condition"              },
                 { "Home / End",   "First / last condition"          },
                 { "PgUp / PgDn",  "Page up / down"                  },
+                { "g / G",        "First / last condition"          },
                 { "Enter / e",    "Edit the condition"              },
                 { "a",            "Add a condition"                 },
                 { "d",            "Delete the condition"            },
                 { "q",            "Done: go on to the actions"      },
-                { "Esc",          "Cancel the rule"                 },
+                { "Esc / BS / h", "Cancel the rule"                 },
                 { "?",            "Show this help"                  },
             };
-            email_service_help_popup("Conditions shortcuts", help, 10);
+            email_service_help_popup("Conditions shortcuts", help, 11);
             continue;
         }
 
@@ -1818,12 +1839,12 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                 wl.cursor--;
                 if (wl.cursor < wl.scroll) wl.scroll--;
             }
-        } else if (key == TERM_KEY_HOME || key == TERM_KEY_END ||
-                   key == TERM_KEY_PREV_PAGE || key == TERM_KEY_NEXT_PAGE) {
-            /* Home/End jump to the edges, PgUp/PgDn move a page (EMAIL-164). */
-            if (key == TERM_KEY_HOME) wl.cursor = 0;
-            else if (key == TERM_KEY_END) wl.cursor = wl.count > 0 ? wl.count - 1 : 0;
-            else if (key == TERM_KEY_PREV_PAGE) {
+        } else if (nav == TERM_KEY_HOME || nav == TERM_KEY_END ||
+                   nav == TERM_KEY_PREV_PAGE || nav == TERM_KEY_NEXT_PAGE) {
+            /* Home/End (g/G) jump to the edges, PgUp/PgDn move a page (EMAIL-164). */
+            if (nav == TERM_KEY_HOME) wl.cursor = 0;
+            else if (nav == TERM_KEY_END) wl.cursor = wl.count > 0 ? wl.count - 1 : 0;
+            else if (nav == TERM_KEY_PREV_PAGE) {
                 wl.cursor -= vis_rows;
                 if (wl.cursor < 0) wl.cursor = 0;
             } else {
@@ -1842,7 +1863,9 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                 input_line_init(&il, tmp, sizeof(tmp), tmp);
                 int erow = 3 + (wl.cursor - wl.scroll) + 1;
                 when_list_render(&wl, vis_rows, title);
-                if (input_line_run(&il, erow, "edit: ")) {
+                int edited = input_line_run(&il, erow, "edit: ");
+                if (input_line_ctrl_c()) terminal_request_quit();
+                if (edited) {
                     char *s = tmp;
                     while (*s == ' ') s++;
                     size_t sl = strlen(s);
@@ -1966,6 +1989,7 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
             input_line_init(&il, fields[i].buf, fields[i].bufsz, fields[i].buf);
             if (!input_line_run(&il, fields[i].row, fields[i].prompt))
                 cancelled = 1;
+            if (input_line_ctrl_c()) terminal_request_quit();   /* ctrl-c quits (EMAIL-148) */
         }
 
         if (!cancelled && !name_buf[0]) {
@@ -2095,7 +2119,7 @@ static void tui_rules_detail(const char *account, int idx)
             static const tui_statusline_hint h[] = {
                 { "e", "edit", SL_PRIO_HIGH },
                 { "d", "delete", SL_PRIO_HIGH },
-                { "Esc/q", "back", SL_PRIO_KEEP },
+                { "Esc/q/BS", "back", SL_PRIO_KEEP },
             };
             screen_bar(h, 3, "?", NULL);
         }
@@ -2117,7 +2141,8 @@ static void tui_rules_detail(const char *account, int idx)
             }
         }
 
-        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || ch == 'q') {
+        if (key == TERM_KEY_QUIT) terminal_request_quit();   /* ctrl-c quits (EMAIL-148) */
+        if (key == TERM_KEY_QUIT || rules_back_key(key, ch)) {
             mail_rules_free(rules);
             break;
         }
@@ -2127,10 +2152,13 @@ static void tui_rules_detail(const char *account, int idx)
                 { "e",            "Edit the rule (conditions, then actions)" },
                 { "d",            "Delete the rule (asks first)"             },
                 { "?",            "Show this help"                           },
-                { "Esc / q",      "Back to the rules list"                   },
+                { "Esc / q / BS / h", "Back to the rules list"               },
             };
             mail_rules_free(rules);
-            email_service_help_popup("Rule shortcuts", help, 4);
+            {   /* the overlay reads raw keys: Esc, q and BS close it (EMAIL-148) */
+                RAII_TERM_RAW TermRawState *_hraw = terminal_raw_enter();
+                email_service_help_popup("Rule shortcuts", help, 4);
+            }
             continue;
         }
 
@@ -2208,7 +2236,7 @@ static void tui_rules_report(const char *account, int dry_run)
     }
     fflush(stdout);
     RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
-    (void)terminal_read_key();
+    if (terminal_read_key() == TERM_KEY_QUIT) terminal_request_quit();   /* EMAIL-148 */
 }
 
 /**
@@ -2258,7 +2286,7 @@ static void tui_rules_editor(const Config *cfg)
                 { "d", "delete", SL_PRIO_HIGH },
                 { "p", "preview", SL_PRIO_MID },
                 { "A", "apply now", SL_PRIO_MID },
-                { "Esc/q", "back", SL_PRIO_KEEP },
+                { "Esc/q/BS", "back", SL_PRIO_KEEP },
             };
             screen_bar(h, 7, "?", NULL);
         }
@@ -2285,7 +2313,8 @@ static void tui_rules_editor(const Config *cfg)
             }
         }
 
-        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || ch == 'q') {
+        if (key == TERM_KEY_QUIT) terminal_request_quit();   /* ctrl-c quits (EMAIL-148) */
+        if (key == TERM_KEY_QUIT || rules_back_key(key, ch)) {
             mail_rules_free(rules);
             break;
         }
@@ -2294,7 +2323,7 @@ static void tui_rules_editor(const Config *cfg)
             static const char *help[][2] = {
                 { "j / \u2193",   "Next rule"                     },
                 { "k / \u2191",   "Previous rule"                 },
-                { "Home / End",   "First / last rule"             },
+                { "Home / End",   "First / last rule (also g / G)" },
                 { "PgUp / PgDn",  "Page up / down"                },
                 { "Enter",        "Open the rule"                 },
                 { "a",            "Add a rule"                    },
@@ -2302,10 +2331,13 @@ static void tui_rules_editor(const Config *cfg)
                 { "p",            "Preview what the rules would do (dry run)" },
                 { "A",            "Apply the rules now (asks first)" },
                 { "?",            "Show this help"                },
-                { "Esc / q",      "Back to the message list"      },
+                { "Esc / q / BS / h", "Back to the message list"          },
             };
             mail_rules_free(rules);
-            email_service_help_popup("Rules shortcuts", help, 11);
+            {   /* the overlay reads raw keys: Esc, q and BS close it (EMAIL-148) */
+                RAII_TERM_RAW TermRawState *_hraw = terminal_raw_enter();
+                email_service_help_popup("Rules shortcuts", help, 11);
+            }
             continue;
         }
 
@@ -2322,13 +2354,14 @@ static void tui_rules_editor(const Config *cfg)
         }
 
         /* Home/End jump to the edges, PgUp/PgDn move a page (EMAIL-164). */
-        if (key == TERM_KEY_HOME || key == TERM_KEY_END ||
-            key == TERM_KEY_PREV_PAGE || key == TERM_KEY_NEXT_PAGE) {
+        TermKey nav = rules_nav_key(key, ch);
+        if (nav == TERM_KEY_HOME || nav == TERM_KEY_END ||
+            nav == TERM_KEY_PREV_PAGE || nav == TERM_KEY_NEXT_PAGE) {
             int page = rows - 4;
             if (page < 1) page = 1;
-            if (key == TERM_KEY_HOME) cursor = 0;
-            else if (key == TERM_KEY_END) cursor = count > 0 ? count - 1 : 0;
-            else if (key == TERM_KEY_PREV_PAGE) cursor = cursor > page ? cursor - page : 0;
+            if (nav == TERM_KEY_HOME) cursor = 0;
+            else if (nav == TERM_KEY_END) cursor = count > 0 ? count - 1 : 0;
+            else if (nav == TERM_KEY_PREV_PAGE) cursor = cursor > page ? cursor - page : 0;
             else cursor = cursor + page < count ? cursor + page : (count > 0 ? count - 1 : 0);
             mail_rules_free(rules);
             continue;

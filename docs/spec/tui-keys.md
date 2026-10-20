@@ -367,3 +367,63 @@ default, failure notice), `?` and its closing keys, the cursor row marked with
 description or search (EMAIL-181, TUI-59), does not list `Backspace` (EMAIL-183)
 and takes no `ctrl-c` (EMAIL-153); the status line of the browser omits `/` and
 the page keys (EMAIL-163).
+
+## Rules list, rule detail and condition editor (EMAIL-148)
+
+Reached with `l` on the message list.  Tested at 80x24 against the mock server
+(`tests/pty/test_pty_rules_keys.c`, `./manage.sh pty rules-keys`), each key also
+with 0 and 1 rules / conditions.
+
+### Rules list
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `Down`, `j` / `Up`, `k` | `j/k navigate` | cursor one row, stops at the ends | `test_rk_list_navigation`, `test_rk_list_zero_and_one` |
+| `Home`, `g` / `End`, `G`, `PgUp`, `PgDn` | | first / last rule, a page (rows - 4) | `test_rk_list_navigation` |
+| `Enter`, `Right`, `l` | `Enter open` | opens the rule detail; the cursor row is kept on return | `test_rk_list_open_keys` |
+| `a` | `a add` | the condition editor, step 1/2 | `test_rk_cond_zero_and_one` |
+| `d` | `d delete` | asks with the rule's name, default No | `test_rk_list_delete` |
+| `p`, `A` | `p preview`, `A apply now` | preview report; apply asks first | `test_rk_list_preview_apply` |
+| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q/BS back` | back to the message list | `test_rk_list_back_keys` |
+| `?` | `? help` | overlay; closes with `Esc`, `q`, `Backspace` | `test_rk_list_help_and_status` |
+| `ctrl-c` | | quits at once with status 0, also at the questions | `test_rk_list_back_keys`, `test_rk_list_delete` |
+| any other key | | changes nothing | `test_rk_list_unbound_keys` |
+
+An empty list shows `(no rules -- press 'a' to add one)`; `d`, `Enter`, `p`
+and `A` do nothing there (`test_rk_list_zero_and_one`).
+
+### Rule detail
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `e` | `e edit` | the condition editor prefilled | `test_rk_detail_view` |
+| `d` | `d delete` | asks, default No; Yes returns to the list | `test_rk_detail_delete` |
+| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q/BS back` | back to the list | `test_rk_detail_back_keys` |
+| `?`, `ctrl-c`, other keys | `? help` | as in the list | `test_rk_detail_back_keys`, `test_rk_detail_view` |
+
+### Condition editor (step 1/2) and the actions form (step 2/2)
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `Down`, `j` / `Up`, `k`, `Home`, `End`, `g`, `G`, `PgUp`, `PgDn` | `j/k move` | cursor, stops at the ends | `test_rk_cond_navigation` |
+| `Enter`, `e` | `Enter/e edit` | edit prompt of the condition; Esc keeps it | `test_rk_cond_edit_keys` |
+| `a` | `a add` | prompt for a new condition | `test_rk_cond_zero_and_one`, `test_rk_cond_edit_keys` |
+| `d` | `d delete` | removes the condition | `test_rk_cond_zero_and_one` |
+| `q` | `q confirm` | goes on to step 2/2 (EMAIL-221) | `test_rk_cond_leave_keys`, `test_rk_actions_form` |
+| `Esc`, `Backspace`, `Left`, `h` | `Esc cancel` | cancels the rule | `test_rk_cond_leave_keys` |
+| `?` | `? help` | overlay (11 rows) | `test_rk_cond_help_and_unbound` |
+| `ctrl-c` | | quits at once with status 0, also in the prompts | `test_rk_cond_leave_keys` |
+| any other key | | changes nothing | `test_rk_cond_help_and_unbound` |
+
+A resize redraws all three views (`test_rk_resize`).
+
+Findings of the study, fixed with EMAIL-148 (no ticket): `Backspace`, `Left` and
+`h` did not go back in the list or the detail, nor cancel in the condition
+editor; `g`, `G` were unbound in all three; the help overlays of the list and
+the detail ran without raw mode and could not be closed; ctrl-c at the delete,
+apply and Save? questions and in the input lines only answered or closed
+instead of quitting; the status lines and help texts did not name `Backspace`
+or `h`.  Open: EMAIL-221 (`q` in the condition editor confirms, the policy
+says `q` goes back).  Already right: `j k Down Up` stopping at the ends,
+`Home`/`End`/pages, `Enter` and the kept row, the empty list, the default-No
+questions, the reports, unbound keys, a resize.

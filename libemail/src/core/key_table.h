@@ -49,6 +49,7 @@ typedef enum {
     EA_FOLDER_CREATE, /**< menu: create an IMAP folder (EMAIL-129)          */
     EA_FOLDER_DELETE, /**< menu: delete an IMAP folder (EMAIL-129)          */
     EA_REAUTH,        /**< menu: renew a Gmail account's authorization (EMAIL-130) */
+    EA_FOLDER_VIEW,   /**< 't'  folder browser: tree or flat view (EMAIL-199) */
     EA_COUNT
 } EmailAction;
 

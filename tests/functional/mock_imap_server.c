@@ -25,6 +25,8 @@
  *   MOCK_IMAP_COUNT   - Number of messages to simulate (default 1, backward compat)
  *   MOCK_IMAP_ATTACHMENTS - Attachments per message, 0..30 (default 2)
  *   MOCK_IMAP_TO, MOCK_IMAP_CC - recipients written into the plain-text messages
+ *   MOCK_IMAP_FOLDERS - N >= 0: LIST answers N folders, INBOX and INBOX.F01...
+ *                       (N = 0: none); unset: the fixed list with the odd names
  *
  * Launching two instances with different ports and subjects allows testing
  * that account isolation works correctly (each account connects to its own
@@ -67,6 +69,7 @@ static long long   g_modseq           = 0;   /* 0 = CONDSTORE disabled */
 static int         g_uidval           = 1;
 static const char *g_vanished         = NULL; /* space-separated UIDs */
 static int         g_changed_count    = 0;
+static int         g_folders          = -1;  /* MOCK_IMAP_FOLDERS */
 
 /**
  * Read one CRLF-terminated line from ssl into buf (max len-1 chars + NUL).
@@ -626,6 +629,20 @@ static void handle_client(SSL *ssl) {
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.&Ti0-\"\r\n"
                 /* U+1F600 (emoji, 4-byte UTF-8); surrogate pair + digit '2','3', lowercase 'e' */
                 "* LIST (\\HasNoChildren) \".\" \"INBOX.&2D3eAA-\"\r\n";
+            static char gen_list[8192];
+            if (g_folders >= 0) {
+                size_t gl = 0;
+                gen_list[0] = '\0';
+                for (int i = 0; i < g_folders && gl + 80 < sizeof(gen_list); i++) {
+                    if (i == 0)
+                        gl += (size_t)snprintf(gen_list + gl, sizeof(gen_list) - gl,
+                            "* LIST (\\HasChildren) \".\" \"INBOX\"\r\n");
+                    else
+                        gl += (size_t)snprintf(gen_list + gl, sizeof(gen_list) - gl,
+                            "* LIST (\\HasNoChildren) \".\" \"INBOX.F%02d\"\r\n", i);
+                }
+                list_resp = gen_list;
+            }
             /* The list is one text with a LIST line per folder; a deleted
              * folder's line is cut out, a created one is added. */
             char listbuf[4096];
@@ -938,6 +955,8 @@ int main(void) {
     if (vanished_env && vanished_env[0]) g_vanished = vanished_env;
     const char *changed_env = getenv("MOCK_IMAP_CHANGED_COUNT");
     if (changed_env && atoi(changed_env) >= 0) g_changed_count = atoi(changed_env);
+    const char *folders_env = getenv("MOCK_IMAP_FOLDERS");
+    if (folders_env && folders_env[0] && atoi(folders_env) >= 0) g_folders = atoi(folders_env);
 
     int server_fd;
     struct sockaddr_in address;

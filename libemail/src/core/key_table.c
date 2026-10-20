@@ -143,9 +143,11 @@ static const tui_keyentry g_entries[] = {
     H(EKV_FOLDERS, 'k', "Up", "move up (also Up)"),
     H(EKV_FOLDERS, TUI_KEY_PGDN, "Page down", NULL),
     H(EKV_FOLDERS, TUI_KEY_PGUP, "Page up", NULL),
-    H(EKV_FOLDERS, TUI_KEY_HOME, "First folder", NULL),
-    H(EKV_FOLDERS, TUI_KEY_END, "Last folder", NULL),
-    H(EKV_FOLDERS, TUI_KEY_ENTER, "Open", "the folder, or step into its subfolders; t: tree / flat view"),
+    H(EKV_FOLDERS, TUI_KEY_HOME, "First row", "also g"),
+    H(EKV_FOLDERS, TUI_KEY_END, "Last row", "also G"),
+    H(EKV_FOLDERS, TUI_KEY_ENTER, "Open", "the folder, or step into its subfolders"),
+    H(EKV_FOLDERS, 'l', "Open", "flat view: as Enter (also Right)"),
+    H(EKV_FOLDERS, 'h', "Up", "flat view: one level up, as Esc (also Left)"),
     H(EKV_FOLDERS, '/', "Search", "cross-folder content search"),
     H(EKV_FOLDERS, 'c', "Compose", "a new message"),
     H(EKV_FOLDERS, '?', "Help", NULL),
@@ -156,6 +158,8 @@ static const tui_keyentry g_entries[] = {
     S(EKV_FOLDERS, TUI_KC_NONE, TUI_VERB_NONE, "Delete the folder", "on the server",
       "Delete the folder %s on the server? Its messages are lost there.",
       EA_FOLDER_DELETE),
+    R(EKV_FOLDERS, 't', TUI_VERB_MOVE, "Tree / flat", "switch between the folder tree and one level at a time",
+      EA_FOLDER_VIEW),
 
     /* The accounts screen, a Gmail account under the cursor (EMAIL-130).  The
      * other keys of that screen (n, d, i, e) are the screen's own. */

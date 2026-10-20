@@ -4176,15 +4176,15 @@ void test_email_service(void) {
         free(fhe_r4);
         ASSERT(1, "folders_interactive: 't' tree toggle covered");
 
-        /* 'c' = compose → returns "__compose__" */
+        /* 'c' = compose → returns "__compose__:" and the row (EMAIL-194) */
         INJECT_STDIN("c", 1, saved_stdin);
         SUPPRESS_OUT(sout, serr);
         char *fhe_r5 = email_service_list_folders_interactive(
                            &fhe_cfg, "INBOX", &go_up_fhe);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
-        ASSERT(fhe_r5 != NULL && strcmp(fhe_r5, "__compose__") == 0,
-               "folders_interactive: 'c' returns __compose__");
+        ASSERT(fhe_r5 != NULL && strcmp(fhe_r5, "__compose__:INBOX") == 0,
+               "folders_interactive: 'c' returns __compose__ and the row it was on");
         free(fhe_r5);
 
         ui_pref_set_int("folder_view_mode", 1);

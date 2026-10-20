@@ -4153,9 +4153,12 @@ list_done:
     return list_result;
 }
 
-/** Fetch the folder list into a heap-allocated array; caller owns entries and array. */
+/** Fetch the folder list into a heap-allocated array; caller owns entries and array.
+ *  @p ok_out (may be NULL) is 1 when the server answered, even with no folder. */
 static char **fetch_folder_list_from_server(const Config *cfg,
-                                             int *count_out, char *sep_out) {
+                                             int *count_out, char *sep_out,
+                                             int *ok_out) {
+    if (ok_out) *ok_out = 0;
     EMC_AUTO_CLOSE emc_client *mc = make_mail(cfg);
     if (!mc) return NULL;
 
@@ -4164,12 +4167,15 @@ static char **fetch_folder_list_from_server(const Config *cfg,
     char sep = '.';
     if (emc_list_names(mc, &folders, &count, &sep) != 0) return NULL;
 
+    if (ok_out) *ok_out = 1;
     *count_out = count;
     if (sep_out) *sep_out = sep;
     return folders;
 }
 
-static char **fetch_folder_list(const Config *cfg, int *count_out, char *sep_out) {
+static char **fetch_folder_list_ex(const Config *cfg, int *count_out, char *sep_out,
+                                   int *ok_out) {
+    if (ok_out) *ok_out = 1;
     /* Try local cache first (populated by sync). */
     char **cached = local_folder_list_load(count_out, sep_out);
     if (cached && *count_out > 0) return cached;
@@ -4177,12 +4183,16 @@ static char **fetch_folder_list(const Config *cfg, int *count_out, char *sep_out
 
     /* Fall back to server. */
     char sep = '.';
-    char **folders = fetch_folder_list_from_server(cfg, count_out, &sep);
+    char **folders = fetch_folder_list_from_server(cfg, count_out, &sep, ok_out);
     if (folders && *count_out > 0) {
         local_folder_list_save((const char **)folders, *count_out, sep);
         if (sep_out) *sep_out = sep;
     }
     return folders;
+}
+
+static char **fetch_folder_list(const Config *cfg, int *count_out, char *sep_out) {
+    return fetch_folder_list_ex(cfg, count_out, sep_out, NULL);
 }
 
 int email_service_list_folders(const Config *cfg, int tree) {
@@ -4254,6 +4264,29 @@ int email_service_list_folders(const Config *cfg, int tree) {
 
 static int change_folder(const Config *cfg, const char *name, int create, int quiet);
 
+/* The row the cursor of the folder browser was on when it last went to a
+ * search (EMAIL-195): a search result is no row, so the browser, called again
+ * with the search as the current folder, comes back to this one. */
+static char g_fb_row[512];
+
+/* The name that identifies table row @p cursor of the folder browser, for a
+ * return to it: a virtual list, or a folder; NULL for a heading. */
+static const char *fb_row_name(int cursor, int tree_mode, char **folders, int count,
+                               const int *vis, int vcount) {
+    switch (cursor) {
+    case FB_UNREAD:    return "__unread__";
+    case FB_FLAGGED:   return "__flagged__";
+    case FB_JUNK:      return "__junk__";
+    case FB_PHISHING:  return "__phishing__";
+    case FB_ANSWERED:  return "__answered__";
+    case FB_FORWARDED: return "__forwarded__";
+    default: break;
+    }
+    if (cursor < FB_PREFIX) return NULL;
+    if (tree_mode) return cursor - FB_PREFIX < count ? folders[cursor - FB_PREFIX] : NULL;
+    return cursor - FB_PREFIX < vcount ? folders[vis[cursor - FB_PREFIX]] : NULL;
+}
+
 char *email_service_list_folders_interactive(const Config *cfg,
                                              const char *current_folder,
                                              int *go_up) {
@@ -4261,17 +4294,21 @@ char *email_service_list_folders_interactive(const Config *cfg,
     if (go_up) *go_up = 0;
     int count = 0;
     char sep = '.';
-    char **folders = fetch_folder_list(cfg, &count, &sep);
-    if (!folders || count == 0) {
+    int read_ok = 0;
+    char **folders = fetch_folder_list_ex(cfg, &count, &sep, &read_ok);
+    if (!read_ok) {
+        /* The list could not be read: that is not the same as a quit */
         if (folders) free(folders);
+        if (go_up) *go_up = -1;
         return NULL;
     }
-
-    qsort(folders, (size_t)count, sizeof(char *), cmp_str);
+    /* A list that was read and is empty opens the browser with the virtual
+     * rows alone; the menu creates a folder (EMAIL-193). */
+    if (count > 0) qsort(folders, (size_t)count, sizeof(char *), cmp_str);
 
     FolderStatus *statuses = fetch_all_folder_statuses(cfg, folders, count);
 
-    int *vis = malloc((size_t)count * sizeof(int));
+    int *vis = malloc((size_t)(count > 0 ? count : 1) * sizeof(int));
     if (!vis) {
         free(statuses);
         for (int i = 0; i < count; i++) free(folders[i]);
@@ -4295,6 +4332,8 @@ char *email_service_list_folders_interactive(const Config *cfg,
     /* Pre-position cursor on current_folder (offset by VPREFIX).
      * Virtual folders (__unread__, __flagged__, …) map to their prefix row.
      * Real folders: INBOX is case-insensitive per RFC 3501. */
+    if (current_folder && strncmp(current_folder, "__search__:", 11) == 0)
+        current_folder = g_fb_row;      /* back from a search: the row it started from */
     if (current_folder && *current_folder) {
         if      (strcmp(current_folder, "__unread__")    == 0) cursor = VP_UNREAD;
         else if (strcmp(current_folder, "__flagged__")   == 0) cursor = VP_FLAGGED;
@@ -4317,10 +4356,9 @@ char *email_service_list_folders_interactive(const Config *cfg,
                     current_prefix[plen] = '\0';
                 }
             }
-            int tmp_vis[1024];
-            int tv = build_flat_view(folders, count, sep, current_prefix, tmp_vis);
+            int tv = build_flat_view(folders, count, sep, current_prefix, vis);
             for (int i = 0; i < tv; i++) {
-                if (strcasecmp(folders[tmp_vis[i]], current_folder) == 0) {
+                if (strcasecmp(folders[vis[i]], current_folder) == 0) {
                     cursor = VPREFIX + i; break;
                 }
             }
@@ -4352,6 +4390,8 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
         if (cursor < wstart) wstart = cursor;
         if (cursor >= wstart + limit) wstart = cursor - limit + 1;
+        /* On the first selectable row the section heading above it is shown */
+        if (cursor <= VP_UNREAD) wstart = 0;
         int wend = wstart + limit;
         if (wend > display_count) wend = display_count;
 
@@ -4389,6 +4429,14 @@ char *email_service_list_folders_interactive(const Config *cfg,
                          cfg->user ? cfg->user : "?",
                          display_count);
             tui_frame_draw_table(cl, &tbl, trows_d, tcols_f, 0, NULL, NULL);
+            if (count == 0) {
+                /* an empty list says so and names what fills it (EMAIL-193) */
+                int mrow = 5 + display_count - wstart;
+                if (mrow < trows_d)
+                    printf("\033[%d;3H\033[2mNo folders in this account.  "
+                           "Create one in the : menu.\033[0m",
+                           mrow);
+            }
         }
 
         fflush(stdout);
@@ -4422,6 +4470,20 @@ char *email_service_list_folders_interactive(const Config *cfg,
             key = TERM_KEY_NEXT_LINE;    /* j and k move (EMAIL-175) */
         if (key == TERM_KEY_IGNORE && !fdeferred && terminal_last_printable() == 'k')
             key = TERM_KEY_PREV_LINE;
+        if (key == TERM_KEY_IGNORE && !fdeferred && terminal_last_printable() == 'g')
+            key = TERM_KEY_HOME;         /* g and G: first and last (EMAIL-198) */
+        if (key == TERM_KEY_IGNORE && !fdeferred && terminal_last_printable() == 'G')
+            key = TERM_KEY_END;
+        if (!tree_mode && !fdeferred) {
+            /* The flat view has no horizontal move: Left goes back like Esc
+             * and Right opens like Enter (EMAIL-197) */
+            if (key == TERM_KEY_LEFT ||
+                (key == TERM_KEY_IGNORE && terminal_last_printable() == 'h'))
+                key = TERM_KEY_ESC;
+            else if (key == TERM_KEY_RIGHT ||
+                     (key == TERM_KEY_IGNORE && terminal_last_printable() == 'l'))
+                key = TERM_KEY_ENTER;
+        }
 
         switch (key) {
         case TERM_KEY_QUIT:          /* ctrl-c: out at once, no go_up */
@@ -4518,6 +4580,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
         case TERM_KEY_IGNORE: {
             int ch = fdeferred ? 0 : terminal_last_printable();
             EmailAction fact = fdeferred;
+            int do_toggle = 0;
             if (ch == ':') {
                 /* Creating and deleting a folder are in the menu (EMAIL-129);
                  * deleting names the folder and asks, No being the default. */
@@ -4531,6 +4594,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 }
                 tt[EA_FOLDER_DELETE] = at ? at : "(no folder selected)";
                 fact = ekeys_menu(EKV_FOLDERS, tt);
+                if (fact == EA_FOLDER_VIEW) { do_toggle = 1; fact = EA_NONE; }
                 if (fact == EA_FOLDER_DELETE && !at) {
                     snprintf(fmsg, sizeof(fmsg), "Select a folder to delete");
                     fact = EA_NONE;
@@ -4573,14 +4637,30 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 int srows = terminal_rows(), scols = terminal_cols();
                 if (srows <= 0) srows = 24;
                 for (;;) {
+                    {
+                        /* the prompt's own keys, not the browser's (EMAIL-192);
+                         * drawn first, so the cursor ends in the prompt */
+                        tui_statusline_hint sh[3] = {
+                            { "Enter", "search", 90 },
+                            { "Tab", "scope", 70 },
+                            { "Esc", "cancel", SL_PRIO_KEEP },
+                        };
+                        status_line_draw(srows, terminal_cols() > 0 ? terminal_cols() : 80,
+                                         sh, 3, NULL, 0, 0, NULL);
+                    }
                     printf("\033[%d;1H\033[K  Search [%s]: %s_",
                            srows - 1, snames[sscope], sbuf);
                     fflush(stdout);
                     TermKey ikey = terminal_read_key();
-                    if (ikey == TERM_KEY_ESC || ikey == TERM_KEY_QUIT) break;
+                    if (ikey == TERM_KEY_QUIT)          /* ctrl-c quits at once (EMAIL-191) */
+                        goto folders_int_done;
+                    if (ikey == TERM_KEY_ESC) break;
                     if (ikey == TERM_KEY_ENTER) {
                         if (sbuf[0]) {
                             char sfolder[512];
+                            const char *rn = fb_row_name(cursor, tree_mode, folders, count,
+                                                         vis, vcount);
+                            snprintf(g_fb_row, sizeof g_fb_row, "%s", rn ? rn : "");
                             snprintf(sfolder, sizeof(sfolder),
                                      "__search__:%d:%s", sscope, sbuf);
                             selected = strdup(sfolder);
@@ -4605,15 +4685,22 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 }
                 (void)scols;
             } else if (ch == 't') {
+                do_toggle = 1;
+            } else if (ch == 'c') {
+                /* the row is carried along, so the browser comes back on it */
+                const char *rn = fb_row_name(cursor, tree_mode, folders, count, vis, vcount);
+                char cbuf[560];
+                snprintf(cbuf, sizeof cbuf, "__compose__:%s", rn ? rn : "");
+                selected = strdup(cbuf);
+                goto folders_int_done;
+            } else if (ch == '?') {
+                ekeys_help(EKV_FOLDERS, "Folder browser shortcuts");
+            }
+            if (do_toggle) {
                 tree_mode = !tree_mode;
                 ui_pref_set_int("folder_view_mode", tree_mode);
                 cursor = VPREFIX; wstart = 0;
                 if (!tree_mode) current_prefix[0] = '\0';
-            } else if (ch == 'c') {
-                selected = strdup("__compose__");
-                goto folders_int_done;
-            } else if (ch == '?') {
-                ekeys_help(EKV_FOLDERS, "Folder browser shortcuts");
             }
             break;
         }
@@ -4630,14 +4717,15 @@ char *email_service_list_folders_interactive(const Config *cfg,
         statuses = NULL;
         vis = NULL;
         count = 0;
-        folders = fetch_folder_list(cfg, &count, &sep);
-        if (!folders || count == 0) {
+        folders = fetch_folder_list_ex(cfg, &count, &sep, &read_ok);
+        if (!read_ok) {
             free(folders);
+            if (go_up) *go_up = -1;
             return NULL;
         }
-        qsort(folders, (size_t)count, sizeof(char *), cmp_str);
+        if (count > 0) qsort(folders, (size_t)count, sizeof(char *), cmp_str);
         statuses = fetch_all_folder_statuses(cfg, folders, count);
-        vis = malloc((size_t)count * sizeof(int));
+        vis = malloc((size_t)(count > 0 ? count : 1) * sizeof(int));
         if (!vis) {
             free(statuses);
             for (int i = 0; i < count; i++) free(folders[i]);
@@ -6078,7 +6166,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
     int folder_count = 0;
     char sep = '.';
     /* Always fetch from server during sync to get the latest folder list */
-    char **folders = fetch_folder_list_from_server(cfg, &folder_count, &sep);
+    char **folders = fetch_folder_list_from_server(cfg, &folder_count, &sep, NULL);
     if (!folders || folder_count == 0) {
         fprintf(stderr, "sync: could not retrieve folder list.\n");
         if (folders) free(folders);

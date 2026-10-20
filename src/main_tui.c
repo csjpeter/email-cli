@@ -2507,6 +2507,41 @@ static const char *tui_reauth_gmail(Config *cfg) {
     return "  Gmail authorization renewed.";
 }
 
+/**
+ * @brief Run the folder (or label) browser of an account, with the compose
+ *        dialog behind its 'c' key.
+ *
+ * The browser returns "__compose__:ROW" for 'c'; the dialog runs and the
+ * browser is opened again on ROW (EMAIL-194), until it returns something else.
+ *
+ * @param init   Row to put the cursor on (a folder name or a virtual list).
+ * @param go_up  Out: 1 back to the accounts, 0 quit or a choice, -1 the list
+ *               could not be read (IMAP browser only).
+ * @return The chosen folder (heap), or NULL.
+ */
+static char *run_browser(Config *sel_cfg, const char *init, int *go_up) {
+    char row[512];
+    snprintf(row, sizeof row, "%s", init ? init : "");
+    for (;;) {
+        char *sel = sel_cfg->gmail_mode
+            ? email_service_list_labels_interactive(sel_cfg, row, go_up)
+            : email_service_list_folders_interactive(sel_cfg, row, go_up);
+        if (!sel || strncmp(sel, "__compose__", 11) != 0) return sel;
+        if (sel[11] == ':') snprintf(row, sizeof row, "%s", sel + 12);
+        free(sel);
+        CDResult dlg = {0};
+        if (compose_dialog(sel_cfg, "New Message", NULL, NULL, NULL, &dlg)) {
+            cmd_compose_interactive(sel_cfg, dlg.to, dlg.cc, dlg.bcc,
+                                    dlg.subj, NULL, NULL, &dlg);
+            printf("\n  [Press any key to return to inbox]\n");
+            fflush(stdout);
+            TermRawState *_r = terminal_raw_enter();
+            char _c2; ssize_t _n2 = read(STDIN_FILENO, &_c2, 1); (void)_n2;
+            terminal_raw_exit(&_r);
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
     /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
@@ -2822,34 +2857,21 @@ int main(int argc, char *argv[]) {
                                   : "__unread__";
 
         /* Open folder/label browser — user picks which folder/label to enter.
-         * Loop so that 'c' (compose) re-enters the browser after the dialog. */
+         * 'c' (compose) runs the dialog and re-enters the browser. */
         int go_up = 0;
-        char *tui_folder = NULL;
-        const char *browser_init = init_folder;
         unsigned errors_before = logger_stderr_error_count();
-        for (;;) {
-            tui_folder = sel_cfg->gmail_mode
-                ? email_service_list_labels_interactive(sel_cfg, browser_init, &go_up)
-                : email_service_list_folders_interactive(sel_cfg, browser_init, &go_up);
-            if (!tui_folder || strcmp(tui_folder, "__compose__") != 0) break;
-            free(tui_folder); tui_folder = NULL;
-            CDResult dlg = {0};
-            if (compose_dialog(sel_cfg, "New Message", NULL, NULL, NULL, &dlg)) {
-                cmd_compose_interactive(sel_cfg, dlg.to, dlg.cc, dlg.bcc,
-                                        dlg.subj, NULL, NULL, &dlg);
-                printf("\n  [Press any key to return to inbox]\n");
-                fflush(stdout);
-                TermRawState *_r = terminal_raw_enter();
-                char _c2; ssize_t _n2 = read(STDIN_FILENO, &_c2, 1); (void)_n2;
-                terminal_raw_exit(&_r);
-            }
-        }
+        char *tui_folder = run_browser(sel_cfg, init_folder, &go_up);
         free(saved_folder);
-        if (tui_folder)
+        if (tui_folder && strncmp(tui_folder, "__search__:", 11) != 0)
             ui_pref_set_str(fc_key, tui_folder);  /* persist selected folder */
 
-        if (!tui_folder && !go_up) {
-            /* Connection error or empty folder list.  A specific error line
+        if (!tui_folder && go_up == 0 && !sel_cfg->gmail_mode) {
+            /* ctrl-c in the folder browser: out at once (EMAIL-190) */
+            config_free(sel_cfg);
+            break;
+        }
+        if (!tui_folder && go_up <= 0) {
+            /* Connection error or an unreadable folder list.  A specific error line
              * (login rejected, TLS failure, ...) already says why: print it
              * once and no generic block after it (EMAIL-105). */
             if (logger_stderr_error_count() != errors_before) {
@@ -2896,7 +2918,7 @@ int main(int argc, char *argv[]) {
             config_free(sel_cfg);
             continue;
         }
-        if (go_up) {
+        if (go_up > 0) {
             /* Backspace at folder root → back to accounts screen */
             config_free(sel_cfg);
             continue;
@@ -2918,28 +2940,12 @@ int main(int argc, char *argv[]) {
                 resume_at = opts.cursor_out;
             if (ret == 1) {
                 /* Backspace from message list → folder/label browser */
-                char *sel = sel_cfg->gmail_mode
-                    ? email_service_list_labels_interactive(sel_cfg, tui_folder, &go_up)
-                    : email_service_list_folders_interactive(sel_cfg, tui_folder, &go_up);
-                if (sel && strcmp(sel, "__compose__") == 0) {
-                    free(sel);
-                    CDResult dlg = {0};
-                    if (compose_dialog(sel_cfg, "New Message", NULL, NULL, NULL, &dlg)) {
-                        cmd_compose_interactive(sel_cfg, dlg.to, dlg.cc, dlg.bcc,
-                                                dlg.subj, NULL, NULL, &dlg);
-                        printf("\n  [Press any key to return to inbox]\n");
-                        fflush(stdout);
-                        TermRawState *_r = terminal_raw_enter();
-                        char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
-                        terminal_raw_exit(&_r);
-                    }
-                    continue;
-                }
+                char *sel = run_browser(sel_cfg, tui_folder, &go_up);
                 free(tui_folder);
                 tui_folder = sel;
-                if (tui_folder)
+                if (tui_folder && strncmp(tui_folder, "__search__:", 11) != 0)
                     ui_pref_set_str(fc_key, tui_folder);  /* persist new folder */
-                if (go_up) {
+                if (go_up > 0) {
                     /* Backspace at folder root → back to accounts */
                     back_to_accounts = 1;
                     break;

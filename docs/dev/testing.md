@@ -18,7 +18,7 @@ build/tests/unit/bin/test-runner --list     # the suite names
 tests/functional/run_functional.sh --list
 ./manage.sh pty compose                 # one PTY suite (views gmail-tui mail-rules
                                         #   compose-dialog attachment send-local
-                                        #   input-line screens rules-keys compose)
+                                        #   input-line screens rules-keys review-keys compose)
 ./manage.sh pty compose test_password   # ... and only its tests whose name contains it
 ```
 

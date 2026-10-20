@@ -5,6 +5,7 @@
 #include "body_editor.h"
 #include "key_events.h"
 #include "status_line.h"
+#include "platform/terminal.h"
 
 #include <tuikit/buf.h>
 #include <tuikit/canvas.h>
@@ -117,6 +118,10 @@ int body_editor_run(char **body, const char *header, BodyEditorSave save, void *
         if (rc < 0 || ev.type == TUI_EV_HANGUP) break;
         if (ev.type == TUI_EV_RESIZE) continue;
         if (ev.type == TUI_EV_KEY && ev.key == TUI_KEY_ESC) break;
+        if (TUI_EV_IS_CTRL(&ev, 'c')) {      /* quits the program; the text is saved below */
+            terminal_request_quit();
+            break;
+        }
         if (rows < MIN_ROWS || cols < MIN_COLS) continue;   /* nothing is drawn: no edits */
         if (TUI_EV_IS_CTRL(&ev, 's')) {
             if (save) save(te.buf, ctx);

@@ -105,6 +105,9 @@ void terminal_request_quit(void);
 /** Forget the request (for tests that press ctrl-c in a modal and go on). */
 void terminal_clear_quit_request(void);
 
+/** Nonzero once terminal_request_quit() was called and not cleared. */
+int terminal_quit_requested(void);
+
 /**
  * Returns the last printable ASCII character (32–126) that caused
  * terminal_read_key() to return TERM_KEY_IGNORE.

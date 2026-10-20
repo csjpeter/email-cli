@@ -50,6 +50,11 @@ void test_key_table(void) {
     ASSERT(find(EKV_FOLDERS, 'n') == EA_NONE, "key table: n does not create a folder");
     ASSERT(ekeys_find(EKV_FOLDERS, TERM_KEY_DELETE, 0) == EA_NONE,
            "key table: Delete does not delete a folder");
+    /* EMAIL-199: t (tree / flat) is a row of the folder help and of the menu */
+    ASSERT(find(EKV_FOLDERS, 't') == EA_FOLDER_VIEW, "key table: t is the folder view switch");
+    ASSERT(ekeys_help_has(EKV_FOLDERS, 't'), "key table: the folder help lists t");
+    ASSERT(ekeys_help_has(EKV_FOLDERS, 'h'), "key table: the folder help lists h (EMAIL-197)");
+    ASSERT(ekeys_help_has(EKV_FOLDERS, 'l'), "key table: the folder help lists l (EMAIL-197)");
 
     /* the label browser and the review screen have no direct state keys but e */
     ASSERT(find(EKV_LABELS, 'c') == EA_NONE, "key table: c does not create a label");

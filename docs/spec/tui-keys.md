@@ -119,3 +119,56 @@ Header `Email Accounts (N)`; with no account the table says
 | `q`, Backspace | - | Ignored (top level) | ignored | `test_tui_accounts_esc_quit`, `test_tui_accounts_backspace_ignored` |
 | Ctrl-C | - | Quits at once | works | `test_interactive_list_ctrl_c_quits_at_once` |
 | any other key | - | Nothing | nothing | `test_accounts_keys_cursor` |
+
+## Folder browser, IMAP account, tree and flat (EMAIL-142)
+
+Opens with `Enter` on an account.  Title `Folders - USER  (N)` (N counts the
+table rows: eight virtual rows plus the folders; in the flat view the rows of
+the level), the table has `rows - 5` data rows (19 at 80x24), the status line
+ends with `[cursor/total]`.  The cursor starts on `Unread` (or on the folder
+last left); the two section headings are never selectable, and the `Tags /
+Flags` heading is on the screen whenever `Unread` is the top row.  The help
+(`?`) is made from the key table view `folders`
+(`libemail/src/core/key_table.c`).  Tests are in `tests/pty/test_pty_views.c`,
+named `test_fk_*` (80x24; the mock lists INBOX and 7 subfolders, or with
+`MOCK_IMAP_FOLDERS=N` INBOX and N-1 subfolders `F01`...).  The cell-exact
+screens are `folders_help` and `folders_search` in `test_pty_screens.c`.
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `Down`, `j` / `Up`, `k` | `up/down step` | cursor one row, stops at the last / first; skips the `Folders` heading | `test_fk_navigation` |
+| `PgDn` / `PgUp` | `PgDn/PgUp page` (dropped first at 80 columns) | one page (19 rows), clamped; on the top row the `Tags / Flags` heading is shown | `test_fk_navigation` |
+| `Home`, `g` / `End`, `G` | help: First row / Last row | first selectable row (`Unread`) / last row | `test_fk_navigation`, `test_fk_flat` |
+| `Enter` | `Enter open/select` | tree: the folder or virtual list under the cursor; flat: a folder with subfolders steps into it (its own row first), a leaf opens; `Esc`, `q`, `Backspace` in the list return to the same row | `test_fk_enter`, `test_fk_flat` |
+| `l`, `Right` | help: Open | flat view: as `Enter` | `test_fk_flat` |
+| `h`, `Left` | help: Up | flat view: as `Esc` | `test_fk_flat` |
+| `t` | `t flat` / `t tree` (the view it switches to) | switches tree / flat, kept in the stored preference; also in the `:` menu as `Tree / flat` | `test_fk_flat`, `test_fk_menu` |
+| `Esc`, `q`, `Backspace` | `Esc/q/BS back` (flat, inside a folder: `Esc/q/BS up`) | tree and flat root: back to the accounts; flat inside a folder: one level up | `test_fk_back_keys`, `test_fk_flat` |
+| `ctrl-c` | help: none (the help overlay does not take it) | the program quits at once, status 0 | `test_fk_ctrl_c`, `test_fk_search` |
+| `/` | help: Search | prompt `Search [Subject]: _`; text (also `q j t`), `Backspace` deletes, `Tab` Subject/From/To/Body, `Enter` searches (empty: cancels), `Esc` cancels, `ctrl-c` quits; the status line shows `Enter search  Tab scope  Esc cancel`; a result returns to the row the search started from | `test_fk_search`, screen `folders_search` |
+| `c` | help: Compose | the new message dialog; the browser comes back on the same row (and flat level), also when it was reached from a message list | `test_fk_compose_keeps_row` |
+| `:` | `: actions` | menu: `Create a folder...`, `Delete the folder`, `Tree / flat` | `test_fk_menu`, `test_folder_create`, `test_folder_delete_asks` |
+| `?` | `? help` | overlay `Folder browser shortcuts`; `Esc`, `q`, `Backspace` close it, other keys change nothing | `test_fk_help`, screen `folders_help` |
+| any other key | | changes nothing, shows nothing | `test_fk_unbound_keys` |
+
+0 folders (the server answers `LIST` with nothing): the browser opens with the
+virtual rows and says `No folders in this account.  Create one in the : menu.`
+(`test_fk_zero_folders`).  1 folder: every cursor key stays on it, `t` and
+`Enter` work (`test_fk_one_folder`).  40 folders: `test_fk_navigation`.
+
+Findings of the study: EMAIL-190 (ctrl-c printed `Connection failed`), EMAIL-191
+(ctrl-c in the search prompt only closed it), EMAIL-192 (the status line kept the
+browser's hints in the prompt), EMAIL-193 (an empty folder list was reported as
+a failed connection), EMAIL-194 (the cursor was lost after `c`; from a list the
+browser did not come back at all), EMAIL-195 (the cursor was lost after a search
+result), EMAIL-196 (the `Tags / Flags` heading scrolled off), EMAIL-197 (`h`,
+`l`, `Left`, `Right` in the flat view), EMAIL-198 (`g`, `G`), EMAIL-199 (the help
+had no row for `t`) were fixed with EMAIL-142.  EMAIL-200 (the tree is open with no
+`+`/`-` markers and `l`/`h` do not open or close) waits for the libtuikit tree
+widget (TUI-60); until then `h`, `l`, `Left`, `Right` do nothing in the tree.
+Already right: `Enter` on folders and virtual rows, `Esc`/`q`/`Backspace`
+back, `j k` and the arrows stopping at the ends, `PgUp`/`PgDn` by 19 rows,
+`Home`/`End`, `t` both ways with the hint following, the search editing keys,
+`?` and its closing keys, the `:` menu, unbound keys.  Not in this view's
+scope: the help overlay takes no `ctrl-c` (EMAIL-153), has no description or
+search (EMAIL-181, TUI-59) and does not list `Backspace` (EMAIL-183).

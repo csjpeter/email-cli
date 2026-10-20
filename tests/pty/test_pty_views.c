@@ -3608,6 +3608,493 @@ static void test_lk_empty_folder(void) {
     pty_close(s);
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  EMAIL-142: key study of the folder browser of an IMAP account (80x24)
+ *  docs/spec/tui-keys.md, "Folder browser".  The mock lists INBOX with 7
+ *  subfolders (16 table rows with the 8 virtual ones: [2/16] is Unread,
+ *  [9/16] INBOX); MOCK_IMAP_FOLDERS=N lists INBOX and N-1 subfolders F01...
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** The folder list of the mock for the next test (-1: the fixed list), and
+ *  a start without a stored cursor, view mode or cached folder list. */
+static void fk_env(int folders) {
+    char p[512];
+    snprintf(p, sizeof p, "%s/.local/share/email-cli/ui.ini", g_test_home);
+    remove(p);
+    test_rmtree(TP("home/.local/share/email-cli/accounts/testuser"));
+    if (folders >= 0) {
+        char n[16];
+        snprintf(n, sizeof n, "%d", folders);
+        setenv("MOCK_IMAP_FOLDERS", n, 1);
+    } else {
+        unsetenv("MOCK_IMAP_FOLDERS");
+    }
+}
+
+/** Opens email-tui at 80x24 on the folder browser of the account; when
+ *  @p want is not NULL waits for that text instead of the "Folders" title. */
+static PtySession *fk_open_wait(const char *want) {
+    restart_mock();
+    const char *args[] = {g_tui_bin, NULL};
+    PtySession *s = pty_open(80, 24);
+    if (!s) return NULL;
+    if (pty_run(s, args) != 0) { pty_close(s); return NULL; }
+    if (pty_wait_for(s, "Email Account", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, want ? want : "Folders \xe2\x80\x94", WAIT_MS) != 0) {
+        pty_close(s);
+        return NULL;
+    }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+static PtySession *fk_open(void) { return fk_open_wait(NULL); }
+
+/** Sends a key and waits for the position @p pos, e.g. "[3/16]". */
+static int fk_key(PtySession *s, PtyKey key, const char *pos) {
+    pty_send_key(s, key);
+    return pty_wait_for(s, pos, WAIT_MS) == 0;
+}
+
+static int fk_str(PtySession *s, const char *k, const char *pos) {
+    pty_send_str(s, k);
+    return pty_wait_for(s, pos, WAIT_MS) == 0;
+}
+
+/** The text of the row under the cursor ('>' in column 0), or "". */
+static const char *fk_cursor_row(PtySession *s, char *buf, size_t size) {
+    buf[0] = '\0';
+    for (int r = 3; r < 23; r++) {
+        pty_row_text(s, r, buf, size);
+        if (buf[0] == '>') return buf;
+    }
+    buf[0] = '\0';
+    return buf;
+}
+
+/** Leaves the program by ctrl-c and closes the session. */
+static void fk_end(PtySession *s) {
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+/* Every cursor key, tree view, 40 folders (48 rows): the page is the 19 rows
+ * of the table; the section heading shows whenever Unread is the top row. */
+static void test_fk_navigation(void) {
+    fk_env(40);
+    PtySession *s = fk_open();
+    ASSERT(s != NULL, "folders nav: opens");
+    if (!s) { fk_env(-1); return; }
+    char row[200];
+    ASSERT_SCREEN_CONTAINS(s, "[2/48]");
+    ASSERT(strstr(fk_cursor_row(s, row, sizeof row), "Unread") != NULL,
+           "folders nav: the cursor starts on Unread");
+    ASSERT_ROW_CONTAINS(s, 4, "Tags / Flags");
+    ASSERT(fk_str(s, "j", "[3/48]"), "folders nav: j steps down");
+    ASSERT(fk_key(s, PTY_KEY_DOWN, "[4/48]"), "folders nav: Down steps down");
+    ASSERT(fk_str(s, "k", "[3/48]"), "folders nav: k steps up");
+    ASSERT(fk_key(s, PTY_KEY_UP, "[2/48]"), "folders nav: Up steps up");
+    pty_send_key(s, PTY_KEY_UP);
+    pty_send_str(s, "k");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[2/48]");               /* stops at the first row */
+    ASSERT(fk_key(s, PTY_KEY_PGDN, "[21/48]"), "folders nav: PgDn goes one page (19 rows) down");
+    ASSERT(strstr(fk_cursor_row(s, row, sizeof row), "F") != NULL && row[0] == '>',
+           "folders nav: the cursor row is on the screen after PgDn");
+    ASSERT(fk_key(s, PTY_KEY_PGDN, "[40/48]"), "folders nav: PgDn again");
+    ASSERT(fk_key(s, PTY_KEY_PGUP, "[21/48]"), "folders nav: PgUp goes one page up");
+    ASSERT(fk_key(s, PTY_KEY_PGUP, "[2/48]"), "folders nav: PgUp stops at the first row");
+    ASSERT_ROW_CONTAINS(s, 4, "Tags / Flags");          /* EMAIL-196 */
+    ASSERT(fk_key(s, PTY_KEY_END, "[48/48]"), "folders nav: End goes to the last row");
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_str(s, "j");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[48/48]");              /* stops at the last row */
+    ASSERT(fk_key(s, PTY_KEY_HOME, "[2/48]"), "folders nav: Home goes to the first row");
+    ASSERT_ROW_CONTAINS(s, 4, "Tags / Flags");
+    ASSERT(fk_str(s, "G", "[48/48]"), "folders nav: G goes to the last row (EMAIL-198)");
+    ASSERT(fk_str(s, "g", "[2/48]"), "folders nav: g goes to the first row (EMAIL-198)");
+    ASSERT_ROW_CONTAINS(s, 4, "Tags / Flags");
+    /* climbing back by single steps shows the heading when Unread is reached */
+    ASSERT(fk_key(s, PTY_KEY_END, "[48/48]"), "folders nav: End again");
+    ASSERT(fk_key(s, PTY_KEY_PGUP, "[29/48]"), "folders nav: PgUp from the end");
+    for (int i = 0; i < 27; i++) pty_send_str(s, "k");
+    ASSERT(pty_wait_for(s, "[2/48]", WAIT_MS) == 0, "folders nav: 27 x k reach Unread");
+    ASSERT_ROW_CONTAINS(s, 4, "Tags / Flags");          /* EMAIL-196 */
+    fk_end(s);
+    fk_env(-1);
+}
+
+/* Enter opens the row: a folder, a virtual list; the way back keeps the row. */
+static void test_fk_enter(void) {
+    fk_env(-1);
+    PtySession *s = fk_open();
+    ASSERT(s != NULL, "folders enter: opens");
+    if (!s) return;
+    ASSERT_SCREEN_CONTAINS(s, "[2/16]");
+    pty_send_key(s, PTY_KEY_ENTER);                    /* Unread */
+    ASSERT_WAIT_FOR(s, "message(s) in Unread", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "[2/16]", WAIT_MS);
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_DOWN);   /* the heading is skipped */
+    ASSERT(pty_wait_for(s, "[9/16]", WAIT_MS) == 0, "folders enter: Down x6 reaches INBOX");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in INBOX", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[9/16]", WAIT_MS);              /* the same row */
+    ASSERT(fk_key(s, PTY_KEY_DOWN, "[10/16]"), "folders enter: Down to a subfolder");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in INBOX.AT&T", WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "[10/16]", WAIT_MS);
+    fk_end(s);
+}
+
+/* The flat view: one level at a time; t toggles; Esc, q, Backspace and h, Left
+ * go up; Enter, l and Right go in (EMAIL-197). */
+static void test_fk_flat(void) {
+    fk_env(-1);
+    PtySession *s = fk_open();
+    ASSERT(s != NULL, "folders flat: opens");
+    if (!s) return;
+    ASSERT_ROW_CONTAINS(s, 23, "t flat");
+    ASSERT(fk_str(s, "t", "[9/9]"), "folders flat: t switches to the flat view");
+    ASSERT_ROW_CONTAINS(s, 23, "t tree");
+    ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS back");
+    ASSERT_SCREEN_CONTAINS(s, "INBOX/");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS up", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "\xe2\x80\xba INBOX/");
+    ASSERT_SCREEN_CONTAINS(s, "[9/16]");                /* the folder itself first */
+    ASSERT(fk_str(s, "G", "[16/16]"), "folders flat: G goes to the last row");
+    ASSERT(fk_str(s, "g", "[2/16]"), "folders flat: g goes to the first row");
+    pty_send_str(s, "h");                              /* up, as Esc */
+    ASSERT_WAIT_FOR(s, "Esc/q/BS back", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "\xe2\x80\xba INBOX/");
+    pty_send_str(s, "l");                              /* in, as Enter */
+    ASSERT_WAIT_FOR(s, "Esc/q/BS up", WAIT_MS);
+    pty_send_key(s, PTY_KEY_LEFT);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS back", WAIT_MS);
+    pty_send_key(s, PTY_KEY_RIGHT);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS up", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS back", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS up", WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "Esc/q/BS back", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS up", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS back", WAIT_MS);
+    /* a folder inside the level opens its messages; the level is kept */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS up", WAIT_MS);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in INBOX.AT&T", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS up", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "\xe2\x80\xba INBOX/");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS back", WAIT_MS);
+    ASSERT(fk_str(s, "t", "[9/16]"), "folders flat: t switches back to the tree");
+    ASSERT_ROW_CONTAINS(s, 23, "t flat");
+    /* h at the root of the flat view goes back to the accounts */
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "t tree", WAIT_MS);
+    pty_send_str(s, "h");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    fk_end(s);
+}
+
+/* Esc, q and Backspace leave the tree for the accounts; Esc there quits. */
+static void test_fk_back_keys(void) {
+    fk_env(-1);
+    const struct { PtyKey key; const char *str; const char *name; } k[] = {
+        { PTY_KEY_ESC, NULL, "Esc" }, { 0, "q", "q" }, { PTY_KEY_BACK, NULL, "Backspace" },
+    };
+    for (int i = 0; i < 3; i++) {
+        PtySession *s = fk_open();
+        ASSERT(s != NULL, "folders back: opens");
+        if (!s) return;
+        if (k[i].str) pty_send_str(s, k[i].str); else pty_send_key(s, k[i].key);
+        ASSERT(pty_wait_for(s, "Email Accounts", WAIT_MS) == 0, k[i].name);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Connection failed");
+        pty_send_key(s, PTY_KEY_ESC);
+        ASSERT(pty_wait_exit(s, 5000) == 0, "folders back: Esc on the accounts quits");
+        pty_close(s);
+    }
+}
+
+/* ctrl-c quits at once from the tree, the flat view and the help (EMAIL-190). */
+static void test_fk_ctrl_c(void) {
+    fk_env(-1);
+    PtySession *s = fk_open();
+    ASSERT(s != NULL, "folders ctrl-c: opens");
+    if (!s) return;
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "folders ctrl-c: the tree quits at once, status 0");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Connection failed");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Press any key");
+    pty_close(s);
+    s = fk_open();
+    ASSERT(s != NULL, "folders ctrl-c: opens again");
+    if (!s) { fk_env(-1); return; }
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "t tree", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "folders ctrl-c: the flat view quits at once");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Connection failed");
+    pty_close(s);
+    fk_env(-1);
+}
+
+/* '/': the prompt, its keys, its hints; Enter searches, Esc and an empty
+ * Enter cancel, ctrl-c quits (EMAIL-191, EMAIL-192, EMAIL-195). */
+static void test_fk_search(void) {
+    fk_env(-1);
+    PtySession *s = fk_open();
+    ASSERT(s != NULL, "folders search: opens");
+    if (!s) return;
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]: _", WAIT_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "Enter search");
+    ASSERT_ROW_CONTAINS(s, 23, "Tab scope");
+    ASSERT_ROW_CONTAINS(s, 23, "Esc cancel");
+    ASSERT(!pty_row_contains(s, 23, "Esc/q/BS"), "folders search: not the browser's hints");
+    pty_send_str(s, "qjtx");                           /* letters, not keys */
+    ASSERT_WAIT_FOR(s, "Search [Subject]: qjtx_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [From]: qjtx_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [To]: qjtx_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [Body]: qjtx_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [Subject]: qjtx_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Search [Subject]: qjt_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);                      /* cancels, stays */
+    ASSERT_WAIT_FOR(s, "Esc/q/BS back", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Search [");
+    ASSERT_SCREEN_CONTAINS(s, "[2/16]");
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]: _", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);                     /* nothing to delete */
+    pty_send_key(s, PTY_KEY_ENTER);                    /* empty: cancels */
+    ASSERT_WAIT_FOR(s, "Esc/q/BS back", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Search [");
+    /* a search result goes back to the row the search started from */
+    for (int i = 0; i < 3; i++) pty_send_key(s, PTY_KEY_DOWN);
+    ASSERT(pty_wait_for(s, "[5/16]", WAIT_MS) == 0, "folders search: Down x3");
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]: _", WAIT_MS);
+    pty_send_str(s, "Test");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in Search: \"Test\"", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Folders \xe2\x80\x94", WAIT_MS);
+    ASSERT(pty_wait_for(s, "[5/16]", WAIT_MS) == 0, "folders search: back on the row of the search");
+    /* ctrl-c in the prompt quits */
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]: _", WAIT_MS);
+    pty_send_str(s, "abc");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "folders search: ctrl-c in the prompt quits at once");
+    pty_close(s);
+    fk_env(-1);
+}
+
+/* c: the dialog, and the browser comes back on the same row, also when the
+ * browser was reached from a message list (EMAIL-194). */
+static void test_fk_compose_keeps_row(void) {
+    fk_env(-1);
+    PtySession *s = fk_open();
+    ASSERT(s != NULL, "folders compose: opens");
+    if (!s) return;
+    for (int i = 0; i < 10; i++) pty_send_key(s, PTY_KEY_DOWN);
+    ASSERT(pty_wait_for(s, "[13/16]", WAIT_MS) == 0, "folders compose: Down x10");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[13/16]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Folders \xe2\x80\x94");
+    /* in the flat view the level is kept too */
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "t tree", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS up", WAIT_MS);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_DOWN);
+    ASSERT(pty_wait_for(s, "[11/16]", WAIT_MS) == 0, "folders compose: flat, Down x2");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[11/16]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "\xe2\x80\xba INBOX/");
+    fk_end(s);
+    /* from a list: Backspace to the browser, c, Esc: the browser, not the list */
+    fk_env(-1);
+    s = fk_open();
+    ASSERT(s != NULL, "folders compose: opens again");
+    if (!s) return;
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_DOWN);
+    ASSERT(pty_wait_for(s, "[9/16]", WAIT_MS) == 0, "folders compose: on INBOX");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in INBOX", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "[9/16]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "[10/16]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Folders \xe2\x80\x94");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "message(s) in");
+    fk_end(s);
+    fk_env(-1);
+}
+
+/* A list that was read and is empty is an empty list, not a failed
+ * connection; the menu creates the first folder (EMAIL-193). */
+static void test_fk_zero_folders(void) {
+    fk_env(0);
+    PtySession *s = fk_open_wait("No folders in this account");
+    ASSERT(s != NULL, "folders zero: the browser opens and says so");
+    if (!s) { fk_env(-1); return; }
+    ASSERT_SCREEN_CONTAINS(s, "Create one in the : menu");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Connection failed");
+    ASSERT_SCREEN_CONTAINS(s, "Folders \xe2\x80\x94 testuser  (8)");
+    ASSERT_ROW_CONTAINS(s, 23, "[2/8]");
+    pty_send_str(s, "jkgG");
+    pty_send_key(s, PTY_KEY_PGDN);
+    pty_send_key(s, PTY_KEY_PGUP);
+    pty_send_key(s, PTY_KEY_END);
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "t tree", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "No folders in this account");
+    pty_send_key(s, PTY_KEY_ENTER);                    /* Unread */
+    ASSERT_WAIT_FOR(s, "message(s) in Unread", WAIT_MS);
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "No folders in this account", WAIT_MS);
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Create a folder", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);                      /* closes the menu */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Create a folder");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_close(s);
+    fk_env(-1);
+}
+
+/* One folder: every cursor key stays on it, t and Enter work. */
+static void test_fk_one_folder(void) {
+    fk_env(1);
+    PtySession *s = fk_open();
+    ASSERT(s != NULL, "folders one: opens");
+    if (!s) { fk_env(-1); return; }
+    ASSERT_SCREEN_CONTAINS(s, "[2/9]");
+    ASSERT(fk_str(s, "G", "[9/9]"), "folders one: G reaches the only folder");
+    ASSERT(fk_key(s, PTY_KEY_END, "[9/9]"), "folders one: End");
+    pty_send_str(s, "j");
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_key(s, PTY_KEY_PGDN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[9/9]");
+    ASSERT(fk_key(s, PTY_KEY_PGUP, "[2/9]"), "folders one: PgUp goes to the top");
+    ASSERT(fk_key(s, PTY_KEY_HOME, "[2/9]"), "folders one: Home");
+    ASSERT(fk_str(s, "t", "[9/9]"), "folders one: t switches to the flat view");
+    pty_send_key(s, PTY_KEY_ENTER);                    /* no subfolder: opens it */
+    ASSERT_WAIT_FOR(s, "message(s) in INBOX", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "t tree", WAIT_MS);
+    fk_end(s);
+    fk_env(-1);
+}
+
+/* The help: every key of the view, readable at 80 columns; Esc, q and
+ * Backspace close it; another key changes nothing (EMAIL-199). */
+static void test_fk_help(void) {
+    fk_env(-1);
+    PtySession *s = fk_open();
+    ASSERT(s != NULL, "folders help: opens");
+    if (!s) return;
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
+    ASSERT_SCREEN_CONTAINS(s, "switch between the folder tree");
+    ASSERT_SCREEN_CONTAINS(s, "also g");
+    ASSERT_SCREEN_CONTAINS(s, "also G");
+    ASSERT_SCREEN_CONTAINS(s, "flat view: as Enter");
+    ASSERT_SCREEN_CONTAINS(s, "flat view: one level up");
+    ASSERT_SCREEN_CONTAINS(s, "Search");
+    ASSERT_SCREEN_CONTAINS(s, "Compose");
+    pty_send_str(s, "xtn");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Folder browser shortcuts");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser shortcuts");
+    ASSERT_ROW_CONTAINS(s, 23, "t flat");                /* t did not toggle */
+    const struct { PtyKey key; const char *str; } close[] = {
+        { 0, "q" }, { PTY_KEY_BACK, NULL },
+    };
+    for (int i = 0; i < 2; i++) {
+        pty_send_str(s, "?");
+        ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+        if (close[i].str) pty_send_str(s, close[i].str); else pty_send_key(s, close[i].key);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser shortcuts");
+        ASSERT_SCREEN_CONTAINS(s, "Folders \xe2\x80\x94");
+    }
+    fk_end(s);
+}
+
+/* The ':' menu lists the view switch with its key, the creation and the
+ * deletion; Esc closes it. */
+static void test_fk_menu(void) {
+    fk_env(-1);
+    PtySession *s = fk_open();
+    ASSERT(s != NULL, "folders menu: opens");
+    if (!s) return;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
+    ASSERT_SCREEN_CONTAINS(s, "Create a folder");
+    ASSERT_SCREEN_CONTAINS(s, "Delete the folder");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Actions");
+    ASSERT_SCREEN_CONTAINS(s, "Folders \xe2\x80\x94");
+    fk_end(s);
+}
+
+/* Keys that mean nothing here change nothing and show nothing. */
+static void test_fk_unbound_keys(void) {
+    fk_env(-1);
+    PtySession *s = fk_open();
+    ASSERT(s != NULL, "folders unbound: opens");
+    if (!s) return;
+    char before[4096], after[4096];
+    pty_screen_text(s, before, sizeof before);
+    const char *dead[] = { "n", "f", "s", "m", "D", "u", "v", "a", "A", "d", "r", "x", "Z",
+                           "1", "2", " ", "*", "+", "-", "!", "U", "N", NULL };
+    for (int i = 0; dead[i]; i++) pty_send_str(s, dead[i]);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_DELETE);
+    pty_send_key(s, PTY_KEY_F1);
+    pty_settle(s, SETTLE_MS);
+    pty_screen_text(s, after, sizeof after);
+    ASSERT(strcmp(before, after) == 0, "folders unbound: the screen is unchanged");
+    ASSERT_SCREEN_CONTAINS(s, "[2/16]");
+    fk_end(s);
+}
+
 static void test_tui_list_esc_quit(void) {
     restart_mock();
     PtySession *s = tui_open_to_list();
@@ -4118,7 +4605,7 @@ static void test_tui_folders_help_panel(void) {
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "tree / flat view");
+    ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser shortcuts");
@@ -6822,6 +7309,18 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_lk_delete_asks);
     RUN_TEST(test_lk_one_message);
     RUN_TEST(test_lk_empty_folder);
+    RUN_TEST(test_fk_navigation);
+    RUN_TEST(test_fk_enter);
+    RUN_TEST(test_fk_flat);
+    RUN_TEST(test_fk_back_keys);
+    RUN_TEST(test_fk_ctrl_c);
+    RUN_TEST(test_fk_search);
+    RUN_TEST(test_fk_compose_keeps_row);
+    RUN_TEST(test_fk_zero_folders);
+    RUN_TEST(test_fk_one_folder);
+    RUN_TEST(test_fk_help);
+    RUN_TEST(test_fk_menu);
+    RUN_TEST(test_fk_unbound_keys);
     RUN_TEST(test_tui_list_content);
     RUN_TEST(test_resize_list_redraws_at_once);
     RUN_TEST(test_statusline_one_row_hints_position);

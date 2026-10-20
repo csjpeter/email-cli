@@ -479,8 +479,8 @@ static int cd_render(const char *title,
             { "Tab", "complete", SL_PRIO_HIGH },
             { "Shift-Tab", "prev", SL_PRIO_LOW },
             { "Enter", "add", SL_PRIO_KEEP },
-            { "d", "remove last", SL_PRIO_LOW },
-            { "Enter (empty)", "ok", SL_PRIO_MID },
+            { "d", "remove last", SL_PRIO_MID },
+            { "Enter (empty)", "ok", SL_PRIO_LOW },
             { "Esc", "cancel", SL_PRIO_KEEP },
         };
         screen_bar(h, 6, NULL, NULL);
@@ -678,6 +678,13 @@ static int compose_dialog(const Config *cfg,
                     if (_ml >= CD_FIELD_BUFSZ) _ml = CD_FIELD_BUFSZ - 1;
                     memcpy(bufs[CD_FIELD_ATTACH], attach_state.matches[0], _ml);
                     bufs[CD_FIELD_ATTACH][_ml] = '\0';
+                    /* A directory ends in '/', so that Tab goes on into it (EMAIL-150). */
+                    struct stat _dst;
+                    if (_ml + 1 < CD_FIELD_BUFSZ && stat(bufs[CD_FIELD_ATTACH], &_dst) == 0 &&
+                        S_ISDIR(_dst.st_mode)) {
+                        bufs[CD_FIELD_ATTACH][_ml] = '/';
+                        bufs[CD_FIELD_ATTACH][_ml + 1] = '\0';
+                    }
                     cursors[CD_FIELD_ATTACH] = (int)strlen(bufs[CD_FIELD_ATTACH]);
                     attach_state.error[0] = '\0';
                 } else {
@@ -806,13 +813,13 @@ confirm_dialog:
                 int ch = terminal_last_printable();
                 if (ch) { dd_hidden = 0; match_sel = 0; dlg_error[0] = '\0'; }
                 if (ch == 'd' && active == CD_FIELD_ATTACH &&
-                    bufs[CD_FIELD_ATTACH][0] == '\0') {
-                    /* Remove last attachment (only when input field is empty) */
-                    if (attach_state.count > 0) {
-                        attach_state.count--;
-                        attach_state.paths[attach_state.count][0] = '\0';
-                        attach_state.error[0] = '\0';
-                    }
+                    bufs[CD_FIELD_ATTACH][0] == '\0' && attach_state.count > 0) {
+                    /* Remove the last attachment: only when the input field is
+                     * empty and there is one, so that a path can start with d
+                     * (EMAIL-150). */
+                    attach_state.count--;
+                    attach_state.paths[attach_state.count][0] = '\0';
+                    attach_state.error[0] = '\0';
                 } else if (ch == ';' && active < CD_FIELD_SUBJ) {
                     int len = (int)strlen(bufs[active]);
                     while (len > 0 && bufs[active][len-1] == ' ')

@@ -29,7 +29,7 @@ A full-screen (or centered floating) TUI form with four editable fields:
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Field navigation**: Tab / Shift-Tab cycle through To → Cc → Bcc → Subject.
+**Field navigation**: Tab / Shift-Tab cycle through To → Cc → Bcc → Subject → Attach and wrap.
 Pressing Enter on the Subject field (or from any field when no autocomplete
 dropdown is open) confirms and opens the editor.
 
@@ -39,7 +39,7 @@ is "committed" and a new address can be typed.  Backspace on an empty token
 removes the last committed address.
 
 **Autocomplete dropdown**: While the user types a partial address in any
-recipient field a drop-down of up to 8 matching candidates appears below the
+recipient field a drop-down of up to 5 matching candidates appears below the
 active field.  The dropdown is dismissed when the field becomes empty, when
 Esc is pressed, or when a selection is made.
 
@@ -70,13 +70,13 @@ File location: `~/.local/share/email-cli/accounts/<user>/contacts.tsv`
 
 | Key | Effect |
 |-----|--------|
-| Tab | Confirm current address token; move to next field |
+| Tab | Dropdown open: take the highlighted address (stay in the field); otherwise next field (Attach: complete the path) |
 | Shift-Tab | Move to previous field |
 | ↑ / ↓ | Navigate autocomplete dropdown (if open) |
 | Enter (dropdown open) | Select highlighted suggestion |
 | Enter (dropdown closed) | Confirm all fields; open editor |
 | Esc (dropdown open) | Dismiss dropdown; stay in field |
-| Esc (dialog) | Cancel — return to message list |
+| Esc (dialog) | Cancel — return to message list; asks `Discard what was typed?` (default No) when anything was typed or attached |
 | `;` | Commit current token and start new address in same field |
 | Backspace | Delete last char; if field is empty, remove last address |
 
@@ -142,7 +142,7 @@ from my email history as I type, so I can select the right address quickly.
 
 **Acceptance criteria:**
 - Typing ≥ 2 characters in any recipient field opens the autocomplete dropdown.
-- Dropdown shows up to 8 matching candidates.
+- Dropdown shows up to 5 matching candidates.
 - Typing more characters narrows the dropdown in real time.
 - Up / Down arrows move the highlighted entry.
 - Enter selects the highlighted entry, appends it to the field, clears the

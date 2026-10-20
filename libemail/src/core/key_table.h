@@ -62,6 +62,7 @@ typedef enum {
 #define EKV_READ_IMAP   "reader-imap"
 #define EKV_READ_GMAIL  "reader-gmail"
 #define EKV_LABELS      "labels"
+#define EKV_LABELS_SYSTEM "labels-system"           /* the cursor is on a system label */
 #define EKV_FOLDERS     "folders"
 #define EKV_REVIEW      "review"
 #define EKV_ATTACH      "attach-picker"

@@ -87,6 +87,12 @@ void test_key_table(void) {
     /* the label browser and the review screen have no direct state keys but e */
     ASSERT(find(EKV_LABELS, 'c') == EA_NONE, "key table: c does not create a label");
     ASSERT(find(EKV_LABELS, 'd') == EA_NONE, "key table: d does not delete a label");
+    /* EMAIL-218: only a label of the user's own can be deleted from the menu */
+    ASSERT(ekeys_menu_has(EKV_LABELS, EA_LABEL_DELETE), "key table: the menu deletes a user label");
+    ASSERT(!ekeys_menu_has(EKV_LABELS_SYSTEM, EA_LABEL_DELETE), "key table: the menu does not delete a system label");
+    ASSERT(ekeys_menu_has(EKV_LABELS, EA_LABEL_CREATE) && ekeys_menu_has(EKV_LABELS_SYSTEM, EA_LABEL_CREATE),
+           "key table: the menu creates a label on every row");
+    ASSERT(ekeys_help_has(EKV_LABELS_SYSTEM, TUI_KEY_HOME), "key table: the system label view has the same help");
     ASSERT(find(EKV_ACCOUNTS_GMAIL, 'r') == EA_NONE, "key table: r does not renew an authorization");
     ASSERT(find(EKV_ACCOUNTS_GMAIL, ':') == EA_NONE, "key table: ':' on the accounts screen is a harmless key");
     /* EMAIL-147: the attachment picker has keys, none of them changes state */

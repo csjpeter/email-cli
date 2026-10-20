@@ -1679,7 +1679,7 @@ static const char *const exp_review_menu[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " j/k select  Enter choose  Esc/q/BS close                                                     [1/3]",
     NULL
 };
 static const char *const sty_review_menu[] = {
@@ -1735,7 +1735,7 @@ static const char *const exp_review_send_ask[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " y yes  n no  Esc/q/BS cancel",
     NULL
 };
 static const char *const sty_review_send_ask[] = {
@@ -1933,9 +1933,18 @@ static const char *const exp_gmail_label_menu[] = {
     "         Sent",
     "         Drafts      ┌─ Actions ─────────────────────────────────────────────┐",
     "  ───────────────────│ >   Create a label... - on the server, name asked for │──────────────────────",
-    "         Archive     │     Delete the label - on the server                  │",
-    "         Spam        └───────────────────────────────────────────────────────┘",
+    "         Archive     └───────────────────────────────────────────────────────┘",
+    "         Spam",
     "         Trash (auto-delete: 30 days)",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " j/k select  Enter choose  Esc/q/BS close                                                     [1/1]",
     NULL
 };
 static const char *const sty_gmail_label_menu[] = {
@@ -1951,7 +1960,6 @@ static const char *const sty_gmail_label_menu[] = {
     "                                                                                                    ",
     "                     TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                      ",
     "  dddddddddddddddddddT ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS Tdddddddddddddddddddddd",
-    "                     T                                                       T                      ",
     "                     TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                      ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -1963,9 +1971,10 @@ static const char *const sty_gmail_label_menu[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_gmail_label_menu[3] = { 13, 78, 0 };
+static const int cur_gmail_label_menu[3] = { 12, 78, 0 };
 
 #endif /* TEST_PTY_SCREENS_EXPECTED_H */
 
@@ -4398,7 +4407,7 @@ static const char *const exp_review_send_failed[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " y yes  n no  Esc/q/BS cancel",
     NULL
 };
 static const char *const sty_review_send_failed[] = {

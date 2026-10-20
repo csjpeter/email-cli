@@ -29,6 +29,7 @@
 #include "pty_assert.h"
 #include "test_scratch.h"
 #include <dirent.h>
+#include <glob.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2292,6 +2293,8 @@ static void test_keys_label_delete_asks(void) {
     pty_send_str(s, "d");                     /* no longer deletes */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Delete the label");
+    pty_send_str(s, "k");                     /* Inbox is a system label: Work (EMAIL-218) */
+    pty_settle(s, SETTLE_MS);
     gm_menu_pick(s, 1);                       /* Delete the label */
     ASSERT_WAIT_FOR(s, "on the server?", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);           /* the default is No */
@@ -3237,6 +3240,598 @@ static void test_gk_one_message(void) {
     gk_quit(s);
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  Key study of the label browser and the label picker at 80x24
+ *  (EMAIL-145).  The mock has 45 messages; the browser lists 12 labels and
+ *  two headings (14 rows): Tags / Flags: Unread, Flagged, Empty Label, Fail
+ *  Label, Personal, Work; Folders: Inbox, Sent, Drafts, Archive, Spam, Trash.
+ *  The cursor starts on Inbox ([9/14]), the label last left.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Adds @p n empty user labels Lab01.. to the local store (after a sync). */
+static void lb_add_labels(int n) {
+    char f[1100];
+    for (int i = 1; i <= n; i++) {
+        snprintf(f, sizeof f, "%s/.local/share/email-cli/accounts/%s/labels/Lab%02d.idx",
+                 g_test_home, GMAIL_TEST_EMAIL, i);
+        FILE *fp = fopen(f, "w");
+        if (!fp) {
+            fprintf(stderr, "gmail-tui: cannot create %s: %s\n", f, strerror(errno));
+            g_tests_failed++;
+            return;
+        }
+        fclose(fp);
+    }
+}
+
+/** Lines with @p needle in the request logs of every Gmail mock this test
+ *  started (a restarted mock writes a log of its own). */
+static int lb_requests(const char *needle) {
+    glob_t g;
+    int n = 0;
+    if (glob(TP("mock-MOCK_GMAIL-*.log"), 0, NULL, &g) != 0) return 0;
+    for (size_t i = 0; i < g.gl_pathc; i++) {
+        FILE *fp = fopen(g.gl_pathv[i], "r");
+        if (!fp) continue;
+        char line[1024];
+        while (fgets(line, sizeof line, fp))
+            if (strstr(line, needle)) n++;
+        fclose(fp);
+    }
+    globfree(&g);
+    return n;
+}
+
+/** The label browser at 80x24, the cursor where the preference puts it. */
+static PtySession *lb_open(void) {
+    write_folder_pref("INBOX");
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(80, 24);
+    if (!s || pty_run(s, args) != 0) { if (s) pty_close(s); return NULL; }
+    if (pty_wait_for(s, "Email Accounts", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "Labels", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/** Opens a Gmail message list at 80x24 (the first message under the cursor). */
+static PtySession *lp_open(void) {
+    return gk_open("inbox");
+}
+
+/** j k Down Up stop at the ends and skip the headings; PgDn PgUp move 19
+ *  rows and stop at the ends; Home g and End G go to the first and last;
+ *  Enter opens the label, Esc returns to the same row. */
+static void test_lb_navigation(void) {
+    ASSERT(gk_mock(45) == 0, "label browser nav: mock");
+    PtySession *s = lb_open();
+    ASSERT(s != NULL, "label browser nav: opens");
+    if (!s) return;
+    ASSERT_ROW_CONTAINS(s, 0, "Labels");
+    ASSERT_ROW_CONTAINS(s, 0, "(14)");
+    ASSERT_SCREEN_CONTAINS(s, "[9/14]");
+    char row[200];
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), "Inbox") != NULL, "label browser nav: starts on Inbox");
+    ASSERT_SCREEN_CONTAINS(s, "Tags / Flags");
+    ASSERT(gk_char(s, "j", "[10/14]"), "label browser nav: j");
+    ASSERT(gk_step(s, PTY_KEY_DOWN, "[11/14]"), "label browser nav: Down");
+    ASSERT(gk_char(s, "k", "[10/14]"), "label browser nav: k");
+    ASSERT(gk_step(s, PTY_KEY_UP, "[9/14]"), "label browser nav: Up");
+    ASSERT(gk_char(s, "k", "[7/14]"), "label browser nav: k skips the Folders heading");
+    ASSERT(gk_char(s, "j", "[9/14]"), "label browser nav: j skips the Folders heading");
+    ASSERT(gk_step(s, PTY_KEY_END, "[14/14]"), "label browser nav: End");
+    pty_send_str(s, "j");
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "[14/14]");              /* stops at the last */
+    ASSERT(gk_step(s, PTY_KEY_HOME, "[2/14]"), "label browser nav: Home");
+    pty_send_str(s, "k");
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "[2/14]");               /* stops at the first */
+    ASSERT_SCREEN_CONTAINS(s, "Tags / Flags");
+    ASSERT(gk_char(s, "G", "[14/14]"), "label browser nav: G goes to the last label (EMAIL-208)");
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), "Trash") != NULL, "label browser nav: G is on Trash");
+    ASSERT(gk_char(s, "g", "[2/14]"), "label browser nav: g goes to the first label (EMAIL-208)");
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), "Unread") != NULL, "label browser nav: g is on Unread");
+    ASSERT(gk_step(s, PTY_KEY_PGDN, "[14/14]"), "label browser nav: PgDn clamps at the last");
+    ASSERT(gk_step(s, PTY_KEY_PGUP, "[2/14]"), "label browser nav: PgUp clamps at the first");
+    /* Enter opens the label under the cursor, Esc returns to its row */
+    ASSERT(gk_char(s, "j", "[3/14]"), "label browser nav: j to Flagged");
+    for (int i = 0; i < 4; i++) pty_send_key(s, PTY_KEY_DOWN);
+    ASSERT(pty_wait_for(s, "[7/14]", WAIT_MS) == 0, "label browser nav: Work");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "of 5 message(s) in Work", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "[7/14]", WAIT_MS);
+    gk_quit(s);
+
+    /* 50 rows: the pages are 19 rows, the window follows the cursor */
+    ASSERT(gk_mock(45) == 0, "label browser nav: mock (40 labels)");
+    lb_add_labels(36);
+    s = lb_open();
+    ASSERT(s != NULL, "label browser nav 50: opens");
+    if (!s) return;
+    ASSERT_ROW_CONTAINS(s, 0, "(50)");
+    ASSERT_SCREEN_CONTAINS(s, "[45/50]");
+    ASSERT(gk_step(s, PTY_KEY_PGDN, "[50/50]"), "label browser nav 50: PgDn clamps");
+    ASSERT(gk_step(s, PTY_KEY_PGUP, "[31/50]"), "label browser nav 50: PgUp goes 19 rows up");
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), "Lab") != NULL, "label browser nav 50: the cursor row is on the screen");
+    ASSERT(gk_step(s, PTY_KEY_HOME, "[2/50]"), "label browser nav 50: Home");
+    ASSERT_SCREEN_CONTAINS(s, "Tags / Flags");
+    ASSERT(gk_step(s, PTY_KEY_PGDN, "[21/50]"), "label browser nav 50: PgDn from the top");
+    ASSERT(gk_step(s, PTY_KEY_PGDN, "[40/50]"), "label browser nav 50: PgDn again");
+    ASSERT(gk_char(s, "G", "[50/50]"), "label browser nav 50: G");
+    ASSERT(strstr(gk_cursor_row(s, row, sizeof row), "Trash") != NULL, "label browser nav 50: G shows Trash");
+    ASSERT(gk_char(s, "g", "[2/50]"), "label browser nav 50: g");
+    gk_quit(s);
+}
+
+/** Esc, q, Backspace, Left and h go back to the accounts; ctrl-c quits. */
+static void test_lb_back_keys(void) {
+    ASSERT(gk_mock(45) == 0, "label browser back: mock");
+    PtySession *s = lb_open();
+    ASSERT(s != NULL, "label browser back: opens");
+    if (!s) return;
+    ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS accounts");
+    for (int i = 0; i < 5; i++) {
+        switch (i) {
+        case 0: pty_send_key(s, PTY_KEY_ESC); break;
+        case 1: pty_send_str(s, "q"); break;
+        case 2: pty_send_key(s, PTY_KEY_BACK); break;
+        case 3: pty_send_key(s, PTY_KEY_LEFT); break;
+        default: pty_send_str(s, "h"); break;
+        }
+        char what[64];
+        snprintf(what, sizeof what, "label browser back: key %d goes back", i);
+        ASSERT(pty_wait_for(s, "Email Accounts", WAIT_MS) == 0, what);
+        pty_send_key(s, PTY_KEY_ENTER);
+        ASSERT(pty_wait_for(s, "Labels", WAIT_MS) == 0, "label browser back: Enter again");
+        pty_settle(s, SETTLE_MS);
+    }
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "label browser back: ctrl-c quits at once");
+    pty_close(s);
+}
+
+/** Keys with no meaning in the browser change nothing and show nothing; the
+ *  old letters c and d (create, delete) are in the ':' menu now. */
+static void test_lb_unbound_keys(void) {
+    ASSERT(gk_mock(45) == 0, "label browser unbound: mock");
+    PtySession *s = lb_open();
+    ASSERT(s != NULL, "label browser unbound: opens");
+    if (!s) return;
+    const char *keys[] = { " ", "c", "d", "t", "x", "n", "r", "e", "i", "D", "Z", "l", "a", "u", "1", "-", "U", NULL };
+    for (int i = 0; keys[i]; i++) {
+        pty_send_str(s, keys[i]);
+        pty_settle(s, 250);
+        char what[64];
+        snprintf(what, sizeof what, "label browser unbound: %s changes nothing", keys[i]);
+        ASSERT(pty_screen_contains(s, "[9/14]") && pty_screen_contains(s, "Labels")
+               && pty_row_contains(s, 23, "Esc/q/BS accounts")
+               && !pty_screen_contains(s, "Delete") && !pty_screen_contains(s, "New label")
+               && !pty_screen_contains(s, "Actions"), what);
+    }
+    pty_send_key(s, PTY_KEY_RIGHT);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_INSERT);
+    pty_send_key(s, PTY_KEY_DELETE);
+    pty_send_key(s, PTY_KEY_F1);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[9/14]");
+    ASSERT_SCREEN_CONTAINS(s, "Labels");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Delete");
+    gk_quit(s);
+}
+
+/** The status line is a reverse-video bar with the keys in bold; the help
+ *  is made from the key table and closes with Esc, q and Backspace. */
+static void test_lb_help_and_status(void) {
+    ASSERT(gk_mock(45) == 0, "label browser help: mock");
+    PtySession *s = lb_open();
+    ASSERT(s != NULL, "label browser help: opens");
+    if (!s) return;
+    ASSERT_ROW_CONTAINS(s, 23, "j/k select");
+    ASSERT_ROW_CONTAINS(s, 23, "Enter open");
+    ASSERT_ROW_CONTAINS(s, 23, ": actions");
+    ASSERT_ROW_CONTAINS(s, 23, "? help");
+    ASSERT_ROW_CONTAINS(s, 23, "[9/14]");
+    ASSERT_CELL_ATTR(s, 23, 2, PTY_ATTR_REVERSE);
+    for (int i = 0; i < 3; i++) {
+        pty_send_str(s, "?");
+        ASSERT_WAIT_FOR(s, "Label browser shortcuts", WAIT_MS);
+        pty_settle(s, 300);
+        ASSERT_SCREEN_CONTAINS(s, "First label - also g");
+        ASSERT_SCREEN_CONTAINS(s, "Last label - also G");
+        ASSERT_SCREEN_CONTAINS(s, "Back - to the accounts (also h and Left)");
+        pty_send_str(s, "x");                           /* any other key: nothing */
+        pty_settle(s, 300);
+        ASSERT_SCREEN_CONTAINS(s, "Label browser shortcuts");
+        if (i == 0) pty_send_key(s, PTY_KEY_ESC);
+        else if (i == 1) pty_send_str(s, "q");
+        else pty_send_key(s, PTY_KEY_BACK);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Label browser shortcuts");
+        ASSERT_SCREEN_CONTAINS(s, "[9/14]");
+    }
+    /* a resize redraws at once, the status line on the new last row */
+    pty_resize(s, 100, 30);
+    ASSERT(pty_wait_for(s, "Esc/q/BS accounts", WAIT_MS) == 0, "label browser: resize redraws");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 29, "Esc/q/BS accounts");
+    ASSERT_SCREEN_CONTAINS(s, "[9/14]");
+    pty_resize(s, 80, 24);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS accounts");
+    gk_quit(s);
+}
+
+/** '/': the prompt, its keys and hints; Enter searches, Esc and an empty Enter
+ *  cancel, a result returns to the row the search started from (EMAIL-216),
+ *  ctrl-c quits (EMAIL-214). */
+static void test_lb_search(void) {
+    ASSERT(gk_mock(45) == 0, "label browser search: mock");
+    PtySession *s = lb_open();
+    ASSERT(s != NULL, "label browser search: opens");
+    if (!s) return;
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]: _", WAIT_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "Enter search");
+    ASSERT_ROW_CONTAINS(s, 23, "Tab scope");
+    ASSERT_ROW_CONTAINS(s, 23, "Esc cancel");
+    ASSERT(!pty_row_contains(s, 23, "Esc/q/BS"), "label browser search: not the browser's hints");
+    pty_send_str(s, "qjtg");                            /* letters, not keys */
+    ASSERT_WAIT_FOR(s, "Search [Subject]: qjtg_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [From]: qjtg_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [To]: qjtg_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [Body]: qjtg_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT_WAIT_FOR(s, "Search [Subject]: qjtg_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT_WAIT_FOR(s, "Search [Subject]: qjt_", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);                       /* cancels, stays */
+    ASSERT_WAIT_FOR(s, "Esc/q/BS accounts", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Search [");
+    ASSERT_SCREEN_CONTAINS(s, "[9/14]");
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]: _", WAIT_MS);
+    pty_send_key(s, PTY_KEY_BACK);                      /* nothing to delete */
+    pty_send_key(s, PTY_KEY_ENTER);                     /* empty: cancels */
+    ASSERT_WAIT_FOR(s, "Esc/q/BS accounts", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Search [");
+    /* a result: Esc, q and Backspace return to the row the search started from */
+    for (int i = 0; i < 3; i++) {
+        pty_send_key(s, PTY_KEY_END);
+        ASSERT(pty_wait_for(s, "[14/14]", WAIT_MS) == 0, "label browser search: End");
+        pty_send_str(s, "/");
+        ASSERT_WAIT_FOR(s, "Search [Subject]: _", WAIT_MS);
+        pty_send_str(s, "Message");
+        pty_send_key(s, PTY_KEY_ENTER);
+        ASSERT_WAIT_FOR(s, "message(s) in Search: \"Message\"", WAIT_MS);
+        if (i == 0) pty_send_key(s, PTY_KEY_ESC);
+        else if (i == 1) pty_send_str(s, "q");
+        else pty_send_key(s, PTY_KEY_BACK);
+        ASSERT_WAIT_FOR(s, "Esc/q/BS accounts", WAIT_MS);
+        ASSERT(pty_wait_for(s, "[14/14]", WAIT_MS) == 0,
+               "label browser search: back on the row of the search (EMAIL-216)");
+        pty_send_key(s, PTY_KEY_HOME);
+        pty_wait_for(s, "[2/14]", WAIT_MS);
+    }
+    /* ctrl-c in the prompt quits */
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Search [Subject]: _", WAIT_MS);
+    pty_send_str(s, "abc");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "label browser search: ctrl-c in the prompt quits at once");
+    pty_close(s);
+}
+
+/** ':' menu: create is always there, delete only on a label of the user's own
+ *  (EMAIL-218); Esc, q and Backspace close the menu and the confirmation
+ *  (EMAIL-210); the menu has a status line (EMAIL-213); the label-name prompt
+ *  has its hints and ctrl-c quits (EMAIL-215, EMAIL-219). */
+static void test_lb_menu(void) {
+    ASSERT(gk_mock(45) == 0, "label browser menu: mock");
+    int deletes = lb_requests("DELETE ");
+    PtySession *s = lb_open();
+    ASSERT(s != NULL, "label browser menu: opens");
+    if (!s) return;
+    /* on a system label (Inbox) the menu creates only */
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "Create a label...");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Delete the label");
+    ASSERT_ROW_CONTAINS(s, 23, "j/k select");
+    ASSERT_ROW_CONTAINS(s, 23, "Enter choose");
+    ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS close");
+    ASSERT_ROW_CONTAINS(s, 23, "[1/1]");
+    ASSERT_CELL_ATTR(s, 23, 2, PTY_ATTR_REVERSE);
+    for (int i = 0; i < 3; i++) {
+        if (i == 0) pty_send_key(s, PTY_KEY_ESC);
+        else if (i == 1) pty_send_str(s, "q");
+        else pty_send_key(s, PTY_KEY_BACK);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Actions");
+        ASSERT_SCREEN_CONTAINS(s, "[9/14]");
+        ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS accounts");
+        pty_send_str(s, ":");
+        ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+        pty_settle(s, 300);
+    }
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    /* on a label of the user's own: both entries, g and G move in the menu */
+    pty_send_str(s, "k");
+    ASSERT(pty_wait_for(s, "[7/14]", WAIT_MS) == 0, "label browser menu: k to Work");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "Create a label...");
+    ASSERT_SCREEN_CONTAINS(s, "Delete the label");
+    ASSERT_ROW_CONTAINS(s, 23, "[1/2]");
+    pty_send_str(s, "G");
+    pty_settle(s, 300);
+    ASSERT_ROW_CONTAINS(s, 23, "[2/2]");
+    pty_send_str(s, "g");
+    pty_settle(s, 300);
+    ASSERT_ROW_CONTAINS(s, 23, "[1/2]");
+    pty_send_key(s, PTY_KEY_END);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Delete the label Work on the server?", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_ROW_CONTAINS(s, 23, "y yes");
+    ASSERT_ROW_CONTAINS(s, 23, "n no");
+    ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS cancel");
+    for (int i = 0; i < 3; i++) {                       /* q and Backspace say No */
+        if (i == 0) pty_send_str(s, "q");
+        else if (i == 1) pty_send_key(s, PTY_KEY_BACK);
+        else pty_send_key(s, PTY_KEY_ESC);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Delete the label");
+        ASSERT_SCREEN_CONTAINS(s, "Work");
+        ASSERT(lb_requests("DELETE ") == deletes, "label browser menu: nothing was deleted");
+        if (i < 2) {
+            pty_send_str(s, ":");
+            ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+            pty_send_key(s, PTY_KEY_END);
+            pty_send_key(s, PTY_KEY_ENTER);
+            ASSERT_WAIT_FOR(s, "Delete the label Work on the server?", WAIT_MS);
+        }
+    }
+    /* the label-name prompt: its own hints; Esc cancels; ctrl-c quits */
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                     /* Create a label... */
+    ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_ROW_CONTAINS(s, 23, "Enter create");
+    ASSERT_ROW_CONTAINS(s, 23, "Esc cancel");
+    pty_send_str(s, "q");                               /* text, not a key */
+    ASSERT_WAIT_FOR(s, "New label name: q", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Esc/q/BS accounts", WAIT_MS);
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "label browser menu: ctrl-c in the label-name prompt quits");
+    pty_close(s);
+
+    /* ctrl-c in the menu and in the confirmation quits */
+    s = lb_open();
+    ASSERT(s != NULL, "label browser menu: opens again");
+    if (!s) return;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "label browser menu: ctrl-c in the menu quits");
+    pty_close(s);
+    s = lb_open();
+    ASSERT(s != NULL, "label browser menu: opens a third time");
+    if (!s) return;
+    pty_send_str(s, "k");
+    pty_wait_for(s, "[7/14]", WAIT_MS);
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Delete the label Work on the server?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "label browser menu: ctrl-c in the confirmation quits");
+    ASSERT(lb_requests("DELETE ") == deletes, "label browser menu: ctrl-c deleted nothing");
+    pty_close(s);
+}
+
+/** Without a label of the user's own the browser lists the system labels
+ *  only; every key works as before. */
+static void test_lb_no_user_labels(void) {
+    ASSERT(gk_mock(45) == 0, "label browser empty: mock");
+    drop_label_indexes();
+    PtySession *s = lb_open();
+    ASSERT(s != NULL, "label browser empty: opens");
+    if (!s) return;
+    ASSERT_ROW_CONTAINS(s, 0, "(10)");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Work");
+    ASSERT(gk_step(s, PTY_KEY_HOME, "[2/10]"), "label browser empty: Home");
+    ASSERT(gk_char(s, "j", "[3/10]"), "label browser empty: j");
+    ASSERT(gk_char(s, "j", "[5/10]"), "label browser empty: j skips the Folders heading");
+    ASSERT(gk_char(s, "G", "[10/10]"), "label browser empty: G");
+    ASSERT(gk_char(s, "g", "[2/10]"), "label browser empty: g");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "Create a label...");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Delete the label");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[2/10]");
+    gk_quit(s);
+}
+
+/** The label picker (t) of a message: Space ticks, Enter applies, Esc, q and
+ *  Backspace close it and change nothing; g G Home End PgUp PgDn j k move;
+ *  the status line has the picker's keys; ctrl-c quits. */
+static void test_lp_keys(void) {
+    ASSERT(gk_mock(45) == 0, "label picker: mock");
+    PtySession *s = lp_open();
+    ASSERT(s != NULL, "label picker: opens");
+    if (!s) return;
+    ASSERT(gk_char(s, "j", "[2/45]"), "label picker: j");
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "Toggle Labels", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[x] UNREAD");
+    ASSERT_SCREEN_CONTAINS(s, "[x] INBOX");
+    ASSERT_ROW_CONTAINS(s, 23, "j/k select");
+    ASSERT_ROW_CONTAINS(s, 23, "Space tick");
+    ASSERT_ROW_CONTAINS(s, 23, "Enter apply");
+    ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS cancel");
+    ASSERT_ROW_CONTAINS(s, 23, "[1/9]");
+    ASSERT_CELL_ATTR(s, 23, 2, PTY_ATTR_REVERSE);
+    /* movement: 5 system labels, then Empty Label, Fail Label, Personal, Work */
+    pty_send_str(s, "j");
+    ASSERT_WAIT_FOR(s, "[2/9]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_DOWN);
+    ASSERT_WAIT_FOR(s, "[3/9]", WAIT_MS);
+    pty_send_str(s, "k");
+    ASSERT_WAIT_FOR(s, "[2/9]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_UP);
+    ASSERT_WAIT_FOR(s, "[1/9]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_UP);                        /* stops at the first */
+    pty_settle(s, 300);
+    ASSERT_ROW_CONTAINS(s, 23, "[1/9]");
+    pty_send_str(s, "G");
+    ASSERT_WAIT_FOR(s, "[9/9]", WAIT_MS);             /* EMAIL-212 */
+    pty_send_key(s, PTY_KEY_DOWN);                      /* stops at the last */
+    pty_settle(s, 300);
+    ASSERT_ROW_CONTAINS(s, 23, "[9/9]");
+    pty_send_str(s, "g");
+    ASSERT_WAIT_FOR(s, "[1/9]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);
+    ASSERT_WAIT_FOR(s, "[9/9]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_HOME);
+    ASSERT_WAIT_FOR(s, "[1/9]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGDN);
+    ASSERT_WAIT_FOR(s, "[9/9]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_PGUP);
+    ASSERT_WAIT_FOR(s, "[1/9]", WAIT_MS);
+    /* unbound keys change nothing */
+    pty_send_str(s, "xz");
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "Toggle Labels");
+    ASSERT_ROW_CONTAINS(s, 23, "[1/9]");
+    /* Space ticks and unticks; q discards the tick */
+    pty_send_key(s, PTY_KEY_DOWN);                      /* INBOX */
+    pty_send_str(s, " ");
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "[ ] INBOX");
+    pty_send_str(s, " ");
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "[x] INBOX");
+    pty_send_str(s, " ");
+    pty_send_str(s, "q");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");     /* EMAIL-211 */
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Label removed");
+    ASSERT_SCREEN_CONTAINS(s, "[2/45]");
+    ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS labels");      /* the list's own line again */
+    /* Backspace and Esc discard too */
+    for (int i = 0; i < 2; i++) {
+        pty_send_str(s, "t");
+        ASSERT_WAIT_FOR(s, "Toggle Labels", WAIT_MS);
+        pty_settle(s, 300);
+        ASSERT_SCREEN_CONTAINS(s, "[x] INBOX");         /* nothing was applied */
+        pty_send_key(s, PTY_KEY_DOWN);
+        pty_send_str(s, " ");
+        pty_send_key(s, i == 0 ? PTY_KEY_BACK : PTY_KEY_ESC);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Label removed");
+        ASSERT_SCREEN_CONTAINS(s, "[2/45]");
+    }
+    /* Enter applies the ticked set */
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "Toggle Labels", WAIT_MS);
+    pty_settle(s, 300);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_str(s, " ");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Label removed: INBOX", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
+    /* Enter with nothing changed applies nothing */
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "Toggle Labels", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
+    /* ctrl-c quits at once and applies nothing */
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "Toggle Labels", WAIT_MS);
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_str(s, " ");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "label picker: ctrl-c quits at once (EMAIL-219)");
+    pty_close(s);
+}
+
+/** The picker lists the labels as the browser does: by name (EMAIL-213), and
+ *  a long list scrolls inside its box. */
+static void test_lp_order(void) {
+    ASSERT(gk_mock(45) == 0, "label picker order: mock");
+    lb_add_labels(36);
+    PtySession *s = lp_open();
+    ASSERT(s != NULL, "label picker order: opens");
+    if (!s) return;
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "Toggle Labels", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "[1/45]");
+    int r_unread = -1, r_lab01 = -1, r_lab02 = -1, r_lab03 = -1;
+    for (int r = 0; r < 23; r++) {
+        if (pty_row_contains(s, r, "UNREAD")) r_unread = r;
+        if (pty_row_contains(s, r, "Lab01")) r_lab01 = r;
+        if (pty_row_contains(s, r, "Lab02")) r_lab02 = r;
+        if (pty_row_contains(s, r, "Lab03")) r_lab03 = r;
+    }
+    ASSERT(r_unread >= 0 && r_lab01 == r_unread + 5 && r_lab02 == r_lab01 + 1 && r_lab03 == r_lab02 + 1,
+           "label picker order: UNREAD INBOX STARRED SENT DRAFTS, then Lab01 Lab02 Lab03 ...");
+    pty_send_key(s, PTY_KEY_END);
+    ASSERT_WAIT_FOR(s, "[45/45]", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Work");                  /* the long list scrolled */
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
+    gk_quit(s);
+}
+
+/** The picker of the reader is the same: q closes it. */
+static void test_lp_reader(void) {
+    ASSERT(gk_mock(45) == 0, "label picker reader: mock");
+    PtySession *s = lp_open();
+    ASSERT(s != NULL, "label picker reader: opens");
+    if (!s) return;
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Message 40", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "t");
+    ASSERT_WAIT_FOR(s, "Toggle Labels", WAIT_MS);
+    pty_settle(s, 300);
+    ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS cancel");
+    pty_send_str(s, "q");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
+    ASSERT_SCREEN_CONTAINS(s, "Message 40");            /* still in the reader */
+    gk_quit(s);
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 4) {
         fprintf(stderr,
@@ -3493,6 +4088,16 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_keys_junk_toggle_gmail);
 
     printf("\n--- Gmail TUI: key study of the message list at 80x24 (EMAIL-144) ---\n");
+    RUN_TEST(test_lb_navigation);
+    RUN_TEST(test_lb_back_keys);
+    RUN_TEST(test_lb_unbound_keys);
+    RUN_TEST(test_lb_help_and_status);
+    RUN_TEST(test_lb_search);
+    RUN_TEST(test_lb_menu);
+    RUN_TEST(test_lb_no_user_labels);
+    RUN_TEST(test_lp_keys);
+    RUN_TEST(test_lp_order);
+    RUN_TEST(test_lp_reader);
     RUN_TEST(test_gk_navigation);
     RUN_TEST(test_gk_back_keys);
     RUN_TEST(test_gk_marks);

@@ -84,6 +84,26 @@ int tui_frame_overlay(void (*draw)(tui_canvas c, void *ctx), void *ctx,
 tui_dialog_state tui_frame_run_dialog(tui_dialog *d);
 
 /**
+ * @brief The keys every modal has that libtuikit's dialogs do not know
+ *        (EMAIL-210..212, EMAIL-219): @p ev is changed in place.
+ *
+ * q and Backspace become Esc (back, never quit); ctrl-c becomes Esc and asks
+ * the program to quit (terminal_request_quit()); with @p is_list, g and G
+ * become Home and End.
+ */
+void tui_frame_modal_key(tui_event *ev, int is_list);
+
+/**
+ * @brief Draws the status line under a modal: the modal's own keys, not the
+ *        view's, then the position [@p selected/@p total] when @p total > 0.
+ *
+ * @param verbs  {key, label} pairs, in priority order; the last pair (Esc)
+ *               is kept on a narrow terminal.
+ */
+void tui_frame_modal_status(const char *const verbs[][2], int nverbs,
+                            int selected, int total);
+
+/**
  * @brief Draws the rows of @p table, without its header, in the rectangle of
  *        @p h rows x @p w columns at terminal row @p row, column @p col
  *        (both 1-based), as an overlay (see tui_frame_overlay()).

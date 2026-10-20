@@ -128,18 +128,27 @@ label, and
 .B Save all attachments.
 .SS Label browser (Gmail)
 .TP
-.BR j " or " Down ", " k " or " Up ", " PgDn ", " PgUp
+.BR j " or " Down ", " k " or " Up ", " PgDn ", " PgUp ", " Home " or " g ", " End " or " G
 Move.
 .TP
 .B Enter
 Open the label.
 .TP
+.BR Esc ", " q ", " Backspace ", " Left ", " h
+Back to the accounts.
+.TP
 .B /
-Search across folders.
+Search across folders.  The prompt takes text; Tab changes the scope, Enter
+searches, Esc cancels and ctrl\-C quits.
 .TP
 .B :
-The action menu: create a label, delete the label under the cursor (asks,
-naming the label; the default answer is No).
+The action menu: create a label, delete the label under the cursor (only a
+label of your own; it asks, naming the label; the default answer is No).
+Esc, q and Backspace close the menu and the question.
+.TP
+.B t
+In a Gmail list or the reader: the label picker.  j and k move, Space ticks,
+Enter applies, Esc, q and Backspace close it and change nothing, ctrl\-C quits.
 .SS Accounts and folders
 .TP
 .BR j " or " Down ", " k " or " Up ", " PgDn ", " PgUp ", " Home ", " End

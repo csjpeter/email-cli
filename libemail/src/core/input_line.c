@@ -82,7 +82,12 @@ static void visible_text(const InputLine *le, int avail, tui_buf *out) {
     }
 }
 
+static int g_ended_on_ctrl_c;
+
+int input_line_ctrl_c(void) { return g_ended_on_ctrl_c; }
+
 int input_line_run(InputLine *il, int trow, const char *prompt) {
+    g_ended_on_ctrl_c = 0;
     caller_render_below = il->render_below;
     if (caller_render_below) il->render_below = render_below_flushed;
     fflush(stdout);
@@ -125,6 +130,7 @@ int input_line_run(InputLine *il, int trow, const char *prompt) {
         if (r <= 0 || ev.type == TUI_EV_HANGUP) { rc = -1; break; }
         if (ev.type == TUI_EV_RESIZE) continue;       /* draw again at the new width */
         tui_edit_result res = tui_lineedit_handle(il, &ev);
+        if (TUI_EV_IS_CTRL(&ev, 'c')) g_ended_on_ctrl_c = 1;
         if (res == TUI_EDIT_ACCEPT) { rc = 1; break; }
         if (res == TUI_EDIT_CANCEL) { rc = 0; break; }
     }

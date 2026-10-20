@@ -1822,6 +1822,14 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
         if (key == TERM_KEY_QUIT) terminal_request_quit();
         if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || key == TERM_KEY_BACK ||
             key == TERM_KEY_LEFT || ch == 'h') {
+            /* A rule with conditions is not thrown away unasked (EMAIL-166). */
+            if (wl.count > 0) {
+                int prow = terminal_rows();
+                if (prow <= 0) prow = 24;
+                printf("\033[%d;1H\033[2KDiscard the rule? (y/N) ", prow);
+                fflush(stdout);
+                if (tui_read_confirm() != 'y') continue;
+            }
             when_list_join(&wl, buf, bufsz);
             return 0;
         }

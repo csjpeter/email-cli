@@ -7058,7 +7058,9 @@ static void test_tui_rules_edit_form_prefill(void) {
     ASSERT_WAIT_FOR(s, "conditions (step 1/2)", WAIT_MS); /* step 1 */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "*@spam.example.com");       /* if-from condition prefilled */
-    pty_send_key(s, PTY_KEY_ESC);                          /* cancel edit */
+    pty_send_key(s, PTY_KEY_ESC);                          /* cancel edit (EMAIL-166: asks) */
+    ASSERT_WAIT_FOR(s, "Discard the rule? (y/N)", WAIT_MS);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Rules for", RULES_WAIT_MS);
@@ -7105,6 +7107,8 @@ static void test_tui_rules_edit_form_esc_cancel(void) {
     pty_send_str(s, "e");
     ASSERT_WAIT_FOR(s, "conditions (step 1/2)", WAIT_MS); /* step 1 opens */
     pty_send_key(s, PTY_KEY_ESC);                          /* cancel — no change */
+    ASSERT_WAIT_FOR(s, "Discard the rule? (y/N)", WAIT_MS);
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Rule:", RULES_WAIT_MS);            /* still in detail view */
     pty_settle(s, SETTLE_MS);                              /* let the redraw finish */
     ASSERT_SCREEN_CONTAINS(s, "SpamFilter");               /* rule unchanged */

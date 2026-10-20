@@ -7466,7 +7466,8 @@ static PtySession *wk_open_wizard(const char *name) {
     snprintf(acc, sizeof acc, "%s", name);
     if (pty_wait_for(s, acc, WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_send_str(s, "n");
-    if (pty_wait_for(s, "Account type", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    if (pty_wait_for(s, "Choice [1]:", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
     return s;
 }
 

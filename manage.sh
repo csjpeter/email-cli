@@ -298,6 +298,8 @@ for_each_pty_suite() {
                           ./tests/pty/mock-imap-server
     "$run" rules-keys     ./tests/pty/bin/test-pty-rules-keys "$B/email-tui" \
                           ./tests/pty/mock-imap-server
+    "$run" review-keys    ./tests/pty/bin/test-pty-review-keys "$B/email-tui" \
+                          ./tests/pty/mock-imap-server ./tests/pty/mock-smtp-server
     "$run" compose        ./tests/pty/bin/test-pty-compose "$B/email-tui" \
                           ./tests/pty/mock-smtp-server "$B/email-cli"
     # The PTY harness is a git submodule (deps/libptytest) with its own test

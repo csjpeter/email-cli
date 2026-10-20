@@ -872,6 +872,7 @@ dialog_done:;
 
 #define PCR_SEND         0
 #define PCR_CANCEL       (-1)
+#define PCR_QUIT         (-2)    /* ctrl-c: the program quits, the draft stays (EMAIL-151) */
 #define PCR_EDIT_BODY    1
 #define PCR_EDIT_HEADERS 2
 
@@ -1176,7 +1177,12 @@ static int post_compose_review(const char *from, const char *to,
             continue;
         }
 
-        if (ch == 'q' || key == TERM_KEY_ESC || key == TERM_KEY_QUIT) {
+        if (key == TERM_KEY_QUIT) {
+            terminal_request_quit();        /* ctrl-c quits at once, as in every view */
+            return PCR_QUIT;
+        }
+
+        if (ch == 'q' || key == TERM_KEY_ESC) {
             printf("\033[2J\033[H");
             {
                 int nl = 0;
@@ -1423,6 +1429,11 @@ static int cmd_compose_interactive(Config *cfg,
             }
             fflush(stdout);
             free(msg);
+            break;
+        }
+
+        if (action == PCR_QUIT) {          /* the draft stays for the next session */
+            send_rc = -1;
             break;
         }
 
@@ -2547,6 +2558,21 @@ static const char *tui_reauth_gmail(Config *cfg) {
     return "  Gmail authorization renewed.";
 }
 
+/* The pause after a compose, reply or forward, so the result can be read
+ * before the list redraws.  Ctrl-C in the editor or the review has asked the
+ * program to quit (EMAIL-151): then there is nothing to read and no pause. */
+static void pause_return_to_inbox(void)
+{
+    if (terminal_quit_requested()) return;
+    printf("\n  [Press any key to return to inbox]\n");
+    fflush(stdout);
+    TermRawState *r = terminal_raw_enter();
+    char c;
+    ssize_t n = read(STDIN_FILENO, &c, 1);
+    (void)n;
+    terminal_raw_exit(&r);
+}
+
 /**
  * @brief Run the folder (or label) browser of an account, with the compose
  *        dialog behind its 'c' key.
@@ -2573,11 +2599,7 @@ static char *run_browser(Config *sel_cfg, const char *init, int *go_up) {
         if (compose_dialog(sel_cfg, "New Message", NULL, NULL, NULL, &dlg)) {
             cmd_compose_interactive(sel_cfg, dlg.to, dlg.cc, dlg.bcc,
                                     dlg.subj, NULL, NULL, &dlg);
-            printf("\n  [Press any key to return to inbox]\n");
-            fflush(stdout);
-            TermRawState *_r = terminal_raw_enter();
-            char _c2; ssize_t _n2 = read(STDIN_FILENO, &_c2, 1); (void)_n2;
-            terminal_raw_exit(&_r);
+            pause_return_to_inbox();
         }
     }
 }
@@ -3004,24 +3026,12 @@ int main(int argc, char *argv[]) {
                 }
                 /* Pause so the user can read the send result before the
                  * list re-renders and clears the screen. */
-                printf("\n  [Press any key to return to inbox]\n");
-                fflush(stdout);
-                {
-                    TermRawState *_r = terminal_raw_enter();
-                    char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
-                    terminal_raw_exit(&_r);
-                }
+                pause_return_to_inbox();
             } else if (ret == 3) {
                 /* 'r' → reply to current message */
                 const char *af = opts.action_folder[0] ? opts.action_folder : tui_folder;
                 cmd_reply(sel_cfg, opts.action_uid, af);
-                printf("\n  [Press any key to return to inbox]\n");
-                fflush(stdout);
-                {
-                    TermRawState *_r = terminal_raw_enter();
-                    char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
-                    terminal_raw_exit(&_r);
-                }
+                pause_return_to_inbox();
             } else if (ret == 4) {
                 /* background sync finished → re-list to show new messages */
                 continue;
@@ -3035,26 +3045,14 @@ int main(int argc, char *argv[]) {
                     const char *af = opts.action_folder[0] ? opts.action_folder : tui_folder;
                     cmd_forward(sel_cfg, opts.action_uid, af);
                 }
-                printf("\n  [Press any key to return to inbox]\n");
-                fflush(stdout);
-                {
-                    TermRawState *_r = terminal_raw_enter();
-                    char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
-                    terminal_raw_exit(&_r);
-                }
+                pause_return_to_inbox();
             } else if (ret == 6) {
                 /* 'A' → reply-all */
                 {
                     const char *af = opts.action_folder[0] ? opts.action_folder : tui_folder;
                     cmd_reply_all(sel_cfg, opts.action_uid, af);
                 }
-                printf("\n  [Press any key to return to inbox]\n");
-                fflush(stdout);
-                {
-                    TermRawState *_r = terminal_raw_enter();
-                    char _c; ssize_t _n = read(STDIN_FILENO, &_c, 1); (void)_n;
-                    terminal_raw_exit(&_r);
-                }
+                pause_return_to_inbox();
             } else if (ret < 0) {
                 /* Connection or command failed — show actionable advice */
                 fprintf(stderr, "\n  Operation failed. Check the error above.\n"

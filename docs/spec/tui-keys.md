@@ -540,3 +540,26 @@ rule): `ctrl-c` in the review screen asked `Discard draft?` like `q` instead of
 quitting (now quits, the draft stays); `ctrl-c` in the body editor was ignored
 (now saves and quits); after a compose, reply or forward the pause `[Press any
 key to return to inbox]` swallowed a pending quit (now skipped).
+
+## Help overlays in every view (EMAIL-153)
+
+The help of a view is a libtuikit modal made from the view's key table
+(`ekeys_help()`, `libemail/src/core/key_table.c`) or, in the accounts list and
+the rules editor, from a literal table in the view's code.  Every view that has
+one names the key on its status line (`? help`).  Only `?` opens it; `h` is not
+a help key (in the lists it goes back).  Tests are in
+`tests/pty/test_pty_help_keys.c` (`./manage.sh pty help-keys`), at 80x24; the
+overlay is checked in each view named below, for each of the three closing keys,
+and with the rules list at 0 and 1 rules.  The attachment picker and the review
+screen are covered by their own sections (EMAIL-147, EMAIL-151).
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `?` | `? help` (status line) | opens `<View> shortcuts` over the view; the view stays visible behind it | `test_hk_accounts`, `_folders`, `_list`, `_reader`, `_rules_list` (0 and 1 rules), `_rule_detail`, `_conditions` |
+| `Esc`, `q`, `Backspace` | help: close | closes the overlay; the view is as it was (cursor, page, state) | the same |
+| `PgDn` `PgUp` `Home` `End` `Down` `Up` `j` `k` | | scroll the overlay when it is longer than the screen (the message list help is 20 rows plus rows below the 80x24 frame: `End` shows the last, `Home` the first); never close it | the same; `test_hk_list` for the long one |
+| `x` `h` `Enter` `Tab` `F1` `?` `Left` `Right` `Del` | | change nothing: the overlay stays, the view behind does not move | the same |
+| `h` outside the overlay | | is "back" in a list, never help | `test_hk_h_is_not_help` |
+
+Findings: none; every view behaves the same.  Not changed (known from
+EMAIL-146): the overlays do not list `Backspace`, `Left`, `h`.

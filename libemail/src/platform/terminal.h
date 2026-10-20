@@ -102,6 +102,9 @@ TermKey terminal_read_key(void);
  */
 void terminal_request_quit(void);
 
+/** Forget the request (for tests that press ctrl-c in a modal and go on). */
+void terminal_clear_quit_request(void);
+
 /**
  * Returns the last printable ASCII character (32–126) that caused
  * terminal_read_key() to return TERM_KEY_IGNORE.

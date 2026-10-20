@@ -157,6 +157,10 @@ void terminal_request_quit(void) {
     g_quit_requested = 1;
 }
 
+void terminal_clear_quit_request(void) {
+    g_quit_requested = 0;
+}
+
 TermKey terminal_read_key(void) {
     g_last_printable = 0;
     g_last_utf8[0]   = '\0';

@@ -3614,6 +3614,378 @@ static void test_lk_empty_folder(void) {
     pty_close(s);
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  EMAIL-146: key study of the message reader of an IMAP account (80x24)
+ *  docs/spec/tui-keys.md, "Message reader".  The mock's single message
+ *  (lk_env(0)) is 25 lines long: 14 rows are shown, two pages, the last
+ *  page starts at line 11.  lk_env(2) gives messages with a one-line body.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Opens the reader on the cursor message; NULL when it did not come up. */
+static PtySession *rk_open(int count) {
+    lk_env(count);
+    PtySession *s = lk_open();
+    if (!s) return NULL;
+    pty_send_key(s, PTY_KEY_ENTER);
+    if (pty_wait_for(s, "From:", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/** The 24 rows of the screen as one text, to tell that a key changed nothing. */
+static void rk_snap(PtySession *s, char *buf, size_t size) {
+    size_t n = 0;
+    buf[0] = '\0';
+    for (int r = 0; r < 24 && n + 1 < size; r++) {
+        char t[300];
+        pty_row_text(s, r, t, sizeof t);
+        n += (size_t)snprintf(buf + n, size - n, "%s\n", t);
+    }
+}
+
+static void rk_end(PtySession *s) {
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+    lk_env(0);
+}
+
+/* Down j / Up k scroll a line and stop at the ends, PgDn PgUp a page (never
+ * past the last full page), Home g / End G the ends; the status line shows the
+ * page, the last one at the bottom (EMAIL-146). */
+static void test_rk_scroll(void) {
+    PtySession *s = rk_open(0);
+    ASSERT(s != NULL, "reader scroll: opens");
+    if (!s) return;
+    ASSERT_SCREEN_CONTAINS(s, "[1/2]");
+    ASSERT_ROW_CONTAINS(s, 9, "Hello from Mock Server");
+    pty_send_str(s, "j");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 10, "Bold <styled>");
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Bold <styled>");
+    pty_send_str(s, "k");
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Hello from Mock Server");
+    pty_send_key(s, PTY_KEY_UP);
+    pty_send_str(s, "k");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Hello from Mock Server");       /* stops at the top */
+    pty_send_key(s, PTY_KEY_PGUP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Hello from Mock Server");
+    pty_send_key(s, PTY_KEY_PGDN);
+    ASSERT_WAIT_FOR(s, "[2/2]", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Dark italic");                  /* the last full page */
+    ASSERT_SCREEN_CONTAINS(s, "https://click.example.com/test");
+    pty_send_key(s, PTY_KEY_PGDN);
+    pty_send_str(s, "j");
+    pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Dark italic");                  /* stops at the bottom */
+    ASSERT_SCREEN_CONTAINS(s, "[2/2]");
+    pty_send_key(s, PTY_KEY_UP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1/2]");
+    pty_send_key(s, PTY_KEY_PGUP);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Hello from Mock Server");
+    pty_send_key(s, PTY_KEY_END);
+    ASSERT_WAIT_FOR(s, "[2/2]", WAIT_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Dark italic");
+    pty_send_key(s, PTY_KEY_HOME);
+    ASSERT_WAIT_FOR(s, "[1/2]", WAIT_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Hello from Mock Server");
+    pty_send_str(s, "G");
+    ASSERT_WAIT_FOR(s, "[2/2]", WAIT_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Dark italic");
+    pty_send_str(s, "g");
+    ASSERT_WAIT_FOR(s, "[1/2]", WAIT_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Hello from Mock Server");
+    ASSERT_ROW_CONTAINS(s, 23, "j/k scroll");
+    rk_end(s);
+}
+
+/* Esc, q, Backspace, Left and h return to the list with the cursor kept;
+ * ctrl-c quits at once. */
+static void test_rk_back_keys(void) {
+    lk_env(30);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "reader back: opens");
+    if (!s) return;
+    ASSERT(lk_char(s, "j", "[2/30]"), "reader back: j");
+    for (int i = 0; i < 5; i++) {
+        pty_send_key(s, PTY_KEY_ENTER);
+        ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        if (i == 0) pty_send_key(s, PTY_KEY_ESC);
+        else if (i == 1) pty_send_str(s, "q");
+        else if (i == 2) pty_send_key(s, PTY_KEY_BACK);
+        else if (i == 3) pty_send_key(s, PTY_KEY_LEFT);
+        else pty_send_str(s, "h");
+        ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_CONTAINS(s, "[2/30]");
+    }
+    /* The mock serves one connection at a time and the flag pushes of the
+     * round trips queue behind the open one, so the quit is tried on a fresh
+     * session (test_rk_ctrl_c), not after them. */
+    rk_end(s);
+}
+
+/* ctrl-c in the reader quits at once. */
+static void test_rk_ctrl_c(void) {
+    PtySession *s = rk_open(2);
+    ASSERT(s != NULL, "reader ctrl-c: opens");
+    if (!s) return;
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "reader ctrl-c: quits at once");
+    pty_close(s);
+    lk_env(0);
+}
+
+/* A message that fits the screen: no key scrolls, the page stays [1/1]. */
+static void test_rk_short_message(void) {
+    PtySession *s = rk_open(2);
+    ASSERT(s != NULL, "reader short: opens");
+    if (!s) return;
+    ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    char before[8192], after[8192];
+    rk_snap(s, before, sizeof before);
+    const char *keys[] = { "j", "k", "g", "G", NULL };
+    for (int i = 0; keys[i]; i++) pty_send_str(s, keys[i]);
+    PtyKey nav[] = { PTY_KEY_DOWN, PTY_KEY_UP, PTY_KEY_PGDN, PTY_KEY_PGUP, PTY_KEY_END, PTY_KEY_HOME };
+    for (size_t i = 0; i < sizeof nav / sizeof nav[0]; i++) pty_send_key(s, nav[i]);
+    pty_settle(s, SETTLE_MS);
+    rk_snap(s, after, sizeof after);
+    ASSERT(strcmp(before, after) == 0, "reader short: no scroll key changes the screen");
+    ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    pty_send_str(s, "q");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    rk_end(s);
+}
+
+/* / searches the body: Enter finds the first match, n and N go on (No more
+ * matches wrap round), Esc cancels, Backspace edits, a miss says so, ctrl-c
+ * in the prompt quits at once. */
+static void test_rk_search(void) {
+    PtySession *s = rk_open(0);
+    ASSERT(s != NULL, "reader search: opens");
+    if (!s) return;
+    pty_send_str(s, "n");                              /* no search yet: nothing */
+    pty_send_str(s, "N");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "No more matches");
+    pty_send_str(s, "/");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "/");
+    pty_send_str(s, "Itemx");
+    pty_send_key(s, PTY_KEY_BACK);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "/Item_");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Item one");              /* the first match is the top row */
+    pty_send_str(s, "n");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Item two");
+    pty_send_str(s, "n");                              /* the search wraps round */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Item one");
+    pty_send_str(s, "N");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Item two");
+    pty_send_str(s, "N");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 9, "Item one");
+    pty_send_str(s, "/");                              /* Esc cancels the prompt */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "/");
+    pty_send_str(s, "Click");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "/Click");
+    ASSERT_ROW_CONTAINS(s, 9, "Item one");
+    pty_send_str(s, "/");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "/");
+    pty_send_str(s, "xyzzy");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "No match: xyzzy", WAIT_MS);
+    pty_send_str(s, "/");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "/");
+    pty_send_str(s, "qh");                             /* letters are text in the prompt */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "/qh_");
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    rk_end(s);
+    /* A fresh session: the mock serves one connection at a time. */
+    s = rk_open(2);
+    ASSERT(s != NULL, "reader search: opens again");
+    if (!s) return;
+    pty_send_str(s, "/");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "/");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "reader search: ctrl-c in the prompt quits at once");
+    pty_close(s);
+    lk_env(0);
+}
+
+/* * + - ! act at once and say so; a second press undoes; v shows the source
+ * and back; ? opens the help, only Esc/q close it; : opens the menu, Esc
+ * closes it. */
+static void test_rk_state_keys(void) {
+    PtySession *s = rk_open(0);
+    ASSERT(s != NULL, "reader state: opens");
+    if (!s) return;
+    pty_send_str(s, "*");
+    ASSERT_WAIT_FOR(s, "Starred", WAIT_MS);
+    pty_send_str(s, "*");
+    ASSERT_WAIT_FOR(s, "Unstarred", WAIT_MS);
+    pty_send_str(s, "-");                              /* the mock's message is unread */
+    ASSERT_WAIT_FOR(s, "Already unread", WAIT_MS);
+    pty_send_str(s, "+");
+    ASSERT_WAIT_FOR(s, "Marked as read", WAIT_MS);
+    pty_send_str(s, "+");
+    ASSERT_WAIT_FOR(s, "Already read", WAIT_MS);
+    pty_send_str(s, "-");
+    ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as junk", WAIT_MS);
+    pty_send_str(s, "!");
+    ASSERT_WAIT_FOR(s, "Marked as not-junk", WAIT_MS);
+    pty_send_str(s, "v");
+    ASSERT_WAIT_FOR(s, "Content-Type", WAIT_MS);
+    pty_send_str(s, "v");
+    ASSERT_WAIT_FOR(s, "Hello from Mock Server", WAIT_MS);
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Actions");
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Message reader shortcuts", WAIT_MS);
+    pty_send_str(s, "x");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Message reader shortcuts");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message reader shortcuts");
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Message reader shortcuts", WAIT_MS);
+    pty_send_str(s, "q");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message reader shortcuts");
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    rk_end(s);
+}
+
+/* d and Delete ask first, naming the message, No is the default (Enter, Esc,
+ * n); y moves it to the Trash and returns to the list.  Run on the
+ * 30-message mock: the single-message one does not finish the move. */
+static void test_rk_delete(void) {
+    PtySession *s = rk_open(30);
+    ASSERT(s != NULL, "reader delete: opens");
+    if (!s) return;
+    PtyKey no[] = { PTY_KEY_ENTER, PTY_KEY_ESC };
+    for (int i = 0; i < 4; i++) {
+        if (i % 2) pty_send_key(s, PTY_KEY_DELETE);
+        else pty_send_str(s, "d");
+        ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+        if (i < 2) pty_send_key(s, no[i]);
+        else pty_send_str(s, "n");
+        ASSERT_WAIT_FOR(s, "Not deleted", WAIT_MS);
+        ASSERT_SCREEN_CONTAINS(s, "From:");
+        pty_settle(s, SETTLE_MS);
+    }
+    rk_end(s);
+    s = rk_open(30);                                   /* a fresh session (one connection at a time) */
+    ASSERT(s != NULL, "reader delete: opens again");
+    if (!s) return;
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "From:");
+    rk_end(s);
+}
+
+/* r, A and F open the dialog for this message and return to the list. */
+static void test_rk_reply_forward(void) {
+    PtySession *s = rk_open(0);
+    ASSERT(s != NULL, "reader reply: opens");
+    if (!s) return;
+    pty_send_str(s, "r");
+    ASSERT(lk_dialog_and_back(s, "Re: Test Message"), "reader reply: r replies");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_send_str(s, "A");
+    ASSERT(lk_dialog_and_back(s, "Re: Test Message"), "reader reply: A replies to all");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_send_str(s, "F");
+    ASSERT(lk_dialog_and_back(s, "Fwd: Test Message"), "reader reply: F forwards");
+    rk_end(s);
+}
+
+/* a: with two attachments the picker, Esc returns to the reader; with none
+ * "No attachments"; the menu entry too. */
+static void test_rk_attachments(void) {
+    PtySession *s = rk_open(0);
+    ASSERT(s != NULL, "reader attach: opens");
+    if (!s) return;
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "data.bin");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_close(s);
+    setenv("MOCK_IMAP_ATTACHMENTS", "0", 1);
+    s = rk_open(0);
+    ASSERT(s != NULL, "reader attach: opens without attachments");
+    if (!s) { unsetenv("MOCK_IMAP_ATTACHMENTS"); return; }
+    ASSERT(!pty_row_contains(s, 23, "save("), "reader attach: no save hint");
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "No attachments", WAIT_MS);
+    pty_send_str(s, "A");
+    ASSERT(lk_dialog_and_back(s, "Re: Test Message"), "reader attach: A is reply-all, not save-all");
+    unsetenv("MOCK_IMAP_ATTACHMENTS");
+    rk_end(s);
+}
+
+/* The keys the reader does not bind change nothing and show nothing. */
+static void test_rk_unbound_keys(void) {
+    PtySession *s = rk_open(0);
+    ASSERT(s != NULL, "reader unbound: opens");
+    if (!s) return;
+    char before[8192], after[8192];
+    rk_snap(s, before, sizeof before);
+    const char *dead[] = { "f", "s", "m", "D", "R", "t", "u", "e", "i", "p", "o", "c", "l", "U", " ", "x", NULL };
+    for (int i = 0; dead[i]; i++) pty_send_str(s, dead[i]);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_send_key(s, PTY_KEY_RIGHT);
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_send_key(s, PTY_KEY_F1);
+    pty_send_key(s, PTY_KEY_INSERT);
+    pty_settle(s, SETTLE_MS);
+    rk_snap(s, after, sizeof after);
+    ASSERT(strcmp(before, after) == 0, "reader unbound: no other key changes the screen");
+    rk_end(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  EMAIL-142: key study of the folder browser of an IMAP account (80x24)
  *  docs/spec/tui-keys.md, "Folder browser".  The mock lists INBOX with 7
@@ -7315,6 +7687,16 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_lk_delete_asks);
     RUN_TEST(test_lk_one_message);
     RUN_TEST(test_lk_empty_folder);
+    RUN_TEST(test_rk_scroll);
+    RUN_TEST(test_rk_back_keys);
+    RUN_TEST(test_rk_ctrl_c);
+    RUN_TEST(test_rk_short_message);
+    RUN_TEST(test_rk_search);
+    RUN_TEST(test_rk_state_keys);
+    RUN_TEST(test_rk_delete);
+    RUN_TEST(test_rk_reply_forward);
+    RUN_TEST(test_rk_attachments);
+    RUN_TEST(test_rk_unbound_keys);
     RUN_TEST(test_fk_navigation);
     RUN_TEST(test_fk_enter);
     RUN_TEST(test_fk_flat);

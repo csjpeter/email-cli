@@ -262,7 +262,7 @@ screens are `folders_help` and `folders_search` in `test_pty_screens.c`.
 | `t` | `t flat` / `t tree` (the view it switches to) | switches tree / flat, kept in the stored preference; also in the `:` menu as `Tree / flat` | `test_fk_flat`, `test_fk_menu` |
 | `Esc`, `q`, `Backspace` | `Esc/q/BS back` (flat, inside a folder: `Esc/q/BS up`) | tree and flat root: back to the accounts; flat inside a folder: one level up | `test_fk_back_keys`, `test_fk_flat` |
 | `ctrl-c` | help: none (the help overlay does not take it) | the program quits at once, status 0 | `test_fk_ctrl_c`, `test_fk_search` |
-| `/` | help: Search | prompt `Search [Subject]: _`; text (also `q j t`), `Backspace` deletes, `Tab` Subject/From/To/Body, `Enter` searches (empty: cancels), `Esc` cancels, `ctrl-c` quits; the status line shows `Enter search  Tab scope  Esc cancel`; a result returns to the row the search started from | `test_fk_search`, screen `folders_search` |
+| `/` | `/ search` | prompt `Search [Subject]: _`; text (also `q j t`), `Backspace` deletes, `Tab` Subject/From/To/Body, `Enter` searches (empty: cancels), `Esc` cancels, `ctrl-c` quits; the status line shows `Enter search  Tab scope  Esc cancel`; a result returns to the row the search started from | `test_fk_search`, screen `folders_search` |
 | `c` | help: Compose | the new message dialog; the browser comes back on the same row (and flat level), also when it was reached from a message list | `test_fk_compose_keeps_row` |
 | `:` | `: actions` | menu: `Create a folder...`, `Delete the folder`, `Tree / flat` | `test_fk_menu`, `test_folder_create`, `test_folder_delete_asks` |
 | `?` | `? help` | overlay `Folder browser shortcuts`; `Esc`, `q`, `Backspace` close it, other keys change nothing | `test_fk_help`, screen `folders_help` |
@@ -309,12 +309,12 @@ labels for the paging tests).
 | Key | Label | Behaviour | Test |
 |---|---|---|---|
 | `Down`, `j` / `Up`, `k` | `j/k select` | cursor one selectable row, stops at the last / first, skips the headings | `test_lb_navigation` |
-| `PgDn` / `PgUp` | help: Page down / Page up | one page (19 rows), clamped; on the first row the `Tags / Flags` heading is on the screen | `test_lb_navigation` (14 and 50 rows) |
+| `PgDn` / `PgUp` | `PgDn/PgUp page` | one page (19 rows), clamped; on the first row the `Tags / Flags` heading is on the screen | `test_lb_navigation` (14 and 50 rows) |
 | `Home`, `g` / `End`, `G` | help: First label (also g) / Last label (also G) | first selectable row (Unread) / last row (Trash) | `test_lb_navigation`, `test_lb_no_user_labels` |
 | `Enter` | `Enter open` | the message list of the label (`Work`: `1-5 of 5 message(s) in Work`); `Esc` there returns to the same row | `test_lb_navigation` |
 | `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q/BS accounts` | back to the accounts | `test_lb_back_keys` |
 | `ctrl-c` | help: none | the program quits at once, status 0, nothing printed | `test_lb_back_keys`, `test_lb_search`, `test_lb_menu` |
-| `/` | help: Search | prompt `Search [Subject]: _`; text (also `q j t g`), `Backspace` deletes, `Tab` Subject/From/To/Body, `Enter` searches (empty: cancels), `Esc` cancels, `ctrl-c` quits; the status line shows `Enter search  Tab scope  Esc cancel`; a result returns to the row the search started from | `test_lb_search` |
+| `/` | `/ search` | prompt `Search [Subject]: _`; text (also `q j t g`), `Backspace` deletes, `Tab` Subject/From/To/Body, `Enter` searches (empty: cancels), `Esc` cancels, `ctrl-c` quits; the status line shows `Enter search  Tab scope  Esc cancel`; a result returns to the row the search started from | `test_lb_search` |
 | `:` | `: actions` | menu: `Create a label...` on every row, `Delete the label` on a label of the user's own only; `j k g G Home End` move, `Enter` chooses, `Esc`, `q`, `Backspace` close; status line `j/k select  Enter choose  Esc/q/BS close [n/N]` | `test_lb_menu` |
 | `Create a label...` | prompt `New label name:` | status line `Enter create  Esc cancel`; `Enter` creates, `Esc` cancels, `ctrl-c` quits; `q` is text | `test_lb_menu`, `test_label_browser_create_*` |
 | `Delete the label` | `Delete the label X on the server? ...  [Yes] [No]` | No is the default; `y` deletes by id, `n`, `Esc`, `q`, `Backspace` refuse; status line `y yes  n no  Esc/q/BS cancel`; `ctrl-c` quits, nothing deleted | `test_lb_menu`, `test_label_browser_delete_label_uses_id` |

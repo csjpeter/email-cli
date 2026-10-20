@@ -620,7 +620,7 @@ accounts:
 
 | View | Status bar text |
 |------|----------------|
-| Label list | `j/k select  Enter open  : actions  Esc/q/BS accounts  ? help` (EMAIL-145) |
+| Label list | `j/k select  PgDn/PgUp page  Enter open  / search  : actions  Esc/q/BS accounts  ? help` (EMAIL-145, EMAIL-163) |
 | Message list (INBOX) | `r=remove  d=trash  a=archive  f=star  t=labels  c=compose  q=back` |
 | Message list (other label) | `r=remove  d=trash  f=star  t=labels  c=compose  q=back` |
 | Message reader | `r=remove  d=trash  f=star  n=unread  t=labels  q=back` |

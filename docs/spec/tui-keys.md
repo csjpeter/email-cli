@@ -428,6 +428,42 @@ says `q` goes back).  Already right: `j k Down Up` stopping at the ends,
 `Home`/`End`/pages, `Enter` and the kept row, the empty list, the default-No
 questions, the reports, unbound keys, a resize.
 
+## Compose dialog, address drop-down and path completion (EMAIL-150)
+
+Reached with `c` on the message list (and, with prefilled fields, `r`, `F`, `A`).
+Five fields: To, Cc, Bcc, Subject, Attach.  Tested at 80x24 against the mock
+server (`tests/pty/test_pty_compose_keys.c`, `./manage.sh pty compose-keys`),
+the drop-down with 0, 1 and many (7) rows, the Attach completion with 0, 1 and
+2 matches.  The drop-down opens in To, Cc and Bcc from two typed characters in
+the current address, shows at most five contacts (address or name, case
+ignored) and never scrolls.
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `Tab` | `Tab next` | drop-down open: takes the highlighted address and stays in the field; else the next field, wrapping Attach to To | `test_ck_tab_cycle`, `test_ck_dropdown_one`, `test_ck_dropdown_other_fields` |
+| `Shift-Tab` | `Shift-Tab prev` | previous field, wrapping To to Attach | `test_ck_tab_cycle` |
+| `Down` / `Up` | | drop-down open: highlight one row, stops at the ends; otherwise nothing (not on file rows: there `Tab` picks) | `test_ck_dropdown_many`, `test_ck_dropdown_zero`, `test_ck_attach_many` |
+| `;` | `; add addr` | in To, Cc, Bcc: ends the address (`; ` follows, a space before it is dropped); a letter in Subject and Attach | `test_ck_semicolon_and_backspace`, `test_ck_unbound_and_literal_keys` |
+| `Enter` | `Enter ok` | drop-down open: takes the highlighted address; Attach with text: adds the file (`File not found`, `Not a file`, `Max attachments` errors); otherwise confirms: empty To shows `To: is empty` and focuses To, empty Subject asks `send anyway? (y/n)` (`y`, `Enter` go on, anything else returns to Subject), else the body editor | `test_ck_dropdown_one`, `test_ck_enter_empty_to`, `test_ck_enter_empty_subject`, `test_ck_enter_confirms`, `test_ck_attach_zero`, `test_ck_attach_one_and_add`, `test_ck_attach_enter_empty` |
+| `Esc` | `Esc cancel` | drop-down open: closes it, text stays; else leaves; with text or attachments asks `Discard what was typed?` (default No; `Esc` is No) | `test_ck_dropdown_esc`, `test_ck_esc_and_ctrl_c`, `test_ck_esc_with_attachment_only` |
+| `ctrl-c` | | leaves the dialog at once, without asking | `test_ck_esc_and_ctrl_c` |
+| `Left` `Right` `Home` `End` `Backspace` `Delete` | | line editing; stop at the ends; `Backspace` right after `; ` removes the whole address | `test_ck_line_editing`, `test_ck_semicolon_and_backspace` |
+| `Tab` (Attach) | `Tab complete` | the path as typed is completed to the first matching entry of its directory (the drop-down lists up to eight); a directory gets a `/`, so `Tab` goes on into it; no match: next field | `test_ck_attach_one_and_add`, `test_ck_attach_many`, `test_ck_attach_directory`, `test_ck_attach_zero` |
+| `d` (Attach) | `d remove last` | with an empty field and at least one attachment: removes the last one; otherwise a letter | `test_ck_attach_d` |
+| other function keys (`F1`, `PgUp`, `PgDn`, `Ins`) | | change nothing; `h ? q j k` are text | `test_ck_unbound_and_literal_keys` |
+| resize | | redrawn, status line on the new last row | `test_ck_resize` |
+
+After the dialog is left, the list waits for one key at `[Press any key to
+return to inbox]` (`leave_pause` in the test).
+
+Findings, fixed with EMAIL-150: `d` in an empty Attach field was swallowed when
+no attachment existed (a path could not start with `d`), `Tab` on a directory
+completed it without `/` (no way down into it), the `d remove last` hint was
+the first cut off at 80 columns, `compose-dialog.md` said eight rows and a
+`Tab` that moves on.  Open: EMAIL-222 (a cancelled dialog still waits for a
+key).  Already right: the field cycle, drop-down keys, the guards, the discard
+question, line editing, the resize.
+
 ## Rule actions form: add step 2/2 and the rule edit (EMAIL-149)
 
 Reached with `q` in the condition editor, for a new rule (`a` in the rules list)

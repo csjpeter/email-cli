@@ -7449,6 +7449,363 @@ static void test_accounts_keys_delete_position(void) {
     restore_accounts("a");
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ *  EMAIL-152: key study of the setup wizard and the bulk-action prompt
+ * ══════════════════════════════════════════════════════════════════════ */
+
+
+/* The wizard is a plain line dialog (cooked terminal, one line per answer),
+ * not a key-driven screen: letters and Space are text.  Policy keys that do
+ * not hold in it are ticketed: EMAIL-223 (Esc is text, ctrl-c
+ * is text).  Ctrl-D ends the input and gives the wizard up. */
+static PtySession *wk_open_wizard(const char *name) {
+    study_account(name);
+    PtySession *s = cli_open_size(80, 24, NULL);
+    if (!s) return NULL;
+    char acc[64];
+    snprintf(acc, sizeof acc, "%s", name);
+    if (pty_wait_for(s, acc, WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_send_str(s, "n");
+    if (pty_wait_for(s, "Choice [1]:", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/* Space, m r u f F l L D are text at the type prompt: each is refused with a
+ * message and the question is asked again.  Esc is text too (EMAIL-223), as
+ * is ctrl-c (EMAIL-223); Ctrl-D gives the wizard up, the accounts list
+ * returns unchanged and Esc there quits. */
+static void test_wk_wizard_type_prompt(void) {
+    PtySession *s = wk_open_wizard("wk1");
+    ASSERT(s != NULL, "wizard type: opens");
+    if (!s) return;
+    ASSERT_SCREEN_CONTAINS(s, "email-cli Configuration Wizard");
+    ASSERT_SCREEN_CONTAINS(s, "[1] IMAP");
+    ASSERT_SCREEN_CONTAINS(s, "[2] Gmail");
+    ASSERT_ROW_CONTAINS(s, 23, "Choice [1]:");
+    pty_send_str(s, " \n");
+    ASSERT_WAIT_FOR(s, "Unknown account type ' '", WAIT_MS);
+    const char *keys[] = { "m", "r", "u", "f", "F", "l", "L", "D", NULL };
+    for (int i = 0; keys[i]; i++) {
+        char want[64];
+        pty_send_str(s, keys[i]);
+        pty_send_str(s, "\n");
+        snprintf(want, sizeof want, "Unknown account type '%s'", keys[i]);
+        ASSERT_WAIT_FOR(s, want, WAIT_MS);
+    }
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 23, "Choice [1]:");
+    pty_send_key(s, PTY_KEY_ESC);                    /* EMAIL-223: text, not cancel */
+    pty_send_str(s, "\n");
+    ASSERT_WAIT_FOR(s, "^[", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Unknown account type");
+    pty_send_key(s, PTY_KEY_CTRL_D);                 /* the end of input */
+    ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts (1)");
+    ASSERT_SCREEN_CONTAINS(s, "wk1");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "wizard type: Esc on the list quits");
+    pty_close(s);
+    restore_accounts("wk1");
+}
+
+/* IMAP flow: Enter takes the default type, the port and the folder; Esc in
+ * the host line is text (EMAIL-223); Ctrl-D at the hidden password prompt
+ * gives the wizard up; an empty password is said to be empty; the finished
+ * wizard adds the account. */
+static void wk_to_password(PtySession *s) {
+    pty_send_str(s, "n");
+    pty_wait_for(s, "Account type", WAIT_MS);
+    pty_send_str(s, "\n");
+    pty_wait_for(s, "IMAP Host", WAIT_MS);
+    send_host(s, "localhost:%d\n");
+    pty_wait_for(s, "IMAP Port [993]", WAIT_MS);
+    pty_send_str(s, "\n");
+    pty_wait_for(s, "Email Username", WAIT_MS);
+    pty_send_str(s, "wk3@example.org\n");
+    pty_wait_for(s, "Email Password", WAIT_MS);
+}
+
+/* One abandoned wizard ends a session's wizards (EMAIL-223: the end of
+ * input is never cleared), so each way of giving up gets its own session. */
+static void test_wk_wizard_imap_flow(void) {
+    PtySession *s = wk_open_wizard("wk2");
+    ASSERT(s != NULL, "wizard flow: opens");
+    if (!s) return;
+    pty_send_str(s, "\n");                           /* Enter: IMAP */
+    ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);                    /* EMAIL-223 */
+    pty_send_str(s, "\n");
+    /* the Esc byte is echoed raw and swallows the I of the next prompt */
+    ASSERT_WAIT_FOR(s, "MAP Port [993]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "using imaps://");
+    pty_send_key(s, PTY_KEY_CTRL_D);                 /* gives the wizard up */
+    ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts (1)");
+    pty_close(s);
+
+    s = cli_open_size(80, 24, NULL);                 /* Ctrl-D at the password */
+    ASSERT(s != NULL, "wizard password: opens");
+    if (!s) { restore_accounts("wk2"); return; }
+    ASSERT_WAIT_FOR(s, "wk2", WAIT_MS);
+    wk_to_password(s);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "wk3@example.org  ");
+    ASSERT_SCREEN_CONTAINS(s, "Email Accounts (1)");
+    pty_close(s);
+
+    s = cli_open_size(80, 24, NULL);                 /* the whole flow */
+    ASSERT(s != NULL, "wizard flow: reopens");
+    if (!s) { restore_accounts("wk2"); return; }
+    ASSERT_WAIT_FOR(s, "wk2", WAIT_MS);
+    wk_to_password(s);
+    pty_send_str(s, "\n");                           /* empty password */
+    ASSERT_WAIT_FOR(s, "no password entered", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Default Folder [INBOX]", WAIT_MS);
+    pty_send_str(s, "\n");
+    ASSERT_WAIT_FOR(s, "SMTP Host [Enter=skip]", WAIT_MS);
+    pty_send_str(s, "\n");                           /* Enter skips SMTP */
+    ASSERT_WAIT_FOR(s, "Email Accounts (2)", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "wk3@example.org");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "wizard flow: Esc on the list quits");
+    pty_close(s);
+    restore_accounts("wk2");
+}
+
+/* ctrl-c at a wizard prompt is text (EMAIL-223): it is echoed as ^C and the
+ * program neither quits nor goes on. */
+static void test_wk_wizard_ctrl_c(void) {
+    PtySession *s = wk_open_wizard("wk4");
+    ASSERT(s != NULL, "wizard ctrl-c: opens");
+    if (!s) return;
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT_WAIT_FOR(s, "^C", WAIT_MS);
+    ASSERT(pty_wait_exit(s, 500) == -1, "wizard ctrl-c: does not quit (EMAIL-223)");
+    pty_close(s);
+    restore_accounts("wk4");
+}
+
+/* First start without any account: the wizard runs before the TUI; Ctrl-D
+ * ends the program with a failure status and a message. */
+static void test_wk_wizard_first_run(void) {
+    char wiz_home[300];
+    snprintf(wiz_home, sizeof(wiz_home), "%s/wizard_first_run", g_test_home);
+    mkdir(wiz_home, 0700);
+    setenv("HOME", wiz_home, 1);
+    unsetenv("XDG_CONFIG_HOME");
+    PtySession *s = cli_open_size(80, 24, NULL);
+    ASSERT(s != NULL, "wizard first run: opens");
+    if (!s) { setenv("HOME", g_test_home, 1); return; }
+    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "email-cli Configuration Wizard");
+    pty_send_str(s, "x\n");
+    ASSERT_WAIT_FOR(s, "Unknown account type 'x'", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    ASSERT_WAIT_FOR(s, "Configuration aborted. Exiting.", WAIT_MS);
+    ASSERT(pty_wait_exit(s, 5000) == 1, "wizard first run: exits with failure");
+    pty_close(s);
+    setenv("HOME", g_test_home, 1);
+}
+
+/* The bulk-action prompt: Space marks, d asks once for all the marked
+ * messages.  Only y, n, Esc, q, Backspace, Enter, Left/Right/Tab and ctrl-c
+ * do anything in it; every other key (Space m r u f F l L D j) is ignored. */
+static void test_bk_prompt_keys(void) {
+    lk_env(30);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "bulk prompt: opens");
+    if (!s) { lk_env(0); return; }
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[3/30]");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "Move 2 marked messages to Trash?", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[ Yes ]  [ No ]");
+    ASSERT_ROW_CONTAINS(s, 23, "y yes  n no  Esc/q/BS cancel");
+    const char *ignored[] = { " ", "m", "r", "u", "f", "F", "l", "L", "D", "j", "x", "d", NULL };
+    for (int i = 0; ignored[i]; i++) pty_send_str(s, ignored[i]);
+    PtyKey nav[] = { PTY_KEY_UP, PTY_KEY_DOWN, PTY_KEY_PGDN, PTY_KEY_PGUP,
+                     PTY_KEY_HOME, PTY_KEY_END, PTY_KEY_F1 };
+    for (size_t i = 0; i < sizeof nav / sizeof nav[0]; i++) pty_send_key(s, nav[i]);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Move 2 marked messages to Trash?");
+    ASSERT_SCREEN_CONTAINS(s, "[2 marked]");
+    /* each way of saying no: the marks and the cursor stay */
+    for (int i = 0; i < 5; i++) {
+        if (i == 0) pty_send_key(s, PTY_KEY_ESC);
+        else if (i == 1) pty_send_str(s, "q");
+        else if (i == 2) pty_send_key(s, PTY_KEY_BACK);
+        else if (i == 3) pty_send_str(s, "n");
+        else pty_send_key(s, PTY_KEY_ENTER);          /* the default is No */
+        ASSERT_WAIT_FOR(s, "Not deleted", WAIT_MS);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash?");
+        ASSERT_SCREEN_CONTAINS(s, "[2 marked]");
+        ASSERT_SCREEN_CONTAINS(s, "[3/30]");
+        ASSERT_SCREEN_CONTAINS(s, "30 message(s) in");
+        pty_send_str(s, "d");
+        ASSERT_WAIT_FOR(s, "Move 2 marked messages to Trash?", WAIT_MS);
+    }
+    pty_send_key(s, PTY_KEY_CTRL_C);                  /* quits at once */
+    ASSERT(pty_wait_exit(s, 5000) == 0, "bulk prompt: ctrl-c quits at once");
+    pty_close(s);
+    lk_env(0);
+}
+
+/** The server drops an idle connection (the mock does after 3 s); quitting
+ *  then writes LOGOUT to a closed socket, which must not kill the program
+ *  with SIGPIPE (EMAIL-152): it exits with status 0. */
+static void test_bk_quit_after_server_dropped(void) {
+    lk_env(0);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "list opens");
+    pty_settle(s, 4500);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "ctrl-c after the server dropped the connection exits cleanly");
+    pty_close(s);
+    lk_env(0);
+}
+
+/* y moves every marked message at once; Y too; the marks are gone afterwards. */
+static void test_bk_prompt_yes(void) {
+    lk_env(30);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "bulk yes: opens");
+    if (!s) { lk_env(0); return; }
+    pty_send_str(s, " ");
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "Move 2 marked messages to Trash?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "2 message(s) moved to Trash", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+    lk_env(0);
+}
+
+/* The buttons: Left, Right and Tab move between [ Yes ] and [ No ], Enter
+ * takes the one in focus (No at first).  Not on the status line. */
+static void test_bk_prompt_buttons(void) {
+    lk_env(30);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "bulk buttons: opens");
+    if (!s) { lk_env(0); return; }
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_LEFT);
+    pty_send_key(s, PTY_KEY_RIGHT);                   /* back on No */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Not deleted", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_TAB);                     /* No -> Yes */
+    pty_send_key(s, PTY_KEY_TAB);                     /* Yes -> No */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Not deleted", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_LEFT);                    /* No -> Yes */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+    lk_env(0);
+}
+
+/* One message: Space marks it (no step), d names the message, not a count. */
+static void test_bk_prompt_one_item(void) {
+    lk_env(1);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "bulk one: opens");
+    if (!s) { lk_env(0); return; }
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Test Message");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked messages");
+    pty_send_str(s, "m");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "to Trash?");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Not deleted", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
+    pty_send_str(s, "d");
+    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+    lk_env(0);
+}
+
+/* No message: Space, d and the letters m r u f F l L D do nothing. */
+static void test_bk_prompt_no_item(void) {
+    lk_env(0);
+    PtySession *s = lk_open_empty();
+    ASSERT(s != NULL, "bulk none: opens");
+    if (!s) return;
+    const char *keys[] = { " ", "d", "m", "r", "u", "f", "F", "l", "L", "D", NULL };
+    for (int i = 0; keys[i]; i++) {
+        if (strcmp(keys[i], "l") == 0) continue;     /* l opens the rules editor */
+        pty_send_str(s, keys[i]);
+    }
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "0 of 0 message(s)");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+/* With rows marked, the old letters m u f D L do nothing (the marks stay),
+ * Space on a marked row unmarks it, and Esc drops the marks first. */
+static void test_bk_marks_and_old_letters(void) {
+    lk_env(30);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "bulk letters: opens");
+    if (!s) { lk_env(0); return; }
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_send_str(s, " ");                             /* Space on a marked row */
+    ASSERT_WAIT_FOR(s, "[2/30]", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");         /* unmarked: a toggle */
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_send_str(s, " ");
+    ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
+    const char *old[] = { "m", "u", "f", "D", "L", NULL };
+    for (int i = 0; old[i]; i++) pty_send_str(s, old[i]);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
+    ASSERT_SCREEN_CONTAINS(s, "[2/30]");
+    ASSERT_SCREEN_CONTAINS(s, "30 message(s) in");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
+    ASSERT_SCREEN_CONTAINS(s, "30 message(s) in");
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+    lk_env(0);
+}
+
 int main(int argc, char *argv[]) {
     printf("--- email-cli PTY View Tests ---\n\n");
 
@@ -7897,6 +8254,18 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_accounts_keys_one_account);
     RUN_TEST(test_accounts_keys_no_account);
     RUN_TEST(test_accounts_keys_delete_position);
+    printf("\n--- email-tui: setup wizard and bulk-action prompt (EMAIL-152) ---\n");
+    RUN_TEST(test_wk_wizard_type_prompt);
+    RUN_TEST(test_wk_wizard_imap_flow);
+    RUN_TEST(test_wk_wizard_ctrl_c);
+    RUN_TEST(test_wk_wizard_first_run);
+    RUN_TEST(test_bk_prompt_keys);
+    RUN_TEST(test_bk_quit_after_server_dropped);
+    RUN_TEST(test_bk_prompt_yes);
+    RUN_TEST(test_bk_prompt_buttons);
+    RUN_TEST(test_bk_prompt_one_item);
+    RUN_TEST(test_bk_prompt_no_item);
+    RUN_TEST(test_bk_marks_and_old_letters);
 
 done:
     stop_mock_server();

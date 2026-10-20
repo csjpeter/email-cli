@@ -372,6 +372,7 @@ static void test_rv_a_attach_prompt(void) {
     ASSERT(s != NULL, "rv a: reached");
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Enter add", WAIT_MS);       /* the status line is drawn after the title */
     ASSERT_ROW_CONTAINS(s, ROWS - 1, "Enter add");
     ASSERT_ROW_CONTAINS(s, ROWS - 1, "Esc cancel");
     pty_send_key(s, PTY_KEY_ENTER);             /* empty path: cancels */

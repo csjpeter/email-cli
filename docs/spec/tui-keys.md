@@ -386,3 +386,27 @@ or `h`.  Open: EMAIL-221 (`q` in the condition editor confirms, the policy
 says `q` goes back).  Already right: `j k Down Up` stopping at the ends,
 `Home`/`End`/pages, `Enter` and the kept row, the empty list, the default-No
 questions, the reports, unbound keys, a resize.
+
+## Rule actions form: add step 2/2 and the rule edit (EMAIL-149)
+
+Reached with `q` in the condition editor, for a new rule (`a` in the rules list)
+or for the edit of a rule (`e` in the rule detail; the fields are prefilled).
+Nine one-line fields, one after another: `Name`, `add-label [1..3]`,
+`rm-label [1..3]`, `then-move-folder`, `then-forward-to`.  Tested at 80x24
+against the mock server (`tests/pty/test_pty_rules_keys.c`).
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| printable keys, `Backspace`, `Left`, `Right`, `Home`, `End` | | edit the field in the input line | `test_rk_form_field_keys`, `test_rk_form_layout_and_edit` |
+| `Enter` | `Enter next field` | keeps the field, goes to the next; after the ninth asks `Save? (y/N)` | `test_rk_actions_form`, `test_rk_form_layout_and_edit` |
+| `Esc` | `Esc cancel` | in any field: cancels the rule, nothing is written; back to the list (add) or the detail (edit) | `test_rk_actions_form`, `test_rk_form_esc_and_save_keys` |
+| `ctrl-c` | | quits at once with status 0, also at `Save?` | `test_rk_actions_form` |
+| `Up`, `Down`, `Tab`, `PgUp`, `PgDn`, `F1` | | change nothing; the form has no way back to an earlier field | `test_rk_form_field_keys` |
+| `y`, `Y` at `Save?` | | saves the rule; an edit returns to the detail | `test_rk_form_layout_and_edit` |
+| any other key at `Save?` (`n`, `N`, `Esc`, `Enter`, ...) | | No: nothing is saved | `test_rk_form_esc_and_save_keys` |
+| any key at `Rule name is required` | | returns to the list, nothing is saved | `test_rk_form_name_required_and_resize` |
+
+A resize keeps the form on screen (`test_rk_form_name_required_and_resize`).
+Findings of the study: no defect that this ticket fixes; the form has no help
+overlay (`?` is a typed character in a field) and no step back to an earlier
+field, which the status line (`Enter next field`, `Esc cancel`) states.

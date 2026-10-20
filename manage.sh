@@ -294,6 +294,8 @@ for_each_pty_suite() {
     "$run" screens        ./tests/pty/bin/test-pty-screens "$B/email-tui" \
                           ./tests/pty/mock-imap-server "$B/email-sync" \
                           ./tests/pty/mock-gmail-server
+    "$run" compose-keys   ./tests/pty/bin/test-pty-compose-keys "$B/email-tui" \
+                          ./tests/pty/mock-imap-server
     "$run" rules-keys     ./tests/pty/bin/test-pty-rules-keys "$B/email-tui" \
                           ./tests/pty/mock-imap-server
     "$run" review-keys    ./tests/pty/bin/test-pty-review-keys "$B/email-tui" \

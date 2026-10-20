@@ -5,6 +5,8 @@
 #include "body_editor.h"
 #include "key_events.h"
 #include "status_line.h"
+#include "tui_frame.h"
+#include <tuikit/dialog.h>
 #include "platform/terminal.h"
 
 #include <tuikit/buf.h>
@@ -61,9 +63,10 @@ static void draw(tui_textedit *te, const char *header, const char *note,
     static const tui_statusline_hint hints[] = {
         { "Esc", "save and continue", SL_PRIO_KEEP },
         { "Ctrl-S", "save", SL_PRIO_HIGH },
+        { "F1", "help", SL_PRIO_MID },
     };
     char status[256];
-    if (status_line_format(cols, hints, 2, NULL, 0, 0, note, status, sizeof(status)) < 0)
+    if (status_line_format(cols, hints, 3, NULL, 0, 0, note, status, sizeof(status)) < 0)
         status[0] = '\0';
     tui_style bar = tui_style_attrs(TUI_ATTR_REVERSE);
     tui_canvas_fill(c, tui_rect_make(rows - 1, 0, 1, cols), bar);
@@ -77,6 +80,34 @@ static void draw(tui_textedit *te, const char *header, const char *note,
     }
     tui_buf_free(&out);
     tui_screen_free(scr);
+}
+
+/* The help overlay (EMAIL-169): the editor's keys; h is text here, so F1 or
+ * Ctrl-G open it.  Esc, q and Backspace close it, as every help overlay. */
+static void show_help(void) {
+    static const char *const rows[][2] = {
+        { "Esc",              "Save and continue to the review" },
+        { "Ctrl-S",           "Save and stay" },
+        { "F1, Ctrl-G",       "This help" },
+        { "Ctrl-C",           "Save and quit the program" },
+        { "Arrows",           "Move the cursor" },
+        { "Home, Ctrl-A",     "Start of the line" },
+        { "End, Ctrl-E",      "End of the line" },
+        { "Ctrl-Home/End",    "Start / end of the text" },
+        { "PgUp, PgDn",       "One page up / down" },
+        { "Backspace, Del",   "Delete a character" },
+        { "Ctrl-K",           "Delete to the end of the line" },
+        { "Enter, Tab",       "Insert a newline / a tab" },
+        { "Discard",          "Esc, then q in the review" },
+    };
+    tui_dialog d;
+    if (tui_dialog_help(&d, "Body editor shortcuts", &rows[0][0],
+                        (int)(sizeof(rows) / sizeof(rows[0]))) != 0) return;
+    tui_frame_run_dialog(&d);
+    tui_dialog_free(&d);
+    /* the overlay drew over the screen: wipe it, the next draw is whole */
+    ssize_t w = write(STDOUT_FILENO, "\033[2J", 4);
+    (void)w;
 }
 
 int body_editor_run(char **body, const char *header, BodyEditorSave save, void *ctx) {
@@ -123,6 +154,10 @@ int body_editor_run(char **body, const char *header, BodyEditorSave save, void *
             break;
         }
         if (rows < MIN_ROWS || cols < MIN_COLS) continue;   /* nothing is drawn: no edits */
+        if ((ev.type == TUI_EV_KEY && ev.key == TUI_KEY_F1) || TUI_EV_IS_CTRL(&ev, 'g')) {
+            show_help();
+            continue;
+        }
         if (TUI_EV_IS_CTRL(&ev, 's')) {
             if (save) save(te.buf, ctx);
             saved_dirty = 1;

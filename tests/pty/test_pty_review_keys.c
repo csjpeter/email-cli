@@ -176,6 +176,34 @@ static void test_ed_layout(void) {
     ASSERT_ROW_CONTAINS(s, 0, "Message body");
     ASSERT_ROW_CONTAINS(s, ROWS - 1, "Esc save and continue");
     ASSERT_ROW_CONTAINS(s, ROWS - 1, "Ctrl-S save");
+    ASSERT_ROW_CONTAINS(s, ROWS - 1, "F1 help");
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
+    discard(s);
+    pty_close(s);
+}
+
+/* EMAIL-169: F1 and Ctrl-G open the help overlay; it changes no text. */
+static void test_ed_help_overlay(void) {
+    fresh();
+    PtySession *s = editor("Help");
+    ASSERT(s != NULL, "ed help: opens");
+    pty_send_str(s, "abc");
+    pty_send_key(s, PTY_KEY_F1);
+    ASSERT_WAIT_FOR(s, "Body editor shortcuts", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Save and stay");
+    ASSERT_SCREEN_CONTAINS(s, "Esc, then q in the review");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, 200);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Body editor shortcuts");
+    ASSERT_ROW_CONTAINS(s, 1, "abc");
+    pty_send_str(s, "\x07");                    /* Ctrl-G */
+    ASSERT_WAIT_FOR(s, "Body editor shortcuts", WAIT_MS);
+    pty_send_str(s, "h");                       /* any other key changes nothing */
+    pty_send_str(s, "q");
+    pty_settle(s, 200);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Body editor shortcuts");
+    ASSERT_ROW_CONTAINS(s, 1, "abc");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     discard(s);
@@ -584,6 +612,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_ed_cursor_and_delete_keys);
     RUN_TEST(test_ed_many_lines_paging);
     RUN_TEST(test_ed_ctrl_s_note);
+    RUN_TEST(test_ed_help_overlay);
     RUN_TEST(test_ed_esc_saves_and_leaves);
     RUN_TEST(test_ed_ctrl_c);
     RUN_TEST(test_ed_unbound_keys_are_text);

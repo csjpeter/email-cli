@@ -504,3 +504,57 @@ rule): `ctrl-c` in the review screen asked `Discard draft?` like `q` instead of
 quitting (now quits, the draft stays); `ctrl-c` in the body editor was ignored
 (now saves and quits); after a compose, reply or forward the pause `[Press any
 key to return to inbox]` swallowed a pending quit (now skipped).
+
+## Setup wizard and bulk-action prompt (EMAIL-152)
+
+Tested at 80x24 against the mock server (`tests/pty/test_pty_views.c`, suite
+`views`).
+
+### Setup wizard
+
+Reached with `n` (new), `i` (IMAP settings), `e` on the accounts screen, and at
+the first start without any account.  It is not a key-driven screen: the
+terminal is cooked, one line per answer, so a key is text and `Enter` ends the
+line.  Prompts: `Account type` (`Choice [1]:`), `IMAP Host`, `IMAP Port [993]`,
+`Email Username`, `Email Password` (hidden), `Default Folder [INBOX]`,
+`SMTP Host [Enter=skip]`.
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `Enter` | `[1]`, `[993]`, `[INBOX]`, `Enter=skip` | takes the default shown in the prompt; at SMTP it skips; an empty password is said to be empty | `test_wk_wizard_imap_flow` |
+| `Space`, `m` `r` `u` `f` `F` `l` `L` `D` | | text: at `Account type` each is refused (`Unknown account type 'x'`) and the question is asked again | `test_wk_wizard_type_prompt` |
+| `Esc` | | text, not cancel (EMAIL-223) | `test_wk_wizard_type_prompt`, `test_wk_wizard_imap_flow` |
+| `ctrl-c` | | text, echoed `^C`, not quit (EMAIL-223) | `test_wk_wizard_ctrl_c` |
+| `Ctrl-D` | | end of input: `Wizard aborted.`, back to the unchanged accounts list (at the first start: `Configuration aborted. Exiting.`, exit status 1); also at the hidden password | `test_wk_wizard_type_prompt`, `test_wk_wizard_imap_flow`, `test_wk_wizard_first_run` |
+
+0 accounts: `test_wk_wizard_first_run`; 1 account: all the others.
+
+### Bulk-action prompt (`d` on a list with marks)
+
+`Space` marks the row under the cursor (`[N marked]` in the title; the cursor
+does not move for one message).  `d` then asks once for all marked messages:
+`Move N marked messages to Trash?` with `[ Yes ]  [ No ]`, status line `y yes
+n no  Esc/q/BS cancel`.  With one message the question names it, not a count.
+With no marks `d` acts on the row under the cursor.
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `y` | `y yes` | does it (`Moved to Trash`), the marks go | `test_bk_prompt_yes` |
+| `n`, `Esc`, `q`, `Backspace` | `n no`, `Esc/q/BS cancel` | `Not deleted`, marks and cursor stay | `test_bk_prompt_keys` |
+| `Enter` | | takes the button in focus; No at first (`Not deleted`) | `test_bk_prompt_keys`, `test_bk_prompt_buttons` |
+| `Left` `Right` `Tab` | not on the status line | move the focus between Yes and No | `test_bk_prompt_buttons` |
+| `ctrl-c` | | cancels and quits the program at once | `test_bk_prompt_keys` |
+| any other key (`Space` `m` `r` `u` `f` `F` `l` `L` `D` `j` `x` `d`, arrows, PgUp/PgDn, Home/End, F1) | | ignored, the question stays | `test_bk_prompt_keys` |
+
+Before the prompt, with rows marked, `m` `u` `f` `D` `L` do nothing, `Space`
+on a marked row unmarks it, and `Esc` drops the marks first
+(`test_bk_marks_and_old_letters`).  1 message: `test_bk_prompt_one_item`; 0
+messages: `Space`, `d` and the letters do nothing (`test_bk_prompt_no_item`).
+
+Findings of the study.  Fixed in this ticket (no separate ticket): quitting
+with ctrl-c after the server had dropped an idle connection killed the program
+with SIGPIPE (the LOGOUT write went to a closed socket); IMAP writes now block
+SIGPIPE and fail instead (`test_bk_quit_after_server_dropped`).  Ticketed:
+EMAIL-223 (wizard prompts: `Esc` and ctrl-c are text, and after one given-up
+wizard every later wizard of the session aborts at once).  Document only: the
+button keys `Left` `Right` `Tab` are not on the prompt's status line.

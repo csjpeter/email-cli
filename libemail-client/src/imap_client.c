@@ -25,6 +25,8 @@
 #include <stdint.h>
 #include <ctype.h>
 #include <time.h>
+#include <signal.h>
+#include <pthread.h>
 
 /* ── Read buffer ─────────────────────────────────────────────────────── */
 
@@ -54,9 +56,43 @@ struct ImapClient {
 
 /* ── Low-level I/O ───────────────────────────────────────────────────── */
 
-/** Read up to `n` bytes from the socket/TLS layer into `buf`.
+/** Block SIGPIPE in this thread; @p old receives the previous mask.  A server
+ *  that dropped an idle connection must make a write fail, not kill the
+ *  program (EMAIL-152). */
+static void sigpipe_block(sigset_t *old) {
+    sigset_t block;
+    sigemptyset(&block);
+    sigaddset(&block, SIGPIPE);
+    pthread_sigmask(SIG_BLOCK, &block, old);
+}
+
+/** Drop a SIGPIPE raised while blocked, then restore the mask @p old. */
+static void sigpipe_unblock(const sigset_t *old) {
+    sigset_t pend, block;
+    sigemptyset(&block);
+    sigaddset(&block, SIGPIPE);
+    sigpending(&pend);
+    if (sigismember(&pend, SIGPIPE)) {
+        struct timespec ts = {0, 0};
+        sigtimedwait(&block, NULL, &ts);
+    }
+    pthread_sigmask(SIG_SETMASK, old, NULL);
+}
+
+static ssize_t net_read_raw(ImapClient *c, char *buf, size_t n);
+
+/** Read up to `n` bytes from the socket/TLS layer into `buf`, SIGPIPE-safe
+ *  (TLS may answer an end of stream with an alert write).
  *  Returns bytes read (>0), 0 on EOF, -1 on error. */
 static ssize_t net_read(ImapClient *c, char *buf, size_t n) {
+    sigset_t old;
+    sigpipe_block(&old);
+    ssize_t r = net_read_raw(c, buf, n);
+    sigpipe_unblock(&old);
+    return r;
+}
+
+static ssize_t net_read_raw(ImapClient *c, char *buf, size_t n) {
     if (c->use_tls) {
         for (;;) {
             errno = 0;
@@ -77,9 +113,19 @@ static ssize_t net_read(ImapClient *c, char *buf, size_t n) {
     return r;
 }
 
-/** Write `n` bytes to the socket/TLS layer.
+static int net_write_raw(ImapClient *c, const char *buf, size_t n);
+
+/** Write `n` bytes to the socket/TLS layer, SIGPIPE-safe.
  *  Returns 0 on success, -1 on error. */
 static int net_write(ImapClient *c, const char *buf, size_t n) {
+    sigset_t old;
+    sigpipe_block(&old);
+    int rc = net_write_raw(c, buf, n);
+    sigpipe_unblock(&old);
+    return rc;
+}
+
+static int net_write_raw(ImapClient *c, const char *buf, size_t n) {
     size_t sent = 0;
     while (sent < n) {
         ssize_t r;
@@ -623,7 +669,13 @@ void imap_disconnect(ImapClient *c) {
     read_response(c, tag, &r);
     response_free(&r);
 
-    if (c->ssl) { SSL_shutdown(c->ssl); SSL_free(c->ssl); }
+    if (c->ssl) {
+        sigset_t old;               /* the close_notify may go to a gone peer */
+        sigpipe_block(&old);
+        SSL_shutdown(c->ssl);
+        sigpipe_unblock(&old);
+        SSL_free(c->ssl);
+    }
     if (c->ctx) SSL_CTX_free(c->ctx);
     if (c->fd >= 0) close(c->fd);
     free(c);

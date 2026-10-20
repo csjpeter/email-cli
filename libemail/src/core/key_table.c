@@ -81,8 +81,8 @@
     H(V, 'k', "Up", "scroll a line (also Up)"),                                     \
     H(V, TUI_KEY_PGDN, "Page down", NULL),                                          \
     H(V, TUI_KEY_PGUP, "Page up", NULL),                                            \
-    H(V, TUI_KEY_HOME, "Top", NULL),                                                \
-    H(V, TUI_KEY_END, "Bottom", NULL),                                              \
+    H(V, TUI_KEY_HOME, "Top", "also g"),                                            \
+    H(V, TUI_KEY_END, "Bottom", "also G"),                                         \
     H(V, 'r', "Reply", NULL),                                                       \
     H(V, 'A', "Reply-all", NULL),                                                   \
     H(V, 'F', "Forward", NULL),                                                     \
@@ -101,7 +101,7 @@
     M(V, "Save all attachments", "to a directory, asked for", EA_SAVE_ALL),         \
     H(V, '?', "Help", NULL),                                                        \
     H(V, ':', "Actions", "the menu of everything that changes state"),              \
-    H(V, 'q', "Back", "to the list"),                                               \
+    H(V, 'q', "Back", "to the list (also h, Left, Backspace)"),                     \
     H(V, TUI_KEY_ESC, "Back", "to the list"),                                       \
     H(V, TUI_KC_QUIT, "Quit", NULL)
 

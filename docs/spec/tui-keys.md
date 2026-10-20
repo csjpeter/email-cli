@@ -46,6 +46,47 @@ without attachments said nothing).  Already right: `Esc` and `Backspace` back,
 arrows, `Enter`, the save and cancel paths, the file name sanitising, the
 count in the status line.
 
+## Message reader, IMAP account (EMAIL-146)
+
+`Enter` on a message of the list opens it; an empty folder has no message, so
+there is no reader with 0 items (`test_lk_empty_folder`).  At 80x24 the header
+block is rows 0-8, the body rows 9-22 (14 lines), the status line row 23; the
+status line ends with `[page/pages]`, the last page being the last 14 lines
+(not a page that is mostly blank).  The status hints are cut by priority at 80
+columns (`r`, `F`, `*`, `v` are not shown; the keys work).  The help (`?`) is
+made from the key table views `read-imap` / `read-gmail`
+(`libemail/src/core/key_table.c`).  Tests are in `tests/pty/test_pty_views.c`,
+named `test_rk_*` (80x24; the single 25-line mock message is two pages, with
+`MOCK_IMAP_COUNT=N` the body is one line).  The mock serves one connection at
+a time, so a test that needs a quit or a server action starts a fresh session.
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| `Down`, `j` / `Up`, `k` | `j/k scroll` | one line, stops at the top and at the last full page | `test_rk_scroll` |
+| `PgDn` / `PgUp` | help: Page down / up | one page, never past the last full page | `test_rk_scroll` |
+| `Home`, `g` / `End`, `G` | help: Top / Bottom | first line / last full page, `[1/2]` / `[2/2]` | `test_rk_scroll` |
+| any scroll key, message of one page | | changes nothing, `[1/1]` | `test_rk_short_message` (1 item) |
+| `/` | `/ search` | prompt `/text_` on the status line; `Enter` goes to the first match, `Esc` cancels, `Backspace` edits, a miss says `No match: text`, letters are text | `test_rk_search` |
+| `n` / `N` | help: next / previous match | the search wraps round at the ends; nothing before a search | `test_rk_search` |
+| `ctrl-c` in the prompt | | quits at once | `test_rk_search` |
+| `*` `+` `-` `!` | `* star` ... | act at once and say so (`Starred`, `Marked as read`...); a second press undoes; `Already read` / `Already unread` | `test_rk_state_keys` |
+| `v` | `v rendered` | toggles rendered / raw source, back to the top | `test_rk_state_keys` |
+| `:` | help | the actions menu, `Esc` closes it | `test_rk_state_keys` |
+| `?` | help | overlay; `Esc` or `q` close it, other keys do nothing | `test_rk_state_keys` |
+| `d`, `Delete` | `d delete` | asks naming the message, No is the default (`Enter`, `Esc`, `n`: `Not deleted`); `y` moves it to the Trash and returns to the list | `test_rk_delete` |
+| `r` / `A` / `F` | `r reply` ... | reply / reply-all / forward dialog for this message, back to the list afterwards | `test_rk_reply_forward` |
+| `a` | `a save(n)` | two or more attachments: the picker (EMAIL-147); none: `No attachments` | `test_rk_attachments` |
+| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q/BS back` | back to the list, cursor kept | `test_rk_back_keys` |
+| `ctrl-c` | help: Quit | the program quits at once | `test_rk_ctrl_c` |
+| any other key | | changes nothing, shows nothing | `test_rk_unbound_keys` |
+
+Findings of the study, fixed with EMAIL-146 (no separate tickets): `g` / `G`
+did nothing; `h` and `Left` did not go back (the lists do); `ctrl-c` in the
+`/` prompt did nothing; `PgDn` jumped past the last full page (2 of 14 rows on
+a blank screen); `End` left the indicator at `[1/2]`; `j` / `Down` scrolled
+until the last line stood alone.  Already right: the other keys of the table
+above.  Not changed: the help overlay does not list `Backspace`, `Left`, `h`.
+
 ## Message list, IMAP account (EMAIL-143)
 
 The list opens with `Enter` on a folder of the folder browser.  The table has
@@ -422,3 +463,27 @@ the first cut off at 80 columns, `compose-dialog.md` said eight rows and a
 `Tab` that moves on.  Open: EMAIL-222 (a cancelled dialog still waits for a
 key).  Already right: the field cycle, drop-down keys, the guards, the discard
 question, line editing, the resize.
+
+## Rule actions form: add step 2/2 and the rule edit (EMAIL-149)
+
+Reached with `q` in the condition editor, for a new rule (`a` in the rules list)
+or for the edit of a rule (`e` in the rule detail; the fields are prefilled).
+Nine one-line fields, one after another: `Name`, `add-label [1..3]`,
+`rm-label [1..3]`, `then-move-folder`, `then-forward-to`.  Tested at 80x24
+against the mock server (`tests/pty/test_pty_rules_keys.c`).
+
+| Key | Label | Behaviour | Test |
+|---|---|---|---|
+| printable keys, `Backspace`, `Left`, `Right`, `Home`, `End` | | edit the field in the input line | `test_rk_form_field_keys`, `test_rk_form_layout_and_edit` |
+| `Enter` | `Enter next field` | keeps the field, goes to the next; after the ninth asks `Save? (y/N)` | `test_rk_actions_form`, `test_rk_form_layout_and_edit` |
+| `Esc` | `Esc cancel` | in any field: cancels the rule, nothing is written; back to the list (add) or the detail (edit) | `test_rk_actions_form`, `test_rk_form_esc_and_save_keys` |
+| `ctrl-c` | | quits at once with status 0, also at `Save?` | `test_rk_actions_form` |
+| `Up`, `Down`, `Tab`, `PgUp`, `PgDn`, `F1` | | change nothing; the form has no way back to an earlier field | `test_rk_form_field_keys` |
+| `y`, `Y` at `Save?` | | saves the rule; an edit returns to the detail | `test_rk_form_layout_and_edit` |
+| any other key at `Save?` (`n`, `N`, `Esc`, `Enter`, ...) | | No: nothing is saved | `test_rk_form_esc_and_save_keys` |
+| any key at `Rule name is required` | | returns to the list, nothing is saved | `test_rk_form_name_required_and_resize` |
+
+A resize keeps the form on screen (`test_rk_form_name_required_and_resize`).
+Findings of the study: no defect that this ticket fixes; the form has no help
+overlay (`?` is a typed character in a field) and no step back to an earlier
+field, which the status line (`Enter next field`, `Esc cancel`) states.

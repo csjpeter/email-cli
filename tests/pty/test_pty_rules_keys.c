@@ -742,6 +742,125 @@ static void test_rk_actions_form(void) {
     pty_close(s);
 }
 
+/* The step-2 form of a new rule (name given) or of the edit of R01. */
+static PtySession *at_form(int edit) {
+    PtySession *s = at_conditions(edit ? 1 : 0, edit);
+    if (!s) return NULL;
+    if (!edit) {
+        press(s, "a");
+        pty_wait_for(s, "new:", WAIT_MS);
+        pty_send_str(s, "from:*@new.example.org");
+        press(s, "Enter");
+    }
+    press(s, "q");
+    if (pty_wait_for(s, "step 2/2: actions", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    pty_settle(s, SETTLE_MS);
+    return s;
+}
+
+/** The form's layout, the prefilled edit, and keeping every field with Enter. */
+static void test_rk_form_layout_and_edit(void) {
+    PtySession *s = at_form(0);
+    ASSERT(s != NULL, "form: opens");
+    CHECK(s, pty_screen_contains(s, "Add new rule for testuser") && pty_screen_contains(s, "Name:")
+             && pty_screen_contains(s, "add-label [1]:") && pty_screen_contains(s, "rm-label  [3]:")
+             && pty_screen_contains(s, "then-move-folder:") && pty_screen_contains(s, "then-forward-to:"),
+          "the add form lists the nine fields");
+    pty_close(s);
+
+    s = at_form(1);
+    ASSERT(s != NULL, "form edit: opens");
+    CHECK(s, pty_screen_contains(s, "Edit rule for testuser") && pty_screen_contains(s, "Name:             R01")
+             && pty_screen_contains(s, "add-label [1]:    L01"), "the edit form is prefilled");
+    for (int i = 0; i < 9; i++) press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "Save? (y/N)", WAIT_MS) == 0, "Enter through all fields asks to save");
+    press(s, "y");
+    CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 && rules_in_file() == 1 && file_has("[rule \"R01\"]")
+             && file_has("then-add-label    = L01") && file_has("two"), "the unchanged edit keeps the rule");
+    pty_close(s);
+
+    s = at_form(1);
+    ASSERT(s != NULL, "form edit text: opens");
+    press(s, "Enter");                                  /* name kept */
+    pty_send_str(s, "Extra");                           /* add-label [1]: L01 + Extra */
+    press(s, "BS");
+    press(s, "BS");
+    for (int i = 0; i < 8; i++) press(s, "Enter");
+    pty_wait_for(s, "Save? (y/N)", WAIT_MS);
+    press(s, "Y");
+    CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 && file_has("then-add-label    = L01Ext"),
+          "typing and Backspace edit a field, Y saves");
+    pty_close(s);
+}
+
+/** Esc in any field cancels without a change; Save? takes only y/Y as yes. */
+static void test_rk_form_esc_and_save_keys(void) {
+    for (int field = 0; field < 9; field += 4) {
+        PtySession *s = at_form(1);
+        ASSERT(s != NULL, "form esc: opens");
+        for (int i = 0; i < field; i++) press(s, "Enter");
+        pty_send_str(s, "ZZZ");
+        press(s, "Esc");
+        CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 || pty_wait_for(s, "(1 rule)", WAIT_MS) == 0,
+              "Esc in field %d leaves the form", field + 1);
+        CHECK(s, !file_has("ZZZ") && rules_in_file() == 1, "Esc in field %d changes nothing", field + 1);
+        pty_close(s);
+    }
+    const char *no_keys[] = { "n", "N", "Esc", "Enter", "x", " ", NULL };
+    for (int i = 0; no_keys[i]; i++) {
+        PtySession *s = at_form(1);
+        ASSERT(s != NULL, "form save keys: opens");
+        press(s, "Enter");
+        pty_send_str(s, "Q");
+        for (int k = 0; k < 8; k++) press(s, "Enter");
+        pty_wait_for(s, "Save? (y/N)", WAIT_MS);
+        press(s, no_keys[i]);
+        CHECK(s, !pty_screen_contains(s, "Save? (y/N)"), "Save? answered with %s closes", no_keys[i]);
+        CHECK(s, !file_has("QL01") && rules_in_file() == 1, "Save? %s is a No", no_keys[i]);
+        pty_close(s);
+    }
+}
+
+/** Keys inside a field: Up, Down, Tab do not move between fields or leave. */
+static void test_rk_form_field_keys(void) {
+    PtySession *s = at_form(0);
+    ASSERT(s != NULL, "form keys: opens");
+    pty_send_str(s, "Nm");
+    const char *keys[] = { "Up", "Down", "Tab", "PgUp", "PgDn", "F1", NULL };
+    for (int i = 0; keys[i]; i++) {
+        press(s, keys[i]);
+        CHECK(s, pty_screen_contains(s, "step 2/2: actions") && pty_screen_contains(s, "Name:             Nm"),
+              "form: %s stays in the name field", keys[i]);
+    }
+    press(s, "Left"); press(s, "Left"); pty_send_str(s, "A"); press(s, "End"); pty_send_str(s, "Z");
+    press(s, "Enter");
+    CHECK(s, pty_screen_contains(s, "Name:             ANmZ"), "Left, End and typing edit the field");
+    pty_close(s);
+}
+
+/** An empty name is refused; any key then returns, nothing is saved. */
+static void test_rk_form_name_required_and_resize(void) {
+    PtySession *s = at_form(0);
+    ASSERT(s != NULL, "form resize: opens");
+    pty_resize(s, 100, 30);
+    pty_settle(s, 600);
+    CHECK(s, pty_screen_contains(s, "step 2/2: actions") && pty_screen_contains(s, "Name:"),
+          "a resize keeps the form");
+    pty_close(s);
+
+    const char *any[] = { "Esc", "Enter", "q", NULL };
+    for (int i = 0; any[i]; i++) {
+        s = at_form(0);
+        ASSERT(s != NULL, "form name: opens");
+        for (int k = 0; k < 9; k++) press(s, "Enter");
+        CHECK(s, pty_wait_for(s, "Rule name is required", WAIT_MS) == 0, "empty name is refused");
+        press(s, any[i]);
+        CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0 && rules_in_file() == 0,
+              "%s after the refusal returns to the list", any[i]);
+        pty_close(s);
+    }
+}
+
 /** The editor redraws at once on a resize, the status line on the last row. */
 static void test_rk_resize(void) {
     PtySession *s = at_rules(3);
@@ -789,6 +908,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_rk_cond_leave_keys);
     RUN_TEST(test_rk_cond_help_and_unbound);
     RUN_TEST(test_rk_actions_form);
+    RUN_TEST(test_rk_form_layout_and_edit);
+    RUN_TEST(test_rk_form_esc_and_save_keys);
+    RUN_TEST(test_rk_form_field_keys);
+    RUN_TEST(test_rk_form_name_required_and_resize);
     RUN_TEST(test_rk_resize);
 
     if (g_mock_pid > 0) { kill(g_mock_pid, SIGKILL); waitpid(g_mock_pid, NULL, 0); }

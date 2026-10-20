@@ -1134,7 +1134,10 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
         printf("\033[0m");                  /* close any open ANSI from body */
         fflush(stdout);
 
-        int cur_page = cur_line / rows_avail + 1;
+        /* At the bottom of the message it is the last page, wherever the
+         * lines of the pages fall. */
+        int cur_page = (body_vrows > rows_avail && cur_line >= body_vrows - rows_avail)
+                           ? total_pages : cur_line / rows_avail + 1;
 
         /* One status line: a message replaces the hints until the next key. */
         {
@@ -1182,8 +1185,11 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
             goto show_int_done;
         case TERM_KEY_NEXT_PAGE:
         {
+            /* One page, but never past the last full page: the last rows
+             * of the message are not shown alone on an empty screen. */
+            int last_top = body_vrows > rows_avail ? body_vrows - rows_avail : 0;
             int next = cur_line + rows_avail;
-            if (next < body_vrows) cur_line = next;
+            if (cur_line < last_top) cur_line = next < last_top ? next : last_top;
         }
             break;
         case TERM_KEY_ENTER:
@@ -1193,7 +1199,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
             if (cur_line < 0) cur_line = 0;
             break;
         case TERM_KEY_NEXT_LINE:
-            if (cur_line < body_vrows - 1) cur_line++;
+            if (cur_line < body_vrows - rows_avail) cur_line++;   /* stops at the bottom, as End */
             break;
         case TERM_KEY_PREV_LINE:
             if (cur_line > 0) cur_line--;
@@ -1239,11 +1245,17 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                     break;
                 }
             }
-            if (ch == 'q') {
-                result = 0;      /* back to list */
+            if (ch == 'q' || ch == 'h' || key == TERM_KEY_LEFT) {
+                result = 0;      /* back to list: Left and h as in the lists (EMAIL-146) */
                 goto show_int_done;
+            } else if (ch == 'g' && key == TERM_KEY_IGNORE) {
+                cur_line = 0;    /* as Home (EMAIL-146) */
+                break;
+            } else if (ch == 'G' && key == TERM_KEY_IGNORE) {
+                cur_line = body_vrows > rows_avail ? body_vrows - rows_avail : 0;
+                break;           /* as End */
             } else if (ch == 'j') {
-                if (cur_line < body_vrows - 1) cur_line++;
+                if (cur_line < body_vrows - rows_avail) cur_line++;   /* stops at the bottom, as End */
                 break;
             } else if (ch == 'k') {
                 if (cur_line > 0) cur_line--;
@@ -1260,6 +1272,10 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 int srch_cancel = 0;
                 for (;;) {
                     TermKey sk = terminal_read_key();
+                    if (sk == TERM_KEY_QUIT) {        /* ctrl-c quits at once (EMAIL-146) */
+                        result = 1;
+                        goto show_int_done;
+                    }
                     if (sk == TERM_KEY_ESC) { srch_cancel = 1; break; }
                     if (sk == TERM_KEY_ENTER) break;
                     if (sk == TERM_KEY_BACK) {

@@ -9,6 +9,7 @@
 #include "key_table.h"
 #include "status_line.h"
 #include <tuikit/text.h>
+#include <tuikit/tree.h>
 #include <tuikit/dialog.h>
 #include "path_complete.h"
 #include "mail_account.h"
@@ -1884,6 +1885,84 @@ static int cmp_str(const void *a, const void *b) {
     return strcmp(*(const char **)a, *(const char **)b);
 }
 
+/* Folder order with the hierarchy separator below every other character, so
+ * that a folder is followed by its whole subtree (pre-order) whatever the
+ * names around it are: "A", "A.b", "A-x" and not "A", "A-x", "A.b".  The tree
+ * widget needs this order (EMAIL-200). */
+static char g_fb_sep = '.';
+static int cmp_folder(const void *a, const void *b) {
+    const unsigned char *x = *(const unsigned char *const *)a;
+    const unsigned char *y = *(const unsigned char *const *)b;
+    for (;; x++, y++) {
+        unsigned cx = *x == (unsigned char)g_fb_sep ? 1u : *x;
+        unsigned cy = *y == (unsigned char)g_fb_sep ? 1u : *y;
+        if (cx != cy) return (int)cx - (int)cy;
+        if (cx == 0) return 0;
+    }
+}
+
+/* The rows of the folder tree for tui_tree: one per folder, in the sorted
+ * order, with the depth (existing ancestors) and the number of children
+ * (rows whose nearest existing ancestor it is).  The ids point into names. */
+/* The branches left open, kept for the next time the browser opens in this
+ * run (coming back from a message list): the folder names, and the account
+ * they belong to.  A new run starts with every branch closed (EMAIL-200). */
+static char  *g_fb_open_acct;
+static char **g_fb_open_ids;
+static int    g_fb_open_n;
+
+static void fb_open_forget(void) {
+    for (int i = 0; i < g_fb_open_n; i++) free(g_fb_open_ids[i]);
+    free(g_fb_open_ids);
+    free(g_fb_open_acct);
+    g_fb_open_ids = NULL;
+    g_fb_open_acct = NULL;
+    g_fb_open_n = 0;
+}
+
+static void fb_open_save(const tui_tree *t, char **names, int count, const char *acct) {
+    fb_open_forget();
+    g_fb_open_acct = strdup(acct);
+    g_fb_open_ids = calloc((size_t)(count > 0 ? count : 1), sizeof *g_fb_open_ids);
+    if (!g_fb_open_acct || !g_fb_open_ids) { fb_open_forget(); return; }
+    for (int i = 0; i < count; i++)
+        if (tui_tree_is_open(t, i) && (g_fb_open_ids[g_fb_open_n] = strdup(names[i])))
+            g_fb_open_n++;
+}
+
+static void fb_open_restore(tui_tree *t, char **names, int count, const char *acct) {
+    if (!g_fb_open_acct || strcmp(g_fb_open_acct, acct) != 0) return;
+    for (int k = 0; k < g_fb_open_n; k++)
+        for (int i = 0; i < count; i++)
+            if (strcmp(names[i], g_fb_open_ids[k]) == 0) {
+                tui_tree_set_open(t, i, 1);
+                break;
+            }
+}
+
+static tui_treerow *fb_make_rows(char **names, int count, char sep) {
+    tui_treerow *rows = calloc((size_t)(count > 0 ? count : 1), sizeof *rows);
+    int *parent = malloc((size_t)(count > 0 ? count : 1) * sizeof *parent);
+    if (!rows || !parent) { free(rows); free(parent); return NULL; }
+    for (int i = 0; i < count; i++) {
+        rows[i].id = names[i];
+        parent[i] = -1;
+        for (const char *p = names[i]; *p; p++) {
+            if (*p != sep) continue;
+            size_t len = (size_t)(p - names[i]);
+            for (int j = i - 1; j >= 0; j--)
+                if (strlen(names[j]) == len && strncmp(names[j], names[i], len) == 0) {
+                    parent[i] = j;
+                    rows[i].depth++;
+                    break;
+                }
+        }
+        if (parent[i] >= 0) rows[parent[i]].children++;
+    }
+    free(parent);
+    return rows;
+}
+
 /* ── Folder tree renderer ────────────────────────────────────────────── */
 
 /**
@@ -2042,11 +2121,13 @@ typedef struct {
     int                  vf[FB_PREFIX]; /* counts of the virtual rows */
     int                  selected;    /* the cursor row: never dimmed */
     const char          *prefix;      /* flat: the folder being looked into, or NULL */
+    const tui_tree      *tw;          /* tree: which branches are open */
+    const tui_treerow   *trows;       /* tree: the depth of each folder */
 } FolderModel;
 
 /* Index into names[] of table row @p i (>= FB_PREFIX). */
 static int fm_name_index(const FolderModel *m, int i) {
-    return m->tree ? i - FB_PREFIX : m->vis[i - FB_PREFIX];
+    return m->vis[i - FB_PREFIX];
 }
 
 /* Totals of a real folder row: own counts, or the subtree's in the flat view
@@ -2124,22 +2205,11 @@ static void folders_cell(void *ctx, int i, int col, tui_table_cell *c) {
     case 3: fmt_thou(buf, sizeof(buf), msgs);    break;
     default:
         if (m->tree) {
-            /* Tree glyphs are a prefix that is never cut. */
+            /* The marker ("+ ", "- " or blanks) and the indent are a prefix
+             * that is never cut (EMAIL-200). */
             char pre[512];
-            int pos = 0, depth = 0;
-            for (const char *p = m->names[ni]; *p; p++)
-                if (*p == m->sep) depth++;
-            for (int lv = 0; lv < depth; lv++) {
-                const char *br = ancestor_is_last(m->names, m->count, ni, lv, m->sep)
-                                 ? "    " : "\u2502   ";
-                int bl = (int)strlen(br);
-                if (pos + bl < (int)sizeof(pre) - 1) { memcpy(pre + pos, br, (size_t)bl); pos += bl; }
-            }
-            const char *cn = is_last_sibling(m->names, m->count, ni, m->sep)
-                             ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ";
-            int cl = (int)strlen(cn);
-            if (pos + cl < (int)sizeof(pre) - 1) { memcpy(pre + pos, cn, (size_t)cl); pos += cl; }
-            pre[pos] = '\0';
+            snprintf(pre, sizeof pre, "%s%*s", tui_tree_marker(m->tw, ni),
+                     2 * m->trows[ni].depth, "");
             tui_table_cell_prefix(c, pre, TUI_STYLE_DEFAULT);
             tui_table_cell_put(c, comp, TUI_STYLE_DEFAULT);
         } else {
@@ -4350,7 +4420,7 @@ static const char *fb_row_name(int cursor, int tree_mode, char **folders, int co
     default: break;
     }
     if (cursor < FB_PREFIX) return NULL;
-    if (tree_mode) return cursor - FB_PREFIX < count ? folders[cursor - FB_PREFIX] : NULL;
+    (void)tree_mode; (void)count;
     return cursor - FB_PREFIX < vcount ? folders[vis[cursor - FB_PREFIX]] : NULL;
 }
 
@@ -4371,17 +4441,28 @@ char *email_service_list_folders_interactive(const Config *cfg,
     }
     /* A list that was read and is empty opens the browser with the virtual
      * rows alone; the menu creates a folder (EMAIL-193). */
-    if (count > 0) qsort(folders, (size_t)count, sizeof(char *), cmp_str);
+    g_fb_sep = sep;
+    if (count > 0) qsort(folders, (size_t)count, sizeof(char *), cmp_folder);
 
     FolderStatus *statuses = fetch_all_folder_statuses(cfg, folders, count);
 
+    char fb_acct[1024];
+    snprintf(fb_acct, sizeof fb_acct, "%s@%s", cfg->user ? cfg->user : "",
+             cfg->host ? cfg->host : "");
     int *vis = malloc((size_t)(count > 0 ? count : 1) * sizeof(int));
-    if (!vis) {
+    tui_treerow *trows = fb_make_rows(folders, count, sep);
+    tui_tree ftree;
+    tui_tree_init(&ftree);
+    if (!vis || !trows || tui_tree_set_rows(&ftree, trows, count) != 0) {
         free(statuses);
+        free(vis);
+        free(trows);
+        tui_tree_free(&ftree);
         for (int i = 0; i < count; i++) free(folders[i]);
         free(folders);
         return NULL;
     }
+    fb_open_restore(&ftree, folders, count, fb_acct);
 
     /* Virtual prefix rows: [0] "Tags / Flags" header, [1] Unread,
      *                      [2] Flagged,              [3] "Folders" header */
@@ -4411,7 +4492,10 @@ char *email_service_list_folders_interactive(const Config *cfg,
         else if (tree_mode) {
             for (int i = 0; i < count; i++) {
                 if (strcasecmp(folders[i], current_folder) == 0) {
-                    cursor = VPREFIX + i; break;
+                    /* opens the branches above it: the cursor is never hidden */
+                    if (tui_tree_select_row(&ftree, i) == 0)
+                        cursor = VPREFIX + ftree.list.selected;
+                    break;
                 }
             }
         } else {
@@ -4445,7 +4529,10 @@ char *email_service_list_folders_interactive(const Config *cfg,
         /* Rebuild flat view on each iteration (alphabetical order) */
         int display_count;
         if (tree_mode) {
-            display_count = VPREFIX + count;
+            /* the visible rows: the closed branches hide their folders */
+            vcount = ftree.list.count;
+            for (int v = 0; v < vcount; v++) vis[v] = tui_tree_row_at(&ftree, v);
+            display_count = VPREFIX + vcount;
         } else {
             vcount = build_flat_view(folders, count, sep, current_prefix, vis);
             display_count = VPREFIX + vcount;
@@ -4470,7 +4557,8 @@ char *email_service_list_folders_interactive(const Config *cfg,
         FolderModel fmodel = { folders, count, sep, statuses, tree_mode, vis,
                                { 0, vf_unread, vf_flagged, vf_junk, vf_phishing,
                                  vf_answered, vf_forwarded, 0 }, cursor,
-                               tree_mode ? NULL : current_prefix };
+                               tree_mode ? NULL : current_prefix,
+                               tree_mode ? &ftree : NULL, trows };
         static const tui_table_col fcols[] = {
             { "Unread",  6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
             { "Flagged", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
@@ -4552,6 +4640,23 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 key = TERM_KEY_ENTER;
         }
 
+        if (tree_mode && !fdeferred && cursor >= VPREFIX && vcount > 0) {
+            /* Right and l open a branch, Left and h close it, or go to the
+             * parent; the tree widget decides (EMAIL-200).  Enter is not
+             * the widget's: it opens the folder. */
+            int pc = key == TERM_KEY_IGNORE ? terminal_last_printable() : 0;
+            tui_event tev = { 0 };
+            tev.type = TUI_EV_KEY;
+            if (key == TERM_KEY_RIGHT || pc == 'l')     tev.key = TUI_KEY_RIGHT;
+            else if (key == TERM_KEY_LEFT || pc == 'h') tev.key = TUI_KEY_LEFT;
+            if (tev.key) {
+                ftree.list.selected = cursor - VPREFIX;
+                tui_tree_handle(&ftree, &tev);
+                cursor = VPREFIX + ftree.list.selected;
+                continue;
+            }
+        }
+
         switch (key) {
         case TERM_KEY_QUIT:          /* ctrl-c: out at once, no go_up */
             goto folders_int_done;
@@ -4589,8 +4694,10 @@ char *email_service_list_folders_interactive(const Config *cfg,
             } else if (cursor == VP_HDR_FLAGS || cursor == VP_HDR_FOLD) {
                 break; /* header row — ignore */
             } else if (tree_mode) {
-                selected = strdup(folders[cursor - VPREFIX]);
-                goto folders_int_done;
+                if (cursor - VPREFIX < vcount) {
+                    selected = strdup(folders[vis[cursor - VPREFIX]]);
+                    goto folders_int_done;
+                }
             } else if (display_count > VPREFIX) {
                 int ri = cursor - VPREFIX;
                 int fi = vis[ri];
@@ -4653,15 +4760,22 @@ char *email_service_list_folders_interactive(const Config *cfg,
                  * deleting names the folder and asks, No being the default. */
                 const char *tt[EA_COUNT] = { NULL };
                 const char *at = NULL;
-                if (cursor >= VPREFIX) {
-                    if (tree_mode && cursor - VPREFIX < count)
-                        at = folders[cursor - VPREFIX];
-                    else if (!tree_mode && cursor - VPREFIX < vcount)
-                        at = folders[vis[cursor - VPREFIX]];
-                }
+                if (cursor >= VPREFIX && cursor - VPREFIX < vcount)
+                    at = folders[vis[cursor - VPREFIX]];
                 tt[EA_FOLDER_DELETE] = at ? at : "(no folder selected)";
                 fact = ekeys_menu(EKV_FOLDERS, tt);
                 if (fact == EA_FOLDER_VIEW) { do_toggle = 1; fact = EA_NONE; }
+                if (fact == EA_FOLDER_OPEN_ALL || fact == EA_FOLDER_CLOSE_ALL) {
+                    /* the tree's own calls; the cursor stays on its folder,
+                     * or moves to the nearest visible parent (EMAIL-200) */
+                    if (tree_mode && cursor >= VPREFIX && vcount > 0)
+                        ftree.list.selected = cursor - VPREFIX;
+                    if (fact == EA_FOLDER_OPEN_ALL) tui_tree_open_all(&ftree);
+                    else                            tui_tree_close_all(&ftree);
+                    if (tree_mode && cursor >= VPREFIX && vcount > 0)
+                        cursor = VPREFIX + ftree.list.selected;
+                    fact = EA_NONE;
+                }
                 if (fact == EA_FOLDER_DELETE && !at) {
                     snprintf(fmsg, sizeof(fmsg), "Select a folder to delete");
                     fact = EA_NONE;
@@ -4776,32 +4890,57 @@ char *email_service_list_folders_interactive(const Config *cfg,
 
     folders_reload: {
         /* A folder was created or deleted: read the list again (the cache
-         * was refreshed by the change) and the counters of every folder. */
-        free(statuses);
-        free(vis);
-        for (int i = 0; i < count; i++) free(folders[i]);
-        free(folders);
-        statuses = NULL;
-        vis = NULL;
-        count = 0;
-        folders = fetch_folder_list_ex(cfg, &count, &sep, &read_ok);
+         * was refreshed by the change) and the counters of every folder.
+         * The tree keeps its open branches by folder name; the old rows
+         * stay valid until it has the new ones. */
+        int ncount = 0;
+        char nsep = sep;
+        char **nfolders = fetch_folder_list_ex(cfg, &ncount, &nsep, &read_ok);
         if (!read_ok) {
+            free(nfolders);
+            free(statuses);
+            free(vis);
+            free(trows);
+            tui_tree_free(&ftree);
+            for (int i = 0; i < count; i++) free(folders[i]);
             free(folders);
             if (go_up) *go_up = -1;
             return NULL;
         }
-        if (count > 0) qsort(folders, (size_t)count, sizeof(char *), cmp_str);
-        statuses = fetch_all_folder_statuses(cfg, folders, count);
-        vis = malloc((size_t)(count > 0 ? count : 1) * sizeof(int));
-        if (!vis) {
+        g_fb_sep = nsep;
+        if (ncount > 0) qsort(nfolders, (size_t)ncount, sizeof(char *), cmp_folder);
+        tui_treerow *ntrows = fb_make_rows(nfolders, ncount, nsep);
+        int *nvis = malloc((size_t)(ncount > 0 ? ncount : 1) * sizeof(int));
+        if (!ntrows || !nvis || tui_tree_set_rows(&ftree, ntrows, ncount) != 0) {
+            free(ntrows);
+            free(nvis);
+            for (int i = 0; i < ncount; i++) free(nfolders[i]);
+            free(nfolders);
             free(statuses);
+            free(vis);
+            free(trows);
+            tui_tree_free(&ftree);
             for (int i = 0; i < count; i++) free(folders[i]);
             free(folders);
             return NULL;
         }
-        }
+        free(statuses);
+        free(vis);
+        free(trows);
+        for (int i = 0; i < count; i++) free(folders[i]);
+        free(folders);
+        folders = nfolders;
+        count = ncount;
+        sep = nsep;
+        trows = ntrows;
+        vis = nvis;
+        statuses = fetch_all_folder_statuses(cfg, folders, count);
+    }
     }
 folders_int_done:
+    fb_open_save(&ftree, folders, count, fb_acct);
+    tui_tree_free(&ftree);
+    free(trows);
     free(statuses);
     free(vis);
     for (int i = 0; i < count; i++) free(folders[i]);

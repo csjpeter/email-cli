@@ -1785,9 +1785,15 @@ void test_email_service(void) {
     {
         char *names[] = { (char *)"INBOX", (char *)"INBOX.Sent", (char *)"Trash" };
         FolderStatus st[3] = { { 5, 2, 1 }, { 3, 0, 0 }, { 0, 0, 0 } };
-        int vis[3] = { 0, 2, 0 };
+        int vis[3] = { 0, 1, 2 };
+        tui_treerow *trows = fb_make_rows(names, 3, '.');
+        tui_tree ftw;
+        tui_tree_init(&ftw);
+        ASSERT(trows != NULL && tui_tree_set_rows(&ftw, trows, 3) == 0,
+               "folder model: tree rows");
+        tui_tree_set_open(&ftw, 0, 1);
         FolderModel fm = { names, 3, '.', st, 1, vis,
-                           { 0, 4, 0, 0, 0, 0, 0, 0 }, FB_PREFIX, NULL };
+                           { 0, 4, 0, 0, 0, 0, 0, 0 }, FB_PREFIX, NULL, &ftw, trows };
         tui_table_col cols[4] = {
             { "Unread", 6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 }, { "Flagged", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
             { "Folder", 20, 1, TUI_ALIGN_LEFT, 0, 0, 0 }, { "Total", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
@@ -1806,8 +1812,13 @@ void test_email_service(void) {
         ASSERT(strstr(row, "Flagged") && strstr(row, "0"),
                "folder model: a virtual row shows a zero count");
         tui_table_format_row(&t, 0, FB_PREFIX + 1, row, sizeof(row));
-        ASSERT(strstr(row, "Sent") && strstr(row, "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80"),
-               "folder model: tree row with its connector");
+        ASSERT(strstr(row, "Sent") != NULL && strstr(row, "\xe2\x94\x94") == NULL,
+               "folder model: tree row, no box-drawing connector");
+        tui_table_format_row(&t, 0, FB_PREFIX + 0, row, sizeof(row));
+        ASSERT(strstr(row, "- INBOX") != NULL, "folder model: open branch marker");
+        tui_tree_set_open(&ftw, 0, 0);
+        tui_table_format_row(&t, 0, FB_PREFIX + 0, row, sizeof(row));
+        ASSERT(strstr(row, "+ INBOX") != NULL, "folder model: closed branch marker");
         fm.tree = 0;
         tui_table_format_row(&t, 0, FB_PREFIX + 0, row, sizeof(row));
         ASSERT(strstr(row, "INBOX/") != NULL,
@@ -1821,6 +1832,8 @@ void test_email_service(void) {
                "folder model: the folder being looked into has no slash");
         ASSERT(strstr(row, "8") == NULL && strstr(row, "5") != NULL,
                "folder model: the folder being looked into shows its own total");
+        tui_tree_free(&ftw);
+        free(trows);
     }
 
     /* ── message list table model (EMAIL-79) ─────────────────────────── */

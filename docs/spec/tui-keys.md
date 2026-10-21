@@ -240,7 +240,7 @@ Header `Email Accounts (N)`; with no account the table says
 ## Folder browser, IMAP account, tree and flat (EMAIL-142)
 
 Opens with `Enter` on an account.  Title `Folders - USER  (N)` (N counts the
-table rows: eight virtual rows plus the folders; in the flat view the rows of
+table rows: eight virtual rows plus the visible folders; in the flat view the rows of
 the level), the table has `rows - 5` data rows (19 at 80x24), the status line
 ends with `[cursor/total]`.  The cursor starts on `Unread` (or on the folder
 last left); the two section headings are never selectable, and the `Tags /
@@ -257,14 +257,14 @@ screens are `folders_help` and `folders_search` in `test_pty_screens.c`.
 | `PgDn` / `PgUp` | `PgDn/PgUp page` (dropped first at 80 columns) | one page (19 rows), clamped; on the top row the `Tags / Flags` heading is shown | `test_fk_navigation` |
 | `Home`, `g` / `End`, `G` | help: First row / Last row | first selectable row (`Unread`) / last row | `test_fk_navigation`, `test_fk_flat` |
 | `Enter` | `Enter open/select` | tree: the folder or virtual list under the cursor; flat: a folder with subfolders steps into it (its own row first), a leaf opens; `Esc`, `q`, `Backspace` in the list return to the same row | `test_fk_enter`, `test_fk_flat` |
-| `l`, `Right` | help: Open | flat view: as `Enter` | `test_fk_flat` |
-| `h`, `Left` | help: Up | flat view: as `Esc` | `test_fk_flat` |
+| `l`, `Right` | help: Open branch | tree: opens the folder's subfolders (on an open row: moves to its first child; on a leaf: nothing); flat view: as `Enter` | `test_fk_tree_open_close`, `test_fk_flat` |
+| `h`, `Left` | help: Close branch | tree: closes an open row, else moves to the parent folder (nothing at the top level); flat view: as `Esc` | `test_fk_tree_open_close`, `test_fk_flat` |
 | `t` | `t flat` / `t tree` (the view it switches to) | switches tree / flat, kept in the stored preference; also in the `:` menu as `Tree / flat` | `test_fk_flat`, `test_fk_menu` |
 | `Esc`, `q`, `Backspace` | `Esc/q/BS back` (flat, inside a folder: `Esc/q/BS up`) | tree and flat root: back to the accounts; flat inside a folder: one level up | `test_fk_back_keys`, `test_fk_flat` |
 | `ctrl-c` | help: none (the help overlay does not take it) | the program quits at once, status 0 | `test_fk_ctrl_c`, `test_fk_search` |
 | `/` | `/ search` | prompt `Search [Subject]: _`; text (also `q j t`), `Backspace` deletes, `Tab` Subject/From/To/Body, `Enter` searches (empty: cancels), `Esc` cancels, `ctrl-c` quits; the status line shows `Enter search  Tab scope  Esc cancel`; a result returns to the row the search started from | `test_fk_search`, screen `folders_search` |
 | `c` | help: Compose | the new message dialog; the browser comes back on the same row (and flat level), also when it was reached from a message list | `test_fk_compose_keeps_row` |
-| `:` | `: actions` | menu: `Create a folder...`, `Delete the folder`, `Tree / flat` | `test_fk_menu`, `test_folder_create`, `test_folder_delete_asks` |
+| `:` | `: actions` | menu: `Create a folder...`, `Delete the folder`, `Open all folders`, `Close all folders`, `Tree / flat` | `test_fk_menu`, `test_fk_tree_open_close`, `test_folder_create`, `test_folder_delete_asks` |
 | `?` | `? help` | overlay `Folder browser shortcuts`; `Esc`, `q`, `Backspace` close it, other keys change nothing | `test_fk_help`, screen `folders_help` |
 | any other key | | changes nothing, shows nothing | `test_fk_unbound_keys` |
 
@@ -280,9 +280,15 @@ a failed connection), EMAIL-194 (the cursor was lost after `c`; from a list the
 browser did not come back at all), EMAIL-195 (the cursor was lost after a search
 result), EMAIL-196 (the `Tags / Flags` heading scrolled off), EMAIL-197 (`h`,
 `l`, `Left`, `Right` in the flat view), EMAIL-198 (`g`, `G`), EMAIL-199 (the help
-had no row for `t`) were fixed with EMAIL-142.  EMAIL-200 (the tree is open with no
-`+`/`-` markers and `l`/`h` do not open or close) waits for the libtuikit tree
-widget (TUI-60); until then `h`, `l`, `Left`, `Right` do nothing in the tree.
+had no row for `t`) were fixed with EMAIL-142.  EMAIL-200 (the tree was open with no
+`+`/`-` markers and `l`/`h` did not open or close) is fixed with the libtuikit
+tree widget (`tui_tree`, TUI-60): the tree is closed on opening, a row shows
+`+ ` (closed, has subfolders), `- ` (open) or two blanks (a leaf) first, each
+level is indented by two cells, and the open branches are kept by folder name
+over a reload (create or delete a folder).  The folders are sorted with the
+hierarchy separator below every other character so that a folder is followed by
+its whole subtree.  The key studies other than `test_fk_tree_open_close` open
+the branches first with the menu's `Open all folders` (`fk_open`).
 Already right: `Enter` on folders and virtual rows, `Esc`/`q`/`Backspace`
 back, `j k` and the arrows stopping at the ends, `PgUp`/`PgDn` by 19 rows,
 `Home`/`End`, `t` both ways with the hint following, the search editing keys,

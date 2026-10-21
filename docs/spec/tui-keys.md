@@ -415,8 +415,8 @@ and `A` do nothing there (`test_rk_list_zero_and_one`).
 | `Enter`, `e` | `Enter/e edit` | edit prompt of the condition; Esc keeps it | `test_rk_cond_edit_keys` |
 | `a` | `a add` | prompt for a new condition | `test_rk_cond_zero_and_one`, `test_rk_cond_edit_keys` |
 | `d` | `d delete` | removes the condition | `test_rk_cond_zero_and_one` |
-| `q` | `q confirm` | goes on to step 2/2 (EMAIL-221) | `test_rk_cond_leave_keys`, `test_rk_actions_form` |
-| `Esc`, `Backspace`, `Left`, `h` | `Esc cancel` | cancels the rule | `test_rk_cond_leave_keys` |
+| `Tab`, `Right` | `Tab next` | goes on to step 2/2 (EMAIL-221) | `test_rk_cond_leave_keys`, `test_rk_actions_form` |
+| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q cancel` | cancels the rule (asks first when there are conditions) | `test_rk_cond_leave_keys` |
 | `?` | `? help` | overlay (11 rows) | `test_rk_cond_help_and_unbound` |
 | `ctrl-c` | | quits at once with status 0, also in the prompts | `test_rk_cond_leave_keys` |
 | any other key | | changes nothing | `test_rk_cond_help_and_unbound` |

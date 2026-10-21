@@ -1769,8 +1769,8 @@ static void when_list_render(const WhenAtomList *wl, int vis_rows, const char *t
             { "Enter/e", "edit", SL_PRIO_HIGH },
             { "a", "add", SL_PRIO_HIGH },
             { "d", "delete", SL_PRIO_HIGH },
-            { "q", "confirm", SL_PRIO_KEEP },
-            { "Esc", "cancel", SL_PRIO_KEEP },
+            { "Tab", "next", SL_PRIO_KEEP },
+            { "Esc/q", "cancel", SL_PRIO_KEEP },
         };
         screen_bar(h, 6, "?", g_when_err[0] ? g_when_err : NULL);
     }
@@ -1821,7 +1821,7 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
 
         if (key == TERM_KEY_QUIT) terminal_request_quit();
         if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT || key == TERM_KEY_BACK ||
-            key == TERM_KEY_LEFT || ch == 'h') {
+            key == TERM_KEY_LEFT || ch == 'h' || ch == 'q') {
             /* A rule with conditions is not thrown away unasked (EMAIL-166). */
             if (wl.count > 0) {
                 int prow = terminal_rows();
@@ -1833,7 +1833,7 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
             when_list_join(&wl, buf, bufsz);
             return 0;
         }
-        if (ch == 'q') {
+        if (key == TERM_KEY_TAB || key == TERM_KEY_RIGHT) {
             when_list_join(&wl, buf, bufsz);
             return 1;
         }
@@ -1847,8 +1847,8 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                 { "Enter / e",    "Edit the condition"              },
                 { "a",            "Add a condition"                 },
                 { "d",            "Delete the condition"            },
-                { "q",            "Done: go on to the actions"      },
-                { "Esc / BS / h", "Cancel the rule"                 },
+                { "Tab / Right",  "Done: go on to the actions"      },
+                { "Esc / q / BS", "Cancel the rule"                 },
                 { "?",            "Show this help"                  },
             };
             email_service_help_popup(EKV_CONDITIONS, "Conditions shortcuts", help, 11);

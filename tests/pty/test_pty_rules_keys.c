@@ -631,7 +631,15 @@ static void test_rk_cond_leave_keys(void) {
     PtySession *s = at_conditions(2, 1);
     ASSERT(s != NULL, "conditions q: opens");
     press(s, "Esc");
-    CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0, "Esc from the edit returns to the detail");
+    CHECK(s, pty_wait_for(s, "Discard the rule? (y/N)", WAIT_MS) == 0
+             && pty_screen_contains(s, "(step 1/2)"), "Esc with conditions asks before discarding");
+    press(s, "n");
+    CHECK(s, pty_screen_contains(s, "(step 1/2)") && cursor_has(s, "1. from:"), "n keeps the rule form open");
+    press(s, "BS");
+    pty_wait_for(s, "Discard the rule? (y/N)", WAIT_MS);
+    press(s, "y");
+    CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 && rules_in_file() == 2,
+          "y discards: back at the detail, rules file unchanged");
     press(s, "e");
     pty_wait_for(s, "conditions", WAIT_MS);
     press(s, "q");

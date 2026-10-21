@@ -2002,7 +2002,7 @@ static const char *const exp_body_editor[] = {
     "",
     "",
     "",
-    " Esc save and continue  Ctrl-S save",
+    " Esc save and continue  Ctrl-S save  F1 help",
     NULL
 };
 static const char *const sty_body_editor[] = {
@@ -2058,7 +2058,7 @@ static const char *const exp_body_editor_typed[] = {
     "",
     "",
     "",
-    " Esc save and continue  Ctrl-S save",
+    " Esc save and continue  Ctrl-S save  F1 help",
     NULL
 };
 static const char *const sty_body_editor_typed[] = {
@@ -7140,7 +7140,7 @@ static const char *const exp_w80_body_editor[] = {
     "",
     "",
     "",
-    " Esc save and continue  Ctrl-S save",
+    " Esc save and continue  Ctrl-S save  F1 help",
     NULL
 };
 static const char *const sty_w80_body_editor[] = {
@@ -7641,7 +7641,7 @@ static const char *const exp_w140_body_editor[] = {
     "",
     "",
     "",
-    " Esc save and continue  Ctrl-S save",
+    " Esc save and continue  Ctrl-S save  F1 help",
     NULL
 };
 static const char *const sty_w140_body_editor[] = {

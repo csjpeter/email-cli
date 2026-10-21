@@ -86,8 +86,10 @@ After the dialog is confirmed the body is written in the built-in editor
 (`libemail/src/core/body_editor.c`, libtuikit `tui_textedit`); no external
 editor or temporary file is involved.  The headers stay in the dialog (and are
 edited again with `e` in the review screen).  The editor's title bar shows
-To and Subject; the bottom line is the status line: `Esc save and continue  Ctrl-S save`, a note (`saved`, `autosaved`) in their place for a moment.
+To and Subject; the bottom line is the status line: `Esc save and continue  Ctrl-S save  F1 help`, a note (`saved`, `autosaved`) in their place for a moment.
 
+* F1 or Ctrl-G open a help overlay of the editor's keys.  To leave without
+  keeping the draft: Esc, then `q` and `y` in the review screen.
 * Esc leaves the editor and saves; Ctrl-S saves and stays; a changed text is
   saved after `BODY_EDITOR_AUTOSAVE_MS` (3 s) without input.  Nothing is asked
   when leaving.

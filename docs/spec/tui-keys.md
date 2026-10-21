@@ -497,9 +497,10 @@ the mock servers (`tests/pty/test_pty_review_keys.c`, suite `review-keys`).
 ### Body editor
 
 Title bar `Message body - To: ... Subject: ...`, status line `Esc save and
-continue  Ctrl-S save`.  The editor is libtuikit's `tui_textedit`; a letter is
+continue  Ctrl-S save  F1 help`.  The editor is libtuikit's `tui_textedit`; a letter is
 text here, so there is no `?` help, no `:` menu and no `q`.  Below 80x24 only
 `Terminal too small` is shown and nothing is edited, `Esc` still leaves.
+Leaving without keeping the draft: `Esc` to the review screen, then `q` and `y`.
 
 | Key | Label | Behaviour | Test |
 |---|---|---|---|
@@ -508,6 +509,7 @@ text here, so there is no `?` help, no `:` menu and no `q`.  Below 80x24 only
 | `PgUp` / `PgDn` | | one page: the cursor goes to the top / bottom of the view, the next press scrolls | `test_ed_many_lines_paging` |
 | `Esc` | `Esc save and continue` | saves the draft and goes to the review screen; with an empty body too | `test_ed_esc_saves_and_leaves`, `test_ed_empty_body_esc` |
 | `Ctrl-S` | `Ctrl-S save` | saves the draft, stays; the status line says `saved` until the next key | `test_ed_ctrl_s_note` |
+| `F1`, `Ctrl-G` | `F1 help` | overlay `Body editor shortcuts` (the editor's keys; `h` is text here); `Esc`, `q`, `Backspace` close only the overlay | `test_ed_help_overlay` |
 | `ctrl-c` | | saves the draft and quits the program at once | `test_ed_ctrl_c` |
 | idle with unsaved changes | | autosave, status line `autosaved` | `test_body_editor_autosave_while_typing` |
 

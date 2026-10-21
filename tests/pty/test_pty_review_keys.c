@@ -192,6 +192,7 @@ static void test_ed_help_overlay(void) {
     pty_send_key(s, PTY_KEY_F1);
     ASSERT_WAIT_FOR(s, "Body editor shortcuts", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Save and stay");
+    ASSERT_SCREEN_CONTAINS(s, "The body of the message being composed");   /* EMAIL-181 */
     ASSERT_SCREEN_CONTAINS(s, "Esc, then q in the review");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, 200);
@@ -508,6 +509,7 @@ static void test_rv_help(void) {
     ASSERT(s != NULL, "rv help: reached");
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Review shortcuts", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "The composed message, ready to send");      /* EMAIL-181 */
     ASSERT_SCREEN_CONTAINS(s, "Edit headers");
     ASSERT_SCREEN_CONTAINS(s, "Edit body");
     ASSERT_SCREEN_CONTAINS(s, "Add attachment");

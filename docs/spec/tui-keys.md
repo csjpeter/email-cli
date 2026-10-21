@@ -617,5 +617,16 @@ screen are covered by their own sections (EMAIL-147, EMAIL-151).
 | `x` `h` `Enter` `Tab` `F1` `?` `Left` `Right` `Del` | | change nothing: the overlay stays, the view behind does not move | the same |
 | `h` outside the overlay | | is "back" in a list, never help | `test_hk_h_is_not_help` |
 
+Description of the view (EMAIL-181): every help overlay opens, under its
+title, with a one- to three-line description of the view (what it shows, what
+the cursor is on, the usual next step), then the keys.  The text is a
+description row (`DESC()`, no key, no action) of the view in the key table,
+`libemail/src/core/key_table.c`, so libtuikit draws it; the views whose key rows
+are a literal list in their code (accounts, rules, rule, conditions, body
+editor) take theirs from the same table through `ekeys_help_rows()`.  A test
+(`test_key_table`) fails for a view without one; the pty tests of each overlay
+look for the text; the same sentences are in the KEYS section of
+`docs/man/email-tui.1`.
+
 Findings: none; every view behaves the same.  Not changed (known from
 EMAIL-146): the overlays do not list `Backspace`, `Left`, `h`.

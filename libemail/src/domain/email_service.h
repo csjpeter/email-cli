@@ -581,6 +581,6 @@ int email_service_save_attachment(const Config *cfg, const char *uid,
  * @param rows   {key, description} pairs.
  * @param n      Number of rows.
  */
-void email_service_help_popup(const char *title, const char *rows[][2], int n);
+void email_service_help_popup(const char *view, const char *title, const char *rows[][2], int n);
 
 #endif /* EMAIL_SERVICE_H */

@@ -1851,7 +1851,7 @@ static int tui_when_list_edit(char *buf, size_t bufsz, const char *title) {
                 { "Esc / BS / h", "Cancel the rule"                 },
                 { "?",            "Show this help"                  },
             };
-            email_service_help_popup("Conditions shortcuts", help, 11);
+            email_service_help_popup(EKV_CONDITIONS, "Conditions shortcuts", help, 11);
             continue;
         }
 
@@ -2183,7 +2183,7 @@ static void tui_rules_detail(const char *account, int idx)
             mail_rules_free(rules);
             {   /* the overlay reads raw keys: Esc, q and BS close it (EMAIL-148) */
                 RAII_TERM_RAW TermRawState *_hraw = terminal_raw_enter();
-                email_service_help_popup("Rule shortcuts", help, 4);
+                email_service_help_popup(EKV_RULE, "Rule shortcuts", help, 4);
             }
             continue;
         }
@@ -2362,7 +2362,7 @@ static void tui_rules_editor(const Config *cfg)
             mail_rules_free(rules);
             {   /* the overlay reads raw keys: Esc, q and BS close it (EMAIL-148) */
                 RAII_TERM_RAW TermRawState *_hraw = terminal_raw_enter();
-                email_service_help_popup("Rules shortcuts", help, 11);
+                email_service_help_popup(EKV_RULES, "Rules shortcuts", help, 11);
             }
             continue;
         }

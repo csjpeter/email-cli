@@ -45,6 +45,21 @@ virtual label; the folder list also offers
 starts a content search in the current view.
 .SH KEYS
 .SS Message list
+The help overlay (\fB?\fR) of each view opens with the same description:
+.br
+Message list: The messages of one folder, newest first. The cursor is on one
+message. Enter reads it; space marks several to act on together.
+.br
+Gmail Unread, Flagged or a search result: The messages of a Gmail view that is
+no label (Unread, Flagged or a search result). The cursor is on one message;
+Enter reads it.
+.br
+Gmail Archive: The archived messages of the Gmail account: they have no label.
+The cursor is on one message; Enter reads it.
+.br
+Gmail Trash: The messages in the Gmail Trash. The cursor is on one message;
+Enter reads it, the : menu restores it to the inbox.
+.PP
 .TP
 .BR j " or " Down ", " k " or " Up
 Move the cursor.
@@ -103,6 +118,9 @@ remove the current label in the view of a label only.
 .B ?
 Help for the view.
 .SS Message reader
+Description: One message, rendered as text. The keys scroll it, search in it and
+reply to it; q goes back to the list.
+.PP
 .TP
 .BR j " or " Down ", " k " or " Up ", " PgDn ", " PgUp ", " Home ", " End
 Scroll.
@@ -127,6 +145,13 @@ The action menu: toggle Done (IMAP), Gmail archive and remove the current
 label, and
 .B Save all attachments.
 .SS Label browser (Gmail)
+Description (a label of your own): The labels of the Gmail account. The cursor
+is on one of your own labels; Enter opens its messages, the : menu can delete
+it.
+.br
+Description (a system label): The labels of the Gmail account. The cursor is on
+a system label, which cannot be deleted; Enter opens its messages.
+.PP
 .TP
 .BR j " or " Down ", " k " or " Up ", " PgDn ", " PgUp ", " Home " or " g ", " End " or " G
 Move.
@@ -150,6 +175,23 @@ Esc, q and Backspace close the menu and the question.
 In a Gmail list or the reader: the label picker.  j and k move, Space ticks,
 Enter applies, Esc, q and Backspace close it and change nothing, ctrl\-C quits.
 .SS Accounts and folders
+Accounts: The accounts of the program. The cursor is on one account; Enter
+opens it, n adds a new one.
+.br
+Folders: The folders of the IMAP account, as a tree or one level at a time. The
+cursor is on one folder; Enter opens its messages.
+.br
+Attachment picker: The attachments of the message. The cursor is on one; Enter
+chooses it and asks where to save it.
+.br
+Rules: The mail rules that sort incoming mail. The cursor is on one rule; Enter
+opens it, a adds a new one.
+.br
+Rule: One mail rule: its conditions and its actions. e edits it, d deletes it.
+.br
+Conditions: The conditions of the rule being edited. The cursor is on one
+condition; Enter edits it, q goes on to the actions.
+.PP
 .TP
 .BR j " or " Down ", " k " or " Up ", " PgDn ", " PgUp ", " Home ", " End
 Move.
@@ -193,6 +235,12 @@ Folders, flat view: go up one level (as Esc) and open the row (as Enter).
 .B Esc ", " q ", " Backspace
 Folders: up one level in the flat view, otherwise back to the accounts.
 .SS Compose and review
+Review: The composed message, ready to send. Check the headers and the body; e,
+b and a change them, the : menu sends the message.
+.br
+Body editor: The body of the message being composed, as plain text. Esc saves
+it and goes on to the review.
+.PP
 .TP
 .B Esc
 In the compose dialog: asks before it throws away what was typed (the default

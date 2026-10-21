@@ -19,6 +19,19 @@ void test_key_table(void) {
     ASSERT(ekeys_init(why, sizeof(why)) == 0, "key table: passes the policy check");
     ASSERT(why[0] == '\0', "key table: no reason given");
 
+    /* every view with a help overlay has a description of one to three lines
+     * (64 columns each), EMAIL-181 */
+    const char *views[] = { EKV_LIST_IMAP, EKV_LIST_GMAIL, EKV_LIST_GMAIL_VIRTUAL,
+        EKV_LIST_GMAIL_ARCHIVE, EKV_LIST_GMAIL_TRASH, EKV_READ_IMAP, EKV_READ_GMAIL,
+        EKV_LABELS, EKV_LABELS_SYSTEM, EKV_FOLDERS, EKV_REVIEW, EKV_ATTACH,
+        EKV_ACCOUNTS, EKV_RULES, EKV_RULE, EKV_CONDITIONS, EKV_BODY_EDITOR };
+    for (size_t i = 0; i < sizeof views / sizeof views[0]; i++) {
+        const char *d = ekeys_view_desc(views[i]);
+        ASSERT(d != NULL && d[0], "key table: a view has a description");
+        ASSERT(d == NULL || strlen(d) <= 3 * 64, "key table: a description fits three lines");
+    }
+    ASSERT(ekeys_view_desc("no-such-view") == NULL, "key table: unknown view has none");
+
     /* the registry keys, in both kinds of list */
     const char *lists[] = { EKV_LIST_IMAP, EKV_LIST_GMAIL, EKV_READ_IMAP, EKV_READ_GMAIL };
     for (int i = 0; i < 4; i++) {

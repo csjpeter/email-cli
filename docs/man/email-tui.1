@@ -157,6 +157,15 @@ Move.
 .B Enter
 Open.
 .TP
+.B Backspace
+On the account list (the top level) it does nothing and does not quit; only
+.B Esc
+quits there.  Everywhere else, outside a text field, it goes back like
+.B Esc
+and
+.BR q ;
+in a field it deletes.
+.TP
 .BR n ", " d ", " i ", " e
 Accounts: add, delete (asks), edit IMAP, edit SMTP.
 On a Gmail account the

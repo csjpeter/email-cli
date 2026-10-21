@@ -282,12 +282,27 @@ static void help_scroll(PtySession *s, const char *title) {
     CHECK(s, !pty_screen_contains(s, title), "%s: Esc closes after scrolling", title);
 }
 
+/* EMAIL-183: the help lists Backspace (with the Back entry; on the top level
+ * it says it does nothing).  A long help is looked through with PgDn. */
+static void help_lists_backspace(PtySession *s, const char *title) {
+    press(s, "?");
+    CHECK(s, pty_wait_for(s, title, WAIT_MS) == 0, "%s: opens for the Backspace row", title);
+    int found = pty_screen_contains(s, "Backspace");
+    for (int i = 0; !found && i < 6; i++) {
+        press(s, "PgDn");
+        found = pty_screen_contains(s, "Backspace");
+    }
+    CHECK(s, found, "%s: the help lists Backspace", title);
+    press(s, "Esc");
+}
+
 static void test_hk_accounts(void) {
     PtySession *s = at_accounts();
     ASSERT(s != NULL, "accounts help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
     help_cycle(s, "Accounts shortcuts", "Add new account", "Email Accounts");
     help_scroll(s, "Accounts shortcuts");
+    help_lists_backspace(s, "Accounts shortcuts");
     pty_close(s);
 }
 
@@ -297,6 +312,7 @@ static void test_hk_folders(void) {
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
     help_cycle(s, "Folder browser shortcuts", "Actions", "Folders");
     help_scroll(s, "Folder browser shortcuts");
+    help_lists_backspace(s, "Folder browser shortcuts");
     pty_close(s);
 }
 
@@ -306,6 +322,7 @@ static void test_hk_list(void) {
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
     help_cycle(s, "Message list shortcuts", "Compose", "message(s) in");
     help_scroll(s, "Message list shortcuts");
+    help_lists_backspace(s, "Message list shortcuts");
     /* The list help is longer than the 80x24 screen: End shows its last rows,
      * Home the first ones again. */
     press(s, "?");
@@ -325,6 +342,7 @@ static void test_hk_reader(void) {
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
     help_cycle(s, "Message reader shortcuts", "Help", "From:");
     help_scroll(s, "Message reader shortcuts");
+    help_lists_backspace(s, "Message reader shortcuts");
     pty_close(s);
 }
 

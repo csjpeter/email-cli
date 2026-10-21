@@ -50,6 +50,8 @@ typedef enum {
     EA_FOLDER_DELETE, /**< menu: delete an IMAP folder (EMAIL-129)          */
     EA_REAUTH,        /**< menu: renew a Gmail account's authorization (EMAIL-130) */
     EA_FOLDER_VIEW,   /**< 't'  folder browser: tree or flat view (EMAIL-199) */
+    EA_FOLDER_OPEN_ALL,  /**< menu: folder tree: open every branch (EMAIL-200)  */
+    EA_FOLDER_CLOSE_ALL, /**< menu: folder tree: close every branch (EMAIL-200) */
     EA_COUNT
 } EmailAction;
 

@@ -1184,6 +1184,8 @@ static void test_interactive_folders_content(void) {
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "INBOX");
+    pty_send_str(s, "l");                       /* the tree opens closed (EMAIL-200) */
+    pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Sent");
     ASSERT_SCREEN_CONTAINS(s, "Trash");
     pty_send_key(s, PTY_KEY_ESC);
@@ -1428,7 +1430,10 @@ static void test_interactive_empty_folder(void) {
 
     /* Navigate to INBOX.Empty.  Folders are sorted byte-wise, so the mock's
      * LIST reply yields: INBOX(0), INBOX.AT&T(1), INBOX.Empty(2), INBOX.Sent(3),
-     * INBOX.Trash(4), INBOX.Träger(5), INBOX.中(6), INBOX.😀(7). */
+     * INBOX.Trash(4), INBOX.Träger(5), INBOX.中(6), INBOX.😀(7).
+     * INBOX is closed on opening: l opens it (EMAIL-200). */
+    pty_send_str(s, "l");
+    pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_DOWN);
     pty_send_key(s, PTY_KEY_DOWN);
     pty_settle(s, 200);
@@ -1460,6 +1465,8 @@ static void test_folder_tree_wide_characters_one_row_each(void) {
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");                       /* open INBOX (EMAIL-200) */
+    pty_settle(s, SETTLE_MS);
 
     int umlaut = find_row(s, "Tr\xc3\xa4ger");
     int cjk    = find_row(s, "\xe4\xb8\xad");
@@ -1486,6 +1493,8 @@ static void test_interactive_empty_folder_cron(void) {
     pty_send_key(s, PTY_KEY_BACK);              /* open folder browser */
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");                       /* open INBOX (EMAIL-200) */
+    pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_DOWN);              /* INBOX → INBOX.AT&T */
     pty_send_key(s, PTY_KEY_DOWN);              /* → INBOX.Empty */
     pty_settle(s, 200);
@@ -2759,6 +2768,7 @@ static PtySession *open_folder_browser(const char *what) {
         if (s) pty_close(s);
         return NULL;
     }
+    pty_send_str(s, "l");                          /* the INBOX branch opens (EMAIL-200) */
     pty_settle(s, SETTLE_MS);
     return s;
 }
@@ -3104,6 +3114,8 @@ static PtySession *lk_open_empty(void) {
     pty_send_key(s, PTY_KEY_BACK);
     if (pty_wait_for(s, "Folders", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");                          /* open INBOX (EMAIL-200) */
+    pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_DOWN);                 /* INBOX.AT&T */
     pty_send_key(s, PTY_KEY_DOWN);                 /* INBOX.Empty */
     pty_settle(s, 200);
@@ -4012,7 +4024,7 @@ static void fk_env(int folders) {
 
 /** Opens email-tui at 80x24 on the folder browser of the account; when
  *  @p want is not NULL waits for that text instead of the "Folders" title. */
-static PtySession *fk_open_wait(const char *want) {
+static PtySession *fk_open_closed_wait(const char *want) {
     restart_mock();
     const char *args[] = {g_tui_bin, NULL};
     PtySession *s = pty_open(80, 24);
@@ -4028,7 +4040,20 @@ static PtySession *fk_open_wait(const char *want) {
     return s;
 }
 
+/** The browser as the key study of the expanded tree needs it: every branch
+ *  opened with the menu's "Open all folders".  A browser that waits for
+ *  @p want (an empty list) is left as it is. */
+static PtySession *fk_open_wait(const char *want) {
+    PtySession *s = fk_open_closed_wait(want);
+    if (s && !want) {
+        menu_pick(s, 2);                           /* Open all folders (EMAIL-200) */
+        pty_settle(s, SETTLE_MS);
+    }
+    return s;
+}
+
 static PtySession *fk_open(void) { return fk_open_wait(NULL); }
+static PtySession *fk_open_closed(void) { return fk_open_closed_wait(NULL); }
 
 /** Sends a key and waits for the position @p pos, e.g. "[3/16]". */
 static int fk_key(PtySession *s, PtyKey key, const char *pos) {
@@ -4102,6 +4127,97 @@ static void test_fk_navigation(void) {
     for (int i = 0; i < 27; i++) pty_send_str(s, "k");
     ASSERT(pty_wait_for(s, "[2/48]", WAIT_MS) == 0, "folders nav: 27 x k reach Unread");
     ASSERT_ROW_CONTAINS(s, 4, "Tags / Flags");          /* EMAIL-196 */
+    fk_end(s);
+    fk_env(-1);
+}
+
+/* Column of @p what in row @p row, or -1. */
+static int fk_col(PtySession *s, int row, const char *what) {
+    char buf[300];
+    pty_row_text(s, row, buf, sizeof buf);
+    const char *p = strstr(buf, what);
+    return p ? (int)(p - buf) : -1;
+}
+
+/* The tree of the folder browser (EMAIL-200, policies/tui-interface-model.md,
+ * "Trees"): closed on opening with a "+ " marker; l and Right open, h and Left
+ * close, a leaf goes to its parent; Enter does not toggle; the children are
+ * indented; the open state survives a reload; the menu opens and closes all. */
+static void test_fk_tree_open_close(void) {
+    fk_env(-1);
+    PtySession *s = fk_open_closed();
+    ASSERT(s != NULL, "folders tree: opens");
+    if (!s) return;
+    ASSERT_SCREEN_CONTAINS(s, "[2/9]");                /* INBOX closed: 9 rows */
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_DOWN);
+    ASSERT(pty_wait_for(s, "[9/9]", WAIT_MS) == 0, "folders tree: Down x6 reaches INBOX");
+    ASSERT_SCREEN_CONTAINS(s, "+ INBOX");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "AT&T");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "\xe2\x94\x9c");           /* no box-drawing glyphs */
+    ASSERT_SCREEN_NOT_CONTAINS(s, "\xe2\x94\x94");
+    pty_send_str(s, "h");                              /* closed top level: nothing */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "[9/9]");
+    ASSERT(fk_str(s, "l", "[9/16]"), "folders tree: l opens INBOX");
+    ASSERT_SCREEN_CONTAINS(s, "- INBOX");
+    ASSERT_SCREEN_CONTAINS(s, "AT&T");
+    int r_in = find_row(s, "- INBOX");
+    int r_at = find_row(s, "AT&T");
+    ASSERT(r_in >= 0 && r_at == r_in + 1, "folders tree: the child is the row under INBOX");
+    if (r_in >= 0 && r_at >= 0) {
+        int c_in = fk_col(s, r_in, "INBOX"), c_at = fk_col(s, r_at, "AT&T");
+        ASSERT(c_at == c_in + 2, "folders tree: a child is one level (two cells) under its parent, past a blank marker");
+    }
+    ASSERT(fk_key(s, PTY_KEY_RIGHT, "[10/16]"), "folders tree: Right on an open row goes to the first child");
+    ASSERT(fk_str(s, "l", "[10/16]"), "folders tree: l on a leaf does nothing");
+    ASSERT(fk_str(s, "h", "[9/16]"), "folders tree: h on a leaf goes to the parent");
+    ASSERT(fk_key(s, PTY_KEY_LEFT, "[9/9]"), "folders tree: Left closes the open row");
+    ASSERT_SCREEN_CONTAINS(s, "+ INBOX");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "AT&T");
+    ASSERT(fk_key(s, PTY_KEY_RIGHT, "[9/16]"), "folders tree: Right opens");
+    /* Enter opens the folder's messages and does not toggle; coming
+     * back, the branch is still open */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "message(s) in INBOX", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Folders \xe2\x80\x94", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "- INBOX");
+    ASSERT_SCREEN_CONTAINS(s, "AT&T");
+    /* the menu: close all, open all */
+    menu_pick(s, 3);
+    ASSERT_WAIT_FOR(s, "[9/9]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "+ INBOX");
+    menu_pick(s, 2);
+    ASSERT_WAIT_FOR(s, "[9/16]", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "- INBOX");
+    /* a reload keeps the open branches: create a folder, delete it again */
+    menu_pick(s, 0);
+    ASSERT_WAIT_FOR(s, "New folder name:", WAIT_MS);
+    pty_send_str(s, "INBOX.Projects");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Folder INBOX.Projects created", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "- INBOX");
+    ASSERT_SCREEN_CONTAINS(s, "Projects");
+    for (int i = 0; i < 12 && !pty_row_contains(s, find_row(s, "Projects"), ">"); i++) {
+        pty_send_str(s, "j");
+        pty_settle(s, 200);
+    }
+    menu_pick(s, 1);
+    ASSERT_WAIT_FOR(s, "Delete the folder INBOX.Projects on the server?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Folder INBOX.Projects deleted", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "- INBOX");
+    /* the menu names the new actions, the help the new keys */
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Open all folders", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Close all folders");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Open branch");
+    ASSERT_SCREEN_CONTAINS(s, "Close - tree: close");
+    pty_send_key(s, PTY_KEY_ESC);
     fk_end(s);
     fk_env(-1);
 }
@@ -4409,7 +4525,7 @@ static void test_fk_help(void) {
     ASSERT_SCREEN_CONTAINS(s, "switch between the folder tree");
     ASSERT_SCREEN_CONTAINS(s, "also g");
     ASSERT_SCREEN_CONTAINS(s, "also G");
-    ASSERT_SCREEN_CONTAINS(s, "flat view: as Enter");
+    ASSERT_SCREEN_CONTAINS(s, "tree: open; flat view: as Enter");
     ASSERT_SCREEN_CONTAINS(s, "flat view: one level up");
     ASSERT_SCREEN_CONTAINS(s, "Search");
     ASSERT_SCREEN_CONTAINS(s, "Compose");
@@ -8061,6 +8177,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_rk_unbound_keys);
     RUN_TEST(test_fk_navigation);
     RUN_TEST(test_fk_enter);
+    RUN_TEST(test_fk_tree_open_close);
     RUN_TEST(test_fk_flat);
     RUN_TEST(test_fk_back_keys);
     RUN_TEST(test_fk_ctrl_c);

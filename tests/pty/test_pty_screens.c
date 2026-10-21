@@ -293,7 +293,10 @@ static PtySession *at_empty_folder(void) {
     PtySession *s = at_folders();
     if (!s) return NULL;
     pty_send_key(s, PTY_KEY_HOME);
-    for (int i = 0; i < 8; i++) pty_send_key(s, PTY_KEY_DOWN);
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_send_str(s, "l");               /* open INBOX's branch */
+    pty_settle(s, 200);
+    for (int i = 0; i < 2; i++) pty_send_key(s, PTY_KEY_DOWN);
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ENTER);
     pty_wait_for(s, "Empty", WAIT_MS);

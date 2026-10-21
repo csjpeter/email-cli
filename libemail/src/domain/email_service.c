@@ -5804,7 +5804,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
                 { "d",               "Delete selected account"     },
                 { "i",               "Edit IMAP for account"       },
                 { "e",               "Edit SMTP for account"       },
-                { "Esc",             "Quit"                        },
+                { "Esc",             "Quit (Backspace does nothing here)" },
                 { "?",               "Show this help"              },
                 { ":",               "Actions of a Gmail account"  },
             };

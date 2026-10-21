@@ -2997,7 +2997,7 @@ static void test_gk_help(void) {
         pty_send_key(s, PTY_KEY_END);
         pty_settle(s, SETTLE_MS);
         ASSERT_SCREEN_CONTAINS(s, "Labels - pick the labels");   /* the last entry */
-        ASSERT_SCREEN_CONTAINS(s, "Back - also h and Left");
+        ASSERT_SCREEN_CONTAINS(s, "Back - also h, Left and Backspace");
         if (i == 0) pty_send_key(s, PTY_KEY_ESC);
         else if (i == 1) pty_send_str(s, "q");
         else pty_send_key(s, PTY_KEY_BACK);
@@ -3448,7 +3448,7 @@ static void test_lb_help_and_status(void) {
         ASSERT_SCREEN_CONTAINS(s, "The labels of the Gmail account.");   /* EMAIL-181 */
         ASSERT_SCREEN_CONTAINS(s, "First label - also g");
         ASSERT_SCREEN_CONTAINS(s, "Last label - also G");
-        ASSERT_SCREEN_CONTAINS(s, "Back - to the accounts (also h and Left)");
+        ASSERT_SCREEN_CONTAINS(s, "Back - to the accounts (also h, Left, Backspace)");
         pty_send_str(s, "x");                           /* any other key: nothing */
         pty_settle(s, 300);
         ASSERT_SCREEN_CONTAINS(s, "Label browser shortcuts");

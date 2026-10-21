@@ -72,7 +72,7 @@
     M(V, "Move to...", "a folder or label, asked for", EA_MOVE),                    \
     H(V, '?', "Help", NULL),                                                        \
     H(V, ':', "Actions", "the menu of everything that changes state"),              \
-    H(V, 'q', "Back", "also h and Left"),                                           \
+    H(V, 'q', "Back", "also h, Left and Backspace"),                                           \
     H(V, TUI_KEY_ESC, "Back", "first clears marks and filter"),                     \
     H(V, TUI_KC_QUIT, "Quit", NULL)
 
@@ -131,7 +131,7 @@
     H(V, '/', "Search", "cross-folder content search"),                             \
     H(V, '?', "Help", NULL),                                                        \
     H(V, ':', "Actions", "the menu of everything that changes state"),              \
-    H(V, 'q', "Back", "to the accounts (also h and Left)"),                         \
+    H(V, 'q', "Back", "to the accounts (also h, Left, Backspace)"),                         \
     H(V, TUI_KEY_ESC, "Back", "to the accounts"),                                   \
     M(V, "Create a label...", "on the server, name asked for", EA_LABEL_CREATE)
 
@@ -225,7 +225,7 @@ static const tui_keyentry g_entries[] = {
     H(EKV_FOLDERS, 'c', "Compose", "a new message"),
     H(EKV_FOLDERS, '?', "Help", NULL),
     H(EKV_FOLDERS, ':', "Actions", "the menu of everything that changes state"),
-    H(EKV_FOLDERS, 'q', "Back", "up one level; the accounts at the top"),
+    H(EKV_FOLDERS, 'q', "Back", "up one level; the accounts at the top (also Backspace)"),
     H(EKV_FOLDERS, TUI_KEY_ESC, "Back", "up one level; the accounts at the top"),
     M(EKV_FOLDERS, "Create a folder...", "on the server, name asked for", EA_FOLDER_CREATE),
     S(EKV_FOLDERS, TUI_KC_NONE, TUI_VERB_NONE, "Delete the folder", "on the server",

@@ -85,7 +85,7 @@ did nothing; `h` and `Left` did not go back (the lists do); `ctrl-c` in the
 `/` prompt did nothing; `PgDn` jumped past the last full page (2 of 14 rows on
 a blank screen); `End` left the indicator at `[1/2]`; `j` / `Down` scrolled
 until the last line stood alone.  Already right: the other keys of the table
-above.  Not changed: the help overlay does not list `Backspace`, `Left`, `h`.
+above.  The help overlay lists `Backspace` with the Back entry since EMAIL-183 (on the accounts screen the Esc row says `Quit (Backspace does nothing here)`); it still does not list `Left`, `h`.
 
 ## Message list, IMAP account (EMAIL-143)
 

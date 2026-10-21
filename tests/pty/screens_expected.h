@@ -309,7 +309,7 @@ static const char *const exp_accounts_help[] = {
     "         │ d            Delete selected account                                          │",
     "         │ i            Edit IMAP for account                                            │",
     "         │ e            Edit SMTP for account                                            │",
-    "         │ Esc          Quit                                                             │",
+    "         │ Esc          Quit (Backspace does nothing here)                               │",
     "         │ ?            Show this help                                                   │",
     "         └───────────────────────────────────────────────────────────────────────────────┘",
     NULL

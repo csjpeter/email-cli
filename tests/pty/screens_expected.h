@@ -362,7 +362,7 @@ static const char *const exp_folders_help[] = {
     "    │ c                  Compose - a new message                                              │",
     "    │ ?                  Help                                                                 │",
     "    │ :                  Actions - the menu of everything that changes state                  │",
-    "    │ Esc, q, Backspace  Back - up one level; the accounts at the top                         │",
+    "    │ Esc, q, Backspace  Back - up one level; the accounts at the top (also Backspace)        │",
     "    │ Esc                Back - up one level; the accounts at the top                         │",
     "    │ t                  Tree / flat - switch between the folder tree and one level at a time │",
     "    └─────────────────────────────────────────────────────────────────────────────────────────┘",

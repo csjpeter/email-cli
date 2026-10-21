@@ -7,6 +7,7 @@
 #include "tui_frame.h"
 
 #include <tuikit/actions.h>
+#include <tuikit/dialog.h>
 #include <tuikit/event.h>
 #include <tuikit/tty.h>
 #include <string.h>
@@ -24,6 +25,18 @@
 /* A rare or unusual change: the menu only. */
 #define M(V, N, D, ID) \
     { (V), TUI_KC_NONE, TUI_VERB_NONE, (N), (D), TUI_ACT_RARE, 0, NULL, (ID) }
+
+/* The description of a view: a row with no key and no action (libtuikit,
+ * "The description of a view"); the help overlay shows it above the keys. */
+#define DESC(V, T) \
+    { (V), TUI_KC_NONE, TUI_VERB_NONE, NULL, (T), TUI_ACT_HARMLESS, 0, NULL, EA_NONE }
+
+#define D_LIST \
+    "The messages of one folder, newest first. The cursor is on one message. " \
+    "Enter reads it; space marks several to act on together."
+#define D_READER \
+    "One message, rendered as text. The keys scroll it, search in it and reply to it; " \
+    "q goes back to the list."
 
 #define CONF_DELETE "%s?"
 #define CONF_SYNC   "Start a background sync of %s?"
@@ -59,7 +72,7 @@
     M(V, "Move to...", "a folder or label, asked for", EA_MOVE),                    \
     H(V, '?', "Help", NULL),                                                        \
     H(V, ':', "Actions", "the menu of everything that changes state"),              \
-    H(V, 'q', "Back", "also h and Left"),                                           \
+    H(V, 'q', "Back", "also h, Left and Backspace"),                                           \
     H(V, TUI_KEY_ESC, "Back", "first clears marks and filter"),                     \
     H(V, TUI_KC_QUIT, "Quit", NULL)
 
@@ -118,12 +131,13 @@
     H(V, '/', "Search", "cross-folder content search"),                             \
     H(V, '?', "Help", NULL),                                                        \
     H(V, ':', "Actions", "the menu of everything that changes state"),              \
-    H(V, 'q', "Back", "to the accounts (also h and Left)"),                         \
+    H(V, 'q', "Back", "to the accounts (also h, Left, Backspace)"),                         \
     H(V, TUI_KEY_ESC, "Back", "to the accounts"),                                   \
     M(V, "Create a label...", "on the server, name asked for", EA_LABEL_CREATE)
 
 static const tui_keyentry g_entries[] = {
     /* The message list of an IMAP account. */
+    DESC(EKV_LIST_IMAP, D_LIST),
     LIST_COMMON(EKV_LIST_IMAP),
     M(EKV_LIST_IMAP, "Toggle Done", "the $Done flag", EA_DONE),
 
@@ -131,6 +145,7 @@ static const tui_keyentry g_entries[] = {
      * the cursor and no more (EMAIL-206): Restore from Trash only in the
      * Trash, Archive in every view but the Archive, Remove this label only
      * in the view of a real label.  The view follows the list's folder. */
+    DESC(EKV_LIST_GMAIL, D_LIST),
     LIST_COMMON(EKV_LIST_GMAIL),
     GMAIL_LIST_T(EKV_LIST_GMAIL),
     GMAIL_LIST_ARCHIVE(EKV_LIST_GMAIL),
@@ -138,17 +153,26 @@ static const tui_keyentry g_entries[] = {
     GMAIL_LIST_LABELS(EKV_LIST_GMAIL),
 
     /* A view that is no label: Unread, Flagged, a search result. */
+    DESC(EKV_LIST_GMAIL_VIRTUAL,
+         "The messages of a Gmail view that is no label (Unread, Flagged or a search result). "
+         "The cursor is on one message; Enter reads it."),
     LIST_COMMON(EKV_LIST_GMAIL_VIRTUAL),
     GMAIL_LIST_T(EKV_LIST_GMAIL_VIRTUAL),
     GMAIL_LIST_ARCHIVE(EKV_LIST_GMAIL_VIRTUAL),
     GMAIL_LIST_LABELS(EKV_LIST_GMAIL_VIRTUAL),
 
     /* The Archive: a message there is archived already and has no label. */
+    DESC(EKV_LIST_GMAIL_ARCHIVE,
+         "The archived messages of the Gmail account: they have no label. "
+         "The cursor is on one message; Enter reads it."),
     LIST_COMMON(EKV_LIST_GMAIL_ARCHIVE),
     GMAIL_LIST_T(EKV_LIST_GMAIL_ARCHIVE),
     GMAIL_LIST_LABELS(EKV_LIST_GMAIL_ARCHIVE),
 
     /* The Trash: the only view that can restore. */
+    DESC(EKV_LIST_GMAIL_TRASH,
+         "The messages in the Gmail Trash. The cursor is on one message; "
+         "Enter reads it, the : menu restores it to the inbox."),
     LIST_COMMON(EKV_LIST_GMAIL_TRASH),
     GMAIL_LIST_T(EKV_LIST_GMAIL_TRASH),
     GMAIL_LIST_ARCHIVE(EKV_LIST_GMAIL_TRASH),
@@ -156,8 +180,10 @@ static const tui_keyentry g_entries[] = {
     GMAIL_LIST_LABELS(EKV_LIST_GMAIL_TRASH),
 
     /* The message reader. */
+    DESC(EKV_READ_IMAP, D_READER),
     READER_COMMON(EKV_READ_IMAP),
     M(EKV_READ_IMAP, "Toggle Done", "the $Done flag", EA_DONE),
+    DESC(EKV_READ_GMAIL, D_READER),
     READER_COMMON(EKV_READ_GMAIL),
     R(EKV_READ_GMAIL, 't', TUI_VERB_MOVE, "Labels", "pick the labels of the message",
       EA_LABELS),
@@ -167,16 +193,25 @@ static const tui_keyentry g_entries[] = {
     /* The Gmail label browser.  On a label of the user's own the menu also
      * deletes it; on a system label (Unread, Inbox, Trash...) it cannot be
      * deleted, so the menu does not offer it (EMAIL-218). */
+    DESC(EKV_LABELS,
+         "The labels of the Gmail account. The cursor is on one of your own labels; "
+         "Enter opens its messages, the : menu can delete it."),
     LABELS_COMMON(EKV_LABELS),
     S(EKV_LABELS, TUI_KC_NONE, TUI_VERB_NONE, "Delete the label", "on the server",
       "Delete the label %s on the server? Its messages keep their other labels.",
       EA_LABEL_DELETE),
+    DESC(EKV_LABELS_SYSTEM,
+         "The labels of the Gmail account. The cursor is on a system label, "
+         "which cannot be deleted; Enter opens its messages."),
     LABELS_COMMON(EKV_LABELS_SYSTEM),
 
     /* The IMAP folder browser (EMAIL-129): creating and deleting a folder are
      * rare, so they are in the menu only; deleting names the folder and asks.
      * 't' (tree / flat) is a registry key (move): the table refuses it as a
      * harmless key, so the browser handles it outside the table. */
+    DESC(EKV_FOLDERS,
+         "The folders of the IMAP account, as a tree or one level at a time. "
+         "The cursor is on one folder; Enter opens its messages."),
     H(EKV_FOLDERS, 'j', "Down", "move down (also Down)"),
     H(EKV_FOLDERS, 'k', "Up", "move up (also Up)"),
     H(EKV_FOLDERS, TUI_KEY_PGDN, "Page down", NULL),
@@ -190,7 +225,7 @@ static const tui_keyentry g_entries[] = {
     H(EKV_FOLDERS, 'c', "Compose", "a new message"),
     H(EKV_FOLDERS, '?', "Help", NULL),
     H(EKV_FOLDERS, ':', "Actions", "the menu of everything that changes state"),
-    H(EKV_FOLDERS, 'q', "Back", "up one level; the accounts at the top"),
+    H(EKV_FOLDERS, 'q', "Back", "up one level; the accounts at the top (also Backspace)"),
     H(EKV_FOLDERS, TUI_KEY_ESC, "Back", "up one level; the accounts at the top"),
     M(EKV_FOLDERS, "Create a folder...", "on the server, name asked for", EA_FOLDER_CREATE),
     S(EKV_FOLDERS, TUI_KC_NONE, TUI_VERB_NONE, "Delete the folder", "on the server",
@@ -203,6 +238,21 @@ static const tui_keyentry g_entries[] = {
 
     /* The accounts screen, a Gmail account under the cursor (EMAIL-130).  The
      * other keys of that screen (n, d, i, e) are the screen's own. */
+    DESC(EKV_ACCOUNTS,
+         "The accounts of the program. The cursor is on one account; "
+         "Enter opens it, n adds a new one."),
+    DESC(EKV_RULES,
+         "The mail rules that sort incoming mail. The cursor is on one rule; "
+         "Enter opens it, a adds a new one."),
+    DESC(EKV_RULE,
+         "One mail rule: its conditions and its actions. "
+         "e edits it, d deletes it."),
+    DESC(EKV_CONDITIONS,
+         "The conditions of the rule being edited. The cursor is on one condition; "
+         "Enter edits it, q goes on to the actions."),
+    DESC(EKV_BODY_EDITOR,
+         "The body of the message being composed, as plain text. "
+         "Esc saves it and goes on to the review."),
     H(EKV_ACCOUNTS_GMAIL, 'j', "Down", "move down (also Down)"),
     H(EKV_ACCOUNTS_GMAIL, 'k', "Up", "move up (also Up)"),
     H(EKV_ACCOUNTS_GMAIL, TUI_KEY_PGDN, "Page down", NULL),
@@ -217,6 +267,9 @@ static const tui_keyentry g_entries[] = {
       EA_REAUTH),
 
     /* The attachment picker of the reader (EMAIL-147): no key changes state. */
+    DESC(EKV_ATTACH,
+         "The attachments of the message. The cursor is on one; "
+         "Enter chooses it and asks where to save it."),
     H(EKV_ATTACH, 'j', "Down", "move down (also Down)"),
     H(EKV_ATTACH, 'k', "Up", "move up (also Up)"),
     H(EKV_ATTACH, TUI_KEY_PGDN, "Page down", NULL),
@@ -231,6 +284,9 @@ static const tui_keyentry g_entries[] = {
     H(EKV_ATTACH, TUI_KC_QUIT, "Quit", NULL),
 
     /* The review of a composed message. */
+    DESC(EKV_REVIEW,
+         "The composed message, ready to send. Check the headers and the body; "
+         "e, b and a change them, the : menu sends the message."),
     S(EKV_REVIEW, TUI_KC_NONE, TUI_VERB_NONE, "Send", "the message",
       "Send the message to %s?", EA_SEND),
     R(EKV_REVIEW, 'e', TUI_VERB_EDIT, "Edit headers", "To, Cc, Bcc, Subject, attachments",
@@ -346,6 +402,58 @@ int ekeys_confirm(const char *view, EmailAction a, const char *target) {
     int yes = m.state == TUI_ACTION_CHOSEN;
     tui_actionmenu_free(&m);
     return yes;
+}
+
+const char *ekeys_view_desc(const char *view) {
+    for (int i = 0; view && i < N_ENTRIES; i++) {
+        const tui_keyentry *e = &g_entries[i];
+        if (!e->action && e->key == TUI_KC_NONE && e->desc && e->view &&
+            strcmp(e->view, view) == 0)
+            return e->desc;
+    }
+    return NULL;
+}
+
+#define DESC_WIDTH 64
+#define DESC_LINES 3
+
+void ekeys_help_rows(const char *view, const char *title, const char *const rows[][2], int n) {
+    if (n < 0 || n > 64) return;
+    const char *pairs[2 * (64 + DESC_LINES + 1)];
+    char lines[DESC_LINES][DESC_WIDTH + 1];
+    int np = 0;
+    const char *desc = ekeys_view_desc(view);
+    if (desc) {
+        /* the description, wrapped at words to the width libtuikit uses */
+        int nl = 0;
+        const char *p = desc;
+        while (*p && nl < DESC_LINES) {
+            while (*p == ' ') p++;
+            size_t len = strlen(p);
+            size_t take = len <= DESC_WIDTH ? len : DESC_WIDTH;
+            if (take < len) {
+                size_t k = take;
+                while (k > 0 && p[k] != ' ') k--;
+                if (k > 0) take = k;
+            }
+            memcpy(lines[nl], p, take);
+            lines[nl][take] = '\0';
+            pairs[np++] = "";
+            pairs[np++] = lines[nl];
+            nl++;
+            p += take;
+        }
+        pairs[np++] = "";
+        pairs[np++] = "";
+    }
+    for (int i = 0; i < n; i++) {
+        pairs[np++] = rows[i][0];
+        pairs[np++] = rows[i][1];
+    }
+    tui_dialog d;
+    if (tui_dialog_help(&d, title, pairs, np / 2) != 0) return;
+    tui_frame_run_dialog(&d);
+    tui_dialog_free(&d);
 }
 
 void ekeys_help(const char *view, const char *title) {

@@ -1983,7 +1983,7 @@ void test_email_service(void) {
         INJECT_STDIN("\rq", 2, saved_stdin);   /* Enter changes nothing, q closes */
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
-        show_help_popup("Help", rows, 2);
+        show_help_popup(NULL, "Help", rows, 2);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         ASSERT(1, "show_help_popup: no crash");

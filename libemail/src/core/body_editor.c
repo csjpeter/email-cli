@@ -4,6 +4,7 @@
 /* The full-screen message body editor: libtuikit's tui_textedit with autosave. */
 #include "body_editor.h"
 #include "key_events.h"
+#include "key_table.h"
 #include "status_line.h"
 #include "tui_frame.h"
 #include <tuikit/dialog.h>
@@ -100,11 +101,8 @@ static void show_help(void) {
         { "Enter, Tab",       "Insert a newline / a tab" },
         { "Discard",          "Esc, then q in the review" },
     };
-    tui_dialog d;
-    if (tui_dialog_help(&d, "Body editor shortcuts", &rows[0][0],
-                        (int)(sizeof(rows) / sizeof(rows[0]))) != 0) return;
-    tui_frame_run_dialog(&d);
-    tui_dialog_free(&d);
+    ekeys_help_rows(EKV_BODY_EDITOR, "Body editor shortcuts", rows,
+                    (int)(sizeof(rows) / sizeof(rows[0])));
     /* the overlay drew over the screen: wipe it, the next draw is whole */
     ssize_t w = write(STDOUT_FILENO, "\033[2J", 4);
     (void)w;

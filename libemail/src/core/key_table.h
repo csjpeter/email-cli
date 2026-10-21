@@ -68,6 +68,13 @@ typedef enum {
 #define EKV_FOLDERS     "folders"
 #define EKV_REVIEW      "review"
 #define EKV_ATTACH      "attach-picker"
+/** The views whose help rows are a literal list in the view's code
+ *  (ekeys_help_rows()); their description is still in the key table. */
+#define EKV_ACCOUNTS    "accounts"
+#define EKV_RULES       "rules"
+#define EKV_RULE        "rule"
+#define EKV_CONDITIONS  "conditions"
+#define EKV_BODY_EDITOR "body-editor"
 /** The accounts screen with a Gmail account under the cursor: its ":" menu
  *  holds the renewal of the authorization. */
 #define EKV_ACCOUNTS_GMAIL "accounts-gmail"
@@ -103,6 +110,16 @@ int ekeys_confirm(const char *view, EmailAction a, const char *target);
 
 /** @brief The help overlay of @p view, made from the table; returns when closed. */
 void ekeys_help(const char *view, const char *title);
+
+/**
+ * @brief The help overlay of a view whose keys are a literal list of @p n
+ *        (key, text) rows: the view's description from the key table (one to
+ *        three lines) comes first, then the rows.  Returns when closed.
+ */
+void ekeys_help_rows(const char *view, const char *title, const char *const rows[][2], int n);
+
+/** @brief The description of @p view in the table, or NULL when it has none. */
+const char *ekeys_view_desc(const char *view);
 
 /** @brief 1 when the help overlay of @p view has a row for @p key (the
  *        table row the handler is checked against). */

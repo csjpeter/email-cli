@@ -250,13 +250,15 @@ static PtySession *at_reader(void) {
  * the view behind it does not move.
  */
 static void help_cycle(PtySession *s, const char *title, const char *row,
-                       const char *behind) {
+                       const char *behind, const char *desc) {
     const char *closers[] = { "Esc", "q", "BS", NULL };
     const char *inert[]   = { "x", "h", "Enter", "Tab", "F1", "?", "Left", "Right", "Del", NULL };
     for (int i = 0; closers[i]; i++) {
         press(s, "?");
         CHECK(s, pty_wait_for(s, title, WAIT_MS) == 0, "%s: ? opens '%s'", closers[i], title);
         CHECK(s, pty_screen_contains(s, row), "%s: the help lists '%s'", title, row);
+        CHECK(s, pty_screen_contains(s, desc), "%s: the help opens with the description '%s'",
+              title, desc);
         CHECK(s, pty_screen_contains(s, behind), "%s: the view stays behind", title);
         for (int k = 0; inert[k]; k++) {
             press(s, inert[k]);
@@ -282,12 +284,28 @@ static void help_scroll(PtySession *s, const char *title) {
     CHECK(s, !pty_screen_contains(s, title), "%s: Esc closes after scrolling", title);
 }
 
+/* EMAIL-183: the help lists Backspace (with the Back entry; on the top level
+ * it says it does nothing).  A long help is looked through with PgDn. */
+static void help_lists_backspace(PtySession *s, const char *title) {
+    press(s, "?");
+    CHECK(s, pty_wait_for(s, title, WAIT_MS) == 0, "%s: opens for the Backspace row", title);
+    int found = pty_screen_contains(s, "Backspace");
+    for (int i = 0; !found && i < 6; i++) {
+        press(s, "PgDn");
+        found = pty_screen_contains(s, "Backspace");
+    }
+    CHECK(s, found, "%s: the help lists Backspace", title);
+    press(s, "Esc");
+}
+
 static void test_hk_accounts(void) {
     PtySession *s = at_accounts();
     ASSERT(s != NULL, "accounts help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Accounts shortcuts", "Add new account", "Email Accounts");
+    help_cycle(s, "Accounts shortcuts", "Add new account", "Email Accounts",
+               "The accounts of the program.");
     help_scroll(s, "Accounts shortcuts");
+    help_lists_backspace(s, "Accounts shortcuts");
     pty_close(s);
 }
 
@@ -295,8 +313,10 @@ static void test_hk_folders(void) {
     PtySession *s = at_folders();
     ASSERT(s != NULL, "folders help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Folder browser shortcuts", "Actions", "Folders");
+    help_cycle(s, "Folder browser shortcuts", "Actions", "Folders",
+               "The folders of the IMAP account");
     help_scroll(s, "Folder browser shortcuts");
+    help_lists_backspace(s, "Folder browser shortcuts");
     pty_close(s);
 }
 
@@ -304,8 +324,10 @@ static void test_hk_list(void) {
     PtySession *s = at_list();
     ASSERT(s != NULL, "list help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Message list shortcuts", "Compose", "message(s) in");
+    help_cycle(s, "Message list shortcuts", "Compose", "message(s) in",
+               "The messages of one folder");
     help_scroll(s, "Message list shortcuts");
+    help_lists_backspace(s, "Message list shortcuts");
     /* The list help is longer than the 80x24 screen: End shows its last rows,
      * Home the first ones again. */
     press(s, "?");
@@ -323,8 +345,10 @@ static void test_hk_reader(void) {
     PtySession *s = at_reader();
     ASSERT(s != NULL, "reader help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Message reader shortcuts", "Help", "From:");
+    help_cycle(s, "Message reader shortcuts", "Down", "From:",
+               "One message, rendered as text.");
     help_scroll(s, "Message reader shortcuts");
+    help_lists_backspace(s, "Message reader shortcuts");
     pty_close(s);
 }
 
@@ -333,7 +357,8 @@ static void test_hk_rules_list(void) {
         PtySession *s = at_rules(n);
         ASSERT(s != NULL, "rules help: opens");
         CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-        help_cycle(s, "Rules shortcuts", "Add a rule", "Rules for");
+        help_cycle(s, "Rules shortcuts", "Add a rule", "Rules for",
+               "The mail rules that sort");
         help_scroll(s, "Rules shortcuts");
         pty_close(s);
     }
@@ -343,7 +368,8 @@ static void test_hk_rule_detail(void) {
     PtySession *s = at_detail(1);
     ASSERT(s != NULL, "detail help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Rule shortcuts", "Edit the rule", "Rule: R01");
+    help_cycle(s, "Rule shortcuts", "Edit the rule", "Rule: R01",
+               "One mail rule: its conditions");
     help_scroll(s, "Rule shortcuts");
     pty_close(s);
 }
@@ -352,7 +378,8 @@ static void test_hk_conditions(void) {
     PtySession *s = at_conditions(1, 1);
     ASSERT(s != NULL, "conditions help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Conditions shortcuts", "Cancel the rule", "(step 1/2)");
+    help_cycle(s, "Conditions shortcuts", "Cancel the rule", "(step 1/2)",
+               "The conditions of the rule being");
     help_scroll(s, "Conditions shortcuts");
     pty_close(s);
 }

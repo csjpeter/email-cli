@@ -1830,6 +1830,7 @@ static void test_picker_help(void) {
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Attachment picker shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "The attachments of the message.");     /* EMAIL-181 */
     ASSERT_SCREEN_CONTAINS(s, "Choose");
     ASSERT_SCREEN_CONTAINS(s, "Back");
     ASSERT_SCREEN_CONTAINS(s, "Page down");

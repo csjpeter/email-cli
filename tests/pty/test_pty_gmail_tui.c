@@ -3445,6 +3445,7 @@ static void test_lb_help_and_status(void) {
         pty_send_str(s, "?");
         ASSERT_WAIT_FOR(s, "Label browser shortcuts", WAIT_MS);
         pty_settle(s, 300);
+        ASSERT_SCREEN_CONTAINS(s, "The labels of the Gmail account.");   /* EMAIL-181 */
         ASSERT_SCREEN_CONTAINS(s, "First label - also g");
         ASSERT_SCREEN_CONTAINS(s, "Last label - also G");
         ASSERT_SCREEN_CONTAINS(s, "Back - to the accounts (also h and Left)");

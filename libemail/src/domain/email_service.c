@@ -416,12 +416,9 @@ static void list_status_line(int trows, int tcols, int is_gmail, int in_trash,
  * @param rows   Array of {key_label, description} string pairs.
  * @param n      Number of rows.
  */
-static void show_help_popup(const char *title,
+static void show_help_popup(const char *view, const char *title,
                             const char *rows[][2], int n) {
-    tui_dialog d;
-    if (tui_dialog_help(&d, title, &rows[0][0], n) != 0) return;
-    tui_frame_run_dialog(&d);
-    tui_dialog_free(&d);
+    ekeys_help_rows(view, title, (const char *const (*)[2])rows, n);
 }
 
 /**
@@ -5813,7 +5810,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             };
             int nhelp = (int)(sizeof(help)/sizeof(help[0]));
             if (!(count > 0 && accounts[cursor].cfg->gmail_mode)) nhelp--;
-            show_help_popup("Accounts shortcuts", help, nhelp);
+            show_help_popup(EKV_ACCOUNTS, "Accounts shortcuts", help, nhelp);
             ACC_FREE(); continue;
         }
         if (ch == 'i' && count > 0) {
@@ -8252,8 +8249,8 @@ int email_service_reply(const Config *cfg, const char *uid, const char *folder,
     return rc;
 }
 
-void email_service_help_popup(const char *title, const char *rows[][2], int n) {
-    show_help_popup(title, rows, n);
+void email_service_help_popup(const char *view, const char *title, const char *rows[][2], int n) {
+    show_help_popup(view, title, rows, n);
 }
 
 /* ── JSON for the account and rule listings (EMAIL-122) ──────────────── */

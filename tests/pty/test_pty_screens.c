@@ -854,7 +854,7 @@ VIEW(rule_add_when,    (remove_rules(), at_rules()),
      (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(rule_add_actions, (remove_rules(), at_rules()),
      (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS),
-      pty_send_str(s, "q"), pty_wait_for(s, "step 2", WAIT_MS), pty_settle(s, SETTLE_MS)))
+      pty_send_key(s, PTY_KEY_TAB), pty_wait_for(s, "step 2", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(compose_dialog,   at_list(),
      (pty_send_str(s, "c"), pty_wait_for(s, "New Message", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(accounts_help,    at_accounts(),
@@ -1098,7 +1098,7 @@ VIEW(rule_when_bad,     (remove_rules(), at_rules()),
       pty_settle(s, 300), pty_send_str(s, "((("), pty_send_key(s, PTY_KEY_ENTER),
       pty_settle(s, SETTLE_MS)))
 VIEW(rule_step2_field,  (remove_rules(), at_rules()),
-     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_str(s, "q"),
+     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_key(s, PTY_KEY_TAB),
       pty_wait_for(s, "step 2", WAIT_MS), pty_settle(s, 300), pty_send_str(s, "Work mail"),
       pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS)))
 

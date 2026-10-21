@@ -6481,7 +6481,7 @@ static void test_tui_rules_editor_add_rule(void) {
     /* Step 1: when list editor */
     pty_send_str(s, "a");                   /* open "new:" input */
     pty_send_str(s, "from:*@test.com\n");   /* type atom, confirm with Enter */
-    pty_send_str(s, "q");                   /* confirm when list, proceed to step 2 */
+    pty_send_key(s, PTY_KEY_TAB);                   /* confirm when list, proceed to step 2 */
     ASSERT_WAIT_FOR(s, "step 2", RULES_WAIT_MS);
     /* Step 2: name + action fields */
     pty_send_str(s, "TestRule\n");          /* Name */
@@ -6516,7 +6516,7 @@ static void test_tui_rules_editor_cancel_add(void) {
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add new rule", RULES_WAIT_MS);
     /* Step 1: when list editor — confirm immediately with q (empty list) */
-    pty_send_str(s, "q");
+    pty_send_key(s, PTY_KEY_TAB);
     ASSERT_WAIT_FOR(s, "step 2", RULES_WAIT_MS);
     /* Step 2: 9 fields all empty — name check fires after last field */
     pty_send_str(s, "\n\n\n\n\n\n\n\n\n");
@@ -6811,7 +6811,7 @@ static void test_tui_rules_edit_form_opens(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "e");
     ASSERT_WAIT_FOR(s, "conditions (step 1/2)", WAIT_MS); /* step 1: when-list editor */
-    pty_send_str(s, "q");                                  /* confirm conditions, advance to step 2 */
+    pty_send_key(s, PTY_KEY_TAB);                                  /* confirm conditions, advance to step 2 */
     ASSERT_WAIT_FOR(s, "Edit rule for", WAIT_MS);          /* step 2: actions form */
     pty_settle(s, SETTLE_MS);                              /* wait for name field to render */
     ASSERT_SCREEN_CONTAINS(s, "SpamFilter");               /* name prefill visible */
@@ -6900,7 +6900,7 @@ static void test_tui_rules_edit_form_saves(void) {
     pty_send_str(s, "d");                       /* delete the one under the cursor */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "subject:*offer*");
-    pty_send_str(s, "q");                       /* conditions done */
+    pty_send_key(s, PTY_KEY_TAB);                       /* conditions done */
 
     rule_form_fields(s, "ExtraLabel");
     ASSERT_WAIT_FOR(s, "Save? (y/N)", WAIT_MS);
@@ -6938,7 +6938,7 @@ static void test_tui_rules_add_form_saves_new_rule(void) {
     pty_send_str(s, "from:*@brand-new.example*");
     pty_send_key(s, PTY_KEY_ENTER);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "q");
+    pty_send_key(s, PTY_KEY_TAB);
     ASSERT_WAIT_FOR(s, "step 2/2: actions", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "BrandNew");                /* the name */
@@ -7026,7 +7026,7 @@ static void test_tui_rules_add_form_needs_a_name(void) {
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add new rule for", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "q");                       /* no conditions, on to the actions */
+    pty_send_key(s, PTY_KEY_TAB);                       /* no conditions, on to the actions */
     ASSERT_WAIT_FOR(s, "step 2/2: actions", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     for (int i = 0; i < 9; i++) { pty_send_key(s, PTY_KEY_ENTER); pty_settle(s, 100); }

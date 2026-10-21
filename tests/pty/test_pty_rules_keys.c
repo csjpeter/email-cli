@@ -525,8 +525,8 @@ static void test_rk_cond_navigation(void) {
     CHECK(s, pty_screen_contains(s, "Edit rule \"R01\" for testuser") && pty_screen_contains(s, "(step 1/2)"),
           "title names the rule and the step");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "Enter/e edit") && pty_row_contains(s, STATUS_ROW, "a add")
-             && pty_row_contains(s, STATUS_ROW, "d delete") && pty_row_contains(s, STATUS_ROW, "q confirm")
-             && pty_row_contains(s, STATUS_ROW, "Esc cancel"), "status line shows the keys");
+             && pty_row_contains(s, STATUS_ROW, "d delete") && pty_row_contains(s, STATUS_ROW, "Tab next")
+             && pty_row_contains(s, STATUS_ROW, "Esc/q cancel"), "status line shows the keys");
     CHECK(s, cursor_has(s, "1. from:*@one"), "cursor starts on the first condition");
     press(s, "k"); press(s, "Up");
     CHECK(s, cursor_has(s, "1. from:"), "k and Up stop at the first");
@@ -559,7 +559,7 @@ static void test_rk_cond_zero_and_one(void) {
     ASSERT(s != NULL, "conditions 0: opens");
     CHECK(s, pty_screen_contains(s, "(empty") && pty_screen_contains(s, "press 'a' to add a condition"),
           "0 conditions: the empty message");
-    const char *keys[] = { "j", "k", "Down", "Up", "Home", "End", "PgUp", "PgDn", "g", "G", "d", "x", " ", "Tab", NULL };
+    const char *keys[] = { "j", "k", "Down", "Up", "Home", "End", "PgUp", "PgDn", "g", "G", "d", "x", " ", NULL };
     for (int i = 0; keys[i]; i++) {
         press(s, keys[i]);
         CHECK(s, pty_screen_contains(s, "(empty") && pty_screen_contains(s, "conditions"),
@@ -617,7 +617,7 @@ static void test_rk_cond_edit_keys(void) {
     pty_close(s);
 }
 
-/** Esc, Backspace, Left, h cancel the rule; q goes on; ctrl-c quits. */
+/** Esc, Backspace, Left, h cancel the rule; q is as Esc, Tab/Right go on; ctrl-c quits. */
 static void test_rk_cond_leave_keys(void) {
     const char *cancel[] = { "Esc", "BS", "Left", "h", NULL };
     for (int i = 0; cancel[i]; i++) {
@@ -643,7 +643,28 @@ static void test_rk_cond_leave_keys(void) {
     press(s, "e");
     pty_wait_for(s, "conditions", WAIT_MS);
     press(s, "q");
-    CHECK(s, pty_wait_for(s, "step 2/2: actions", WAIT_MS) == 0, "q goes on to the actions");
+    CHECK(s, pty_wait_for(s, "Discard the rule? (y/N)", WAIT_MS) == 0
+             && !pty_screen_contains(s, "step 2/2"), "q is as Esc: asks before discarding, does not go on");
+    press(s, "y");
+    CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 && rules_in_file() == 2, "q then y goes back");
+    press(s, "e");
+    pty_wait_for(s, "conditions", WAIT_MS);
+    press(s, "Right");
+    CHECK(s, pty_wait_for(s, "step 2/2: actions", WAIT_MS) == 0, "Right goes on to the actions");
+    press(s, "Esc");
+    pty_close(s);
+
+    s = at_conditions(0, 0);
+    ASSERT(s != NULL, "conditions q empty: opens");
+    press(s, "q");
+    CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0 && !pty_screen_contains(s, "step 2/2"),
+          "q with no conditions goes back to the rules list");
+    pty_close(s);
+
+    s = at_conditions(0, 0);
+    ASSERT(s != NULL, "conditions Tab: opens");
+    press(s, "Tab");
+    CHECK(s, pty_wait_for(s, "step 2/2: actions", WAIT_MS) == 0, "Tab goes on to the actions");
     press(s, "Esc");
     pty_close(s);
 
@@ -665,7 +686,7 @@ static void test_rk_cond_leave_keys(void) {
 static void test_rk_cond_help_and_unbound(void) {
     PtySession *s = at_conditions(1, 1);
     ASSERT(s != NULL, "conditions help: opens");
-    const char *keys[] = { "x", " ", "r", "c", "l", "p", "A", "Tab", "Right", "Del", "Ins", "F1", NULL };
+    const char *keys[] = { "x", " ", "r", "c", "l", "p", "A", "Del", "Ins", "F1", NULL };
     for (int i = 0; keys[i]; i++) {
         press(s, keys[i]);
         CHECK(s, pty_screen_contains(s, "(step 1/2)") && cursor_has(s, "1. from:")
@@ -691,7 +712,7 @@ static void test_rk_actions_form(void) {
     pty_wait_for(s, "new:", WAIT_MS);
     pty_send_str(s, "from:*@new.example.org");
     press(s, "Enter");
-    press(s, "q");
+    press(s, "Tab");
     CHECK(s, pty_wait_for(s, "step 2/2: actions", WAIT_MS) == 0 && pty_row_contains(s, STATUS_ROW, "Enter next field")
              && pty_row_contains(s, STATUS_ROW, "Esc cancel"), "step 2 and its status line");
     pty_send_str(s, "Fresh");
@@ -702,7 +723,7 @@ static void test_rk_actions_form(void) {
     CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0 && rules_in_file() == 0, "n saves nothing");
     press(s, "a"); pty_wait_for(s, "new:", WAIT_MS);
     pty_send_str(s, "from:*@new.example.org");
-    press(s, "Enter"); press(s, "q");
+    press(s, "Enter"); press(s, "Tab");
     pty_wait_for(s, "step 2/2", WAIT_MS);
     pty_send_str(s, "Fresh");
     for (int i = 0; i < 9; i++) press(s, "Enter");
@@ -713,7 +734,7 @@ static void test_rk_actions_form(void) {
 
     s = at_conditions(0, 0);
     ASSERT(s != NULL, "actions empty name: opens");
-    press(s, "q");
+    press(s, "Tab");
     pty_wait_for(s, "step 2/2", WAIT_MS);
     for (int i = 0; i < 9; i++) press(s, "Enter");
     CHECK(s, pty_wait_for(s, "Rule name is required", WAIT_MS) == 0, "an empty name is refused");
@@ -723,7 +744,7 @@ static void test_rk_actions_form(void) {
 
     s = at_conditions(0, 0);
     ASSERT(s != NULL, "actions esc: opens");
-    press(s, "q");
+    press(s, "Tab");
     pty_wait_for(s, "step 2/2", WAIT_MS);
     press(s, "Esc");
     CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0, "Esc in a field cancels the rule");
@@ -731,7 +752,7 @@ static void test_rk_actions_form(void) {
 
     s = at_conditions(0, 0);
     ASSERT(s != NULL, "actions ctrl-c: opens");
-    press(s, "q");
+    press(s, "Tab");
     pty_wait_for(s, "step 2/2", WAIT_MS);
     pty_send_key(s, PTY_KEY_CTRL_C);
     ASSERT_EXIT_STATUS(s, 0, 5000);
@@ -739,7 +760,7 @@ static void test_rk_actions_form(void) {
 
     s = at_conditions(0, 0);
     ASSERT(s != NULL, "actions save ctrl-c: opens");
-    press(s, "q");
+    press(s, "Tab");
     pty_wait_for(s, "step 2/2", WAIT_MS);
     pty_send_str(s, "Zed");
     for (int i = 0; i < 9; i++) press(s, "Enter");
@@ -760,7 +781,7 @@ static PtySession *at_form(int edit) {
         pty_send_str(s, "from:*@new.example.org");
         press(s, "Enter");
     }
-    press(s, "q");
+    press(s, "Tab");
     if (pty_wait_for(s, "step 2/2: actions", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
     return s;

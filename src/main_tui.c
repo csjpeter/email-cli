@@ -1476,6 +1476,10 @@ static int cmd_compose_interactive(Config *cfg,
     return send_rc;
 }
 
+/** Returned by cmd_reply, cmd_forward and cmd_reply_all when the compose dialog
+ *  was cancelled: nothing was sent and there is nothing to read (EMAIL-222). */
+#define CMD_DIALOG_CANCELLED 2
+
 /**
  * @brief Reply to a message identified by UID in the given folder.
  * Loads the message, extracts reply metadata, opens compose form.
@@ -1513,7 +1517,7 @@ static int cmd_reply(Config *cfg, const char *uid, const char *folder) {
 
     CDResult dlg = {0};
     if (!compose_dialog(cfg, "Reply", reply_to, NULL, subject, &dlg)) {
-        rc = -1;
+        rc = CMD_DIALOG_CANCELLED;
     } else {
         rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, msg_id, quoted, &dlg);
         if (rc == 0)
@@ -1565,7 +1569,7 @@ static int cmd_forward(Config *cfg, const char *uid, const char *folder) {
     CDResult dlg = {0};
     if (!compose_dialog(cfg, "Forward", NULL, NULL, fwd_subject, &dlg)) {
         free(quoted);
-        return -1;
+        return CMD_DIALOG_CANCELLED;
     }
     int rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, NULL, quoted, &dlg);
     if (rc == 0) {
@@ -1626,7 +1630,7 @@ static int cmd_reply_all(Config *cfg, const char *uid, const char *folder) {
 
     CDResult dlg = {0};
     if (!compose_dialog(cfg, "Reply All", reply_to, cc_buf[0] ? cc_buf : NULL, subject, &dlg)) {
-        rc = -1;
+        rc = CMD_DIALOG_CANCELLED;
     } else {
         rc = cmd_compose_interactive(cfg, dlg.to, dlg.cc, dlg.bcc, dlg.subj, msg_id, quoted, &dlg);
         if (rc == 0)
@@ -3025,21 +3029,20 @@ int main(int argc, char *argv[]) {
                 if (!tui_folder) break;  /* ESC from folder browser → quit */
             } else if (ret == 2) {
                 /* 'c' → compose new message via pre-compose dialog */
-                {
-                    CDResult dlg = {0};
-                    if (compose_dialog(sel_cfg, "New Message", NULL, NULL, NULL, &dlg)) {
-                        cmd_compose_interactive(sel_cfg, dlg.to, dlg.cc, dlg.bcc,
-                                                dlg.subj, NULL, NULL, &dlg);
-                    }
+                CDResult dlg = {0};
+                if (compose_dialog(sel_cfg, "New Message", NULL, NULL, NULL, &dlg)) {
+                    cmd_compose_interactive(sel_cfg, dlg.to, dlg.cc, dlg.bcc,
+                                            dlg.subj, NULL, NULL, &dlg);
+                    /* Pause so the user can read the send result before the
+                     * list re-renders and clears the screen.  A cancelled
+                     * dialog has nothing to read (EMAIL-222). */
+                    pause_return_to_inbox();
                 }
-                /* Pause so the user can read the send result before the
-                 * list re-renders and clears the screen. */
-                pause_return_to_inbox();
             } else if (ret == 3) {
                 /* 'r' → reply to current message */
                 const char *af = opts.action_folder[0] ? opts.action_folder : tui_folder;
-                cmd_reply(sel_cfg, opts.action_uid, af);
-                pause_return_to_inbox();
+                if (cmd_reply(sel_cfg, opts.action_uid, af) != CMD_DIALOG_CANCELLED)
+                    pause_return_to_inbox();
             } else if (ret == 4) {
                 /* background sync finished → re-list to show new messages */
                 continue;
@@ -3051,16 +3054,16 @@ int main(int argc, char *argv[]) {
                 /* 'F' → forward current message */
                 {
                     const char *af = opts.action_folder[0] ? opts.action_folder : tui_folder;
-                    cmd_forward(sel_cfg, opts.action_uid, af);
+                    if (cmd_forward(sel_cfg, opts.action_uid, af) != CMD_DIALOG_CANCELLED)
+                        pause_return_to_inbox();
                 }
-                pause_return_to_inbox();
             } else if (ret == 6) {
                 /* 'A' → reply-all */
                 {
                     const char *af = opts.action_folder[0] ? opts.action_folder : tui_folder;
-                    cmd_reply_all(sel_cfg, opts.action_uid, af);
+                    if (cmd_reply_all(sel_cfg, opts.action_uid, af) != CMD_DIALOG_CANCELLED)
+                        pause_return_to_inbox();
                 }
-                pause_return_to_inbox();
             } else if (ret < 0) {
                 /* Connection or command failed — show actionable advice */
                 fprintf(stderr, "\n  Operation failed. Check the error above.\n"

@@ -355,10 +355,10 @@ static void test_compose_esc_cancels(void) {
     pty_settle(s, SETTLE_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
-    /* After compose cancel, TUI shows "[Press any key]" before returning to list */
-    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
-    pty_send_str(s, " ");
+    /* A cancel returns to the list at once, with no pause (EMAIL-222). */
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "[Press any key");
     pty_settle(s, SETTLE_MS);
     /* Must NOT have opened editor (vim is not running) */
     ASSERT_SCREEN_NOT_CONTAINS(s, "~"); /* vim empty-buffer tilde markers */
@@ -398,9 +398,10 @@ static void test_compose_esc_asks_before_discarding(void) {
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
     pty_send_str(s, "y");                         /* Yes discards */
-    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
-    pty_send_str(s, " ");
+    /* A cancel returns to the list at once, with no pause (EMAIL-222). */
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "[Press any key");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1342,9 +1343,10 @@ static void test_reply_esc_cancels(void) {
     /* Esc asks before it throws away the prefilled text (EMAIL-175). */
     ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
     pty_send_str(s, "y");
-    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
-    pty_send_str(s, " ");
+    /* A cancel returns to the list at once, with no pause (EMAIL-222). */
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "[Press any key");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1617,9 +1619,10 @@ static void test_reply_all_esc_cancels(void) {
     /* Esc asks before it throws away the prefilled text (EMAIL-175). */
     ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
     pty_send_str(s, "y");
-    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
-    pty_send_str(s, " ");
+    /* A cancel returns to the list at once, with no pause (EMAIL-222). */
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "[Press any key");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1821,9 +1824,10 @@ static void test_forward_esc_cancels(void) {
     /* Esc asks before it throws away the prefilled text (EMAIL-175). */
     ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
     pty_send_str(s, "y");
-    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
-    pty_send_str(s, " ");
+    /* A cancel returns to the list at once, with no pause (EMAIL-222). */
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "[Press any key");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -2119,9 +2123,10 @@ static void test_reader_reply_all_opens_compose(void) {
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
     pty_send_str(s, "y");
-    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
-    pty_send_str(s, " ");
+    /* A cancel returns to the list at once, with no pause (EMAIL-222). */
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "[Press any key");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -2146,14 +2151,15 @@ static void test_reader_reply_opens_compose(void) {
     ASSERT_SCREEN_CONTAINS(s, "To:");
     ASSERT_SCREEN_CONTAINS(s, "Re:");
 
-    /* ESC → dialog closed; main_tui shows "[Press any key]" prompt */
+    /* ESC → dialog closed */
     pty_send_key(s, PTY_KEY_ESC);
     /* Esc asks before it throws away the prefilled text (EMAIL-175). */
     ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
     pty_send_str(s, "y");
-    ASSERT_WAIT_FOR(s, "[Press any key", WAIT_MS);
-    pty_send_str(s, " ");
+    /* A cancel returns to the list at once, with no pause (EMAIL-222). */
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "[Press any key");
 
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);

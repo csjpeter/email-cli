@@ -459,8 +459,10 @@ ignored) and never scrolls.
 | other function keys (`F1`, `PgUp`, `PgDn`, `Ins`) | | change nothing; `h ? q j k` are text | `test_ck_unbound_and_literal_keys` |
 | resize | | redrawn, status line on the new last row | `test_ck_resize` |
 
-After the dialog is left, the list waits for one key at `[Press any key to
-return to inbox]` (`leave_pause` in the test).
+When the dialog is cancelled (`Esc`, `y` at the question, `ctrl-c`), in `c`, `r`,
+`F` and `A` alike, the list is redrawn at once (EMAIL-222).  Only after a
+completed compose does it wait for one key at `[Press any key to return to
+inbox]`, so that the send result can be read.
 
 Findings, fixed with EMAIL-150: `d` in an empty Attach field was swallowed when
 no attachment existed (a path could not start with `d`), `Tab` on a directory

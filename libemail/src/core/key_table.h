@@ -125,6 +125,24 @@ const char *ekeys_view_desc(const char *view);
  *        table row the handler is checked against). */
 int ekeys_help_has(const char *view, tui_keycode key);
 
+/** @brief The quick key of action @p a in the ':' menu of @p view (the
+ *         library's assignment, the one the menu draws), 0 when it has none. */
+char ekeys_quick_key(const char *view, EmailAction a);
+
+/** One row of a view's ':' menu, as the menu draws it (EMAIL-225). */
+typedef struct {
+    char letter;         /**< the quick key; 0 only when the assignment failed */
+    const char *name;    /**< the entry's name */
+    const char *cls;     /**< "routine", "serious" or "rare" */
+    int direct;          /**< 1 when the entry also has a direct key */
+} EkeysMenuRow;
+
+/** @brief Fills @p rows (at most @p max) with the entries of @p view's ':' menu
+ *         in table order, with the letters the menu draws; the docs, the help
+ *         and the tests read the same table.
+ *  @return the number of rows, -1 when the view is unknown. */
+int ekeys_menu_rows(const char *view, EkeysMenuRow *rows, int max);
+
 /** @brief 1 when the table of @p view has an entry for the action @p a (a key
  *         or a row of the ':' menu), 0 when the view does not offer it. */
 int ekeys_menu_has(const char *view, EmailAction a);

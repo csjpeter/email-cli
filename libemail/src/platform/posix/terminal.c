@@ -283,6 +283,85 @@ int terminal_read_password(const char *prompt, char *buf, size_t size) {
     return read_password_plain(buf, size);
 }
 
+int terminal_read_line(const char *prompt, int mask, char *buf, size_t size) {
+    if (!buf || size == 0) return TERM_LINE_EOF;
+    buf[0] = '\0';
+    int fd = STDIN_FILENO;
+    fflush(stdout);   /* the library writes with write(2) */
+    tui_tty_raw *raw = tui_tty_raw_enter(fd, 0);
+    if (!raw) return TERM_LINE_EOF;
+    int rc = TERM_LINE_EOF;
+    size_t len = 0;
+    int shown = 0;    /* characters on the screen */
+    if (prompt) {
+        if (write(STDOUT_FILENO, prompt, strlen(prompt)) < 0 ||
+            write(STDOUT_FILENO, ": ", 2) < 0)
+            goto done;
+    }
+    for (;;) {
+        tui_event ev;
+        int r = tui_tty_read_key(fd, &ev);
+        if (r <= 0) break;
+        if (ev.type != TUI_EV_KEY) continue;
+        if (ev.key == TUI_KEY_ENTER) { rc = (int)len; break; }
+        if (ev.key == TUI_KEY_ESC) { rc = TERM_LINE_CANCEL; break; }
+        if (TUI_EV_IS_CTRL(&ev, 'c')) {
+            if (write(STDOUT_FILENO, "^C", 2) < 0) { /* the quit still counts */ }
+            rc = TERM_LINE_QUIT;
+            break;
+        }
+        if (TUI_EV_IS_CTRL(&ev, 'd')) {
+            if (len == 0) break;
+            continue;
+        }
+        if (TUI_EV_IS_CTRL(&ev, 'u')) {
+            while (shown > 0) {
+                if (write(STDOUT_FILENO, "\b \b", 3) < 0) break;
+                shown--;
+            }
+            len = 0;
+            continue;
+        }
+        if (ev.key == TUI_KEY_BACKSPACE) {
+            if (len == 0) continue;
+            size_t start = len;
+            do { start--; } while (start > 0 && ((unsigned char)buf[start] & 0xC0) == 0x80);
+            if (!mask) {
+                /* a wide character takes its columns: erase them all */
+                int w = tui_str_width(buf + start);
+                for (int i = 0; i < (w > 0 ? w : 1); i++)
+                    if (write(STDOUT_FILENO, "\b \b", 3) < 0) break;
+            } else if (write(STDOUT_FILENO, "\b \b", 3) < 0) {
+                /* nothing more to do */
+            }
+            len = start;
+            buf[len] = '\0';
+            shown--;
+            continue;
+        }
+        if (ev.key != TUI_KEY_CHAR || (ev.mods & (TUI_MOD_CTRL | TUI_MOD_ALT))) continue;
+        size_t n = strlen(ev.utf8);
+        if (len + n >= size) {
+            if (write(STDOUT_FILENO, "\a", 1) < 0) { /* only a bell */ }
+            continue;
+        }
+        memcpy(buf + len, ev.utf8, n);
+        len += n;
+        buf[len] = '\0';
+        shown++;
+        if (mask) {
+            if (write(STDOUT_FILENO, "*", 1) < 0) break;
+        } else if (write(STDOUT_FILENO, ev.utf8, n) < 0) {
+            break;
+        }
+    }
+done:
+    tui_tty_raw_exit(&raw);
+    if (write(STDOUT_FILENO, "\n", 1) < 0) { /* the line is done anyway */ }
+    if (rc < 0) memset(buf, 0, size);
+    return rc;
+}
+
 int terminal_understands_escapes(void) {
     const char *t = getenv("TERM");
     return t && t[0] && strcmp(t, "dumb") != 0;

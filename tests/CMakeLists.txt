@@ -101,6 +101,5 @@ project_test(pty test-pty-compose SOURCES pty/test_compose_pty.c ${SCRATCH} INCL
 
 project_test(integration run_integration SCRIPT integration/run_integration.sh TIMEOUT 1800)
 project_test(integration run_local_dovecot SCRIPT integration/run_local_dovecot.sh TIMEOUT 1800)
-project_test(integration test_compose_names SCRIPT integration/test_compose_names.sh)
 
 project_test(e2e smtp_delivery SCRIPT e2e/smtp_delivery.sh TIMEOUT 1800)

@@ -39,11 +39,9 @@ show_help() {
     echo "  declared       Fail when a declared test is not built or a built test is not declared"
     echo "  check          Run every gate (headers, names, declared, test, functional, pty, valgrind) and summarise"
     echo "  coverage       Run tests and generate coverage report"
-    echo "  integration    Run integration test against Dovecot IMAP container"
-    echo "  integration-local  Run APPEND integration test with local Dovecot (no Docker)"
+    echo "  integration    Run integration test against a per-agent Dovecot process"
+    echo "  integration-local  Run APPEND integration test with a per-agent Dovecot process"
     echo "  e2e            Build the package, run tests/e2e in LXC containers (sudo lxc-*)"
-    echo "  imap-down      Stop integration test container (preserves emails volume)"
-    echo "  imap-clean     Remove integration test container and volume"
     echo "  install        Build (release) and install binaries to ~/.local/bin"
     echo "  uninstall      Remove installed binaries from ~/.local/bin"
     echo "  package [deb|rpm|all]  Build release and create package(s) in build/packages/"
@@ -668,12 +666,6 @@ case "$1" in
             exit 1
         fi
         exit "$e2e_rc"
-        ;;
-    imap-down)
-        ./tests/integration/run_integration.sh --down
-        ;;
-    imap-clean)
-        ./tests/integration/run_integration.sh --clean
         ;;
     headers)
         check_source_headers "${2:-.}"

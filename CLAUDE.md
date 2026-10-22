@@ -40,11 +40,9 @@ Working through the approved tickets of this project by itself is the
 ./manage.sh coverage   # GCOV/LCOV coverage report (>90% goal for core/infra)
                        # also runs the functional suite and the PTY tests
 ./manage.sh clean      # Remove build artifacts
-./manage.sh integration # Integration test against real Dovecot IMAP (Docker required)
-./manage.sh integration-local # APPEND integration test against a local Dovecot (no Docker)
+./manage.sh integration # Integration test against a per-agent Dovecot process (no container)
+./manage.sh integration-local # APPEND integration test, same per-agent Dovecot setup
 ./manage.sh e2e        # Build the package, run tests/e2e in LXC containers (sudo lxc-*)
-./manage.sh imap-down  # Stop integration container (volume preserved)
-./manage.sh imap-clean # Remove integration container and volume
 ./manage.sh deps       # Install system dependencies (Ubuntu 24.04 / Rocky 9)
 ./manage.sh run        # Release build + launch email-cli
 ./manage.sh install    # Release build + install binaries into ~/.local/bin

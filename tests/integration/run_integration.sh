@@ -11,113 +11,29 @@
 #   - Lists messages in INBOX (UID SEARCH ALL)
 #   - Downloads and displays message content
 #
-# Environment lifecycle:
-#   - Container already running  → reused (fast)
-#   - Container stopped, volume exists → restarted in seconds (emails preserved)
-#   - First run ever             → full build + start (~30-60s)
+# Environment: one Dovecot process of its own, started by this script under
+# build/tests/integration/work-<pid> on a port the kernel picks, seeded with
+# the two messages of tests/integration/seed, and stopped with its files
+# removed when the script ends.  No container, no compose, no volume: agents
+# running it side by side share nothing (EMAIL-228; the setup is
+# dovecot_env.sh, shared with run_local_dovecot.sh).
 #
 # Usage:
-#   ./run_integration.sh            # run test (start env if needed)
-#   ./run_integration.sh --down     # stop containers (keeps email volume)
-#   ./run_integration.sh --clean    # stop containers AND remove volume
-#   ./run_integration.sh --names    # print this agent's compose project and volume
-#
-# Names carry the agent id (AGENT_ID, or the clone's agent-work/<id>), so
-# agents running it side by side do not share a container or a volume.
+#   ./run_integration.sh
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# The agent id names the compose project, so the container and the volume of
-# one agent are never those of another (EMAIL-172).  It is AGENT_ID when set,
-# else the <id> of a clone under .../agent-work/<id>/, else "local".
-AGENT="${AGENT_ID:-}"
-if [ -z "$AGENT" ]; then
-    case "$PROJECT_ROOT" in
-        */agent-work/*/*) AGENT="${PROJECT_ROOT#*/agent-work/}"; AGENT="${AGENT%%/*}" ;;
-        *) AGENT="local" ;;
-    esac
-fi
-case "$AGENT" in
-    *[!A-Za-z0-9_-]*|'') echo "ERROR: unusable agent id '$AGENT'" >&2; exit 1 ;;
-esac
-COMPOSE_PROJECT_NAME="email-cli-$AGENT"
-export COMPOSE_PROJECT_NAME
-COMPOSE="docker compose -p $COMPOSE_PROJECT_NAME -f $SCRIPT_DIR/docker-compose.yml"
-VOLUME="${COMPOSE_PROJECT_NAME}_maildata"
-CONTAINER=""   # read back from compose by resolve_container
-
-resolve_container() {
-    CONTAINER="$($COMPOSE ps -a -q imap-server | head -n 1)"
-}
-
-# TLS connection – self-signed cert, so verify is disabled
-# The container's IMAPS port is published on a loopback port the kernel picks
-# (docker-compose.yml); ensure_env_running leaves it in IMAP_HOST.
-IMAP_HOST=""
 IMAP_USER="testuser"
 IMAP_PASS="testpass"
 IMAP_FOLDER="INBOX"
 
-# ── Lifecycle helpers ────────────────────────────────────────────────────
-
-start_env() {
-    echo "Building and starting Dovecot IMAP/TLS test server..."
-    $COMPOSE up -d --build
-    resolve_container
-    wait_for_imaps
-}
-
-wait_for_imaps() {
-    echo "Waiting for IMAPS on port 993..."
-    for i in $(seq 1 30); do
-        if docker exec "$CONTAINER" nc -z localhost 993; then
-            echo "IMAPS server is ready."
-            return 0
-        fi
-        sleep 1
-    done
-    echo "ERROR: IMAPS server did not become ready in time."
-    docker logs "$CONTAINER" | tail -20
-    exit 1
-}
-
-ensure_env_running() {
-    resolve_container
-    if [ -n "$CONTAINER" ] && [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" = "true" ]; then
-        echo "Reusing running IMAP test server."
-    elif [ -n "$CONTAINER" ]; then
-        echo "Restarting stopped IMAP test server..."
-        $COMPOSE start
-        wait_for_imaps
-    else
-        start_env
-    fi
-}
-
-# ── Subcommands ──────────────────────────────────────────────────────────
-
-case "${1:-}" in
-    --names)
-        echo "project=$COMPOSE_PROJECT_NAME"
-        echo "volume=$VOLUME"
-        exit 0
-        ;;
-    --down)
-        echo "Stopping integration test environment..."
-        $COMPOSE stop
-        echo "Done. Volume '$VOLUME' preserved."
-        exit 0
-        ;;
-    --clean)
-        echo "Removing integration test environment and volume..."
-        $COMPOSE down -v
-        echo "Done."
-        exit 0
-        ;;
-esac
+. "$SCRIPT_DIR/dovecot_env.sh"
+dovecot_env_init "$IMAP_USER" "$IMAP_PASS"
+trap dovecot_env_cleanup EXIT
+TEST_HOME="$WORK_DIR/home"
 
 # ── Run integration test ─────────────────────────────────────────────────
 
@@ -130,31 +46,15 @@ if [ ! -f "$PROJECT_ROOT/bin/email-cli" ]; then
     (cd "$PROJECT_ROOT" && ./manage.sh build)
 fi
 
-# 2. Start or reuse the IMAP/TLS server
-ensure_env_running
-
-# 3. Write temporary config pointing at the TLS server.  The home lives under
-#    build/ with this shell's pid in its name; nothing is written to the system temp directory.
-HOST_MAPPING="$(docker port "$CONTAINER" 993/tcp | head -n 1)"
-IMAP_PORT="${HOST_MAPPING##*:}"
-case "$IMAP_PORT" in
-    ''|*[!0-9]*) echo "ERROR: no published IMAPS port for $CONTAINER ('$HOST_MAPPING')" >&2; exit 1 ;;
-esac
+# 2. Start this run's own Dovecot with the seeded messages, and write a
+#    config pointing at it.  The home lives under the work dir in build/.
+dovecot_env_seed "$SCRIPT_DIR/seed"
+dovecot_env_start
 IMAP_HOST="imaps://localhost:$IMAP_PORT"
-echo "IMAPS is published on $IMAP_HOST"
+echo "IMAPS is on $IMAP_HOST"
 
-TEST_HOME="$PROJECT_ROOT/build/tests/integration/work-$$"
-mkdir -p "$TEST_HOME"
-cleanup_home() {
-    case "$TEST_HOME" in
-        "$PROJECT_ROOT"/build/tests/integration/work-*) ;;
-        *) echo "ERROR: refusing unsafe path '$TEST_HOME'" >&2; return 1 ;;
-    esac
-    rm -rf "$PROJECT_ROOT/build/tests/integration/work-${TEST_HOME##*/work-}"
-}
-trap cleanup_home EXIT
-mkdir -p "$TEST_HOME/.config/email-cli"
-cat > "$TEST_HOME/.config/email-cli/config.ini" <<EOF
+mkdir -p "$TEST_HOME/.config/email-cli/accounts/$IMAP_USER" "$TEST_HOME/.cache/email-cli/logs"
+cat > "$TEST_HOME/.config/email-cli/accounts/$IMAP_USER/config.ini" <<EOF
 EMAIL_HOST=$IMAP_HOST
 EMAIL_USER=$IMAP_USER
 EMAIL_PASS=$IMAP_PASS
@@ -162,9 +62,11 @@ EMAIL_FOLDER=$IMAP_FOLDER
 SSL_NO_VERIFY=1
 EOF
 
-# Helper: query FLAGS for all messages in INBOX via doveadm inside the container
+# Helper: query FLAGS for all messages in INBOX via doveadm against this run's Dovecot
 flags_for_user() {
-    docker exec "$CONTAINER" doveadm fetch -u "$IMAP_USER" "flags" mailbox INBOX ALL 2>/dev/null
+    dovecot_env_doveadm fetch -u "$IMAP_USER" "flags" mailbox INBOX ALL | grep -v '^$' | sed 's/\\Recent//'
+    # \Recent belongs to the session that first sees a message, not to the
+    # message, so it is left out of the comparison.
 }
 
 # 4. Verify FLAGS before any email-cli operation (baseline)
@@ -172,16 +74,18 @@ BEFORE_FLAGS=$(flags_for_user)
 
 # 5. Run email-cli list (batch) and capture output
 echo "Running: email-cli list --batch ..."
-LIST_OUTPUT=$(HOME="$TEST_HOME" "$PROJECT_ROOT/bin/email-cli" list --batch 2>&1)
+LIST_RC=0
+LIST_OUTPUT=$(HOME="$TEST_HOME" "$PROJECT_ROOT/bin/email-cli" list --batch 2>&1) || LIST_RC=$?
+echo "email-cli list exit code: $LIST_RC"
 echo "$LIST_OUTPUT"
 echo ""
 
 # 6. Run email-cli show for each UID found in list output
 UIDS=$(echo "$LIST_OUTPUT" | grep -Eo '^[[:space:]]+[0-9]+' | tr -d ' ' | head -5)
 SHOW_OUTPUT=""
-for UID in $UIDS; do
-    echo "Running: email-cli show $UID ..."
-    OUT=$(HOME="$TEST_HOME" "$PROJECT_ROOT/bin/email-cli" --batch show "$UID" 2>&1)
+for MSG_UID in $UIDS; do
+    echo "Running: email-cli show $MSG_UID ..."
+    OUT=$(HOME="$TEST_HOME" "$PROJECT_ROOT/bin/email-cli" --batch show "$MSG_UID" 2>&1) || echo "email-cli show exit code: $?"
     echo "$OUT"
     SHOW_OUTPUT="$SHOW_OUTPUT $OUT"
 done
@@ -229,10 +133,12 @@ check "Messages listed"                  "message"      "$LIST_OUTPUT"
 check "First test email in list"         "Test Email 1" "$LIST_OUTPUT"
 check "Second test email in list"        "Test Email 2" "$LIST_OUTPUT"
 check "Show output has message content"  "Test Email"   "$SHOW_OUTPUT"
-check "Successful list completion"       "Fetch complete" "$LIST_OUTPUT"
+check "Both seeded messages counted"    "2 message(s) in INBOX (2 unread)" "$LIST_OUTPUT"
+check_equal "email-cli list exit code is 0" "0" "$LIST_RC"
 
 echo ""
 echo "--- CRITICAL: Read-only guarantee (FLAGS must not change) ---"
+check "Baseline FLAGS were read from the server" "flags:" "$BEFORE_FLAGS"
 check_equal "Message FLAGS unchanged after list+show" "$BEFORE_FLAGS" "$AFTER_FLAGS"
 
 echo ""

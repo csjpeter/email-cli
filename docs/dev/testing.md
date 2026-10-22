@@ -6,7 +6,7 @@
 ./manage.sh test        # Unit tests with AddressSanitizer
 ./manage.sh valgrind    # Unit tests with Valgrind
 ./manage.sh coverage    # Coverage report + functional tests
-./manage.sh integration # End-to-end against Dockerized Dovecot (requires Docker)
+./manage.sh integration # Against a per-agent Dovecot process (no container)
 ```
 
 ### Running one test
@@ -37,8 +37,8 @@ No test uses `/tmp` and no test has a fixed port.
   leaves its directory under `build/`, and `./manage.sh clean` takes it.
 - Every mock binds a loopback port the kernel picks (`MOCK_*_PORT` unset or 0)
   and writes the port it got to the file named by `MOCK_*_PORT_FILE`; the unit
-  tests bind port 0 before they fork; the Docker integration container publishes
-  its ports on kernel-picked loopback ports.
+  tests bind port 0 before they fork; the integration Dovecot listens on a
+  kernel-picked loopback port.
 - Every suite sets `HOME` to a fixture and unsets the three `XDG_*` variables.
 
 ## Unit Tests (`tests/unit/`)
@@ -232,21 +232,23 @@ cannot be tested at all.
 
 ## Integration Tests (`tests/integration/`)
 
-Requires Docker. Runs a real Dovecot IMAP server with:
+Runs a real Dovecot IMAP server as a process of its own (no docker, podman or compose;
+needs `dovecot-imapd`, `openssl`, `nc`, `gcc` and a password-less `sudo`) with:
 - Self-signed TLS certificate (openssl, `ssl_min_protocol = TLSv1.2`)
 - Two seed emails pre-loaded into the mailbox
 
 ```bash
-./manage.sh integration   # start Dovecot if needed, run test, assert output
-./manage.sh imap-down     # stop container (volume preserved)
-./manage.sh imap-clean    # stop + remove volume
+./manage.sh integration        # start Dovecot, seed it, run the test, assert output
+./manage.sh integration-local  # the IMAP APPEND test, on the same setup
 ```
 
-The compose project, container and volume carry the agent id
-(`COMPOSE_PROJECT_NAME=email-cli-<agent>`, from `AGENT_ID` or the clone's
-`agent-work/<id>`; `local` otherwise), so agents running it side by side share
-neither; `imap-down` and `imap-clean` touch only the caller's own.
-`tests/integration/test_compose_names.sh` checks this without Docker.
+`tests/integration/dovecot_env.sh` is the one Dovecot setup both scripts source.
+Every file of a run (configuration, certificate, mail, log, pid) is under
+`build/tests/integration/work-<pid>`, the port is picked by the kernel, and the
+exit trap stops that one process and removes only that directory, so agents
+running the suite side by side share nothing.  A killed run leaves its directory
+for `./manage.sh clean`.  Both Dovecot 2.3 and 2.4 configuration syntax are
+written, by the installed version.
 
 ## End-to-end Tests (`tests/e2e/`, EMAIL-35)
 

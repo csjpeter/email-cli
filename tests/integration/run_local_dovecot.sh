@@ -4,7 +4,7 @@
 # Created: 2026-04-30
 # Integration test of IMAP APPEND against a locally running Dovecot.
 
-# Integration test: IMAP APPEND via locally running Dovecot (no Docker).
+# Integration test: IMAP APPEND via locally running Dovecot (no container).
 #
 # What this tests:
 #   - email-sync uploads a pending message to the server's "Sent" folder
@@ -15,6 +15,7 @@
 #   - dovecot-imapd installed  (sudo apt-get install -y dovecot-imapd)
 #   - sudo available for starting/stopping the Dovecot process
 #   - openssl for generating a self-signed test certificate
+#   - the Dovecot setup is shared with run_integration.sh (dovecot_env.sh)
 #
 # Usage:
 #   ./tests/integration/run_local_dovecot.sh
@@ -26,20 +27,12 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 TEST_USER="itest-append"
 TEST_PASS="testpass123"
-CURRENT_UID="$(id -u)"
-CURRENT_GID="$(id -g)"
 
-# Every path of the run is under build/ and carries this shell's pid; nothing
-# is written to the system temp directory.  The port is whatever the kernel says is free.
-WORK_BASE="$PROJECT_ROOT/build/tests/integration"
-TMPDIR_BASE="$WORK_BASE/work-$$"
-mkdir -p "$TMPDIR_BASE"
-gcc "$PROJECT_ROOT/tests/functional/free_port.c" -o "$TMPDIR_BASE/free_port"
-IMAP_PORT="$("$TMPDIR_BASE/free_port")"
-DOVE_BASE="$TMPDIR_BASE/run"           # Dovecot runtime (pids, sockets)
-MAIL_HOME="$TMPDIR_BASE/mail"          # Maildir root for test user
-CERTS_DIR="$TMPDIR_BASE/certs"
-EMAIL_HOME="$TMPDIR_BASE/home"         # Fake HOME for email-cli
+. "$SCRIPT_DIR/dovecot_env.sh"
+dovecot_env_init "$TEST_USER" "$TEST_PASS"
+trap dovecot_env_cleanup EXIT
+EMAIL_HOME="$WORK_DIR/home"            # Fake HOME for email-cli
+mkdir -p "$EMAIL_HOME"
 
 PASSED=0
 FAILED=0
@@ -54,45 +47,6 @@ check_contains() {
     if echo "$text" | grep -q "$pattern"; then ok "$desc"; else fail "$desc (pattern: '$pattern')"; fi
 }
 
-dovecot_stop() {
-    local pid_file="$DOVE_BASE/master.pid"
-    if sudo test -f "$pid_file" 2>/dev/null; then
-        local pid
-        pid="$(sudo cat "$pid_file")"
-        sudo kill "$pid" 2>/dev/null || true
-        local i=0
-        while sudo kill -0 "$pid" 2>/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done
-        sudo kill -9 "$pid" 2>/dev/null || true
-    fi
-}
-
-cleanup() {
-    dovecot_stop
-    # sudo: dovecot created files here as another user.  A guard, then a
-    # literal prefix with only the pid suffix expanded.
-    case "$TMPDIR_BASE" in
-        "$WORK_BASE"/work-*) ;;
-        *) echo "ERROR: refusing unsafe path '$TMPDIR_BASE'" >&2; return 1 ;;
-    esac
-    sudo rm -rf "$PROJECT_ROOT/build/tests/integration/work-${TMPDIR_BASE##*/work-}"
-}
-trap cleanup EXIT
-
-# ── Prerequisites ─────────────────────────────────────────────────────────────
-
-if ! command -v dovecot >/dev/null 2>&1; then
-    echo "ERROR: dovecot not installed.  Run: sudo apt-get install -y dovecot-imapd"
-    exit 1
-fi
-if ! command -v openssl >/dev/null 2>&1; then
-    echo "ERROR: openssl not found."
-    exit 1
-fi
-if ! sudo -n true 2>/dev/null; then
-    echo "ERROR: sudo without password required (add NOPASSWD entry for this user)."
-    exit 1
-fi
-
 echo "=== email-cli Local Dovecot Integration Test (APPEND / TRYCREATE) ==="
 echo ""
 
@@ -103,97 +57,9 @@ if [ ! -f "$PROJECT_ROOT/bin/email-sync" ]; then
     (cd "$PROJECT_ROOT" && ./manage.sh build)
 fi
 
-# ── Certificates ──────────────────────────────────────────────────────────────
-
-mkdir -p "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR" "$EMAIL_HOME"
-# Dovecot auth/imap daemons run as system user 'dovecot' (uid≠current user)
-# and must be able to enter the work directory — and every directory above it.
-chmod 755 "$TMPDIR_BASE" "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR"
-walk="$TMPDIR_BASE"
-while [ "$walk" != "/" ]; do
-    perms="$(stat -c %A "$walk")"
-    if [ "${perms:9:1}" != "x" ] && [ "${perms:9:1}" != "t" ]; then
-        echo "ERROR: $walk is not searchable by other users ($perms); the dovecot" >&2
-        echo "       user could not reach the work directory under build/." >&2
-        exit 1
-    fi
-    walk="$(dirname "$walk")"
-done
-
-openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
-    -keyout "$CERTS_DIR/server.key" \
-    -out    "$CERTS_DIR/server.crt" \
-    -subj   "/CN=localhost" 2>/dev/null
-chmod 644 "$CERTS_DIR/server.crt"
-chmod 640 "$CERTS_DIR/server.key"
-
-# ── Dovecot configuration ─────────────────────────────────────────────────────
-
-# passwd-file format: user:password:uid:gid::home
-# We reuse the current user's uid/gid so Dovecot imap processes can write
-# to mail directories owned by the current user.
-echo "$TEST_USER:{PLAIN}$TEST_PASS:$CURRENT_UID:$CURRENT_GID::$MAIL_HOME" \
-    > "$TMPDIR_BASE/users"
-chmod 644 "$TMPDIR_BASE/users"
-
-cat > "$TMPDIR_BASE/dovecot.conf" <<DOVECONF
-protocols = imap
-listen = 127.0.0.1
-
-base_dir = $DOVE_BASE
-state_dir = $DOVE_BASE
-
-log_path = $TMPDIR_BASE/dovecot.log
-info_log_path = $TMPDIR_BASE/dovecot.log
-
-ssl = yes
-ssl_cert = <$CERTS_DIR/server.crt
-ssl_key  = <$CERTS_DIR/server.key
-ssl_min_protocol = TLSv1.2
-
-disable_plaintext_auth = no
-auth_mechanisms = plain
-
-mail_location = maildir:$MAIL_HOME
-
-passdb {
-  driver = passwd-file
-  args = scheme=PLAIN $TMPDIR_BASE/users
-}
-userdb {
-  driver = passwd-file
-  args = $TMPDIR_BASE/users
-}
-service imap-login {
-  inet_listener imap {
-    port = 0
-  }
-  inet_listener imaps {
-    address = 127.0.0.1
-    port = $IMAP_PORT
-    ssl = yes
-  }
-}
-DOVECONF
-
 # ── Start Dovecot ─────────────────────────────────────────────────────────────
 
-echo "Starting Dovecot on 127.0.0.1:$IMAP_PORT ..."
-sudo dovecot -c "$TMPDIR_BASE/dovecot.conf"
-
-# Wait until the port is ready (max 10 s)
-for i in $(seq 1 50); do
-    if nc -z 127.0.0.1 "$IMAP_PORT" 2>/dev/null; then
-        echo "Dovecot ready."
-        break
-    fi
-    sleep 0.2
-    if [ "$i" -eq 50 ]; then
-        echo "ERROR: Dovecot did not start in time."
-        cat "$TMPDIR_BASE/dovecot.log" 2>/dev/null || true
-        exit 1
-    fi
-done
+dovecot_env_start
 
 # ── email-cli account setup ───────────────────────────────────────────────────
 
@@ -299,7 +165,7 @@ echo "Passed: $PASSED / $((PASSED + FAILED))"
 if [ "$FAILED" -gt 0 ]; then
     echo ""
     echo "Dovecot log:"
-    sudo tail -50 "$TMPDIR_BASE/dovecot.log" 2>/dev/null || true
+    sudo tail -50 "$WORK_DIR/dovecot.log" 2>/dev/null || true
     echo ""
     echo "LOCAL DOVECOT INTEGRATION TEST FAILED"
     exit 1

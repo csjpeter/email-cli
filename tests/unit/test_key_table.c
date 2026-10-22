@@ -5,6 +5,8 @@
 #include "test_helpers.h"
 #include "key_table.h"
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 static EmailAction find(const char *view, int ch) {
     return ekeys_find(view, TERM_KEY_IGNORE, ch);
@@ -136,4 +138,55 @@ void test_key_table(void) {
         ASSERT(ekeys_help_has(finders[i], '/'), "key table: help lists / (filter, search)");
     ASSERT(ekeys_help_has(EKV_REVIEW, '?'), "key table: the review screen has a help");
     ASSERT(!ekeys_help_has(EKV_FOLDERS, 'd'), "key table: help lists no key that does nothing");
+}
+
+/* EMAIL-225: every entry of every ':' menu has a unique quick key, and
+ * docs/spec/tui-keys.md lists each of them with its letter and class. */
+static char g_doc[200000];
+
+static char *read_doc(void) {
+    const char *paths[] = { "docs/spec/tui-keys.md", "../docs/spec/tui-keys.md",
+                            "../../docs/spec/tui-keys.md" };
+    for (size_t i = 0; i < sizeof paths / sizeof paths[0]; i++) {
+        FILE *f = fopen(paths[i], "r");
+        if (!f) continue;
+        size_t n = fread(g_doc, 1, sizeof g_doc - 1, f);
+        g_doc[n] = '\0';
+        fclose(f);
+        return g_doc;
+    }
+    return NULL;
+}
+
+void test_key_table_menu_quick_keys(void) {
+    ASSERT(ekeys_init(NULL, 0) == 0, "menu keys: key table is ready");
+    const char *views[] = { EKV_LIST_IMAP, EKV_LIST_GMAIL, EKV_LIST_GMAIL_VIRTUAL,
+        EKV_LIST_GMAIL_ARCHIVE, EKV_LIST_GMAIL_TRASH, EKV_READ_IMAP, EKV_READ_GMAIL,
+        EKV_LABELS, EKV_LABELS_SYSTEM, EKV_FOLDERS, EKV_REVIEW, EKV_ACCOUNTS_GMAIL };
+    char *doc = read_doc();
+    ASSERT(doc != NULL, "menu keys: docs/spec/tui-keys.md can be read");
+    int total = 0;
+    for (size_t v = 0; v < sizeof views / sizeof views[0] && getenv("EMENU_DUMP"); v++) {
+        EkeysMenuRow rows[64];
+        int n = ekeys_menu_rows(views[v], rows, 64);
+        for (int i = 0; i < n; i++)
+            printf("| `%s` | `%c` | %s | %s |\n", views[v], rows[i].letter, rows[i].name, rows[i].cls);
+    }
+    for (size_t v = 0; v < sizeof views / sizeof views[0]; v++) {
+        EkeysMenuRow rows[64];
+        int n = ekeys_menu_rows(views[v], rows, 64);
+        ASSERT(n > 0, "menu keys: a view has a menu");
+        total += n;
+        for (int i = 0; i < n; i++) {
+            ASSERT(rows[i].letter != 0, "menu keys: every entry has a quick key");
+            for (int j = i + 1; j < n; j++)
+                ASSERT(rows[i].letter != rows[j].letter, "menu keys: quick keys are unique in a menu");
+            if (!doc) continue;
+            char row[300];
+            snprintf(row, sizeof row, "| `%s` | `%c` | %s | %s |", views[v], rows[i].letter,
+                     rows[i].name, rows[i].cls);
+            ASSERT(strstr(doc, row) != NULL, "menu keys: the docs list the entry, its letter and class");
+        }
+    }
+    ASSERT(total > 30, "menu keys: the menus have their entries");
 }

@@ -16,6 +16,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "menu_keys.h"
 #include "test_scratch.h"
 #include "pty_editor.h"
 
@@ -470,6 +471,50 @@ static void test_rv_colon_menu(void) {
     pty_close(s);
 }
 
+/* EMAIL-225: every entry of the review menu has a unique quick key; Send
+ * (serious) names the recipient, Enter on the default is No and keeps the
+ * draft, y sends; the letter of Remove an attachment (routine) performs it. */
+static void test_rv_menu_keys(void) {
+    fresh();
+    PtySession *s = review("Menu keys", "x");
+    ASSERT(s != NULL, "rv menu keys: reached");
+    if (!s) return;
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want[] = { "Send", "Edit headers", "Remove an attachment" };
+    ASSERT_MENU_LETTERS(s, ROWS, rows, n, want, 3, "review menu");
+    ASSERT(n == 3, "review menu: three rows");
+    char send = menu_letter(rows, n, "Send");
+    char rm = menu_letter(rows, n, "Remove an attachment");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    char k[2] = { rm, 0 };
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "(none)");
+    ASSERT_ROW_CONTAINS(s, 0, "Review: Message");
+    k[0] = send;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "alice@example.com", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Yes", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);             /* the default is No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_ROW_CONTAINS(s, 0, "Review: Message");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message sent");
+    ASSERT(draft_has("x"), "rv menu keys: Enter on the default keeps the draft");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "Yes", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Message sent", WAIT_MS);
+    pty_close(s);
+}
+
 static void test_rv_send_asks_and_declines(void) {
     fresh();
     PtySession *s = review("Send ask", "x");
@@ -627,6 +672,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_rv_a_attach_prompt);
     RUN_TEST(test_rv_a_tab_completes);
     RUN_TEST(test_rv_colon_menu);
+    RUN_TEST(test_rv_menu_keys);
     RUN_TEST(test_rv_send_asks_and_declines);
     RUN_TEST(test_rv_send_yes);
     RUN_TEST(test_rv_help);

@@ -16,6 +16,7 @@
 #include "pty_assert.h"
 #include "test_scratch.h"
 #include "pty_editor.h"
+#include "menu_keys.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -3293,7 +3294,7 @@ static void lk_marks_body(void) {
     if (!s) return;
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
-    ASSERT_WAIT_FOR(s, "[2/30]", WAIT_MS);            /* stepped down */
+    ASSERT_WAIT_FOR(s, "[2/30]", WAIT_MS);              /* stepped down */
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
     ASSERT_WAIT_FOR(s, "[3/30]", WAIT_MS);
@@ -3335,7 +3336,6 @@ static void lk_enter_body(void) {
     for (int i = 0; i < 3; i++) {
         pty_send_key(s, PTY_KEY_ENTER);
         ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
-        /* the reader draws header first, body after: wait, do not read at once */
         ASSERT_WAIT_FOR(s, "Message 18", WAIT_MS);
         if (i == 0) pty_send_key(s, PTY_KEY_BACK);
         else if (i == 1) pty_send_str(s, back[1]);
@@ -4532,14 +4532,21 @@ static void test_fk_help(void) {
     if (!s) return;
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
-    ASSERT_SCREEN_CONTAINS(s, "switch between the folder tree");
     ASSERT_SCREEN_CONTAINS(s, "also g");
     ASSERT_SCREEN_CONTAINS(s, "also G");
     ASSERT_SCREEN_CONTAINS(s, "tree: open; flat view: as Enter");
     ASSERT_SCREEN_CONTAINS(s, "flat view: one level up");
     ASSERT_SCREEN_CONTAINS(s, "Search");
     ASSERT_SCREEN_CONTAINS(s, "Compose");
+    /* EMAIL-225: the menu-only entries (with their ":x" letters) make the
+     * help longer than 80x24, so the last rows are below the fold */
+    pty_send_key(s, PTY_KEY_END);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
+    ASSERT_SCREEN_CONTAINS(s, "switch between the folder tree");
+    ASSERT_SCREEN_CONTAINS(s, ":t");
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_settle(s, SETTLE_MS);
     pty_send_str(s, "xtn");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Folder browser shortcuts");
@@ -4559,6 +4566,190 @@ static void test_fk_help(void) {
         ASSERT_SCREEN_CONTAINS(s, "Folders \xe2\x80\x94");
     }
     fk_end(s);
+}
+
+/* ---- EMAIL-225: every entry of every ':' menu has a quick key ---------- */
+
+/* The IMAP list menu: nine rows, each with a unique letter; the letter of a
+ * routine entry (Star) performs it; the serious ones (Delete, Start a sync)
+ * ask first, naming the target, No is the default, and only y performs. */
+static void test_menu_keys_list_imap(void) {
+    lk_env(30);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "menu keys list: opens");
+    if (!s) { lk_env(0); return; }
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want[] = { "Star", "Mark read", "Mark unread", "Junk", "Delete",
+                           "Start a sync", "Move to", "Toggle Done" };
+    ASSERT_MENU_LETTERS(s, 24, rows, n, want, 8, "list menu");
+    ASSERT(n == 9, "list menu: nine rows");
+    char star = menu_letter(rows, n, "Star");
+    char del = menu_letter(rows, n, "Delete");
+    char sync = menu_letter(rows, n, "Start a sync");
+    ASSERT(star && del && sync, "list menu: letters found");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    /* routine: the letter performs it */
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    char k[2] = { star, 0 };
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "tarred", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* serious: Delete names the message, Enter and Esc are No, y performs */
+    PtyKey no[] = { PTY_KEY_ENTER, PTY_KEY_ESC };
+    for (int i = 0; i < 2; i++) {
+        pty_send_str(s, ":");
+        ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+        k[0] = del;
+        pty_send_str(s, k);
+        ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+        ASSERT_SCREEN_CONTAINS(s, "Message 1");
+        pty_send_key(s, no[i]);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Moved to Trash");
+        ASSERT_SCREEN_CONTAINS(s, "of 30 message(s)");
+    }
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    k[0] = del;
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* serious: the sync */
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    k[0] = sync;
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "Start a background sync", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Start a background sync");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "syncing");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    k[0] = sync;
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "Start a background sync", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "syncing", WAIT_MS);
+    rk_end(s);
+}
+
+/* The folder browser menu: letters; Create asks for a name; Delete names the
+ * folder, Enter is No, y deletes. */
+static void test_menu_keys_folders(void) {
+    PtySession *s = open_folder_browser("menu keys folders: opens");
+    if (!s) return;
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want[] = { "Create a folder", "Delete the folder", "Open all folders",
+                           "Close all folders" };
+    ASSERT_MENU_LETTERS(s, 24, rows, n, want, 4, "folder menu");
+    char open = menu_letter(rows, n, "Open all folders");
+    char close = menu_letter(rows, n, "Close all folders");
+    char del = menu_letter(rows, n, "Delete the folder");
+    char create = menu_letter(rows, n, "Create a folder");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    int er = find_row(s, "Empty");
+    for (int i = 0; i < 4 && er >= 0 && !pty_row_contains(s, er, ">"); i++) {
+        pty_send_str(s, "j");
+        pty_settle(s, 200);
+        er = find_row(s, "Empty");
+    }
+    ASSERT(er >= 0 && pty_row_contains(s, er, ">"), "menu keys folders: the cursor is on Empty");
+    char k[2] = { create, 0 };
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "New folder name:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    /* serious: names the folder, Enter is No, y deletes */
+    k[0] = del;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "Delete the folder INBOX.Empty on the server?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "on the server?");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "deleted");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "Delete the folder INBOX.Empty on the server?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Folder INBOX.Empty deleted", WAIT_MS);
+    /* routine: close all, open all */
+    k[0] = close;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "+ INBOX", WAIT_MS);
+    k[0] = open;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "- INBOX", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* The reader menu: letters, unique. */
+static void test_menu_keys_reader(void) {
+    PtySession *s = rk_open(30);
+    ASSERT(s != NULL, "menu keys reader: opens");
+    if (!s) return;
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want[] = { "Delete", "Toggle Done" };
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_settle(s, 300);
+    n = menu_read(s, rows, 24);
+    ASSERT(n > 2, "reader menu: has rows");
+    ASSERT(menu_letters_ok(rows, n), "reader menu: every entry has a unique letter");
+    for (int i = 0; i < 2; i++)
+        ASSERT(menu_find(rows, n, want[i]) >= 0, "reader menu: entry is listed");
+    char del = menu_letter(rows, n, "Delete");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    char k[2] = { del, 0 };
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                    /* the default is No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    rk_end(s);
+}
+
+/* The help overlay lists the letters of the menu entries, at 80x24. */
+static void test_menu_keys_help(void) {
+    lk_env(30);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "menu keys help: opens");
+    if (!s) { lk_env(0); return; }
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "*, :s");
+    pty_send_key(s, PTY_KEY_ESC);
+    rk_end(s);
 }
 
 /* The ':' menu lists the view switch with its key, the creation and the
@@ -5110,6 +5301,8 @@ static void test_tui_folders_help_panel(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_END);        /* EMAIL-225: the menu rows push it below the fold */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
     pty_send_key(s, PTY_KEY_ESC);
@@ -7592,10 +7785,9 @@ static void test_accounts_keys_delete_position(void) {
  * ══════════════════════════════════════════════════════════════════════ */
 
 
-/* The wizard is a plain line dialog (cooked terminal, one line per answer),
- * not a key-driven screen: letters and Space are text.  Policy keys that do
- * not hold in it are ticketed: EMAIL-223 (Esc is text, ctrl-c
- * is text).  Ctrl-D ends the input and gives the wizard up. */
+/* The wizard is a line dialog, one line per answer, not a key-driven screen:
+ * letters and Space are text.  Esc cancels the wizard, ctrl-c quits and
+ * Ctrl-D ends the input and gives the wizard up (EMAIL-223). */
 static PtySession *wk_open_wizard(const char *name) {
     study_account(name);
     PtySession *s = cli_open_size(80, 24, NULL);
@@ -7610,9 +7802,8 @@ static PtySession *wk_open_wizard(const char *name) {
 }
 
 /* Space, m r u f F l L D are text at the type prompt: each is refused with a
- * message and the question is asked again.  Esc is text too (EMAIL-223), as
- * is ctrl-c (EMAIL-223); Ctrl-D gives the wizard up, the accounts list
- * returns unchanged and Esc there quits. */
+ * message and the question is asked again.  Esc cancels the wizard
+ * (EMAIL-223); the accounts list returns unchanged and Esc there quits. */
 static void test_wk_wizard_type_prompt(void) {
     PtySession *s = wk_open_wizard("wk1");
     ASSERT(s != NULL, "wizard type: opens");
@@ -7633,12 +7824,9 @@ static void test_wk_wizard_type_prompt(void) {
     }
     pty_settle(s, SETTLE_MS);
     ASSERT_ROW_CONTAINS(s, 23, "Choice [1]:");
-    pty_send_key(s, PTY_KEY_ESC);                    /* EMAIL-223: text, not cancel */
-    pty_send_str(s, "\n");
-    ASSERT_WAIT_FOR(s, "^[", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Unknown account type");
-    pty_send_key(s, PTY_KEY_CTRL_D);                 /* the end of input */
+    pty_send_key(s, PTY_KEY_ESC);                    /* EMAIL-223: cancels */
     ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "^[");
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts (1)");
     ASSERT_SCREEN_CONTAINS(s, "wk1");
     pty_send_key(s, PTY_KEY_ESC);
@@ -7664,22 +7852,25 @@ static void wk_to_password(PtySession *s) {
     pty_wait_for(s, "Email Password", WAIT_MS);
 }
 
-/* One abandoned wizard ends a session's wizards (EMAIL-223: the end of
- * input is never cleared), so each way of giving up gets its own session. */
+/* Esc in the host line cancels the wizard; a wizard given up with Ctrl-D does
+ * not end the later ones of the session (EMAIL-223). */
 static void test_wk_wizard_imap_flow(void) {
     PtySession *s = wk_open_wizard("wk2");
     ASSERT(s != NULL, "wizard flow: opens");
     if (!s) return;
     pty_send_str(s, "\n");                           /* Enter: IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_key(s, PTY_KEY_ESC);                    /* EMAIL-223 */
-    pty_send_str(s, "\n");
-    /* the Esc byte is echoed raw and swallows the I of the next prompt */
-    ASSERT_WAIT_FOR(s, "MAP Port [993]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "using imaps://");
-    pty_send_key(s, PTY_KEY_CTRL_D);                 /* gives the wizard up */
+    pty_send_key(s, PTY_KEY_ESC);                    /* EMAIL-223: cancels */
     ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts (1)");
+    pty_send_str(s, "n");                            /* again: Ctrl-D gives up */
+    ASSERT_WAIT_FOR(s, "Choice [1]:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
+    pty_send_str(s, "n");                            /* a wizard after a given-up one */
+    ASSERT_WAIT_FOR(s, "Choice [1]:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
     pty_close(s);
 
     s = cli_open_size(80, 24, NULL);                 /* Ctrl-D at the password */
@@ -7712,15 +7903,14 @@ static void test_wk_wizard_imap_flow(void) {
     restore_accounts("wk2");
 }
 
-/* ctrl-c at a wizard prompt is text (EMAIL-223): it is echoed as ^C and the
- * program neither quits nor goes on. */
+/* ctrl-c at a wizard prompt quits the program at once (EMAIL-223). */
 static void test_wk_wizard_ctrl_c(void) {
     PtySession *s = wk_open_wizard("wk4");
     ASSERT(s != NULL, "wizard ctrl-c: opens");
     if (!s) return;
     pty_send_key(s, PTY_KEY_CTRL_C);
     ASSERT_WAIT_FOR(s, "^C", WAIT_MS);
-    ASSERT(pty_wait_exit(s, 500) == -1, "wizard ctrl-c: does not quit (EMAIL-223)");
+    ASSERT(pty_wait_exit(s, 5000) == 0, "wizard ctrl-c: quits (EMAIL-223)");
     pty_close(s);
     restore_accounts("wk4");
 }
@@ -7759,7 +7949,7 @@ static void test_bk_prompt_keys(void) {
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[3/30]");
+    ASSERT_WAIT_FOR(s, "[3/30]", WAIT_MS);
     pty_send_str(s, "d");
     ASSERT_WAIT_FOR(s, "Move 2 marked messages to Trash?", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "[ Yes ]  [ No ]");
@@ -8204,6 +8394,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_fk_one_folder);
     RUN_TEST(test_fk_help);
     RUN_TEST(test_fk_menu);
+    RUN_TEST(test_menu_keys_list_imap);
+    RUN_TEST(test_menu_keys_folders);
+    RUN_TEST(test_menu_keys_reader);
+    RUN_TEST(test_menu_keys_help);
     RUN_TEST(test_fk_unbound_keys);
     RUN_TEST(test_tui_list_content);
     RUN_TEST(test_resize_list_redraws_at_once);

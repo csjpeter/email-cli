@@ -37,6 +37,12 @@ never quits the program and
 is not a help key.  The help overlay and the key handler are made from one
 table, so the help lists exactly the keys the view has.
 .PP
+Every entry of the \fB:\fR action menu has a quick key, a letter drawn at
+its left; the help shows it as \fB:x\fR.  Serious entries (Delete, Send, Start
+a sync) and rare ones (Move, labels, Create, Save all attachments, Renew the
+authorization) ask first, with No as the default.  The letters are listed in
+docs/spec/tui-keys.md.
+.PP
 The browser starts on the
 .B Unread
 virtual label; the folder list also offers

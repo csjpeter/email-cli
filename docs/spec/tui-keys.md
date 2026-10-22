@@ -560,8 +560,8 @@ Tested at 80x24 against the mock server (`tests/pty/test_pty_views.c`, suite
 
 Reached with `n` (new), `i` (IMAP settings), `e` on the accounts screen, and at
 the first start without any account.  It is not a key-driven screen: the
-terminal is cooked, one line per answer, so a key is text and `Enter` ends the
-line.  Prompts: `Account type` (`Choice [1]:`), `IMAP Host`, `IMAP Port [993]`,
+prompts read one line per answer key by key, so a letter is text and `Enter`
+ends the line.  Prompts: `Account type` (`Choice [1]:`), `IMAP Host`, `IMAP Port [993]`,
 `Email Username`, `Email Password` (hidden), `Default Folder [INBOX]`,
 `SMTP Host [Enter=skip]`.
 
@@ -569,9 +569,9 @@ line.  Prompts: `Account type` (`Choice [1]:`), `IMAP Host`, `IMAP Port [993]`,
 |---|---|---|---|
 | `Enter` | `[1]`, `[993]`, `[INBOX]`, `Enter=skip` | takes the default shown in the prompt; at SMTP it skips; an empty password is said to be empty | `test_wk_wizard_imap_flow` |
 | `Space`, `m` `r` `u` `f` `F` `l` `L` `D` | | text: at `Account type` each is refused (`Unknown account type 'x'`) and the question is asked again | `test_wk_wizard_type_prompt` |
-| `Esc` | | text, not cancel (EMAIL-223) | `test_wk_wizard_type_prompt`, `test_wk_wizard_imap_flow` |
-| `ctrl-c` | | text, echoed `^C`, not quit (EMAIL-223) | `test_wk_wizard_ctrl_c` |
-| `Ctrl-D` | | end of input: `Wizard aborted.`, back to the unchanged accounts list (at the first start: `Configuration aborted. Exiting.`, exit status 1); also at the hidden password | `test_wk_wizard_type_prompt`, `test_wk_wizard_imap_flow`, `test_wk_wizard_first_run` |
+| `Esc` | | cancels the wizard at once: `Wizard aborted.` (EMAIL-223) | `test_wk_wizard_type_prompt`, `test_wk_wizard_imap_flow` |
+| `ctrl-c` | | quits the program at once, shown as `^C` (EMAIL-223) | `test_wk_wizard_ctrl_c` |
+| `Ctrl-D` | | end of input (not sticky: the next wizard asks its first question): `Wizard aborted.`, back to the unchanged accounts list (at the first start: `Configuration aborted. Exiting.`, exit status 1); also at the hidden password | `test_wk_wizard_type_prompt`, `test_wk_wizard_imap_flow`, `test_wk_wizard_first_run` |
 
 0 accounts: `test_wk_wizard_first_run`; 1 account: all the others.
 
@@ -638,3 +638,125 @@ look for the text; the same sentences are in the KEYS section of
 
 Findings: none; every view behaves the same.  Not changed (known from
 EMAIL-146): the overlays do not list `Backspace`, `Left`, `h`.
+
+
+## Quick keys of the ':' menus (EMAIL-225)
+
+Every entry of every `:` menu has a quick key: a letter drawn at the left of the
+entry.  Typing it in the open menu runs the entry (a serious or rare entry opens
+its dialog first).  The letters come from libtuikit (`tui_keytable_assign_quick`,
+v0.13.0, TUI-62), assigned from the key table in `libemail/src/core/key_table.c`,
+so the menu, the help overlay and this list are made from one table
+(`ekeys_menu_rows()`; `test_key_table_menu_quick_keys` fails when a row below is
+missing or differs).  No letter is chosen by hand: a letter the library picked
+is stable for a given table, and an entry that has a direct key too is shown in
+the help as `key, :x`.
+
+Classes: **routine** entries run at once (they can be undone or repeated);
+**serious** entries (Delete, Send, Start a sync) open a dialog that names the
+target and has No as the default, so Enter on the default never performs them;
+**rare** entries (Move to..., Add or Remove a label..., Create, Save all
+attachments, Renew the authorization) open a name prompt or dialog first, and
+cancelling does nothing.  Renew the authorization is also irreversible: the
+dialog says that the saved token is replaced.  Views with no `:` menu are the
+rules views and the IMAP accounts list.
+
+Tests (80x24, `./manage.sh pty`): `test_menu_keys_list_imap`,
+`test_menu_keys_folders`, `test_menu_keys_reader`, `test_menu_keys_help`
+(views suite), `test_menu_keys_gmail_list`, `test_menu_keys_gmail_reader`,
+`test_menu_keys_labels`, `test_menu_keys_accounts` (gmail-tui suite) and
+`test_rv_menu_keys` (review-keys suite) check a unique letter on every entry and
+that a routine letter performs its entry; the serious entries are driven with
+`:` and the letter, the dialog names the target, Enter on the default is No and
+changes nothing, and Yes performs it.
+
+| View | Letter | Entry | Class |
+|---|---|---|---|
+| `list-imap` | `s` | Star | routine |
+| `list-imap` | `r` | Mark read | routine |
+| `list-imap` | `u` | Mark unread | routine |
+| `list-imap` | `n` | Junk | routine |
+| `list-imap` | `d` | Delete | serious |
+| `list-imap` | `e` | Delete (Delete key) | serious |
+| `list-imap` | `b` | Start a sync | serious |
+| `list-imap` | `m` | Move to... | rare |
+| `list-imap` | `t` | Toggle Done | routine |
+| `list-gmail` | `s` | Star | routine |
+| `list-gmail` | `r` | Mark read | routine |
+| `list-gmail` | `u` | Mark unread | routine |
+| `list-gmail` | `n` | Junk | routine |
+| `list-gmail` | `d` | Delete | serious |
+| `list-gmail` | `e` | Delete (Delete key) | serious |
+| `list-gmail` | `b` | Start a sync | serious |
+| `list-gmail` | `m` | Move to... | rare |
+| `list-gmail` | `l` | Labels | routine |
+| `list-gmail` | `a` | Archive | routine |
+| `list-gmail` | `t` | Remove this label | routine |
+| `list-gmail` | `1` | Add a label... | rare |
+| `list-gmail` | `o` | Remove a label... | rare |
+| `list-gmail-virtual` | `s` | Star | routine |
+| `list-gmail-virtual` | `r` | Mark read | routine |
+| `list-gmail-virtual` | `u` | Mark unread | routine |
+| `list-gmail-virtual` | `n` | Junk | routine |
+| `list-gmail-virtual` | `d` | Delete | serious |
+| `list-gmail-virtual` | `e` | Delete (Delete key) | serious |
+| `list-gmail-virtual` | `b` | Start a sync | serious |
+| `list-gmail-virtual` | `m` | Move to... | rare |
+| `list-gmail-virtual` | `l` | Labels | routine |
+| `list-gmail-virtual` | `a` | Archive | routine |
+| `list-gmail-virtual` | `1` | Add a label... | rare |
+| `list-gmail-virtual` | `o` | Remove a label... | rare |
+| `list-gmail-archive` | `s` | Star | routine |
+| `list-gmail-archive` | `r` | Mark read | routine |
+| `list-gmail-archive` | `u` | Mark unread | routine |
+| `list-gmail-archive` | `n` | Junk | routine |
+| `list-gmail-archive` | `d` | Delete | serious |
+| `list-gmail-archive` | `e` | Delete (Delete key) | serious |
+| `list-gmail-archive` | `b` | Start a sync | serious |
+| `list-gmail-archive` | `m` | Move to... | rare |
+| `list-gmail-archive` | `l` | Labels | routine |
+| `list-gmail-archive` | `a` | Add a label... | rare |
+| `list-gmail-archive` | `o` | Remove a label... | rare |
+| `list-gmail-trash` | `s` | Star | routine |
+| `list-gmail-trash` | `r` | Mark read | routine |
+| `list-gmail-trash` | `u` | Mark unread | routine |
+| `list-gmail-trash` | `n` | Junk | routine |
+| `list-gmail-trash` | `d` | Delete | serious |
+| `list-gmail-trash` | `e` | Delete (Delete key) | serious |
+| `list-gmail-trash` | `b` | Start a sync | serious |
+| `list-gmail-trash` | `m` | Move to... | rare |
+| `list-gmail-trash` | `l` | Labels | routine |
+| `list-gmail-trash` | `a` | Archive | routine |
+| `list-gmail-trash` | `f` | Restore from Trash | routine |
+| `list-gmail-trash` | `1` | Add a label... | rare |
+| `list-gmail-trash` | `o` | Remove a label... | rare |
+| `reader-imap` | `s` | Star | routine |
+| `reader-imap` | `m` | Mark read | routine |
+| `reader-imap` | `u` | Mark unread | routine |
+| `reader-imap` | `n` | Junk | routine |
+| `reader-imap` | `d` | Delete | serious |
+| `reader-imap` | `e` | Delete (Delete key) | serious |
+| `reader-imap` | `a` | Save all attachments | rare |
+| `reader-imap` | `t` | Toggle Done | routine |
+| `reader-gmail` | `s` | Star | routine |
+| `reader-gmail` | `m` | Mark read | routine |
+| `reader-gmail` | `u` | Mark unread | routine |
+| `reader-gmail` | `n` | Junk | routine |
+| `reader-gmail` | `d` | Delete | serious |
+| `reader-gmail` | `e` | Delete (Delete key) | serious |
+| `reader-gmail` | `v` | Save all attachments | rare |
+| `reader-gmail` | `l` | Labels | routine |
+| `reader-gmail` | `a` | Archive | routine |
+| `reader-gmail` | `r` | Remove this label | routine |
+| `labels` | `c` | Create a label... | rare |
+| `labels` | `d` | Delete the label | serious |
+| `labels-system` | `c` | Create a label... | rare |
+| `folders` | `c` | Create a folder... | rare |
+| `folders` | `d` | Delete the folder | serious |
+| `folders` | `o` | Open all folders | routine |
+| `folders` | `a` | Close all folders | routine |
+| `folders` | `t` | Tree / flat | routine |
+| `review` | `s` | Send | serious |
+| `review` | `e` | Edit headers | routine |
+| `review` | `r` | Remove an attachment | routine |
+| `accounts-gmail` | `r` | Renew the authorization... | rare |

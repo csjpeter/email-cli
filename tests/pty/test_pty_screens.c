@@ -47,6 +47,10 @@ int g_tests_failed = 0;
 #define COLS 100
 #define MAXCOLS 200   /* the widest terminal a view is recorded at */
 #define WAIT_MS 6000
+/* A positive screen assertion waits for the text (EMAIL-224): under ASan or
+ * Valgrind the program redraws slowly, and a read in between sees half a screen. */
+#undef ASSERT_SCREEN_CONTAINS
+#define ASSERT_SCREEN_CONTAINS(s, text) ASSERT_WAIT_FOR(s, text, WAIT_MS)
 #define SETTLE_MS 500
 
 static pid_t g_mock_pid = -1;
@@ -349,8 +353,17 @@ static PtySession *at_error(int kind) {
     PtySession *s = at_accounts();
     if (!s) return NULL;
     pty_send_key(s, PTY_KEY_ENTER);
+    /* The message is there when the connect, login or handshake has ended; a
+     * program under Valgrind needs far longer than the settle below. */
+    pty_wait_for(s, "ERROR: ", WAIT_MS * 5);
     pty_settle(s, SETTLE_MS * 4);
     return s;
+}
+
+/** @brief Predicate: the list header no longer says it is syncing. */
+static int sync_is_done(PtySession *s, void *ctx) {
+    (void)ctx;
+    return !pty_screen_contains(s, "syncing");
 }
 
 /* Cron mode: the list is read from the local cache, a background sync can
@@ -1043,7 +1056,8 @@ VIEW(err_tls,           at_error(3), (void)0)
 VIEW(list_syncing,      at_cron_list(),
      (menu_row_yes(s, 6), pty_wait_for(s, "syncing", WAIT_MS), pty_settle(s, 100)))
 VIEW(list_new_mail,     at_cron_list(),
-     (menu_row_yes(s, 6), pty_wait_for(s, "syncing", WAIT_MS), pty_settle(s, 3000),
+     (menu_row_yes(s, 6), pty_wait_for(s, "syncing", WAIT_MS),
+      pty_wait_until(s, sync_is_done, NULL, WAIT_MS * 10), pty_settle(s, 3000),
       pty_send_key(s, PTY_KEY_DOWN), pty_wait_for(s, "New mail", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
 VIEW(list_star_feedback, at_list(),

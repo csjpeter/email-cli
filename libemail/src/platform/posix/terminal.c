@@ -341,10 +341,34 @@ static FILE *plain_stream(FILE *real) {
     return f;
 }
 
+/* The real streams and the filtering ones, so that the exit handler can put the
+ * real ones back and close (flush and free) the others: stdio does not close a
+ * stream it did not open, and the cookie behind it would be a leak (EMAIL-224). */
+static FILE *plain_real_out, *plain_real_err, *plain_out, *plain_err;
+
+static void plain_release(void) {
+    if (!plain_out) return;
+    FILE *po = plain_out, *pe = plain_err;
+    plain_out = plain_err = NULL;
+    fflush(po);
+    fflush(pe);
+    /* writes after this point (other exit handlers) reach the real streams */
+    stdout = plain_real_out;
+    stderr = plain_real_err;
+    if (pe != plain_real_err) fclose(pe);
+    if (po != plain_real_out) fclose(po);
+}
+
 void terminal_plain_output_if_needed(void) {
     if (terminal_understands_escapes()) return;
+    if (plain_out) return;
     FILE *out = stdout, *err = stderr;
     FILE *po = plain_stream(out), *pe = plain_stream(err);
+    plain_real_out = out;
+    plain_real_err = err;
+    plain_out = po;
+    plain_err = pe;
     stdout = po;
     stderr = pe;
+    atexit(plain_release);
 }

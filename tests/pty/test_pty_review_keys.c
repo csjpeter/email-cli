@@ -36,6 +36,10 @@ int g_tests_failed = 0;
 #define ROWS 24
 #define COLS 80
 #define WAIT_MS 6000
+/* A positive screen assertion waits for the text (EMAIL-224): under ASan or
+ * Valgrind the program redraws slowly, and a read in between sees half a screen. */
+#undef ASSERT_SCREEN_CONTAINS
+#define ASSERT_SCREEN_CONTAINS(s, text) ASSERT_WAIT_FOR(s, text, WAIT_MS)
 #define SETTLE_MS 300
 #define TEST_ACCOUNT "testuser@example.com"
 #define CTRL_S "\x13"

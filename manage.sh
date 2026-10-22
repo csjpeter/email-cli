@@ -34,6 +34,11 @@ show_help() {
     echo "                 send-local input-line compose screens, FILTER selects tests"
     echo "                 by name"
     echo "  valgrind       Build and run unit tests with Valgrind"
+    echo "  sanitize       Debug build of every program and test with ASan and UBSan; run the unit,"
+    echo "                 functional and pty suites and integration-local on those binaries;"
+    echo "                 logs in build/sanitize/, any log is a failure"
+    echo "  valgrind-all   Dynamic Release build; run the same suites with every program under"
+    echo "                 Valgrind (leak-check=full, track-origins); logs in build/valgrind/"
     echo "  headers [DIR]  Fail on a source file or script without the source header"
     echo "  names [DIR]    Fail when a tracked file names the owner's private domain"
     echo "  declared       Fail when a declared test is not built or a built test is not declared"
@@ -258,6 +263,9 @@ cmake_configure() {
     # last so the coverage target can still turn it back on.
     cmake -DCMAKE_BUILD_TYPE="$build_type" \
           -DENABLE_COVERAGE=OFF \
+          -DENABLE_UBSAN=OFF \
+          -DEMAIL_STATIC=ON \
+          -DCMAKE_C_FLAGS= \
           -DWORKSPACE_LIBS="$WORKSPACE_LIBS" \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
           $extra_flags ..
@@ -304,6 +312,53 @@ for_each_pty_suite() {
                           ./tests/pty/mock-smtp-server "$B/email-cli"
     # The PTY harness is a git submodule (deps/libptytest) with its own test
     # suite and release gates; they run in its repository, not here.
+}
+
+# sanitize and valgrind-all (EMAIL-224) run the suites with the programs under
+# test instrumented.  The suites find the programs through EMAIL_TEST_BIN_DIR
+# (default: bin/) and, for the mock servers they compile themselves,
+# EMAIL_TEST_MOCK_CFLAGS.
+#
+# instrumented_run LABEL RUNNER_ENV... is not used; the verbs below call:
+#   run_instrumented_suites ABS_BIN LABEL_ENV_VAR
+# which runs unit, functional, pty and integration-local and returns 0 when all
+# of them passed.  LABEL_ENV_VAR is the name of the variable that tells the
+# instrumented program which suite started it (VG_TEST_NAME for Valgrind, none
+# needed for the sanitizers, whose log names carry the pid).
+run_instrumented_suites() {
+    local abs_bin="$1" label_var="${2:-}" rc=0
+    local abs_build
+    abs_build="$(realpath "$BUILD_DIR")"
+    if [ -z "${SKIP_UNIT:-}" ]; then
+        echo "--- instrumented: unit tests ---"
+        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner) || { echo "  [FAILED] unit"; rc=1; }
+    fi
+    echo "--- instrumented: functional tests ---"
+    [ -z "$label_var" ] || export "$label_var=functional"
+    "$BUILD_DIR/tests/functional/bin/run_functional" || { echo "  [FAILED] functional"; rc=1; }
+    run_pty_instrumented() {  # <label> <binary> [args...]
+        local label="$1"; shift
+        echo "--- instrumented: PTY $label ---"
+        [ -z "$label_var" ] || export "$label_var=pty-$label"
+        (cd "$abs_build" && "$@") || { echo "  [FAILED] pty $label"; rc=1; }
+    }
+    for_each_pty_suite run_pty_instrumented "$abs_bin"
+    echo "--- instrumented: integration-local ---"
+    if command -v dovecot >/dev/null; then
+        [ -z "$label_var" ] || export "$label_var=integration-local"
+        ./tests/integration/run_local_dovecot.sh || { echo "  [FAILED] integration-local"; rc=1; }
+        [ -z "$label_var" ] || export "$label_var=integration"
+        ./tests/integration/run_integration.sh || { echo "  [FAILED] integration"; rc=1; }
+    else
+        echo "  NOT RUN: dovecot is not installed on this machine (integration needs it)"
+    fi
+    return $rc
+}
+
+# Empty a log directory of a previous run: its files only, never a recursive delete.
+fresh_log_dir() {
+    mkdir -p "$1"
+    find "$1" -maxdepth 1 -type f -delete
 }
 
 PTY_TARGETS="tests-pty"
@@ -516,6 +571,58 @@ case "$1" in
         build_test_runner
         (cd "$BUILD_DIR" && valgrind --leak-check=full --error-exitcode=1 \
             --child-silent-after-fork=yes ./tests/unit/bin/test-runner)
+        ;;
+    sanitize)
+        echo "Running unit, functional, pty and integration-local with ASan and UBSan..."
+        cmake_configure Debug "-DENABLE_UBSAN=ON"
+        cmake_build
+        cmake --build "$BUILD_DIR" --target tests-unit tests-functional $PTY_TARGETS -- -j"$JOBS"
+        SAN_DIR="$(realpath "$BUILD_DIR")/sanitize"
+        fresh_log_dir "$SAN_DIR"
+        # Every process of the run, the programs and the mock servers, writes a
+        # log of its own (…/asan.PID, …/ubsan.PID) only when it has a finding.
+        export ASAN_OPTIONS="log_path=$SAN_DIR/asan:detect_leaks=1:strict_string_checks=1:detect_stack_use_after_return=1"
+        export UBSAN_OPTIONS="log_path=$SAN_DIR/ubsan:halt_on_error=1:print_stacktrace=1"
+        export EMAIL_TEST_BIN_DIR="$(realpath "$BIN_DIR")"
+        export EMAIL_TEST_MOCK_CFLAGS="-g -fsanitize=address,undefined -fno-omit-frame-pointer"
+        san_rc=0
+        run_instrumented_suites "$EMAIL_TEST_BIN_DIR" "" || san_rc=1
+        ./tests/sanitize/scan_logs.sh sanitizer "$SAN_DIR" || san_rc=1
+        [ "$san_rc" -eq 0 ] || { echo "sanitize FAILED (logs: $SAN_DIR)" >&2; exit 1; }
+        echo "sanitize passed"
+        ;;
+    valgrind-all)
+        echo "Running unit, functional, pty and integration-local under Valgrind..."
+        cmake_configure Release "-DEMAIL_STATIC=OFF -DCMAKE_C_FLAGS=-g"
+        cmake_build
+        cmake --build "$BUILD_DIR" --target tests-unit tests-functional $PTY_TARGETS -- -j"$JOBS"
+        ABS_BUILD="$(realpath "$BUILD_DIR")"
+        VG_BIN="$ABS_BUILD/valgrind-bin"
+        export VG_LOG_DIR="$ABS_BUILD/valgrind"
+        fresh_log_dir "$VG_BIN"
+        fresh_log_dir "$VG_LOG_DIR"
+        export VG_SUPPRESSIONS="$(realpath tests/sanitize/valgrind.supp)"
+        # Each program sits in VG_BIN as NAME.bin with the wrapper script as NAME:
+        # whatever starts NAME (a PTY child, the daemon the TUI forks, found in
+        # the directory of the running program) gets Valgrind with it.
+        for b in "$PROJECT_NAME" "${PROJECT_NAME}-ro" email-sync email-tui email-import-rules; do
+            cp "$BIN_DIR/$b" "$VG_BIN/$b.bin" || exit 1
+            cp tests/sanitize/valgrind-program.sh "$VG_BIN/$b" || exit 1
+        done
+        export EMAIL_TEST_BIN_DIR="$VG_BIN"
+        # The unit tests run under Valgrind as one process, as in `valgrind`.
+        vg_rc=0
+        echo "--- valgrind: unit tests ---"
+        (cd "$BUILD_DIR" && valgrind --leak-check=full --error-exitcode=1 --track-origins=yes \
+            --child-silent-after-fork=yes --suppressions="$VG_SUPPRESSIONS" \
+            --log-file="$VG_LOG_DIR/unit-test-runner.%p.log" ./tests/unit/bin/test-runner) \
+            || { echo "  [FAILED] unit"; vg_rc=1; }
+        # run_instrumented_suites runs the unit tests itself; for Valgrind they
+        # were run above, so only the other suites go through it.
+        SKIP_UNIT=1 run_instrumented_suites "$VG_BIN" VG_TEST_NAME || vg_rc=1
+        ./tests/sanitize/scan_logs.sh valgrind "$VG_LOG_DIR" || vg_rc=1
+        [ "$vg_rc" -eq 0 ] || { echo "valgrind-all FAILED (logs: $VG_LOG_DIR)" >&2; exit 1; }
+        echo "valgrind-all passed"
         ;;
     coverage)
         cmake_configure Debug "-DENABLE_COVERAGE=ON"

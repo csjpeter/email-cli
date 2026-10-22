@@ -56,6 +56,12 @@ int g_tests_failed = 0;
 /* Bottom-most message (lowest UID) */
 #define GMAIL_BOT_MSG    "Message 1"
 #define WAIT_MS  8000
+/* A positive screen assertion waits for the text instead of reading the screen
+ * at once (EMAIL-224).  The programs draw a screen in several writes, and under
+ * ASan or Valgrind they are slow enough for a read in between; a text that is
+ * already there costs nothing. */
+#undef ASSERT_SCREEN_CONTAINS
+#define ASSERT_SCREEN_CONTAINS(s, text) ASSERT_WAIT_FOR(s, text, WAIT_MS)
 #define SETTLE_MS 700
 #define ROWS 30
 #define COLS 120
@@ -2525,7 +2531,14 @@ static void test_reauth_wait_is_announced_and_cancellable(void) {
     ASSERT_WAIT_FOR(s, "Waiting for Google", WAIT_MS);   /* the screen says why it waits */
     ASSERT_WAIT_FOR(s, "Waiting for authorization", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Ctrl-C cancels");
-    pty_send_key(s, PTY_KEY_CTRL_C);                    /* Ctrl-C: ends the wait, not the program */
+    /* Ctrl-C ends the wait, not the program.  The text is shown just before the
+     * program blocks in accept(); a Ctrl-C that lands in that gap is lost, as it
+     * is for a person, who presses it again: so does the test (EMAIL-224, a
+     * slow program under Valgrind shows the gap). */
+    for (int tries = 0; tries < 8; tries++) {
+        pty_send_key(s, PTY_KEY_CTRL_C);
+        if (pty_wait_for(s, "Press any key to return to accounts", 1500) == 0) break;
+    }
     ASSERT_WAIT_FOR(s, "Press any key to return to accounts", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);

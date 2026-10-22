@@ -47,6 +47,13 @@ static char  g_old_home[512];
 static char  g_batch_cli_bin[512];  /* email-cli (batch), never changes */
 
 #define WAIT_MS 6000
+
+/* A positive screen assertion waits for the text instead of reading the screen
+ * at once (EMAIL-224).  The programs draw a screen in several writes (a header,
+ * then the rows, then the status line), and under ASan or Valgrind they are slow
+ * enough for a read in between; a text that is already there costs nothing. */
+#undef ASSERT_SCREEN_CONTAINS
+#define ASSERT_SCREEN_CONTAINS(s, text) ASSERT_WAIT_FOR(s, text, WAIT_MS)
 #define SETTLE_MS 600
 #define ROWS 24
 #define COLS 100
@@ -3277,17 +3284,19 @@ static void test_lk_compose_reply_forward(void) {
 }
 
 /* Space marks and steps down, x clears, Esc drops the marks first and goes
- * back only the second time. */
+ * back only the second time.  The position is waited for, not read at once
+ * (EMAIL-224): the header and the status line are redrawn one after the other,
+ * and an instrumented program is slow enough for a read in between. */
 static void lk_marks_body(void) {
     PtySession *s = lk_open();
     ASSERT(s != NULL, "list marks: opens");
     if (!s) return;
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[2/30]");              /* stepped down */
+    ASSERT_WAIT_FOR(s, "[2/30]", WAIT_MS);            /* stepped down */
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[3/30]");
+    ASSERT_WAIT_FOR(s, "[3/30]", WAIT_MS);
     pty_send_str(s, "x");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
@@ -3302,7 +3311,7 @@ static void lk_marks_body(void) {
     ASSERT_WAIT_FOR(s, "[30/30]", WAIT_MS);
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[30/30]");             /* the last row: no step */
+    ASSERT_WAIT_FOR(s, "[30/30]", WAIT_MS);           /* the last row: no step */
     pty_send_key(s, PTY_KEY_CTRL_C);
     pty_wait_exit(s, 5000);
     pty_close(s);
@@ -3326,7 +3335,8 @@ static void lk_enter_body(void) {
     for (int i = 0; i < 3; i++) {
         pty_send_key(s, PTY_KEY_ENTER);
         ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
-        ASSERT_SCREEN_CONTAINS(s, "Message 18");
+        /* the reader draws header first, body after: wait, do not read at once */
+        ASSERT_WAIT_FOR(s, "Message 18", WAIT_MS);
         if (i == 0) pty_send_key(s, PTY_KEY_BACK);
         else if (i == 1) pty_send_str(s, back[1]);
         else pty_send_key(s, PTY_KEY_ESC);
@@ -5340,9 +5350,15 @@ static void test_tui_list_sync_and_refresh(void) {
     pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "syncing", WAIT_MS);
     /* Sync completes quickly: no IMAP conflict since TUI holds no connection.
-     * 3 s settle ensures SIGCHLD fires before the DOWN keypress. */
+     * The SIGCHLD of the finished sync is only seen when the screen is redrawn,
+     * so DOWN is sent until the notification shows: under Valgrind email-sync
+     * needs far longer than a fixed settle (EMAIL-224). */
     pty_settle(s, 3000);
-    pty_send_key(s, PTY_KEY_DOWN);   /* re-render: bg_sync_done=1 → shows notification */
+    int _seen = 0;
+    for (int _try = 0; _try < 40 && !_seen; _try++) {
+        pty_send_key(s, PTY_KEY_DOWN);   /* re-render: bg_sync_done=1 → shows notification */
+        _seen = pty_wait_for(s, "New mail", 1500) == 0;
+    }
     ASSERT_WAIT_FOR(s, "New mail", WAIT_MS);
     pty_send_str(s, "U");            /* refresh: bg_sync_done=0, re-enters list */
     int _ok = 0;

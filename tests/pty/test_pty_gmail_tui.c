@@ -3052,7 +3052,7 @@ static void test_gk_filter(void) {
     ASSERT(gk_char(s, "j", "[2/14]"), "gmail list filter: j");
     pty_send_key(s, PTY_KEY_ESC);                      /* clears the filter */
     ASSERT_WAIT_FOR(s, "of 45 message(s)", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[1/45]");
+    ASSERT_WAIT_FOR(s, "[1/45]", WAIT_MS);
     /* No match: nothing to open, answer, delete or mark. */
     pty_send_str(s, "/");
     ASSERT_WAIT_FOR(s, "Filter [", WAIT_MS);

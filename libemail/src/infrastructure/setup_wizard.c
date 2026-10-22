@@ -17,18 +17,23 @@
 static char* get_input(const char *prompt, int hide, FILE *stream) {
     int is_tty = isatty(fileno(stream));
 
-    if (hide && stream == stdin) {
-        /* Delegate password reading (with echo suppression) to the platform layer.
-         * terminal_read_password() reads from stdin and handles TTY detection. */
+    if (stream == stdin && is_tty) {
+        /* Key by key (EMAIL-223): Esc cancels, ctrl-c quits, and the end of
+         * input given by Ctrl-D is not sticky, so a later wizard asks again. */
+        clearerr(stdin);
         char buf[512];
-        int n = terminal_read_password(prompt, buf, sizeof(buf));
+        int n = terminal_read_line(prompt, hide, buf, sizeof(buf));
+        if (n == TERM_LINE_QUIT) terminal_request_quit();
         if (n < 0) return NULL;
         return strdup(buf);
     }
 
-    if (stream == stdin && is_tty) {
-        printf("%s: ", prompt);
-        fflush(stdout);
+    if (hide && stream == stdin) {
+        /* Not a terminal: the platform layer reads the password plainly. */
+        char buf[512];
+        int n = terminal_read_password(prompt, buf, sizeof(buf));
+        if (n < 0) return NULL;
+        return strdup(buf);
     }
 
     char *line = NULL;

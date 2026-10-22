@@ -560,8 +560,8 @@ Tested at 80x24 against the mock server (`tests/pty/test_pty_views.c`, suite
 
 Reached with `n` (new), `i` (IMAP settings), `e` on the accounts screen, and at
 the first start without any account.  It is not a key-driven screen: the
-terminal is cooked, one line per answer, so a key is text and `Enter` ends the
-line.  Prompts: `Account type` (`Choice [1]:`), `IMAP Host`, `IMAP Port [993]`,
+prompts read one line per answer key by key, so a letter is text and `Enter`
+ends the line.  Prompts: `Account type` (`Choice [1]:`), `IMAP Host`, `IMAP Port [993]`,
 `Email Username`, `Email Password` (hidden), `Default Folder [INBOX]`,
 `SMTP Host [Enter=skip]`.
 
@@ -569,9 +569,9 @@ line.  Prompts: `Account type` (`Choice [1]:`), `IMAP Host`, `IMAP Port [993]`,
 |---|---|---|---|
 | `Enter` | `[1]`, `[993]`, `[INBOX]`, `Enter=skip` | takes the default shown in the prompt; at SMTP it skips; an empty password is said to be empty | `test_wk_wizard_imap_flow` |
 | `Space`, `m` `r` `u` `f` `F` `l` `L` `D` | | text: at `Account type` each is refused (`Unknown account type 'x'`) and the question is asked again | `test_wk_wizard_type_prompt` |
-| `Esc` | | text, not cancel (EMAIL-223) | `test_wk_wizard_type_prompt`, `test_wk_wizard_imap_flow` |
-| `ctrl-c` | | text, echoed `^C`, not quit (EMAIL-223) | `test_wk_wizard_ctrl_c` |
-| `Ctrl-D` | | end of input: `Wizard aborted.`, back to the unchanged accounts list (at the first start: `Configuration aborted. Exiting.`, exit status 1); also at the hidden password | `test_wk_wizard_type_prompt`, `test_wk_wizard_imap_flow`, `test_wk_wizard_first_run` |
+| `Esc` | | cancels the wizard at once: `Wizard aborted.` (EMAIL-223) | `test_wk_wizard_type_prompt`, `test_wk_wizard_imap_flow` |
+| `ctrl-c` | | quits the program at once, shown as `^C` (EMAIL-223) | `test_wk_wizard_ctrl_c` |
+| `Ctrl-D` | | end of input (not sticky: the next wizard asks its first question): `Wizard aborted.`, back to the unchanged accounts list (at the first start: `Configuration aborted. Exiting.`, exit status 1); also at the hidden password | `test_wk_wizard_type_prompt`, `test_wk_wizard_imap_flow`, `test_wk_wizard_first_run` |
 
 0 accounts: `test_wk_wizard_first_run`; 1 account: all the others.
 

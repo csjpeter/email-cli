@@ -3284,10 +3284,10 @@ static void lk_marks_body(void) {
     if (!s) return;
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[2/30]");              /* stepped down */
+    ASSERT_WAIT_FOR(s, "[2/30]", WAIT_MS);              /* stepped down */
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[3/30]");
+    ASSERT_WAIT_FOR(s, "[3/30]", WAIT_MS);
     pty_send_str(s, "x");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");

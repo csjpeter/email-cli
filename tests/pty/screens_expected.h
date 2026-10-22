@@ -6050,7 +6050,7 @@ static const char *const exp_rule_add_when[] = {
     "",
     "",
     "",
-    " j/k move  Enter/e edit  a add  d delete  q confirm  Esc cancel  ? help",
+    " j/k move  Enter/e edit  a add  d delete  Tab next  Esc/q cancel  ? help",
     NULL
 };
 static const char *const sty_rule_add_when[] = {
@@ -6218,7 +6218,7 @@ static const char *const exp_rule_edit_form[] = {
     "",
     "",
     "",
-    " j/k move  Enter/e edit  a add  d delete  q confirm  Esc cancel  ? help",
+    " j/k move  Enter/e edit  a add  d delete  Tab next  Esc/q cancel  ? help",
     NULL
 };
 static const char *const sty_rule_edit_form[] = {
@@ -6369,7 +6369,7 @@ static const char *const exp_rule_when_help[] = {
     "",
     "          ┌─ Conditions shortcuts ──────────────────────────────────────────────────────┐",
     "          │               The conditions of the rule being edited. The cursor is on one │",
-    "          │               condition; Enter edits it, q goes on to the actions.          │",
+    "          │               condition; Enter edits it, Tab goes on to the actions.        │",
     "          │                                                                             │",
     "          │ j / ↓         Next condition                                                │",
     "          │ k / ↑         Previous condition                                            │",
@@ -6379,14 +6379,14 @@ static const char *const exp_rule_when_help[] = {
     "          │ Enter / e     Edit the condition                                            │",
     "          │ a             Add a condition                                               │",
     "          │ d             Delete the condition                                          │",
-    "          │ q             Done: go on to the actions                                    │",
-    "          │ Esc / BS / h  Cancel the rule                                               │",
+    "          │ Tab / Right   Done: go on to the actions                                    │",
+    "          │ Esc / q / BS  Cancel the rule                                               │",
     "          │ ?             Show this help                                                │",
     "          └─────────────────────────────────────────────────────────────────────────────┘",
     "",
     "",
     "",
-    " j/k move  Enter/e edit  a add  d delete  q confirm  Esc cancel  ? help",
+    " j/k move  Enter/e edit  a add  d delete  Tab next  Esc/q cancel  ? help",
     NULL
 };
 static const char *const sty_rule_when_help[] = {
@@ -6406,7 +6406,7 @@ static const char *const sty_rule_when_help[] = {
     "          T bbbbbbbbb                                                                   T           ",
     "          T b                                                                           T           ",
     "          T b                                                                           T           ",
-    "          T b                                                                           T           ",
+    "          T bbbbbbbbbbb                                                                 T           ",
     "          T bbbbbbbbbbbb                                                                T           ",
     "          T b                                                                           T           ",
     "          TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT           ",
@@ -6610,7 +6610,7 @@ static const char *const exp_rule_when_typed[] = {
     "",
     "",
     "",
-    " j/k move  Enter/e edit  a add  d delete  q confirm  Esc cancel  ? help",
+    " j/k move  Enter/e edit  a add  d delete  Tab next  Esc/q cancel  ? help",
     NULL
 };
 static const char *const sty_rule_when_typed[] = {
@@ -6666,7 +6666,7 @@ static const char *const exp_rule_when_added[] = {
     "",
     "",
     "",
-    " j/k move  Enter/e edit  a add  d delete  q confirm  Esc cancel  ? help",
+    " j/k move  Enter/e edit  a add  d delete  Tab next  Esc/q cancel  ? help",
     NULL
 };
 static const char *const sty_rule_when_added[] = {

@@ -249,7 +249,7 @@ static const tui_keyentry g_entries[] = {
          "e edits it, d deletes it."),
     DESC(EKV_CONDITIONS,
          "The conditions of the rule being edited. The cursor is on one condition; "
-         "Enter edits it, q goes on to the actions."),
+         "Enter edits it, Tab goes on to the actions."),
     DESC(EKV_BODY_EDITOR,
          "The body of the message being composed, as plain text. "
          "Esc saves it and goes on to the review."),

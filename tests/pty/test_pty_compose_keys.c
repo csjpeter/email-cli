@@ -235,12 +235,6 @@ static int field_is(PtySession *s, int row, const char *value) {
     ASSERT((cond), _w); \
 } while (0)
 
-/* A left dialog is followed by "[Press any key to return to inbox]" (a pause
- * kept for the send result; ticketed as a defect for a cancel: EMAIL-222). */
-static void leave_pause(PtySession *s) {
-    ASSERT(pty_wait_for(s, "[Press any key", WAIT_MS) == 0, "the pause after the dialog");
-    pty_send_str(s, " ");
-}
 
 static int in_list(PtySession *s) {
     return pty_screen_contains(s, "message(s) in") && !pty_screen_contains(s, "Subject:");
@@ -519,7 +513,8 @@ static void test_ck_esc_and_ctrl_c(void) {
     PtySession *s = at_dialog(3);
     ASSERT(s != NULL, "esc: opens");
     press(s, "Esc");
-    leave_pause(s);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(!pty_screen_contains(s, "[Press any key"), "a cancel has no pause (EMAIL-222)");
     CHECK(s, pty_wait_for(s, "message(s) in", WAIT_MS) == 0 && in_list(s), "Esc on an empty dialog leaves");
     pty_close(s);
 
@@ -536,7 +531,8 @@ static void test_ck_esc_and_ctrl_c(void) {
     CHECK(s, pty_screen_contains(s, "New Message"), "n keeps the dialog");
     press(s, "Esc");
     press(s, "y");
-    leave_pause(s);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(!pty_screen_contains(s, "[Press any key"), "a cancel has no pause (EMAIL-222)");
     CHECK(s, pty_wait_for(s, "message(s) in", WAIT_MS) == 0 && in_list(s), "y discards and leaves");
     pty_close(s);
 
@@ -544,7 +540,8 @@ static void test_ck_esc_and_ctrl_c(void) {
     ASSERT(s != NULL, "ctrl-c: opens");
     typed(s, "a@x.org");
     press(s, "^C");
-    leave_pause(s);
+    pty_settle(s, SETTLE_MS);
+    ASSERT(!pty_screen_contains(s, "[Press any key"), "a cancel has no pause (EMAIL-222)");
     CHECK(s, pty_wait_for(s, "message(s) in", WAIT_MS) == 0 && in_list(s), "ctrl-c leaves without asking");
     pty_close(s);
 }

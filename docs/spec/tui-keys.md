@@ -415,8 +415,8 @@ and `A` do nothing there (`test_rk_list_zero_and_one`).
 | `Enter`, `e` | `Enter/e edit` | edit prompt of the condition; Esc keeps it | `test_rk_cond_edit_keys` |
 | `a` | `a add` | prompt for a new condition | `test_rk_cond_zero_and_one`, `test_rk_cond_edit_keys` |
 | `d` | `d delete` | removes the condition | `test_rk_cond_zero_and_one` |
-| `q` | `q confirm` | goes on to step 2/2 (EMAIL-221) | `test_rk_cond_leave_keys`, `test_rk_actions_form` |
-| `Esc`, `Backspace`, `Left`, `h` | `Esc cancel` | cancels the rule | `test_rk_cond_leave_keys` |
+| `Tab`, `Right` | `Tab next` | goes on to step 2/2 (EMAIL-221) | `test_rk_cond_leave_keys`, `test_rk_actions_form` |
+| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q cancel` | cancels the rule (asks first when there are conditions) | `test_rk_cond_leave_keys` |
 | `?` | `? help` | overlay (11 rows) | `test_rk_cond_help_and_unbound` |
 | `ctrl-c` | | quits at once with status 0, also in the prompts | `test_rk_cond_leave_keys` |
 | any other key | | changes nothing | `test_rk_cond_help_and_unbound` |
@@ -459,8 +459,10 @@ ignored) and never scrolls.
 | other function keys (`F1`, `PgUp`, `PgDn`, `Ins`) | | change nothing; `h ? q j k` are text | `test_ck_unbound_and_literal_keys` |
 | resize | | redrawn, status line on the new last row | `test_ck_resize` |
 
-After the dialog is left, the list waits for one key at `[Press any key to
-return to inbox]` (`leave_pause` in the test).
+When the dialog is cancelled (`Esc`, `y` at the question, `ctrl-c`), in `c`, `r`,
+`F` and `A` alike, the list is redrawn at once (EMAIL-222).  Only after a
+completed compose does it wait for one key at `[Press any key to return to
+inbox]`, so that the send result can be read.
 
 Findings, fixed with EMAIL-150: `d` in an empty Attach field was swallowed when
 no attachment existed (a path could not start with `d`), `Tab` on a directory

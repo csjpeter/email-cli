@@ -150,4 +150,22 @@ int terminal_wcwidth(uint32_t cp);
  */
 int terminal_read_password(const char *prompt, char *buf, size_t size);
 
+/** terminal_read_line() results besides a length (EMAIL-223). */
+#define TERM_LINE_EOF    (-1)  /**< Ctrl-D on an empty line, end of input, error */
+#define TERM_LINE_CANCEL (-2)  /**< Esc */
+#define TERM_LINE_QUIT   (-3)  /**< Ctrl-C */
+
+/**
+ * @brief Reads one line from the terminal on stdin, key by key, writing
+ *        "<prompt>: " first.  Backspace and Ctrl-U edit; Enter ends the line;
+ *        Esc cancels; Ctrl-C quits (shown as "^C"); Ctrl-D on an empty line
+ *        is the end of input.  With @p mask one '*' is shown per character.
+ *
+ * Needs a terminal on stdin; the end of input is never sticky: the next call
+ * asks again.
+ * @return The length in bytes, or TERM_LINE_EOF / TERM_LINE_CANCEL /
+ *         TERM_LINE_QUIT.  On a negative result the buffer is wiped.
+ */
+int terminal_read_line(const char *prompt, int mask, char *buf, size_t size);
+
 #endif /* PLATFORM_TERMINAL_H */

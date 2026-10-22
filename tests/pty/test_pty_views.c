@@ -3284,10 +3284,10 @@ static void lk_marks_body(void) {
     if (!s) return;
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[2/30]");              /* stepped down */
+    ASSERT_WAIT_FOR(s, "[2/30]", WAIT_MS);              /* stepped down */
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[3/30]");
+    ASSERT_WAIT_FOR(s, "[3/30]", WAIT_MS);
     pty_send_str(s, "x");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");
@@ -3326,7 +3326,7 @@ static void lk_enter_body(void) {
     for (int i = 0; i < 3; i++) {
         pty_send_key(s, PTY_KEY_ENTER);
         ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
-        ASSERT_SCREEN_CONTAINS(s, "Message 18");
+        ASSERT_WAIT_FOR(s, "Message 18", WAIT_MS);
         if (i == 0) pty_send_key(s, PTY_KEY_BACK);
         else if (i == 1) pty_send_str(s, back[1]);
         else pty_send_key(s, PTY_KEY_ESC);
@@ -7576,10 +7576,9 @@ static void test_accounts_keys_delete_position(void) {
  * ══════════════════════════════════════════════════════════════════════ */
 
 
-/* The wizard is a plain line dialog (cooked terminal, one line per answer),
- * not a key-driven screen: letters and Space are text.  Policy keys that do
- * not hold in it are ticketed: EMAIL-223 (Esc is text, ctrl-c
- * is text).  Ctrl-D ends the input and gives the wizard up. */
+/* The wizard is a line dialog, one line per answer, not a key-driven screen:
+ * letters and Space are text.  Esc cancels the wizard, ctrl-c quits and
+ * Ctrl-D ends the input and gives the wizard up (EMAIL-223). */
 static PtySession *wk_open_wizard(const char *name) {
     study_account(name);
     PtySession *s = cli_open_size(80, 24, NULL);
@@ -7594,9 +7593,8 @@ static PtySession *wk_open_wizard(const char *name) {
 }
 
 /* Space, m r u f F l L D are text at the type prompt: each is refused with a
- * message and the question is asked again.  Esc is text too (EMAIL-223), as
- * is ctrl-c (EMAIL-223); Ctrl-D gives the wizard up, the accounts list
- * returns unchanged and Esc there quits. */
+ * message and the question is asked again.  Esc cancels the wizard
+ * (EMAIL-223); the accounts list returns unchanged and Esc there quits. */
 static void test_wk_wizard_type_prompt(void) {
     PtySession *s = wk_open_wizard("wk1");
     ASSERT(s != NULL, "wizard type: opens");
@@ -7617,12 +7615,9 @@ static void test_wk_wizard_type_prompt(void) {
     }
     pty_settle(s, SETTLE_MS);
     ASSERT_ROW_CONTAINS(s, 23, "Choice [1]:");
-    pty_send_key(s, PTY_KEY_ESC);                    /* EMAIL-223: text, not cancel */
-    pty_send_str(s, "\n");
-    ASSERT_WAIT_FOR(s, "^[", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Unknown account type");
-    pty_send_key(s, PTY_KEY_CTRL_D);                 /* the end of input */
+    pty_send_key(s, PTY_KEY_ESC);                    /* EMAIL-223: cancels */
     ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "^[");
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts (1)");
     ASSERT_SCREEN_CONTAINS(s, "wk1");
     pty_send_key(s, PTY_KEY_ESC);
@@ -7648,22 +7643,25 @@ static void wk_to_password(PtySession *s) {
     pty_wait_for(s, "Email Password", WAIT_MS);
 }
 
-/* One abandoned wizard ends a session's wizards (EMAIL-223: the end of
- * input is never cleared), so each way of giving up gets its own session. */
+/* Esc in the host line cancels the wizard; a wizard given up with Ctrl-D does
+ * not end the later ones of the session (EMAIL-223). */
 static void test_wk_wizard_imap_flow(void) {
     PtySession *s = wk_open_wizard("wk2");
     ASSERT(s != NULL, "wizard flow: opens");
     if (!s) return;
     pty_send_str(s, "\n");                           /* Enter: IMAP */
     ASSERT_WAIT_FOR(s, "IMAP Host", WAIT_MS);
-    pty_send_key(s, PTY_KEY_ESC);                    /* EMAIL-223 */
-    pty_send_str(s, "\n");
-    /* the Esc byte is echoed raw and swallows the I of the next prompt */
-    ASSERT_WAIT_FOR(s, "MAP Port [993]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "using imaps://");
-    pty_send_key(s, PTY_KEY_CTRL_D);                 /* gives the wizard up */
+    pty_send_key(s, PTY_KEY_ESC);                    /* EMAIL-223: cancels */
     ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts (1)");
+    pty_send_str(s, "n");                            /* again: Ctrl-D gives up */
+    ASSERT_WAIT_FOR(s, "Choice [1]:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
+    pty_send_str(s, "n");                            /* a wizard after a given-up one */
+    ASSERT_WAIT_FOR(s, "Choice [1]:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_D);
+    ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
     pty_close(s);
 
     s = cli_open_size(80, 24, NULL);                 /* Ctrl-D at the password */
@@ -7696,15 +7694,14 @@ static void test_wk_wizard_imap_flow(void) {
     restore_accounts("wk2");
 }
 
-/* ctrl-c at a wizard prompt is text (EMAIL-223): it is echoed as ^C and the
- * program neither quits nor goes on. */
+/* ctrl-c at a wizard prompt quits the program at once (EMAIL-223). */
 static void test_wk_wizard_ctrl_c(void) {
     PtySession *s = wk_open_wizard("wk4");
     ASSERT(s != NULL, "wizard ctrl-c: opens");
     if (!s) return;
     pty_send_key(s, PTY_KEY_CTRL_C);
     ASSERT_WAIT_FOR(s, "^C", WAIT_MS);
-    ASSERT(pty_wait_exit(s, 500) == -1, "wizard ctrl-c: does not quit (EMAIL-223)");
+    ASSERT(pty_wait_exit(s, 5000) == 0, "wizard ctrl-c: quits (EMAIL-223)");
     pty_close(s);
     restore_accounts("wk4");
 }

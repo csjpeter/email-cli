@@ -3228,7 +3228,8 @@ static void test_gk_one_message(void) {
     }
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[1/1]");
+    /* The header repaints before the status line does: wait for it. */
+    ASSERT_WAIT_FOR(s, "[1/1]", WAIT_MS);
     pty_send_str(s, "x");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "marked]");

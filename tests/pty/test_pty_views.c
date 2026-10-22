@@ -3236,11 +3236,12 @@ static int lk_dialog_and_back(PtySession *s, const char *text) {
     for (int ms = 0; ms < WAIT_MS; ms += 100) {
         pty_settle(s, 100);
         if (pty_screen_contains(s, "Discard what was typed?")) { pty_send_str(s, "y"); break; }
-        if (pty_screen_contains(s, "Press any key to return")) break;
+        if (pty_screen_contains(s, "message(s) in") && !pty_screen_contains(s, text)) break;
     }
-    if (pty_wait_for(s, "Press any key to return", WAIT_MS) != 0) return 0;
-    pty_send_str(s, " ");
-    return pty_wait_for(s, "message(s) in", WAIT_MS) == 0;
+    /* A cancel returns to the list at once, with no pause (EMAIL-222). */
+    if (pty_wait_for(s, "message(s) in", WAIT_MS) != 0) return 0;
+    pty_settle(s, 200);
+    return !pty_screen_contains(s, "Press any key to return");
 }
 
 /* c r A F act on the message under the cursor; Esc in the dialog returns to

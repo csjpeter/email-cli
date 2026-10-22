@@ -242,6 +242,12 @@ Requires Docker. Runs a real Dovecot IMAP server with:
 ./manage.sh imap-clean    # stop + remove volume
 ```
 
+The compose project, container and volume carry the agent id
+(`COMPOSE_PROJECT_NAME=email-cli-<agent>`, from `AGENT_ID` or the clone's
+`agent-work/<id>`; `local` otherwise), so agents running it side by side share
+neither; `imap-down` and `imap-clean` touch only the caller's own.
+`tests/integration/test_compose_names.sh` checks this without Docker.
+
 ## End-to-end Tests (`tests/e2e/`, EMAIL-35)
 
 An end-to-end test uses real server software in an LXC container the test

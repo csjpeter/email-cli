@@ -31,4 +31,4 @@ no code branch for a platform nobody builds on.
 | `xdg-open` | `libemail-client/src/gmail_auth.c` | a per-OS URL launcher |
 | `fork`, `mkdir(path, mode)`, `rename` over an existing file, `strptime`, `timegm`, `strcasecmp`, `asprintf`, `iconv(3)` | `libemail/src/core/`, `infrastructure/` | shims or libraries on a non-POSIX or non-glibc libc |
 | `__attribute__((cleanup))` RAII | `libemail/src/core/raii.h` | none on GCC or Clang; MSVC cannot build it |
-| `./manage.sh deps` via `apt` or `dnf`, `dpkg`, CPack DEB and RPM, Docker, local Dovecot | `manage.sh`, `CMakeLists.txt`, `tests/integration/` | none: the build and test host is Linux regardless |
+| `./manage.sh deps` via `apt` or `dnf`, `dpkg`, CPack DEB and RPM, local Dovecot | `manage.sh`, `CMakeLists.txt`, `tests/integration/` | none: the build and test host is Linux regardless |

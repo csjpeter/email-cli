@@ -36,4 +36,4 @@ Tests are designed to run under three diagnostic harnesses without modification:
 - No mocking framework — infrastructure dependencies are tested via real implementations
   (config_store writes real files to /tmp; imap_client uses real OpenSSL connections).
 - Functional tests use a separate mock IMAP server written in C (`tests/functional/`).
-- Integration tests use a real Dockerized Dovecot server (`tests/integration/`).
+- Integration tests use a real Dovecot server run as a per-agent process (`tests/integration/`).

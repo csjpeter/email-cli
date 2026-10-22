@@ -20,13 +20,38 @@
 #   ./run_integration.sh            # run test (start env if needed)
 #   ./run_integration.sh --down     # stop containers (keeps email volume)
 #   ./run_integration.sh --clean    # stop containers AND remove volume
+#   ./run_integration.sh --names    # print this agent's compose project and volume
+#
+# Names carry the agent id (AGENT_ID, or the clone's agent-work/<id>), so
+# agents running it side by side do not share a container or a volume.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-COMPOSE="docker compose -f $SCRIPT_DIR/docker-compose.yml"
-CONTAINER="email-cli-imap-test"
+
+# The agent id names the compose project, so the container and the volume of
+# one agent are never those of another (EMAIL-172).  It is AGENT_ID when set,
+# else the <id> of a clone under .../agent-work/<id>/, else "local".
+AGENT="${AGENT_ID:-}"
+if [ -z "$AGENT" ]; then
+    case "$PROJECT_ROOT" in
+        */agent-work/*/*) AGENT="${PROJECT_ROOT#*/agent-work/}"; AGENT="${AGENT%%/*}" ;;
+        *) AGENT="local" ;;
+    esac
+fi
+case "$AGENT" in
+    *[!A-Za-z0-9_-]*|'') echo "ERROR: unusable agent id '$AGENT'" >&2; exit 1 ;;
+esac
+COMPOSE_PROJECT_NAME="email-cli-$AGENT"
+export COMPOSE_PROJECT_NAME
+COMPOSE="docker compose -p $COMPOSE_PROJECT_NAME -f $SCRIPT_DIR/docker-compose.yml"
+VOLUME="${COMPOSE_PROJECT_NAME}_maildata"
+CONTAINER=""   # read back from compose by resolve_container
+
+resolve_container() {
+    CONTAINER="$($COMPOSE ps -a -q imap-server | head -n 1)"
+}
 
 # TLS connection – self-signed cert, so verify is disabled
 # The container's IMAPS port is published on a loopback port the kernel picks
@@ -41,6 +66,7 @@ IMAP_FOLDER="INBOX"
 start_env() {
     echo "Building and starting Dovecot IMAP/TLS test server..."
     $COMPOSE up -d --build
+    resolve_container
     wait_for_imaps
 }
 
@@ -59,9 +85,10 @@ wait_for_imaps() {
 }
 
 ensure_env_running() {
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER}$"; then
+    resolve_container
+    if [ -n "$CONTAINER" ] && [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" = "true" ]; then
         echo "Reusing running IMAP test server."
-    elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER}$"; then
+    elif [ -n "$CONTAINER" ]; then
         echo "Restarting stopped IMAP test server..."
         $COMPOSE start
         wait_for_imaps
@@ -73,10 +100,15 @@ ensure_env_running() {
 # ── Subcommands ──────────────────────────────────────────────────────────
 
 case "${1:-}" in
+    --names)
+        echo "project=$COMPOSE_PROJECT_NAME"
+        echo "volume=$VOLUME"
+        exit 0
+        ;;
     --down)
         echo "Stopping integration test environment..."
         $COMPOSE stop
-        echo "Done. Volume 'email-cli-maildata' preserved."
+        echo "Done. Volume '$VOLUME' preserved."
         exit 0
         ;;
     --clean)

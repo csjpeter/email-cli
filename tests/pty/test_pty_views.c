@@ -4523,14 +4523,21 @@ static void test_fk_help(void) {
     if (!s) return;
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
-    ASSERT_SCREEN_CONTAINS(s, "switch between the folder tree");
     ASSERT_SCREEN_CONTAINS(s, "also g");
     ASSERT_SCREEN_CONTAINS(s, "also G");
     ASSERT_SCREEN_CONTAINS(s, "tree: open; flat view: as Enter");
     ASSERT_SCREEN_CONTAINS(s, "flat view: one level up");
     ASSERT_SCREEN_CONTAINS(s, "Search");
     ASSERT_SCREEN_CONTAINS(s, "Compose");
+    /* EMAIL-225: the menu-only entries (with their ":x" letters) make the
+     * help longer than 80x24, so the last rows are below the fold */
+    pty_send_key(s, PTY_KEY_END);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
+    ASSERT_SCREEN_CONTAINS(s, "switch between the folder tree");
+    ASSERT_SCREEN_CONTAINS(s, ":t");
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_settle(s, SETTLE_MS);
     pty_send_str(s, "xtn");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Folder browser shortcuts");
@@ -5285,6 +5292,8 @@ static void test_tui_folders_help_panel(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_END);        /* EMAIL-225: the menu rows push it below the fold */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
     pty_send_key(s, PTY_KEY_ESC);
@@ -7925,7 +7934,7 @@ static void test_bk_prompt_keys(void) {
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[2 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[3/30]");
+    ASSERT_WAIT_FOR(s, "[3/30]", WAIT_MS);
     pty_send_str(s, "d");
     ASSERT_WAIT_FOR(s, "Move 2 marked messages to Trash?", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "[ Yes ]  [ No ]");

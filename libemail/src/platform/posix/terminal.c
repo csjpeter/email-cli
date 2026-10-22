@@ -290,6 +290,9 @@ int terminal_read_line(const char *prompt, int mask, char *buf, size_t size) {
     fflush(stdout);   /* the library writes with write(2) */
     tui_tty_raw *raw = tui_tty_raw_enter(fd, 0);
     if (!raw) return TERM_LINE_EOF;
+    /* Keys typed ahead were echoed in clear by the previous field: a masked
+     * field must not take them silently. */
+    if (mask) tcflush(fd, TCIFLUSH);
     int rc = TERM_LINE_EOF;
     size_t len = 0;
     int shown = 0;    /* characters on the screen */

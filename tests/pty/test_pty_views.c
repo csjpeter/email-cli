@@ -3326,7 +3326,7 @@ static void lk_enter_body(void) {
     for (int i = 0; i < 3; i++) {
         pty_send_key(s, PTY_KEY_ENTER);
         ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
-        ASSERT_SCREEN_CONTAINS(s, "Message 18");
+        ASSERT_WAIT_FOR(s, "Message 18", WAIT_MS);
         if (i == 0) pty_send_key(s, PTY_KEY_BACK);
         else if (i == 1) pty_send_str(s, back[1]);
         else pty_send_key(s, PTY_KEY_ESC);

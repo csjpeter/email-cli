@@ -68,9 +68,9 @@ The project follows a strict layered CLEAN architecture with zero circular depen
 
 ```
 Application    →  src/main.c, main_ro.c, main_sync.c, main_tui.c, main_import_rules.c
-Domain         →  libemail/src/domain/email_service.c
+Domain         →  libemail/src/domain/{email_service,history_service,history_view}.c
 Infrastructure →  libemail/src/infrastructure/{config_store,local_store,setup_wizard,
-                                                  mail_rules,when_expr}.c + mail_account.h
+                                                  mail_rules,when_expr,op_history}.c + mail_account.h
 Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_parser,html_render,
                                      imap_util,input_line,path_complete}.c + raii.h
 Platform       →  libemail/src/platform/{terminal,path,process,credential_key}.h + html_medium.h
@@ -112,6 +112,13 @@ AddressSanitizer cannot be linked static.
 
 **Config** is stored at `~/.config/email-cli/config.ini` with mode 0600 (IMAP host, user, password, folder). Gmail accounts add `GMAIL_MODE=1`, `GMAIL_REFRESH_TOKEN`, and optional `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET` fields.
 
+**Operation history (EMAIL-226):** every state-changing operation is recorded in the
+append-only `<data dir>/email-cli/history.tsv` (`op_history.c`; the mail operations by
+`history_note_*` in `history_service.c`, the rule, account and setting steps by their
+stores) and taken back with `history_revert()`; secrets are recorded as `changed`.
+CLI: `history`, `revert <id>`, `-q`; TUI: `H` (`history_view.c`, libtuikit `tui_histview`).
+See `docs/spec/operation-history.md`.
+
 **Local store** uses account-based directories with reverse digit bucketing and text indexes. See `docs/spec/local-store.md` for the full specification.
 
 ## RAII Memory Safety
@@ -144,7 +151,7 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, and libssl (OpenSSL).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
 The one library of the workspace used at run time is **libtuikit**
-(`deps/libtuikit`, a git submodule pinned to a release tag, now v0.9.0), linked
+(`deps/libtuikit`, a git submodule pinned to a release tag, now v0.11.0), linked
 **statically**: the binaries carry no run-time dependency on it, and the
 package declares none.  It replaces this project's own terminal code module by
 module (EMAIL-28).  Migrated: terminal size, raw mode, key decoding and

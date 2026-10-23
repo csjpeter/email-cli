@@ -364,9 +364,9 @@ static const char *const exp_folders_help[] = {
     "    │ :                  Actions - the menu of everything that changes state                  │",
     "    │ Esc, q, Backspace  Back - up one level; the accounts at the top (also Backspace)        │",
     "    │ Esc                Back - up one level; the accounts at the top                         │",
-    "    │ t                  Tree / flat - switch between the folder tree and one level at a time │",
+    "    │ :                  Create a folder... - on the server, name asked for                   │",
+    "    │ :                  Delete the folder - on the server                                    │",
     "    └─────────────────────────────────────────────────────────────────────────────────────────┘",
-    "",
     " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help         [2/9]",
     NULL
 };
@@ -392,12 +392,12 @@ static const char *const sty_folders_help[] = {
     "    T bbbbbbbbbbbbbbbbb                                                                       T     ",
     "    T bbb                                                                                     T     ",
     "    T b                                                                                       T     ",
+    "    T b                                                                                       T     ",
     "    TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT     ",
-    "                                                                                                    ",
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_folders_help[3] = { 21, 95, 0 };
+static const int cur_folders_help[3] = { 22, 95, 0 };
 
 static const char *const exp_list_help[] = {
     "  1-3 of 3 message(s) in INBOX (3 unread) [testuser].",
@@ -421,7 +421,7 @@ static const char *const exp_list_help[] = {
     "             │ F                  Forward                                             │",
     "             │ U                  Refresh - after a sync                              │",
     "             │ l                  Rules - the rules editor                            │",
-    "             │ *                  Star - toggle the star (flag)                       │",
+    "             │ H                  History - recent changes, with Revert               │",
     "             └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -473,10 +473,10 @@ static const char *const exp_reader_help[] = {
     "             │ /                  Search - in the message body                        │",
     "             │ N                  Previous match - n: next match                      │",
     "             │ a                  Save attachment                                     │",
+    "             │ H                  History - of this message, with Revert              │",
     "             │ *                  Star - toggle the star (flag)                       │",
     "             │ +                  Mark read                                           │",
     "             │ -                  Mark unread                                         │",
-    "             │ !                  Junk - toggle junk                                  │",
     "             └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -7028,7 +7028,7 @@ static const char *const exp_w80_list_help[] = {
     "   │ F                  Forward                                             │",
     "   │ U                  Refresh - after a sync                              │",
     "   │ l                  Rules - the rules editor                            │",
-    "   │ *                  Star - toggle the star (flag)                       │",
+    "   │ H                  History - recent changes, with Revert               │",
     "   └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -7529,7 +7529,7 @@ static const char *const exp_w140_list_help[] = {
     "                                 │ F                  Forward                                             │",
     "                                 │ U                  Refresh - after a sync                              │",
     "                                 │ l                  Rules - the rules editor                            │",
-    "                                 │ *                  Star - toggle the star (flag)                       │",
+    "                                 │ H                  History - recent changes, with Revert               │",
     "                                 └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };

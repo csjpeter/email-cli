@@ -2762,7 +2762,7 @@ static void test_gk_marks(void) {
     ASSERT(gk_step(s, PTY_KEY_END, "[45/45]"), "gmail list marks: End");
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[45/45]");
+    ASSERT_WAIT_FOR(s, "[45/45]", WAIT_MS);
     gk_quit(s);
 }
 

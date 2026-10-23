@@ -74,10 +74,15 @@ email-cli rules edit --name N [--new-name M] [--if-from G] [--if-subject G] [--i
 email-cli rules add --name N [--if-from G] [--if-subject G] [--if-to G] [--if-label G] \
     [--add-label L] [--remove-label L] [--move-folder F]
 email-cli remove-account ADDRESS     # deletes the account's configuration; local mail is kept
+email-cli history [OBJECT]           # recorded operations: who, when, old and new value, revertable or not
+email-cli revert ID [-q]             # takes a step back; asks first unless -q
 ```
 `send` needs SMTP settings already configured. Always try `rules apply --dry-run`
 before `rules apply`. Run `remove-account` only when the user asked for exactly
-that account to be removed. Every command that takes a UID also takes
+that account to be removed. An irreversible operation (permanent delete, send, delete-folder,
+delete-label) asks `Continue? [y/N]` first; `-q` / `--quiet` skips the question,
+so use it only when the user asked for exactly that. `revert` is a new step and
+can itself be reverted; an overtaken step is refused in the server's words. Every command that takes a UID also takes
 `--folder NAME` (Gmail: `--label NAME`) for the mailbox the UID belongs to.
 
 ## Do not run these as an agent

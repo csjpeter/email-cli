@@ -23,6 +23,8 @@ no code branch for a platform nobody builds on.
 | `readlink("/proc/self/exe")` | `libemail/src/platform/posix/path.c` | a per-OS executable-path call |
 | `/proc/<pid>/comm`, `kill(pid, 0)` for PID-file liveness | `libemail/src/platform/posix/process.c` | a per-OS process-identity query behind `platform/process.h` |
 | `/etc/machine-id`, `~/.ssh/id_*` as credential key source | `libemail/src/platform/posix/credential_key.c` | a per-OS machine identifier behind `platform/credential_key.h` |
+| `flock(2)`, `getuid`/`getpwuid` for the append-only operation history (who, serialised writes) | `libemail/src/infrastructure/op_history.c` | a per-OS file lock and user identity behind a platform header |
+| `fopencookie(3)` (glibc) for the plain-output filter | `libemail/src/platform/posix/terminal.c` | a per-OS stream wrapper |
 | `open_memstream(3)` | `libemail/src/platform/posix/html_medium.c` | a `tmpfile`-based replacement |
 | `forkpty`/`<pty.h>`, `-lutil` | `deps/libptytest/`, `tests/pty/` | a ConPTY or per-OS pty layer (test harness only) |
 | `crontab` via `popen` (scheduled sync) | `libemail/src/domain/email_service.c` | a per-OS scheduler (launchd, Task Scheduler) |

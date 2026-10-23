@@ -423,10 +423,24 @@ static FILE *plain_stream(FILE *real) {
     return f;
 }
 
+static FILE *g_plain_out, *g_plain_err;
+
+/* Closes the filtering streams at exit, which flushes them and frees their
+ * cookies (a leak otherwise, which LeakSanitizer reports as a failed exit). */
+static void plain_streams_close(void) {
+    FILE *po = g_plain_out, *pe = g_plain_err;
+    g_plain_out = g_plain_err = NULL;
+    if (po) fclose(po);
+    if (pe) fclose(pe);
+}
+
 void terminal_plain_output_if_needed(void) {
     if (terminal_understands_escapes()) return;
     FILE *out = stdout, *err = stderr;
     FILE *po = plain_stream(out), *pe = plain_stream(err);
+    if (po != out) g_plain_out = po;
+    if (pe != err) g_plain_err = pe;
     stdout = po;
     stderr = pe;
+    atexit(plain_streams_close);
 }

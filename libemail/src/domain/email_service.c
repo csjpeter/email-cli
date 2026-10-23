@@ -4,6 +4,8 @@
 /* The mail service: listing, reading, syncing and applying rules through the mail client. */
 #include "email_service.h"
 #include "config_store.h"
+#include "history_service.h"
+#include "history_view.h"
 #include "input_line.h"
 #include "tui_frame.h"
 #include "key_table.h"
@@ -221,7 +223,7 @@ static char *word_wrap(const char *text, int width) {
 
 /* Forward declaration — defined after visible_line_cols (below). */
 static void warn_charset(const MimeTextInfo *info, const char *uid);
-static void show_label_picker(emc_client *mc, const char *uid,
+static void show_label_picker(const Config *cfg, emc_client *mc, const char *uid,
                                char *feedback_out, int feedback_cap);
 static int is_system_or_special_label(const char *name);
 static void flag_push_background(const Config *cfg, const char *uid,
@@ -1307,6 +1309,15 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 if (ml >= 0) { cur_line = ml; info_msg[0] = '\0'; }
                 else snprintf(info_msg, sizeof(info_msg), "No more matches");
                 break;
+            } else if (ch == 'H') {
+                /* The history of this message, with Revert (EMAIL-226) */
+                char hobj[256];
+                history_mail_object(cfg, folder, uid, hobj, sizeof(hobj));
+                if (history_view_run(cfg, hobj) < 0) {
+                    result = 1;
+                    goto show_int_done;
+                }
+                break;
             } else if (ch == '?') {
                 ekeys_help(rview, is_gmail ? "Message reader shortcuts (Gmail)"
                                            : "Message reader shortcuts");
@@ -1317,6 +1328,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 label_idx_remove(lbl, uid);
                 local_hdr_update_labels("", uid, NULL, 0, &lbl, 1);
                 if (mc) emc_modify_label(mc, uid, lbl, 0);
+                history_note_label(cfg, uid, lbl, 0);
                 snprintf(info_msg, sizeof(info_msg), "Label removed: %s", lbl);
                 /* Reload show_labels to reflect the change */
                 free(show_labels);
@@ -1335,19 +1347,29 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                         break;
                     }
                     label_idx_remove("_trash", uid);
+                    history_note_delete(cfg, folder, uid, NULL);
                     result = 6;   /* signal list loop to mark entry removed */
                     goto show_int_done;
                 }
                 /* Trash: Gmail compound trash operation (queued offline) */
                 gmail_trash_or_queue(mc, uid);
                 char **all_labels = NULL; int all_count = 0;
+                char hist_held[1024] = "";
                 label_idx_list(&all_labels, &all_count);
                 for (int j = 0; j < all_count; j++) {
+                    if (strcmp(all_labels[j], "_trash") != 0 &&
+                        label_idx_contains(all_labels[j], uid) > 0) {
+                        size_t hl = strlen(hist_held);
+                        if (hl + strlen(all_labels[j]) + 2 < sizeof(hist_held))
+                            snprintf(hist_held + hl, sizeof(hist_held) - hl, "%s%s",
+                                     hl ? "," : "", all_labels[j]);
+                    }
                     label_idx_remove(all_labels[j], uid);
                     free(all_labels[j]);
                 }
                 free(all_labels);
                 label_idx_add("_trash", uid);
+                history_note_gmail_trash(cfg, uid, hist_held);
                 result = 6;   /* go back to list; entry will be marked removed */
                 goto show_int_done;
             } else if (act == EA_ARCHIVE) {
@@ -1358,6 +1380,8 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                     break;
                 }
                 char *lbl_str = local_hdr_get_labels("", uid);
+                const int hist_unread = label_idx_contains("UNREAD", uid) > 0;
+                char hist_removed[1024] = "";
                 if (lbl_str) {
                     int n = 1;
                     for (const char *p = lbl_str; *p; p++) if (*p == ',') n++;
@@ -1371,6 +1395,13 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                             if (sep) *sep = '\0';
                             if (tok[0] && tok[0] != '_') {
                                 label_idx_remove(tok, uid);
+                                {
+                                    size_t hl = strlen(hist_removed);
+                                    if (hl + strlen(tok) + 2 < sizeof(hist_removed))
+                                        snprintf(hist_removed + hl,
+                                                 sizeof(hist_removed) - hl,
+                                                 "%s%s", hl ? "," : "", tok);
+                                }
                                 rm[rm_n++] = tok;
                                 if (strcmp(tok, "IMPORTANT") != 0 &&
                                     strncmp(tok, "CATEGORY_", 9) != 0) {
@@ -1392,12 +1423,13 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 if (mc) emc_set_flag(mc, uid, "\\Seen", 1);
                 else local_pending_label_add(uid, "UNREAD", 0);
                 label_idx_add("_nolabel", uid);
+                history_note_gmail_archive(cfg, uid, hist_removed, hist_unread);
                 free(show_labels);
                 show_labels = local_hdr_get_labels("", uid);
                 snprintf(info_msg, sizeof(info_msg), "Archived");
                 break;
             } else if (act == EA_LABELS) {
-                show_label_picker(mc, uid, info_msg, sizeof(info_msg));
+                show_label_picker(cfg, mc, uid, info_msg, sizeof(info_msg));
                 free(show_labels);
                 show_labels = local_hdr_get_labels("", uid);
                 break;
@@ -1423,6 +1455,8 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 } else if (mc) {
                     emc_set_flag(mc, uid, "\\Flagged", add_flag);
                 }
+                history_note_flag(cfg, folder, uid, MSG_FLAG_FLAGGED,
+                                  currently != 0, add_flag);
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Unstarred" : "Starred");
                 break;
@@ -1453,6 +1487,8 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 } else if (mc) {
                     emc_set_flag(mc, uid, "\\Seen", add_flag);
                 }
+                history_note_flag(cfg, folder, uid, MSG_FLAG_UNSEEN,
+                                  currently != 0, !add_flag);
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Marked as read" : "Marked as unread");
                 break;
@@ -1464,6 +1500,8 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 /* .hdr flags field is not used for IMAP; skip local_hdr_update_flags */
                 local_pending_flag_add(folder, uid, "$Done", add_flag);
                 if (mc) emc_set_flag(mc, uid, "$Done", add_flag);
+                history_note_flag(cfg, folder, uid, MSG_FLAG_DONE,
+                                  currently != 0, add_flag);
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Marked not done" : "Marked done");
                 break;
@@ -1475,6 +1513,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                     if (want) emc_mark_junk(mc, uid);
                     else      emc_mark_notjunk(mc, uid);
                 }
+                history_note_junk(cfg, uid, want != 0);
                 snprintf(info_msg, sizeof(info_msg),
                          want ? "Marked as junk" : "Marked as not-junk");
                 break;
@@ -1484,9 +1523,20 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                     snprintf(info_msg, sizeof(info_msg), "Not deleted");
                     break;
                 }
+                char *hist_msgid = history_message_id(folder, uid);
                 if (imap_trash_or_queue(mc, cfg, folder, uid,
-                                        info_msg, sizeof(info_msg)) != 0)
+                                        info_msg, sizeof(info_msg)) != 0) {
+                    free(hist_msgid);
                     break;    /* nothing done: stay in the reader */
+                }
+                {
+                    const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
+                    if (strcmp(folder, trf) == 0)
+                        history_note_delete(cfg, folder, uid, hist_msgid);
+                    else
+                        history_note_move(cfg, "trash", folder, uid, trf, hist_msgid);
+                }
+                free(hist_msgid);
                 result = 6;   /* signal list loop to mark entry removed */
                 goto show_int_done;
             } else if (ch == 'r') {
@@ -2419,6 +2469,7 @@ static int list_empty_screen(const Config *cfg, const char *folder,
                                        : "Message list shortcuts");
         if (ch == 'U') return 4; /* refresh */
         if (ch == 'l') return 7; /* rules editor */
+        if (ch == 'H' && history_view_run(cfg, NULL) < 0) return 0;   /* recent changes */
     }
 }
 
@@ -2503,6 +2554,7 @@ static int bulk_set_flag(BulkCtx *b, int ei, int bit, const char *flag_name,
     local_pending_flag_add(efolder, uid, flag_name, add_flag);
     e->flags ^= bit;
     bulk_save_flags(b, ei);
+    history_note_flag(b->cfg, efolder, uid, bit, currently, want_bit != 0);
 
     int rc = 0;
     if (b->is_gmail) {
@@ -2526,9 +2578,11 @@ static int bulk_set_flag(BulkCtx *b, int ei, int bit, const char *flag_name,
     return rc == 0 ? 0 : -1;
 }
 
-/** Adds (@p on 1) or removes (0) a Gmail label on entry @p ei. */
-static int bulk_label(BulkCtx *b, int ei, const char *label, int on) {
+/** Adds (@p on 1) or removes (0) a Gmail label on entry @p ei; @p record 0
+ *  leaves the history step to the caller (a move is one step). */
+static int bulk_label_q(BulkCtx *b, int ei, const char *label, int on, int record) {
     const char *uid = b->entries[ei].uid;
+    const int had = label_idx_contains(label, uid) > 0;
     int rc = 0;
     if (b->mc) rc = emc_modify_label(b->mc, uid, label, on);
     else rc = local_pending_label_add(uid, label, on);   /* offline: queue */
@@ -2539,7 +2593,12 @@ static int bulk_label(BulkCtx *b, int ei, const char *label, int on) {
         label_idx_remove(label, uid);
         local_hdr_update_labels("", uid, NULL, 0, &label, 1);
     }
+    if (record && had != (on != 0)) history_note_label(b->cfg, uid, label, on != 0);
     return rc == 0 ? 0 : -1;
+}
+
+static int bulk_label(BulkCtx *b, int ei, const char *label, int on) {
+    return bulk_label_q(b, ei, label, on, 1);
 }
 
 /** Moves entry @p ei to folder @p target (IMAP) or to the label @p target
@@ -2549,15 +2608,20 @@ static int bulk_move(BulkCtx *b, int ei, const char *target) {
     const char *efolder = bulk_folder(b, ei);
     int rc = 0;
     if (b->is_gmail) {
-        if (efolder[0] != '_' && strcmp(efolder, target) != 0)
-            rc |= bulk_label(b, ei, efolder, 0);
-        rc |= bulk_label(b, ei, target, 1);
+        const int leaves = efolder[0] != '_' && strcmp(efolder, target) != 0;
+        if (leaves)
+            rc |= bulk_label_q(b, ei, efolder, 0, 0);
+        rc |= bulk_label_q(b, ei, target, 1, !leaves);
+        if (leaves && rc == 0) history_note_gmail_move(b->cfg, uid, efolder, target);
         if (b->pend_label && efolder[0] != '_') b->pend_label[ei] = 1;
         return rc == 0 ? 0 : -1;
     }
+    char *hist_msgid = history_message_id(efolder, uid);
     if (b->mc) rc = emc_move_to_folder(b->mc, uid, target);
     if (rc != 0 || !b->mc)   /* no connection or refused: queue for the sync */
         rc = local_pending_move_add(efolder, uid, target);
+    if (rc == 0) history_note_move(b->cfg, "move", efolder, uid, target, hist_msgid);
+    free(hist_msgid);
     if (rc == 0) {
         manifest_remove(b->manifest, uid);
         if (b->pend_remove) b->pend_remove[ei] = 1;
@@ -2576,22 +2640,47 @@ static int bulk_delete(BulkCtx *b, int ei) {
         int in_trash = strcmp(b->folder, "_trash") == 0;
         if (in_trash) {
             rc = gmail_delete_now(b->cfg, b->mc, uid);
-            if (rc == 0) label_idx_remove("_trash", uid);
+            if (rc == 0) {
+                label_idx_remove("_trash", uid);
+                history_note_delete(b->cfg, b->folder, uid, NULL);
+            }
         } else {
             gmail_trash_or_queue(b->mc, uid);
             char **all_labels = NULL;
             int all_count = 0;
+            char *held = calloc(1, 1);
+            size_t held_len = 0;
             label_idx_list(&all_labels, &all_count);
             for (int j = 0; j < all_count; j++) {
+                if (held && strcmp(all_labels[j], "_trash") != 0 &&
+                    label_idx_contains(all_labels[j], uid) > 0) {
+                    char *t = realloc(held, held_len + strlen(all_labels[j]) + 2);
+                    if (t) {
+                        held = t;
+                        held_len += (size_t)sprintf(held + held_len, "%s%s",
+                                                    held_len ? "," : "", all_labels[j]);
+                    }
+                }
                 label_idx_remove(all_labels[j], uid);
                 free(all_labels[j]);
             }
             free(all_labels);
             label_idx_add("_trash", uid);
+            history_note_gmail_trash(b->cfg, uid, held);
+            free(held);
         }
     } else {
         char msg[80];
+        char *hist_msgid = history_message_id(efolder, uid);
+        const char *trf = b->cfg->trash_folder ? b->cfg->trash_folder : "Trash";
         rc = imap_trash_or_queue(b->mc, b->cfg, efolder, uid, msg, sizeof(msg));
+        if (rc == 0) {
+            if (strcmp(efolder, trf) == 0)
+                history_note_delete(b->cfg, efolder, uid, hist_msgid);
+            else
+                history_note_move(b->cfg, "trash", efolder, uid, trf, hist_msgid);
+        }
+        free(hist_msgid);
     }
     if (rc == 0) {
         manifest_remove(b->manifest, uid);
@@ -2619,6 +2708,7 @@ static int bulk_junk(BulkCtx *b, int ei, int want) {
     if (want) e->flags |= MSG_FLAG_JUNK;
     else      e->flags &= ~MSG_FLAG_JUNK;
     bulk_save_flags(b, ei);
+    history_note_junk(b->cfg, uid, want != 0);
     int rc = 0;
     if (b->is_gmail)
         junk_push_background(b->cfg, uid, want != 0);
@@ -2631,6 +2721,8 @@ static int bulk_junk(BulkCtx *b, int ei, int want) {
 static void gmail_archive_one(BulkCtx *b, int ei) {
     const char *uid = b->entries[ei].uid;
     char *lbl_str = local_hdr_get_labels("", uid);
+    const int hist_unread = label_idx_contains("UNREAD", uid) > 0;
+    char hist_removed[1024] = "";
     if (lbl_str) {
         int n = 1;
         for (const char *p = lbl_str; *p; p++) if (*p == ',') n++;
@@ -2643,7 +2735,13 @@ static void gmail_archive_one(BulkCtx *b, int ei) {
                 sep = strchr(tok, ',');
                 if (sep) *sep = '\0';
                 if (tok[0]) {
-                    if (tok[0] != '_') label_idx_remove(tok, uid);
+                    if (tok[0] != '_') {
+                        label_idx_remove(tok, uid);
+                        size_t hl = strlen(hist_removed);
+                        if (hl + strlen(tok) + 2 < sizeof(hist_removed))
+                            snprintf(hist_removed + hl, sizeof(hist_removed) - hl,
+                                     "%s%s", hl ? "," : "", tok);
+                    }
                     rm[rm_n++] = tok;
                     if (strcmp(tok, "IMPORTANT") != 0 &&
                         strncmp(tok, "CATEGORY_", 9) != 0) {
@@ -2666,6 +2764,7 @@ static void gmail_archive_one(BulkCtx *b, int ei) {
     if (b->mc) emc_set_flag(b->mc, uid, "\\Seen", 1);
     else local_pending_label_add(uid, "UNREAD", 0);
     label_idx_add("_nolabel", uid);
+    history_note_gmail_archive(b->cfg, uid, hist_removed, hist_unread);
     if (b->pend_label) b->pend_label[ei] = 1;
 }
 
@@ -2674,6 +2773,7 @@ static void gmail_restore_one(BulkCtx *b, int ei) {
     const char *uid = b->entries[ei].uid;
     label_idx_remove("_trash", uid);
     label_idx_add("INBOX", uid);
+    history_note_gmail_move(b->cfg, uid, "_trash", "INBOX");
     {
         const char *add_lbl = "INBOX";
         const char *rm_lbl  = "TRASH";
@@ -2703,12 +2803,14 @@ static void gmail_rm_label_one(BulkCtx *b, int ei, char *fb, size_t fsz) {
         local_hdr_update_labels("", uid, &folder, 1, NULL, 0);
         label_idx_remove("_nolabel", uid);
         b->pend_label[ei] = 0;
+        history_note_label(b->cfg, uid, folder, 1);
         snprintf(fb, fsz, "Undo: %s restored", folder);
         return;
     }
     if (b->mc) emc_modify_label(b->mc, uid, folder, 0);
     label_idx_remove(folder, uid);
     local_hdr_update_labels("", uid, NULL, 0, &folder, 1);
+    history_note_label(b->cfg, uid, folder, 0);
     char *lbl = local_hdr_get_labels("", uid);
     int has_real = 0;
     if (lbl) {
@@ -4208,7 +4310,7 @@ read_key_again: ;
                      * so we can show green feedback if a label addition removes it. */
                     int was_archived = label_idx_contains("_nolabel", uid);
                     int was_trashed  = label_idx_contains("_trash",   uid);
-                    show_label_picker(list_mc, uid, feedback_msg, sizeof(feedback_msg));
+                    show_label_picker(cfg, list_mc, uid, feedback_msg, sizeof(feedback_msg));
                     if ((was_archived && !label_idx_contains("_nolabel", uid)) ||
                         (was_trashed  && !label_idx_contains("_trash",   uid)))
                         if (pending_restore) pending_restore[targets[0]] = 1;
@@ -4249,6 +4351,11 @@ read_key_again: ;
                 /* Rules editor */
                 list_result = 7;
                 goto list_done;
+            }
+            if (ch == 'H') {
+                /* Recent changes, with Revert (EMAIL-226) */
+                if (history_view_run(cfg, NULL) < 0) { list_result = 0; goto list_done; }
+                break;
             }
             if (ch == '?') {
                 ekeys_help(list_view, is_gmail ? "Message list shortcuts (Gmail)"
@@ -4957,7 +5064,8 @@ folders_int_done:
  *  index, the .hdr and, with a client, the server.  Adding a real label (not
  *  UNREAD/STARRED/CATEGORY_) implicitly moves the message out of the virtual
  *  archive (_nolabel) and out of the trash. */
-static void apply_label_change(emc_client *mc, const char *uid, const char *lid,
+static void apply_label_change(const Config *cfg, emc_client *mc,
+                               const char *uid, const char *lid,
                                int adding) {
     if (adding) {
         label_idx_add(lid, uid);
@@ -4986,9 +5094,10 @@ static void apply_label_change(emc_client *mc, const char *uid, const char *lid,
         else
             emc_modify_label(mc, uid, lid, adding);
     }
+    history_note_label(cfg, uid, lid, adding != 0);
 }
 
-static void show_label_picker(emc_client *mc, const char *uid,
+static void show_label_picker(const Config *cfg, emc_client *mc, const char *uid,
                                char *feedback_out, int feedback_cap) {
     /* Collect available labels from local .idx files */
     char **all_labels = NULL;
@@ -5066,7 +5175,7 @@ static void show_label_picker(emc_client *mc, const char *uid,
                     int now = tui_dialog_is_checked(&dlg, i);
                     if (now == (pick_on[i] ? 1 : 0)) continue;
                     pick_on[i] = now;
-                    apply_label_change(mc, uid, pick_ids[i], now);
+                    apply_label_change(cfg, mc, uid, pick_ids[i], now);
                 }
             }
             tui_dialog_free(&dlg);
@@ -7634,6 +7743,9 @@ int email_service_set_flag(const Config *cfg, const char *uid,
         return -1;
     }
 
+    /* The state before, for the operation history. */
+    const int hist_old = history_flag_state(cfg, use_folder, uid, flag_bit);
+
     /* Update local manifest */
     Manifest *m = manifest_load(use_folder);
     if (m) {
@@ -7676,6 +7788,11 @@ int email_service_set_flag(const Config *cfg, const char *uid,
             manifest_free(m2);
         }
     }
+
+    /* The local state is the state now: record the step (a change that
+     * changes nothing records nothing). */
+    if (hist_old != (add ? 1 : 0))
+        history_note_flag(cfg, use_folder, uid, flag_bit, hist_old, add ? 1 : 0);
 
     /* Gmail has no pending_flags drain: its sync path flushes
      * pending_labels.tsv instead.  Queue the change there, and only when the
@@ -7733,8 +7850,12 @@ int email_service_set_label(const Config *cfg, const char *uid,
         fprintf(stderr, "Error: Could not connect to server.\n");
         return -1;
     }
+    local_store_init(cfg->host, cfg->user);
+    const int had_label = label_idx_contains(label, uid) > 0;
     int rc = emc_modify_label(mc, uid, label, add);
     emc_close(mc);
+    if (rc == 0 && had_label != (add ? 1 : 0))
+        history_note_label(cfg, uid, label, add ? 1 : 0);
 
     if (add) {
         label_idx_add(label, uid);
@@ -7822,8 +7943,11 @@ int email_service_create_label(const Config *cfg, const char *name) {
     int rc = emc_create_label(mc, name, &new_id);
     emc_close(mc);
 
-    if (rc == 0)
+    if (rc == 0) {
+        local_store_init(cfg->host, cfg->user);
+        history_note_folder(cfg, name, new_id ? new_id : name, 1);
         printf("Label '%s' created (ID: %s).\n", name, new_id ? new_id : name);
+    }
     free(new_id);
     return rc;
 }
@@ -7841,8 +7965,11 @@ int email_service_delete_label(const Config *cfg, const char *label_id) {
     int rc = emc_delete_label(mc, label_id);
     emc_close(mc);
 
-    if (rc == 0)
+    if (rc == 0) {
+        local_store_init(cfg->host, cfg->user);
+        history_note_folder(cfg, label_id, label_id, 0);
         printf("Label '%s' deleted.\n", label_id);
+    }
     return rc;
 }
 
@@ -7852,7 +7979,10 @@ int email_service_mark_junk(const Config *cfg, const char *uid) {
     if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
     int rc = emc_mark_junk(mc, uid);
     emc_close(mc);
-    if (rc == 0) printf("Message %s marked as junk.\n", uid);
+    if (rc == 0) {
+        history_note_junk(cfg, uid, 1);
+        printf("Message %s marked as junk.\n", uid);
+    }
     return rc;
 }
 
@@ -7862,7 +7992,10 @@ int email_service_mark_notjunk(const Config *cfg, const char *uid) {
     if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
     int rc = emc_mark_notjunk(mc, uid);
     emc_close(mc);
-    if (rc == 0) printf("Message %s marked as not-junk.\n", uid);
+    if (rc == 0) {
+        history_note_junk(cfg, uid, 0);
+        printf("Message %s marked as not-junk.\n", uid);
+    }
     return rc;
 }
 
@@ -7877,6 +8010,8 @@ int email_service_move(const Config *cfg, const char *uid,
     emc_client *mc = make_mail(cfg);
     if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
 
+    /* The Message-ID finds the mail again after the server gave it a new UID. */
+    char *hist_msgid = cfg->gmail_mode ? NULL : history_message_id(src, uid);
     int rc;
     if (cfg->gmail_mode) {
         rc = emc_modify_label(mc, uid, target, 1);
@@ -7886,11 +8021,13 @@ int email_service_move(const Config *cfg, const char *uid,
             local_hdr_update_labels("", uid, &target, 1, NULL, 0);
             label_idx_remove(src, uid);
             local_hdr_update_labels("", uid, NULL, 0, &src, 1);
+            history_note_gmail_move(cfg, uid, src, target);
         }
     } else {
         rc = emc_select(mc, src);
         if (rc == 0) rc = emc_move_to_folder(mc, uid, target);
         if (rc == 0) {
+            history_note_move(cfg, "move", src, uid, target, hist_msgid);
             Manifest *m = manifest_load(src);
             if (m) {
                 manifest_remove(m, uid);
@@ -7900,6 +8037,7 @@ int email_service_move(const Config *cfg, const char *uid,
         }
     }
     emc_close(mc);
+    free(hist_msgid);
     if (rc == 0) printf("Message %s moved to '%s'.\n", uid, target);
     else fprintf(stderr, "Error: could not move message %s to '%s'.\n", uid, target);
     return rc == 0 ? 0 : -1;
@@ -7921,12 +8059,19 @@ static void manifest_drop_uid(const char *folder, const char *uid) {
     manifest_free(m);
 }
 
+int email_service_trash_is_permanent(const Config *cfg, const char *folder) {
+    const char *use = folder ? folder : (cfg->folder ? cfg->folder : "INBOX");
+    if (cfg->gmail_mode) return gmail_folder_is_trash(use);
+    return strcmp(use, cfg->trash_folder ? cfg->trash_folder : "Trash") == 0;
+}
+
 int email_service_trash(const Config *cfg, const char *uid, const char *folder) {
     const char *use_folder = folder ? folder
                            : (cfg->folder ? cfg->folder : "INBOX");
     local_store_init(cfg->host, cfg->user);
     emc_client *mc = make_mail(cfg);
     if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+    char *hist_msgid = cfg->gmail_mode ? NULL : history_message_id(use_folder, uid);
     int rc;
     int permanent;
     if (cfg->gmail_mode) {
@@ -7943,21 +8088,41 @@ int email_service_trash(const Config *cfg, const char *uid, const char *folder) 
     if (rc != 0) {
         fprintf(stderr, "Error: Could not %s message %s.\n",
                 permanent ? "delete" : "move to the trash", uid);
+        free(hist_msgid);
         return -1;
     }
 
     if (cfg->gmail_mode) {
         char **all_labels = NULL; int all_count = 0;
+        char *held = calloc(1, 1);
+        size_t held_len = 0;
         label_idx_list(&all_labels, &all_count);
         for (int j = 0; j < all_count; j++) {
+            if (held && label_idx_contains(all_labels[j], uid) > 0 &&
+                strcmp(all_labels[j], "_trash") != 0) {
+                size_t l = strlen(all_labels[j]);
+                char *t = realloc(held, held_len + l + 2);
+                if (t) {
+                    held = t;
+                    held_len += (size_t)sprintf(held + held_len, "%s%s",
+                                                held_len ? "," : "", all_labels[j]);
+                }
+            }
             label_idx_remove(all_labels[j], uid);
             free(all_labels[j]);
         }
         free(all_labels);
         if (!permanent) label_idx_add("_trash", uid);
+        if (permanent) history_note_delete(cfg, use_folder, uid, NULL);
+        else history_note_gmail_trash(cfg, uid, held);
+        free(held);
     } else {
+        const char *trf = cfg->trash_folder ? cfg->trash_folder : "Trash";
+        if (permanent) history_note_delete(cfg, use_folder, uid, hist_msgid);
+        else history_note_move(cfg, "trash", use_folder, uid, trf, hist_msgid);
         manifest_drop_uid(use_folder, uid);
     }
+    free(hist_msgid);
     if (permanent) printf("Message %s deleted for good.\n", uid);
     else           printf("Message %s moved to the trash.\n", uid);
     return 0;
@@ -7976,13 +8141,17 @@ int email_service_archive(const Config *cfg, const char *uid, const char *folder
         }
         emc_client *mc = make_mail(cfg);
         if (!mc) { fprintf(stderr, "Error: Could not connect.\n"); return -1; }
+        char *hist_msgid = history_message_id(use_folder, uid);
         int rc = emc_select(mc, use_folder);
         if (rc == 0) rc = emc_move_to_folder(mc, uid, arf);
         emc_close(mc);
         if (rc != 0) {
             fprintf(stderr, "Error: Could not move message %s to %s.\n", uid, arf);
+            free(hist_msgid);
             return -1;
         }
+        history_note_move(cfg, "archive", use_folder, uid, arf, hist_msgid);
+        free(hist_msgid);
         manifest_drop_uid(use_folder, uid);
         printf("Message %s archived (moved to %s).\n", uid, arf);
         return 0;
@@ -8024,6 +8193,15 @@ int email_service_archive(const Config *cfg, const char *uid, const char *folder
         free(copy); free(rm); free(lbl_str);
         return -1;
     }
+    {
+        char removed[1024] = "";
+        size_t rl = 0;
+        for (int i = 0; i < rm_n; i++)
+            rl += (size_t)snprintf(removed + rl, rl < sizeof(removed) ? sizeof(removed) - rl : 0,
+                                   "%s%s", rl ? "," : "", rm[i]);
+        history_note_gmail_archive(cfg, uid, removed,
+                                   label_idx_contains("UNREAD", uid) > 0);
+    }
     for (int i = 0; i < rm_n; i++) label_idx_remove(rm[i], uid);
     if (rm_n > 0) local_hdr_update_labels("", uid, NULL, 0, rm, rm_n);
     label_idx_remove("UNREAD", uid);
@@ -8064,6 +8242,7 @@ static int change_folder(const Config *cfg, const char *name, int create, int qu
     if (rc == 0) {
         local_store_init(cfg->host, cfg->user);
         refresh_folder_cache(mc);
+        history_note_folder(cfg, name, "", create);
     }
     emc_close(mc);
 

@@ -494,6 +494,13 @@ int email_service_reply(const Config *cfg, const char *uid, const char *folder,
 int email_service_trash(const Config *cfg, const char *uid, const char *folder);
 
 /**
+ * @brief Whether email_service_trash() on @p folder deletes for good (the
+ *        message is in the trash already): the CLI confirms before that.
+ * @param folder Folder or label the message is in; NULL = the account's.
+ */
+int email_service_trash_is_permanent(const Config *cfg, const char *folder);
+
+/**
  * @brief Archive a message (the TUI's 'a').  Gmail: remove its labels and mark
  *        it read; IMAP: move it to the configured archive folder.
  * @param folder Folder (IMAP) or label the message is in; NULL = the account's.

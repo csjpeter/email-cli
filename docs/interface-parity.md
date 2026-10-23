@@ -46,6 +46,10 @@ existing references and every `no` has a reason.
 | Mark junk / not junk | yes | F:52.2 | yes | P:test_keys_junk_toggle_imap | the `!` key (registry); the PTY tests check the server requests (IMAP STORE; Gmail: test_keys_junk_toggle_gmail) |
 | Move a message to a folder | yes (`move`) | F:124.29 | yes (`m`) | P:test_screen_list_move_prompt | |
 | Delete (trash) / archive a message | yes (`trash`, `archive`) | F:132.2 | yes (`d`, `D`, `a`) | P:test_tui_list_bulk_delete_confirm | |
+| Operation history: the steps of one object, the recent changes | yes (`history [<object>]`) | F:140.3 F:140.5 | yes (`H` in the list, `H` in the reader; libtuikit `tui_histview`) | P:test_hist_tui_recent P:test_hist_tui_reader | `email-cli-ro` has no `history`: it reads mail only, the history is the writer's own record |
+| Revert a recorded operation (the revert is a step, and can be reverted) | yes (`revert <id>`, confirms unless `-q`) | F:140.10 F:140.15 | yes (`:` menu or Enter on a step, confirms, default No) | P:test_hist_tui_revert_and_revert_again P:test_hist_tui_confirm_default_no | |
+| An overtaken step is refused in the server's words | yes | F:140.17 | yes (one line at the bottom) | P:test_hist_tui_overtaken | |
+| Irreversible operations confirm first (default No) and show as not revertable | yes (`delete-folder`, `trash --folder Trash`, `forward`, ...) | F:140.21 F:140.28 F:140.34 | yes | P:test_hist_tui_not_revertable P:test_folder_delete_asks | |
 | Mark several messages at once | no (one UID per call; a script loops) | | yes (`Space`, `m`) | P:test_tui_list_bulk_star_marked | medium: a script loops; not a gap |
 | List attachments | yes | F:14.1 | yes | P:test_show_attachment_picker | |
 | Save an attachment / all attachments | yes | F:15.2 | yes (`a`, `A`) | P:test_show_save_single | |

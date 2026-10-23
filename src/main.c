@@ -20,6 +20,8 @@
 #include "help_gmail.h"
 #include "mail_rules.h"
 #include "when_expr.h"
+#include "history_service.h"
+#include <unistd.h>
 
 /** Exit path marker: the failure has already been explained on stderr. */
 #define RESULT_REPORTED (-2)
@@ -93,6 +95,13 @@ static void help_general(void) {
         "  rules add --name ...        Add a sorting rule\n"
         "  rules edit --name ...       Change a sorting rule in place\n"
         "  rules remove --name ...     Remove a sorting rule by name\n"
+        "\n"
+        "History:\n"
+        "  history [object]            Recorded operations: who, when, old and new value\n"
+        "  revert <id>                 Take back a recorded operation\n"
+        "\n"
+        "Options for every command:\n"
+        "  -q, --quiet                 Do not ask before an irreversible operation\n"
         "\n"
         "Help:\n"
         "  help [command]              Show this help, or detailed help for a command\n"
@@ -651,6 +660,48 @@ static void help_delete_folder(void) {
     );
 }
 
+static void help_history(void) {
+    printf(
+        "Usage: email-cli [<account>] history [<object>] [--limit N]\n"
+        "\n"
+        "Show the recorded operations: who changed what, when, from which value to\n"
+        "which.  Without <object> the recent changes are listed (yours; an\n"
+        "administrator sees everyone's); with <object> every step of that object.\n"
+        "\n"
+        "  <object>    As the history names it: \"mail INBOX/000000000000002a\",\n"
+        "              \"rule Newsletters\", \"account\", \"settings\", \"folder Work\"\n"
+        "  --limit N   At most N steps (default 50)\n"
+        "\n"
+        "Each step ends in [revertable], [compensable], [not revertable], or says\n"
+        "that it was reverted or is the revert of another step.\n"
+        "Revert a step with: email-cli revert <id>\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli history\n"
+        "  email-cli history \"mail INBOX/000000000000002a\"\n"
+    );
+}
+
+static void help_revert(void) {
+    printf(
+        "Usage: email-cli revert <id> [-q]\n"
+        "\n"
+        "Take back the operation recorded as step <id> (see 'history').  The\n"
+        "revert is a new step naming the step it reverts; nothing is rewritten, and\n"
+        "the revert can itself be reverted.\n"
+        "\n"
+        "Refused when: the step is not revertable (a sent mail, a permanent delete,\n"
+        "a secret); the state has changed since (the reason names what is there\n"
+        "now, or is the server's own words); the mail is not in the local store; or\n"
+        "the step is another user's and you are not an administrator.\n"
+        "\n"
+        "  -q, --quiet   Do not ask for confirmation\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli revert 12\n"
+    );
+}
+
 static void help_move(void) {
     printf(
         "Usage: email-cli move <uid> <folder> [--folder <name>]\n"
@@ -872,6 +923,99 @@ static void unknown_option(const char *cmd, const char *opt) {
     fprintf(stderr, "Run 'email-cli help %s' for usage.\n", cmd);
 }
 
+
+/* ── Confirmation of the steps that cannot be taken back (EMAIL-226) ──── */
+
+static int g_quiet;   /* -q / --quiet: no confirmation, no prompt */
+
+/**
+ * @brief Asks whether to go on with an irreversible operation; the default is
+ *        No.  With -q the question is not asked and the answer is yes.
+ * @param what  What is about to happen, one line.
+ * @return 1 to go on, 0 when the answer is anything but "y" or "yes".
+ */
+static int confirm_irreversible(const char *what) {
+    if (g_quiet) return 1;
+    printf("%s\nThis cannot be undone and is not revertable. Continue? [y/N] ", what);
+    fflush(stdout);
+    char line[64];
+    if (!fgets(line, sizeof(line), stdin)) {
+        printf("\n");
+        return 0;
+    }
+    for (char *p = line; *p; p++) *p = (char)tolower((unsigned char)*p);
+    return strncmp(line, "y\n", 2) == 0 || strncmp(line, "yes\n", 4) == 0 ||
+           strcmp(line, "y") == 0 || strcmp(line, "yes") == 0;
+}
+
+/** The confirmation of a revert (itself revertable): default No, -q skips. */
+static int confirm_irreversible_or_revert(const char *what) {
+    if (g_quiet) return 1;
+    printf("%s\nContinue? [y/N] ", what);
+    fflush(stdout);
+    char line[64];
+    if (!fgets(line, sizeof(line), stdin)) {
+        printf("\n");
+        return 0;
+    }
+    for (char *p = line; *p; p++) *p = (char)tolower((unsigned char)*p);
+    return strncmp(line, "y\n", 2) == 0 || strncmp(line, "yes\n", 4) == 0;
+}
+
+/** Writes the answer "declined" and returns the result code for it. */
+static int declined(void) {
+    printf("Not done.\n");
+    return RESULT_REPORTED;
+}
+
+/* ── history and revert ───────────────────────────────────────────────── */
+
+static int history_colour(void) {
+    return isatty(STDOUT_FILENO) && getenv("NO_COLOR") == NULL;
+}
+
+/** Prints the steps of @p h (newest first) that belong in the view: those of
+ *  @p object, or the recent changes when it is NULL. */
+static int print_history(const OpHistory *h, const char *object, int limit) {
+    const int recent = object == NULL;
+    const int colour = history_colour();
+    int shown = 0;
+    if (colour) printf("\033[1m");
+    printf("%-5s %-20s %-8s %-9s %s\n", "ID", "WHEN", "WHO", "OP", "WHAT");
+    if (colour) printf("\033[0m");
+    for (int i = 0; i < h->count && shown < limit; i++) {   /* newest first */
+        const OpStep *s = &h->steps[i];
+        if (object && strcmp(s->object, object) != 0) continue;
+        if (!history_shown(s, recent)) continue;
+        char desc[512];
+        history_describe(s, desc, sizeof(desc));
+        const char *state;
+        char tail[64];
+        if (s->reverts) {
+            snprintf(tail, sizeof(tail), "revert of %lu", s->reverts);
+            state = tail;
+        } else if (s->kind == OPH_IRREVERSIBLE) {
+            state = "not revertable";
+        } else if (op_history_reverted_by(h, s->id)) {
+            snprintf(tail, sizeof(tail), "reverted by %lu",
+                     op_history_reverted_by(h, s->id));
+            state = tail;
+        } else if (s->kind == OPH_COMPENSABLE) {
+            state = "compensable";
+        } else {
+            state = "revertable";
+        }
+        const int dim = s->kind == OPH_IRREVERSIBLE;
+        if (dim && colour) printf("\033[2m");
+        printf("%-5lu %-20.20s %-8.8s %-9.9s %s: %s [%s]\n", s->id, s->time,
+               s->who, s->op, s->object, desc, state);
+        if (dim && colour) printf("\033[0m");
+        shown++;
+    }
+    if (shown == 0) printf("No operations recorded.\n");
+    return 0;
+}
+
 /* ── Entry point ─────────────────────────────────────────────────────── */
 
 #ifndef EMAIL_CLI_VERSION
@@ -889,6 +1033,21 @@ int main(int argc, char *argv[]) {
     if (argc >= 2 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)) {
         printf("email-cli %s\n", EMAIL_CLI_VERSION);
         return EXIT_SUCCESS;
+    }
+
+    /* -q / --quiet: no confirmation of irreversible operations (EMAIL-226).
+     * Removed from argv so that no command has to know it. */
+    {
+        int w = 1;
+        for (int r = 1; r < argc; r++) {
+            if (strcmp(argv[r], "-q") == 0 || strcmp(argv[r], "--quiet") == 0) {
+                g_quiet = 1;
+                continue;
+            }
+            argv[w++] = argv[r];
+        }
+        argc = w;
+        argv[argc] = NULL;
     }
 
     /* 1. Determine cache directory for logs */
@@ -987,6 +1146,8 @@ int main(int argc, char *argv[]) {
                 if (strcmp(cmd, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
                 if (strcmp(cmd, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
                 if (strcmp(cmd, "rules")           == 0) { help_rules();           return EXIT_SUCCESS; }
+                if (strcmp(cmd, "history")         == 0) { help_history();         return EXIT_SUCCESS; }
+                if (strcmp(cmd, "revert")          == 0) { help_revert();          return EXIT_SUCCESS; }
                 if (strcmp(cmd, "migrate-credentials") == 0) { help_migrate_credentials(); return EXIT_SUCCESS; }
                 if (strcmp(cmd, "help")            == 0) { help_help();            return EXIT_SUCCESS; }
             }
@@ -1045,6 +1206,8 @@ int main(int argc, char *argv[]) {
             if (strcmp(topic, "add-account")     == 0) { help_add_account();     return EXIT_SUCCESS; }
             if (strcmp(topic, "remove-account")  == 0) { help_remove_account();  return EXIT_SUCCESS; }
             if (strcmp(topic, "rules")           == 0) { help_rules();           return EXIT_SUCCESS; }
+            if (strcmp(topic, "history")         == 0) { help_history();         return EXIT_SUCCESS; }
+            if (strcmp(topic, "revert")          == 0) { help_revert();          return EXIT_SUCCESS; }
             if (strcmp(topic, "migrate-credentials") == 0) { help_migrate_credentials(); return EXIT_SUCCESS; }
             if (strcmp(topic, "help")            == 0) { help_help();            return EXIT_SUCCESS; }
             fprintf(stderr, "Unknown command '%s'.\n", topic);
@@ -1075,6 +1238,8 @@ int main(int argc, char *argv[]) {
                                   strcmp(cmd, "list-accounts")      == 0 ||
                                   strcmp(cmd, "remove-account")     == 0 ||
                                   strcmp(cmd, "migrate-credentials") == 0 ||
+                                  strcmp(cmd, "history")            == 0 ||
+                                  strcmp(cmd, "revert")             == 0 ||
                                   strcmp(cmd, "rules")              == 0));
 
     /* 4. Load configuration */
@@ -1575,6 +1740,12 @@ int main(int argc, char *argv[]) {
                 help_send();
             } else {
                 const char *from = cfg->smtp_user ? cfg->smtp_user : cfg->user;
+                char q[600];
+                snprintf(q, sizeof(q), "Send the message to %s.", to);
+                if (!confirm_irreversible(q)) {
+                    result = declined();
+                    goto send_done;
+                }
                 emc_message p = {.from = from, .to = to, .subject = subject,
                                  .body = body,
                                  .attachments = attach_count > 0 ? attach_arr : NULL,
@@ -1597,6 +1768,7 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+        send_done: ;
 
     } else if (strcmp(cmd, "mark-read") == 0 || strcmp(cmd, "mark-unread") == 0) {
         const char *uid_str = NULL;
@@ -1708,7 +1880,10 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Error: 'delete-label' requires a label ID.\n");
             help_delete_label();
         } else {
-            result = email_service_delete_label(cfg, label_id);
+            char q[512];
+            snprintf(q, sizeof(q), "Delete the label '%s'.", label_id);
+            if (!cfg->gmail_mode || confirm_irreversible(q)) result = email_service_delete_label(cfg, label_id);
+            else result = declined();
         }
 
     } else if (strcmp(cmd, "create-folder") == 0) {
@@ -1724,6 +1899,77 @@ int main(int argc, char *argv[]) {
             result = email_service_create_folder(cfg, name);
         }
 
+    } else if (strcmp(cmd, "history") == 0) {
+        const char *object = NULL;
+        int limit = 50, ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--account") == 0) { i++; continue; }
+            if (i == account_arg_idx) continue;
+            if (strcmp(argv[i], "--limit") == 0) {
+                if (i + 1 >= argc || atoi(argv[i + 1]) <= 0) {
+                    fprintf(stderr, "Error: --limit requires a positive number.\n"); ok = 0;
+                } else limit = atoi(argv[++i]);
+            } else if (argv[i][0] != '-' && !object) {
+                object = argv[i];
+            } else {
+                unknown_option("history", argv[i]); ok = 0;
+            }
+        }
+        if (ok) {
+            OpHistory h = {0};
+            if (history_load(account_arg, NULL, &h) != 0) {
+                fprintf(stderr, "Error: the history could not be read.\n");
+            } else {
+                result = print_history(&h, object, limit);
+                op_history_free(&h);
+            }
+        }
+
+    } else if (strcmp(cmd, "revert") == 0) {
+        const char *id_str = NULL;
+        int ok = 1;
+        for (int i = cmd_idx + 1; i < argc && ok; i++) {
+            if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--account") == 0) { i++; continue; }
+            if (i == account_arg_idx) continue;
+            if (argv[i][0] != '-' && !id_str) id_str = argv[i];
+            else { unknown_option("revert", argv[i]); ok = 0; }
+        }
+        if (ok) {
+            char *end = NULL;
+            unsigned long id = id_str ? strtoul(id_str, &end, 10) : 0;
+            if (!id_str || *end != '\0' || id == 0) {
+                fprintf(stderr, "Error: 'revert' requires a step number.\n");
+                help_revert();
+            } else {
+                OpHistory h = {0};
+                const OpStep *st = NULL;
+                char q[600] = "";
+                if (history_load(NULL, NULL, &h) == 0 && (st = op_history_step(&h, id))) {
+                    char desc[512];
+                    history_describe(st, desc, sizeof(desc));
+                    snprintf(q, sizeof(q), "Revert step %lu: %s %s", id, st->object, desc);
+                }
+                if (!st) {
+                    fprintf(stderr, "Error: no step %lu in the history.\n", id);
+                    result = RESULT_REPORTED;
+                } else if (!confirm_irreversible_or_revert(q)) {
+                    result = declined();
+                } else {
+                    char refusal[512] = "";
+                    if (history_revert(id, refusal, sizeof(refusal)) == 0) {
+                        printf("Step %lu reverted.\n", id);
+                        result = 0;
+                    } else {
+                        fprintf(stderr, "Refused: %s\n", refusal);
+                        result = RESULT_REPORTED;
+                    }
+                }
+                op_history_free(&h);
+            }
+        }
+
     } else if (strcmp(cmd, "delete-folder") == 0) {
         const char *name = NULL;
         for (int i = cmd_idx + 1; i < argc; i++) {
@@ -1734,7 +1980,10 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Error: 'delete-folder' requires a folder name.\n");
             help_delete_folder();
         } else {
-            result = email_service_delete_folder(cfg, name);
+            char q[512];
+            snprintf(q, sizeof(q), "Delete the folder '%s' with every message in it.", name);
+            if (cfg->gmail_mode || confirm_irreversible(q)) result = email_service_delete_folder(cfg, name);
+            else result = declined();
         }
 
     } else if (strcmp(cmd, "move") == 0) {
@@ -1817,8 +2066,15 @@ int main(int argc, char *argv[]) {
                 char uid[17];
                 if (parse_uid(uid_str, uid) != 0)
                     fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
-                else if (strcmp(cmd, "trash") == 0)
-                    result = email_service_trash(cfg, uid, folder);
+                else if (strcmp(cmd, "trash") == 0) {
+                    char q[512];
+                    snprintf(q, sizeof(q), "Delete message %s for good.", uid_str);
+                    if (!email_service_trash_is_permanent(cfg, folder) ||
+                        confirm_irreversible(q))
+                        result = email_service_trash(cfg, uid, folder);
+                    else
+                        result = declined();
+                }
                 else
                     result = email_service_archive(cfg, uid, folder);
             }
@@ -1853,8 +2109,10 @@ int main(int argc, char *argv[]) {
                 char uid[17];
                 if (parse_uid(uid_str, uid) != 0)
                     fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
-                else
+                else if (confirm_irreversible("Send the reply."))
                     result = email_service_reply(cfg, uid, folder, all, body);
+                else
+                    result = declined();
             }
         }
 
@@ -1892,8 +2150,10 @@ int main(int argc, char *argv[]) {
                 char uid[17];
                 if (parse_uid(uid_str, uid) != 0)
                     fprintf(stderr, "Error: invalid UID '%s' (expected decimal integer or 16-char hex).\n", uid_str);
-                else
+                else if (confirm_irreversible("Send the forwarded message."))
                     result = email_service_forward(cfg, uid, folder, to, cc, note);
+                else
+                    result = declined();
             }
         }
 
@@ -1956,8 +2216,13 @@ int main(int argc, char *argv[]) {
                 if (accs[i].name && strcmp(accs[i].name, account_name) == 0) found = 1;
             config_free_account_list(accs, acc_count);
 
+            char q[512];
+            snprintf(q, sizeof(q), "Remove the account '%s' (its settings and credentials).",
+                     account_name);
             if (!found) {
                 fprintf(stderr, "Error: Account '%s' not found.\n", account_name);
+            } else if (!confirm_irreversible(q)) {
+                result = declined();
             } else {
                 config_delete_account(account_name);
 

@@ -610,6 +610,9 @@ case "$1" in
             cp tests/sanitize/valgrind-program.sh "$VG_BIN/$b" || exit 1
         done
         export EMAIL_TEST_BIN_DIR="$VG_BIN"
+        # memcheck is ten to fifty times slower: the PTY tests stretch every wait
+        # for a screen (tests/pty/wait_scale.h) by this factor.
+        export EMAIL_TEST_WAIT_SCALE=6
         # The unit tests run under Valgrind as one process, as in `valgrind`.
         vg_rc=0
         echo "--- valgrind: unit tests ---"

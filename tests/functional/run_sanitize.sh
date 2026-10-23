@@ -102,6 +102,10 @@ grep -q 'EMAIL_TEST_BIN_DIR' "$ROOT/tests/functional/run_functional.sh" \
     && ok "6.1 functional and integration suites take the programs from EMAIL_TEST_BIN_DIR" || bad "6.1 a suite ignores EMAIL_TEST_BIN_DIR"
 grep -q 'log_path=\$SAN_DIR' "$ROOT/manage.sh" && grep -q 'halt_on_error=1' "$ROOT/manage.sh" \
     && ok "6.2 sanitize writes its logs under build/ and halts UBSan on the first error" || bad "6.2 sanitize options missing"
+grep -q 'EMAIL_TEST_WAIT_SCALE' "$ROOT/manage.sh" && grep -q 'getenv("EMAIL_TEST_WAIT_SCALE")' "$ROOT/tests/pty/wait_scale.h" \
+    && ok "6.3 valgrind-all stretches the waits of the PTY tests" || bad "6.3 no wait scale for Valgrind"
+unscaled=$(grep -l '^#define WAIT_MS' "$ROOT"/tests/pty/*.c | xargs grep -L 'wait_scale()')
+[ -z "$unscaled" ] && ok "6.4 every PTY test file scales its waits" || bad "6.4 unscaled: $unscaled"
 
 case "$WORK" in
     "$ROOT"/build/sanitize-test-*) ;;

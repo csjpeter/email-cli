@@ -21,6 +21,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "wait_scale.h"
 #include "test_scratch.h"
 #include "pty_editor.h"
 
@@ -70,7 +71,7 @@ static pid_t g_smtp_pid = -1;
 static int   g_imap_port = 0;   /* both ports are picked by the kernel */
 static int   g_smtp_port = 0;
 
-#define WAIT_MS   6000
+#define WAIT_MS (6000 * wait_scale())
 /* A positive screen assertion waits for the text (EMAIL-224): under ASan or
  * Valgrind the program redraws slowly, and a read in between sees half a screen. */
 #undef ASSERT_SCREEN_CONTAINS
@@ -422,6 +423,9 @@ static void test_compose_ctrl_c_does_not_ask(void) {
     pty_send_str(s, "bob@example.org");
     pty_settle(s, 300);
     pty_send_key(s, PTY_KEY_CTRL_C);
+    /* The list is drawn again once the dialog is left; a slow program shows a
+     * blank screen before that, and "absent" would mean nothing (EMAIL-224). */
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Discard what was typed?");
     pty_close(s);

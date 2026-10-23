@@ -27,6 +27,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "wait_scale.h"
 #include "menu_keys.h"
 #include "test_scratch.h"
 #include <dirent.h>
@@ -56,7 +57,7 @@ int g_tests_failed = 0;
 #define GMAIL_TOP_MSG    "Message 5"
 /* Bottom-most message (lowest UID) */
 #define GMAIL_BOT_MSG    "Message 1"
-#define WAIT_MS  8000
+#define WAIT_MS (8000 * wait_scale())
 /* A positive screen assertion waits for the text instead of reading the screen
  * at once (EMAIL-224).  The programs draw a screen in several writes, and under
  * ASan or Valgrind they are slow enough for a read in between; a text that is

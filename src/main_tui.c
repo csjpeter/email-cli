@@ -2616,6 +2616,16 @@ static char *run_browser(Config *sel_cfg, const char *init, int *go_up) {
     }
 }
 
+/** @brief SIGTERM handler: leave with status 128 + SIGTERM, running no cleanup code
+ *  (a coverage build calls exit() instead, so that gcov flushes its counters). */
+static void on_sigterm(int sig) {
+#ifdef ENABLE_GCOV
+    exit(128 + sig);
+#else
+    _exit(128 + sig);
+#endif
+}
+
 int main(int argc, char *argv[]) {
     /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
@@ -2629,8 +2639,11 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* Ensure SIGTERM causes a clean exit so atexit() handlers run (e.g. gcov). */
-    signal(SIGTERM, exit);
+    /* SIGTERM ends the program at once.  exit() is not async-signal-safe: its
+     * cleanup handlers free memory and hit a block that the interrupted
+     * free()/malloc() was changing (a double free under AddressSanitizer,
+     * EMAIL-224).  Only a coverage build keeps exit(), to flush its counters. */
+    signal(SIGTERM, on_sigterm);
 
     /* Parse command line: handle --help/--version and detect subcommands */
     const char *subcmd = NULL;  /* "compose" | "send" | "reply" | NULL */

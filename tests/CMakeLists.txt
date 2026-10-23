@@ -85,6 +85,7 @@ project_test(functional run_parity SCRIPT functional/run_parity.sh)
 project_test(functional run_coverage_map SCRIPT functional/run_coverage_map.sh)
 project_test(functional run_skill_sync SCRIPT functional/run_skill_sync.sh)
 project_test(functional run_sanitize SCRIPT functional/run_sanitize.sh)
+project_test(functional run_sigterm SCRIPT functional/run_sigterm.sh)
 
 project_test(pty test-pty-views SOURCES pty/test_pty_views.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-cli email-cli-ro email-sync email-tui mock-imap-server)
 project_test(pty test-pty-gmail-tui SOURCES pty/test_pty_gmail_tui.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-tui email-sync mock-gmail-server)

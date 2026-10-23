@@ -17,6 +17,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "wait_scale.h"
 #include "test_scratch.h"
 
 /* Minimal RUN_TEST compatible with g_tests_run / g_tests_failed globals */
@@ -44,7 +45,7 @@ int g_tests_failed = 0;
 static char g_harness_bin[512]; /* path to input-line-harness */
 static char g_root[256];        /* per-run temp dir for filesystem tests */
 
-#define WAIT_MS   3000
+#define WAIT_MS (3000 * wait_scale())
 /* A positive screen assertion waits for the text (EMAIL-224): under ASan or
  * Valgrind the program redraws slowly, and a read in between sees half a screen. */
 #undef ASSERT_SCREEN_CONTAINS

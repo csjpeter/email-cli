@@ -22,6 +22,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "wait_scale.h"
 #include "test_scratch.h"
 #include "pty_editor.h"
 
@@ -67,7 +68,7 @@ static pid_t g_smtp_pid = -1;
 static int   g_imap_port = 0;   /* both ports are picked by the kernel */
 static int   g_smtp_port = 0;
 
-#define WAIT_MS   6000
+#define WAIT_MS (6000 * wait_scale())
 /* A positive screen assertion waits for the text (EMAIL-224): under ASan or
  * Valgrind the program redraws slowly, and a read in between sees half a screen. */
 #undef ASSERT_SCREEN_CONTAINS

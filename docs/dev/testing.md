@@ -270,6 +270,9 @@ How it works:
 - The suites take the programs from `EMAIL_TEST_BIN_DIR` (default `bin/`);
   `run_functional.sh` also compiles its mock servers with
   `EMAIL_TEST_MOCK_CFLAGS`.  The PTY suites get the directory from `manage.sh`.
+- Under Valgrind a program is ten to fifty times slower, so `valgrind-all`
+  sets `EMAIL_TEST_WAIT_SCALE=6`: every `WAIT_MS` of the PTY tests is
+  multiplied by it (`tests/pty/wait_scale.h`).  Unset, the factor is 1.
 - ASan and UBSan write a log (`log_path=`) only when they have a finding, so
   *any file* in `build/sanitize/` fails the run (`tests/sanitize/scan_logs.sh`),
   and the log is named in the output.  `UBSAN_OPTIONS` has `halt_on_error=1`.
@@ -284,6 +287,10 @@ How it works:
   the comment above it), never for this project's or the workspace libraries'
   code; today there is none.  `tests/functional/run_sanitize.sh` checks the
   verdicts with a deliberate leak and overflow, and the comment rule.
+- Findings fixed so far are listed on the ticket (EMAIL-224).  One of them is
+  `email-tui`'s SIGTERM handler, which called `exit()` (not async-signal-safe;
+  a double free inside OpenSSL's cleanup when the signal landed in `free()`):
+  `tests/functional/run_sigterm.sh` checks that it now leaves with status 143.
 - The integration suites need Dovecot; where it is not installed the verbs say
   `NOT RUN` for them and carry on.  The container variant of the integration
   suite is the same per-agent Dovecot process since EMAIL-228, so there is no

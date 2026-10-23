@@ -22,6 +22,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "wait_scale.h"
 #include "test_scratch.h"
 #include "screens_expected.h"
 #include <stdio.h>
@@ -46,7 +47,7 @@ int g_tests_failed = 0;
 #define ROWS 24
 #define COLS 100
 #define MAXCOLS 200   /* the widest terminal a view is recorded at */
-#define WAIT_MS 6000
+#define WAIT_MS (6000 * wait_scale())
 /* A positive screen assertion waits for the text (EMAIL-224): under ASan or
  * Valgrind the program redraws slowly, and a read in between sees half a screen. */
 #undef ASSERT_SCREEN_CONTAINS

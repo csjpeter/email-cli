@@ -27,6 +27,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "menu_keys.h"
 #include "test_scratch.h"
 #include <dirent.h>
 #include <glob.h>
@@ -2474,6 +2475,8 @@ static void test_reauth_paste_renews_the_token(void) {
     pty_send_str(s, ":");
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "The saved token is replaced", WAIT_MS);   /* EMAIL-225: it asks first */
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Renew the Gmail authorization of", WAIT_MS);
     ASSERT_WAIT_FOR(s, "paste the redirect address", WAIT_MS);   /* the title is drawn before the text */
     pty_send_str(s, "p");
@@ -2497,6 +2500,8 @@ static void test_reauth_refused_code_changes_nothing(void) {
     pty_send_str(s, ":");
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "The saved token is replaced", WAIT_MS);   /* EMAIL-225: it asks first */
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Choose:", WAIT_MS);
     pty_send_str(s, "p");
     ASSERT_WAIT_FOR(s, "Paste the address", WAIT_MS);
@@ -2520,6 +2525,8 @@ static void test_reauth_wait_is_announced_and_cancellable(void) {
     pty_send_str(s, ":");
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "The saved token is replaced", WAIT_MS);   /* EMAIL-225: it asks first */
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Choose:", WAIT_MS);
     pty_send_str(s, "l");                                /* no browser is started */
     ASSERT_WAIT_FOR(s, "Waiting for Google", WAIT_MS);   /* the screen says why it waits */
@@ -2543,11 +2550,206 @@ static void test_reauth_choice_can_be_left(void) {
     pty_send_str(s, ":");
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "The saved token is replaced", WAIT_MS);   /* EMAIL-225: it asks first */
+    pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Choose:", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
     ASSERT(ini_has("GMAIL_REFRESH_TOKEN=fake_refresh"), "reauth esc: token unchanged");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════
+ *  EMAIL-225: every entry of every ':' menu has a quick key
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/* Presses ':' and then the quick key @p letter. */
+static void gm_menu_letter(PtySession *s, char letter) {
+    char k[2] = { letter, 0 };
+    pty_send_str(s, ":");
+    pty_wait_for(s, "Actions", WAIT_MS);
+    pty_settle(s, 300);
+    pty_send_str(s, k);
+}
+
+/* The Gmail list menu: letters unique; the letter of Archive (routine) archives;
+ * Delete and Start a sync (serious) ask first, naming the target, No is the
+ * default, y performs. */
+static void test_menu_keys_gmail_list(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "menu keys gmail list: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "menu keys gmail list: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "menu keys gmail list: navigate_to_inbox");
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want[] = { "Star", "Mark read", "Junk", "Delete", "Start a sync", "Labels",
+                           "Archive", "Remove this label", "Add a label", "Remove a label" };
+    ASSERT_MENU_LETTERS(s, ROWS, rows, n, want, 10, "gmail list menu");
+    char del = menu_letter(rows, n, "Delete");
+    char sync = menu_letter(rows, n, "Start a sync");
+    char arch = menu_letter(rows, n, "Archive");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    PtyKey no[] = { PTY_KEY_ENTER, PTY_KEY_ESC };
+    for (int i = 0; i < 2; i++) {
+        gm_menu_letter(s, del);
+        ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+        ASSERT_SCREEN_CONTAINS(s, GMAIL_TOP_MSG);
+        pty_send_key(s, no[i]);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+        ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Moved to Trash"), "menu keys gmail list: nothing moved");
+    }
+    gm_menu_letter(s, sync);
+    ASSERT_WAIT_FOR(s, "Start a background sync", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Start a background sync");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "syncing");
+    gm_menu_letter(s, sync);
+    ASSERT_WAIT_FOR(s, "Start a background sync", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "syncing", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    gm_menu_letter(s, del);
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    gm_menu_letter(s, arch);
+    ASSERT_WAIT_FOR(s, "Archived", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* The Gmail reader menu: letters unique; Delete asks, No by default. */
+static void test_menu_keys_gmail_reader(void) {
+    reset_and_sync();
+    const char *args[] = { g_tui_bin, NULL };
+    PtySession *s = pty_open(COLS, ROWS);
+    ASSERT(s != NULL, "menu keys gmail reader: pty_open");
+    if (!s) return;
+    ASSERT(pty_run(s, args) == 0, "menu keys gmail reader: pty_run");
+    ASSERT(navigate_to_inbox(s) == 0, "menu keys gmail reader: navigate_to_inbox");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want[] = { "Star", "Delete", "Save all attachments", "Labels", "Archive",
+                           "Remove this label" };
+    ASSERT_MENU_LETTERS(s, ROWS, rows, n, want, 6, "gmail reader menu");
+    char del = menu_letter(rows, n, "Delete");
+    char arch = menu_letter(rows, n, "Archive");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    gm_menu_letter(s, del);
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    gm_menu_letter(s, arch);                         /* routine: the letter archives */
+    ASSERT_WAIT_FOR(s, "Archived", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+static int lb_requests(const char *needle);
+
+/* The label browser menus: a system label offers only Create (a name is asked
+ * for, Esc does nothing); a label of the user's own also Delete, which names
+ * the label, defaults to No and deletes on y. */
+static void test_menu_keys_labels(void) {
+    PtySession *s = open_label_browser();
+    ASSERT(s != NULL, "menu keys labels: reaches the label list");
+    if (!s) return;
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want_sys[] = { "Create a label" };
+    ASSERT_MENU_LETTERS(s, ROWS, rows, n, want_sys, 1, "system label menu");
+    ASSERT(n == 1, "system label menu: one row");
+    char create = menu_letter(rows, n, "Create a label");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    int row = find_row(s, "Empty Label");
+    ASSERT(row >= 0, "menu keys labels: Empty Label is listed");
+    for (int i = 0; row >= 0 && i < 30 && !on_cursor_row(s, row); i++) {
+        int cur = -1;
+        for (int r = 0; r < ROWS && cur < 0; r++)
+            if (on_cursor_row(s, r)) cur = r;
+        pty_send_key(s, cur > row ? PTY_KEY_UP : PTY_KEY_DOWN);
+        pty_settle(s, 100);
+    }
+    ASSERT(row >= 0 && on_cursor_row(s, row), "menu keys labels: cursor on Empty Label");
+    const char *want_own[] = { "Create a label", "Delete the label" };
+    ASSERT_MENU_LETTERS(s, ROWS, rows, n, want_own, 2, "own label menu");
+    ASSERT(n == 2, "own label menu: two rows");
+    char del = menu_letter(rows, n, "Delete the label");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    int deletes = lb_requests("DELETE /gmail/v1/users/me/labels/Label_Empty1");
+    gm_menu_letter(s, del);
+    ASSERT_WAIT_FOR(s, "Delete the label Empty Label", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                  /* the default is No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "on the server?");
+    ASSERT(lb_requests("DELETE /gmail/v1/users/me/labels/Label_Empty1") == deletes,
+           "menu keys labels: Enter on the default deleted nothing");
+    gm_menu_letter(s, del);
+    ASSERT_WAIT_FOR(s, "Delete the label Empty Label", WAIT_MS);
+    pty_send_str(s, "y");
+    pty_settle(s, SETTLE_MS);
+    ASSERT(lb_requests("DELETE /gmail/v1/users/me/labels/Label_Empty1") == deletes + 1,
+           "menu keys labels: y deletes the label");
+    /* routine-class rare entry: Create asks for a name, Esc does nothing */
+    gm_menu_letter(s, create);
+    ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "New label name:");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* The accounts menu: Renew the authorization has a letter; it names the
+ * account, No is the default (nothing changes), y goes on. */
+static void test_menu_keys_accounts(void) {
+    reauth_account();
+    PtySession *s = open_accounts();
+    ASSERT(s != NULL, "menu keys accounts: accounts screen");
+    if (!s) return;
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want[] = { "Renew the authorization" };
+    ASSERT_MENU_LETTERS(s, ROWS, rows, n, want, 1, "accounts menu");
+    char renew = menu_letter(rows, n, "Renew the authorization");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    PtyKey no[] = { PTY_KEY_ENTER, PTY_KEY_ESC };
+    for (int i = 0; i < 2; i++) {
+        gm_menu_letter(s, renew);
+        ASSERT_WAIT_FOR(s, "The saved token is replaced", WAIT_MS);
+        ASSERT_SCREEN_CONTAINS(s, GMAIL_TEST_EMAIL);
+        pty_send_key(s, no[i]);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "The saved token is replaced");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Choose:");
+        ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
+    }
+    ASSERT(ini_has("GMAIL_REFRESH_TOKEN=fake_refresh"), "menu keys accounts: token untouched");
+    gm_menu_letter(s, renew);
+    ASSERT_WAIT_FOR(s, "The saved token is replaced", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Choose:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Cancelled", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -2762,7 +2964,8 @@ static void test_gk_marks(void) {
     ASSERT(gk_step(s, PTY_KEY_END, "[45/45]"), "gmail list marks: End");
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
-    ASSERT_WAIT_FOR(s, "[45/45]", WAIT_MS);
+    pty_settle(s, SETTLE_MS);                          /* the redraw after the mark is whole */
+    ASSERT_SCREEN_CONTAINS(s, "[45/45]");
     gk_quit(s);
 }
 
@@ -4139,6 +4342,10 @@ int main(int argc, char *argv[]) {
 
     printf("\n--- Gmail TUI: renew the authorization (EMAIL-130) ---\n");
     RUN_TEST(test_reauth_menu_offers_the_renewal);
+    RUN_TEST(test_menu_keys_gmail_list);
+    RUN_TEST(test_menu_keys_gmail_reader);
+    RUN_TEST(test_menu_keys_labels);
+    RUN_TEST(test_menu_keys_accounts);
     RUN_TEST(test_reauth_paste_renews_the_token);
     RUN_TEST(test_reauth_refused_code_changes_nothing);
     RUN_TEST(test_reauth_wait_is_announced_and_cancellable);

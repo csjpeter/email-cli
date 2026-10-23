@@ -6081,6 +6081,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
                 ACC_FREE(); continue;
             }
             const char *tt[EA_COUNT] = { NULL };
+            tt[EA_REAUTH] = accounts[cursor].name ? accounts[cursor].name : "?";
             if (ekeys_menu(EKV_ACCOUNTS_GMAIL, tt) == EA_REAUTH) {
                 if (cursor_inout) *cursor_inout = cursor;
                 *cfg_out = accounts[cursor].cfg;

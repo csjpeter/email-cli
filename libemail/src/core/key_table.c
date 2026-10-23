@@ -10,6 +10,7 @@
 #include <tuikit/dialog.h>
 #include <tuikit/event.h>
 #include <tuikit/tty.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -26,6 +27,10 @@
 #define M(V, N, D, ID) \
     { (V), TUI_KC_NONE, TUI_VERB_NONE, (N), (D), TUI_ACT_RARE, 0, NULL, (ID) }
 
+/* A reversible change that only the menu offers (no registry verb fits): it
+ * runs on its quick key, like a routine one (EMAIL-225). */
+#define RM(V, N, D, ID) \
+    { (V), TUI_KC_NONE, TUI_VERB_NONE, (N), (D), TUI_ACT_ROUTINE, 0, NULL, (ID) }
 /* The description of a view: a row with no key and no action (libtuikit,
  * "The description of a view"); the help overlay shows it above the keys. */
 #define DESC(V, T) \
@@ -81,11 +86,11 @@
 #define GMAIL_LIST_T(V)                                                             \
     R(V, 't', TUI_VERB_MOVE, "Labels", "pick the labels of the message", EA_LABELS)
 #define GMAIL_LIST_ARCHIVE(V)                                                       \
-    M(V, "Archive", "remove every label", EA_ARCHIVE)
+    RM(V, "Archive", "remove every label", EA_ARCHIVE)
 #define GMAIL_LIST_RESTORE(V)                                                       \
-    M(V, "Restore from Trash", "back to the inbox", EA_RESTORE)
+    RM(V, "Restore from Trash", "back to the inbox", EA_RESTORE)
 #define GMAIL_LIST_RM_LABEL(V)                                                      \
-    M(V, "Remove this label", "from the message", EA_RM_LABEL)
+    RM(V, "Remove this label", "from the message", EA_RM_LABEL)
 #define GMAIL_LIST_LABELS(V)                                                        \
     M(V, "Add a label...", "to the messages, asked for", EA_ADD_LABEL),             \
     M(V, "Remove a label...", "from the messages, asked for", EA_REMOVE_LABEL)
@@ -141,7 +146,7 @@ static const tui_keyentry g_entries[] = {
     /* The message list of an IMAP account. */
     DESC(EKV_LIST_IMAP, D_LIST),
     LIST_COMMON(EKV_LIST_IMAP),
-    M(EKV_LIST_IMAP, "Toggle Done", "the $Done flag", EA_DONE),
+    RM(EKV_LIST_IMAP, "Toggle Done", "the $Done flag", EA_DONE),
 
     /* The message list of a Gmail account.  The menu lists what applies at
      * the cursor and no more (EMAIL-206): Restore from Trash only in the
@@ -184,13 +189,13 @@ static const tui_keyentry g_entries[] = {
     /* The message reader. */
     DESC(EKV_READ_IMAP, D_READER),
     READER_COMMON(EKV_READ_IMAP),
-    M(EKV_READ_IMAP, "Toggle Done", "the $Done flag", EA_DONE),
+    RM(EKV_READ_IMAP, "Toggle Done", "the $Done flag", EA_DONE),
     DESC(EKV_READ_GMAIL, D_READER),
     READER_COMMON(EKV_READ_GMAIL),
     R(EKV_READ_GMAIL, 't', TUI_VERB_MOVE, "Labels", "pick the labels of the message",
       EA_LABELS),
-    M(EKV_READ_GMAIL, "Archive", "remove every label", EA_ARCHIVE),
-    M(EKV_READ_GMAIL, "Remove this label", "from the message", EA_RM_LABEL),
+    RM(EKV_READ_GMAIL, "Archive", "remove every label", EA_ARCHIVE),
+    RM(EKV_READ_GMAIL, "Remove this label", "from the message", EA_RM_LABEL),
 
     /* The Gmail label browser.  On a label of the user's own the menu also
      * deletes it; on a system label (Unread, Inbox, Trash...) it cannot be
@@ -233,8 +238,8 @@ static const tui_keyentry g_entries[] = {
     S(EKV_FOLDERS, TUI_KC_NONE, TUI_VERB_NONE, "Delete the folder", "on the server",
       "Delete the folder %s on the server? Its messages are lost there.",
       EA_FOLDER_DELETE),
-    M(EKV_FOLDERS, "Open all folders", "tree: every branch", EA_FOLDER_OPEN_ALL),
-    M(EKV_FOLDERS, "Close all folders", "tree: every branch", EA_FOLDER_CLOSE_ALL),
+    RM(EKV_FOLDERS, "Open all folders", "tree: every branch", EA_FOLDER_OPEN_ALL),
+    RM(EKV_FOLDERS, "Close all folders", "tree: every branch", EA_FOLDER_CLOSE_ALL),
     R(EKV_FOLDERS, 't', TUI_VERB_MOVE, "Tree / flat", "switch between the folder tree and one level at a time",
       EA_FOLDER_VIEW),
 
@@ -265,8 +270,10 @@ static const tui_keyentry g_entries[] = {
     H(EKV_ACCOUNTS_GMAIL, '?', "Help", NULL),
     H(EKV_ACCOUNTS_GMAIL, ':', "Actions", "the menu of everything that changes state"),
     H(EKV_ACCOUNTS_GMAIL, TUI_KEY_ESC, "Quit", NULL),
-    M(EKV_ACCOUNTS_GMAIL, "Renew the authorization...", "Gmail access, in the browser or by paste",
-      EA_REAUTH),
+    /* rare, and it replaces the saved token: a dialog names the account (EMAIL-225) */
+    { EKV_ACCOUNTS_GMAIL, TUI_KC_NONE, TUI_VERB_NONE, "Renew the authorization...",
+      "Gmail access, in the browser or by paste", TUI_ACT_RARE, 1,
+      "Renew the Gmail authorization of %s? The saved token is replaced.", EA_REAUTH },
 
     /* The attachment picker of the reader (EMAIL-147): no key changes state. */
     DESC(EKV_ATTACH,
@@ -299,7 +306,7 @@ static const tui_keyentry g_entries[] = {
     H(EKV_REVIEW, ':', "Actions", "send the message, remove an attachment"),
     H(EKV_REVIEW, 'q', "Discard", "asks first"),
     H(EKV_REVIEW, TUI_KEY_ESC, "Discard", "asks first"),
-    M(EKV_REVIEW, "Remove an attachment", NULL, EA_UNATTACH),
+    RM(EKV_REVIEW, "Remove an attachment", NULL, EA_UNATTACH),
 };
 
 #define N_ENTRIES ((int)(sizeof g_entries / sizeof g_entries[0]))
@@ -339,7 +346,8 @@ static void draw_menu(tui_canvas c, void *ctx) {
  * @p targets (may be NULL) gives each action its own target: the menu has one
  * target for all its confirmations, so it is set to the chosen row's before
  * Enter is handled. */
-static void run_actionmenu(tui_actionmenu *m, const char *const targets[EA_COUNT]) {
+static void run_actionmenu(tui_actionmenu *m, const char *const targets[EA_COUNT],
+                           const char *letters) {
     tui_decoder dec;
     tui_decoder_init(&dec);
     KeyEvents winch;
@@ -354,8 +362,9 @@ static void run_actionmenu(tui_actionmenu *m, const char *const targets[EA_COUNT
             tui_frame_modal_status(v, 3, 0, 0);
         } else {
             static const char *const v[][2] = {
-                { "j/k", "select" }, { "Enter", "choose" }, { "Esc/q/BS", "close" } };
-            tui_frame_modal_status(v, 3, m->dialog.list.selected + 1, m->dialog.nitems);
+                { "letter", "run" }, { "j/k", "select" }, { "Enter", "choose" },
+                { "Esc/q/BS", "close" } };
+            tui_frame_modal_status(v, 4, m->dialog.list.selected + 1, m->dialog.nitems);
         }
         tui_frame_overlay(draw_menu, m, rows, cols);
         tui_event ev;
@@ -367,7 +376,19 @@ static void run_actionmenu(tui_actionmenu *m, const char *const targets[EA_COUNT
         if (ev.type == TUI_EV_RESIZE) continue;
         tui_frame_modal_key(&ev, !m->confirming);
         if (targets && !m->confirming && m->idx && m->dialog.list.selected >= 0) {
-            int id = g_entries[m->idx[m->dialog.list.selected]].id;
+            int row = m->dialog.list.selected;
+            /* a quick key runs the entry of its letter, not the row under the
+             * cursor: name that entry's target in its confirmation */
+            if (letters && ev.type == TUI_EV_KEY && ev.key == TUI_KEY_CHAR &&
+                ev.mods == 0 && ev.cp > ' ' && ev.cp < 128) {
+                for (int i = 0; i < g_table.n; i++)
+                    if (letters[i] && (unsigned char)letters[i] == ev.cp) {
+                        for (int k = 0; k < m->dialog.nitems; k++)
+                            if (m->idx[k] == i) row = k;
+                        break;
+                    }
+            }
+            int id = g_entries[m->idx[row]].id;
             if (id > 0 && id < EA_COUNT && targets[id]) m->target = targets[id];
         }
         tui_actionmenu_handle(m, &ev);
@@ -379,8 +400,12 @@ static void run_actionmenu(tui_actionmenu *m, const char *const targets[EA_COUNT
 EmailAction ekeys_menu(const char *view, const char *const targets[EA_COUNT]) {
     if (!g_ready && ekeys_init(NULL, 0) != 0) return EA_NONE;
     tui_actionmenu m;
+    /* the quick keys are the library's assignment (TUI-62, EMAIL-225); the
+     * same call gives the letters the menu draws, for the targets and the help */
+    char letters[N_ENTRIES];
+    if (tui_keytable_assign_quick(&g_table, view, NULL, letters) < 0) return EA_NONE;
     if (tui_actionmenu_open(&m, &g_table, view, "") != 0) return EA_NONE;
-    run_actionmenu(&m, targets);
+    run_actionmenu(&m, targets, letters);
     EmailAction a = m.state == TUI_ACTION_CHOSEN ? (EmailAction)g_entries[m.entry].id
                                                   : EA_NONE;
     tui_actionmenu_free(&m);
@@ -400,7 +425,7 @@ int ekeys_confirm(const char *view, EmailAction a, const char *target) {
     if (entry < 0) return 0;
     tui_actionmenu m;
     if (tui_actionmenu_run(&m, &g_table, entry, target ? target : "") != 0) return 0;
-    run_actionmenu(&m, NULL);
+    run_actionmenu(&m, NULL, NULL);
     int yes = m.state == TUI_ACTION_CHOSEN;
     tui_actionmenu_free(&m);
     return yes;
@@ -458,12 +483,55 @@ void ekeys_help_rows(const char *view, const char *title, const char *const rows
     tui_dialog_free(&d);
 }
 
+/* The help of a table view is libtuikit's tui_keyhelp_open(), with the quick
+ * key of each menu entry added beside its direct key (":d"): the letters come
+ * from the same assignment the menu draws, so the help cannot list a letter
+ * the menu does not have (EMAIL-225).  The dialog's rows are the table's
+ * entries of the view, in table order; the key column of a row with a quick
+ * key is replaced by a string of ours. */
+#define HELP_ROWS 96
+#define HELP_KEYCOL 40
+
 void ekeys_help(const char *view, const char *title) {
     if (!g_ready && ekeys_init(NULL, 0) != 0) return;
     tui_keyhelp h;
     if (tui_keyhelp_open(&h, &g_table, view, title) != 0) return;
+    char letters[N_ENTRIES];
+    static char keys[HELP_ROWS][HELP_KEYCOL];
+    if (tui_keytable_assign_quick(&g_table, view, NULL, letters) >= 0) {
+        const char **pairs = (const char **)h.dialog.items;
+        int k = 0;
+        for (int i = 0; i < N_ENTRIES && k < h.dialog.nitems && k < HELP_ROWS; i++) {
+            const tui_keyentry *e = &g_entries[i];
+            if (!e->action || !(e->view == NULL || (view && strcmp(e->view, view) == 0)))
+                continue;
+            if (letters[i]) {
+                if (e->key == TUI_KC_NONE)
+                    snprintf(keys[k], HELP_KEYCOL, ":%c", letters[i]);
+                else {
+                    char direct[24];
+                    tui_keycode_name(e->key, direct, sizeof direct);
+                    snprintf(keys[k], HELP_KEYCOL, "%s, :%c", direct, letters[i]);
+                }
+                pairs[2 * k] = keys[k];
+            }
+            k++;
+        }
+    }
     tui_frame_run_dialog(&h.dialog);
     tui_keyhelp_free(&h);
+}
+
+/* The quick key of an entry of @p view's menu, 0 when it has none. */
+char ekeys_quick_key(const char *view, EmailAction a) {
+    if (!g_ready && ekeys_init(NULL, 0) != 0) return 0;
+    char letters[N_ENTRIES];
+    if (tui_keytable_assign_quick(&g_table, view, NULL, letters) < 0) return 0;
+    for (int i = 0; i < N_ENTRIES; i++)
+        if ((int)g_entries[i].id == (int)a && g_entries[i].view &&
+            strcmp(g_entries[i].view, view) == 0 && g_entries[i].cls != TUI_ACT_HARMLESS)
+            return letters[i];
+    return 0;
 }
 
 int ekeys_help_has(const char *view, tui_keycode key) {
@@ -472,6 +540,26 @@ int ekeys_help_has(const char *view, tui_keycode key) {
             strcmp(g_entries[i].view, view) == 0)
             return 1;
     return 0;
+}
+
+int ekeys_menu_rows(const char *view, EkeysMenuRow *rows, int max) {
+    if (!g_ready && ekeys_init(NULL, 0) != 0) return -1;
+    char letters[N_ENTRIES];
+    if (tui_keytable_assign_quick(&g_table, view, NULL, letters) < 0) return -1;
+    int n = 0;
+    for (int i = 0; i < N_ENTRIES && n < max; i++) {
+        const tui_keyentry *e = &g_entries[i];
+        if (!e->action || !e->view || strcmp(e->view, view) != 0 ||
+            e->cls == TUI_ACT_HARMLESS)
+            continue;
+        rows[n].letter = letters[i];
+        rows[n].name = e->action;
+        rows[n].cls = e->cls == TUI_ACT_SERIOUS ? "serious"
+                    : e->cls == TUI_ACT_RARE ? "rare" : "routine";
+        rows[n].direct = e->key != TUI_KC_NONE;
+        n++;
+    }
+    return n;
 }
 
 int ekeys_menu_has(const char *view, EmailAction a) {

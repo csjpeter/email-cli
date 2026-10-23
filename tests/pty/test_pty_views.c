@@ -16,6 +16,7 @@
 #include "pty_assert.h"
 #include "test_scratch.h"
 #include "pty_editor.h"
+#include "menu_keys.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -4528,10 +4529,15 @@ static void test_fk_help(void) {
     ASSERT_SCREEN_CONTAINS(s, "flat view: one level up");
     ASSERT_SCREEN_CONTAINS(s, "Search");
     ASSERT_SCREEN_CONTAINS(s, "Compose");
-    pty_send_key(s, PTY_KEY_END);                      /* the help scrolls: the tail */
+    /* EMAIL-225: the menu-only entries (with their ":x" letters) make the
+     * help longer than 80x24, so the last rows are below the fold */
+    pty_send_key(s, PTY_KEY_END);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
     ASSERT_SCREEN_CONTAINS(s, "switch between the folder tree");
+    ASSERT_SCREEN_CONTAINS(s, ":t");
+    pty_send_key(s, PTY_KEY_HOME);
+    pty_settle(s, SETTLE_MS);
     pty_send_str(s, "xtn");
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Folder browser shortcuts");
@@ -4551,6 +4557,190 @@ static void test_fk_help(void) {
         ASSERT_SCREEN_CONTAINS(s, "Folders \xe2\x80\x94");
     }
     fk_end(s);
+}
+
+/* ---- EMAIL-225: every entry of every ':' menu has a quick key ---------- */
+
+/* The IMAP list menu: nine rows, each with a unique letter; the letter of a
+ * routine entry (Star) performs it; the serious ones (Delete, Start a sync)
+ * ask first, naming the target, No is the default, and only y performs. */
+static void test_menu_keys_list_imap(void) {
+    lk_env(30);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "menu keys list: opens");
+    if (!s) { lk_env(0); return; }
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want[] = { "Star", "Mark read", "Mark unread", "Junk", "Delete",
+                           "Start a sync", "Move to", "Toggle Done" };
+    ASSERT_MENU_LETTERS(s, 24, rows, n, want, 8, "list menu");
+    ASSERT(n == 9, "list menu: nine rows");
+    char star = menu_letter(rows, n, "Star");
+    char del = menu_letter(rows, n, "Delete");
+    char sync = menu_letter(rows, n, "Start a sync");
+    ASSERT(star && del && sync, "list menu: letters found");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    /* routine: the letter performs it */
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    char k[2] = { star, 0 };
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "tarred", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* serious: Delete names the message, Enter and Esc are No, y performs */
+    PtyKey no[] = { PTY_KEY_ENTER, PTY_KEY_ESC };
+    for (int i = 0; i < 2; i++) {
+        pty_send_str(s, ":");
+        ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+        k[0] = del;
+        pty_send_str(s, k);
+        ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+        ASSERT_SCREEN_CONTAINS(s, "Message 1");
+        pty_send_key(s, no[i]);
+        pty_settle(s, SETTLE_MS);
+        ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Moved to Trash");
+        ASSERT_SCREEN_CONTAINS(s, "of 30 message(s)");
+    }
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    k[0] = del;
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    /* serious: the sync */
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    k[0] = sync;
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "Start a background sync", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Start a background sync");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "syncing");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    k[0] = sync;
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "Start a background sync", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "syncing", WAIT_MS);
+    rk_end(s);
+}
+
+/* The folder browser menu: letters; Create asks for a name; Delete names the
+ * folder, Enter is No, y deletes. */
+static void test_menu_keys_folders(void) {
+    PtySession *s = open_folder_browser("menu keys folders: opens");
+    if (!s) return;
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want[] = { "Create a folder", "Delete the folder", "Open all folders",
+                           "Close all folders" };
+    ASSERT_MENU_LETTERS(s, 24, rows, n, want, 4, "folder menu");
+    char open = menu_letter(rows, n, "Open all folders");
+    char close = menu_letter(rows, n, "Close all folders");
+    char del = menu_letter(rows, n, "Delete the folder");
+    char create = menu_letter(rows, n, "Create a folder");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    int er = find_row(s, "Empty");
+    for (int i = 0; i < 4 && er >= 0 && !pty_row_contains(s, er, ">"); i++) {
+        pty_send_str(s, "j");
+        pty_settle(s, 200);
+        er = find_row(s, "Empty");
+    }
+    ASSERT(er >= 0 && pty_row_contains(s, er, ">"), "menu keys folders: the cursor is on Empty");
+    char k[2] = { create, 0 };
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "New folder name:", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    /* serious: names the folder, Enter is No, y deletes */
+    k[0] = del;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "Delete the folder INBOX.Empty on the server?", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "on the server?");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "deleted");
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "Delete the folder INBOX.Empty on the server?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "Folder INBOX.Empty deleted", WAIT_MS);
+    /* routine: close all, open all */
+    k[0] = close;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "+ INBOX", WAIT_MS);
+    k[0] = open;
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "- INBOX", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* The reader menu: letters, unique. */
+static void test_menu_keys_reader(void) {
+    PtySession *s = rk_open(30);
+    ASSERT(s != NULL, "menu keys reader: opens");
+    if (!s) return;
+    MenuRow rows[MENU_MAX_ROWS];
+    int n = 0;
+    const char *want[] = { "Delete", "Toggle Done" };
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_settle(s, 300);
+    n = menu_read(s, rows, 24);
+    ASSERT(n > 2, "reader menu: has rows");
+    ASSERT(menu_letters_ok(rows, n), "reader menu: every entry has a unique letter");
+    for (int i = 0; i < 2; i++)
+        ASSERT(menu_find(rows, n, want[i]) >= 0, "reader menu: entry is listed");
+    char del = menu_letter(rows, n, "Delete");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, SETTLE_MS);
+    char k[2] = { del, 0 };
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                    /* the default is No */
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, ":");
+    ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
+    pty_send_str(s, k);
+    ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    rk_end(s);
+}
+
+/* The help overlay lists the letters of the menu entries, at 80x24. */
+static void test_menu_keys_help(void) {
+    lk_env(30);
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "menu keys help: opens");
+    if (!s) { lk_env(0); return; }
+    pty_send_str(s, "?");
+    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "*, :s");
+    pty_send_key(s, PTY_KEY_ESC);
+    rk_end(s);
 }
 
 /* The ':' menu lists the view switch with its key, the creation and the
@@ -5103,7 +5293,7 @@ static void test_tui_folders_help_panel(void) {
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_key(s, PTY_KEY_END);
+    pty_send_key(s, PTY_KEY_END);        /* EMAIL-225: the menu rows push it below the fold */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
     pty_send_key(s, PTY_KEY_ESC);
@@ -8189,6 +8379,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_fk_one_folder);
     RUN_TEST(test_fk_help);
     RUN_TEST(test_fk_menu);
+    RUN_TEST(test_menu_keys_list_imap);
+    RUN_TEST(test_menu_keys_folders);
+    RUN_TEST(test_menu_keys_reader);
+    RUN_TEST(test_menu_keys_help);
     RUN_TEST(test_fk_unbound_keys);
     RUN_TEST(test_tui_list_content);
     RUN_TEST(test_resize_list_redraws_at_once);

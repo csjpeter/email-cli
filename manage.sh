@@ -45,6 +45,7 @@ show_help() {
     echo "  install        Build (release) and install binaries to ~/.local/bin"
     echo "  uninstall      Remove installed binaries from ~/.local/bin"
     echo "  package [deb|rpm|all]  Build release and create package(s) in build/packages/"
+    echo "  tag-build VERSION  Annotated tag vVERSION on HEAD (ticket keys since the previous tag), pushed to origin"
     echo "  timing [KEY-N] Print the Gate line from build/timing.log; with a key, comment it on the ticket"
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
@@ -361,6 +362,32 @@ do_uninstall() {
     done
     rm -f -- "$INSTALL_DIR"/libemail-client.so*      # left by installs before EMAIL-103
     echo "Uninstall complete."
+}
+
+# Tag the built commit v<VERSION> (annotated; the message names the ticket keys
+# since the previous v* tag) and push it.  The same tag at the same commit again
+# is fine; the same tag at another commit is an error.  (EMAIL-229)
+tag_package_build() {
+    local ver="$1" tag="v$1" head at prev range keys
+    head=$(git rev-parse HEAD) || return 1
+    if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+        at=$(git rev-parse "$tag^{commit}") || return 1
+        if [ "$at" != "$head" ]; then
+            echo "ERROR: tag $tag exists at ${at:0:12}, not at HEAD ${head:0:12}." >&2
+            return 1
+        fi
+    else
+        prev=$(git tag --merged HEAD --list 'v[0-9]*' --sort=-creatordate | head -n 1)
+        if [ -n "$prev" ]; then range="$prev..HEAD"; else range="HEAD"; fi
+        keys=$(git log --format=%B "$range" | grep -oE '[A-Z][A-Z0-9]*-[0-9]+' | sort -u | tr '\n' ' ')
+        git tag -a "$tag" -m "email-cli $ver: ${keys:-no ticket keys}" || return 1
+    fi
+    if git remote | grep -qx origin; then
+        git push origin "refs/tags/$tag" || return 1
+    else
+        echo "tag-build: no origin remote; $tag not pushed." >&2
+    fi
+    echo "Tagged $tag"
 }
 
 # Every verb that does work times itself (manage-sh-model.md): the verb is re-run
@@ -760,9 +787,21 @@ case "$1" in
         done
         echo "Package(s) written to $PKG_DIR/"
         ls -lh "$PKG_DIR"
+        pkg_ver=$(sed -n 's/^set(CPACK_PACKAGE_VERSION "\(.*\)")$/\1/p' "$BUILD_DIR/CPackConfig.cmake")
+        [ -n "$pkg_ver" ] || { echo "ERROR: no package version in $BUILD_DIR/CPackConfig.cmake." >&2; exit 1; }
+        # MANAGE_NO_TAG=1 (the tests that build packages of the real tree) skips the tag.
+        if [ -z "${MANAGE_NO_TAG:-}" ]; then
+            tag_package_build "$pkg_ver" || exit 1
+        fi
         ;;
     uninstall)
         do_uninstall
+        ;;
+    tag-build)
+        # EMAIL-229: the tag follows the package version, never decides it.
+        tver="${2:-}"
+        [ -n "$tver" ] || { echo "usage: manage.sh tag-build VERSION" >&2; exit 1; }
+        tag_package_build "$tver" || exit 1
         ;;
     timing)
         line=$(gate_line) || { echo "$line"; exit 1; }

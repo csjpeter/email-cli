@@ -9,6 +9,7 @@
 #include "config.h"
 #include "email-client.h"
 #include "gmail_login.h"
+#include "op_history.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -95,6 +96,8 @@ static inline int mail_send_wire(const Config *cfg, const char *from,
     /* The library prints nothing (EMAIL-112): the program tells the user why. */
     if (st != EMC_OK) fprintf(stderr, "Error: %s\n", emc_last_error(c));
     emc_close(c);
+    /* A sent mail cannot be taken back: recorded, as not revertable. */
+    if (st == EMC_OK) op_history_record_send(cfg->user, to, wire);
     return st == EMC_OK ? 0 : -1;
 }
 

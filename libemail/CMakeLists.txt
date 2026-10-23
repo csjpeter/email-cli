@@ -34,7 +34,10 @@ add_library(libemail STATIC
     src/infrastructure/local_store.c
     src/infrastructure/when_expr.c
     src/infrastructure/mail_rules.c
+    src/infrastructure/op_history.c
     src/domain/email_service.c
+    src/domain/history_service.c
+    src/domain/history_view.c
     ${LIBEMAIL_PLATFORM_SOURCES}
 )
 

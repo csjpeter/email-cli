@@ -1269,6 +1269,37 @@ static void draft_autosave_cb(const char *text, void *ctx) {
     compose_draft_save(&d);
 }
 
+/* The send screen (EMAIL-227): while a message is sent the TUI owns the
+ * terminal, so the progress and the result are drawn as a whole screen --
+ * title bar, the lines so far, the last one repeated in the status line --
+ * never printed raw at the cursor under whatever was drawn before. */
+#define SEND_SCREEN_MAX 6
+typedef struct {
+    char lines[SEND_SCREEN_MAX][160];
+    int  n;
+} SendScreen;
+
+static void send_screen_draw(const SendScreen *ss) {
+    int tcols = terminal_cols();
+    if (tcols < 20) tcols = 80;
+    printf("\033[2J\033[H");
+    tui_frame_print_bar(1, "  Send: Message", tcols);
+    for (int i = 0; i < ss->n; i++)
+        printf("\033[%d;1H  %s", 3 + i, ss->lines[i]);
+    static const tui_statusline_hint none[1] = { { "", "", SL_PRIO_KEEP } };
+    screen_bar(none, 0, NULL, ss->n > 0 ? ss->lines[ss->n - 1] : "");
+    /* The cursor stays under the lines, so what the caller prints next (the
+     * pause line) lands there and nothing scrolls the bar off the screen. */
+    printf("\033[%d;1H", 3 + ss->n);
+    fflush(stdout);
+}
+
+static void send_screen_say(SendScreen *ss, const char *text) {
+    if (ss->n < SEND_SCREEN_MAX)
+        snprintf(ss->lines[ss->n++], sizeof(ss->lines[0]), "%s", text);
+    send_screen_draw(ss);
+}
+
 /**
  * @brief Interactive compose form — the built-in body editor (tui_textedit,
  *        autosaved draft, EMAIL-87), then the post-compose review screen
@@ -1394,40 +1425,40 @@ static int cmd_compose_interactive(Config *cfg,
             char *msg = NULL;
             size_t msg_len = 0;
             if (mail_compose(&p, &msg, &msg_len) != 0) {
-                fprintf(stderr, "Error: Failed to build message.\n");
+                SendScreen bad = { .n = 0 };
+                send_screen_say(&bad, "Error: Failed to build message.");
                 send_rc = -1;
                 break;
             }
-            printf("  Sending...\n");
-            fflush(stdout);
+            SendScreen ss = { .n = 0 };
+            logger_set_stderr(0);      /* the screen is drawn, not scrolled */
+            send_screen_say(&ss, "Sending...");
             if (cfg->gmail_mode) {
                 send_rc = mail_send_wire(cfg, from_send, to_buf, msg, msg_len);
                 if (send_rc == 0) {
                     compose_draft_remove();
-                    printf("  Message sent.\n");
+                    send_screen_say(&ss, "Message sent.");
                 }
             } else {
                 send_rc = mail_send_wire(cfg, from_send, to_buf, msg, msg_len);
                 if (send_rc == 0) {
                     compose_draft_remove();   /* before anything can be cut short */
-                    printf("  Message sent.\n");
-                    fflush(stdout);
+                    send_screen_say(&ss, "Message sent.");
                     if (email_service_save_sent(cfg, msg, msg_len) == 0)
-                        printf("  Saved locally.\n");
+                        send_screen_say(&ss, "Saved locally.");
                     else
-                        fprintf(stderr, "  Warning: could not save to Sent folder.\n");
+                        send_screen_say(&ss, "Warning: could not save to Sent folder.");
                 } else {
-                    printf("  Send failed. Saving to Drafts...\n");
-                    fflush(stdout);
+                    send_screen_say(&ss, "Send failed. Saving to Drafts...");
                     if (email_service_save_draft(cfg, msg, msg_len) == 0) {
                         compose_draft_remove();
-                        printf("  Saved to Drafts (will retry on next sync).\n");
+                        send_screen_say(&ss, "Saved to Drafts (will retry on next sync).");
                     }
                     else
-                        fprintf(stderr, "  Warning: could not save to local Drafts folder.\n");
+                        send_screen_say(&ss, "Warning: could not save to local Drafts folder.");
                 }
             }
-            fflush(stdout);
+            logger_set_stderr(1);
             free(msg);
             break;
         }

@@ -273,6 +273,14 @@ static void ticks_off(const struct sigaction *old)
 {
     struct itimerval off = { {0, 0}, {0, 0} };
     setitimer(ITIMER_REAL, &off, NULL);
+    /* A tick still pending must be discarded while the signal is ignored: under
+     * valgrind or a loaded machine it would otherwise reach the restored
+     * default action and kill the process ("Alarm clock"). */
+    struct sigaction ign;
+    memset(&ign, 0, sizeof(ign));
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    sigaction(SIGALRM, &ign, NULL);
     sigaction(SIGALRM, old, NULL);
 }
 

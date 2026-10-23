@@ -2215,7 +2215,7 @@ void test_email_service(void) {
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
         /* mc=NULL is safe: the picker checks if(mc) before calling it */
-        show_label_picker(NULL, "0000000000001234", NULL, 0);
+        show_label_picker(NULL, NULL, "0000000000001234", NULL, 0);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         terminal_clear_quit_request();            /* ctrl-c in a modal asks to quit (EMAIL-219) */
@@ -2225,7 +2225,7 @@ void test_email_service(void) {
         label_idx_add("INBOX", "0000000000001234");
         INJECT_STDIN("\033[B \003", 5, saved_stdin);   /* Down, untick INBOX, cancel */
         SUPPRESS_OUT(sout, serr);
-        show_label_picker(NULL, "0000000000001234", NULL, 0);
+        show_label_picker(NULL, NULL, "0000000000001234", NULL, 0);
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         terminal_clear_quit_request();
@@ -2234,7 +2234,7 @@ void test_email_service(void) {
         char fb[128] = "";
         INJECT_STDIN("\033[B \r", 5, saved_stdin);     /* Down, untick INBOX, apply */
         SUPPRESS_OUT(sout, serr);
-        show_label_picker(NULL, "0000000000001234", fb, (int)sizeof(fb));
+        show_label_picker(NULL, NULL, "0000000000001234", fb, (int)sizeof(fb));
         RESTORE_OUT(sout, serr);
         RESTORE_STDIN(saved_stdin);
         ASSERT(!label_idx_contains("INBOX", "0000000000001234"),

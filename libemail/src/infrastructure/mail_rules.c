@@ -3,6 +3,7 @@
 /* Created: 2026-04-23 */
 /* The per-account mail sorting rules engine. */
 #include "mail_rules.h"
+#include "op_history.h"
 #include "when_expr.h"
 #include "fs_util.h"
 #include "imap_util.h"
@@ -17,6 +18,8 @@
 #include <time.h>
 
 #define CONFIG_APP_DIR "email-cli"
+
+static void rule_free_members(MailRule *r);
 
 /* ── Path helpers ────────────────────────────────────────────────────── */
 
@@ -55,12 +58,8 @@ static MailRule *rules_grow(MailRules *r) {
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
-MailRules *mail_rules_load_path(const char *path) {
-    if (!path) return NULL;
-
-    RAII_FILE FILE *fp = fopen(path, "r");
-    if (!fp) return NULL;   /* no rules file — not an error */
-
+/** Parses the rules of an open ini stream.  NULL on allocation error. */
+static MailRules *rules_parse_fp(FILE *fp) {
     MailRules *r = calloc(1, sizeof(MailRules));
     if (!r) return NULL;
 
@@ -141,13 +140,170 @@ MailRules *mail_rules_load_path(const char *path) {
         }
     }
 
-    logger_log(LOG_INFO, "mail_rules_load: loaded %d rule(s) from %s", r->count, path);
+    return r;
+}
+
+MailRules *mail_rules_load_path(const char *path) {
+    if (!path) return NULL;
+
+    RAII_FILE FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;   /* no rules file — not an error */
+
+    MailRules *r = rules_parse_fp(fp);
+    if (r)
+        logger_log(LOG_INFO, "mail_rules_load: loaded %d rule(s) from %s", r->count, path);
+    return r;
+}
+
+MailRules *mail_rules_parse_text(const char *text) {
+    if (!text) return NULL;
+    FILE *fp = fmemopen((void *)text, strlen(text), "r");
+    if (!fp) return NULL;
+    MailRules *r = rules_parse_fp(fp);
+    fclose(fp);
     return r;
 }
 
 MailRules *mail_rules_load(const char *account_name) {
     RAII_STRING char *path = rules_path(account_name);
     return mail_rules_load_path(path);
+}
+
+/* ── Serialisation and the operation history ─────────────────────────── */
+
+char *mail_rule_text(const MailRule *r) {
+    char *buf = NULL;
+    size_t len = 0;
+    FILE *fp = open_memstream(&buf, &len);
+    if (!fp) return NULL;
+    /* US-82: write [rule "name" action N] header for N >= 2 */
+    if (r->action_index >= 2)
+        fprintf(fp, "[rule \"%s\" action %d]\n", r->name ? r->name : "", r->action_index);
+    else
+        fprintf(fp, "[rule \"%s\"]\n", r->name ? r->name : "");
+    /* US-81: write when expression; skip old flat if-* fields */
+    if (r->when && r->when[0])
+        fprintf(fp, "when = %s\n", r->when);
+    for (int j = 0; j < r->then_add_count; j++)
+        fprintf(fp, "then-add-label    = %s\n", r->then_add_label[j]);
+    for (int j = 0; j < r->then_rm_count; j++)
+        fprintf(fp, "then-remove-label = %s\n", r->then_rm_label[j]);
+    if (r->then_move_folder)
+        fprintf(fp, "then-move-folder  = %s\n", r->then_move_folder);
+    if (r->then_forward_to)
+        fprintf(fp, "then-forward-to   = %s\n", r->then_forward_to);
+    fclose(fp);
+    return buf;
+}
+
+/** The history object of a rule: "rule NAME" or "rule NAME action N". */
+static void rule_object(const MailRule *r, char *buf, size_t size) {
+    if (r->action_index >= 2)
+        snprintf(buf, size, "rule %s action %d", r->name ? r->name : "", r->action_index);
+    else
+        snprintf(buf, size, "rule %s", r->name ? r->name : "");
+}
+
+static int rules_find(const MailRules *rs, const char *object) {
+    char o[1024];
+    for (int i = 0; rs && i < rs->count; i++) {
+        rule_object(&rs->rules[i], o, sizeof(o));
+        if (strcmp(o, object) == 0) return i;
+    }
+    return -1;
+}
+
+/** Records one step per rule that was added, deleted or edited. */
+static void rules_record_diff(const char *account, const MailRules *before,
+                              const MailRules *after) {
+    char obj[1024], idx[32];
+    for (int i = 0; before && i < before->count; i++) {
+        const MailRule *o = &before->rules[i];
+        rule_object(o, obj, sizeof(obj));
+        int j = rules_find(after, obj);
+        char *ot = mail_rule_text(o);
+        char *nt = j >= 0 ? mail_rule_text(&after->rules[j]) : NULL;
+        if (ot && j < 0) {
+            snprintf(idx, sizeof(idx), "%d", i);
+            OpRecord rec = { account, "rule", obj, "delete", ot, "", idx, OPH_REVERTABLE, 0 };
+            op_history_record(&rec);
+        } else if (ot && nt) {
+            snprintf(idx, sizeof(idx), "%d", j);
+            OpRecord rec = { account, "rule", obj, "edit", ot, nt, idx, OPH_REVERTABLE, 0 };
+            op_history_record(&rec);
+        }
+        free(ot);
+        free(nt);
+    }
+    for (int j = 0; j < after->count; j++) {
+        const MailRule *n = &after->rules[j];
+        rule_object(n, obj, sizeof(obj));
+        if (rules_find(before, obj) >= 0) continue;
+        char *nt = mail_rule_text(n);
+        snprintf(idx, sizeof(idx), "%d", j);
+        OpRecord rec = { account, "rule", obj, "add", "", nt, idx, OPH_REVERTABLE, 0 };
+        if (nt) op_history_record(&rec);
+        free(nt);
+    }
+}
+
+int mail_rules_revert_step(const OpStep *st, char *refusal, size_t size) {
+    MailRules *rs = mail_rules_load(st->account);
+    if (!rs) rs = calloc(1, sizeof(MailRules));
+    if (!rs) { snprintf(refusal, size, "out of memory"); return -1; }
+    int cur = rules_find(rs, st->object);
+    char *cur_text = cur >= 0 ? mail_rule_text(&rs->rules[cur]) : NULL;
+    int rc = -1;
+    int is_add = strcmp(st->thing, "add") == 0, is_del = strcmp(st->thing, "delete") == 0;
+
+    /* The current state must still be the step's new value (undo-model rule 3). */
+    if (is_del ? cur >= 0 : (cur < 0 || !cur_text || strcmp(cur_text, st->new_value) != 0)) {
+        snprintf(refusal, size, "the rule '%s' was changed after step %lu; "
+                 "the current value is not the one the step set",
+                 st->object + 5, st->id);
+        goto out;
+    }
+    if (is_add) {
+        MailRule *r = &rs->rules[cur];
+        rule_free_members(r);
+        memmove(r, r + 1, (size_t)(rs->count - cur - 1) * sizeof(MailRule));
+        rs->count--;
+    } else {
+        MailRules *one = mail_rules_parse_text(st->old_value);
+        if (!one || one->count != 1) {
+            snprintf(refusal, size, "step %lu holds no rule text", st->id);
+            mail_rules_free(one);
+            goto out;
+        }
+        if (is_del) {
+            int at = atoi(st->ref);
+            if (at < 0 || at > rs->count) at = rs->count;
+            if (rs->count >= rs->cap) {
+                int nc = rs->cap ? rs->cap * 2 : 8;
+                MailRule *t = realloc(rs->rules, (size_t)nc * sizeof(MailRule));
+                if (!t) { mail_rules_free(one); snprintf(refusal, size, "out of memory"); goto out; }
+                rs->rules = t;
+                rs->cap = nc;
+            }
+            memmove(&rs->rules[at + 1], &rs->rules[at], (size_t)(rs->count - at) * sizeof(MailRule));
+            rs->rules[at] = one->rules[0];
+            rs->count++;
+        } else {
+            MailRule keep = one->rules[0];
+            rule_free_members(&rs->rules[cur]);
+            rs->rules[cur] = keep;
+        }
+        free(one->rules);
+        free(one);
+    }
+    op_history_revert_begin(st->id);
+    rc = mail_rules_save(st->account, rs);
+    op_history_revert_end();
+    if (rc != 0) snprintf(refusal, size, "the rules file could not be written");
+out:
+    free(cur_text);
+    mail_rules_free(rs);
+    return rc;
 }
 
 int mail_rules_save(const char *account_name, const MailRules *rules) {
@@ -166,30 +322,40 @@ int mail_rules_save(const char *account_name, const MailRules *rules) {
         }
     }
 
-    RAII_FILE FILE *fp = fopen(path, "w");
-    if (!fp) return -1;
+    /* What the file held before: the history records the difference. */
+    MailRules *before = mail_rules_load_path(path);
 
-    for (int i = 0; i < rules->count; i++) {
-        const MailRule *r = &rules->rules[i];
-        /* US-82: write [rule "name" action N] header for N >= 2 */
-        if (r->action_index >= 2)
-            fprintf(fp, "[rule \"%s\" action %d]\n", r->name ? r->name : "", r->action_index);
-        else
-            fprintf(fp, "[rule \"%s\"]\n", r->name ? r->name : "");
-        /* US-81: write when expression; skip old flat if-* fields */
-        if (r->when && r->when[0])
-            fprintf(fp, "when = %s\n", r->when);
-        for (int j = 0; j < r->then_add_count; j++)
-            fprintf(fp, "then-add-label    = %s\n", r->then_add_label[j]);
-        for (int j = 0; j < r->then_rm_count; j++)
-            fprintf(fp, "then-remove-label = %s\n", r->then_rm_label[j]);
-        if (r->then_move_folder)
-            fprintf(fp, "then-move-folder  = %s\n", r->then_move_folder);
-        if (r->then_forward_to)
-            fprintf(fp, "then-forward-to   = %s\n", r->then_forward_to);
-        fprintf(fp, "\n");
+    {
+        RAII_FILE FILE *fp = fopen(path, "w");
+        if (!fp) { mail_rules_free(before); return -1; }
+        for (int i = 0; i < rules->count; i++) {
+            char *t = mail_rule_text(&rules->rules[i]);
+            if (!t) { mail_rules_free(before); return -1; }
+            fprintf(fp, "%s\n", t);
+            free(t);
+        }
     }
+    rules_record_diff(account_name, before, rules);
+    mail_rules_free(before);
     return 0;
+}
+
+/** Releases the strings of one rule (not the rule itself). */
+static void rule_free_members(MailRule *r) {
+    free(r->name);
+    free(r->when);
+    free(r->if_from);
+    free(r->if_not_from);
+    free(r->if_subject);
+    free(r->if_not_subject);
+    free(r->if_to);
+    free(r->if_not_to);
+    free(r->if_label);
+    free(r->if_body);
+    for (int j = 0; j < r->then_add_count; j++) free(r->then_add_label[j]);
+    for (int j = 0; j < r->then_rm_count;  j++) free(r->then_rm_label[j]);
+    free(r->then_move_folder);
+    free(r->then_forward_to);
 }
 
 void mail_rules_free(MailRules *rules) {

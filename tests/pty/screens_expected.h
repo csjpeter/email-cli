@@ -421,7 +421,7 @@ static const char *const exp_list_help[] = {
     "             │ F                  Forward                                             │",
     "             │ U                  Refresh - after a sync                              │",
     "             │ l                  Rules - the rules editor                            │",
-    "             │ *, :s              Star - toggle the star (flag)                       │",
+    "             │ H                  History - recent changes, with Revert               │",
     "             └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -447,7 +447,7 @@ static const char *const sty_list_help[] = {
     "             T b                                                                      T             ",
     "             T b                                                                      T             ",
     "             T b                                                                      T             ",
-    "             T bbbbb                                                                  T             ",
+    "             T b                                                                      T             ",
     "             TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT             ",
     "                                                                                                    ",
     NULL
@@ -473,10 +473,10 @@ static const char *const exp_reader_help[] = {
     "             │ /                  Search - in the message body                        │",
     "             │ N                  Previous match - n: next match                      │",
     "             │ a                  Save attachment                                     │",
+    "             │ H                  History - of this message, with Revert              │",
     "             │ *, :s              Star - toggle the star (flag)                       │",
     "             │ +, :m              Mark read                                           │",
     "             │ -, :u              Mark unread                                         │",
-    "             │ !, :n              Junk - toggle junk                                  │",
     "             └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -499,7 +499,7 @@ static const char *const sty_reader_help[] = {
     "             T b                                                                      T             ",
     "             T b                                                                      T             ",
     "             T b                                                                      T             ",
-    "             T bbbbb                                                                  T             ",
+    "             T b                                                                      T             ",
     "             T bbbbb                                                                  T             ",
     "             T bbbbb                                                                  T             ",
     "             T bbbbb                                                                  T             ",
@@ -4385,22 +4385,9 @@ static const char *const sty_review_attach_removed[] = {
 static const int cur_review_attach_removed[3] = { 23, 99, 1 };
 
 static const char *const exp_review_send_failed[] = {
-    "  Review: Message",
+    "  Send: Message",
     "",
-    "  From:    testuser",
-    "  To:      ann@example.org",
-    "  Cc:      cc@example.org",
-    "  Bcc:     bcc@example.org",
-    "  Subject: Quarterly report",
-    "  Body:    1 line",
-    "  Attach:  report.pdf",
-    "                    ┌─ Actions┌─ Send ───────────────────────────────┐─────────┐",
-    "                    │ > s     │ Send the message to ann@example.org? │         │",
-    "                    │   e  e  │                                      │achments │",
-    "                    │   r     │           [ Yes ]  [ No ]            │         │",
-    "                    └─────────└──────────────────────────────────────┘  Sending...",
-    "ERROR: smtp_send failed: Could not connect to server",
-    "Error: send: Could not connect to server",
+    "  Sending...",
     "  Send failed. Saving to Drafts...",
     "  Saved to Drafts (will retry on next sync).",
     "",
@@ -4408,24 +4395,37 @@ static const char *const exp_review_send_failed[] = {
     "",
     "",
     "",
-    " y yes  n no  Esc/q/BS cancel",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " Saved to Drafts (will retry on next sync).",
     NULL
 };
 static const char *const sty_review_send_failed[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
     "                                                                                                    ",
-    "  ddddd                                                                                             ",
-    "  ddd                                                                                               ",
-    "  ddd                                                                                               ",
-    "  dddd                                                                                              ",
-    "  dddddddd                                                                                          ",
-    "  ddddd                                                                                             ",
-    "  ddddddd                                                                                           ",
-    "                    TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                    ",
-    "                    T ASASSSSST                                      TSSSSSSSS T                    ",
-    "                    T   T     T                                      T         T                    ",
-    "                    T   T     T                    BBBBBB            T         T                    ",
-    "                    TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                              ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
+    "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -4438,7 +4438,7 @@ static const char *const sty_review_send_failed[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_review_send_failed[3] = { 20, 0, 1 };
+static const int cur_review_send_failed[3] = { 7, 0, 1 };
 
 static const char *const exp_dd_many[] = {
     "  New Message",
@@ -7028,7 +7028,7 @@ static const char *const exp_w80_list_help[] = {
     "   │ F                  Forward                                             │",
     "   │ U                  Refresh - after a sync                              │",
     "   │ l                  Rules - the rules editor                            │",
-    "   │ *, :s              Star - toggle the star (flag)                       │",
+    "   │ H                  History - recent changes, with Revert               │",
     "   └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -7054,7 +7054,7 @@ static const char *const sty_w80_list_help[] = {
     "   T b                                                                      T   ",
     "   T b                                                                      T   ",
     "   T b                                                                      T   ",
-    "   T bbbbb                                                                  T   ",
+    "   T b                                                                      T   ",
     "   TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT   ",
     "                                                                                ",
     NULL
@@ -7529,7 +7529,7 @@ static const char *const exp_w140_list_help[] = {
     "                                 │ F                  Forward                                             │",
     "                                 │ U                  Refresh - after a sync                              │",
     "                                 │ l                  Rules - the rules editor                            │",
-    "                                 │ *, :s              Star - toggle the star (flag)                       │",
+    "                                 │ H                  History - recent changes, with Revert               │",
     "                                 └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -7555,7 +7555,7 @@ static const char *const sty_w140_list_help[] = {
     "                                 T b                                                                      T                                 ",
     "                                 T b                                                                      T                                 ",
     "                                 T b                                                                      T                                 ",
-    "                                 T bbbbb                                                                  T                                 ",
+    "                                 T b                                                                      T                                 ",
     "                                 TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                                 ",
     "                                                                                                                                            ",
     NULL

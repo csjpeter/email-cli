@@ -64,6 +64,7 @@
     H(V, 'F', "Forward", NULL),                                                     \
     H(V, 'U', "Refresh", "after a sync"),                                           \
     H(V, 'l', "Rules", "the rules editor"),                                         \
+    H(V, 'H', "History", "recent changes, with Revert"),                            \
     R(V, '*', TUI_VERB_STAR, "Star", "toggle the star (flag)", EA_STAR),            \
     R(V, '+', TUI_VERB_READ, "Mark read", NULL, EA_READ),                           \
     R(V, '-', TUI_VERB_UNREAD, "Mark unread", NULL, EA_UNREAD),                     \
@@ -108,6 +109,7 @@
     H(V, '/', "Search", "in the message body"),                                     \
     H(V, 'N', "Previous match", "n: next match"),                                   \
     H(V, 'a', "Save attachment", NULL),                                             \
+    H(V, 'H', "History", "of this message, with Revert"),                           \
     R(V, '*', TUI_VERB_STAR, "Star", "toggle the star (flag)", EA_STAR),            \
     R(V, '+', TUI_VERB_READ, "Mark read", NULL, EA_READ),                           \
     R(V, '-', TUI_VERB_UNREAD, "Mark unread", NULL, EA_UNREAD),                     \

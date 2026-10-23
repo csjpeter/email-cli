@@ -18,6 +18,7 @@ It is written at a level of detail sufficient to re-implement the program from s
 | [email-sync.md](email-sync.md) | email-sync binary: background sync and cron management |
 | [manifest-cache.md](manifest-cache.md) | Manifest cache for instant folder listing on warm start |
 | [tui-keys.md](tui-keys.md) | Key tables per email-tui view, with the PTY test of each key |
+| [operation-history.md](operation-history.md) | History of state-changing operations, revert, classification (revertable / compensable / irreversible) |
 | [gmail-api.md](gmail-api.md) | Gmail native API: OAuth2, label model, local store, sync, TUI behaviour |
 
 ## Relationship to other docs

@@ -57,6 +57,7 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/test_email_client.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_when_expr.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_mail_rules.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_history.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_tuikit_link.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/when_expr.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_tls_revocation.c
@@ -82,6 +83,9 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/setup_wizard.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/local_store.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/mail_rules.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/op_history.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/domain/history_service.c
+    ${CMAKE_SOURCE_DIR}/libemail/src/domain/history_view.c
     ${CMAKE_SOURCE_DIR}/tests/unit/html_medium_stub.c
     ${UNIT_TEST_PLATFORM_SOURCES}
 )

@@ -70,9 +70,9 @@ The project follows a strict layered CLEAN architecture with zero circular depen
 
 ```
 Application    →  src/main.c, main_ro.c, main_sync.c, main_tui.c, main_import_rules.c
-Domain         →  libemail/src/domain/email_service.c
+Domain         →  libemail/src/domain/{email_service,history_service,history_view}.c
 Infrastructure →  libemail/src/infrastructure/{config_store,local_store,setup_wizard,
-                                                  mail_rules,when_expr}.c + mail_account.h
+                                                  mail_rules,when_expr,op_history}.c + mail_account.h
 Core           →  libemail/src/core/{logger,fs_util,config,mime_util,html_parser,html_render,
                                      imap_util,input_line,path_complete}.c + raii.h
 Platform       →  libemail/src/platform/{terminal,path,process,credential_key}.h + html_medium.h
@@ -113,6 +113,13 @@ AddressSanitizer cannot be linked static.
 **Gmail support:** Gmail accounts use the native Gmail REST API (OAuth2, over the library's own HTTP client), not IMAP. The setup wizard offers account type selection ([1] IMAP / [2] Gmail). Gmail uses label-based navigation instead of folders. See `docs/spec/gmail-api.md` for the full specification.
 
 **Config** is stored at `~/.config/email-cli/config.ini` with mode 0600 (IMAP host, user, password, folder). Gmail accounts add `GMAIL_MODE=1`, `GMAIL_REFRESH_TOKEN`, and optional `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET` fields.
+
+**Operation history (EMAIL-226):** every state-changing operation is recorded in the
+append-only `<data dir>/email-cli/history.tsv` (`op_history.c`; the mail operations by
+`history_note_*` in `history_service.c`, the rule, account and setting steps by their
+stores) and taken back with `history_revert()`; secrets are recorded as `changed`.
+CLI: `history`, `revert <id>`, `-q`; TUI: `H` (`history_view.c`, libtuikit `tui_histview`).
+See `docs/spec/operation-history.md`.
 
 **Local store** uses account-based directories with reverse digit bucketing and text indexes. See `docs/spec/local-store.md` for the full specification.
 

@@ -4749,6 +4749,8 @@ static void test_menu_keys_help(void) {
     if (!s) { lk_env(0); return; }
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);                      /* the help scrolls: the tail */
+    pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "*, :s");
     pty_send_key(s, PTY_KEY_ESC);
     rk_end(s);

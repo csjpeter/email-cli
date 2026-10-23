@@ -7,6 +7,7 @@
 
 #include <time.h>
 #include "when_expr.h"
+#include "op_history.h"
 
 /**
  * @file mail_rules.h
@@ -88,6 +89,27 @@ MailRules *mail_rules_load(const char *account_name);
  * @return 0 on success, -1 on error.
  */
 int mail_rules_save(const char *account_name, const MailRules *rules);
+
+/**
+ * @brief Parse rules from ini text (one or more [rule "..."] sections).
+ * @return Heap-allocated MailRules (free with mail_rules_free()), or NULL.
+ */
+MailRules *mail_rules_parse_text(const char *text);
+
+/**
+ * @brief The ini text of one rule, as mail_rules_save() writes it (the
+ *        header line and the keys, each line ending in a newline).
+ * @return Heap string, or NULL.
+ */
+char *mail_rule_text(const MailRule *rule);
+
+/**
+ * @brief Reverts a recorded step of operation "rule" (add, edit or delete of
+ *        a rule): the current rule must still be the step's new value.
+ * @param refusal  The reason, when the step is refused.
+ * @return 0 when reverted (a new step is recorded), -1 when refused.
+ */
+int mail_rules_revert_step(const OpStep *step, char *refusal, size_t size);
 
 /**
  * @brief Free all memory owned by a MailRules struct.

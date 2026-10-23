@@ -26,6 +26,7 @@
  */
 
 #include "config.h"
+#include "op_history.h"
 
 /**
  * @brief One entry in the account list returned by config_list_accounts().
@@ -105,5 +106,14 @@ int app_settings_get_obfuscation(void);
  * @return 0 on success, -1 on error.
  */
 int app_settings_set_obfuscation(int enabled);
+
+/**
+ * @brief Reverts a recorded step of operation "account" (one field of an
+ *        account) or "setting": the current value must still be the step's
+ *        new value.  A new step that names the reverted one is recorded.
+ * @param refusal  The reason, when the step is refused.
+ * @return 0 when reverted, -1 when refused.
+ */
+int config_revert_step(const OpStep *step, char *refusal, size_t size);
 
 #endif /* CONFIG_STORE_H */

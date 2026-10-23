@@ -72,6 +72,7 @@ void test_tls_revocation(void);
 void test_net_clients(void);
 void test_charset(void);
 void test_mail_rules(void);
+void test_history(void);
 void test_when_expr(void);
 void test_tuikit_link(void);
 void test_local_search(void);
@@ -182,6 +183,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_net_clients);
     RUN_TEST(test_charset);
     RUN_TEST(test_mail_rules);
+    RUN_TEST(test_history);
     RUN_TEST(test_when_expr);
     RUN_TEST(test_tuikit_link);
     RUN_TEST(test_config_settings);

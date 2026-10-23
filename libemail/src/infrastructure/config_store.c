@@ -3,6 +3,7 @@
 /* Created: 2026-03-24 */
 /* Loads and saves the account configuration with obfuscated credentials. */
 #include "config_store.h"
+#include "op_history.h"
 #include "config.h"
 #include "fs_util.h"
 #include "platform/path.h"
@@ -103,10 +104,15 @@ int app_settings_get_obfuscation(void) {
 
 int app_settings_set_obfuscation(int enabled) {
     load_settings_once();
+    int was = g_credential_obfuscation;
     g_credential_obfuscation = enabled ? 1 : 0;
     RAII_STRING char *path = get_settings_path();
     if (!path) return -1;
     write_settings(path);
+    OpRecord rec = { "", "setting", "settings", "credential_obfuscation",
+                     was ? "true" : "false", g_credential_obfuscation ? "true" : "false",
+                     "", OPH_REVERTABLE, 0 };
+    op_history_record(&rec);
     return 0;
 }
 
@@ -500,25 +506,164 @@ Config* config_load_from_store(void) {
     return result;
 }
 
+/* ── The operation history of the account fields ─────────────────────── */
+
+/** One account field as the history sees it. */
+typedef struct {
+    const char *name;
+    int secret;
+    const char *(*get)(const Config *c, char *buf, size_t size);
+    int (*set)(Config *c, const char *v);
+} AcctField;
+
+static const char *nzs(const char *s) { return s ? s : ""; }
+static int set_str(char **dst, const char *v) {
+    char *d = strdup(v);
+    if (!d) return -1;
+    free(*dst);
+    *dst = d;
+    return 0;
+}
+#define ACCT_STR(NAME, FIELD, SECRET) \
+    static const char *get_##FIELD(const Config *c, char *b, size_t n) { (void)b; (void)n; return nzs(c->FIELD); } \
+    static int set_##FIELD(Config *c, const char *v) { return set_str(&c->FIELD, v); }
+ACCT_STR("host", host, 0)
+static const char *get_folder(const Config *c, char *b, size_t n) {
+    (void)b; (void)n;
+    return c->folder && c->folder[0] ? c->folder : "INBOX";
+}
+static int set_folder(Config *c, const char *v) { return set_str(&c->folder, v); }
+ACCT_STR("sent_folder", sent_folder, 0)
+ACCT_STR("archive_folder", archive_folder, 0)
+ACCT_STR("trash_folder", trash_folder, 0)
+ACCT_STR("smtp_host", smtp_host, 0)
+ACCT_STR("smtp_user", smtp_user, 0)
+ACCT_STR("gmail_client_id", gmail_client_id, 0)
+ACCT_STR("pass", pass, 1)
+ACCT_STR("smtp_pass", smtp_pass, 1)
+ACCT_STR("gmail_refresh_token", gmail_refresh_token, 1)
+ACCT_STR("gmail_client_secret", gmail_client_secret, 1)
+#define ACCT_INT(FIELD) \
+    static const char *get_##FIELD(const Config *c, char *b, size_t n) { snprintf(b, n, "%d", c->FIELD); return b; } \
+    static int set_##FIELD(Config *c, const char *v) { c->FIELD = atoi(v); return 0; }
+ACCT_INT(ssl_no_verify)
+ACCT_INT(sync_interval)
+ACCT_INT(smtp_port)
+ACCT_INT(gmail_mode)
+
+static const AcctField g_acct_fields[] = {
+    { "host", 0, get_host, set_host },
+    { "folder", 0, get_folder, set_folder },
+    { "sent_folder", 0, get_sent_folder, set_sent_folder },
+    { "archive_folder", 0, get_archive_folder, set_archive_folder },
+    { "trash_folder", 0, get_trash_folder, set_trash_folder },
+    { "ssl_no_verify", 0, get_ssl_no_verify, set_ssl_no_verify },
+    { "sync_interval", 0, get_sync_interval, set_sync_interval },
+    { "smtp_host", 0, get_smtp_host, set_smtp_host },
+    { "smtp_port", 0, get_smtp_port, set_smtp_port },
+    { "smtp_user", 0, get_smtp_user, set_smtp_user },
+    { "gmail_mode", 0, get_gmail_mode, set_gmail_mode },
+    { "gmail_client_id", 0, get_gmail_client_id, set_gmail_client_id },
+    { "pass", 1, get_pass, set_pass },
+    { "smtp_pass", 1, get_smtp_pass, set_smtp_pass },
+    { "gmail_refresh_token", 1, get_gmail_refresh_token, set_gmail_refresh_token },
+    { "gmail_client_secret", 1, get_gmail_client_secret, set_gmail_client_secret },
+};
+#define ACCT_NFIELDS ((int)(sizeof(g_acct_fields) / sizeof(g_acct_fields[0])))
+
+/** Records one step per field that differs between @p before and @p after;
+ *  a new account is one step "add". */
+static void record_account_diff(const Config *before, const Config *after) {
+    char object[600];
+    snprintf(object, sizeof(object), "account %s", after->user);
+    if (!before) {
+        OpRecord rec = { after->user, "account", object, "add", "", after->host ? after->host
+                         : (after->gmail_mode ? "gmail" : ""), "", OPH_COMPENSABLE, 0 };
+        op_history_record(&rec);
+        return;
+    }
+    for (int i = 0; i < ACCT_NFIELDS; i++) {
+        const AcctField *f = &g_acct_fields[i];
+        char b1[32], b2[32];
+        const char *ov = f->get(before, b1, sizeof(b1));
+        const char *nv = f->get(after, b2, sizeof(b2));
+        OpRecord rec = { after->user, "account", object, f->name, ov, nv, "",
+                         OPH_REVERTABLE, f->secret };
+        op_history_record(&rec);
+    }
+}
+
+int config_revert_step(const OpStep *st, char *refusal, size_t size) {
+    if (strcmp(st->op, "setting") == 0) {
+        int cur = app_settings_get_obfuscation();
+        if (strcmp(st->thing, "credential_obfuscation") != 0 ||
+            strcmp(cur ? "true" : "false", st->new_value) != 0) {
+            snprintf(refusal, size, "the setting %s was changed after step %lu",
+                     st->thing, st->id);
+            return -1;
+        }
+        op_history_revert_begin(st->id);
+        int rc = app_settings_set_obfuscation(strcmp(st->old_value, "true") == 0);
+        op_history_revert_end();
+        if (rc != 0) snprintf(refusal, size, "the settings file could not be written");
+        return rc;
+    }
+    const char *name = strncmp(st->object, "account ", 8) == 0 ? st->object + 8 : "";
+    Config *cfg = config_load_account(name);
+    if (!cfg) {
+        snprintf(refusal, size, "the account %s does not exist any more", name);
+        return -1;
+    }
+    for (int i = 0; i < ACCT_NFIELDS; i++) {
+        const AcctField *f = &g_acct_fields[i];
+        if (strcmp(f->name, st->thing) != 0) continue;
+        char b[32];
+        const char *cur = f->get(cfg, b, sizeof(b));
+        if (strcmp(cur, st->new_value) != 0) {
+            snprintf(refusal, size, "%s of %s is now '%s', not '%s' as step %lu left it",
+                     f->name, name, cur, st->new_value, st->id);
+            config_free(cfg);
+            return -1;
+        }
+        int rc = f->set(cfg, st->old_value);
+        if (rc == 0) {
+            op_history_revert_begin(st->id);
+            rc = config_save_account(cfg);
+            op_history_revert_end();
+        }
+        if (rc != 0) snprintf(refusal, size, "the account could not be saved");
+        config_free(cfg);
+        return rc;
+    }
+    snprintf(refusal, size, "step %lu names the unknown field '%s'", st->id, st->thing);
+    config_free(cfg);
+    return -1;
+}
+
 int config_save_account(const Config *cfg) {
     if (!cfg || !cfg->user || !cfg->user[0]) return -1;
+    Config *before = config_load_account(cfg->user);
 
     RAII_STRING char *accounts_dir = get_accounts_dir();
-    if (!accounts_dir) return -1;
+    if (!accounts_dir) { config_free(before); return -1; }
 
     char account_dir[1024];
     snprintf(account_dir, sizeof(account_dir), "%s/%s", accounts_dir, cfg->user);
 
-    if (fs_mkdir_p(account_dir, 0700) != 0) return -1;
+    if (fs_mkdir_p(account_dir, 0700) != 0) { config_free(before); return -1; }
 
     char path[1088];
     snprintf(path, sizeof(path), "%s/config.ini", account_dir);
 
-    RAII_FILE FILE *fp = fopen(path, "w");
-    if (!fp) return -1;
-    write_config_to_fp(fp, cfg);
+    {
+        RAII_FILE FILE *fp = fopen(path, "w");
+        if (!fp) { config_free(before); return -1; }
+        write_config_to_fp(fp, cfg);
+    }
     fs_ensure_permissions(path, 0600);
 
+    record_account_diff(before, cfg);
+    config_free(before);
     logger_log(LOG_INFO, "Account saved: %s", cfg->user);
     return 0;
 }
@@ -529,6 +674,7 @@ int config_save_to_store(const Config *cfg) {
 
 int config_delete_account(const char *name) {
     if (!name || !name[0]) return -1;
+    Config *before = config_load_account(name);
 
     RAII_STRING char *accounts_dir = get_accounts_dir();
     if (!accounts_dir) return -1;
@@ -541,8 +687,21 @@ int config_delete_account(const char *name) {
     snprintf(dir, sizeof(dir), "%s/%s", accounts_dir, name);
     if (rmdir(dir) != 0 && errno != ENOENT) {
         logger_log(LOG_WARN, "Could not remove account dir %s", dir);
+        config_free(before);
         return -1;
     }
+    if (before) {
+        /* Irreversible: the secrets are not in the history, so the account
+         * cannot be put back by a revert. */
+        char object[600], what[1100];
+        snprintf(object, sizeof(object), "account %s", name);
+        snprintf(what, sizeof(what), "%s", before->host ? before->host
+                 : (before->gmail_mode ? "gmail" : "account"));
+        OpRecord rec = { name, "account", object, "remove", what, "", "",
+                         OPH_IRREVERSIBLE, 0 };
+        op_history_record(&rec);
+    }
+    config_free(before);
     logger_log(LOG_INFO, "Account deleted: %s", name);
     return 0;
 }

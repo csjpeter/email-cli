@@ -96,7 +96,7 @@ chmod 0600 "$WORK/root/home/u/.config/email-cli/accounts/testuser/config.ini"
 out=$(inroot /email-cli list)
 case "$out" in *"Staticá RootMsg"*) ok "3.1 IMAP over verified TLS works in the empty root (resolver, CA bundle, TLS), and the ISO-8859-2 subject is decoded without iconv modules" ;;
                *) bad "3.1 list in the empty root: $out" ;; esac
-out=$(inroot /email-cli send --to alice@example.com --subject "Static" --body "from an empty root")
+out=$(inroot /email-cli -q send --to alice@example.com --subject "Static" --body "from an empty root")
 case "$out" in *[Ss]ent*|*queued*) ok "3.2 SMTP over verified TLS works in the empty root" ;;
                *) bad "3.2 send in the empty root: $out" ;; esac
 

@@ -11,6 +11,7 @@ Authoritative what-and-how reference; sufficient to re-implement the program fro
 - [Local store](spec/local-store.md) — account-based store, reverse digit bucketing, text indexes
 - [Pagination](spec/pagination.md) — terminal detection, pager, batch mode
 - [Email sync](spec/email-sync.md) — email synchronization
+- [Operation history](spec/operation-history.md) — history and revert of operations
 - [Gmail API](spec/gmail-api.md) — Gmail native API specification
 - [HTML rendering](spec/html-rendering.md) — HTML-to-text rendering
 - [Input line](spec/input-line.md) — interactive line editing

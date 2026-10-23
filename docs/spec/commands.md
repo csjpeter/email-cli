@@ -711,6 +711,41 @@ server accepted the change; with no connection the command fails (exit 1).
 
 ---
 
+## `history` and `revert`
+
+```
+email-cli [<account>] history [<object>] [--limit N]
+email-cli revert <id> [-q]
+```
+
+**User story:** As a user I want to see what was changed, by whom and when, and
+to take a change back, from a script or a terminal, as the TUI's history page
+does.
+
+* `history` -- lists the recorded steps newest first (`ID WHEN WHO OP WHAT`),
+  with `[revertable]`, `[compensable]`, `[not revertable]`, `reverted by N` or
+  `revert of N` at the end.  Without `<object>` the caller's recent changes (an
+  administrator: everyone's); with `<object>` (`mail INBOX/000000000000002a`,
+  `rule Name`, `account`, ...) every step of it.  `--limit N` (default 50).
+* `revert <id>` -- asks `Continue? [y/N]` (No by default, also at the end of
+  input), performs the inverse on the server, prints `Step N reverted.`, and
+  records the revert as a new step.  `-q` skips the question.  A refusal
+  (`Refused: ...`, on standard error) exits 1.
+* `-q`, `--quiet` -- also answers Yes to the confirmation of the irreversible
+  operations (`delete-folder`, `delete-label`, `remove-account`, permanent
+  `trash`, `reply`, `forward`, `send`), which otherwise ask with No as default.
+
+`email-cli-ro` refuses both.  Full rules: `operation-history.md`.
+
+### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Listed, reverted, or declined (`Not done.`) |
+| 1 | No such step, refused, history unreadable, bad arguments |
+
+---
+
 ## `reply`
 
 ```

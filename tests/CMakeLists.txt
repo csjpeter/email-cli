@@ -99,6 +99,7 @@ project_test(pty test-pty-rules-keys SOURCES pty/test_pty_rules_keys.c ${SCRATCH
 project_test(pty test-pty-help-keys SOURCES pty/test_pty_help_keys.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-tui mock-imap-server)
 project_test(pty test-pty-review-keys SOURCES pty/test_pty_review_keys.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-tui mock-imap-server mock-smtp-server)
 project_test(pty test-pty-screens SOURCES pty/test_pty_screens.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-tui mock-imap-server)
+project_test(pty test-pty-history SOURCES pty/test_pty_history.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-tui email-cli mock-imap-server)
 project_test(pty test-pty-compose SOURCES pty/test_compose_pty.c ${SCRATCH} INCLUDES ${PTY_INCLUDES} LINK ${PTY_LIBS} NEEDS email-tui email-cli mock-smtp-server)
 
 project_test(integration run_integration SCRIPT integration/run_integration.sh TIMEOUT 1800)

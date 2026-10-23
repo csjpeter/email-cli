@@ -172,6 +172,21 @@ on standard error, and a failing command still exits non\-zero. Not offered:
 .B config show
 (a summary of the settings, which a script reads from the configuration file),
 and the writing commands, which print one status line.
+.PP
+.B \-\-columns
+and
+.B \-\-sort
+work on every command that prints a table, exactly as described in
+.BR email\-cli\-ro (1):
+.BR list ", " list\-folders ", " list\-labels ", " list\-attachments ", "
+.BR list\-accounts ", " history " and " "rules list" .
+.B history
+has the columns
+.BR id ", " when ", " who ", " op ", " object ", " what " and " state ;
+.B rules list
+with either option prints one flat row per rule, with
+.BR account ", " nr ", " name ", " when ", " then_add_label ", "
+.BR then_remove_label " and " then_move_folder .
 .SH VIRTUAL FOLDERS AND SEARCH
 .B \-\-folder
 accepts the virtual folders

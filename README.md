@@ -435,6 +435,24 @@ email-cli list --folder STARRED        # Gmail: starred messages
 email-cli list --all | grep "Invoice"
 ```
 
+### Columns and sort order
+
+Every command that prints a table (`list`, `list-folders`, `list-labels`,
+`list-attachments`, `list-accounts`, `history`, `rules list`) takes
+`--columns` and `--sort`; `--help` of each command names its columns.
+
+```
+email-cli list --all --columns uid,from,subject
+email-cli list --all --columns subject,uid --json
+email-cli list --all --sort from,date:desc
+email-cli list-folders --sort total:desc --columns folder,total
+email-cli history --sort who,id:desc
+```
+
+`--columns A,B,C` prints exactly these columns in this order, also under
+`--json`; an unknown name is a usage error that lists the valid ones.
+`--sort COL[:asc|:desc],...` orders the rows by any column, displayed or not.
+
 ### show
 
 ```

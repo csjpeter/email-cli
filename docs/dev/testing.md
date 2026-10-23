@@ -197,6 +197,8 @@ nothing (exit 0), a record from a newer run posts again even if the text is
 identical (EMAIL-121). `./tests/functional/run_timing.sh`
 tests the log and the line against a log under `build/`.
 
+`./tests/functional/run_version.sh` (EMAIL-229) tests the package version derivation (`cmake/derive_version.cmake`: `<project version>.<commit count>`, a tag restarts nothing, no git gives the bare version) and `./manage.sh tag-build VERSION`, which `package` runs to tag the built commit `vVERSION` (annotated, pushed) in a throwaway repository under `build/`.
+
 `./manage.sh functional` (no phase argument, so also in `check`) runs `run_functional` and then every other declared functional script in `build/tests/functional/bin/`, naming each in a summary; `./manage.sh functional <phase>` runs just that phase. `./tests/functional/run_skill_sync.sh` (EMAIL-125) reads the commands and options from the `--help` pages of `email-cli` and `email-cli-ro` and fails when one is missing from `claude/skills/email-cli/SKILL.md` or when the skill names one the CLI does not have (policies/cli-skill-model.md): a change to a command changes the skill and the man page in the same commit.
 
 `./tests/functional/run_coverage_map.sh` (EMAIL-124) keeps `docs/functional-coverage.md` honest: every command, sub-command and option the programs name in their own `--help` has a row, every row names functional or PTY tests that exist (or a reasoned gap), and a row matching nothing is stale. `./tests/functional/run_parity.sh` (EMAIL-123) does the same for `docs/interface-parity.md`. A change that adds or removes a capability changes its row in the same commit.

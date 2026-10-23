@@ -3,6 +3,7 @@
 /* Created: 2026-03-24 */
 /* The mail service: listing, reading, syncing and applying rules through the mail client. */
 #include "email_service.h"
+#include "cli_table.h"
 #include "config_store.h"
 #include "history_service.h"
 #include "history_view.h"
@@ -2268,6 +2269,33 @@ static void folders_cell(void *ctx, int i, int col, tui_table_cell *c) {
     tui_table_cell_put(c, buf, TUI_STYLE_DEFAULT);
 }
 
+/* "tree-prefix + component-name" of names[i] in the pre-ordered list. */
+static void folder_tree_label(char **names, int count, int i, char sep,
+                              char *name_buf, size_t bufsz) {
+    int pos = 0;
+    int depth = 0;
+    for (const char *p = names[i]; *p; p++)
+        if (*p == sep) depth++;
+    for (int lv = 0; lv < depth; lv++) {
+        int anc_last = ancestor_is_last(names, count, i, lv, sep);
+        const char *branch = anc_last ? "    " : "\u2502   ";
+        int blen = (int)strlen(branch);
+        if (pos + blen < (int)bufsz - 1) {
+            memcpy(name_buf + pos, branch, (size_t)blen);
+            pos += blen;
+        }
+    }
+    int last = is_last_sibling(names, count, i, sep);
+    const char *conn = last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ";
+    int clen = (int)strlen(conn);
+    if (pos + clen < (int)bufsz - 1) {
+        memcpy(name_buf + pos, conn, (size_t)clen);
+        pos += clen;
+    }
+    const char *comp = strrchr(names[i], sep);
+    snprintf(name_buf + pos, bufsz - (size_t)pos, "%s", comp ? comp + 1 : names[i]);
+}
+
 static void render_folder_tree(char **names, int count, char sep,
                                 const FolderStatus *statuses) {
     int name_w = 40;
@@ -2281,31 +2309,8 @@ static void render_folder_tree(char **names, int count, char sep,
         int flagged  = statuses ? statuses[i].flagged  : 0;
         int messages = statuses ? statuses[i].messages : 0;
 
-        /* Build "tree-prefix + component-name" */
         char name_buf[512];
-        int pos = 0;
-        int depth = 0;
-        for (const char *p = names[i]; *p; p++)
-            if (*p == sep) depth++;
-        for (int lv = 0; lv < depth; lv++) {
-            int anc_last = ancestor_is_last(names, count, i, lv, sep);
-            const char *branch = anc_last ? "    " : "\u2502   ";
-            int blen = (int)strlen(branch);
-            if (pos + blen < (int)sizeof(name_buf) - 1) {
-                memcpy(name_buf + pos, branch, blen);
-                pos += blen;
-            }
-        }
-        int last = is_last_sibling(names, count, i, sep);
-        const char *conn = last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ";
-        int clen = (int)strlen(conn);
-        if (pos + clen < (int)sizeof(name_buf) - 1) {
-            memcpy(name_buf + pos, conn, clen);
-            pos += clen;
-        }
-        const char *comp = strrchr(names[i], sep);
-        snprintf(name_buf + pos, sizeof(name_buf) - pos, "%s",
-                 comp ? comp + 1 : names[i]);
+        folder_tree_label(names, count, i, sep, name_buf, sizeof name_buf);
 
         char u[16], f[16], t[16];
         fmt_thou(u, sizeof(u), unseen);
@@ -3112,10 +3117,78 @@ static uint64_t msglist_row_id(void *ctx, int index) {
 }
 
 
+/* ── --columns / --sort of the batch list (EMAIL-230) ────────────────── */
+
+static const CliCol list_out_cols[] = {
+    { "uid",         "UID",         NULL, CLI_COL_TEXT, NULL },
+    { "date",        "DATE",        NULL, CLI_COL_TEXT, NULL },
+    { "from",        "FROM",        NULL, CLI_COL_TEXT, NULL },
+    { "subject",     "SUBJECT",     NULL, CLI_COL_TEXT, NULL },
+    { "folder",      "FOLDER",      NULL, CLI_COL_TEXT, NULL },
+    { "status",      "STATUS",      "sts", CLI_COL_TEXT, NULL },
+    { "flags",       "FLAGS",       NULL, CLI_COL_NUM,  NULL },
+    { "unread",      "UNREAD",      NULL, CLI_COL_BOOL, NULL },
+    { "flagged",     "FLAGGED",     NULL, CLI_COL_BOOL, NULL },
+    { "attachments", "ATTACHMENTS", NULL, CLI_COL_BOOL, NULL },
+};
+#define LIST_OUT_NCOLS ((int)(sizeof list_out_cols / sizeof list_out_cols[0]))
+
+typedef struct {
+    const MsgEntry *entries;
+    Manifest       *manifest;
+    const char     *folder;
+} ListOutCtx;
+
+/* The 6-character status of a message in plain text (also the JSON "status"). */
+static void list_sts_plain(int eflags, char sts[8]) {
+    sts[0] = (eflags & MSG_FLAG_PHISHING)  ? 'P'
+           : (eflags & MSG_FLAG_JUNK)       ? 'J'
+           : (eflags & MSG_FLAG_UNSEEN)     ? 'N' : '-';
+    sts[1] = (eflags & MSG_FLAG_FLAGGED)   ? '*' : '-';
+    sts[2] = (eflags & MSG_FLAG_DONE)      ? 'D' : '-';
+    sts[3] = (eflags & MSG_FLAG_ATTACH)    ? 'A' : '-';
+    sts[4] = (eflags & MSG_FLAG_ANSWERED)  ? 'R'
+           : (eflags & MSG_FLAG_FORWARDED) ? 'F' : '-';
+    sts[5] = (eflags & MSG_FLAG_DMARC_PASS) ? 'v'
+           : (eflags & MSG_FLAG_DMARC_FAIL)  ? 'x' : '-';
+    sts[6] = '\0';
+}
+
+static void list_out_cell(void *ctx, int row, int col, char *buf, size_t n) {
+    const ListOutCtx *c = ctx;
+    const MsgEntry *e = &c->entries[row];
+    ManifestEntry *me = manifest_find(c->manifest, e->uid);
+    int computed = MSG_FLAG_ATTACH | MSG_FLAG_ATTACH_CHECKED |
+                   MSG_FLAG_DMARC_PASS | MSG_FLAG_DMARC_FAIL;
+    int eflags = e->flags | (me ? (me->flags & computed) : 0);
+    switch (col) {
+    case 0: snprintf(buf, n, "%s", e->uid); break;
+    case 1: snprintf(buf, n, "%s", (me && me->date) ? me->date : ""); break;
+    case 2: snprintf(buf, n, "%s", (me && me->from && me->from[0]) ? me->from : "(no from)"); break;
+    case 3: snprintf(buf, n, "%s", (me && me->subject && me->subject[0]) ? me->subject : "(no subject)"); break;
+    case 4: snprintf(buf, n, "%s", e->folder[0] ? e->folder : c->folder); break;
+    case 5: { char sts[8]; list_sts_plain(eflags, sts); snprintf(buf, n, "%s", sts); break; }
+    case 6: snprintf(buf, n, "%d", eflags); break;
+    case 7: snprintf(buf, n, "%s", (eflags & MSG_FLAG_UNSEEN) ? "true" : "false"); break;
+    case 8: snprintf(buf, n, "%s", (eflags & MSG_FLAG_FLAGGED) ? "true" : "false"); break;
+    default: snprintf(buf, n, "%s", (eflags & MSG_FLAG_ATTACH) ? "true" : "false"); break;
+    }
+}
+
 int email_service_list(const Config *cfg, EmailListOpts *opts) {
     /* Always re-initialise the local store so the correct account's manifests
      * and header cache are used, regardless of which account was active before. */
     local_store_init(cfg->host, cfg->user);
+
+    /* --columns / --sort of the batch table: a bad name is a usage error,
+     * found before any work.  The TUI has no such options. */
+    CliColumns out_sel;
+    CliSort out_sort;
+    cli_columns_all(LIST_OUT_NCOLS, &out_sel);
+    out_sort.n = 0;
+    if (!opts->pager && cli_out_resolve(list_out_cols, LIST_OUT_NCOLS, &out_sel, &out_sort) != 0)
+        return -1;
+    const int out_spec = !opts->pager && cli_out_requested();
 
     const char *raw_folder = opts->folder ? opts->folder : cfg->folder;
 
@@ -3568,7 +3641,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         int overhead = show_uid ? 48 : 30;  /* 48 = 30 + uid(16) + sep(2) */
         if (show_folder) overhead += 22;    /* folder(20) + sep(2) */
         int subj_w, from_w;
-        if (is_tty) {
+        if (is_tty && !out_spec) {
             int avail = tcols - overhead;
             if (avail < 40) avail = 40;
             subj_w = avail * 3 / 5;
@@ -3582,8 +3655,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
          * This two-pass approach ensures Subject is padded consistently so From starts
          * at a predictable column — required for reliable batch/script processing. */
         int manifest_dirty = 0;
-        if (!opts->pager && !is_tty) {
-            for (int i = wstart; i < wend; i++) {
+        if (!opts->pager && (!is_tty || out_spec)) {
+            /* --sort needs the headers of every message, not only of the page */
+            const int pre_from = out_sort.n > 0 ? 0 : wstart;
+            const int pre_to   = out_sort.n > 0 ? show_count : wend;
+            for (int i = pre_from; i < pre_to; i++) {
                 ManifestEntry *cme = manifest_find(manifest, entries[i].uid);
                 int need_dmarc  = cme && !(cme->flags & MSG_FLAG_DMARC_CHECKED);
                 int need_attach = cme && !(cme->flags & MSG_FLAG_ATTACH_CHECKED);
@@ -3646,6 +3722,19 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 }
                 manifest_dirty = 1;
             }
+            if (out_sort.n > 0) {
+                ListOutCtx oc = { entries, manifest, folder };
+                int *ord = malloc((size_t)show_count * sizeof *ord);
+                MsgEntry *sorted = malloc((size_t)show_count * sizeof *sorted);
+                if (ord && sorted) {
+                    for (int i = 0; i < show_count; i++) ord[i] = i;
+                    cli_sort_rows(ord, show_count, list_out_cols, &out_sort, list_out_cell, &oc);
+                    for (int i = 0; i < show_count; i++) sorted[i] = entries[ord[i]];
+                    memcpy(entries, sorted, (size_t)show_count * sizeof *sorted);
+                }
+                free(ord);
+                free(sorted);
+            }
             /* Compute max Subject display width across all visible entries */
             for (int i = wstart; i < wend; i++) {
                 ManifestEntry *me = manifest_find(manifest, entries[i].uid);
@@ -3705,6 +3794,23 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
             } else {
                 printf("%s\n\n", cl);
             }
+        }
+        if (out_spec && out_sel.set) {
+            /* --columns: the named columns in the named order, one renderer
+             * for the table and for --json (EMAIL-230). */
+            ListOutCtx oc = { entries, manifest, folder };
+            if (opts->json) {
+                cli_json_print(list_out_cols, &out_sel, NULL, wstart, wend, list_out_cell, &oc);
+            } else {
+                cli_table_print(list_out_cols, &out_sel, NULL, wstart, wend, list_out_cell, &oc);
+                if (wend < show_count)
+                    printf("\n  -- %d more message(s) --  use --offset %d for next page\n",
+                           show_count - wend, wend + 1);
+            }
+            fflush(stdout);
+            if (manifest_dirty && !is_virtual_flags && !is_virtual_search)
+                manifest_save(folder, manifest);
+            break;
         }
         if (opts->json) {
             printf("[");
@@ -4433,11 +4539,86 @@ static char **fetch_folder_list(const Config *cfg, int *count_out, char *sep_out
     return fetch_folder_list_ex(cfg, count_out, sep_out, NULL);
 }
 
+static const CliCol folder_cols[] = {
+    { "name",      "FOLDER",    "folder", CLI_COL_TEXT, NULL },
+    { "separator", "SEPARATOR", NULL,     CLI_COL_TEXT, NULL },
+    { "unread",    "UNREAD",    NULL,     CLI_COL_NUM,  NULL },
+    { "flagged",   "FLAGGED",   NULL,     CLI_COL_NUM,  NULL },
+    { "total",     "TOTAL",     NULL,     CLI_COL_NUM,  NULL },
+};
+
+typedef struct {
+    char **names;
+    const FolderStatus *st;
+    int count;
+    char sep;
+    int tree;       /* the name cell is the tree label (names in pre-order) */
+} FolderRows;
+
+static void folder_cell(void *ctx, int row, int col, char *buf, size_t n) {
+    const FolderRows *f = ctx;
+    switch (col) {
+    case 0:
+        if (f->tree) folder_tree_label(f->names, f->count, row, f->sep, buf, n);
+        else snprintf(buf, n, "%s", f->names[row]);
+        break;
+    case 1: snprintf(buf, n, "%c", f->sep); break;
+    case 2: snprintf(buf, n, "%d", f->st ? f->st[row].unseen : 0); break;
+    case 3: snprintf(buf, n, "%d", f->st ? f->st[row].flagged : 0); break;
+    default: snprintf(buf, n, "%d", f->st ? f->st[row].messages : 0); break;
+    }
+}
+
+/* The sort of a tree orders the siblings under every parent and the roots: two
+ * folders are compared at the first path component where they differ, by the
+ * rows of the two ancestors (or, with no such row, by the component text); an
+ * ancestor comes before its descendants. */
+typedef struct { const FolderRows *f; const CliSort *sort; } TreeSortCtx;
+static TreeSortCtx g_tsc;
+
+static int folder_row_of(const FolderRows *f, const char *path, size_t len) {
+    for (int i = 0; i < f->count; i++)
+        if (strlen(f->names[i]) == len && strncmp(f->names[i], path, len) == 0)
+            return i;
+    return -1;
+}
+
+static int tree_cmp(const void *pa, const void *pb) {
+    const FolderRows *f = g_tsc.f;
+    int a = *(const int *)pa, b = *(const int *)pb;
+    const char *na = f->names[a], *nb = f->names[b];
+    size_t i = 0;            /* start of the component being compared */
+    for (;;) {
+        const char *ea = strchr(na + i, f->sep), *eb = strchr(nb + i, f->sep);
+        size_t la = ea ? (size_t)(ea - na) - i : strlen(na + i);
+        size_t lb = eb ? (size_t)(eb - nb) - i : strlen(nb + i);
+        if (la == lb && strncmp(na + i, nb + i, la) == 0) {
+            if (!ea && !eb) return a < b ? -1 : a > b ? 1 : 0;
+            if (!ea) return -1;          /* a is the ancestor of b */
+            if (!eb) return 1;
+            i += la + 1;
+            continue;
+        }
+        int ra = folder_row_of(f, na, i + la), rb = folder_row_of(f, nb, i + lb);
+        if (ra >= 0 && rb >= 0) {
+            int c = cli_row_compare(folder_cols, g_tsc.sort, folder_cell, (void *)f, ra, rb);
+            if (c) return c;
+        }
+        size_t m = la < lb ? la : lb;
+        int c = strncmp(na + i, nb + i, m);
+        if (c) return c;
+        return la < lb ? -1 : 1;
+    }
+}
+
 int email_service_list_folders(const Config *cfg, int tree) {
     if (cfg->gmail_mode) {
         fprintf(stderr, "Error: 'list-folders' is IMAP-only. Use 'list-labels' for Gmail.\n");
         return -1;
     }
+    CliColumns sel;
+    CliSort srt;
+    if (cli_out_resolve(folder_cols, 5, &sel, &srt) != 0) return -1;
     int count = 0;
     char sep = '.';
     char **folders = fetch_folder_list(cfg, &count, &sep);
@@ -4453,7 +4634,40 @@ int email_service_list_folders(const Config *cfg, int tree) {
 
     FolderStatus *statuses = fetch_all_folder_statuses(cfg, folders, count);
 
-    if (g_json_out) {
+    /* --sort: put the folders (and their counters) in the requested order, so
+     * every view below reads them front to back. */
+    if (srt.n > 0) {
+        FolderRows plain = { folders, statuses, count, sep, 0 };
+        int *order = malloc((size_t)count * sizeof *order);
+        char **nf = malloc((size_t)count * sizeof *nf);
+        FolderStatus *ns = statuses ? malloc((size_t)count * sizeof *ns) : NULL;
+        if (order && nf && (ns || !statuses)) {
+            for (int i = 0; i < count; i++) order[i] = i;
+            if (tree) {
+                g_tsc = (TreeSortCtx){ &plain, &srt };
+                qsort(order, (size_t)count, sizeof(int), tree_cmp);
+            } else {
+                cli_sort_rows(order, count, folder_cols, &srt, folder_cell, &plain);
+            }
+            for (int i = 0; i < count; i++) {
+                nf[i] = folders[order[i]];
+                if (ns) ns[i] = statuses[order[i]];
+            }
+            memcpy(folders, nf, (size_t)count * sizeof *nf);
+            if (ns) memcpy(statuses, ns, (size_t)count * sizeof *ns);
+        }
+        free(order);
+        free(nf);
+        free(ns);
+    }
+
+    FolderRows rows = { folders, statuses, count, sep, tree };
+
+    if (g_json_out && sel.set) {
+        FolderRows jrows = rows;
+        jrows.tree = 0;     /* the JSON name is the folder's full name */
+        cli_json_print(folder_cols, &sel, NULL, 0, count, folder_cell, &jrows);
+    } else if (g_json_out) {
         /* the complete record: every folder with its counters; the tree is
          * the folder names split at "separator" */
         printf("[");
@@ -4466,6 +4680,8 @@ int email_service_list_folders(const Config *cfg, int tree) {
                    statuses ? statuses[i].messages : 0);
         }
         printf("\n]\n");
+    } else if (sel.set) {
+        cli_table_print(folder_cols, &sel, NULL, 0, count, folder_cell, &rows);
     } else if (tree) {
         render_folder_tree(folders, count, sep, statuses);
     } else {
@@ -7630,7 +7846,22 @@ char *email_service_fetch_raw(const Config *cfg, const char *uid) {
     return load_raw_message(cfg, uid);
 }
 
+static const CliCol att_cols[] = {
+    { "filename", "FILENAME", NULL, CLI_COL_TEXT, NULL },
+    { "size",     "SIZE",     NULL, CLI_COL_NUM,  NULL },
+};
+
+static void att_cell(void *ctx, int row, int col, char *buf, size_t n) {
+    const MimeAttachment *a = ctx;
+    if (col == 0) snprintf(buf, n, "%s", a[row].filename ? a[row].filename : "(no name)");
+    else          snprintf(buf, n, "%zu", a[row].size);
+}
+
 int email_service_list_attachments(const Config *cfg, const char *uid) {
+    /* a bad --columns / --sort is a usage error, found before any work */
+    CliColumns sel;
+    CliSort srt;
+    if (cli_out_resolve(att_cols, 2, &sel, &srt) != 0) return -1;
     char *raw = load_raw_message(cfg, uid);
     if (!raw) {
         fprintf(stderr, "Could not load message UID %s.\n", uid);
@@ -7639,23 +7870,41 @@ int email_service_list_attachments(const Config *cfg, const char *uid) {
     int count = 0;
     MimeAttachment *atts = mime_list_attachments(raw, &count);
     free(raw);
+    int *order = malloc((size_t)(count > 0 ? count : 1) * sizeof *order);
+    if (!order) { mime_free_attachments(atts, count); return -1; }
+    for (int i = 0; i < count; i++) order[i] = i;
+    cli_sort_rows(order, count, att_cols, &srt, att_cell, atts);
     if (g_json_out) {
-        printf("[");
-        for (int i = 0; i < count; i++) {
-            printf("%s\n  {\"filename\": ", i ? "," : "");
-            print_json_string(atts[i].filename);
-            printf(", \"size\": %zu}", atts[i].size);
+        if (sel.set) {
+            cli_json_print(att_cols, &sel, order, 0, count, att_cell, atts);
+        } else {
+            printf("[");
+            for (int k = 0; k < count; k++) {
+                int i = order[k];
+                printf("%s\n  {\"filename\": ", k ? "," : "");
+                print_json_string(atts[i].filename);
+                printf(", \"size\": %zu}", atts[i].size);
+            }
+            printf("%s]\n", count ? "\n" : "");
         }
-        printf("%s]\n", count ? "\n" : "");
+        free(order);
         mime_free_attachments(atts, count);
         return 0;
     }
     if (count == 0) {
         printf("No attachments.\n");
+        free(order);
         mime_free_attachments(atts, count);
         return 0;
     }
-    for (int i = 0; i < count; i++) {
+    if (sel.set) {
+        cli_table_print(att_cols, &sel, order, 0, count, att_cell, atts);
+        free(order);
+        mime_free_attachments(atts, count);
+        return 0;
+    }
+    for (int k = 0; k < count; k++) {
+        int i = order[k];
         const char *name = atts[i].filename ? atts[i].filename : "(no name)";
         size_t sz = atts[i].size;
         if (sz >= 1024 * 1024)
@@ -7665,6 +7914,7 @@ int email_service_list_attachments(const Config *cfg, const char *uid) {
         else
             printf("%-40s  %zu B\n", name, sz);
     }
+    free(order);
     mime_free_attachments(atts, count);
     return 0;
 }
@@ -7869,11 +8119,27 @@ int email_service_set_label(const Config *cfg, const char *uid,
     return rc;
 }
 
+static const CliCol label_cols[] = {
+    { "name", "LABEL", "label", CLI_COL_TEXT, NULL },
+    { "id",   "ID",    NULL,    CLI_COL_TEXT, NULL },
+};
+
+typedef struct { char **names; char **ids; } LabelRows;
+
+static void label_cell(void *ctx, int row, int col, char *buf, size_t n) {
+    const LabelRows *l = ctx;
+    const char *v = col == 0 ? l->names[row] : l->ids[row];
+    snprintf(buf, n, "%s", v ? v : "");
+}
+
 int email_service_list_labels(const Config *cfg) {
     if (!cfg->gmail_mode) {
         fprintf(stderr, "Error: 'list-labels' is Gmail-only. Use 'list-folders' for IMAP.\n");
         return -1;
     }
+    CliColumns sel;
+    CliSort srt;
+    if (cli_out_resolve(label_cols, 2, &sel, &srt) != 0) return -1;
     emc_client *mc = make_mail(cfg);
     if (!mc) {
         fprintf(stderr, "Error: Could not connect.\n");
@@ -7885,19 +8151,31 @@ int email_service_list_labels(const Config *cfg) {
     int rc = emc_list_with_ids(mc, &names, &ids, &count);
     emc_close(mc);
 
+    LabelRows lr = { names, ids };
+    int *order = malloc((size_t)(count > 0 ? count : 1) * sizeof *order);
+    if (!order) count = 0;
+    for (int i = 0; i < count; i++) order[i] = i;
+    if (rc == 0) cli_sort_rows(order, count, label_cols, &srt, label_cell, &lr);
+
     if (rc == 0 && g_json_out) {
-        printf("[");
-        for (int i = 0; i < count; i++) {
-            printf("%s\n  {\"name\": ", i ? "," : "");
-            print_json_string(names[i]);
-            printf(", \"id\": ");
-            print_json_string(ids[i]);
-            printf("}");
+        if (sel.set) {
+            cli_json_print(label_cols, &sel, order, 0, count, label_cell, &lr);
+        } else {
+            printf("[");
+            for (int k = 0; k < count; k++) {
+                int i = order[k];
+                printf("%s\n  {\"name\": ", k ? "," : "");
+                print_json_string(names[i]);
+                printf(", \"id\": ");
+                print_json_string(ids[i]);
+                printf("}");
+            }
+            printf("%s]\n", count ? "\n" : "");
         }
-        printf("%s]\n", count ? "\n" : "");
         for (int i = 0; i < count; i++) { free(names[i]); free(ids[i]); }
         free(names);
         free(ids);
+        free(order);
         return 0;
     }
     if (rc != 0 || count == 0) {
@@ -7909,16 +8187,22 @@ int email_service_list_labels(const Config *cfg) {
         }
         free(names);
         free(ids);
+        free(order);
         return rc;
     }
 
-    printf("%-30s  %s\n", "Label", "ID");
-    printf("%-30s  %s\n", "------------------------------",
-           "------------------------------");
-    for (int i = 0; i < count; i++) {
-        printf("%-30s  %s\n",
-               names[i] ? names[i] : "",
-               ids[i]   ? ids[i]   : "");
+    if (sel.set) {
+        cli_table_print(label_cols, &sel, order, 0, count, label_cell, &lr);
+    } else {
+        printf("%-30s  %s\n", "Label", "ID");
+        printf("%-30s  %s\n", "------------------------------",
+               "------------------------------");
+        for (int k = 0; k < count; k++) {
+            int i = order[k];
+            printf("%-30s  %s\n",
+                   names[i] ? names[i] : "",
+                   ids[i]   ? ids[i]   : "");
+        }
     }
 
     for (int i = 0; i < count; i++) {
@@ -7927,6 +8211,7 @@ int email_service_list_labels(const Config *cfg) {
     }
     free(names);
     free(ids);
+    free(order);
     return 0;
 }
 
@@ -8574,21 +8859,148 @@ void email_service_help_popup(const char *view, const char *title, const char *r
 
 /* ── JSON for the account and rule listings (EMAIL-122) ──────────────── */
 
-int email_service_list_accounts_json(void) {
+static const CliCol acct_cols[] = {
+    { "account", "ACCOUNT", NULL, CLI_COL_TEXT, NULL },
+    { "type",    "TYPE",    NULL, CLI_COL_TEXT, NULL },
+    { "server",  "SERVER",  NULL, CLI_COL_TEXT, NULL },
+};
+
+static void acct_cell(void *ctx, int row, int col, char *buf, size_t n) {
+    const AccountEntry *a = ctx;
+    const char *v;
+    switch (col) {
+    case 0:  v = a[row].name ? a[row].name : "?"; break;
+    case 1:  v = (a[row].cfg && a[row].cfg->gmail_mode) ? "Gmail" : "IMAP"; break;
+    default: v = (a[row].cfg && a[row].cfg->host) ? a[row].cfg->host : "-"; break;
+    }
+    snprintf(buf, n, "%s", v);
+}
+
+int email_service_list_accounts(int json) {
+    CliColumns sel;
+    CliSort srt;
+    if (cli_out_resolve(acct_cols, 3, &sel, &srt) != 0) return -1;
     int count = 0;
     AccountEntry *accs = config_list_accounts(&count);
-    printf("[");
-    for (int i = 0; i < count; i++) {
-        printf("%s\n  {\"account\": ", i ? "," : "");
-        print_json_string(accs[i].name);
-        printf(", \"type\": \"%s\", \"server\": ",
-               (accs[i].cfg && accs[i].cfg->gmail_mode) ? "Gmail" : "IMAP");
-        print_json_string(accs[i].cfg ? accs[i].cfg->host : NULL);
-        printf("}");
+    int *order = malloc((size_t)(count > 0 ? count : 1) * sizeof *order);
+    if (!order) { if (accs) config_free_account_list(accs, count); return -1; }
+    for (int i = 0; i < count; i++) order[i] = i;
+    cli_sort_rows(order, count, acct_cols, &srt, acct_cell, accs);
+    if (json && sel.set) {
+        cli_json_print(acct_cols, &sel, order, 0, count, acct_cell, accs);
+    } else if (json) {
+        printf("[");
+        for (int k = 0; k < count; k++) {
+            int i = order[k];
+            printf("%s\n  {\"account\": ", k ? "," : "");
+            print_json_string(accs[i].name);
+            printf(", \"type\": \"%s\", \"server\": ",
+                   (accs[i].cfg && accs[i].cfg->gmail_mode) ? "Gmail" : "IMAP");
+            print_json_string(accs[i].cfg ? accs[i].cfg->host : NULL);
+            printf("}");
+        }
+        printf("%s]\n", count ? "\n" : "");
+    } else if (count == 0) {
+        printf("No accounts configured.\n");
+    } else if (sel.set) {
+        cli_table_print(acct_cols, &sel, order, 0, count, acct_cell, accs);
+    } else {
+        printf("%-40s  %-8s  %s\n", "Account", "Type", "Server");
+        printf("%-40s  %-8s  %s\n",
+               "----------------------------------------",
+               "--------",
+               "----------------------------");
+        for (int k = 0; k < count; k++) {
+            int i = order[k];
+            const char *type   = (accs[i].cfg && accs[i].cfg->gmail_mode) ? "Gmail" : "IMAP";
+            const char *server = accs[i].cfg ? (accs[i].cfg->host ? accs[i].cfg->host : "-") : "-";
+            printf("%-40s  %-8s  %s\n", accs[i].name ? accs[i].name : "?", type, server);
+        }
     }
-    printf("%s]\n", count ? "\n" : "");
+    free(order);
     if (accs) config_free_account_list(accs, count);
     return 0;
+}
+
+/* The rules as one flat table: one row per rule, the account in a column. */
+static const CliCol rule_cols[] = {
+    { "account",            "ACCOUNT",            NULL, CLI_COL_TEXT, NULL },
+    { "nr",                 "NR",                 NULL, CLI_COL_NUM,  NULL },
+    { "name",               "NAME",               NULL, CLI_COL_TEXT, NULL },
+    { "when",               "WHEN",               NULL, CLI_COL_TEXT, NULL },
+    { "then_add_label",     "THEN_ADD_LABEL",     NULL, CLI_COL_TEXT, NULL },
+    { "then_remove_label",  "THEN_REMOVE_LABEL",  NULL, CLI_COL_TEXT, NULL },
+    { "then_move_folder",   "THEN_MOVE_FOLDER",   NULL, CLI_COL_TEXT, NULL },
+};
+
+typedef struct { const char *account; int nr; const MailRule *rule; } RuleRow;
+
+static void join_labels(char *buf, size_t n, char *const *v, int count) {
+    size_t off = 0;
+    buf[0] = '\0';
+    for (int j = 0; j < count && off + 1 < n; j++)
+        off += (size_t)snprintf(buf + off, n - off, "%s%s", j ? ", " : "", v[j]);
+}
+
+static void rule_cell(void *ctx, int row, int col, char *buf, size_t n) {
+    const RuleRow *r = ctx;
+    const MailRule *m = r[row].rule;
+    switch (col) {
+    case 0: snprintf(buf, n, "%s", r[row].account); break;
+    case 1: snprintf(buf, n, "%d", r[row].nr); break;
+    case 2: snprintf(buf, n, "%s", m->name && m->name[0] ? m->name : "(unnamed)"); break;
+    case 3: snprintf(buf, n, "%s", m->when ? m->when : ""); break;
+    case 4: join_labels(buf, n, (char *const *)m->then_add_label, m->then_add_count); break;
+    case 5: join_labels(buf, n, (char *const *)m->then_rm_label, m->then_rm_count); break;
+    default: snprintf(buf, n, "%s", m->then_move_folder ? m->then_move_folder : ""); break;
+    }
+}
+
+int email_service_rules_table(const char *only_account, int json) {
+    CliColumns sel;
+    CliSort srt;
+    if (cli_out_resolve(rule_cols, 7, &sel, &srt) != 0) return -1;
+    int count = 0;
+    AccountEntry *accs = config_list_accounts(&count);
+    MailRules **loaded = calloc((size_t)(count > 0 ? count : 1), sizeof *loaded);
+    int nrows = 0, found = 0;
+    for (int i = 0; loaded && i < count; i++) {
+        if (only_account && only_account[0] && strcmp(accs[i].name, only_account) != 0)
+            continue;
+        found++;
+        loaded[i] = mail_rules_load(accs[i].name);
+        if (loaded[i]) nrows += loaded[i]->count;
+    }
+    RuleRow *rows = calloc((size_t)(nrows > 0 ? nrows : 1), sizeof *rows);
+    int *order = malloc((size_t)(nrows > 0 ? nrows : 1) * sizeof *order);
+    int rc = 0;
+    if (!loaded || !rows || !order) {
+        rc = -1;
+    } else if (!found) {
+        fprintf(stderr, "Error: Account '%s' not found.\n", only_account ? only_account : "");
+        rc = -1;
+    } else {
+        int k = 0;
+        for (int i = 0; i < count; i++)
+            for (int r = 0; loaded[i] && r < loaded[i]->count; r++) {
+                rows[k] = (RuleRow){ accs[i].name, r + 1, &loaded[i]->rules[r] };
+                order[k] = k;
+                k++;
+            }
+        cli_sort_rows(order, nrows, rule_cols, &srt, rule_cell, rows);
+        if (json)
+            cli_json_print(rule_cols, &sel, order, 0, nrows, rule_cell, rows);
+        else if (nrows == 0)
+            printf("No rules configured.\n");
+        else
+            cli_table_print(rule_cols, &sel, order, 0, nrows, rule_cell, rows);
+    }
+    for (int i = 0; loaded && i < count; i++) mail_rules_free(loaded[i]);
+    free(loaded);
+    free(rows);
+    free(order);
+    if (accs) config_free_account_list(accs, count);
+    return rc;
 }
 
 int email_service_rules_json(const char *only_account) {

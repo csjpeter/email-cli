@@ -33,7 +33,8 @@ recorded weakness, not coverage of the promise.
 | `email-cli --help` | F:1.1 | |
 | `email-cli --version` | F:74.1 | |
 | `email-cli -q` | F:140.10 F:140.24 F:140.31 F:140.37 | answers the confirmation of a revert or an irreversible operation Yes |
-| `email-cli history` | F:140.3 F:140.5 F:140.25 | the history of one object and the recent changes; PTY page P:test_hist_cli_history_page |
+| `email-cli --columns` | F:150.1 F:150.5 F:150.20 F:150.27 F:150.40 | with `--sort`: F:150.7 F:150.8 F:150.21 F:150.23; unknown name F:150.12; unit tests `tests/unit/test_cli_table.c` |
+| `email-cli history` | F:140.3 F:140.5 F:140.25 F:150.47 | the history of one object and the recent changes; PTY page P:test_hist_cli_history_page |
 | `email-cli revert` | F:140.7 F:140.10 F:140.15 F:140.17 | confirms (default No); refuses an overtaken, a reverted and an irreversible step; PTY page P:test_hist_cli_revert_page |
 | `email-cli list` | F:1.4 F:1.6 | |
 | `email-cli list --all-accounts` | F:84.41 F:84.42 | also through `email-cli-ro` F:84.26 |
@@ -58,7 +59,7 @@ recorded weakness, not coverage of the promise.
 | `email-cli rules add` | F:37.1 | |
 | `email-cli rules apply` | F:36.1 | `--dry-run` F:36.3 |
 | `email-cli rules edit` | F:37.20 | `--new-name` F:37.29 |
-| `email-cli rules list` | F:34.1 | `--json` F:122.16 |
+| `email-cli rules list` | F:34.1 | `--json` F:122.16; `--columns` / `--sort` F:150.40 |
 | `email-cli rules remove` | F:37.12 | |
 | `email-cli save-attachment` | F:15.2 | |
 | `email-cli reply` | F:133.3 F:133.8 | `--all` F:133.7 |
@@ -73,6 +74,7 @@ recorded weakness, not coverage of the promise.
 
 | Capability | Tests | Notes |
 |------------|-------|-------|
+| `email-cli-ro --columns` | F:150.1 F:150.5 F:150.20 F:150.27 | with `--sort`: F:150.7 F:150.8 F:150.21 F:150.23; unknown name F:150.12 |
 | `email-cli-ro help` | F:77.1 | |
 | `email-cli-ro --help` | F:77.1 | |
 | `email-cli-ro --version` | F:74.20 | |

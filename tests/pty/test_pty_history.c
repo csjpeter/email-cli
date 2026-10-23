@@ -18,6 +18,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "wait_scale.h"
 #include "test_scratch.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,7 +41,7 @@ int g_tests_failed = 0;
 
 #define ROWS 24
 #define COLS 80
-#define WAIT_MS 6000
+#define WAIT_MS (6000 * wait_scale())
 #define SETTLE_MS 400
 
 static pid_t g_mock_pid = -1;

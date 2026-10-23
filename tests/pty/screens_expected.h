@@ -421,7 +421,7 @@ static const char *const exp_list_help[] = {
     "             │ F                  Forward                                             │",
     "             │ U                  Refresh - after a sync                              │",
     "             │ l                  Rules - the rules editor                            │",
-    "             │ *, :s              Star - toggle the star (flag)                       │",
+    "             │ H                  History - recent changes, with Revert               │",
     "             └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -447,7 +447,7 @@ static const char *const sty_list_help[] = {
     "             T b                                                                      T             ",
     "             T b                                                                      T             ",
     "             T b                                                                      T             ",
-    "             T bbbbb                                                                  T             ",
+    "             T b                                                                      T             ",
     "             TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT             ",
     "                                                                                                    ",
     NULL
@@ -473,10 +473,10 @@ static const char *const exp_reader_help[] = {
     "             │ /                  Search - in the message body                        │",
     "             │ N                  Previous match - n: next match                      │",
     "             │ a                  Save attachment                                     │",
+    "             │ H                  History - of this message, with Revert              │",
     "             │ *, :s              Star - toggle the star (flag)                       │",
     "             │ +, :m              Mark read                                           │",
     "             │ -, :u              Mark unread                                         │",
-    "             │ !, :n              Junk - toggle junk                                  │",
     "             └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -499,7 +499,7 @@ static const char *const sty_reader_help[] = {
     "             T b                                                                      T             ",
     "             T b                                                                      T             ",
     "             T b                                                                      T             ",
-    "             T bbbbb                                                                  T             ",
+    "             T b                                                                      T             ",
     "             T bbbbb                                                                  T             ",
     "             T bbbbb                                                                  T             ",
     "             T bbbbb                                                                  T             ",
@@ -7028,7 +7028,7 @@ static const char *const exp_w80_list_help[] = {
     "   │ F                  Forward                                             │",
     "   │ U                  Refresh - after a sync                              │",
     "   │ l                  Rules - the rules editor                            │",
-    "   │ *, :s              Star - toggle the star (flag)                       │",
+    "   │ H                  History - recent changes, with Revert               │",
     "   └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -7054,7 +7054,7 @@ static const char *const sty_w80_list_help[] = {
     "   T b                                                                      T   ",
     "   T b                                                                      T   ",
     "   T b                                                                      T   ",
-    "   T bbbbb                                                                  T   ",
+    "   T b                                                                      T   ",
     "   TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT   ",
     "                                                                                ",
     NULL
@@ -7529,7 +7529,7 @@ static const char *const exp_w140_list_help[] = {
     "                                 │ F                  Forward                                             │",
     "                                 │ U                  Refresh - after a sync                              │",
     "                                 │ l                  Rules - the rules editor                            │",
-    "                                 │ *, :s              Star - toggle the star (flag)                       │",
+    "                                 │ H                  History - recent changes, with Revert               │",
     "                                 └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -7555,7 +7555,7 @@ static const char *const sty_w140_list_help[] = {
     "                                 T b                                                                      T                                 ",
     "                                 T b                                                                      T                                 ",
     "                                 T b                                                                      T                                 ",
-    "                                 T bbbbb                                                                  T                                 ",
+    "                                 T b                                                                      T                                 ",
     "                                 TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                                 ",
     "                                                                                                                                            ",
     NULL

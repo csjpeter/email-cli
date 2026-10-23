@@ -4,7 +4,7 @@
 # Top-level CMake build: options, shared flags and the sub-projects of email-cli.
 
 cmake_minimum_required(VERSION 3.20)
-project(email-cli VERSION 0.3.0 LANGUAGES C)
+project(email-cli VERSION 0.8.2 LANGUAGES C)
 
 # Version: project() version plus the total commit count (EMAIL-229).  Tags take
 # no part in it; manage.sh package tags the built commit with this version.

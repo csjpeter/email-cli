@@ -2084,7 +2084,7 @@ static void test_wizard_abort(void) {
     const char *wiz[] = {"add-account", NULL};
     PtySession *s = cli_run(wiz);
     ASSERT(s != NULL, "wizard abort: opens");
-    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Choice [1]:", WAIT_MS);
     pty_send_key(s, PTY_KEY_CTRL_D);  /* EOF on stdin → getline returns -1 → wizard aborts */
     ASSERT_WAIT_FOR(s, "cancelled", WAIT_MS);
     pty_close(s);
@@ -4738,6 +4738,8 @@ static void test_menu_keys_help(void) {
     if (!s) { lk_env(0); return; }
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);                      /* the help scrolls: the tail */
+    pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "*, :s");
     pty_send_key(s, PTY_KEY_ESC);
     rk_end(s);

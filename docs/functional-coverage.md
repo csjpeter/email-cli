@@ -32,6 +32,9 @@ recorded weakness, not coverage of the promise.
 | `email-cli help` | F:1.2 F:85.7 | |
 | `email-cli --help` | F:1.1 | |
 | `email-cli --version` | F:74.1 | |
+| `email-cli -q` | F:140.10 F:140.24 F:140.31 F:140.37 | answers the confirmation of a revert or an irreversible operation Yes |
+| `email-cli history` | F:140.3 F:140.5 F:140.25 | the history of one object and the recent changes; PTY page P:test_hist_cli_history_page |
+| `email-cli revert` | F:140.7 F:140.10 F:140.15 F:140.17 | confirms (default No); refuses an overtaken, a reverted and an irreversible step; PTY page P:test_hist_cli_revert_page |
 | `email-cli list` | F:1.4 F:1.6 | |
 | `email-cli list --all-accounts` | F:84.41 F:84.42 | also through `email-cli-ro` F:84.26 |
 | `email-cli list --folder` | F:58.1 F:59.1 | virtual folders (each flag view lists exactly its messages) and search (subject, from, no match) |

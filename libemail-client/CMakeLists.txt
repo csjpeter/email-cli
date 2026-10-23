@@ -36,6 +36,7 @@ add_library(email-client-objects OBJECT
     ${EMC_SRC}/infrastructure/config_store.c
     ${EMC_SRC}/infrastructure/local_store.c
     ${EMC_SRC}/infrastructure/mail_rules.c
+    ${EMC_SRC}/infrastructure/op_history.c
     ${EMC_SRC}/infrastructure/when_expr.c
     ${EMC_SRC}/core/config.c
     ${EMC_SRC}/platform/posix/path.c

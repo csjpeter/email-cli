@@ -783,7 +783,7 @@ echo ""
 echo "--- Phase 11: SMTP send ---"
 
 SEND_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch send \
+    "$BIN_DIR/email-cli" --batch -q send \
         --to "recipient@example.com" \
         --subject "Functional Test Mail" \
         --body "Hello from functional test." \
@@ -3561,7 +3561,7 @@ check     "51.1 create-folder: success"       "created"          "$CF_OUT"
 check_not "51.2 create-folder: no error"      "Error"            "$CF_OUT"
 
 DF_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch delete-folder INBOX.TestFolder51 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch -q delete-folder INBOX.TestFolder51 2>&1 || true) )
 check     "51.3 delete-folder: success"       "deleted"          "$DF_OUT"
 check_not "51.4 delete-folder: no error"      "Error"            "$DF_OUT"
 
@@ -3610,7 +3610,7 @@ ACCT_RM53="rm53@test.local"
 make_home "$H_RM53" "$ACCT_RM53" $IMAP1_PORT
 
 RM_OUT=$( (export HOME="$H_RM53"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" remove-account "$ACCT_RM53" 2>&1 || true) )
+    "$BIN_DIR/email-cli" -q remove-account "$ACCT_RM53" 2>&1 || true) )
 check     "53.1 remove-account: success"      "removed"          "$RM_OUT"
 
 RM_NOTFOUND=$( (export HOME="$H_RM53"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
@@ -3954,7 +3954,7 @@ check "61.3 create-label on IMAP: Gmail-only error" "Gmail\|label" "$CL_IMAP"
 
 # 61.4: delete-label on IMAP account → Gmail-only error
 DL_IMAP=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch delete-label TestLabel 2>&1 || true) )
+    "$BIN_DIR/email-cli" --batch -q delete-label TestLabel 2>&1 || true) )
 check "61.4 delete-label on IMAP: Gmail-only error" "Gmail\|label" "$DL_IMAP"
 
 # 61.5: add-label without args → error
@@ -4381,7 +4381,7 @@ check "70.2 send --to only: missing subject/body error" "Error\|required" "$SEND
 
 # 70.3: send a second message (tests code path after first send in Phase 11)
 SEND70_OK=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch send \
+    "$BIN_DIR/email-cli" --batch -q send \
         --to "beta@test.local" \
         --subject "Phase70 second send" \
         --body "Second test message body." 2>&1 || true) )
@@ -5141,7 +5141,7 @@ ATTACH_PDF=$(mktemp "$WORK_DIR/attach-file-XXXXXX.pdf")
 printf '%%PDF-1.4 stub\n' > "$ATTACH_PDF"
 
 # 79.1: send with --attach → succeeds (mock SMTP accepts)
-OUT79_1=$("$BIN_DIR/email-cli" send \
+OUT79_1=$("$BIN_DIR/email-cli" -q send \
     --to alice@example.com \
     --subject "Attach test" \
     --body "See attached" \
@@ -5149,7 +5149,7 @@ OUT79_1=$("$BIN_DIR/email-cli" send \
 check "79.1 send --attach: success" "sent\|Sent\|queued" "$OUT79_1"
 
 # 79.2: send with multiple --attach flags
-OUT79_2=$("$BIN_DIR/email-cli" send \
+OUT79_2=$("$BIN_DIR/email-cli" -q send \
     --to alice@example.com \
     --subject "Multi-attach test" \
     --body "Two files" \
@@ -5158,7 +5158,7 @@ OUT79_2=$("$BIN_DIR/email-cli" send \
 check "79.2 send --attach --attach: success" "sent\|Sent\|queued" "$OUT79_2"
 
 # 79.3: --attach with non-existent file → error
-OUT79_3=$("$BIN_DIR/email-cli" send \
+OUT79_3=$("$BIN_DIR/email-cli" -q send \
     --to alice@example.com \
     --subject "Bad attach" \
     --body "body" \
@@ -5166,7 +5166,7 @@ OUT79_3=$("$BIN_DIR/email-cli" send \
 check "79.3 send --attach non-existent: error" "not found\|No such file\|Error" "$OUT79_3"
 
 # 79.4: --attach with directory path → error
-OUT79_4=$("$BIN_DIR/email-cli" send \
+OUT79_4=$("$BIN_DIR/email-cli" -q send \
     --to alice@example.com \
     --subject "Dir attach" \
     --body "body" \
@@ -5176,7 +5176,7 @@ check "79.4 send --attach directory: error" "Not a file\|directory\|Error" "$OUT
 # 79.5: --attach exceeding 25 MB limit → error
 BIGFILE=$(mktemp "$WORK_DIR/attach-big-XXXXXX.bin")
 dd if=/dev/zero of="$BIGFILE" bs=1M count=26 2>/dev/null
-OUT79_5=$("$BIN_DIR/email-cli" send \
+OUT79_5=$("$BIN_DIR/email-cli" -q send \
     --to alice@example.com \
     --subject "Big attach" \
     --body "body" \
@@ -7263,7 +7263,7 @@ check_not "122.20 the default stays the table, not JSON"    '^\[' "$OUT"
 
 OUT=$(j122 email-cli $GM_ACC create-label Fresh122)
 check "122.24 create-label (Gmail) reports the new label and its id" "Label .Fresh122. created (ID: Label_Test001)" "$OUT"
-OUT=$(j122 email-cli $GM_ACC delete-label Label_1)
+OUT=$(j122 email-cli $GM_ACC delete-label Label_1 -q)
 check "122.25 delete-label (Gmail) reports the deletion" "Label .Label_1. deleted" "$OUT"
 OUT=$(j122 email-cli $IMAP_ACC migrate-credentials)
 check "122.26 migrate-credentials reports the result" "Done. All account credentials" "$OUT"
@@ -7271,7 +7271,7 @@ for bin in email-cli email-cli-ro; do
     OUT=$(j122 $bin $IMAP_ACC show 1 --raw)
     check "122.21 $bin show --raw prints the source headers" "Subject: " "$OUT"
 done
-OUT=$(j122 email-cli $IMAP_ACC remove-account json@gmail.example)
+OUT=$(j122 email-cli $IMAP_ACC remove-account json@gmail.example -q)
 check "122.22 remove-account removes the account"           "removed" "$OUT"
 OUT=$(j122 email-cli $IMAP_ACC list-accounts --json)
 check "122.23 the removed account is no longer listed"      "IMAP" "$(jv122 "','.join(a['type'] for a in d)" "$OUT")"
@@ -7350,7 +7350,7 @@ check "124.12 IMAP mark-notjunk sets \$NotJunk"                  'UID STORE 0000
 OUT=$(w124 $IM create-folder Folder124)
 check "124.13 create-folder reports it"                         "Folder 'Folder124' created" "$OUT"
 check "124.14 create-folder sends CREATE"                       'CREATE "Folder124"' "$(ilog)"
-OUT=$(w124 $IM delete-folder Folder124)
+OUT=$(w124 $IM delete-folder Folder124 -q)
 check "124.15 delete-folder reports it"                         "Folder 'Folder124' deleted" "$OUT"
 check "124.16 delete-folder sends DELETE"                       'DELETE "Folder124"' "$(ilog)"
 
@@ -7455,7 +7455,7 @@ check "132.3 IMAP trash flags it \\Deleted"                    'UID STORE 000000
 OUT=$(w132 email-cli $IM archive 3)
 check "132.4 IMAP archive reports it"                          "archived" "$OUT"
 check "132.5 IMAP archive copies the UID to ARCHIVE_FOLDER"    'UID COPY 0000000000000003 "Old132"' "$(ilog)"
-OUT=$(w132 email-cli $IM trash 4 --folder Trash)
+OUT=$(w132 email-cli $IM trash 4 --folder Trash -q)
 check "132.6 IMAP trash in the Trash deletes for good"         "deleted for good" "$OUT"
 check_not "132.7 IMAP trash in the Trash does not copy"        'UID COPY 0000000000000004' "$(ilog)"
 OUT=$(w132 email-cli $IM archive 5 --folder Old132)
@@ -7532,7 +7532,7 @@ w133() {
 smtp133() { cat "$SMTP133_LOG"; }
 
 w133 email-cli list >/dev/null
-OUT=$(w133 email-cli reply 2 --body "My answer 133")
+OUT=$(w133 email-cli reply 2 --body "My answer 133" -q)
 check "133.1 reply reports it"                      "Reply sent" "$OUT"
 check "133.2 reply exits 0"                         "exit-code=0" "$OUT"
 check "133.3 reply goes to the sender"              "RCPT TO:<sender2@example.com>" "$(smtp133)"
@@ -7544,7 +7544,7 @@ check "133.8 reply carries the text"                "My answer 133" "$(smtp133)"
 check_not "133.9 reply does not go to the others"   "RCPT TO:<other133@example.org>" "$(smtp133)"
 check "133.10 reply marks the original answered"    "marked as answered" "$OUT"
 
-OUT=$(w133 email-cli reply 3 --all --body "All answer 133")
+OUT=$(w133 email-cli reply 3 --all --body "All answer 133" -q)
 check "133.11 reply --all exits 0"                  "exit-code=0" "$OUT"
 check "133.12 reply --all reaches the sender"       "RCPT TO:<sender3@example.com>" "$(smtp133)"
 check "133.13 reply --all reaches To"               "RCPT TO:<other133@example.org>" "$(smtp133)"
@@ -7642,7 +7642,7 @@ w134() {
      echo "exit-code=$?")
 }
 
-OUT=$(w134 email-cli forward 2 --to bob@example.org --body "FYI134")
+OUT=$(w134 email-cli forward 2 --to bob@example.org --body "FYI134" -q)
 check "134.1 forward reports it"                     "Message forwarded." "$OUT"
 check "134.2 forward exits 0"                        "exit-code=0" "$OUT"
 check "134.3 forward saves a copy in Sent"           "Saved." "$OUT"
@@ -7654,7 +7654,7 @@ check "134.8 the original is included"               "Hello from Mock Server" "$
 check "134.9 the note is included"                   "FYI134" "$(cat "$SMTP134_LOG")"
 check "134.10 the original is flagged \$Forwarded"   'UID STORE 0000000000000002 +FLAGS (.Forwarded)' "$(grep 'Client requested' "$IMAP134_LOG")"
 
-OUT=$(w134 email-cli forward 3 --to c@example.org --cc d@example.org --folder INBOX)
+OUT=$(w134 email-cli forward 3 --to c@example.org --cc d@example.org --folder INBOX -q)
 check "134.11 forward with --cc and --folder"        "Message forwarded." "$OUT"
 check "134.12 the Cc address is a recipient too"     "RCPT TO:<d@example.org>" "$(cat "$SMTP134_LOG")"
 check "134.22 the To address got the message as well" "RCPT TO:<c@example.org>" "$(cat "$SMTP134_LOG")"
@@ -7677,6 +7677,166 @@ check "134.20 forward --help describes it"           "Fwd: <subject>" "$OUT"
 OUT=$("$BIN_DIR/email-cli" help forward 2>&1)
 check "134.21 help forward shows the page"           "\$Forwarded" "$OUT"
 kill "$IMAP134_PID" "$SMTP134_PID"
+
+fi
+
+if phase_wanted 140; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 140 — operation history and revert from the command line (EMAIL-226)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 140: history and revert (EMAIL-226) ---"
+
+alloc_port IMAP140_PORT
+alloc_port GMAIL140_PORT
+alloc_port SMTP140_PORT
+IMAP140_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_140.log"
+GMAIL140_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_140.log"
+SMTP140_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp_140.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP140_PORT MOCK_IMAP_SUBJECT="Phase140Msg" \
+    "$MOCK_SERVER_BIN") >"$IMAP140_LOG" 2>&1 &
+IMAP140_PID=$!
+(MOCK_GMAIL_PORT=$GMAIL140_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="w140@gmail.example" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL140_LOG" 2>&1 &
+GMAIL140_PID=$!
+(cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP140_PORT "$MOCK_SMTP_BIN") >"$SMTP140_LOG" 2>&1 &
+SMTP140_PID=$!
+sleep 1
+
+H140="./build/tests/functional/work-$$/homes/f140"
+mkdir -p "$H140/.config/email-cli/accounts/w140@example.org" "$H140/.config/email-cli/accounts/w140@gmail.example"
+cat > "$H140/.config/email-cli/accounts/w140@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP140_PORT
+EMAIL_USER=w140@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SMTP_HOST=smtps://localhost:$SMTP140_PORT
+SMTP_PORT=$SMTP140_PORT
+SMTP_USER=w140@example.org
+SMTP_PASS=testpass
+SSL_NO_VERIFY=1
+INI
+cat > "$H140/.config/email-cli/accounts/w140@gmail.example/config.ini" <<INI
+EMAIL_HOST=
+EMAIL_USER=w140@gmail.example
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=fakefaketoken
+INI
+chmod 0600 "$H140"/.config/email-cli/accounts/*/config.ini
+
+# w140 <account> <args...>: stdin is empty (EOF), so a confirmation is answered No
+w140() {
+    local acc="$1"; shift
+    (set +e  # the exit code is printed below, and a refusal is expected
+     export HOME="$H140"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     export GMAIL_TEST_TOKEN=testtoken
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL140_PORT/gmail/v1/users/me"
+     "$BIN_DIR/email-cli" "$acc" "$@" </dev/null 2>&1
+     echo "exit-code=$?")
+}
+IM=w140@example.org
+GM=w140@gmail.example
+ilog() { grep "Client requested" "$IMAP140_LOG"; }
+glog() { grep "MODIFY\|POST\|DELETE\|TRASH" "$GMAIL140_LOG"; }
+# step_id <history text> <pattern>: the id of the first line matching the pattern
+step_id() { printf '%s\n' "$1" | grep -- "$2" | head -1 | awk '{print $1}'; }
+
+w140 $IM list >/dev/null
+OUT=$(w140 $IM mark-starred 1)
+check "140.1 mark-starred exits 0"                          "exit-code=0" "$OUT"
+HIST=$(w140 $IM history)
+check "140.2 history has the column header"                 "ID .*WHEN .*WHO .*OP .*WHAT" "$HIST"
+check "140.3 history names the object and the change"       "mail INBOX/0000000000000001: starred: no -> yes" "$HIST"
+check "140.4 the step is revertable"                        "\[revertable\]" "$HIST"
+SID=$(step_id "$HIST" "starred: no -> yes")
+OUT=$(w140 $IM history "mail INBOX/0000000000000001")
+check "140.5 history of one object lists its step"          "starred: no -> yes" "$OUT"
+
+OUT=$(w140 $IM revert "$SID")
+check "140.7 revert asks and the default is No"             "Continue? \[y/N\]" "$OUT"
+check "140.8 revert declined says Not done"                 "Not done." "$OUT"
+check_not "140.9 declined revert changed nothing on the server" 'STORE.*-FLAGS' "$(ilog)"
+OUT=$(w140 $IM revert "$SID" -q)
+check "140.10 revert -q reverts without asking"             "Step $SID reverted." "$OUT"
+check "140.11 the inverse is a flag change on the server"   'STORE.*-FLAGS (.Flagged)' "$(ilog)"
+HIST=$(w140 $IM history)
+check "140.12 the revert is a step naming the step"         "revert of $SID" "$HIST"
+check "140.13 the reverted step says so"                    "reverted by" "$HIST"
+RID=$(step_id "$HIST" "revert of $SID")
+OUT=$(w140 $IM revert "$SID" -q)
+check "140.14 a reverted step is refused"                   "Refused:" "$OUT"
+OUT=$(w140 $IM revert "$RID" -q)
+check "140.15 the revert can be reverted"                   "Step $RID reverted." "$OUT"
+check "140.16 reverting the revert sets the flag again"     "^2$" "$(ilog | grep -c '+FLAGS (.Flagged)')"
+
+w140 $IM remove-starred 1 >/dev/null
+HIST=$(w140 $IM history)
+SID2=$(step_id "$HIST" "starred: yes -> no")
+w140 $IM mark-starred 1 >/dev/null
+OUT=$(w140 $IM revert "$SID2" -q)
+check "140.17 an overtaken step is refused"                 "Refused:" "$OUT"
+check "140.18 the refusal exits non-zero"                   "exit-code=1" "$OUT"
+OUT=$(w140 $IM revert 99999 -q)
+check "140.19 a step that does not exist"                   "no step 99999" "$OUT"
+OUT=$(w140 $IM revert abc)
+check "140.20 revert needs a number"                        "exit-code=1" "$OUT"
+
+# Irreversible operations confirm (default No) and show as not revertable.
+w140 $IM create-folder Folder140 -q >/dev/null
+OUT=$(w140 $IM delete-folder Folder140)
+check "140.21 delete-folder asks first"                     "not revertable. Continue? \[y/N\]" "$OUT"
+check "140.22 delete-folder default is No"                  "Not done." "$OUT"
+check_not "140.23 declined delete-folder sends nothing"     'DELETE "Folder140"' "$(ilog)"
+OUT=$(w140 $IM delete-folder Folder140 -q)
+check "140.24 delete-folder -q deletes"                     "exit-code=0" "$OUT"
+HIST=$(w140 $IM history)
+check "140.25 the deleted folder shows as not revertable"   "folder Folder140: .*\[not revertable\]" "$HIST"
+check "140.26 the created folder was a revertable step"     "folder Folder140: .*\[revertable\]\|folder Folder140: .*reverted by" "$HIST"
+
+OUT=$(w140 $IM trash 4 --folder Trash)
+check "140.28 permanent delete asks first"                  "not revertable. Continue? \[y/N\]" "$OUT"
+check "140.29 permanent delete default is No"               "Not done." "$OUT"
+OUT=$(w140 $IM trash 4 --folder Trash -q)
+check "140.31 permanent delete -q exits 0"                  "exit-code=0" "$OUT"
+HIST=$(w140 $IM history)
+check "140.32 permanent delete shows as not revertable"     "mail Trash/0000000000000004: .*\[not revertable\]" "$HIST"
+SIDD=$(step_id "$HIST" "mail Trash/0000000000000004")
+OUT=$(w140 $IM revert "$SIDD" -q)
+check "140.33 a permanent delete cannot be reverted"        "Refused:" "$OUT"
+
+OUT=$(w140 $IM forward 2 --to bob@example.org --body "FYI140")
+check "140.34 forward asks first"                           "not revertable. Continue? \[y/N\]" "$OUT"
+check "140.35 forward default is No"                        "Not done." "$OUT"
+check_not "140.36 declined forward sends nothing"           "RCPT TO" "$(cat "$SMTP140_LOG")"
+OUT=$(w140 $IM forward 2 --to bob@example.org --body "FYI140" -q)
+check "140.37 forward -q exits 0"                           "exit-code=0" "$OUT"
+HIST=$(w140 $IM history)
+check "140.38 a sent mail shows as not revertable"          "sent mail.*\[not revertable\]" "$HIST"
+
+# Gmail: a label change, reverted and re-reverted.
+w140 $GM list >/dev/null
+w140 $GM show 0000000000000001 >/dev/null
+w140 $GM add-label 0000000000000001 Work140 >/dev/null
+HIST=$(w140 $GM history)
+check "140.43 Gmail label change is a step"                 "Work140.*\[revertable\]" "$HIST"
+GID=$(step_id "$HIST" "Work140")
+OUT=$(w140 $GM revert "$GID" -q)
+check "140.44 Gmail revert reports it"                      "Step $GID reverted." "$OUT"
+HIST=$(w140 $GM history)
+GRID=$(step_id "$HIST" "revert of $GID")
+OUT=$(w140 $GM revert "$GRID" -q)
+check "140.46 the Gmail revert can be reverted"             "Step $GRID reverted." "$OUT"
+
+HFILE="$H140/.local/share/email-cli/history.tsv"
+check "140.49 the history file exists in the data directory" "ex" "$(test -f "$HFILE" && echo ex)"
+check_not "140.50 no secret in the history file"            "testpass\|fakefaketoken" "$(cat "$HFILE")"
+
+OUT=$(w140 $IM help revert)
+check "140.52 help revert describes it"                     "revert" "$OUT"
+OUT=$("$BIN_DIR/email-cli" --help 2>&1)
+check "140.53 the general help lists history"               "history" "$OUT"
+check "140.54 the general help names -q"                    "\-q" "$OUT"
+kill "$IMAP140_PID" "$GMAIL140_PID" "$SMTP140_PID"
 
 fi
 

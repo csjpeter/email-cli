@@ -103,6 +103,27 @@ takes
 .B \-\-import\-token
 (read a refresh token made on another machine from standard input).
 .TP
+.BR history " [\fIobject\fP] [\fB\-\-limit\fP \fIN\fP]"
+List the recorded operations, newest first: who changed what, when, from which
+value to which, and whether the step is revertable, compensable, not revertable,
+reverted or the revert of another step.  Without
+.I object
+the recent changes, with it every step of that object
+(\(lqmail INBOX/000000000000002a\(rq, \(lqrule Name\(rq, \(lqaccount\(rq).
+.TP
+.BR revert " \fIid\fP"
+Take back step
+.IR id :
+the inverse is done on the server and recorded as a new step that names the step
+it reverts, so the revert can be reverted.  Asks first (default No).  Refused,
+with the reason, when the step is not revertable, was overtaken by a later
+change, is another user's (unless root), or its mail is not in the local store.
+.TP
+.BR \-q ", " \-\-quiet
+Answer yes to the confirmation of a revert and of the irreversible operations
+(deleting a folder or label, removing an account, a permanent delete, sending),
+which otherwise ask with No as the default.
+.TP
 .B migrate\-credentials
 Re\-encrypt or decrypt stored passwords.
 .TP

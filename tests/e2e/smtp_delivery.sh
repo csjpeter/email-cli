@@ -76,7 +76,7 @@ CFGTXT=$(testenv_exec su sender -c 'cat ~/.config/email-cli/accounts/sender@mail
 check_not_contains "1.2 verification is on (no SSL_NO_VERIFY)" "SSL_NO_VERIFY" "$CFGTXT"
 
 # 2. A plain message.
-OUT=$(testenv_exec su sender -c 'email-cli --account sender@mail.example.org send --to rcpt@mail.example.org --subject "E2E plain" --body "hello-e2e-body"')
+OUT=$(testenv_exec su sender -c 'email-cli --account sender@mail.example.org -q send --to rcpt@mail.example.org --subject "E2E plain" --body "hello-e2e-body"')
 RC=$?
 echo "$OUT"
 [ "$RC" -eq 0 ] && ok "2.1 send exits 0" || fail "2.1 send exits 0 (status $RC)"
@@ -95,7 +95,7 @@ check_contains "2.6 From header arrived"                "^From: .*sender@mail.ex
 
 # 3. A message with an attachment.
 testenv_exec su sender -c 'printf "hello-attachment" > ~/note.txt' >/dev/null
-OUT=$(testenv_exec su sender -c 'email-cli --account sender@mail.example.org send --to rcpt@mail.example.org --subject "E2E attach" --body "with file" --attach ~/note.txt')
+OUT=$(testenv_exec su sender -c 'email-cli --account sender@mail.example.org -q send --to rcpt@mail.example.org --subject "E2E attach" --body "with file" --attach ~/note.txt')
 RC=$?
 echo "$OUT"
 [ "$RC" -eq 0 ] && ok "3.1 send with attachment exits 0" || fail "3.1 send with attachment exits 0 (status $RC)"
@@ -112,7 +112,7 @@ check_contains "3.4 it carries the file content"        "aGVsbG8tYXR0YWNobWVudA=
 
 # 4. A certificate for another name is refused (verification really is on).
 mkcfg wrongname@mail.example.org localhost 465 >/dev/null
-OUT=$(testenv_exec su sender -c 'email-cli --account wrongname@mail.example.org send --to rcpt@mail.example.org --subject "E2E wrong name" --body "never"')
+OUT=$(testenv_exec su sender -c 'email-cli --account wrongname@mail.example.org -q send --to rcpt@mail.example.org --subject "E2E wrong name" --body "never"')
 RC=$?
 echo "$OUT"
 [ "$RC" -ne 0 ] && ok "4.1 a certificate for another host name fails" \
@@ -122,7 +122,7 @@ check_not_contains "4.2 nothing was delivered"          "E2E wrong name"        
 
 # 5. A closed port fails.
 mkcfg closedport@mail.example.org mail.example.org 1 >/dev/null
-OUT=$(testenv_exec su sender -c 'email-cli --account closedport@mail.example.org send --to rcpt@mail.example.org --subject "E2E closed" --body "never"')
+OUT=$(testenv_exec su sender -c 'email-cli --account closedport@mail.example.org -q send --to rcpt@mail.example.org --subject "E2E closed" --body "never"')
 RC=$?
 echo "$OUT"
 [ "$RC" -ne 0 ] && ok "5.1 a closed port fails with a non-zero status" \

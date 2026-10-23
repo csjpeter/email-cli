@@ -9,6 +9,7 @@
 # build/packages/ and nothing there when the run fails (EMAIL-18).
 # Run from anywhere after a build; it does its own release build.
 set -u
+export MANAGE_NO_TAG=1   # EMAIL-229: a test build is not a release, no tag
 cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
 PKG="$ROOT/build/packages"

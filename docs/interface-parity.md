@@ -16,7 +16,7 @@ the code: a change that adds or removes an operation changes this table.
 | Web UI | none, not planned | |
 | Sync | `email-sync` | background program (cron), not an interface of the owner's operations; it runs the same sync, rules and cron as the others |
 
-The CLI-only forms of a command (`--json`, `--batch`, flags for scripts) are
+The CLI-only forms of a command (`--json`, `--columns`, `--sort`, `--batch`, flags for scripts) are
 medium, not gaps: a screen is not a script.
 
 ## Operations

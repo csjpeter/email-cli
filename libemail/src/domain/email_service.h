@@ -94,8 +94,19 @@ void email_service_set_json(int on);
 /** @brief Write @p s as a JSON string value (quotes included) to stdout. */
 void email_service_print_json_string(const char *s);
 
-/** @brief `list-accounts --json`: a JSON array of the configured accounts. 0. */
-int email_service_list_accounts_json(void);
+/**
+ * @brief `list-accounts`: the configured accounts as a table, or with @p json
+ *        as a JSON array.  Honours --columns and --sort (cli_table.h).
+ * @return 0, or -1 on a usage error (bad column name).
+ */
+int email_service_list_accounts(int json);
+
+/**
+ * @brief `rules list --columns/--sort`: the rules as one flat table (or JSON
+ *        array), one row per rule with the account in a column.
+ * @return 0, or -1 on a usage error or an unknown account.
+ */
+int email_service_rules_table(const char *only_account, int json);
 
 /**
  * @brief `rules list --json`: a JSON array of accounts with their rules.

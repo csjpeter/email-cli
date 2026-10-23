@@ -72,6 +72,8 @@ Lists messages in the configured (or overridden) IMAP folder.
 | `--before <YYYY-MM-DD>` | — | Keep only messages dated strictly before this day (exclusive) |
 | `--json` | off | Emit JSON instead of the text table |
 | `--all-accounts` | off | Repeat the listing for every configured account |
+| `--columns A,B,C` | all | Print only these columns, in this order (see *`--columns` and `--sort`*) |
+| `--sort COL[:asc\|:desc],...` | list order | Order the messages by any column; applied before `--limit` / `--offset` |
 
 ### Filters
 
@@ -1203,3 +1205,49 @@ Not offered: `config show` (a human summary of settings that include credential
 state; a script reads `config.ini`), the writing commands (`send`, `mark-*`,
 `add-label`, `create-*`, `delete-*`), which print a single status line, and
 `save-attachment`, which writes a file.
+
+## `--columns` and `--sort` on every table (EMAIL-230)
+
+Policy: `cli-output-model.md`.  One implementation (`libemail/src/core/cli_table.c`)
+serves `list`, `list-folders`, `list-labels`, `list-attachments`,
+`list-accounts`, `history` and `rules list`, in `email-cli` and `email-cli-ro`.
+A command describes its columns (name, header, kind); the module parses the two
+options against them.  Both are taken out of the argument list before the
+command runs, so they may stand anywhere on the line, as `--columns A,B`,
+`--columns=A,B`, `--sort X` or `--sort=X`.
+
+| Command | Columns (the first is the default order) |
+|---------|------------------------------------------|
+| `list` | `uid`, `date`, `from`, `subject`, `folder`, `status` (alias `sts`), `flags`, `unread`, `flagged`, `attachments` |
+| `list-folders` | `name` (alias `folder`), `separator`, `unread`, `flagged`, `total` |
+| `list-labels` | `name` (alias `label`), `id` |
+| `list-attachments` | `filename`, `size` |
+| `list-accounts` | `account`, `type`, `server` |
+| `history` | `id`, `when`, `who`, `op`, `object`, `what`, `state` |
+| `rules list` | `account`, `nr`, `name`, `when`, `then_add_label`, `then_remove_label`, `then_move_folder` |
+
+* `--columns A,B,C` prints exactly these columns in this order, in every format:
+  the table has only these columns and `--json` has only these fields.  Names
+  are case-insensitive.  An unknown name is a usage error
+  (exit 1, nothing printed on stdout) that lists the valid names.
+* `--sort COL[:asc|:desc],...` orders the rows by columns that need not be
+  displayed and may differ from the display order; later keys break ties.
+  A bad direction is a usage error.  The sort is stable.
+* Comparison: a vocabulary column sorts by the order of its vocabulary (a
+  priority sorts CRITICAL, HIGH, MEDIUM, LOW); a key such as `PROJ-12` by its
+  project, then its number (so `PROJ-2` precedes `PROJ-10`); a number as a
+  number; a text of digits only (a UID) as a number; other text without regard
+  to case; booleans false before true.
+* With `--sort` alone the default view is kept, only reordered.  With
+  `--columns` the generic table is printed: a header, a `═` rule under it,
+  two-space indent and two spaces between columns, numbers right-aligned.
+* `list-folders --sort` reorders the folder tree among siblings, so a child
+  stays under its parent; with `--columns` the table is flat.
+* `list --sort` loads the headers of every matching message, sorts, then applies
+  `--offset` and `--limit`.  It is meant for batch output; the interactive pager
+  keeps the manifest order.
+* `rules list` with either option prints one flat row per rule (the default
+  blocks and nested `--json` are kept without them).
+* `history --json` prints the steps as an array of the chosen fields.
+* Given to a command that prints no table, either option is a usage error:
+  `Error: --columns is only for the commands that print a table; 'X' prints none.`

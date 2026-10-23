@@ -21,6 +21,7 @@
 #include "mail_rules.h"
 #include "when_expr.h"
 #include "history_service.h"
+#include "cli_table.h"
 #include <unistd.h>
 
 /** Exit path marker: the failure has already been explained on stderr. */
@@ -75,6 +76,8 @@ static void help_general(void) {
         "  list --from <text>            Filter by sender substring\n"
         "  list --since/--before <date>  Filter by date (YYYY-MM-DD)\n"
         "  list --json                   Machine-readable output\n"
+        "  --columns A,B,C / --sort COL[:desc]  On every table command: pick the\n"
+        "                                columns, order the rows (also under --json)\n"
         "  list --all-accounts           Every configured account in turn\n"
         "  list --folder __unread__      Virtual folders: __unread__ __flagged__\n"
         "                                __answered__ __forwarded__ __junk__\n"
@@ -151,6 +154,10 @@ static void help_rules_list(void) {
         "\n"
         "--json: print JSON, the complete record, instead of the table.\n"
         "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "--columns A,B,C: print only these columns, in this order (also under\n"
+        "--json).  --sort COL[:asc|:desc],...: order the rows by any column,\n"
+        "shown or not.  Columns: account, nr, name, when, then_add_label,\n"
+        "then_remove_label, then_move_folder (either option prints a flat table).\n"
         "\n"
         "List all sorting rules configured for the account.\n"
         "\n"
@@ -307,6 +314,11 @@ static void help_list(void) {
         "                           object per message, fields never truncated.\n"
         "                           stdout stays a single parseable document;\n"
         "                           notices go to stderr.\n"
+        "  --columns A,B,C          Print only these columns, in this order (also under\n"
+        "                           --json): uid, date, from, subject, folder, status,\n"
+        "                           flags, unread, flagged, attachments.\n"
+        "  --sort COL[:asc|:desc],...  Order the messages by any column, shown or\n"
+        "                           not; with --limit the window is taken after.\n"
 
         "\n"
         "Virtual folders (pass to --folder; they span every cached folder):\n"
@@ -392,6 +404,9 @@ static void help_folders(void) {
         "\n"
         "--json: print JSON, the complete record, instead of the table.\n"
         "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "--columns A,B,C: print only these columns, in this order (also under\n"
+        "--json).  --sort COL[:asc|:desc],...: order the rows by any column,\n"
+        "shown or not.  Columns: name (alias folder), separator, unread, flagged, total.\n"
         "\n"
         "Lists all IMAP folders on the server. IMAP accounts only.\n"
         "Use 'list-labels' for Gmail accounts.\n"
@@ -514,6 +529,9 @@ static void help_attachments(void) {
         "\n"
         "--json: print JSON, the complete record, instead of the table.\n"
         "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "--columns A,B,C: print only these columns, in this order (also under\n"
+        "--json).  --sort COL[:asc|:desc],...: order the rows by any column,\n"
+        "shown or not.  Columns: filename, size.\n"
         "\n"
         "Lists all attachments in the message identified by <uid>.\n"
         "Prints one line per attachment: filename and decoded size.\n"
@@ -595,6 +613,9 @@ static void help_list_labels(void) {
         "\n"
         "--json: print JSON, the complete record, instead of the table.\n"
         "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "--columns A,B,C: print only these columns, in this order (also under\n"
+        "--json).  --sort COL[:asc|:desc],...: order the rows by any column,\n"
+        "shown or not.  Columns: name (alias label), id.\n"
         "\n"
         "List all Gmail labels with their IDs. Gmail accounts only.\n"
         "Use 'list-folders' for IMAP accounts.\n"
@@ -671,6 +692,9 @@ static void help_history(void) {
         "  <object>    As the history names it: \"mail INBOX/000000000000002a\",\n"
         "              \"rule Newsletters\", \"account\", \"settings\", \"folder Work\"\n"
         "  --limit N   At most N steps (default 50)\n"
+        "  --columns A,B,C  Print only these columns, in this order: id, when, who,\n"
+        "              op, object, what, state.  --sort COL[:asc|:desc],... orders\n"
+        "              the steps by any column.  --json prints the steps as JSON.\n"
         "\n"
         "Each step ends in [revertable], [compensable], [not revertable], or says\n"
         "that it was reverted or is the revert of another step.\n"
@@ -827,6 +851,9 @@ static void help_list_accounts(void) {
         "\n"
         "--json: print JSON, the complete record, instead of the table.\n"
         "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "--columns A,B,C: print only these columns, in this order (also under\n"
+        "--json).  --sort COL[:asc|:desc],...: order the rows by any column,\n"
+        "shown or not.  Columns: account, type, server.\n"
         "\n"
         "List all configured accounts with their type and server.\n"
         "\n"
@@ -974,9 +1001,87 @@ static int history_colour(void) {
     return isatty(STDOUT_FILENO) && getenv("NO_COLOR") == NULL;
 }
 
+/** The state text of step @p s ("revertable", "reverted by N", ...). */
+static const char *history_state(const OpHistory *h, const OpStep *s, char *tail, size_t n) {
+    if (s->reverts) {
+        snprintf(tail, n, "revert of %lu", s->reverts);
+        return tail;
+    }
+    if (s->kind == OPH_IRREVERSIBLE)
+        return "not revertable";
+    if (op_history_reverted_by(h, s->id)) {
+        snprintf(tail, n, "reverted by %lu", op_history_reverted_by(h, s->id));
+        return tail;
+    }
+    return s->kind == OPH_COMPENSABLE ? "compensable" : "revertable";
+}
+
+/* --columns / --sort / --json view of the history (EMAIL-230). */
+static const CliCol history_cols[] = {
+    { "id",     "ID",     NULL, CLI_COL_NUM,  NULL },
+    { "when",   "WHEN",   NULL, CLI_COL_TEXT, NULL },
+    { "who",    "WHO",    NULL, CLI_COL_TEXT, NULL },
+    { "op",     "OP",     NULL, CLI_COL_TEXT, NULL },
+    { "object", "OBJECT", NULL, CLI_COL_TEXT, NULL },
+    { "what",   "WHAT",   NULL, CLI_COL_TEXT, NULL },
+    { "state",  "STATE",  NULL, CLI_COL_TEXT, NULL },
+};
+#define HISTORY_NCOLS ((int)(sizeof(history_cols) / sizeof(history_cols[0])))
+
+typedef struct {
+    const OpHistory *h;
+    const OpStep   **rows;
+} HistoryRows;
+
+static void history_cell(void *ctx, int row, int col, char *buf, size_t n) {
+    const HistoryRows *r = ctx;
+    const OpStep *s = r->rows[row];
+    char tail[64];
+    switch (col) {
+    case 0: snprintf(buf, n, "%lu", s->id); break;
+    case 1: snprintf(buf, n, "%s", s->time); break;
+    case 2: snprintf(buf, n, "%s", s->who); break;
+    case 3: snprintf(buf, n, "%s", s->op); break;
+    case 4: snprintf(buf, n, "%s", s->object); break;
+    case 5: history_describe(s, buf, n); break;
+    default: snprintf(buf, n, "%s", history_state(r->h, s, tail, sizeof(tail))); break;
+    }
+}
+
+/** The --columns / --sort / --json form of print_history(). */
+static int print_history_table(const OpHistory *h, const char *object, int limit, int json) {
+    CliColumns sel;
+    CliSort sort;
+    if (cli_out_resolve(history_cols, HISTORY_NCOLS, &sel, &sort) != 0)
+        return RESULT_REPORTED;
+    if (!sel.set) cli_columns_all(HISTORY_NCOLS, &sel);
+    const OpStep **rows = calloc((size_t)(h->count > 0 ? h->count : 1), sizeof(*rows));
+    int *order = calloc((size_t)(h->count > 0 ? h->count : 1), sizeof(*order));
+    if (!rows || !order) { free(rows); free(order); return -1; }
+    const int recent = object == NULL;
+    int n = 0;
+    for (int i = 0; i < h->count && n < limit; i++) {   /* newest first */
+        const OpStep *s = &h->steps[i];
+        if (object && strcmp(s->object, object) != 0) continue;
+        if (!history_shown(s, recent)) continue;
+        order[n] = n;
+        rows[n++] = s;
+    }
+    HistoryRows ctx = { h, rows };
+    cli_sort_rows(order, n, history_cols, &sort, history_cell, &ctx);
+    if (json) cli_json_print(history_cols, &sel, order, 0, n, history_cell, &ctx);
+    else if (n == 0) printf("No operations recorded.\n");
+    else cli_table_print(history_cols, &sel, order, 0, n, history_cell, &ctx);
+    free(rows);
+    free(order);
+    return 0;
+}
+
 /** Prints the steps of @p h (newest first) that belong in the view: those of
  *  @p object, or the recent changes when it is NULL. */
-static int print_history(const OpHistory *h, const char *object, int limit) {
+static int print_history(const OpHistory *h, const char *object, int limit, int json) {
+    if (json || cli_out_requested())
+        return print_history_table(h, object, limit, json);
     const int recent = object == NULL;
     const int colour = history_colour();
     int shown = 0;
@@ -1049,6 +1154,11 @@ int main(int argc, char *argv[]) {
         argc = w;
         argv[argc] = NULL;
     }
+
+    /* --columns / --sort (EMAIL-230): taken out of argv like -q; the commands
+     * that print a table resolve them against their own columns. */
+    if (cli_out_extract(&argc, argv) != 0)
+        return EXIT_FAILURE;
 
     /* 1. Determine cache directory for logs */
     const char *cache_base = platform_cache_dir();
@@ -1223,6 +1333,13 @@ int main(int argc, char *argv[]) {
         help_general();
         return EXIT_SUCCESS;
     }
+
+    /* --columns / --sort belong to the commands that print a table. */
+    if (strcmp(cmd, "list") != 0 && strcmp(cmd, "list-folders") != 0 &&
+        strcmp(cmd, "list-attachments") != 0 && strcmp(cmd, "list-labels") != 0 &&
+        strcmp(cmd, "list-accounts") != 0 && strcmp(cmd, "history") != 0 &&
+        strcmp(cmd, "rules") != 0 && cli_out_reject(cmd) != 0)
+        return EXIT_FAILURE;
 
     /* 3. Initialize logger */
     if (fs_mkdir_p(log_dir, 0700) != 0)
@@ -1904,6 +2021,7 @@ int main(int argc, char *argv[]) {
         int limit = 50, ok = 1;
         for (int i = cmd_idx + 1; i < argc && ok; i++) {
             if (strcmp(argv[i], "--batch") == 0) continue;
+            if (strcmp(argv[i], "--json") == 0) continue;
             if (strcmp(argv[i], "--account") == 0) { i++; continue; }
             if (i == account_arg_idx) continue;
             if (strcmp(argv[i], "--limit") == 0) {
@@ -1921,7 +2039,7 @@ int main(int argc, char *argv[]) {
             if (history_load(account_arg, NULL, &h) != 0) {
                 fprintf(stderr, "Error: the history could not be read.\n");
             } else {
-                result = print_history(&h, object, limit);
+                result = print_history(&h, object, limit, cmd_json);
                 op_history_free(&h);
             }
         }
@@ -2158,29 +2276,7 @@ int main(int argc, char *argv[]) {
         }
 
     } else if (strcmp(cmd, "list-accounts") == 0) {
-        int count = 0;
-        AccountEntry *accs = cmd_json ? NULL : config_list_accounts(&count);
-        if (cmd_json) {
-            result = email_service_list_accounts_json();
-        } else if (count == 0) {
-            printf("No accounts configured.\n");
-            result = 0;
-        } else {
-            printf("%-40s  %-8s  %s\n", "Account", "Type", "Server");
-            printf("%-40s  %-8s  %s\n",
-                   "----------------------------------------",
-                   "--------",
-                   "----------------------------");
-            for (int i = 0; i < count; i++) {
-                const char *type   = (accs[i].cfg && accs[i].cfg->gmail_mode) ? "Gmail" : "IMAP";
-                const char *server = accs[i].cfg ? (accs[i].cfg->host ? accs[i].cfg->host : "-") : "-";
-                printf("%-40s  %-8s  %s\n",
-                       accs[i].name ? accs[i].name : "?",
-                       type, server);
-            }
-            config_free_account_list(accs, count);
-            result = 0;
-        }
+        result = email_service_list_accounts(cmd_json) == 0 ? 0 : RESULT_REPORTED;
 
     } else if (strcmp(cmd, "add-account") == 0) {
         Config *new_cfg = setup_wizard_run();
@@ -2267,6 +2363,9 @@ int main(int argc, char *argv[]) {
             if (argv[i][0] != '-') { subcmd = argv[i]; subcmd_idx = i; break; }
         }
 
+        if (subcmd && strcmp(subcmd, "list") != 0 && cli_out_reject("rules") != 0)
+            return EXIT_FAILURE;
+
         if (!subcmd || strcmp(subcmd, "list") == 0) {
             /* rules list: show rules for the configured account(s) */
             for (int i = subcmd_idx + 1; i < argc; i++) {
@@ -2274,7 +2373,9 @@ int main(int argc, char *argv[]) {
                     help_rules_list(); return EXIT_SUCCESS;
                 }
             }
-            if (cmd_json) {
+            if (cli_out_requested()) {
+                result = email_service_rules_table(account_arg, cmd_json) == 0 ? 0 : RESULT_REPORTED;
+            } else if (cmd_json) {
                 if (email_service_rules_json(account_arg) == 0) {
                     fprintf(stderr, "Error: Account '%s' not found.\n",
                             account_arg ? account_arg : "");

@@ -55,6 +55,20 @@ total; `--tree` is ignored), `list-labels` (array: name, id), `list-attachments`
 `rules list` (array of accounts with their rules). `list --all-accounts` cannot
 be combined with it. `list-folders --tree` is the human view of the folders.
 
+## `--columns` and `--sort`
+
+Every table command (`list`, `list-folders`, `list-labels`, `list-attachments`,
+`list-accounts`, `history`, `rules list`) takes `--columns A,B,C` (only these
+columns, in this order, also under `--json`) and `--sort COL[:asc|:desc],...`
+(order the rows by any column, shown or not; vocabulary columns by their order,
+UIDs and numbers numerically). An unknown column is a usage error that lists
+the valid names; `--help` of each command names its columns.
+
+```
+email-cli-ro list --all --columns uid,from,subject --sort from,uid:desc
+email-cli-ro list --all --columns uid,subject --json
+```
+
 ## Changing
 
 ```

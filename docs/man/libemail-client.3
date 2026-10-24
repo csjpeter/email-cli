@@ -5,6 +5,10 @@ libemail\-client \- send and read mail through IMAP, SMTP or the Gmail API
 .nf
 .B #include <email-client.h>
 .sp
+.B emc_status emc_account_load(const char *name, emc_account *out, char *err, size_t err_len);
+.br
+.B void emc_account_free(emc_account *account);
+.br
 .B emc_status emc_open(emc_client **out, const emc_account *account);
 .B emc_status emc_send(emc_client *c, const emc_message *m, emc_send_result *r);
 .B emc_status emc_list_folders(emc_client *c, char ***names, int *count);
@@ -22,6 +26,9 @@ holds the mail client logic of
 .BR email\-cli (1)
 once, so that other programs send and read mail natively.
 .PP
+.B emc_account_load
+reads the named account of the calling user's email\-cli configuration with its credentials decrypted (no output, no prompt); release it with
+.BR emc_account_free .
 .B emc_open
 copies an account (IMAP/SMTP, or Gmail with an OAuth2 refresh token) and
 opens no connection; the network is used when an operation needs it.

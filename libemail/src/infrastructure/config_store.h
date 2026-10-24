@@ -69,6 +69,23 @@ int config_delete_account(const char *name);
  */
 Config *config_load_account(const char *name);
 
+/** Why config_load_account_quiet() returned no account. */
+enum {
+    CFG_LOAD_OK = 0,        /**< loaded */
+    CFG_LOAD_NOT_FOUND,     /**< no such account */
+    CFG_LOAD_UNREADABLE,    /**< the file cannot be read, is incomplete or insecure */
+    CFG_LOAD_UNDECRYPTABLE  /**< an enc: credential cannot be decrypted */
+};
+
+/**
+ * @brief Like config_load_account(), for a library: prints and logs nothing,
+ *        does not rewrite the file, and tells the causes apart.
+ * @param name    Account directory name or address.
+ * @param reason  Receives a CFG_LOAD_* value; may be NULL.
+ * @return the Config (free with config_free()) or NULL.
+ */
+Config *config_load_account_quiet(const char *name, int *reason);
+
 /**
  * @brief Loads the first configured account from the platform config directory.
  *        Convenience wrapper for single-account setups.

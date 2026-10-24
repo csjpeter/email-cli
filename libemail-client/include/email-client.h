@@ -20,9 +20,10 @@
  * - **No audit.** The library is a client of third-party mail servers; there
  *   is no service of ours behind it.  It returns the outcome and the message
  *   id (emc_send_result), and the calling program writes its own audit record.
- * - **No configuration files, no terminal.**  The caller hands the account in
- *   an emc_account; the library reads nothing from the user's home and never
- *   prompts.
+ * - **No terminal.**  The caller hands the account in an emc_account, or has
+ *   emc_account_load() read a stored account of the calling user's email-cli
+ *   configuration (the only place the library reads the user's home).  The
+ *   library never prompts and prints nothing.
  * - **TLS is mandatory** unless the caller asks for emc_account::insecure_tls
  *   (test servers with self-signed certificates only).
  * - A handle is not thread safe; use one handle per thread.
@@ -46,7 +47,9 @@ typedef enum {
     EMC_ERR_CONNECT,      /**< The server could not be reached or refused the login. */
     EMC_ERR_SEND,         /**< The server did not accept the message. */
     EMC_ERR_PROTOCOL,     /**< The server answered something the client cannot use. */
-    EMC_ERR_MEMORY        /**< Out of memory. */
+    EMC_ERR_MEMORY,       /**< Out of memory. */
+    EMC_ERR_NO_ACCOUNT,   /**< emc_account_load(): no account of that name. */
+    EMC_ERR_CREDENTIAL    /**< emc_account_load(): a stored credential cannot be decrypted. */
 } emc_status;
 
 /** A short English description of @p status; never NULL. */
@@ -75,6 +78,35 @@ typedef struct {
     const char *gmail_client_secret; /**< OAuth2 client secret; NULL = built-in. */
     int         insecure_tls; /**< 1 = do not verify the server certificate (tests only). */
 } emc_account;
+
+/**
+ * @brief Load the account @p name of the calling user's email-cli
+ *        configuration (~/.config/email-cli/accounts/NAME/config.ini), with
+ *        its credentials decrypted exactly as email-cli does.
+ *
+ * Plaintext and "enc:" credentials alike are returned as plaintext.  Nothing
+ * is printed, prompted or rewritten.  Not thread safe (one call at a time).
+ * The strings of @p out belong to the
+ * library: release them with emc_account_free().  The result can be given to
+ * emc_open().
+ *
+ * @param name     Account directory name or its address (e.g.
+ *                 "alice\@example.org").
+ * @param out      Receives the account; zeroed on failure.
+ * @param err      Receives a one-line description on failure; may be NULL.
+ * @param err_len  Size of @p err.
+ * @return EMC_OK; EMC_ERR_ARGUMENT (NULL @p name or @p out, empty name);
+ *         EMC_ERR_NO_ACCOUNT (no such account); EMC_ERR_CONFIG (the file
+ *         cannot be read, is incomplete or names a non-TLS server);
+ *         EMC_ERR_CREDENTIAL (an "enc:" credential cannot be decrypted, e.g.
+ *         the installation key changed); EMC_ERR_MEMORY.
+ */
+emc_status emc_account_load(const char *name, emc_account *out,
+                            char *err, size_t err_len);
+
+/** @brief Release what emc_account_load() filled into @p account and zero
+ *         it.  NULL and a zeroed account are allowed. */
+void emc_account_free(emc_account *account);
 
 /** An opaque client handle. */
 typedef struct emc_client emc_client;

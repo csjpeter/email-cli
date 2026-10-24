@@ -336,9 +336,18 @@ static void write_config_to_fp(FILE *fp, const Config *cfg) {
 
 /** Load a config from a specific file path. Decrypts enc: credentials transparently.
  *  Sets *out_needs_resave to 1 if any credential was plaintext and obfuscation is ON. */
+/* Quiet mode and failure reason of load_config_from_path(), for the callers
+ * that must print nothing and tell the causes apart (config_load_account_quiet). */
+static int g_lc_quiet = 0;
+static int g_lc_reason = CFG_LOAD_OK;
+
 static Config *load_config_from_path(const char *path, int *out_needs_resave) {
+    g_lc_reason = CFG_LOAD_OK;
     RAII_FILE FILE *fp = fopen(path, "r");
-    if (!fp) return NULL;
+    if (!fp) {
+        g_lc_reason = errno == ENOENT ? CFG_LOAD_NOT_FOUND : CFG_LOAD_UNREADABLE;
+        return NULL;
+    }
 
     Config *cfg = calloc(1, sizeof(Config));
     if (!cfg) return NULL;
@@ -398,12 +407,13 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
         if (dec) {
             cfg->pass = dec;
         } else {
-            fprintf(stderr,
+            if (!g_lc_quiet) fprintf(stderr,
                 "Warning: Could not decrypt stored password for '%s'.\n"
                 "  The system key may have changed. Re-enter the password with:\n"
                 "    email-cli config password\n", email);
-            logger_log(LOG_WARN, "credential decrypt failed for %s", email);
+            if (!g_lc_quiet) logger_log(LOG_WARN, "credential decrypt failed for %s", email);
             cfg->pass = NULL;
+            g_lc_reason = CFG_LOAD_UNDECRYPTABLE;
         }
     }
 
@@ -411,6 +421,7 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
         char *dec = decrypt_credential(cfg->smtp_pass, email);
         free(cfg->smtp_pass);
         cfg->smtp_pass = dec; /* NULL on failure is acceptable for SMTP */
+        if (!dec) g_lc_reason = CFG_LOAD_UNDECRYPTABLE;
     }
 
     if (cfg->gmail_refresh_token && strncmp(cfg->gmail_refresh_token, "enc:", 4) == 0) {
@@ -419,52 +430,57 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
         if (dec) {
             cfg->gmail_refresh_token = dec;
         } else {
-            fprintf(stderr,
+            if (!g_lc_quiet) fprintf(stderr,
                 "Warning: Could not decrypt stored refresh token for '%s'.\n"
                 "  Re-run the Gmail OAuth2 setup: email-cli add-account\n", email);
-            logger_log(LOG_WARN, "refresh token decrypt failed for %s", email);
+            if (!g_lc_quiet) logger_log(LOG_WARN, "refresh token decrypt failed for %s", email);
             cfg->gmail_refresh_token = NULL;
+            g_lc_reason = CFG_LOAD_UNDECRYPTABLE;
         }
     }
 
+    if (g_lc_reason == CFG_LOAD_UNDECRYPTABLE && g_lc_quiet) { config_free(cfg); return NULL; }
+
     /* Gmail mode requires user + refresh token; IMAP mode requires host + user + pass */
     if (cfg->gmail_mode) {
-        if (!cfg->user || !cfg->gmail_refresh_token) { config_free(cfg); return NULL; }
+        if (!cfg->user || !cfg->gmail_refresh_token) { g_lc_reason = CFG_LOAD_UNREADABLE; config_free(cfg); return NULL; }
     } else {
-        if (!cfg->host || !cfg->user || !cfg->pass) { config_free(cfg); return NULL; }
+        if (!cfg->host || !cfg->user || !cfg->pass) { g_lc_reason = CFG_LOAD_UNREADABLE; config_free(cfg); return NULL; }
     }
 
     /* TLS enforcement (IMAP mode only — Gmail uses OAuth2 over HTTPS) */
     if (!cfg->gmail_mode && !cfg->ssl_no_verify) {
         if (strncmp(cfg->host, "imaps://", 8) != 0) {
-            fprintf(stderr,
+            if (!g_lc_quiet) fprintf(stderr,
                 "Error: EMAIL_HOST must start with imaps:// (TLS required).\n"
                 "  Got: %s\n", cfg->host);
-            logger_log(LOG_ERROR,
+            if (!g_lc_quiet) logger_log(LOG_ERROR,
                        "Rejected insecure EMAIL_HOST in account config: %s",
                        cfg->host);
+            g_lc_reason = CFG_LOAD_UNREADABLE;
             config_free(cfg);
             return NULL;
         }
         if (cfg->smtp_host && cfg->smtp_host[0] &&
             strncmp(cfg->smtp_host, "smtps://", 8) != 0) {
-            fprintf(stderr,
+            if (!g_lc_quiet) fprintf(stderr,
                 "Error: SMTP_HOST must start with smtps:// (TLS required).\n"
                 "  Got: %s\n", cfg->smtp_host);
-            logger_log(LOG_ERROR,
+            if (!g_lc_quiet) logger_log(LOG_ERROR,
                        "Rejected insecure SMTP_HOST in account config: %s",
                        cfg->smtp_host);
+            g_lc_reason = CFG_LOAD_UNREADABLE;
             config_free(cfg);
             return NULL;
         }
     } else if (cfg->host) {
         if (strncmp(cfg->host, "imaps://", 8) != 0)
-            logger_log(LOG_WARN,
+            if (!g_lc_quiet) logger_log(LOG_WARN,
                        "SSL_NO_VERIFY=1: connecting without TLS to %s "
                        "(test/dev mode only)", cfg->host);
         if (cfg->smtp_host && cfg->smtp_host[0] &&
             strncmp(cfg->smtp_host, "smtps://", 8) != 0)
-            logger_log(LOG_WARN,
+            if (!g_lc_quiet) logger_log(LOG_WARN,
                        "SSL_NO_VERIFY=1: SMTP without TLS to %s "
                        "(test/dev mode only)", cfg->smtp_host);
     }
@@ -490,6 +506,39 @@ Config *config_load_account(const char *name) {
     }
     config_free_account_list(list, count);
     return result;
+}
+
+Config *config_load_account_quiet(const char *name, int *reason) {
+    int dummy;
+    if (!reason) reason = &dummy;
+    *reason = CFG_LOAD_NOT_FOUND;
+    if (!name || !name[0] || name[0] == '.' || strchr(name, '/')) return NULL;
+    RAII_STRING char *dir = get_accounts_dir();
+    if (!dir) return NULL;
+    char path[1024];
+    Config *cfg = NULL;
+    g_lc_quiet = 1;
+    snprintf(path, sizeof(path), "%s/%s/config.ini", dir, name);
+    cfg = load_config_from_path(path, NULL);
+    *reason = g_lc_reason;
+    if (!cfg && g_lc_reason == CFG_LOAD_NOT_FOUND) {
+        /* not a directory name: an account whose EMAIL_USER is the name */
+        RAII_DIR DIR *d = opendir(dir);
+        struct dirent *ent;
+        while (d && (ent = readdir(d)) != NULL) {
+            if (ent->d_name[0] == '.') continue;
+            snprintf(path, sizeof(path), "%s/%s/config.ini", dir, ent->d_name);
+            Config *c = load_config_from_path(path, NULL);
+            if (c && c->user && strcmp(c->user, name) == 0) {
+                cfg = c;
+                break;
+            }
+            config_free(c);
+        }
+        *reason = cfg ? CFG_LOAD_OK : CFG_LOAD_NOT_FOUND;
+    }
+    g_lc_quiet = 0;
+    return cfg;
 }
 
 Config* config_load_from_store(void) {

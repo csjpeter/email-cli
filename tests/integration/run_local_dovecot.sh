@@ -24,6 +24,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# The programs under test (manage.sh sanitize / valgrind-all set it).
+BIN_DIR="${EMAIL_TEST_BIN_DIR:-$PROJECT_ROOT/bin}"
 
 TEST_USER="itest-append"
 TEST_PASS="testpass123"
@@ -52,7 +54,7 @@ echo ""
 
 # ── Build if needed ───────────────────────────────────────────────────────────
 
-if [ ! -f "$PROJECT_ROOT/bin/email-sync" ]; then
+if [ ! -f "$BIN_DIR/email-sync" ]; then
     echo "Building email-sync..."
     (cd "$PROJECT_ROOT" && ./manage.sh build)
 fi
@@ -104,7 +106,7 @@ printf "Sent\t%s\n" "$TEST_UID" > "$ACCT_DIR/pending_appends.tsv"
 
 echo ""
 echo "--- Running email-sync ---"
-SYNC_OUT=$(HOME="$EMAIL_HOME" "$PROJECT_ROOT/bin/email-sync" 2>&1 || true)
+SYNC_OUT=$(HOME="$EMAIL_HOME" "$BIN_DIR/email-sync" 2>&1 || true)
 echo "$SYNC_OUT"
 echo ""
 echo "--- Sync log (APPEND-related) ---"

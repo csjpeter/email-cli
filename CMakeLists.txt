@@ -32,7 +32,17 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Werror -pedantic -D_GNU_SOURC
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ENABLE_COVERAGE)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+    # `manage.sh sanitize` (EMAIL-224) adds UBSan to every program and test of
+    # the tree; halt_on_error comes from UBSAN_OPTIONS at run time.
+    if(ENABLE_UBSAN)
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=undefined")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=undefined")
+    endif()
 endif()
+
+# `manage.sh valgrind-all` (EMAIL-224) builds the programs dynamic: Valgrind
+# replaces malloc through the dynamic loader and sees nothing of a static one.
+option(EMAIL_STATIC "Link the programs fully static (the shipped form)" ON)
 
 # Coverage Support
 if(ENABLE_COVERAGE)
@@ -84,7 +94,7 @@ function(email_static_program name source)
     target_link_libraries(${name} libemail)
     # AddressSanitizer cannot be linked static: the Debug build (the unit-test
     # run) keeps the C library dynamic; every other build is fully static.
-    if(NOT (CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ENABLE_COVERAGE))
+    if(EMAIL_STATIC AND NOT (CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ENABLE_COVERAGE))
         target_link_options(${name} PRIVATE -static)
     endif()
 endfunction()

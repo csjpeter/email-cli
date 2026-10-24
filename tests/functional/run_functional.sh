@@ -70,7 +70,10 @@ fi
 # them once here; the helpers that need a specific XDG_DATA_HOME still export
 # it inside their own subshell.
 unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
-BIN_DIR="$PROJECT_ROOT/bin"
+# EMAIL_TEST_BIN_DIR: the programs under test (manage.sh sanitize / valgrind-all
+# point it at instrumented ones); EMAIL_TEST_MOCK_CFLAGS: flags for the mocks.
+BIN_DIR="${EMAIL_TEST_BIN_DIR:-$PROJECT_ROOT/bin}"
+MOCK_CFLAGS="${EMAIL_TEST_MOCK_CFLAGS:-}"
 MOCK_SERVER_SRC="$PROJECT_ROOT/tests/functional/mock_imap_server.c"
 MOCK_SERVER_BIN="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_server"
 MOCK_SMTP_SRC="$PROJECT_ROOT/tests/pty/mock_smtp_server.c"
@@ -101,9 +104,9 @@ mkdir -p "$WORK_DIR/homes" "$WORK_DIR/home"
 # The caller's HOME is not the suite's: until a phase picks its own home, HOME
 # is an empty directory of this run.  The XDG_* variables were unset above.
 export HOME="$WORK_DIR/home"
-gcc "$MOCK_SERVER_SRC" -o "$MOCK_SERVER_BIN" -lssl -lcrypto
-gcc "$MOCK_SMTP_SRC"   -o "$MOCK_SMTP_BIN"   -lssl -lcrypto
-gcc "$MOCK_GMAIL_SRC"  -o "$MOCK_GMAIL_BIN"
+gcc $MOCK_CFLAGS "$MOCK_SERVER_SRC" -o "$MOCK_SERVER_BIN" -lssl -lcrypto
+gcc $MOCK_CFLAGS "$MOCK_SMTP_SRC"   -o "$MOCK_SMTP_BIN"   -lssl -lcrypto
+gcc $MOCK_CFLAGS "$MOCK_GMAIL_SRC"  -o "$MOCK_GMAIL_BIN"
 FREE_PORT_BIN="$PROJECT_ROOT/build/tests/functional/free_port"
 gcc "$PROJECT_ROOT/tests/functional/free_port.c" -o "$FREE_PORT_BIN"
 

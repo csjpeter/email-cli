@@ -37,6 +37,8 @@ Working through the approved tickets of this project by itself is the
 ./manage.sh debug      # Debug build with Address Sanitizer (ASAN)
 ./manage.sh test       # Unit tests with ASAN
 ./manage.sh valgrind   # Unit tests with Valgrind
+./manage.sh sanitize   # unit+functional+pty+integration with every program under ASan+UBSan (logs in build/sanitize)
+./manage.sh valgrind-all # the same suites with every program under Valgrind (logs in build/valgrind)
 ./manage.sh coverage   # GCOV/LCOV coverage report (>90% goal for core/infra)
                        # also runs the functional suite and the PTY tests
 ./manage.sh clean      # Remove build artifacts

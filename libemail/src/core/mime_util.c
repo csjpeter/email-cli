@@ -95,11 +95,14 @@ static char *decode_base64(const char *in, size_t inlen, size_t *out_len) {
     char *out = malloc(max);
     if (!out) return NULL;
     size_t n = 0;
-    int buf = 0, bits = 0;
+    /* unsigned: the accumulator wraps on a long input, and only its low
+     * bits+8 bits are ever used (a signed shift overflow is undefined, EMAIL-224) */
+    unsigned int buf = 0;
+    int bits = 0;
     for (size_t i = 0; i < inlen; i++) {
         int v = b64val((unsigned char)in[i]);
         if (v < 0) continue;
-        buf = (buf << 6) | v;
+        buf = (buf << 6) | (unsigned int)v;
         bits += 6;
         if (bits >= 8) {
             bits -= 8;

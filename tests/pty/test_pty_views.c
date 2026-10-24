@@ -14,6 +14,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "wait_scale.h"
 #include "test_scratch.h"
 #include "pty_editor.h"
 #include "menu_keys.h"
@@ -47,7 +48,14 @@ static char  g_mock_bin[512];
 static char  g_old_home[512];
 static char  g_batch_cli_bin[512];  /* email-cli (batch), never changes */
 
-#define WAIT_MS 6000
+#define WAIT_MS (6000 * wait_scale())
+
+/* A positive screen assertion waits for the text instead of reading the screen
+ * at once (EMAIL-224).  The programs draw a screen in several writes (a header,
+ * then the rows, then the status line), and under ASan or Valgrind they are slow
+ * enough for a read in between; a text that is already there costs nothing. */
+#undef ASSERT_SCREEN_CONTAINS
+#define ASSERT_SCREEN_CONTAINS(s, text) ASSERT_WAIT_FOR(s, text, WAIT_MS)
 #define SETTLE_MS 600
 #define ROWS 24
 #define COLS 100
@@ -2084,7 +2092,8 @@ static void test_wizard_abort(void) {
     const char *wiz[] = {"add-account", NULL};
     PtySession *s = cli_run(wiz);
     ASSERT(s != NULL, "wizard abort: opens");
-    ASSERT_WAIT_FOR(s, "Choice [1]:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Choice [1]:", WAIT_MS);   /* keys are read from here on (EMAIL-224) */
     pty_send_key(s, PTY_KEY_CTRL_D);  /* EOF on stdin → getline returns -1 → wizard aborts */
     ASSERT_WAIT_FOR(s, "cancelled", WAIT_MS);
     pty_close(s);
@@ -3278,7 +3287,9 @@ static void test_lk_compose_reply_forward(void) {
 }
 
 /* Space marks and steps down, x clears, Esc drops the marks first and goes
- * back only the second time. */
+ * back only the second time.  The position is waited for, not read at once
+ * (EMAIL-224): the header and the status line are redrawn one after the other,
+ * and an instrumented program is slow enough for a read in between. */
 static void lk_marks_body(void) {
     PtySession *s = lk_open();
     ASSERT(s != NULL, "list marks: opens");
@@ -3303,7 +3314,7 @@ static void lk_marks_body(void) {
     ASSERT_WAIT_FOR(s, "[30/30]", WAIT_MS);
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[30/30]");             /* the last row: no step */
+    ASSERT_WAIT_FOR(s, "[30/30]", WAIT_MS);           /* the last row: no step */
     pty_send_key(s, PTY_KEY_CTRL_C);
     pty_wait_exit(s, 5000);
     pty_close(s);
@@ -5536,9 +5547,15 @@ static void test_tui_list_sync_and_refresh(void) {
     pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "syncing", WAIT_MS);
     /* Sync completes quickly: no IMAP conflict since TUI holds no connection.
-     * 3 s settle ensures SIGCHLD fires before the DOWN keypress. */
+     * The SIGCHLD of the finished sync is only seen when the screen is redrawn,
+     * so DOWN is sent until the notification shows: under Valgrind email-sync
+     * needs far longer than a fixed settle (EMAIL-224). */
     pty_settle(s, 3000);
-    pty_send_key(s, PTY_KEY_DOWN);   /* re-render: bg_sync_done=1 → shows notification */
+    int _seen = 0;
+    for (int _try = 0; _try < 40 && !_seen; _try++) {
+        pty_send_key(s, PTY_KEY_DOWN);   /* re-render: bg_sync_done=1 → shows notification */
+        _seen = pty_wait_for(s, "New mail", 1500) == 0;
+    }
     ASSERT_WAIT_FOR(s, "New mail", WAIT_MS);
     pty_send_str(s, "U");            /* refresh: bg_sync_done=0, re-enters list */
     int _ok = 0;
@@ -7722,6 +7739,10 @@ static void test_accounts_keys_no_account(void) {
 
     pty_send_str(s, "n");
     ASSERT_WAIT_FOR(s, "Account type", WAIT_MS);
+    /* The prompt line is written once the program reads keys one by one; a
+     * Ctrl-D sent before that is taken by the terminal's own line editing and
+     * lost (EMAIL-224: a loaded or instrumented run shows the gap). */
+    ASSERT_WAIT_FOR(s, "Choice [1]:", WAIT_MS);
     pty_send_key(s, PTY_KEY_CTRL_D);
     ASSERT_WAIT_FOR(s, "Wizard aborted.", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts (0)");
@@ -7896,10 +7917,24 @@ static void test_wk_wizard_ctrl_c(void) {
     ASSERT(s != NULL, "wizard ctrl-c: opens");
     if (!s) return;
     pty_send_key(s, PTY_KEY_CTRL_C);
-    ASSERT_WAIT_FOR(s, "^C", WAIT_MS);
+    /* The "^C" echo is on the screen only until the accounts list is drawn once
+     * more on the way out, so a wait for it can miss it on a slow run
+     * (EMAIL-224): the exit status is what the key must bring about. */
     ASSERT(pty_wait_exit(s, 5000) == 0, "wizard ctrl-c: quits (EMAIL-223)");
     pty_close(s);
     restore_accounts("wk4");
+}
+
+/** @brief Predicate: the screen shows the account-type prompt twice. */
+static int wk_second_choice_prompt(PtySession *s, void *ctx) {
+    (void)ctx;
+    int n = 0;
+    for (int r = 0; r < 24; r++) {
+        char row[512];
+        pty_row_text(s, r, row, sizeof row);
+        if (strstr(row, "Choice [1]:")) n++;
+    }
+    return n >= 2;
 }
 
 /* First start without any account: the wizard runs before the TUI; Ctrl-D
@@ -7917,6 +7952,9 @@ static void test_wk_wizard_first_run(void) {
     ASSERT_SCREEN_CONTAINS(s, "email-cli Configuration Wizard");
     pty_send_str(s, "x\n");
     ASSERT_WAIT_FOR(s, "Unknown account type 'x'", WAIT_MS);
+    /* Ctrl-D counts once the second prompt is out (see above): wait for it. */
+    ASSERT(pty_wait_until(s, wk_second_choice_prompt, NULL, WAIT_MS) == 0,
+           "wizard first run: the type is asked again");
     pty_send_key(s, PTY_KEY_CTRL_D);
     ASSERT_WAIT_FOR(s, "Configuration aborted. Exiting.", WAIT_MS);
     ASSERT(pty_wait_exit(s, 5000) == 1, "wizard first run: exits with failure");

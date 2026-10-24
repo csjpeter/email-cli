@@ -56,7 +56,9 @@ static int plain_output_of(const char *term, char *out, size_t cap)
         printf("\033[1mbold\033[0m \033[38;5;12mblue\033[0m\n");
         fprintf(stderr, "\r\033[K  progress 42\n");
         fflush(stdout);
-        _exit(0);
+        /* a normal exit, not _exit(): the leak check of the sanitizer runs at
+         * exit, and the filtering streams must not be left behind (EMAIL-224) */
+        exit(0);
     }
     close(fds[1]);
     size_t n = 0;

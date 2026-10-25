@@ -10,6 +10,9 @@
 #include "mail_rules.h"
 #include "local_store.h"
 #include "email_service.h"
+#include "history_view.h"
+#include "pty_stdio.h"
+#include "platform/terminal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -746,6 +749,96 @@ static void test_shown_recent_own_only(void) {
     op_history_set_actor("alice", 0);
 }
 
+
+/* ── The history screen (history_view.c), on a pseudo-terminal ───────── */
+
+static char g_screen[262144];
+
+/** Runs the history screen typed @p keys; its output is left in g_screen. */
+static int view_with_keys(const char *object, const char *keys) {
+    PtyStdio p;
+    if (pty_stdio_begin(&p, 24, 100, keys) != 0) return -99;
+    int rc = history_view_run(&g_imap, object);
+    pty_stdio_end(&p, g_screen, sizeof(g_screen));
+    return rc;
+}
+
+static void test_view_recent_and_object(void) {
+    setup();
+    OpRecord r = { IMAP_USER, "flag", "mail INBOX/0000000000000007", "unread",
+                   "yes", "no", "INBOX", OPH_REVERTABLE, 0 };
+    ASSERT(op_history_record(&r) > 0, "a step to show");
+    int rc = view_with_keys(NULL, "q");
+    ASSERT(rc == 0, "q leaves the screen and the program carries on");
+    ASSERT(strstr(g_screen, "Recent changes") != NULL, "the recent changes have their title");
+    ASSERT(strstr(g_screen, "mail INBOX/0") != NULL, "the step's object is listed");
+    ASSERT(strstr(g_screen, "alice") != NULL, "the step's author is listed");
+    rc = view_with_keys("mail INBOX/0000000000000007", "\033");
+    ASSERT(rc == 0, "Esc leaves the screen");
+    ASSERT(strstr(g_screen, "History of mail INBOX/0000000000000007") != NULL,
+           "the history of one object is titled with the object");
+    ASSERT(strstr(g_screen, "unread") != NULL, "the changed thing is listed");
+    rc = view_with_keys("mail INBOX/nothing-here", "q");
+    ASSERT(rc == 0, "an object without steps shows an empty screen");
+    ASSERT(strstr(g_screen, "unread") == NULL,
+           "the history of another object does not show this object's steps");
+}
+
+static void test_view_ctrl_c_quits_program(void) {
+    setup();
+    terminal_clear_quit_request();
+    int rc = view_with_keys(NULL, "\003");
+    ASSERT(rc == -1, "Ctrl-C asks the caller to quit");
+    ASSERT(terminal_quit_requested() == 1, "and the request is remembered for the callers above");
+    terminal_clear_quit_request();
+}
+
+static void test_view_help_and_navigation(void) {
+    setup();
+    int rc = view_with_keys(NULL, "?|\033|jkgGq");
+    ASSERT(rc == 0, "help, navigation keys and q");
+    ASSERT(strstr(g_screen, "History shortcuts") != NULL, "the help names the screen");
+    terminal_clear_quit_request();
+    rc = view_with_keys(NULL, ":|\033|q");
+    ASSERT(rc == 0, "the action menu opens and closes");
+    ASSERT(strstr(g_screen, "Revert") != NULL, "the action menu offers Revert");
+}
+
+static void test_view_revert_asks_then_reverts(void) {
+    setup();
+    int cur = app_settings_get_obfuscation();
+    app_settings_set_obfuscation(!cur);
+    OpHistory h = {0};
+    ASSERT(op_history_load(NULL, NULL, &h) == 0 && h.count > 0, "the change is recorded");
+    char object[256];
+    snprintf(object, sizeof(object), "%s", h.steps[h.count - 1].object);
+    op_history_free(&h);
+    int before = nsteps();
+
+    int rc = view_with_keys(object, "\rnq");
+    ASSERT(rc == 0, "leaving after No");
+    ASSERT(nsteps() == before, "No changes nothing");
+    ASSERT(app_settings_get_obfuscation() == !cur, "the setting is as it was");
+
+    rc = view_with_keys(object, "\ryq");
+    ASSERT(rc == 0, "leaving after Yes");
+    ASSERT(nsteps() == before + 1, "Yes records the revert as a step");
+    ASSERT(app_settings_get_obfuscation() == cur, "the setting is back");
+    ASSERT(strstr(g_screen, "reverted step") != NULL, "the screen says the step was reverted");
+}
+
+static void test_view_refusal_shown(void) {
+    setup();
+    op_history_set_actor("bob", 0);
+    OpRecord r = { IMAP_USER, "flag", "mail INBOX/0000000000000009", "unread",
+                   "yes", "no", "INBOX", OPH_REVERTABLE, 0 };
+    op_history_record(&r);
+    op_history_set_actor("alice", 0);
+    int rc = view_with_keys("mail INBOX/0000000000000009", "\rynq");
+    ASSERT(rc == 0, "leaving");
+    ASSERT(strstr(g_screen, "reverted step") == NULL, "another user's step is not reverted");
+}
+
 void test_history(void) {
     RUN_TEST(test_store_records);
     RUN_TEST(test_store_nothing_changed);
@@ -779,6 +872,11 @@ void test_history(void) {
     RUN_TEST(test_irreversible_not_revertable);
     RUN_TEST(test_account_add_is_compensable);
     RUN_TEST(test_shown_recent_own_only);
+    RUN_TEST(test_view_recent_and_object);
+    RUN_TEST(test_view_ctrl_c_quits_program);
+    RUN_TEST(test_view_help_and_navigation);
+    RUN_TEST(test_view_revert_asks_then_reverts);
+    RUN_TEST(test_view_refusal_shown);
     history_set_backend(NULL);
     op_history_set_actor(NULL, 0);
     for (int i = 0; i < 4; i++) {

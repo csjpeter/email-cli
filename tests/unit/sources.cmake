@@ -58,6 +58,8 @@ set(UNIT_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/test_when_expr.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_mail_rules.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_history.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_terminal_io.c
+    ${CMAKE_SOURCE_DIR}/tests/unit/test_cli_output.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_cli_table.c
     ${CMAKE_SOURCE_DIR}/tests/unit/test_tuikit_link.c
     ${CMAKE_SOURCE_DIR}/libemail/src/infrastructure/when_expr.c

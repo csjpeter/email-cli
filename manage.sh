@@ -807,8 +807,11 @@ case "$1" in
         # measured (policies/testing-model.md, Coverage).
         capture_product() {  # capture_product <raw.info> <product.info>
             local dirs=() d
+            # lcov recurses into a directory, so only the top-level ones are
+            # named (a nested one as well gives "duplicate file").
             while IFS= read -r d; do dirs+=(--directory "$d"); done < <(cd "$BUILD_DIR" && \
-                find . -name '*.gcno' -not -path './coverage/*' -printf '%h\n' | sort -u)
+                find . -name '*.gcno' -not -path './coverage/*' | cut -d/ -f2 | sort -u | \
+                while IFS= read -r t; do [ -d "$t" ] && echo "$t"; done)
             (cd "$BUILD_DIR" && lcov --capture "${dirs[@]}" --output-file "$1" && \
              lcov --extract "$1" --ignore-errors unused \
                   "$ROOT_ABS/src/*" "$ROOT_ABS/libemail/src/*" "$ROOT_ABS/libemail-client/src/*" \

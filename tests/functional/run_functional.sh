@@ -70,7 +70,7 @@ fi
 # them once here; the helpers that need a specific XDG_DATA_HOME still export
 # it inside their own subshell.
 unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
-# EMAIL_TEST_BIN_DIR: the programs under test (manage.sh sanitize / valgrind-all
+# EMAIL_TEST_BIN_DIR: the programs under test (manage.sh sanitize / memcheck
 # point it at instrumented ones); EMAIL_TEST_MOCK_CFLAGS: flags for the mocks.
 BIN_DIR="${EMAIL_TEST_BIN_DIR:-$PROJECT_ROOT/bin}"
 MOCK_CFLAGS="${EMAIL_TEST_MOCK_CFLAGS:-}"

@@ -33,20 +33,20 @@ show_help() {
     echo "                 of views gmail-tui mail-rules compose-dialog attachment"
     echo "                 send-local input-line compose screens, FILTER selects tests"
     echo "                 by name"
-    echo "  valgrind       Build and run unit tests with Valgrind"
+    echo "  valgrind       Build and run every unit suite under Valgrind"
     echo "  sanitize       Debug build of every program and test with ASan and UBSan; run the unit,"
-    echo "                 functional and pty suites and integration-local on those binaries;"
+    echo "                 functional, pty and integration suites on those binaries;"
     echo "                 logs in build/sanitize/, any log is a failure"
-    echo "  valgrind-all   Dynamic Release build; run the same suites with every program under"
+    echo "  memcheck       Dynamic Release build; run the same suites with every program under"
     echo "                 Valgrind (leak-check=full, track-origins); logs in build/valgrind/"
     echo "  headers [DIR]  Fail on a source file or script without the source header"
     echo "  names [DIR]    Fail when a tracked file names the owner's private domain"
     echo "  declared       Fail when a declared test is not built or a built test is not declared"
     echo "  check          Run every gate (headers, names, declared, test, functional, pty, valgrind) and summarise"
-    echo "  coverage       Run tests and generate coverage report"
-    echo "  integration    Run integration test against a per-agent Dovecot process"
-    echo "  integration-local  Run APPEND integration test with a per-agent Dovecot process"
-    echo "  e2e            Build the package, run tests/e2e in LXC containers (sudo lxc-*)"
+    echo "  coverage       Run the unit scope and the external scope (functional + pty +"
+    echo "                 integration), report line coverage, keep the raw data in"
+    echo "                 build/coverage/unit and build/coverage/external"
+    echo "  integration    Run tests/integration against a per-agent Dovecot process"
     echo "  install        Build (release) and install binaries to ~/.local/bin"
     echo "  uninstall      Remove installed binaries from ~/.local/bin"
     echo "  package [deb|rpm|all]  Build release and create package(s) in build/packages/"
@@ -55,6 +55,9 @@ show_help() {
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
+    echo ""
+    echo "test, functional, pty, integration, valgrind and coverage write build/result/VERB.result"
+    echo "(policies/manage-sh-model.md); an unknown command prints this text to stderr and exits 2."
     echo ""
     echo "Environment:"
     echo "  WORKSPACE_LIBS=bundled|system|auto  how libtuikit and libptytest come in:"
@@ -317,14 +320,14 @@ for_each_pty_suite() {
     # suite and release gates; they run in its repository, not here.
 }
 
-# sanitize and valgrind-all (EMAIL-224) run the suites with the programs under
+# sanitize and memcheck (EMAIL-224) run the suites with the programs under
 # test instrumented.  The suites find the programs through EMAIL_TEST_BIN_DIR
 # (default: bin/) and, for the mock servers they compile themselves,
 # EMAIL_TEST_MOCK_CFLAGS.
 #
 # instrumented_run LABEL RUNNER_ENV... is not used; the verbs below call:
 #   run_instrumented_suites ABS_BIN LABEL_ENV_VAR
-# which runs unit, functional, pty and integration-local and returns 0 when all
+# which runs unit, functional, pty and integration and returns 0 when all
 # of them passed.  LABEL_ENV_VAR is the name of the variable that tells the
 # instrumented program which suite started it (VG_TEST_NAME for Valgrind, none
 # needed for the sanitizers, whose log names carry the pid).
@@ -346,15 +349,13 @@ run_instrumented_suites() {
         (cd "$abs_build" && "$@") || { echo "  [FAILED] pty $label"; rc=1; }
     }
     for_each_pty_suite run_pty_instrumented "$abs_bin"
-    echo "--- instrumented: integration-local ---"
-    if command -v dovecot >/dev/null; then
-        [ -z "$label_var" ] || export "$label_var=integration-local"
-        ./tests/integration/run_local_dovecot.sh || { echo "  [FAILED] integration-local"; rc=1; }
-        [ -z "$label_var" ] || export "$label_var=integration"
-        ./tests/integration/run_integration.sh || { echo "  [FAILED] integration"; rc=1; }
-    else
-        echo "  NOT RUN: dovecot is not installed on this machine (integration needs it)"
-    fi
+    # No skip: a machine without Dovecot fails the integration scripts (their
+    # own tool check), and so this verb.
+    echo "--- instrumented: integration ---"
+    [ -z "$label_var" ] || export "$label_var=integration-local"
+    ./tests/integration/run_local_dovecot.sh || { echo "  [FAILED] integration (run_local_dovecot)"; rc=1; }
+    [ -z "$label_var" ] || export "$label_var=integration"
+    ./tests/integration/run_integration.sh || { echo "  [FAILED] integration (run_integration)"; rc=1; }
     return $rc
 }
 
@@ -447,6 +448,171 @@ tag_package_build() {
     echo "Tagged $tag"
 }
 
+# The commit the code of a run is at: the short id of HEAD, with a "+" after it
+# when the working tree has uncommitted changes (EMAIL-121); "unknown" outside a
+# repository.  Used by the timing record and by the result files.
+short_commit() {
+    local c d
+    c=$(git rev-parse --short HEAD) || { echo unknown; return 0; }
+    d=$(git status --porcelain) || d=""
+    [ -z "$d" ] || c="${c}+"
+    echo "$c"
+}
+
+# The result file of a verb (manage-sh-model.md, "The result file", EMAIL-233).
+# result_begin VERB deletes build/result/VERB.result, writes it again as
+# "status: running" and arms an EXIT trap that writes the final file on every
+# way out of the verb: success, a failed suite, a failed build, a signal.
+# run_suite SUITE DIR CMD... runs one suite with its output shown and kept in
+# build/result/log/, counts what the suite's runner counted and records one
+# "suite:" line.  The verb exits with the failure of any suite after all ran.
+RESULT_DIR="$BUILD_DIR/result"
+R_VERB=""; R_FILE=""; R_START=0; R_STARTED=""; R_BAD=0; R_PREFIX=""
+R_SUITES=(); R_EXTRA=()
+
+result_write() {  # result_write STATUS EXITCODE
+    local status="$1" code="$2" tmp="$R_FILE.new" a=0 f=0 line sa sf
+    for line in "${R_SUITES[@]}"; do
+        read -r _ _ sa sf _ <<< "$line"
+        a=$((a + sa)); f=$((f + sf))
+    done
+    {
+        echo "format: manage-result/1"
+        echo "verb: $R_VERB"
+        echo "commit: $(short_commit)"
+        echo "started: $R_STARTED"
+        echo "seconds: $(( $(date +%s) - R_START ))"
+        echo "exit: $code"
+        echo "status: $status"
+        echo "suites: ${#R_SUITES[@]}"
+        echo "assertions: $a"
+        echo "failed: $f"
+        for line in "${R_EXTRA[@]}"; do echo "$line"; done
+        for line in "${R_SUITES[@]}"; do echo "suite: $line"; done
+    } > "$tmp" && mv -- "$tmp" "$R_FILE"
+}
+
+result_exit() {
+    local rc=$? status
+    trap - EXIT
+    if [ "$rc" -eq 0 ] && [ "$R_BAD" -gt 0 ]; then rc=1; fi
+    if [ "$rc" -eq 0 ] && [ "${#R_SUITES[@]}" -lt 1 ]; then
+        echo "ERROR: $R_VERB ran no suite." >&2
+        rc=1
+    fi
+    if [ "$rc" -eq 0 ]; then status=pass
+    elif [ "$R_BAD" -gt 0 ]; then status=fail
+    else status=error; fi
+    result_write "$status" "$rc" || { echo "ERROR: cannot write $R_FILE" >&2; rc=1; }
+    exit "$rc"
+}
+
+result_begin() {  # result_begin VERB
+    R_VERB="$1"
+    mkdir -p "$RESULT_DIR/log" || exit 1
+    R_FILE="$(cd "$RESULT_DIR" && pwd)/$1.result"
+    rm -f -- "$R_FILE"
+    R_START=$(date +%s); R_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    R_BAD=0; R_PREFIX=""; R_SUITES=(); R_EXTRA=()
+    trap 'exit 143' TERM
+    trap 'exit 130' INT
+    trap 'exit 129' HUP
+    trap result_exit EXIT
+    result_write running 0 || exit 1
+}
+
+# count_assertions LOG prints "RUN FAILED" as the suite's own runner counted:
+# "Tests Run:/Tests Failed:" (unit and pty runners), else "Passed: P / T"
+# (functional and integration scripts), else the [PASS] and [FAIL] lines.
+count_assertions() {
+    awk '
+        /^Tests Run:/    { r += $3; have_r = 1 }
+        /^Tests Failed:/ { rf += $3 }
+        /^Passed: [0-9]+ \/ [0-9]+/ { t += $4; tf += $4 - $2; have_t = 1 }
+        /^[ \t]*\[PASS\]/ { pc++ }
+        /^[ \t]*\[FAIL\]/ { fc++ }
+        END {
+            if (have_r)      print r + 0, rf + 0
+            else if (have_t) print t + 0, tf + 0
+            else             print pc + fc, fc + 0
+        }' "$1"
+}
+
+run_suite() {  # run_suite NAME DIR CMD [ARGS...]
+    local name="$1" dir="$2" log t0 t1 rc a f st
+    shift 2
+    log="$RESULT_DIR/log/$R_VERB-${R_PREFIX//\//-}$name.log"
+    t0=$(date +%s)
+    echo "--- $R_VERB: $R_PREFIX$name ---"
+    ( cd "$dir" && "$@" ) 2>&1 | tee "$log"
+    rc=${PIPESTATUS[0]}
+    t1=$(date +%s)
+    read -r a f < <(count_assertions "$log")
+    if [ "$rc" -eq 0 ] && [ "$a" -ge 1 ] && [ "$f" -eq 0 ]; then st=pass
+    elif [ "$rc" -eq 124 ]; then st=timeout
+    elif [ "$rc" -ne 0 ] && [ "$a" -eq 0 ]; then st=crash
+    else st=fail; fi
+    R_SUITES+=("$R_PREFIX$name $st $a $f $((t1 - t0))")
+    result_write running 0 || exit 1
+    if [ "$st" != pass ]; then
+        R_BAD=$((R_BAD + 1))
+        echo "  [FAILED] $R_PREFIX$name: $st (exit $rc, $a assertions counted, $f failed)" >&2
+        return 1
+    fi
+}
+
+# The suites of the verbs, defined once so that a verb and the scope of
+# `coverage` named like it run the same ones.
+run_functional_suites() {  # run_functional_suites [PHASES] [WITH_SCRIPTS: 1|0]
+    local phases="${1:-}" with_scripts="${2:-1}" rc=0 fscript fname
+    cmake --build "$BUILD_DIR" --target tests-functional -- -j"$JOBS" || return 1
+    run_suite run_functional . "$BUILD_DIR/tests/functional/bin/run_functional" ${phases:+--phase "$phases"} || rc=1
+    if [ -z "$phases" ] && [ "$with_scripts" = 1 ]; then
+        # The other declared functional tests (scripts for the manage.sh
+        # verdicts, the package, the static binaries, the skill and the
+        # maps ...) run with it: a declared test that nothing runs proves
+        # nothing.  Every one is a suite of its own in the result file.
+        for fscript in "$BUILD_DIR"/tests/functional/bin/*; do
+            fname=$(basename "$fscript")
+            [ "$fname" = run_functional ] && continue
+            run_suite "$fname" . env MANAGE_TIMED= "$fscript" || rc=1
+        done
+    fi
+    return $rc
+}
+
+run_pty_suites() {  # run_pty_suites [SUITE] : all PTY suites, or the one labelled SUITE
+    local pty_suite="${1:-}" abs_build abs_bin
+    abs_build="$(realpath "$BUILD_DIR")"
+    abs_bin="$(realpath "$BIN_DIR")"
+    pty_rc=0
+    pty_ran=0
+    # Every mock binds a port the kernel picks and every fixture lives under
+    # build/ with the pid in its name, so suites share nothing; a suite runs
+    # from the build directory so that the mocks find tests/certs/test.crt.
+    run_pty_one() {  # run_pty_one <label> <binary> [args…]
+        local label="$1"; shift
+        if [ -n "$pty_suite" ] && [ "$pty_suite" != "$label" ]; then
+            return 0
+        fi
+        pty_ran=$((pty_ran + 1))
+        run_suite "$label" "$abs_build" "$@" || pty_rc=1
+    }
+    for_each_pty_suite run_pty_one "$abs_bin"
+    if [ -n "$pty_suite" ] && [ "$pty_ran" -eq 0 ]; then
+        echo "ERROR: no PTY suite is called '$pty_suite'" >&2
+        return 1
+    fi
+    return $pty_rc
+}
+
+run_integration_suites() {
+    local rc=0
+    run_suite run_integration . ./tests/integration/run_integration.sh || rc=1
+    run_suite run_local_dovecot . ./tests/integration/run_local_dovecot.sh || rc=1
+    return $rc
+}
+
 # Every verb that does work times itself (manage-sh-model.md): the verb is re-run
 # by this script under MANAGE_TIMED=1 and one line
 # "<UTC time> <verb> <s>s <ok|fail> <commit>" is appended to the timing log,
@@ -455,7 +621,7 @@ tag_package_build() {
 # overrides the log path (the tests keep theirs under build/).
 TIMING_LOG="${MANAGE_TIMING_LOG:-$BUILD_DIR/timing.log}"
 case "$1" in
-    build|debug|test|coverage|valgrind|functional|pty|integration|integration-local|e2e|headers|names|declared|check|package|install)
+    build|debug|test|coverage|valgrind|functional|pty|integration|headers|names|declared|check|package|install)
         if [ -z "${MANAGE_TIMED:-}" ]; then
             timed_start=$(date +%s)
             timed_rc=0
@@ -464,11 +630,7 @@ case "$1" in
             timed_res=ok
             [ "$timed_rc" -eq 0 ] || timed_res=fail
             mkdir -p "$(dirname "$TIMING_LOG")" || exit 1
-            timed_commit=$(git rev-parse --short HEAD) || timed_commit=unknown
-            if [ "$timed_commit" != unknown ]; then
-                timed_dirty=$(git status --porcelain) || timed_dirty=""
-                [ -z "$timed_dirty" ] || timed_commit="${timed_commit}+"
-            fi
+            timed_commit=$(short_commit)
             printf '%s %s %ss %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" \
                 "$((timed_end - timed_start))" "$timed_res" "$timed_commit" >> "$TIMING_LOG" || exit 1
             exit "$timed_rc"
@@ -524,85 +686,41 @@ case "$1" in
         $BIN_PATH
         ;;
     test)
+        result_begin test
         echo "Running unit tests with ASAN..."
         build_debug
         build_test_runner
         # An optional second argument runs only the test suites whose name
         # contains it: ./manage.sh test test_mime
-        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner ${2:+"$2"})
+        run_suite unit "$BUILD_DIR" ./tests/unit/bin/test-runner ${2:+"$2"} || exit 1
         ;;
     functional)
+        result_begin functional
         echo "Running functional tests..."
         build_release
-        cmake --build "$BUILD_DIR" --target tests-functional -- -j"$JOBS"
-        functional_rc=0
-        "$BUILD_DIR/tests/functional/bin/run_functional" ${2:+--phase "$2"} || functional_rc=$?
-        if [ -z "$2" ]; then
-            # The other declared functional tests (scripts for the manage.sh
-            # verdicts, the package, the static binaries, the skill and the
-            # maps ...) run with it: a declared test that nothing runs proves
-            # nothing.  Every one is named in the summary.
-            functional_summary=""
-            for fscript in "$BUILD_DIR"/tests/functional/bin/*; do
-                fname=$(basename "$fscript")
-                [ "$fname" = run_functional ] && continue
-                echo "=== functional: $fname ==="
-                if MANAGE_TIMED= "$fscript"; then
-                    functional_summary="${functional_summary}  $(printf '%-26s' "$fname") PASS"$'\n'
-                else
-                    functional_summary="${functional_summary}  $(printf '%-26s' "$fname") FAIL"$'\n'
-                    functional_rc=1
-                fi
-            done
-            echo ""
-            echo "=== functional: scripts summary ==="
-            printf '%s' "$functional_summary"
-        fi
-        [ "$functional_rc" -eq 0 ] || { echo "functional tests FAILED" >&2; exit 1; }
+        run_functional_suites "${2:-}" 1 || { echo "functional tests FAILED" >&2; exit 1; }
         ;;
     pty)
+        result_begin pty
         echo "Running PTY tests..."
         build_release
         cmake --build "$BUILD_DIR" --target $PTY_TARGETS -- -j"$JOBS"
-        ABS_BUILD="$(realpath "$BUILD_DIR")"
-        ABS_BIN="$(realpath "$BIN_DIR")"
         # ./manage.sh pty [SUITE [FILTER]]: SUITE is a label from
         # for_each_pty_suite, FILTER is passed on as TEST_FILTER and selects
         # the tests of that suite whose function name contains it.
-        pty_suite="$2"
-        if [ -n "$3" ]; then export TEST_FILTER="$3"; fi
-        pty_rc=0
-        pty_ran=0
-        run_pty_strict() {  # run_pty_strict <label> <binary> [args…]
-            local label="$1"; shift
-            if [ -n "$pty_suite" ] && [ "$pty_suite" != "$label" ]; then
-                return 0
-            fi
-            pty_ran=$((pty_ran + 1))
-            echo "--- PTY: $label ---"
-            # Every mock binds a port the kernel picks and every fixture lives
-            # under build/ with the pid in its name, so suites share nothing.
-            if ! (cd "$ABS_BUILD" && "$@"); then
-                echo "  [FAILED] $label"
-                pty_rc=1
-            fi
-        }
-        for_each_pty_suite run_pty_strict "$ABS_BIN"
-        if [ -n "$pty_suite" ] && [ "$pty_ran" -eq 0 ]; then
-            echo "ERROR: no PTY suite is called '$pty_suite'" >&2
-            exit 1
-        fi
-        exit $pty_rc
+        if [ -n "${3:-}" ]; then export TEST_FILTER="$3"; fi
+        run_pty_suites "${2:-}" || exit 1
         ;;
     valgrind)
+        result_begin valgrind
         echo "Running unit tests with Valgrind..."
         build_release
         build_test_runner
-        (cd "$BUILD_DIR" && valgrind --leak-check=full --error-exitcode=1 \
-            --child-silent-after-fork=yes ./tests/unit/bin/test-runner)
+        run_suite unit "$BUILD_DIR" valgrind --leak-check=full --error-exitcode=1 \
+            --child-silent-after-fork=yes ./tests/unit/bin/test-runner || exit 1
         ;;
     sanitize)
-        echo "Running unit, functional, pty and integration-local with ASan and UBSan..."
+        echo "Running unit, functional, pty and integration with ASan and UBSan..."
         cmake_configure Debug "-DENABLE_UBSAN=ON"
         cmake_build
         cmake --build "$BUILD_DIR" --target tests-unit tests-functional $PTY_TARGETS -- -j"$JOBS"
@@ -620,8 +738,8 @@ case "$1" in
         [ "$san_rc" -eq 0 ] || { echo "sanitize FAILED (logs: $SAN_DIR)" >&2; exit 1; }
         echo "sanitize passed"
         ;;
-    valgrind-all)
-        echo "Running unit, functional, pty and integration-local under Valgrind..."
+    memcheck)
+        echo "Running unit, functional, pty and integration under Valgrind..."
         cmake_configure Release "-DEMAIL_STATIC=OFF -DCMAKE_C_FLAGS=-g"
         cmake_build
         cmake --build "$BUILD_DIR" --target tests-unit tests-functional $PTY_TARGETS -- -j"$JOBS"
@@ -653,57 +771,45 @@ case "$1" in
         # were run above, so only the other suites go through it.
         SKIP_UNIT=1 run_instrumented_suites "$VG_BIN" VG_TEST_NAME || vg_rc=1
         ./tests/sanitize/scan_logs.sh valgrind "$VG_LOG_DIR" || vg_rc=1
-        [ "$vg_rc" -eq 0 ] || { echo "valgrind-all FAILED (logs: $VG_LOG_DIR)" >&2; exit 1; }
-        echo "valgrind-all passed"
+        [ "$vg_rc" -eq 0 ] || { echo "memcheck FAILED (logs: $VG_LOG_DIR)" >&2; exit 1; }
+        echo "memcheck passed"
         ;;
     coverage)
+        result_begin coverage
         cmake_configure Debug "-DENABLE_COVERAGE=ON"
         cmake_build
         build_test_runner
         echo "Building PTY test binaries..."
         cmake --build "$BUILD_DIR" --target $PTY_TARGETS tests-functional -- -j"$JOBS"
 
-        # Pass 1 — functional suite + PTY tests (fresh .gcda) → functional badge
-        find "$BUILD_DIR" -name "*.gcda" -delete
-        # The report is still produced when the suite fails, but the failure is
-        # the verdict of this run: it is kept and returned at the end.
-        functional_rc=0
-        "$BUILD_DIR/tests/functional/bin/run_functional" || functional_rc=$?
-        pty_cov_rc=0
-        echo "Running PTY tests for coverage..."
         ABS_BUILD="$(realpath "$BUILD_DIR")"
-        ABS_BIN="$(realpath "$BIN_DIR")"
-        # Every suite contributes to the measured coverage.  Failures are
-        # tolerated here on purpose — the report must still be produced — but
-        # they are reported, and `./manage.sh pty` (which CI runs) fails on them.
-        run_pty_lenient() {  # run_pty_lenient <label> <binary> [args…]
-            local label="$1"; shift
-            # PTY tests run from the build directory so that mock servers find
-            # tests/certs/test.crt relative to cwd.  Output is captured rather
-            # than discarded: a suite that fails only under the coverage build
-            # is exactly the one whose failure lines nobody can reconstruct
-            # afterwards, and a bare "reported failures" says nothing.
-            local log="$ABS_BUILD/pty-coverage-$label.log"
-            if ! (cd "$ABS_BUILD" && "$@" >"$log" 2>&1); then
-                echo "  [warn] PTY suite '$label' reported failures (coverage run continues):"
-                grep -E "\[FAIL\]|ASSERT|Segmentation|Assertion" "$log" | head -20 | sed 's/^/    /'
-                echo "    (full output: $log)"
-                pty_cov_rc=1
-            fi
-        }
+        ROOT_ABS="$(pwd)"
         # A program that is killed while it writes its .gcda at exit leaves a
         # truncated file that fails lcov (EMAIL-119): the PTY harness lets a
         # child that is on its way out finish before it signals it.
         export PTYTEST_CLOSE_GRACE_MS="${PTYTEST_CLOSE_GRACE_MS:-3000}"
-        for_each_pty_suite run_pty_lenient "$ABS_BIN"
-        gcda_rc=0
-        tests/functional/gcda_check.sh "$ABS_BUILD" || gcda_rc=$?
+        # build/coverage/<scope>/ keeps the raw data of a scope for the
+        # integrator (manage-sh-model.md): the .gcno and .gcda files of the
+        # instrumented build tree, in the tree's own layout.  Counters are
+        # zeroed before each scope; the snapshots themselves are left out.
+        zero_counters() {
+            find "$BUILD_DIR" -name '*.gcda' -not -path "$BUILD_DIR/coverage/*" -delete
+        }
+        snapshot_scope() {  # snapshot_scope <unit|external>
+            local dest="$ABS_BUILD/coverage/$1"
+            mkdir -p "$dest" || return 1
+            find "$dest" -type f -delete || return 1
+            (cd "$BUILD_DIR" && find . -path ./coverage -prune -o -type f \
+                \( -name '*.gcno' -o -name '*.gcda' \) -exec cp --parents -t "$dest" {} +)
+        }
         # One definition of "product code" for every report: the program's own
         # sources.  Test code, the PTY library and the system headers are not
         # measured (policies/testing-model.md, Coverage).
-        ROOT_ABS="$(pwd)"
         capture_product() {  # capture_product <raw.info> <product.info>
-            (cd "$BUILD_DIR" && lcov --capture --directory . --output-file "$1" && \
+            local dirs=() d
+            while IFS= read -r d; do dirs+=(--directory "$d"); done < <(cd "$BUILD_DIR" && \
+                find . -name '*.gcno' -not -path './coverage/*' -printf '%h\n' | sort -u)
+            (cd "$BUILD_DIR" && lcov --capture "${dirs[@]}" --output-file "$1" && \
              lcov --extract "$1" --ignore-errors unused \
                   "$ROOT_ABS/src/*" "$ROOT_ABS/libemail/src/*" "$ROOT_ABS/libemail-client/src/*" \
                   --output-file "$2")
@@ -711,23 +817,42 @@ case "$1" in
         line_pct() {         # line_pct <product.info> -> "91.8"
             lcov --summary "$BUILD_DIR/$1" 2>&1 | grep 'lines' | grep -oP '[0-9]+\.[0-9]+(?=%)' | head -1
         }
+        line_counts() {      # line_counts <product.info> -> "covered total"
+            lcov --summary "$BUILD_DIR/$1" 2>&1 | grep 'lines' | grep -oP '\(\K[0-9]+ of [0-9]+' | head -1 | awk '{print $1, $3}'
+        }
 
-        # External suites alone: functional + PTY (black-box, instrumented binaries).
-        echo "Capturing external (functional + PTY) coverage..."
+        # External scope: the functional, PTY and integration suites together
+        # (black-box, instrumented binaries), from fresh counters.  The scripts
+        # of the functional verb that rebuild the tree (the package tests) are
+        # left to `functional`: they would replace the instrumented build.
+        coverage_run_rc=0
+        zero_counters
+        R_PREFIX="external/"
+        run_functional_suites "" 0 || coverage_run_rc=1
+        run_pty_suites "" || coverage_run_rc=1
+        run_integration_suites || coverage_run_rc=1
+        gcda_rc=0
+        tests/functional/gcda_check.sh "$ABS_BUILD" || gcda_rc=$?
+        echo "Capturing external (functional + PTY + integration) coverage..."
         capture_product coverage-functional-raw.info coverage-functional.info
+        snapshot_scope external || exit 1
+        R_EXTRA+=("scope: external build/coverage/external $(line_counts coverage-functional.info)")
 
         # Unit tests on top of the same .gcda give the union of everything.
         # (LCOV 2.x --add-tracefile intersects lines instead of unioning; running
         # both kinds in sequence and capturing once gives the correct union.)
-        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner)
+        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner) || coverage_run_rc=1
         echo "Capturing combined coverage..."
         capture_product coverage-raw.info coverage.info
 
-        # Unit tests alone, from fresh counters: they have to stand on their own.
-        find "$BUILD_DIR" -name "*.gcda" -delete
-        (cd "$BUILD_DIR" && ./tests/unit/bin/test-runner)
+        # Unit scope: from fresh counters, the unit tests have to stand on their own.
+        zero_counters
+        R_PREFIX="unit/"
+        run_suite unit "$BUILD_DIR" ./tests/unit/bin/test-runner || coverage_run_rc=1
         echo "Capturing unit-only coverage..."
         capture_product coverage-unit-raw.info coverage-unit.info
+        snapshot_scope unit || exit 1
+        R_EXTRA+=("scope: unit build/coverage/unit $(line_counts coverage-unit.info)")
 
         echo "Generating coverage reports..."
         (cd "$BUILD_DIR" && \
@@ -741,9 +866,9 @@ case "$1" in
         COVERAGE_TARGET=90   # policy target for everything together (not a gate)
         echo ""
         echo "Line coverage of product code (src/, libemail/src/, libemail-client/src/):"
-        echo "  unit tests alone            ${UNIT_PCT}%   (minimum ${COVERAGE_MIN}%)"
-        echo "  functional + PTY together   ${EXT_PCT}%   (minimum ${COVERAGE_MIN}%)"
-        echo "  everything combined         ${ALL_PCT}%   (target ${COVERAGE_TARGET}%)"
+        echo "  unit tests alone                    ${UNIT_PCT}%   (minimum ${COVERAGE_MIN}%)"
+        echo "  functional + PTY + integration      ${EXT_PCT}%   (minimum ${COVERAGE_MIN}%)"
+        echo "  everything combined                 ${ALL_PCT}%   (target ${COVERAGE_TARGET}%)"
         # Kept for the per-release record (docs/dev/testing.md), so the figures
         # quoted anywhere are the ones of a run, with its date and commit.
         tests/functional/coverage_summary.sh "$(date +%F)" "$(git rev-parse --short=12 HEAD)" \
@@ -752,7 +877,7 @@ case "$1" in
         echo "Combined report:  $BUILD_DIR/coverage_report/index.html"
         echo "External report:  $BUILD_DIR/coverage_functional_report/index.html"
         coverage_gate_rc=0
-        for pair in "unit tests alone:$UNIT_PCT" "functional + PTY:$EXT_PCT"; do
+        for pair in "unit tests alone:$UNIT_PCT" "functional + PTY + integration:$EXT_PCT"; do
             label="${pair%%:*}"; pct="${pair##*:}"
             if [ -z "$pct" ]; then
                 echo "ERROR: no coverage figure for '$label'." >&2
@@ -766,12 +891,11 @@ case "$1" in
             echo "note: the combined figure is below the ${COVERAGE_TARGET}% target (not a gate)."
         fi
         if [ "$gcda_rc" -ne 0 ]; then
-            echo "ERROR: coverage run failed: invalid .gcda files (named above, see build/pty-coverage-*.log)." >&2
+            echo "ERROR: coverage run failed: invalid .gcda files (named above, see build/result/log/)." >&2
             exit 1
         fi
-        if [ "$functional_rc" -ne 0 ] || [ "$pty_cov_rc" -ne 0 ]; then
-            echo "ERROR: coverage run failed: functional suite status $functional_rc," \
-                 "PTY suites status $pty_cov_rc (reports above were still produced)." >&2
+        if [ "$coverage_run_rc" -ne 0 ]; then
+            echo "ERROR: coverage run failed: a suite failed (named above; the reports were still produced)." >&2
             exit 1
         fi
         if [ "$coverage_gate_rc" -ne 0 ]; then
@@ -779,32 +903,9 @@ case "$1" in
         fi
         ;;
     integration)
+        result_begin integration
         build_release
-        ./tests/integration/run_integration.sh
-        ;;
-    integration-local)
-        build_release
-        ./tests/integration/run_local_dovecot.sh
-        ;;
-    e2e)
-        # End-to-end tests (tests/e2e): they install the package into an LXC
-        # container they create themselves, so the package is built first.
-        ./manage.sh package deb || exit 1
-        cmake --build "$BUILD_DIR" --target tests-e2e -- -j"$JOBS" || exit 1
-        e2e_rc=0
-        e2e_ran=0
-        for e2e_test in "$BUILD_DIR"/tests/e2e/bin/*; do
-            [ -x "$e2e_test" ] || continue
-            if [ -n "${2:-}" ] && [ "$(basename "$e2e_test")" != "$2" ]; then continue; fi
-            e2e_ran=$((e2e_ran + 1))
-            echo "--- e2e: $(basename "$e2e_test") ---"
-            "$e2e_test" || e2e_rc=1
-        done
-        if [ "$e2e_ran" -eq 0 ]; then
-            echo "ERROR: no e2e test ran${2:+ (no test named $2)}" >&2
-            exit 1
-        fi
-        exit "$e2e_rc"
+        run_integration_suites || exit 1
         ;;
     headers)
         check_source_headers "${2:-.}"
@@ -947,7 +1048,11 @@ case "$1" in
         rm -rf "./build" "./bin"
         echo "Cleaned."
         ;;
-    help|*)
+    help)
         show_help
+        ;;
+    *)
+        show_help >&2
+        exit 2
         ;;
 esac

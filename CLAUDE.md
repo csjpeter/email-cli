@@ -146,6 +146,16 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 - Exit codes: `0` = success, non-zero = failure (use `EXIT_SUCCESS`/`EXIT_FAILURE`).
 - Errors go to **stderr**; normal output to **stdout**.
 
+## Error messages instead of a log file (owner, 2026-10-27)
+
+**Goal: a production fault can be understood and traced from its error message alone, without a log file.** A client should not need a log (`../policies/logging-model.md`); the session log of `logger.h` is tolerated, off unless asked for, and not extended. An error shown to the user must therefore carry what a log line would have:
+
+- **what failed** (the operation, in the user's terms) and **where** (account, folder or message id, server and port, the protocol step: connect, TLS, login, SELECT, FETCH, send, REST call);
+- **what the other side said**, verbatim and bounded: the IMAP/SMTP status line and code, the Gmail REST HTTP status, `error.status`, `error.message` and `reason`, the OpenSSL error string, `errno` text;
+- **what to try** when the cause is known (re-run `login`, check the clock, the quota, the scope).
+
+This matters most for faults the tests cannot produce without the real server (Gmail, a particular IMAP server): the mock servers in `tests/functional/` must be extended to answer with such a refusal, and each error path has a test that checks the message holds the server's words. Secrets (passwords, tokens, message bodies) never go into an error message.
+
 ## Dependency Policy
 
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, and libssl (OpenSSL).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.

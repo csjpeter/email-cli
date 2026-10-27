@@ -172,6 +172,10 @@ char *gmail_get_history(GmailClient *c, const char *history_id);
 typedef void (*GmailProgressFn)(size_t current, size_t total, void *ctx);
 
 /** @brief Install a progress callback (called during list/sync operations). */
+/** See gmail_last_error in the docs: what Google said to the last failed call
+ *  (verb, endpoint, HTTP status, error.status, error.message, reason, hint). */
+const char *gmail_last_error(const GmailClient *c);
+
 void gmail_set_progress(GmailClient *c, GmailProgressFn fn, void *ctx);
 
 /**

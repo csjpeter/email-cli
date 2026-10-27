@@ -812,7 +812,7 @@ case "$1" in
             while IFS= read -r d; do dirs+=(--directory "$d"); done < <(cd "$BUILD_DIR" && \
                 find . -name '*.gcno' -not -path './coverage/*' | cut -d/ -f2 | sort -u | \
                 while IFS= read -r t; do [ -d "$t" ] && echo "$t"; done)
-            (cd "$BUILD_DIR" && lcov --capture "${dirs[@]}" --output-file "$1" && \
+            (cd "$BUILD_DIR" && lcov --capture --ignore-errors empty "${dirs[@]}" --output-file "$1" && \
              lcov --extract "$1" --ignore-errors unused \
                   "$ROOT_ABS/src/*" "$ROOT_ABS/libemail/src/*" "$ROOT_ABS/libemail-client/src/*" \
                   --output-file "$2")

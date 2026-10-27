@@ -43,7 +43,7 @@ PID=$!
 
 # Wait until the handler is installed: /proc/PID/status lists the signals the
 # process catches (SigCgt, a hex mask); SIGTERM is bit 14 (0x4000).  The wrapper
-# of valgrind-all execs Valgrind first, so this can take a while.
+# of memcheck execs Valgrind first, so this can take a while.
 caught=0
 for _ in $(seq 1 600); do
     [ -d "/proc/$PID" ] || break

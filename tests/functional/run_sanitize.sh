@@ -4,7 +4,7 @@
 # Created: 2026-10-22
 # Tests that the sanitizer and Valgrind verdicts of manage.sh catch a real fault.
 
-# EMAIL-224: `manage.sh sanitize` and `valgrind-all` turn the logs of an
+# EMAIL-224: `manage.sh sanitize` and `memcheck` turn the logs of an
 # instrumented run into a verdict (tests/sanitize/scan_logs.sh) and start every
 # program through tests/sanitize/valgrind-program.sh.  Here a program with a
 # deliberate leak and one with a heap overflow are built in a scratch directory
@@ -43,7 +43,7 @@ C
 # 1. help lists both verbs.
 out=$("$ROOT/manage.sh" help)
 echo "$out" | grep -q '^  sanitize '     && ok "1.1 help lists sanitize"     || bad "1.1 help has no sanitize"
-echo "$out" | grep -q '^  valgrind-all ' && ok "1.2 help lists valgrind-all" || bad "1.2 help has no valgrind-all"
+echo "$out" | grep -q '^  memcheck ' && ok "1.2 help lists memcheck" || bad "1.2 help has no memcheck"
 
 # 2. the sanitizer verdict: an empty log directory passes, any file fails and is named.
 out=$("$SCAN" sanitizer "$WORK/scan" 2>&1); rc=$?
@@ -70,7 +70,7 @@ out=$("$SCAN" sanitizer "$WORK/asan-overflow" 2>&1); src=$?
 [ "$rc" -ne 0 ] && [ "$src" -eq 1 ] && echo "$out" | grep -q 'heap-buffer-overflow' \
     && ok "3.3 a deliberate overflow fails and its log is named" || bad "3.3 rc=$rc scan=$src: $out"
 
-# 4. Valgrind through the wrapper that valgrind-all copies beside each program.
+# 4. Valgrind through the wrapper that memcheck copies beside each program.
 gcc -g -O0 "$WORK/src/clean.c" -o "$WORK/vg-bin/clean.bin" || bad "4.0 build clean"
 gcc -g -O0 "$WORK/src/leak.c"  -o "$WORK/vg-bin/leak.bin"  || bad "4.0 build leak"
 cp "$ROOT/tests/sanitize/valgrind-program.sh" "$WORK/vg-bin/clean" || bad "4.0 copy wrapper"
@@ -103,7 +103,7 @@ grep -q 'EMAIL_TEST_BIN_DIR' "$ROOT/tests/functional/run_functional.sh" \
 grep -q 'log_path=\$SAN_DIR' "$ROOT/manage.sh" && grep -q 'halt_on_error=1' "$ROOT/manage.sh" \
     && ok "6.2 sanitize writes its logs under build/ and halts UBSan on the first error" || bad "6.2 sanitize options missing"
 grep -q 'EMAIL_TEST_WAIT_SCALE' "$ROOT/manage.sh" && grep -q 'getenv("EMAIL_TEST_WAIT_SCALE")' "$ROOT/tests/pty/wait_scale.h" \
-    && ok "6.3 valgrind-all stretches the waits of the PTY tests" || bad "6.3 no wait scale for Valgrind"
+    && ok "6.3 memcheck stretches the waits of the PTY tests" || bad "6.3 no wait scale for Valgrind"
 unscaled=$(grep -l '^#define WAIT_MS' "$ROOT"/tests/pty/*.c | xargs grep -L 'wait_scale()')
 [ -z "$unscaled" ] && ok "6.4 every PTY test file scales its waits" || bad "6.4 unscaled: $unscaled"
 

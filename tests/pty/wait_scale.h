@@ -6,7 +6,7 @@
  * @file wait_scale.h
  * @brief Waits of the PTY tests, scaled for programs run under Valgrind.
  *
- * `manage.sh valgrind-all` runs every program under memcheck, which is ten to
+ * `manage.sh memcheck` runs every program under memcheck, which is ten to
  * fifty times slower; it sets EMAIL_TEST_WAIT_SCALE so that a wait for a screen
  * (a sync, a TLS handshake) is as many times longer.  Unset, the factor is 1
  * and the tests wait as they always did.

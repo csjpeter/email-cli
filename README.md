@@ -73,7 +73,7 @@ The same build also ships **`libemail-client`** (`libemail-client0`,
   Logs may include server responses; rotate or delete them as needed.
 - **Memory safety:** The codebase is tested with AddressSanitizer and Valgrind on every
   CI run to eliminate memory leaks and buffer overflows. `./manage.sh sanitize` and
-  `./manage.sh valgrind-all` run the unit, functional and PTY suites with the programs
+  `./manage.sh memcheck` run the unit, functional and PTY suites with the programs
   themselves under ASan + UBSan and under Valgrind. See the [developer docs](docs/)
   for details.
 

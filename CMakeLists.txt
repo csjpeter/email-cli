@@ -40,7 +40,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ENABLE_COVERAGE)
     endif()
 endif()
 
-# `manage.sh valgrind-all` (EMAIL-224) builds the programs dynamic: Valgrind
+# `manage.sh memcheck` (EMAIL-224) builds the programs dynamic: Valgrind
 # replaces malloc through the dynamic loader and sees nothing of a static one.
 option(EMAIL_STATIC "Link the programs fully static (the shipped form)" ON)
 

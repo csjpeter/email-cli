@@ -728,6 +728,26 @@ No SMTP configuration is stored or needed for Gmail accounts.
 | 429 Too Many Requests | Exponential backoff: 1s → 2s → 4s → 8s → 16s → 30s cap; retry up to 6 times |
 | 5xx Server Error | Retry 3 times with exponential backoff; then display: `"Gmail API temporarily unavailable."` |
 
+### Error message content (EMAIL-236)
+
+Whatever the handling above, a failed REST call is reported with what Google
+said, so it can be traced without a log (`gmail_last_error()`, shown through
+`emc_last_error()`):
+
+`Gmail <VERB> <endpoint>: HTTP <code> <error.status>: <error.message> (reason: <reason>); <hint>`
+
+- The endpoint is the path after the API base with message or label id and
+  **without** the query (a search query may be private).
+- `error.status`, `error.message` and `reason` come from the JSON body, each
+  bounded; a body that is not the Google error shape is shown as a bounded
+  `body: ...` excerpt, an empty one as `empty body`; a dropped connection as
+  `no response (<transport reason>)`.
+- Hints: 401 renew with `email-cli config reauth`, 403 scope or quota,
+  404 object gone, 429 rate limit, 5xx try later.
+- No access token and no message body is ever part of the text.
+- A refused page of `gmail_list_messages()` is an error (-1), never an empty
+  mailbox.
+
 ### Sync Error Recovery
 
 If incremental sync fails with `historyId` not found (HTTP 404 on the

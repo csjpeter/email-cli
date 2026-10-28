@@ -1324,6 +1324,182 @@ static void test_expired_token_that_cannot_be_refreshed_fails(void) {
 
 /* ── Registration ─────────────────────────────────────────────────── */
 
+/* ── Error messages hold the server's words (EMAIL-236) ───────────── */
+
+/* Answers one connection with the raw bytes @p raw (HTTP head included), or
+ * drops it unanswered when @p raw is NULL. */
+static pid_t start_canned_server(int *port_out, const char *status, const char *body) {
+    int listen_fd = make_mock_listener(port_out);
+    if (listen_fd < 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) { close(listen_fd); return -1; }
+    if (pid == 0) {
+        int cfd = accept(listen_fd, NULL, NULL);
+        if (cfd >= 0) {
+            struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+            setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            char buf[8192];
+            mock_read_request(cfd, buf, (int)sizeof(buf));
+            if (status) {
+                char head[256];
+                snprintf(head, sizeof(head),
+                         "HTTP/1.1 %s\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+                         status, strlen(body));
+                ssize_t r = write(cfd, head, strlen(head)); (void)r;
+                r = write(cfd, body, strlen(body)); (void)r;
+            }
+            close(cfd);
+        }
+        close(listen_fd);
+        GCOV_FLUSH();
+        _exit(0);
+    }
+    close(listen_fd);
+    return pid;
+}
+
+/* One refused trash call: the message must hold every word in @p w1..w4
+ * (NULL = skip) and never the access token. */
+static void check_refusal(const char *name, const char *status, const char *body, const char *w1,
+                          const char *w2, const char *w3, const char *w4) {
+    int port = 0;
+    pid_t pid = start_canned_server(&port, status, body);
+    if (pid < 0) { ASSERT(0, "refusal: could not start mock server"); return; }
+    usleep(20000);
+    GmailClient *c = make_test_client(port);
+    ASSERT(c != NULL, "refusal: client connected");
+    if (!c) { wait_child(pid); return; }
+    ASSERT(gmail_trash(c, "msg1234") != 0, name);
+    const char *e = gmail_last_error(c);
+    char what[200];
+    snprintf(what, sizeof(what), "%s: names the call (%s)", name, e);
+    ASSERT(strstr(e, "POST /messages/msg1234/trash") != NULL, what);
+    const char *w[4] = {w1, w2, w3, w4};
+    for (int i = 0; i < 4; i++) {
+        if (!w[i]) continue;
+        snprintf(what, sizeof(what), "%s: holds '%s' (%s)", name, w[i], e);
+        ASSERT(strstr(e, w[i]) != NULL, what);
+    }
+    ASSERT(strstr(e, "test_access_token") == NULL, "refusal: no token in the message");
+    gmail_disconnect(c);
+    wait_child(pid);
+}
+
+static void test_error_403_reason(void) {
+    check_refusal("403",
+        "403 Forbidden",
+        "{\"error\":{\"code\":403,\"message\":\"Insufficient Permission\","
+        "\"errors\":[{\"message\":\"Insufficient Permission\",\"domain\":\"global\","
+        "\"reason\":\"insufficientPermissions\"}],\"status\":\"PERMISSION_DENIED\"}}",
+        "HTTP 403", "PERMISSION_DENIED", "Insufficient Permission",
+        "reason: insufficientPermissions");
+}
+
+static void test_error_404(void) {
+    check_refusal("404",
+        "404 Not Found",
+        "{\"error\":{\"code\":404,\"message\":\"Requested entity was not found.\","
+        "\"status\":\"NOT_FOUND\"}}",
+        "HTTP 404", "NOT_FOUND", "Requested entity was not found.", NULL);
+}
+
+static void test_error_429(void) {
+    check_refusal("429",
+        "429 Too Many Requests",
+        "{\"error\":{\"code\":429,\"message\":\"Rate Limit Exceeded\","
+        "\"errors\":[{\"reason\":\"rateLimitExceeded\"}],\"status\":\"RESOURCE_EXHAUSTED\"}}",
+        "HTTP 429", "RESOURCE_EXHAUSTED", "reason: rateLimitExceeded", "rate limit");
+}
+
+static void test_error_5xx(void) {
+    check_refusal("503",
+        "503 Service Unavailable",
+        "{\"error\":{\"code\":503,\"message\":\"Backend Error\",\"status\":\"UNAVAILABLE\"}}",
+        "HTTP 503", "UNAVAILABLE", "Backend Error", "try again later");
+}
+
+static void test_error_non_json_body(void) {
+    check_refusal("html",
+        "502 Bad Gateway",
+        "<html>proxy broke</html>",
+        "HTTP 502", "body: <html>proxy broke</html>", NULL, NULL);
+}
+
+static void test_error_empty_body(void) {
+    check_refusal("empty",
+        "500 Internal Server Error", "",
+        "HTTP 500", "empty body", NULL, NULL);
+}
+
+static void test_error_dropped_connection(void) {
+    check_refusal("dropped", NULL, NULL, "no response", NULL, NULL, NULL);
+}
+
+static void test_error_401_cannot_refresh(void) {
+    /* 401, and the refresh has no refresh token: both are said. */
+    int port = 0;
+    pid_t pid = start_canned_server(&port, "401 Unauthorized",
+        "{\"error\":{\"code\":401,\"message\":\"Invalid Credentials\","
+        "\"status\":\"UNAUTHENTICATED\"}}");
+    if (pid < 0) { ASSERT(0, "401: could not start mock server"); return; }
+    usleep(20000);
+    char api_base[128];
+    snprintf(api_base, sizeof(api_base), "http://127.0.0.1:%d/gmail/v1/users/me", port);
+    setenv("GMAIL_TEST_TOKEN", "test_access_token_12345", 1);
+    setenv("GMAIL_API_BASE_URL", api_base, 1);
+    static Config cfg;               /* the client borrows it */
+    cfg.gmail_mode = 1;
+    cfg.gmail_refresh_token = "fake_refresh_token";
+    GmailClient *c = gmail_connect(&cfg);
+    ASSERT(c != NULL, "401: client connected");
+    if (!c) { wait_child(pid); return; }
+    cfg.gmail_refresh_token = NULL;
+    unsetenv("GMAIL_TEST_TOKEN");
+    ASSERT(gmail_trash(c, "m1") != 0, "401: fails");
+    const char *e = gmail_last_error(c);
+    ASSERT(strstr(e, "HTTP 401") && strstr(e, "UNAUTHENTICATED") &&
+           strstr(e, "Invalid Credentials") && strstr(e, "config reauth"), e);
+    gmail_disconnect(c);
+    wait_child(pid);
+}
+
+static void test_error_refused_list_page_is_an_error(void) {
+    int port = 0;
+    pid_t pid = start_canned_server(&port,
+        "403 Forbidden",
+        "{\"error\":{\"message\":\"Quota exceeded\",\"status\":\"DENIED\"}}");
+    if (pid < 0) { ASSERT(0, "list: could not start mock server"); return; }
+    usleep(20000);
+    GmailClient *c = make_test_client(port);
+    ASSERT(c != NULL, "list: client connected");
+    if (!c) { wait_child(pid); return; }
+    char (*uids)[17] = NULL;
+    int count = 0;
+    ASSERT(gmail_list_messages(c, NULL, "secret words", &uids, &count, NULL) != 0,
+           "list: a refused page is a failure, not an empty mailbox");
+    const char *e = gmail_last_error(c);
+    ASSERT(strstr(e, "GET /messages") && strstr(e, "Quota exceeded") &&
+           strstr(e, "HTTP 403") && !strstr(e, "secret words"), e);
+    gmail_disconnect(c);
+    wait_child(pid);
+}
+
+static void test_error_empty_after_success(void) {
+    int port = 0;
+    pid_t pid = start_canned_server(&port,
+        "200 OK", "{}");
+    if (pid < 0) { ASSERT(0, "ok: could not start mock server"); return; }
+    usleep(20000);
+    GmailClient *c = make_test_client(port);
+    ASSERT(c != NULL, "ok: client connected");
+    if (!c) { wait_child(pid); return; }
+    ASSERT(gmail_trash(c, "m1") == 0, "ok: succeeds");
+    ASSERT(gmail_last_error(c)[0] == '\0', "ok: no error text after a success");
+    ASSERT(gmail_last_error(NULL)[0] == '\0', "ok: NULL client has no error");
+    gmail_disconnect(c);
+    wait_child(pid);
+}
+
 void test_gmail_client(void) {
     RUN_TEST(test_connect_not_gmail);
     RUN_TEST(test_connect_no_token);
@@ -1368,4 +1544,14 @@ void test_gmail_client(void) {
     RUN_TEST(test_delete_label_error);
     RUN_TEST(test_expired_token_is_refreshed_and_the_call_repeated);
     RUN_TEST(test_expired_token_that_cannot_be_refreshed_fails);
+    RUN_TEST(test_error_403_reason);
+    RUN_TEST(test_error_404);
+    RUN_TEST(test_error_429);
+    RUN_TEST(test_error_5xx);
+    RUN_TEST(test_error_non_json_body);
+    RUN_TEST(test_error_empty_body);
+    RUN_TEST(test_error_dropped_connection);
+    RUN_TEST(test_error_401_cannot_refresh);
+    RUN_TEST(test_error_refused_list_page_is_an_error);
+    RUN_TEST(test_error_empty_after_success);
 }

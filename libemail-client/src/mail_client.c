@@ -54,6 +54,10 @@ void mail_client_free(MailClient *c) {
     free(c);
 }
 
+const char *mail_client_last_error(const MailClient *c) {
+    return (c && c->gmail) ? gmail_last_error(c->gmail) : "";
+}
+
 int mail_client_uses_labels(const MailClient *c) {
     return c ? c->is_gmail : 0;
 }

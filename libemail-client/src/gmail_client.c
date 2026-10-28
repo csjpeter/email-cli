@@ -33,7 +33,93 @@ struct GmailClient {
     Config *cfg;             /* borrowed, not owned */
     GmailProgressFn progress_fn;
     void   *progress_ctx;
+    char    err[512];        /* what Google said to the last failed call */
 };
+
+/* ── Error text (EMAIL-236) ───────────────────────────────────────── */
+
+/** Copy the string value that follows the first `"key"` in @p json into
+ *  @p out (at most @p cap-1 bytes, control characters become spaces). */
+static int json_find_text(const char *json, const char *key, char *out, size_t cap) {
+    char pat[40];
+    snprintf(pat, sizeof(pat), "\"%s\"", key);
+    const char *p = strstr(json, pat);
+    if (!p) return 0;
+    p += strlen(pat);
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (*p != ':') return 0;
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (*p != '"') return 0;
+    p++;
+    size_t o = 0;
+    while (*p && *p != '"' && o + 1 < cap) {
+        if (*p == '\\' && p[1]) p++;
+        out[o++] = ((unsigned char)*p < 0x20) ? ' ' : *p;
+        p++;
+    }
+    out[o] = '\0';
+    return o > 0;
+}
+
+/** The part of @p url after the API base, without the query (a search
+ *  query may hold private words). */
+static void endpoint_of(const char *url, char *out, size_t cap) {
+    const char *base = gmail_api_base();
+    size_t bl = strlen(base);
+    const char *p = strncmp(url, base, bl) == 0 ? url + bl : url;
+    size_t n = strcspn(p, "?");
+    if (n >= cap) n = cap - 1;
+    memcpy(out, p, n);
+    out[n] = '\0';
+}
+
+/** What to try for a status, or "". */
+static const char *status_hint(long code) {
+    if (code == 401) return "the access token was refused; renew the authorization with: email-cli config reauth";
+    if (code == 403) return "the scope or the quota does not allow this; check the granted scopes and the API quota in the Google console";
+    if (code == 404) return "the message or label does not exist (any more)";
+    if (code == 429) return "rate limit reached; wait and try again";
+    if (code >= 500) return "Google reported a server fault; try again later";
+    return "";
+}
+
+/** Record the refusal of one call.  @p resp may be NULL; @p transport is the
+ *  reason when no response was read. */
+static void note_failure(GmailClient *c, const char *method, const char *url,
+                         long code, const char *resp, const char *transport) {
+    char ep[160];
+    endpoint_of(url, ep, sizeof(ep));
+    if (!resp) {
+        snprintf(c->err, sizeof(c->err), "Gmail %s %s: no response (%s)",
+                 method, ep, transport && transport[0] ? transport : "connection failed");
+        return;
+    }
+    char status[64] = "", msg[200] = "", reason[64] = "";
+    json_find_text(resp, "status", status, sizeof(status));
+    json_find_text(resp, "message", msg, sizeof(msg));
+    json_find_text(resp, "reason", reason, sizeof(reason));
+    int n = snprintf(c->err, sizeof(c->err), "Gmail %s %s: HTTP %ld", method, ep, code);
+    if (status[0]) n += snprintf(c->err + n, sizeof(c->err) - (size_t)n, " %s", status);
+    if (msg[0])    n += snprintf(c->err + n, sizeof(c->err) - (size_t)n, ": %s", msg);
+    if (reason[0]) n += snprintf(c->err + n, sizeof(c->err) - (size_t)n, " (reason: %s)", reason);
+    if (!status[0] && !msg[0] && !reason[0]) {
+        /* not the Google error shape: show a bounded start of what came */
+        char raw[121];
+        size_t k = 0;
+        for (const char *p = resp; *p && k < sizeof(raw) - 1; p++)
+            raw[k++] = ((unsigned char)*p < 0x20) ? ' ' : *p;
+        raw[k] = '\0';
+        if (k) n += snprintf(c->err + n, sizeof(c->err) - (size_t)n, ": body: %s", raw);
+        else   n += snprintf(c->err + n, sizeof(c->err) - (size_t)n, ": empty body");
+    }
+    const char *hint = status_hint(code);
+    if (hint[0]) snprintf(c->err + n, sizeof(c->err) - (size_t)n, "; %s", hint);
+}
+
+const char *gmail_last_error(const GmailClient *c) {
+    return c ? c->err : "";
+}
 
 /* ── HTTP helpers ─────────────────────────────────────────────────── */
 
@@ -56,11 +142,21 @@ static char *api_call(GmailClient *c, const char *method, const char *url,
     };
     char *resp = NULL;
     char err[160];
+    c->err[0] = '\0';
     if (http_request(&req, http_code, &resp, NULL, err, sizeof(err)) != 0) {
         logger_log(LOG_ERROR, "gmail: %s %s failed: %s", method, url, err);
+        note_failure(c, method, url, 0, NULL, err);
         return NULL;
     }
+    if (*http_code >= 400) note_failure(c, method, url, *http_code, resp, NULL);
     return resp;
+}
+
+/** The token refresh after a 401 failed: say so, keeping what Google said. */
+static void refresh_failed(GmailClient *c) {
+    size_t n = strlen(c->err);
+    snprintf(c->err + n, sizeof(c->err) - n,
+             "; refreshing the access token failed too, renew the authorization with: email-cli config reauth");
 }
 
 /** Perform an authenticated GET request. */
@@ -85,7 +181,7 @@ static char *api_get_retry(GmailClient *c, const char *url, long *http_code) {
     if (resp && *http_code == 401) {
         free(resp);
         char *new_token = gmail_auth_refresh(c->cfg);
-        if (!new_token) return NULL;
+        if (!new_token) { refresh_failed(c); return NULL; }
         free(c->access_token);
         c->access_token = new_token;
         resp = api_get(c, url, http_code);
@@ -99,7 +195,7 @@ static char *api_post_retry(GmailClient *c, const char *url,
     if (resp && *http_code == 401) {
         free(resp);
         char *new_token = gmail_auth_refresh(c->cfg);
-        if (!new_token) return NULL;
+        if (!new_token) { refresh_failed(c); return NULL; }
         free(c->access_token);
         c->access_token = new_token;
         resp = api_post_json(c, url, json_body, http_code);
@@ -238,7 +334,7 @@ static char *api_delete_retry(GmailClient *c, const char *url, long *http_code) 
     if (resp && *http_code == 401) {
         free(resp);
         char *new_token = gmail_auth_refresh(c->cfg);
-        if (!new_token) return NULL;
+        if (!new_token) { refresh_failed(c); return NULL; }
         free(c->access_token);
         c->access_token = new_token;
         resp = api_delete(c, url, http_code);
@@ -378,6 +474,7 @@ int gmail_list_messages(GmailClient *c, const char *label_id,
 
     struct msg_id_ctx mc = {0};
     char *page_token = NULL;
+    int failed = 0;
 
     for (;;) {
         /* Build URL with optional query parameters */
@@ -397,6 +494,8 @@ int gmail_list_messages(GmailClient *c, const char *label_id,
         char *resp = api_get_retry(c, url_buf, &code);
         if (!resp || code != 200) {
             free(resp);
+            failed = 1;
+            if (!c->err[0]) note_failure(c, "GET", url_buf, code, NULL, "unexpected status");
             break;
         }
 
@@ -419,6 +518,11 @@ int gmail_list_messages(GmailClient *c, const char *label_id,
         if (!page_token) break;
     }
     free(page_token);
+
+    if (failed) {  /* a refused page is an error, not an empty mailbox */
+        free(mc.uids);
+        return -1;
+    }
 
     *uids_out  = mc.uids;
     *count_out = mc.count;

@@ -69,7 +69,7 @@ The same build also ships **`libemail-client`** (`libemail-client0`,
   verification — never use it in production.
 - **Local cache:** Fetched messages are stored in `~/.local/share/email-cli/` with
   directory permissions `0700`. No external service has access to the cache.
-- **Logs:** Session diagnostics are written to `~/.cache/email-cli/logs/session.log`.
+- **Logs:** Session diagnostics are written to `~/.cache/email-cli/logs/session.log` only when asked for: `--debug` or `EMAIL_CLI_DEBUG=1`.
   Logs may include server responses; rotate or delete them as needed.
 - **Memory safety:** The codebase is tested with AddressSanitizer and Valgrind on every
   CI run to eliminate memory leaks and buffer overflows. `./manage.sh sanitize` and

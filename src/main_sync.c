@@ -57,6 +57,7 @@ static void help(void) {
         "                      automatic sync seems stuck or out of sync)\n"
         "  --verbose, -v       Print per-rule firing details during sync or\n"
         "                      --apply-rules\n"
+        "  --debug             Write a session trace (also: EMAIL_CLI_DEBUG=1)\n"
         "  --help, -h          Show this help message\n"
         "\n"
         "Exit Codes:\n"
@@ -91,6 +92,8 @@ static void help_cron(void) {
 #endif
 
 int main(int argc, char *argv[]) {
+    /* --debug / EMAIL_CLI_DEBUG: the trace is written only on request (EMAIL-240). */
+    int debug_trace = logger_debug_requested(&argc, argv);
     setlocale(LC_ALL, "");
 
     /* TERM unset or dumb: no colour or erase codes in the output (EMAIL-108). */
@@ -143,11 +146,15 @@ int main(int argc, char *argv[]) {
     }
 
     /* Initialize logger */
-    if (fs_mkdir_p(log_dir, 0700) != 0)
-        fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
-    if (logger_init(log_file, LOG_DEBUG) != 0)
-        fprintf(stderr, "Warning: Logging system failed to initialize.\n");
-    emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
+    if (debug_trace) {
+        if (fs_mkdir_p(log_dir, 0700) != 0)
+            fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
+        if (logger_init(log_file, LOG_DEBUG) != 0)
+            fprintf(stderr, "Warning: Logging system failed to initialize.\n");
+        emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
+    } else {
+        logger_stderr_only();        /* no file: errors still reach the user */
+    }
 
     /* 'cron setup' needs config for sync_interval */
     if (cmd && strcmp(cmd, "cron") == 0) {
@@ -250,6 +257,9 @@ int main(int argc, char *argv[]) {
 
     if (result >= 0)
         return EXIT_SUCCESS;
-    fprintf(stderr, "\nSync failed. Check logs in %s\n", log_file);
+    if (debug_trace)
+        fprintf(stderr, "\nSync failed. Check logs in %s\n", log_file);
+    else
+        fprintf(stderr, "\nSync failed. Run again with --debug to write a trace to %s\n", log_file);
     return EXIT_FAILURE;
 }

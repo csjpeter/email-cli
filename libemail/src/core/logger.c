@@ -19,6 +19,7 @@ static FILE *g_log_fp = NULL;
 static LogLevel g_log_level = LOG_INFO;
 static char *g_log_path = NULL;
 static int g_log_stderr = 1;
+static int g_stderr_only = 0;   /* no file, but errors still go to stderr */
 static unsigned g_stderr_errors;
 
 /** @brief Converts a LogLevel enum to its string representation. */
@@ -61,6 +62,20 @@ static void rotate_logs() {
     rename(g_log_path, new_name);
 }
 
+int logger_debug_requested(int *argc, char **argv) {
+    int on = 0;
+    const char *env = getenv("EMAIL_CLI_DEBUG");
+    if (env && env[0] && strcmp(env, "0") != 0) on = 1;
+    int w = 1;
+    for (int r = 1; r < *argc; r++) {
+        if (strcmp(argv[r], "--debug") == 0) { on = 1; continue; }
+        argv[w++] = argv[r];
+    }
+    *argc = w;
+    argv[w] = NULL;
+    return on;
+}
+
 int logger_init(const char *log_file_path, LogLevel level) {
     /* A program and libemail-client (linked static: one copy of this state)
      * both open the log; the second call must not leak the first one's file
@@ -91,25 +106,29 @@ int logger_init(const char *log_file_path, LogLevel level) {
 }
 
 void logger_log(LogLevel level, const char *format, ...) {
-    if (level < g_log_level || !g_log_fp) return;
-
-    time_t now = time(NULL);
-    struct tm *tm_info = localtime(&now);
-    char time_str[26];
-    strftime(time_str, 26, "%Y-%m-%d %H:%M:%S", tm_info);
+    /* The file is optional (EMAIL-240: the trace is written only on request);
+     * an error is still shown on stderr when that is enabled. */
+    int to_file = g_log_fp && level >= g_log_level;
+    int to_stderr = level == LOG_ERROR && g_log_stderr && (g_log_fp || g_stderr_only);
+    if (!to_file && !to_stderr) return;
 
     va_list args;
 
-    // Log to file
-    fprintf(g_log_fp, "[%s] [%s] ", time_str, level_to_str(level));
-    va_start(args, format);
-    vfprintf(g_log_fp, format, args);
-    va_end(args);
-    fprintf(g_log_fp, "\n");
-    fflush(g_log_fp);
+    if (to_file) {
+        time_t now = time(NULL);
+        struct tm *tm_info = localtime(&now);
+        char time_str[26];
+        strftime(time_str, 26, "%Y-%m-%d %H:%M:%S", tm_info);
 
-    // Also log to stderr if ERROR and enabled
-    if (level == LOG_ERROR && g_log_stderr) {
+        fprintf(g_log_fp, "[%s] [%s] ", time_str, level_to_str(level));
+        va_start(args, format);
+        vfprintf(g_log_fp, format, args);
+        va_end(args);
+        fprintf(g_log_fp, "\n");
+        fflush(g_log_fp);
+    }
+
+    if (to_stderr) {
         g_stderr_errors++;
         fprintf(stderr, "ERROR: ");
         va_start(args, format);
@@ -119,7 +138,12 @@ void logger_log(LogLevel level, const char *format, ...) {
     }
 }
 
+void logger_stderr_only(void) {
+    g_stderr_only = 1;
+}
+
 void logger_close(void) {
+    g_stderr_only = 0;
     if (g_log_fp) {
         fclose(g_log_fp);
         g_log_fp = NULL;

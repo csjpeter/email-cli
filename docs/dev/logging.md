@@ -2,7 +2,11 @@
 
 ## Overview
 
-The logger writes to a rotating file at `~/.cache/email-cli/logs/session.log`.
+The logger writes to a rotating file at `~/.cache/email-cli/logs/session.log`,
+but only on request (EMAIL-240): `--debug` on any program, or the environment
+variable `EMAIL_CLI_DEBUG` set to anything but empty or `0`. Without either, no
+log file is created. `logger_debug_requested()` decides and removes `--debug`
+from argv.
 All IMAP traffic is captured at DEBUG level via the imap_client logging integration.
 
 ## Log Levels
@@ -35,8 +39,8 @@ The imap_client module logs all sent commands and received responses to
 `logger_log(LOG_DEBUG, ...)`.
 At runtime LOG_INFO level the logger filters these out silently.
 
-To capture a full traffic dump, set `logger_init(path, LOG_DEBUG)` (already the
-default in `main.c`) and read `session.log` after a run.
+To capture a full traffic dump, run with `--debug` (or `EMAIL_CLI_DEBUG=1`; the
+programs then call `logger_init(path, LOG_DEBUG)`) and read `session.log`.
 
 ## Purging Logs
 

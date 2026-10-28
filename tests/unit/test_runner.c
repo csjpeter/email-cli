@@ -21,6 +21,8 @@ void test_fs_util(void);
 void test_config_store(void);
 void test_logger(void);
 void test_logger_double_init(void);
+void test_logger_debug_requested(void);
+void test_logger_stderr_without_file(void);
 void test_wizard(void);
 void test_imap_client(void);
 void test_mime_util(void);
@@ -130,6 +132,8 @@ int main(int argc, char **argv) {
     RUN_TEST(test_config_store);
     RUN_TEST(test_logger);
     RUN_TEST(test_logger_double_init);
+    RUN_TEST(test_logger_debug_requested);
+    RUN_TEST(test_logger_stderr_without_file);
     RUN_TEST(test_wizard);
     RUN_TEST(test_imap_client);
     RUN_TEST(test_mime_util);

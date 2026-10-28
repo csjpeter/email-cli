@@ -24,6 +24,11 @@ full reconcile when the stored history ID has expired. IMAP accounts use
 CONDSTORE/QRESYNC when the server offers it.
 .SH OPTIONS
 .TP
+.B \-\-debug
+Write a session trace (a debug\-level log, which may contain server responses)
+under \fI~/.cache/email\-cli/logs/\fP.  Off by default.  Setting the environment
+variable \fBEMAIL_CLI_DEBUG\fP to anything but empty or 0 does the same.
+.TP
 .BI \-\-account " email"
 Sync only this account instead of all of them.
 .TP
@@ -61,7 +66,7 @@ Remove the entry.
 .SH FILES
 .TP
 .I ~/.cache/email\-cli/logs/sync-session.log
-Sync diagnostics.
+Sync diagnostics, written only with \fB\-\-debug\fP or EMAIL_CLI_DEBUG=1.
 .PP
 Store and configuration paths are as in
 .BR email\-cli\-ro (1).

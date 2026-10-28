@@ -106,7 +106,7 @@ printf "Sent\t%s\n" "$TEST_UID" > "$ACCT_DIR/pending_appends.tsv"
 
 echo ""
 echo "--- Running email-sync ---"
-SYNC_OUT=$(HOME="$EMAIL_HOME" "$BIN_DIR/email-sync" 2>&1 || true)
+SYNC_OUT=$(HOME="$EMAIL_HOME" "$BIN_DIR/email-sync" --debug 2>&1 || true)
 echo "$SYNC_OUT"
 echo ""
 echo "--- Sync log (APPEND-related) ---"

@@ -154,3 +154,53 @@ void test_logger_double_init(void) {
     unlink(b);
     rmdir(dir);
 }
+
+void test_logger_debug_requested(void) {
+    char a0[] = "prog", a1[] = "list", a2[] = "--debug", a3[] = "-q";
+    char *argv[] = { a0, a1, a2, a3, NULL };
+    int argc = 4;
+
+    unsetenv("EMAIL_CLI_DEBUG");
+    ASSERT(logger_debug_requested(&argc, argv) == 1, "--debug asks for the trace");
+    ASSERT(argc == 3 && strcmp(argv[2], "-q") == 0 && argv[3] == NULL,
+           "--debug is removed from argv");
+
+    char b0[] = "prog", b1[] = "list";
+    char *argv2[] = { b0, b1, NULL };
+    argc = 2;
+    ASSERT(logger_debug_requested(&argc, argv2) == 0, "off by default");
+    ASSERT(argc == 2, "nothing removed without --debug");
+
+    setenv("EMAIL_CLI_DEBUG", "1", 1);
+    ASSERT(logger_debug_requested(&argc, argv2) == 1, "EMAIL_CLI_DEBUG=1 asks for the trace");
+    setenv("EMAIL_CLI_DEBUG", "0", 1);
+    ASSERT(logger_debug_requested(&argc, argv2) == 0, "EMAIL_CLI_DEBUG=0 does not");
+    setenv("EMAIL_CLI_DEBUG", "", 1);
+    ASSERT(logger_debug_requested(&argc, argv2) == 0, "an empty EMAIL_CLI_DEBUG does not");
+    unsetenv("EMAIL_CLI_DEBUG");
+}
+
+void test_logger_stderr_without_file(void) {
+    /* No log file open (the default, EMAIL-240): an error still reaches stderr
+     * and is counted, so the user sees it. */
+    logger_close();
+    logger_set_stderr(1);
+    logger_stderr_only();
+    unsigned before = logger_stderr_error_count();
+    int saved = dup(2);
+    const char *cap = TP("email-cli-log-nofile.err");
+    FILE *f = freopen(cap, "w", stderr);
+    ASSERT(f != NULL, "stderr captured");
+    logger_log(LOG_ERROR, "no file %d", 7);
+    logger_log(LOG_INFO, "not an error");
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
+    clearerr(stderr);
+    logger_set_stderr(1);
+    logger_close();   /* ends the stderr-only mode */
+    ASSERT(logger_stderr_error_count() == before + 1, "the error is counted");
+    ASSERT(count_lines(cap, "ERROR: no file 7") == 1, "the error is written to stderr");
+    ASSERT(count_lines(cap, "not an error") == 0, "only errors are mirrored");
+    unlink(cap);
+}

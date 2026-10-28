@@ -462,6 +462,9 @@ check "1.19 list --folder: Sent shown"      "INBOX.Sent\|message(s) in" "$OVERRI
 check_not "1.20 list: no STORE sent to server" "STORE" "$(cat "$MOCK_LOG1")"
 
 # 1.8 login regression
+# The trace is off by default (EMAIL-240): one run asks for it.
+(export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+ "$BIN_DIR/email-cli" --batch --debug list >/dev/null 2>&1 || true)
 SESSION1="$H_ALPHA/.cache/email-cli/logs/session.log"
 SESS1=$(cat "$SESSION1" 2>/dev/null || true)
 check_not "1.21 no login rejection in output" "rejected the login" "$L1"
@@ -786,7 +789,7 @@ echo ""
 echo "--- Phase 11: SMTP send ---"
 
 SEND_OUT=$( (export HOME="$H_ALPHA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
-    "$BIN_DIR/email-cli" --batch -q send \
+    "$BIN_DIR/email-cli" --batch -q --debug send \
         --to "recipient@example.com" \
         --subject "Functional Test Mail" \
         --body "Hello from functional test." \
@@ -7061,7 +7064,7 @@ H116L="./build/tests/functional/work-$$/homes/f116l-$$"
 mk116_home "$H116L" testuser
 printf 'x' > "$H116L/not-a-dir"
 OUT=$( (export HOME="$H116L" XDG_CACHE_HOME="$H116L/not-a-dir"; unset XDG_DATA_HOME XDG_CONFIG_HOME
-    "$BIN_DIR/email-cli" list-accounts </dev/null 2>&1; echo "exit-code=$?") )
+    "$BIN_DIR/email-cli" --debug list-accounts </dev/null 2>&1; echo "exit-code=$?") )
 check "116.43 an unusable log directory is a warning" "Could not create log directory" "$OUT"
 check "116.44 and the logger says so, too"       "Logging system failed to initialize" "$OUT"
 check "116.45 the command still runs"            "testuser"                           "$OUT"
@@ -8034,6 +8037,59 @@ for page in email-cli email-cli-ro; do
 done
 
 kill "$IMAP150_PID" "$IMAP150B_PID" "$GMAIL150_PID"
+
+fi
+
+if phase_wanted 160; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 160 — the session log is off unless asked for (EMAIL-240)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 160: the session log is off by default (EMAIL-240) ---"
+
+H160="./build/tests/functional/work-$$/homes/f160-$$"
+mkdir -p "$H160"
+L160="$H160/.cache/email-cli/logs/session.log"
+# r160 <env-assignment-or-NONE> <args...>: email-cli with stderr merged
+r160() {
+    local envv="$1"; shift
+    (export HOME="$H160"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME EMAIL_CLI_DEBUG
+     [ "$envv" != NONE ] && export "$envv"
+     "$BIN_DIR/email-cli" "$@" 2>&1 || true)
+}
+has160() { if [ -e "$L160" ]; then echo present; else echo absent; fi; }
+r160 NONE list-accounts >/dev/null
+check "160.1 no log file by default" "absent" "$(has160)"
+OUT160=$(r160 NONE --debug list-accounts)
+check "160.2 --debug writes the log" "present" "$(has160)"
+check_not "160.3 --debug is taken out of the arguments" "nknown" "$OUT160"
+check "160.4 the trace is at debug level" "Level: DEBUG" "$(cat "$L160")"
+rm -f "$L160"
+r160 EMAIL_CLI_DEBUG=1 list-accounts >/dev/null
+check "160.5 EMAIL_CLI_DEBUG=1 writes the log" "present" "$(has160)"
+rm -f "$L160"
+r160 EMAIL_CLI_DEBUG=0 list-accounts >/dev/null
+check "160.6 EMAIL_CLI_DEBUG=0 writes none" "absent" "$(has160)"
+r160 EMAIL_CLI_DEBUG= list-accounts >/dev/null
+check "160.7 an empty EMAIL_CLI_DEBUG writes none" "absent" "$(has160)"
+check "160.8 help names --debug" "[-][-]debug" "$(r160 NONE --help)"
+check "160.9 help names EMAIL_CLI_DEBUG" "EMAIL_CLI_DEBUG" "$(r160 NONE --help)"
+LRO160="$H160/.cache/email-cli/logs/session.log"
+rm -f "$LRO160"
+(export HOME="$H160"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME EMAIL_CLI_DEBUG
+ "$BIN_DIR/email-cli-ro" list-accounts >/dev/null 2>&1 || true)
+check "160.10 email-cli-ro: no log by default" "absent" "$(has160)"
+(export HOME="$H160"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME EMAIL_CLI_DEBUG
+ "$BIN_DIR/email-cli-ro" --debug list-accounts >/dev/null 2>&1 || true)
+check "160.11 email-cli-ro --debug writes the log" "present" "$(has160)"
+rm -f "$L160"
+SL160="$H160/.cache/email-cli/logs/sync-session.log"
+(export HOME="$H160"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME EMAIL_CLI_DEBUG
+ "$BIN_DIR/email-sync" cron setup >/dev/null 2>&1 || true)
+check "160.12 email-sync: no log by default" "absent" "$(if [ -e "$SL160" ]; then echo present; else echo absent; fi)"
+(export HOME="$H160"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME EMAIL_CLI_DEBUG
+ "$BIN_DIR/email-sync" --debug cron setup >/dev/null 2>&1 || true)
+check "160.13 email-sync --debug writes the log" "present" "$(if [ -e "$SL160" ]; then echo present; else echo absent; fi)"
 
 fi
 

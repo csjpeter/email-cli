@@ -28,6 +28,23 @@ typedef enum {
 int logger_init(const char *log_file_path, LogLevel level);
 
 /**
+ * @brief Without a log file, still show errors on stderr (EMAIL-240).
+ *
+ * The programs call it when the trace is not asked for; a program that never
+ * calls it and opens no file stays silent, as the library tests expect.
+ */
+void logger_stderr_only(void);
+
+/**
+ * @brief Whether the session trace was asked for (EMAIL-240).
+ *
+ * True when `--debug` is among the arguments (it is removed from argv, so no
+ * command has to know it) or the environment variable EMAIL_CLI_DEBUG is set
+ * to anything but empty or "0". The trace is off otherwise.
+ */
+int logger_debug_requested(int *argc, char **argv);
+
+/**
  * @brief Logs a message with a specific level.
  * @param level The severity level of the log.
  * @param format Format string (printf style).

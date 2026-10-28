@@ -95,7 +95,7 @@ email-cli revert ID [-q]             # takes a step back; asks first unless -q
 before `rules apply`. Run `remove-account` only when the user asked for exactly
 that account to be removed. An irreversible operation (permanent delete, send, delete-folder,
 delete-label) asks `Continue? [y/N]` first; `-q` / `--quiet` skips the question,
-so use it only when the user asked for exactly that. `revert` is a new step and
+so use it only when the user asked for exactly that. `--debug` (or `EMAIL_CLI_DEBUG=1`) writes a session trace under `~/.cache/email-cli/logs/`; it is off by default. `revert` is a new step and
 can itself be reverted; an overtaken step is refused in the server's words. Every command that takes a UID also takes
 `--folder NAME` (Gmail: `--label NAME`) for the mailbox the UID belongs to.
 

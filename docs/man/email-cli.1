@@ -150,6 +150,12 @@ The field then reports whether the credential was updated, and how long it was,
 or that it was left unchanged.
 When standard input is not a terminal the line is read as\-is, without masking.
 .SH OPTIONS
+.TP
+.B \-\-debug
+Write a session trace (a debug\-level log, which may contain server responses)
+under \fI~/.cache/email\-cli/logs/\fP.  Off by default.  Setting the environment
+variable \fBEMAIL_CLI_DEBUG\fP to anything but empty or 0 does the same.
+.PP
 The options of
 .B list
 and

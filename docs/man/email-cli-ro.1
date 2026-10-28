@@ -56,6 +56,11 @@ List configured accounts.
 Show help for a command.
 .SH OPTIONS
 .TP
+.B \-\-debug
+Write a session trace (a debug\-level log, which may contain server responses)
+under \fI~/.cache/email\-cli/logs/\fP.  Off by default.  Setting the environment
+variable \fBEMAIL_CLI_DEBUG\fP to anything but empty or 0 does the same.
+.TP
 .B \-\-batch
 Disable the interactive pager and use a fixed page size of 100. This is
 implied whenever standard output is not a terminal, so a pipe or a captured
@@ -304,7 +309,7 @@ Local store: cached messages, per\-folder manifests, label indexes and
 queued operations. Directory mode 0700.
 .TP
 .I ~/.cache/email\-cli/logs/session.log
-Diagnostics. May contain server responses.
+Diagnostics, written only with \fB\-\-debug\fP or EMAIL_CLI_DEBUG=1. May contain server responses.
 .PP
 .BR XDG_CONFIG_HOME ", " XDG_DATA_HOME " and " XDG_CACHE_HOME
 override these locations and take precedence over

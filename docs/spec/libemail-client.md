@@ -75,6 +75,12 @@ All names start with `emc_`; everything else in the object is hidden.
   home, and the library never prompts and prints nothing.
 - **TLS is mandatory.** `emc_account.insecure_tls` disables certificate
   verification (and the revocation check) and exists for test servers only.
+- **Network errors say where and why** (EMAIL-238): a connect, TLS or I/O
+  failure names the stage (resolve, connect, handshake, read, write), `host:port`,
+  the OpenSSL error string (with the certificate verify reason) or the `errno` text,
+  and `timed out after N s` for a timeout, e.g. `Could not connect to 192.0.2.1:993
+  (connect failed: Connection refused)`.  `net_connect()` returns it in `err`;
+  `net_conn_error()` holds the reason of the last failed read or write.
 - **Revocation is checked** (EMAIL-102, network-and-config-model.md): after the
   chain is verified, the leaf certificate is checked, OCSP first at the
   responder it names (plain HTTP, answer verified against the trust store),

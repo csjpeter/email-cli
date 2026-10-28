@@ -42,7 +42,8 @@ SSL_CTX *net_tls_ctx_new(int verify);
  * @brief Connect to @p host : @p port, with TLS when @p use_tls.
  * @param verify      1 = verify the certificate and the host name.
  * @param timeout_s   Limit of the connect and of every later read or write.
- * @param err         Receives a short reason on failure.
+ * @param err         Receives the reason on failure: the stage (resolve, connect,
+ *                    handshake), HOST:PORT, the errno or OpenSSL text and the timeout.
  * @return the connection, or NULL.
  */
 NetConn *net_connect(const char *host, int port, int use_tls, int verify,
@@ -56,6 +57,13 @@ ssize_t net_conn_read(NetConn *c, void *buf, size_t len);
 
 /** @brief Write all of @p buf: 0 / -1. */
 int net_conn_write_all(NetConn *c, const void *buf, size_t len);
+
+/**
+ * @brief Why the last net_conn_read() or net_conn_write_all() failed, as
+ *        "read from HOST:PORT failed: REASON" (OpenSSL error string or errno
+ *        text, "timed out after N s" for a timeout); "" when none failed.
+ */
+const char *net_conn_error(const NetConn *c);
 
 /** @brief Close and free; safe with NULL. */
 void net_close(NetConn *c);

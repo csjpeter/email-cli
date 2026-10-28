@@ -4999,7 +4999,6 @@ static const char *const sty_err_login[] = {
 static const int cur_err_login[3] = { 23, 0, 1 };
 
 static const char *const exp_err_tls[] = {
-    "~>                testuser                         IMAP  …aps://localhost:# …ps://localhost:#",
     "",
     "",
     "",
@@ -5018,14 +5017,15 @@ static const char *const exp_err_tls[] = {
     "",
     "",
     "",
-    "ERROR: SSL handshake failed with localhost",
+    "~ERROR: SSL handshake failed with localhost:#: error:#A#:SSL routines::certificate verify fa",
+    "iled; certificate verify: self-signed certificate",
     "",
     "",
     "  Press any key to return to accounts...",
     NULL
 };
 static const char *const sty_err_tls[] = {
-    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",

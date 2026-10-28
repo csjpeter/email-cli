@@ -123,6 +123,8 @@ long op_history_record(const OpRecord *rec) {
     }
     int fd = open(path, O_RDWR | O_CREAT | O_APPEND, 0600);
     if (fd < 0) {
+        fprintf(stderr, "Warning: the change history is not recorded: cannot open %s: %s\n",
+                path, strerror(errno));
         logger_log(LOG_WARN, "history: cannot open %s: %s", path, strerror(errno));
         free(path);
         return -1;
@@ -152,7 +154,11 @@ long op_history_record(const OpRecord *rec) {
                          id, ts, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7],
                          g_reverting, (int)kind);
         if (n > 0 && write(fd, line, (size_t)n) == n) ret = (long)id;
-        else logger_log(LOG_WARN, "history: write failed: %s", strerror(errno));
+        else {
+            fprintf(stderr, "Warning: the change history is not recorded: write failed: %s\n",
+                    strerror(errno));
+            logger_log(LOG_WARN, "history: write failed: %s", strerror(errno));
+        }
         free(line);
     }
     for (int i = 0; i < 8; i++) free(f[i]);

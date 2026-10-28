@@ -4399,14 +4399,14 @@ static const char *const exp_review_send_failed[] = {
     "                    │   e  e  │                                      │achments │",
     "                    │   r     │           [ Yes ]  [ No ]            │         │",
     "                    └─────────└──────────────────────────────────────┘  Sending...",
-    "ERROR: smtp_send failed: Could not connect to server",
-    "Error: send: Could not connect to server",
+    "~ERROR: smtp_send failed: SMTP connect/TLS at localhost:# as testuser failed: could not connect:",
+    "Connection refused",
+    "~Error: send: SMTP connect/TLS at localhost:# as testuser failed: could not connect: Connection r",
+    "efused",
     "  Send failed. Saving to Drafts...",
     "  Saved to Drafts (will retry on next sync).",
     "",
     "  [Press any key to return to inbox]",
-    "",
-    "",
     "",
     " y yes  n no  Esc/q/BS cancel",
     NULL
@@ -4438,7 +4438,7 @@ static const char *const sty_review_send_failed[] = {
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_review_send_failed[3] = { 20, 0, 1 };
+static const int cur_review_send_failed[3] = { 22, 0, 1 };
 
 static const char *const exp_dd_many[] = {
     "  New Message",
@@ -4889,7 +4889,6 @@ static const char *const sty_path_one[] = {
 static const int cur_path_one[3] = { 6, -1, 1 };
 
 static const char *const exp_err_connect[] = {
-    "~>                testuser                         IMAP  …aps://localhost:# …ps://localhost:#",
     "",
     "",
     "",
@@ -4909,13 +4908,14 @@ static const char *const exp_err_connect[] = {
     "",
     "",
     "~ERROR: connect to localhost:# failed: Connection refused",
+    "~ERROR: IMAP connect failed at localhost:# as testuser: could not connect: Connection refused",
     "",
     "",
     "  Press any key to return to accounts...",
     NULL
 };
 static const char *const sty_err_connect[] = {
-    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -4960,7 +4960,7 @@ static const char *const exp_err_login[] = {
     "",
     "",
     "",
-    "ERROR: localhost rejected the login for testuser.",
+    "~ERROR: IMAP LOGIN failed at localhost:#: localhost rejected the login for testuser.",
     "  The server said: NO [AUTHENTICATIONFAILED] Invalid credentials",
     "  The stored username or password is not accepted.",
     "  Change the stored password with: email-cli config password",
@@ -4999,8 +4999,6 @@ static const char *const sty_err_login[] = {
 static const int cur_err_login[3] = { 23, 0, 1 };
 
 static const char *const exp_err_tls[] = {
-    "~>                testuser                         IMAP  …aps://localhost:# …ps://localhost:#",
-    "",
     "",
     "",
     "",
@@ -5019,13 +5017,15 @@ static const char *const exp_err_tls[] = {
     "",
     "",
     "ERROR: SSL handshake failed with localhost",
+    "~ERROR: IMAP TLS failed at localhost:# as testuser: server certificate rejected: self-signed cert",
+    "ificate",
     "",
     "",
     "  Press any key to return to accounts...",
     NULL
 };
 static const char *const sty_err_tls[] = {
-    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",

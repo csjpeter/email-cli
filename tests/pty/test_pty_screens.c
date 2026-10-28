@@ -591,6 +591,16 @@ static void check_view(PtySession *s, const char *const exp[],
                     }
                 }
                 norm[o] = '\0';
+                if (strcmp(norm, exp[t] + 1) != 0)
+                {
+                    fprintf(stderr, "    row %d\n    - %s\n    + %s\n", t + offset,
+                            exp[t] + 1, norm);
+                    for (int dr = 0; dr < ROWS; dr++) {
+                        char dump[MAXCOLS * 4 + 4];
+                        pty_row_text(s, dr, dump, sizeof(dump));
+                        fprintf(stderr, "    %2d|%s\n", dr, dump);
+                    }
+                }
                 ASSERT(strcmp(norm, exp[t] + 1) == 0,
                        "row with a variable number matches its picture");
                 t++;

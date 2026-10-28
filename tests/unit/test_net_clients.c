@@ -277,7 +277,8 @@ static void test_http_bad_urls_and_unreachable(void)
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/", nc_dead_port());
     r.url = url;
     ASSERT(http_request(&r, &st, &b, &n, err, sizeof(err)) == -1, "a refused connection is an error");
-    ASSERT(strstr(err, "Could not connect") != NULL, "named as such");
+    ASSERT(strstr(err, "could not connect") != NULL && strstr(err, "Connection refused") != NULL,
+           "named as such, with the system's reason");
 
     r.url = "http://no-such-host.invalid/";
     ASSERT(http_request(&r, &st, &b, &n, err, sizeof(err)) == -1, "an unresolvable host is an error");
@@ -319,6 +320,11 @@ typedef enum {
     SM_RCPT_FAIL,     /* 550 for RCPT */
     SM_NO_STARTTLS,   /* plain server without STARTTLS */
     SM_DATA_FAIL,     /* 554 after the message (EMAIL-139) */
+    SM_GREET_421,     /* 421 instead of the 220 greeting, then closes (EMAIL-237) */
+    SM_EHLO_FAIL,     /* 502 for EHLO */
+    SM_MAIL_FAIL,     /* 452 for MAIL FROM */
+    SM_HANGUP_MAIL,   /* closes the connection when MAIL FROM arrives */
+    SM_SILENT_MAIL,   /* never answers MAIL FROM */
     SM_TLS_DEAD       /* says "go ahead" to STARTTLS and then speaks no TLS (EMAIL-139) */
 } SmtpMode;
 
@@ -352,6 +358,7 @@ static int ln_line(Link *l, char *line, int cap)
 static void smtp_session(Link *l, SmtpMode mode, int starttls, SSL_CTX *tctx, int rep)
 {
     char line[2048];
+    if (mode == SM_GREET_421) { ln_say(l, "421 4.3.2 Service not available, closing channel\r\n"); return; }
     ln_say(l, "220 mock ESMTP\r\n");
     for (;;) {
         if (ln_line(l, line, sizeof(line)) < 0) return;
@@ -362,7 +369,16 @@ static void smtp_session(Link *l, SmtpMode mode, int starttls, SSL_CTX *tctx, in
         } else if (strncasecmp(line, "DATA", 4) != 0) {
             dprintf(rep, "%s\n", line);
         }
-        if (strncasecmp(line, "EHLO", 4) == 0) {
+        if (strncasecmp(line, "EHLO", 4) == 0 && mode == SM_EHLO_FAIL) {
+            ln_say(l, "502 5.5.1 EHLO not implemented\r\n");
+        } else if (strncasecmp(line, "MAIL", 4) == 0 && mode == SM_MAIL_FAIL) {
+            ln_say(l, "452 4.3.1 Insufficient system storage\r\n");
+        } else if (strncasecmp(line, "MAIL", 4) == 0 && mode == SM_HANGUP_MAIL) {
+            return;
+        } else if (strncasecmp(line, "MAIL", 4) == 0 && mode == SM_SILENT_MAIL) {
+            sleep(5);
+            return;
+        } else if (strncasecmp(line, "EHLO", 4) == 0) {
             const char *auth = mode == SM_LOGIN_ONLY ? "250-AUTH LOGIN\r\n" : "250-AUTH PLAIN LOGIN\r\n";
             ln_say(l, "250-mock\r\n");
             if (starttls && !l->ssl) ln_say(l, "250-STARTTLS\r\n");
@@ -531,9 +547,64 @@ static void test_smtp_message_refused_after_data(void)
     char t[4096];
     ASSERT(smtp_case(SM_DATA_FAIL, 1, 1, "user1", "Subject: x\r\n\r\nb\r\n", t, sizeof(t)) == -1,
            "a message refused after the final dot fails the send");
-    ASSERT(strstr(g_smtp_why, "did not accept the message") != NULL && strstr(g_smtp_why, "554") != NULL,
-           "the reason carries the server's code");
+    ASSERT(strstr(g_smtp_why, "SMTP message") != NULL && strstr(g_smtp_why, "554 5.7.1 rejected as spam") != NULL,
+           "the reason names the step and carries the server's status line");
     ASSERT(g_smtp_stderr[0] == '\0', "and nothing is printed");
+}
+
+/* EMAIL-237: every refusal names the step, server:port, account and the
+ * server's words; never the password. */
+static void smtp_expect(SmtpMode mode, int implicit, const char *step, const char *words)
+{
+    char t[4096], what[200];
+    int rc = smtp_case(mode, implicit, 1, "user1", "Subject: x\r\nX-Secret: BODYTEXT\r\n\r\nb\r\n",
+                       t, sizeof(t));
+    ASSERT(rc == -1, "the refused send fails");
+    snprintf(what, sizeof(what), "SMTP %s at 127.0.0.1:", step);
+    ASSERT(strstr(g_smtp_why, what) != NULL, what);
+    ASSERT(strstr(g_smtp_why, "as user1") != NULL, "the message names the account");
+    snprintf(what, sizeof(what), "the message carries: %s", words);
+    ASSERT(strstr(g_smtp_why, words) != NULL, what);
+    ASSERT(strstr(g_smtp_why, "p@ss") == NULL && strstr(g_smtp_why, "cEBzcw") == NULL &&
+           strstr(g_smtp_why, "BODYTEXT") == NULL,
+           "no password and no message body in the message");
+    ASSERT(g_smtp_stderr[0] == '\0', "and nothing is printed");
+}
+
+static void test_smtp_error_messages(void)
+{
+    smtp_expect(SM_GREET_421, 1, "greeting", "421 4.3.2 Service not available");
+    smtp_expect(SM_EHLO_FAIL, 1, "EHLO", "502 5.5.1 EHLO not implemented");
+    smtp_expect(SM_AUTH_FAIL, 1, "AUTH", "535 5.7.8 bad");
+    smtp_expect(SM_MAIL_FAIL, 1, "MAIL FROM", "452 4.3.1 Insufficient system storage");
+    smtp_expect(SM_RCPT_FAIL, 1, "RCPT TO", "550 5.1.1 no such user");
+    smtp_expect(SM_DATA_FAIL, 1, "message", "554 5.7.1 rejected as spam");
+    smtp_expect(SM_HANGUP_MAIL, 1, "MAIL FROM", "the server closed the connection");
+    smtp_expect(SM_NO_STARTTLS, 0, "STARTTLS", "does not offer STARTTLS");
+    smtp_set_io_timeout(1);
+    smtp_expect(SM_SILENT_MAIL, 1, "MAIL FROM", "timed out");
+    smtp_set_io_timeout(30);
+
+    /* TLS refused for the certificate: the step and the reason */
+    char t[256];
+    ASSERT(smtp_case(SM_OK, 1, 0, "user1", "Subject: v\r\n\r\nb\r\n", t, sizeof(t)) == -1,
+           "an unverifiable certificate fails the send");
+    ASSERT(strstr(g_smtp_why, "SMTP connect/TLS at 127.0.0.1:") != NULL &&
+           strstr(g_smtp_why, "certificate") != NULL,
+           "the TLS step and the certificate problem are named");
+
+    /* a closed port: the connect step and errno text */
+    int port; int l = nc_listen(&port);
+    close(l);
+    char host[96];
+    snprintf(host, sizeof(host), "smtps://127.0.0.1:%d", port);
+    Config cfg = {0};
+    cfg.smtp_host = host; cfg.smtp_user = "user1"; cfg.smtp_pass = "p@ss"; cfg.ssl_no_verify = 1;
+    char why[400] = "", out[64];
+    ASSERT(smtp_send_captured(&cfg, "x", why, sizeof(why), out, sizeof(out)) == -1, "refused");
+    ASSERT(strstr(why, "SMTP connect/TLS at 127.0.0.1:") != NULL &&
+           strstr(why, "Connection refused") != NULL,
+           "the connect step names the system's reason");
 }
 
 static void test_smtp_starttls_that_never_starts(void)
@@ -628,6 +699,7 @@ void test_net_clients(void)
     RUN_TEST(test_smtp_auth_login_fallback);
     RUN_TEST(test_smtp_rejections);
     RUN_TEST(test_smtp_message_refused_after_data);
+    RUN_TEST(test_smtp_error_messages);
     RUN_TEST(test_smtp_starttls_that_never_starts);
     RUN_TEST(test_smtp_starttls);
     RUN_TEST(test_smtp_dot_stuffing_and_line_ends);

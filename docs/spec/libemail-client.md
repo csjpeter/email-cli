@@ -92,6 +92,17 @@ All names start with `emc_`; everything else in the object is hidden.
 - **Signals do not fail an operation.** A signal that interrupts a blocking
   read or write of the IMAP connection (a `SIGCHLD` handler installed without
   `SA_RESTART`, a timer) is retried, not reported as a connection error.
+- **IMAP and SMTP failures carry the step and the server's words**
+  (EMAIL-237, CLAUDE.md "Error messages instead of a log file").  IMAP
+  writes, on stderr, `ERROR: IMAP <step> failed at host:port as user[, folder
+  F]: <status line>`; SMTP returns the same shape in the reason of
+  `smtp_send` (`SMTP <step> at host:port as user failed: server replied 550 ...`).
+  Steps: connect, TLS, greeting, LOGIN/AUTH, the command verb (SELECT, UID FETCH,
+  UID STORE, ...), EHLO, STARTTLS, MAIL FROM, RCPT TO, DATA, message.  The
+  status line is the server's tagged or numeric reply, bounded and on one
+  line; a `* BYE`, a closed connection and a timeout (`imap_set_io_timeout`,
+  `smtp_set_io_timeout`) are named as such.  Neither a password nor a message
+  body is ever put into a message.
 - One handle per thread.
 
 ## Tests

@@ -116,22 +116,28 @@ static int tcp_connect(const char *host, int port, int timeout_s,
     struct addrinfo *ai = NULL;
     int rc = getaddrinfo(host, portstr, &hints, &ai);
     if (rc != 0) {
-        set_err(err, err_len, "Could not resolve hostname");
+        char m[160];
+        snprintf(m, sizeof(m), "could not resolve the host name: %s", gai_strerror(rc));
+        set_err(err, err_len, m);
         logger_log(LOG_ERROR, "getaddrinfo(%s): %s", host, gai_strerror(rc));
         return -1;
     }
     int fd = -1;
+    int why_errno = 0;
     for (struct addrinfo *a = ai; a; a = a->ai_next) {
         fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-        if (fd < 0) continue;
+        if (fd < 0) { why_errno = errno; continue; }
         fcntl_nonblock(fd, 1);
         int cr = connect(fd, a->ai_addr, a->ai_addrlen);
+        if (cr < 0) why_errno = errno;
         if (cr < 0 && (errno == EINPROGRESS || errno == EINTR)) {
+            why_errno = ETIMEDOUT;
             if (wait_fd(fd, POLLOUT, timeout_s) > 0) {
                 int soerr = 0;
                 socklen_t sl = sizeof(soerr);
                 getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &sl);
                 cr = soerr == 0 ? 0 : -1;
+                if (soerr) why_errno = soerr;
             }
         }
         if (cr == 0) { fcntl_nonblock(fd, 0); break; }
@@ -139,7 +145,11 @@ static int tcp_connect(const char *host, int port, int timeout_s,
         fd = -1;
     }
     freeaddrinfo(ai);
-    if (fd < 0) set_err(err, err_len, "Could not connect to server");
+    if (fd < 0) {
+        char m[160];
+        snprintf(m, sizeof(m), "could not connect: %s", strerror(why_errno ? why_errno : ECONNREFUSED));
+        set_err(err, err_len, m);
+    }
     return fd;
 }
 
@@ -215,7 +225,12 @@ static int tls_handshake(NetConn *c, const char *host, int verify,
                      X509_verify_cert_error_string(vr));
             set_err(err, err_len, m);
         } else {
-            set_err(err, err_len, "TLS handshake failed");
+            char m[200];
+            unsigned long oe = ERR_peek_last_error();
+            char es[120] = "";
+            if (oe) ERR_error_string_n(oe, es, sizeof(es));
+            snprintf(m, sizeof(m), "TLS handshake failed%s%s", es[0] ? ": " : "", es);
+            set_err(err, err_len, m);
         }
         logger_log(LOG_ERROR, "TLS handshake failed with %s", host);
         return -1;
@@ -275,15 +290,22 @@ ssize_t net_conn_read(NetConn *c, void *buf, size_t len)
             if (e == SSL_ERROR_ZERO_RETURN) return 0;
             if (e == SSL_ERROR_SYSCALL && n == 0 && errno == 0) return 0;   /* EOF without close_notify */
             if (e == SSL_ERROR_SYSCALL && errno == EINTR) continue;
+            if (e == SSL_ERROR_SSL &&
+                ERR_GET_REASON(ERR_peek_error()) == SSL_R_UNEXPECTED_EOF_WHILE_READING) {
+                ERR_clear_error();
+                return 0;                   /* the peer closed without close_notify */
+            }
             if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) {
                 if (wait_fd(c->fd, e == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT,
                             c->timeout_s) > 0) continue;
+                errno = ETIMEDOUT;
             }
             return -1;
         }
         ssize_t n = read(c->fd, buf, len);
         if (n >= 0) return n;
         if (errno == EINTR) continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) errno = ETIMEDOUT;
         return -1;
     }
 }

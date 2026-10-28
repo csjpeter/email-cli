@@ -1161,6 +1161,231 @@ void test_imap_qresync_vanished_no_earlier(void) {
     wait_child(pid);
 }
 
+
+/* ── Error messages: the step and the server's words (EMAIL-237) ─────────── */
+
+typedef enum {
+    EM_GREET_BYE,      /* greets with "* BYE ..." and closes */
+    EM_GREET_SILENT,   /* accepts and says nothing */
+    EM_LOGIN_BYE,      /* "* BYE" instead of the LOGIN answer */
+    EM_SELECT_NO,      /* SELECT -> NO */
+    EM_SELECT_BYE,     /* SELECT -> "* BYE ..." and close */
+    EM_SELECT_CLOSE,   /* SELECT -> the connection is closed */
+    EM_SELECT_SILENT,  /* SELECT -> no answer */
+    EM_SEARCH_BAD,     /* UID SEARCH -> BAD */
+    EM_FETCH_NO,       /* UID FETCH -> NO */
+    EM_STORE_NO,       /* UID STORE -> NO */
+    EM_COPY_NO,        /* UID COPY -> NO */
+    EM_LIST_NO,        /* LIST -> NO */
+    EM_APPEND_NO       /* APPEND -> NO (CREATE answers OK) */
+} EmMode;
+
+static void run_em_server(int listen_fd, EmMode mode) {
+    int cfd = accept(listen_fd, NULL, NULL);
+    close(listen_fd);
+    if (cfd < 0) { GCOV_FLUSH(); _exit(1); }
+    struct timeval tv = {.tv_sec = 4, .tv_usec = 0};
+    setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ssize_t w;
+    if (mode == EM_GREET_BYE) {
+        w = write(cfd, "* BYE too many connections from your address\r\n", 46); (void)w;
+        close(cfd); GCOV_FLUSH(); _exit(0);
+    }
+    if (mode == EM_GREET_SILENT) {
+        char b[64];
+        w = read(cfd, b, sizeof(b)); (void)w;      /* returns when the client gives up */
+        close(cfd); GCOV_FLUSH(); _exit(0);
+    }
+    w = write(cfd, "* OK ready\r\n", 12); (void)w;
+    char buf[8192];
+    for (;;) {
+        ssize_t n = read(cfd, buf, sizeof(buf) - 1);
+        if (n <= 0) break;
+        buf[n] = '\0';
+        char tag[32] = "*";
+        sscanf(buf, "%31s", tag);
+        char r[512];
+        const char *cmd = strchr(buf, ' ');
+        cmd = cmd ? cmd + 1 : "";
+        if (strncmp(cmd, "LOGIN", 5) == 0) {
+            if (mode == EM_LOGIN_BYE) {
+                w = write(cfd, "* BYE server is shutting down for maintenance\r\n", 48); (void)w;
+                break;
+            }
+            snprintf(r, sizeof(r), "%s OK Logged in\r\n", tag);
+        } else if (strncmp(cmd, "SELECT", 6) == 0) {
+            if (mode == EM_SELECT_NO) snprintf(r, sizeof(r), "%s NO [NONEXISTENT] Unknown Mailbox: Nope\r\n", tag);
+            else if (mode == EM_SELECT_BYE) { w = write(cfd, "* BYE Fatal error: index corrupted\r\n", 36); (void)w; break; }
+            else if (mode == EM_SELECT_CLOSE) break;
+            else if (mode == EM_SELECT_SILENT) { w = read(cfd, buf, sizeof(buf)); (void)w; break; }
+            else snprintf(r, sizeof(r), "* 1 EXISTS\r\n%s OK SELECT completed\r\n", tag);
+        } else if (strncmp(cmd, "UID SEARCH", 10) == 0) {
+            if (mode == EM_SEARCH_BAD) snprintf(r, sizeof(r), "%s BAD [CLIENTBUG] Invalid search criteria\r\n", tag);
+            else snprintf(r, sizeof(r), "* SEARCH\r\n%s OK done\r\n", tag);
+        } else if (strncmp(cmd, "UID FETCH", 9) == 0) {
+            snprintf(r, sizeof(r), "%s NO [SERVERBUG] Internal error while fetching\r\n", tag);
+        } else if (strncmp(cmd, "UID STORE", 9) == 0) {
+            snprintf(r, sizeof(r), "%s NO [NOPERM] Read-only mailbox\r\n", tag);
+        } else if (strncmp(cmd, "UID COPY", 8) == 0) {
+            snprintf(r, sizeof(r), "%s NO [OVERQUOTA] Quota exceeded\r\n", tag);
+        } else if (strncmp(cmd, "LIST", 4) == 0) {
+            snprintf(r, sizeof(r), "%s NO LIST refused\r\n", tag);
+        } else if (strstr(buf, "APPEND") != NULL) {
+            snprintf(r, sizeof(r), "%s NO [OVERQUOTA] Mailbox is full\r\n", tag);
+        } else if (strncmp(cmd, "CREATE", 6) == 0) {
+            snprintf(r, sizeof(r), "%s OK created\r\n", tag);
+        } else if (strncmp(cmd, "LOGOUT", 6) == 0) {
+            snprintf(r, sizeof(r), "* BYE bye\r\n%s OK done\r\n", tag);
+            w = write(cfd, r, strlen(r)); (void)w;
+            break;
+        } else {
+            snprintf(r, sizeof(r), "%s OK\r\n", tag);
+        }
+        w = write(cfd, r, strlen(r)); (void)w;
+    }
+    close(cfd);
+    GCOV_FLUSH();
+    _exit(0);
+}
+
+static int g_cap_fd = -1, g_cap_saved = -1;
+static char g_cap_path[PATH_MAX];
+
+static void cap_begin(void) {
+    snprintf(g_cap_path, sizeof(g_cap_path), "%s/imap-err-XXXXXX", test_scratch_dir());
+    g_cap_fd = mkstemp(g_cap_path);
+    fflush(stderr);
+    g_cap_saved = dup(2);
+    dup2(g_cap_fd, 2);
+}
+
+static void cap_end(char *out, size_t cap) {
+    fflush(stderr);
+    dup2(g_cap_saved, 2);
+    close(g_cap_saved);
+    lseek(g_cap_fd, 0, SEEK_SET);
+    ssize_t rd = read(g_cap_fd, out, cap - 1);
+    out[rd > 0 ? rd : 0] = '\0';
+    close(g_cap_fd);
+    unlink(g_cap_path);
+}
+
+/* The operation each case runs after connecting; returns 1 when it failed. */
+static int em_op(ImapClient *c, EmMode mode) {
+    char (*uids)[17] = NULL; int cnt = 0; char **f = NULL; int fc = 0; char sep = '.';
+    switch (mode) {
+    case EM_SELECT_NO: case EM_SELECT_BYE: case EM_SELECT_CLOSE: case EM_SELECT_SILENT:
+        return imap_select(c, "Archive/2026") != 0;
+    case EM_SEARCH_BAD: free(uids); return imap_uid_search(c, "ALL", &uids, &cnt) != 0;
+    case EM_FETCH_NO: { char *b = imap_uid_fetch_body(c, "7"); free(b); return b == NULL; }
+    case EM_STORE_NO: return imap_uid_set_flag(c, "7", "\\Seen", 1) != 0;
+    case EM_COPY_NO: return imap_uid_copy(c, "7", "Trash") != 0;
+    case EM_LIST_NO: return imap_list(c, &f, &fc, &sep) != 0;
+    case EM_APPEND_NO: return imap_append(c, "Sent", "Subject: x\r\n\r\nSECRETBODY\r\n", 26) != 0;
+    default: return 0;
+    }
+}
+
+/* One case: returns what the client wrote to stderr in @p out. */
+static void em_case(EmMode mode, char *out, size_t cap, int *port_out) {
+    int port = 0;
+    int lfd = make_listener(&port);
+    pid_t pid = fork();
+    if (pid == 0) run_em_server(lfd, mode);
+    close(lfd);
+    char url[64];
+    snprintf(url, sizeof(url), "imap://127.0.0.1:%d", port);
+    imap_set_io_timeout(1);
+    cap_begin();
+    ImapClient *c = imap_connect(url, "alice", "s3cretPW", 0);
+    int failed;
+    if (c) {
+        failed = em_op(c, mode);
+        imap_disconnect(c);
+    } else {
+        failed = 1;
+    }
+    cap_end(out, cap);
+    imap_set_io_timeout(15);
+    ASSERT(failed, "error case: the operation fails");
+    ASSERT(strstr(out, "s3cretPW") == NULL && strstr(out, "SECRETBODY") == NULL,
+           "error case: no password and no message body in the message");
+    ASSERT(strstr(out, "alice") != NULL, "error case: names the account");
+    char hp[48];
+    snprintf(hp, sizeof(hp), "127.0.0.1:%d", port);
+    ASSERT(strstr(out, hp) != NULL, "error case: names server and port");
+    *port_out = port;
+    wait_child(pid);
+}
+
+static void em_expect(EmMode mode, const char *step, const char *words) {
+    char out[2048]; int port;
+    em_case(mode, out, sizeof(out), &port);
+    char what[160];
+    snprintf(what, sizeof(what), "IMAP %s failed", step);
+    ASSERT(strstr(out, what) != NULL, what);
+    snprintf(what, sizeof(what), "the message carries: %s", words);
+    ASSERT(strstr(out, words) != NULL, what);
+}
+
+void test_imap_error_messages(void) {
+    em_expect(EM_GREET_BYE, "greeting", "BYE too many connections");
+    em_expect(EM_GREET_SILENT, "greeting", "timed out");
+    em_expect(EM_LOGIN_BYE, "LOGIN", "BYE server is shutting down");
+    em_expect(EM_SELECT_NO, "SELECT", "NO [NONEXISTENT] Unknown Mailbox: Nope");
+    em_expect(EM_SELECT_BYE, "SELECT", "BYE Fatal error: index corrupted");
+    em_expect(EM_SELECT_CLOSE, "SELECT", "the server closed the connection");
+    em_expect(EM_SELECT_SILENT, "SELECT", "no reply within 1 seconds (timed out)");
+    em_expect(EM_SEARCH_BAD, "UID SEARCH", "BAD [CLIENTBUG] Invalid search criteria");
+    em_expect(EM_FETCH_NO, "UID FETCH", "NO [SERVERBUG] Internal error while fetching");
+    em_expect(EM_STORE_NO, "UID STORE", "NO [NOPERM] Read-only mailbox");
+    em_expect(EM_COPY_NO, "UID COPY", "NO [OVERQUOTA] Quota exceeded");
+    em_expect(EM_LIST_NO, "LIST", "NO LIST refused");
+    em_expect(EM_APPEND_NO, "APPEND", "NO [OVERQUOTA] Mailbox is full");
+
+    /* the selected folder is named */
+    char out[2048]; int port;
+    em_case(EM_SELECT_NO, out, sizeof(out), &port);
+    ASSERT(strstr(out, "folder Archive/2026") != NULL, "a SELECT failure names the folder");
+
+    /* nothing listens: the connect step, with the system's reason */
+    int p2 = 0; int l = make_listener(&p2); close(l);
+    char url[64];
+    snprintf(url, sizeof(url), "imap://127.0.0.1:%d", p2);
+    cap_begin();
+    ImapClient *c = imap_connect(url, "alice", "s3cretPW", 0);
+    cap_end(out, sizeof(out));
+    ASSERT(c == NULL, "connect to a closed port fails");
+    ASSERT(strstr(out, "IMAP connect failed") != NULL && strstr(out, "Connection refused") != NULL,
+           "connect failure names the step and the system's reason");
+
+    /* a server whose certificate cannot be verified: the TLS step */
+    int p3 = 0; int l3 = make_listener(&p3);
+    SSL_CTX *ctx = create_server_ctx();
+    pid_t pid = fork();
+    if (pid == 0) {
+        int cf = accept(l3, NULL, NULL);
+        if (cf >= 0) {
+            SSL *ssl = SSL_new(ctx);
+            SSL_set_fd(ssl, cf);
+            SSL_accept(ssl);
+            close(cf);
+        }
+        GCOV_FLUSH();
+        _exit(0);
+    }
+    close(l3);
+    SSL_CTX_free(ctx);
+    snprintf(url, sizeof(url), "imaps://127.0.0.1:%d", p3);
+    cap_begin();
+    c = imap_connect(url, "alice", "s3cretPW", 1);
+    cap_end(out, sizeof(out));
+    ASSERT(c == NULL, "an unverifiable certificate fails the connect");
+    ASSERT(strstr(out, "IMAP TLS failed") != NULL && strstr(out, "certificate") != NULL,
+           "TLS failure names the step and the certificate problem");
+    wait_child(pid);
+}
+
 /* ── Test suite entry point ──────────────────────────────────────────────── */
 
 void test_imap_client(void) {
@@ -1182,4 +1407,5 @@ void test_imap_client(void) {
     test_imap_plain_socket_ops();
     test_imap_list_empty_separator();
     test_imap_qresync_vanished_no_earlier();
+    test_imap_error_messages();
 }

@@ -6,7 +6,7 @@
 
 # EMAIL-229: version = <project version>.<commit count>; a tag restarts nothing;
 # a raised project version sorts above; no git gives the bare version; the
-# tag-build verb makes the annotated tag v<version> and pushes it.
+# tag-build verb makes the annotated tag v<version> locally and pushes nothing.
 # Everything lives under build/.
 set -u
 cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
@@ -37,12 +37,13 @@ v=$(GIT_CEILING_DIRECTORIES="$WORK" ver 0.1.0 "$WORK/nogit"); [ "$v" = "0.1.0" ]
 
 # 2. the tag verb
 git init -q --bare "$WORK/bare" || exit 1
-git -C "$R" remote add origin "$WORK/bare"
+git -C "$R" remote add origin "$WORK/unreachable-$$"
 ( cd "$R" && "$ROOT/manage.sh" tag-build 0.1.0.4 ) > "$WORK/out" 2>&1; rc=$?
 [ "$rc" -eq 0 ] && [ "$(git -C "$R" cat-file -t v0.1.0.4)" = tag ] \
     && ok "2.1 an annotated tag v0.1.0.4 is made" || bad "2.1 (rc=$rc: $(cat "$WORK/out"))"
-git -C "$WORK/bare" rev-parse -q --verify refs/tags/v0.1.0.4 > /dev/null \
-    && ok "2.2 the tag is pushed" || bad "2.2"
+git -C "$R" remote set-url origin "$WORK/bare"
+[ -z "$(git -C "$WORK/bare" tag -l)" ] \
+    && ok "2.2 nothing is pushed (unreachable origin did not fail it)" || bad "2.2"
 git -C "$R" tag -n1 -l v0.1.0.4 | grep -q 'EMAIL-4' && ! git -C "$R" tag -n1 -l v0.1.0.4 | grep -q 'EMAIL-2' \
     && ok "2.3 the message names the keys since the previous tag only" || bad "2.3 ($(git -C "$R" tag -n1 -l v0.1.0.4))"
 ( cd "$R" && "$ROOT/manage.sh" tag-build 0.1.0.4 ) > "$WORK/out" 2>&1; rc=$?

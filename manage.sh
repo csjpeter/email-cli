@@ -50,7 +50,7 @@ show_help() {
     echo "  install        Build (release) and install binaries to ~/.local/bin"
     echo "  uninstall      Remove installed binaries from ~/.local/bin"
     echo "  package [deb|rpm|all]  Build release and create package(s) in build/packages/"
-    echo "  tag-build VERSION  Annotated tag vVERSION on HEAD (ticket keys since the previous tag), pushed to origin"
+    echo "  tag-build VERSION  Annotated tag vVERSION on HEAD (ticket keys since the previous tag); local only, pushes nothing"
     echo "  timing [KEY-N] Print the Gate line from build/timing.log; with a key, comment it on the ticket"
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
@@ -423,7 +423,8 @@ do_uninstall() {
 }
 
 # Tag the built commit v<VERSION> (annotated; the message names the ticket keys
-# since the previous v* tag) and push it.  The same tag at the same commit again
+# since the previous v* tag), locally.  It never pushes (EMAIL-241: the agent
+# pushes with gh-push on the host).  The same tag at the same commit again
 # is fine; the same tag at another commit is an error.  (EMAIL-229)
 tag_package_build() {
     local ver="$1" tag="v$1" head at prev range keys
@@ -440,12 +441,7 @@ tag_package_build() {
         keys=$(git log --format=%B "$range" | grep -oE '[A-Z][A-Z0-9]*-[0-9]+' | sort -u | tr '\n' ' ')
         git tag -a "$tag" -m "email-cli $ver: ${keys:-no ticket keys}" || return 1
     fi
-    if git remote | grep -qx origin; then
-        git push origin "refs/tags/$tag" || return 1
-    else
-        echo "tag-build: no origin remote; $tag not pushed." >&2
-    fi
-    echo "Tagged $tag"
+    echo "Tagged $tag (not pushed)"
 }
 
 # The commit the code of a run is at: the short id of HEAD, with a "+" after it
@@ -1005,16 +1001,13 @@ case "$1" in
         ls -lh "$PKG_DIR"
         pkg_ver=$(sed -n 's/^set(CPACK_PACKAGE_VERSION "\(.*\)")$/\1/p' "$BUILD_DIR/CPackConfig.cmake")
         [ -n "$pkg_ver" ] || { echo "ERROR: no package version in $BUILD_DIR/CPackConfig.cmake." >&2; exit 1; }
-        # MANAGE_NO_TAG=1 (the tests that build packages of the real tree) skips the tag.
-        if [ -z "${MANAGE_NO_TAG:-}" ]; then
-            tag_package_build "$pkg_ver" || exit 1
-        fi
+        # package never tags and never pushes (EMAIL-241); tag-build VERSION tags.
         ;;
     uninstall)
         do_uninstall
         ;;
     tag-build)
-        # EMAIL-229: the tag follows the package version, never decides it.
+        # EMAIL-229/241: local tag only, never pushed; the tag follows the package version, never decides it.
         tver="${2:-}"
         [ -n "$tver" ] || { echo "usage: manage.sh tag-build VERSION" >&2; exit 1; }
         tag_package_build "$tver" || exit 1

@@ -4889,7 +4889,6 @@ static const char *const sty_path_one[] = {
 static const int cur_path_one[3] = { 6, -1, 1 };
 
 static const char *const exp_err_connect[] = {
-    "~>                testuser                         IMAP  …aps://localhost:# …ps://localhost:#",
     "",
     "",
     "",
@@ -4909,13 +4908,14 @@ static const char *const exp_err_connect[] = {
     "",
     "",
     "~ERROR: connect to localhost:# failed: Connection refused",
+    "~ERROR: IMAP connect failed at localhost:# as testuser: could not connect: Connection refused",
     "",
     "",
     "  Press any key to return to accounts...",
     NULL
 };
 static const char *const sty_err_connect[] = {
-    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -4960,7 +4960,7 @@ static const char *const exp_err_login[] = {
     "",
     "",
     "",
-    "ERROR: localhost rejected the login for testuser.",
+    "~ERROR: IMAP LOGIN failed at localhost:#: localhost rejected the login for testuser.",
     "  The server said: NO [AUTHENTICATIONFAILED] Invalid credentials",
     "  The stored username or password is not accepted.",
     "  Change the stored password with: email-cli config password",
@@ -5015,10 +5015,10 @@ static const char *const exp_err_tls[] = {
     "",
     "",
     "",
-    "",
-    "",
     "~ERROR: SSL handshake failed with localhost:#: error:#A#:SSL routines::certificate verify fa",
     "iled; certificate verify: self-signed certificate",
+    "~ERROR: IMAP TLS failed at localhost:# as testuser: server certificate rejected: self-signed cert",
+    "ificate",
     "",
     "",
     "  Press any key to return to accounts...",

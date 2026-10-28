@@ -60,6 +60,12 @@ ImapClient *imap_connect(const char *host_url, const char *user,
                          const char *pass, int verify_tls);
 
 /**
+ * @brief Set the read and write limit of IMAP sessions opened afterwards, in
+ *        seconds (default 15; below 1 restores it).  Process-wide.
+ */
+void imap_set_io_timeout(int seconds);
+
+/**
  * @brief Send LOGOUT and close the connection.
  * Safe to call with NULL.
  */

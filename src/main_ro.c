@@ -30,6 +30,7 @@
 #include "local_store.h"
 #include "fs_util.h"
 #include "config.h"
+#include "cli_table.h"
 
 #define BATCH_DEFAULT_LIMIT 100
 
@@ -60,6 +61,8 @@ static void help_general(void) {
         "  list --from <text>            Filter by sender substring\n"
         "  list --since/--before <date>  Filter by date (YYYY-MM-DD)\n"
         "  list --json                   Machine-readable output\n"
+        "  --columns A,B,C / --sort COL[:desc]  On every table command: pick the\n"
+        "                                columns, order the rows (also under --json)\n"
         "  list --all-accounts           Every configured account in turn\n"
         "  list --folder __unread__      Virtual folders: __unread__ __flagged__\n"
         "                                __answered__ __forwarded__ __junk__\n"
@@ -115,6 +118,11 @@ static void help_list(void) {
         "                           object per message, fields never truncated.\n"
         "                           stdout stays a single parseable document;\n"
         "                           notices go to stderr.\n"
+        "  --columns A,B,C          Print only these columns, in this order (also under\n"
+        "                           --json): uid, date, from, subject, folder, status,\n"
+        "                           flags, unread, flagged, attachments.\n"
+        "  --sort COL[:asc|:desc],...  Order the messages by any column, shown or\n"
+        "                           not; with --limit the window is taken after.\n"
 
         "\n"
         "Virtual folders (pass to --folder; they span every cached folder):\n"
@@ -194,6 +202,9 @@ static void help_folders(void) {
         "\n"
         "--json: print JSON, the complete record, instead of the table.\n"
         "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "--columns A,B,C: print only these columns, in this order (also under\n"
+        "--json).  --sort COL[:asc|:desc],...: order the rows by any column,\n"
+        "shown or not.  Columns: name (alias folder), separator, unread, flagged, total.\n"
         "\n"
         "Lists all available IMAP folders on the server.\n"
         "\n"
@@ -212,6 +223,9 @@ static void help_attachments(void) {
         "\n"
         "--json: print JSON, the complete record, instead of the table.\n"
         "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "--columns A,B,C: print only these columns, in this order (also under\n"
+        "--json).  --sort COL[:asc|:desc],...: order the rows by any column,\n"
+        "shown or not.  Columns: filename, size.\n"
         "\n"
         "Lists all attachments in the message identified by <uid>.\n"
         "Prints one line per attachment: filename and decoded size.\n"
@@ -245,6 +259,9 @@ static void help_list_labels(void) {
         "\n"
         "--json: print JSON, the complete record, instead of the table.\n"
         "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "--columns A,B,C: print only these columns, in this order (also under\n"
+        "--json).  --sort COL[:asc|:desc],...: order the rows by any column,\n"
+        "shown or not.  Columns: name (alias label), id.\n"
         "\n"
         "List all available labels (Gmail) or folders (IMAP).\n"
         "For Gmail, shows both the display name and the label ID.\n"
@@ -260,6 +277,9 @@ static void help_list_accounts(void) {
         "\n"
         "--json: print JSON, the complete record, instead of the table.\n"
         "A script reads --json, not the table.  Errors stay text on stderr.\n"
+        "--columns A,B,C: print only these columns, in this order (also under\n"
+        "--json).  --sort COL[:asc|:desc],...: order the rows by any column,\n"
+        "shown or not.  Columns: account, type, server.\n"
         "\n"
         "List all configured accounts with their type and server.\n"
         "\n"
@@ -328,6 +348,11 @@ int main(int argc, char *argv[]) {
         printf("email-cli-ro %s\n", EMAIL_CLI_VERSION);
         return EXIT_SUCCESS;
     }
+
+    /* --columns / --sort (EMAIL-230): taken out of argv; the commands that
+     * print a table resolve them against their own columns. */
+    if (cli_out_extract(&argc, argv) != 0)
+        return EXIT_FAILURE;
 
     /* 1. Determine cache directory for logs */
     const char *cache_base = platform_cache_dir();
@@ -427,6 +452,12 @@ int main(int argc, char *argv[]) {
         help_general();
         return EXIT_SUCCESS;
     }
+
+    /* --columns / --sort belong to the commands that print a table. */
+    if (strcmp(cmd, "list") != 0 && strcmp(cmd, "list-folders") != 0 &&
+        strcmp(cmd, "list-attachments") != 0 && strcmp(cmd, "list-labels") != 0 &&
+        strcmp(cmd, "list-accounts") != 0 && cli_out_reject(cmd) != 0)
+        return EXIT_FAILURE;
 
     /* 3. Initialize logger */
     if (fs_mkdir_p(log_dir, 0700) != 0)
@@ -723,29 +754,9 @@ int main(int argc, char *argv[]) {
         result = email_service_list_labels(cfg);
 
     } else if (strcmp(cmd, "list-accounts") == 0) {
-        int count = 0;
-        AccountEntry *accs = cmd_json ? NULL : config_list_accounts(&count);
-        if (cmd_json) {
-            result = email_service_list_accounts_json();
-        } else if (count == 0) {
-            printf("No accounts configured.\n");
-            result = 0;
-        } else {
-            printf("%-40s  %-8s  %s\n", "Account", "Type", "Server");
-            printf("%-40s  %-8s  %s\n",
-                   "----------------------------------------",
-                   "--------",
-                   "----------------------------");
-            for (int i = 0; i < count; i++) {
-                const char *type   = (accs[i].cfg && accs[i].cfg->gmail_mode) ? "Gmail" : "IMAP";
-                const char *server = accs[i].cfg ? (accs[i].cfg->host ? accs[i].cfg->host : "-") : "-";
-                printf("%-40s  %-8s  %s\n",
-                       accs[i].name ? accs[i].name : "?",
-                       type, server);
-            }
-            config_free_account_list(accs, count);
-            result = 0;
-        }
+        if (email_service_list_accounts(cmd_json) != 0)
+            return EXIT_FAILURE;   /* the error is already on stderr */
+        result = 0;
 
     } else {
         /* Check if the command is a write-only command blocked in ro mode */

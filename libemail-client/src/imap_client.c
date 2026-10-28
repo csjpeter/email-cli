@@ -603,7 +603,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     struct addrinfo *ai = NULL;
     int rc = getaddrinfo(host, port, &hints, &ai);
     if (rc != 0) {
-        logger_log(LOG_ERROR, "getaddrinfo(%s:%s): %s", host, port, gai_strerror(rc));
+        logger_log(LOG_ERROR, "Could not resolve %s:%s (resolve failed: %s)", host, port, gai_strerror(rc));
         char why[200];
         snprintf(why, sizeof(why), "could not resolve the host name: %s", gai_strerror(rc));
         imap_report(user, host, port, NULL, "connect", why);
@@ -691,6 +691,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         int hs;
         do {
             errno = 0;
+            ERR_clear_error();
             hs = SSL_connect(ssl);
             /* An interrupted handshake read or write is continued, not failed. */
         } while (hs != 1 && errno == EINTR);

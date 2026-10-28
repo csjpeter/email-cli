@@ -28,7 +28,7 @@ The ones that bind every task:
   owner's private domain appears in no file.
 
 Working through the approved tickets of this project by itself is the
-`work-on-tickets` skill; the supervisor may ask for one ticket by key.
+`work-on-tickets` skill.
 
 ## Build Commands
 
@@ -37,12 +37,12 @@ Working through the approved tickets of this project by itself is the
 ./manage.sh debug      # Debug build with Address Sanitizer (ASAN)
 ./manage.sh test       # Unit tests with ASAN
 ./manage.sh valgrind   # Unit tests with Valgrind
-./manage.sh coverage   # GCOV/LCOV coverage report (>90% goal for core/infra)
-                       # also runs the functional suite and the PTY tests
+./manage.sh sanitize   # unit+functional+pty+integration with every program under ASan+UBSan (logs in build/sanitize)
+./manage.sh memcheck   # the same suites with every program under Valgrind (logs in build/valgrind)
+./manage.sh coverage   # GCOV/LCOV coverage: unit scope and external scope (functional+pty+integration);
+                       # raw data in build/coverage/{unit,external}
 ./manage.sh clean      # Remove build artifacts
 ./manage.sh integration # Integration test against a per-agent Dovecot process (no container)
-./manage.sh integration-local # APPEND integration test, same per-agent Dovecot setup
-./manage.sh e2e        # Build the package, run tests/e2e in LXC containers (sudo lxc-*)
 ./manage.sh deps       # Install system dependencies (Ubuntu 24.04 / Rocky 9)
 ./manage.sh run        # Release build + launch email-cli
 ./manage.sh install    # Release build + install binaries into ~/.local/bin
@@ -145,6 +145,16 @@ New commands and options must follow standard GNU/Linux CLI conventions:
 - Short single-character aliases (`-h`, `-v`) are welcome but not required.
 - Exit codes: `0` = success, non-zero = failure (use `EXIT_SUCCESS`/`EXIT_FAILURE`).
 - Errors go to **stderr**; normal output to **stdout**.
+
+## Error messages instead of a log file (owner, 2026-10-27)
+
+**Goal: a production fault can be understood and traced from its error message alone, without a log file.** A client should not need a log (`../policies/logging-model.md`); the session log of `logger.h` is tolerated, off unless asked for, and not extended. An error shown to the user must therefore carry what a log line would have:
+
+- **what failed** (the operation, in the user's terms) and **where** (account, folder or message id, server and port, the protocol step: connect, TLS, login, SELECT, FETCH, send, REST call);
+- **what the other side said**, verbatim and bounded: the IMAP/SMTP status line and code, the Gmail REST HTTP status, `error.status`, `error.message` and `reason`, the OpenSSL error string, `errno` text;
+- **what to try** when the cause is known (re-run `login`, check the clock, the quota, the scope).
+
+This matters most for faults the tests cannot produce without the real server (Gmail, a particular IMAP server): the mock servers in `tests/functional/` must be extended to answer with such a refusal, and each error path has a test that checks the message holds the server's words. Secrets (passwords, tokens, message bodies) never go into an error message.
 
 ## Dependency Policy
 

@@ -10,6 +10,7 @@
 # lintian finding makes `manage.sh package deb` fail and leave nothing behind.
 # Run from anywhere; it does its own release build.
 set -u
+export MANAGE_NO_TAG=1   # EMAIL-229: a test build is not a release, no tag
 cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
 PKG="$ROOT/build/packages"

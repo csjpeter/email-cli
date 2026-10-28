@@ -1474,6 +1474,206 @@ static void test_reconcile_no_history_id_in_list(void) {
     free(hid);
 }
 
+/* ── A recording mock server: the requests it saw are appended to a file ── */
+
+#define GS_MODIFY_FAILS 1
+
+static void gs_read_body(int cfd, char *buf, int *total, int bufsz) {
+    char *eoh = strstr(buf, "\r\n\r\n");
+    if (!eoh) return;
+    const char *cl = strcasestr(buf, "content-length:");
+    int want = cl ? atoi(cl + 15) : 0;
+    int have = *total - (int)(eoh + 4 - buf);
+    while (have < want && *total < bufsz - 1) {
+        ssize_t n = read(cfd, buf + *total, (size_t)(bufsz - *total - 1));
+        if (n <= 0) break;
+        *total += (int)n;
+        have += (int)n;
+    }
+    buf[*total] = '\0';
+}
+
+static void run_recording_server(int lfd, int count, const char *logpath, int mode) {
+    const char *raw_email =
+        "From: carol@example.com\r\nTo: me@gmail.com\r\n"
+        "Subject: Unread Recovery\r\nDate: Mon, 01 Jan 2024 12:00:00 +0000\r\n"
+        "\r\nBody.\r\n";
+    char *b64 = gs_b64encode(raw_email, strlen(raw_email));
+    struct sockaddr_in cli = {0};
+    socklen_t cli_len = sizeof(cli);
+    for (int i = 0; i < count; i++) {
+        int cfd = accept(lfd, (struct sockaddr *)&cli, &cli_len);
+        if (cfd < 0) break;
+        struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+        setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        char buf[8192];
+        int total = gs_read_req(cfd, buf, (int)sizeof(buf));
+        if (total <= 0) { close(cfd); continue; }
+        gs_read_body(cfd, buf, &total, (int)sizeof(buf));
+        char method[16] = {0}, path[2048] = {0};
+        sscanf(buf, "%15s %2047s", method, path);
+        const char *body = strstr(buf, "\r\n\r\n");
+        FILE *lf = fopen(logpath, "a");
+        if (lf) {
+            fprintf(lf, "%s %s %s\n", method, path, body ? body + 4 : "");
+            fclose(lf);
+        }
+        int is_post = strcmp(method, "POST") == 0;
+        if (strstr(path, "/history")) {
+            gs_send_json(cfd, 200, "{\"historyId\":\"77777\"}");
+        } else if (is_post && strstr(path, "/modify")) {
+            if (mode & GS_MODIFY_FAILS) gs_send_json(cfd, 500, "{}");
+            else gs_send_json(cfd, 200, "{\"id\":\"x\"}");
+        } else if (is_post && strstr(path, "/labels")) {
+            gs_send_json(cfd, 200, "{\"id\":\"Label_99\",\"name\":\"Fresh\"}");
+        } else if (strstr(path, "/labels")) {
+            gs_send_json(cfd, 200,
+                "{\"labels\":[{\"id\":\"INBOX\",\"name\":\"INBOX\"},"
+                "{\"id\":\"Label_7\",\"name\":\"Projects\"}]}");
+        } else if (strstr(path, "/messages/")) {
+            char mb[4096];
+            snprintf(mb, sizeof(mb), "{\"id\":\"unrd000000000002\","
+                     "\"labelIds\":[\"INBOX\",\"UNREAD\"],\"raw\":\"%s\"}", b64 ? b64 : "");
+            gs_send_json(cfd, 200, mb);
+        } else if (strstr(path, "/messages") && strstr(path, "UNREAD")) {
+            gs_send_json(cfd, 200,
+                "{\"messages\":[{\"id\":\"unrd000000000001\",\"threadId\":\"t1\"},"
+                "{\"id\":\"unrd000000000002\",\"threadId\":\"t2\"}],"
+                "\"resultSizeEstimate\":2,\"historyId\":\"77777\"}");
+        } else {
+            gs_send_json(cfd, 404, "{}");
+        }
+        close(cfd);
+    }
+    free(b64);
+    close(lfd);
+    GCOV_FLUSH();
+    _exit(0);
+}
+
+static pid_t start_recording_server(int *port_out, int count, const char *logpath, int mode) {
+    int lfd = gs_make_listener(port_out);
+    if (lfd < 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) { close(lfd); return -1; }
+    if (pid == 0) run_recording_server(lfd, count, logpath, mode);
+    close(lfd);
+    return pid;
+}
+
+/** The whole request log of a mock server run, or "" when nothing was logged. */
+static char *gs_read_log(const char *logpath) {
+    FILE *f = fopen(logpath, "r");
+    char *s = calloc(1, 65536);
+    if (f) {
+        size_t n = fread(s, 1, 65535, f);
+        s[n] = '\0';
+        fclose(f);
+    }
+    return s;
+}
+
+static void test_flush_pending_labels_pushes_merged_changes(void) {
+    reset_gmail_test_env();
+    local_pending_label_clear();
+    const char *logpath = TP("gs-flush-log.txt");
+    unlink(logpath);
+    const char *u1 = "flsh000000000001", *u2 = "flsh000000000002";
+    local_pending_label_add(u1, "Projects", 1);     /* on the server's list */
+    local_pending_label_add(u1, "Fresh", 1);        /* has to be created */
+    local_pending_label_add(u1, "UNREAD", 0);       /* a system label id */
+    local_pending_label_add(u1, "_flagged", 1);     /* the star */
+    local_pending_label_add(u2, "_done", 1);        /* local only: no Google label */
+    local_pending_label_add(u2, "Unknown", 0);      /* nothing to remove there */
+
+    int port = 0;
+    pid_t pid = start_recording_server(&port, 3, logpath, 0);
+    if (pid < 0) { ASSERT(0, "flush: could not start mock server"); return; }
+    usleep(20000);
+    GmailClient *gc = gs_make_client(port);
+    if (!gc) { gs_wait_child(pid); ASSERT(0, "flush: client connected"); return; }
+    int rc = gmail_sync_flush_pending_labels(gc);
+    gmail_disconnect(gc);
+    gs_wait_child(pid);
+
+    int n = -1;
+    PendingLabel *left = local_pending_label_load(&n);
+    free(left);
+    char *log = gs_read_log(logpath);
+    ASSERT(rc == 0, "flush: every change went through");
+    ASSERT(n == 0, "flush: the queue is empty afterwards");
+    ASSERT(strstr(log, "POST /gmail/v1/users/me/labels ") != NULL, "flush: the missing label is created");
+    ASSERT(strstr(log, "\"name\":\"Fresh\"") != NULL, "flush: with its name");
+    ASSERT(strstr(log, "/messages/flsh000000000001/modify") != NULL,
+           "flush: the changes of one message are one modify call");
+    ASSERT(strstr(log, "\"Label_7\"") != NULL && strstr(log, "\"Label_99\"") != NULL &&
+           strstr(log, "\"STARRED\"") != NULL, "flush: the added labels are sent by id");
+    ASSERT(strstr(log, "removeLabelIds\":[\"UNREAD\"]") != NULL, "flush: the removed label is sent");
+    ASSERT(strstr(log, "flsh000000000002") == NULL, "flush: local-only changes are not sent to Google");
+    free(log);
+}
+
+static void test_flush_pending_labels_keeps_failed_changes(void) {
+    reset_gmail_test_env();
+    local_pending_label_clear();
+    const char *logpath = TP("gs-flush-fail-log.txt");
+    unlink(logpath);
+    local_pending_label_add("flsh000000000003", "Projects", 1);
+
+    int port = 0;
+    pid_t pid = start_recording_server(&port, 2, logpath, GS_MODIFY_FAILS);
+    if (pid < 0) { ASSERT(0, "flush_fail: could not start mock server"); return; }
+    usleep(20000);
+    GmailClient *gc = gs_make_client(port);
+    if (!gc) { gs_wait_child(pid); ASSERT(0, "flush_fail: client connected"); return; }
+    int rc = gmail_sync_flush_pending_labels(gc);
+    gmail_disconnect(gc);
+    gs_wait_child(pid);
+
+    int n = -1;
+    PendingLabel *left = local_pending_label_load(&n);
+    int kept = n == 1 && left && strcmp(left[0].label, "Projects") == 0 &&
+               strcmp(left[0].uid, "flsh000000000003") == 0 && left[0].add == 1;
+    free(left);
+    ASSERT(rc == -1, "flush_fail: a refused modify is reported");
+    ASSERT(kept, "flush_fail: the change stays queued for the next sync");
+}
+
+static void test_incremental_recovers_unread_labels(void) {
+    reset_gmail_test_env();
+    local_pending_fetch_clear();
+    local_gmail_history_save("12345");
+    const char *logpath = TP("gs-recover-log.txt");
+    unlink(logpath);
+
+    /* uid1 is cached but lost its UNREAD label; uid2 is not cached at all. */
+    const char *uid1 = "unrd000000000001";
+    const char *raw = "From: dave@example.com\r\nSubject: Cached\r\n\r\nBody\r\n";
+    const char *hdr = "Dave\tCached\t2024-01-01\tINBOX\t0";
+    local_msg_save("", uid1, raw, strlen(raw));
+    local_hdr_save("", uid1, hdr, strlen(hdr));
+    label_idx_add("INBOX", uid1);
+
+    int port = 0;
+    pid_t pid = start_recording_server(&port, 12, logpath, 0);
+    if (pid < 0) { ASSERT(0, "recover: could not start mock server"); return; }
+    usleep(20000);
+    GmailClient *gc = gs_make_client(port);
+    if (!gc) { gs_wait_child(pid); ASSERT(0, "recover: client connected"); return; }
+    int rc = gmail_sync_incremental(gc);
+    gmail_disconnect(gc);
+    gs_wait_child(pid);
+
+    ASSERT(rc == 0, "recover: the incremental sync succeeds");
+    ASSERT(label_idx_contains("UNREAD", uid1) > 0, "recover: the cached message is unread again");
+    char *labels = local_hdr_get_labels("", uid1);
+    int has = labels && strstr(labels, "UNREAD") != NULL;
+    free(labels);
+    ASSERT(has, "recover: and its stored header says so");
+    ASSERT(local_msg_exists("", "unrd000000000002"), "recover: the unread message that was missing is downloaded");
+    ASSERT(label_idx_contains("UNREAD", "unrd000000000002") > 0, "recover: and it is unread");
+}
+
 /* ── Registration ────────────────────────────────────────────────────── */
 
 void test_gmail_sync(void) {
@@ -1522,4 +1722,7 @@ void test_gmail_sync(void) {
     RUN_TEST(test_incremental_with_history);
     RUN_TEST(test_incremental_history_expired);
     RUN_TEST(test_sync_full_success);
+    RUN_TEST(test_flush_pending_labels_pushes_merged_changes);
+    RUN_TEST(test_flush_pending_labels_keeps_failed_changes);
+    RUN_TEST(test_incremental_recovers_unread_labels);
 }

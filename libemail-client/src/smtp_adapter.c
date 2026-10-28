@@ -110,13 +110,10 @@ static void smtp_why(const SmtpLink *l, const char *step, int code, const char *
     } else if (l->io_state == 1) {
         snprintf(why, why_len, "SMTP %s at %s:%d%s failed: no reply, the server closed the connection",
                  step, l->host, l->port, acct);
-    } else if (l->io_errno == ETIMEDOUT) {
-        snprintf(why, why_len, "SMTP %s at %s:%d%s failed: no reply within %d seconds (timed out)",
-                 step, l->host, l->port, acct, g_smtp_io_timeout);
     } else {
-        snprintf(why, why_len, "SMTP %s at %s:%d%s failed: no reply, connection error (%s)",
-                 step, l->host, l->port, acct,
-                 l->io_errno ? strerror(l->io_errno) : "unknown");
+        const char *ne = net_conn_error(l->c);
+        snprintf(why, why_len, "SMTP %s at %s:%d%s failed: no reply, %s",
+                 step, l->host, l->port, acct, ne[0] ? ne : "connection error");
     }
 }
 
@@ -262,7 +259,7 @@ static int smtp_deliver(const char *url, const char *user, const char *pass,
     host[hl] = '\0';
     if (hp[hl] == ':') port = atoi(hp + hl + 1);
 
-    char err[160] = "";
+    char err[400] = "";
     SmtpLink l = {0};
     l.host = host;
     l.port = port;

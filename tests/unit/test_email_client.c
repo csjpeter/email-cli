@@ -4,6 +4,9 @@
 /* Unit tests of libemail-client's public interface (EMAIL-101). */
 #include "test_helpers.h"
 #include "email-client.h"
+#include "config_store.h"
+#include "config.h"
+#include <sys/stat.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -905,9 +908,138 @@ static void test_ec_log_open_writes_the_file(void)
     ASSERT(saw_error, "log: the library's failure is in the file");
 }
 
+/* ── emc_account_load (EMAIL-231) ──────────────────────────────────── */
+
+static void ec_write_account(const char *name, const char *body)
+{
+    char path[512];
+    snprintf(path, sizeof(path), "%s", TP("email-cli-test-home-load/.config"));
+    mkdir(TP("email-cli-test-home-load"), 0700);
+    mkdir(path, 0700);
+    snprintf(path, sizeof(path), "%s/email-cli", TP("email-cli-test-home-load/.config"));
+    mkdir(path, 0700);
+    snprintf(path, sizeof(path), "%s/email-cli/accounts", TP("email-cli-test-home-load/.config"));
+    mkdir(path, 0700);
+    snprintf(path, sizeof(path), "%s/email-cli/accounts/%s", TP("email-cli-test-home-load/.config"), name);
+    mkdir(path, 0700);
+    snprintf(path, sizeof(path), "%s/email-cli/accounts/%s/config.ini", TP("email-cli-test-home-load/.config"), name);
+    FILE *f = fopen(path, "w");
+    ASSERT(f != NULL, "account file written");
+    fputs(body, f);
+    fclose(f);
+}
+
+static void test_ec_account_load(void)
+{
+    char *old_home = getenv("HOME");
+    char *old_xdg = getenv("XDG_CONFIG_HOME");
+    char *saved_home = old_home ? strdup(old_home) : NULL;
+    char *saved_xdg = old_xdg ? strdup(old_xdg) : NULL;
+    setenv("HOME", TP("email-cli-test-home-load"), 1);
+    unsetenv("XDG_CONFIG_HOME");
+    char err[256];
+    emc_account a;
+
+    /* argument errors */
+    ASSERT(emc_account_load(NULL, &a, err, sizeof(err)) == EMC_ERR_ARGUMENT, "NULL name");
+    ASSERT(emc_account_load("x", NULL, err, sizeof(err)) == EMC_ERR_ARGUMENT, "NULL out");
+    ASSERT(emc_account_load("", &a, err, sizeof(err)) == EMC_ERR_ARGUMENT, "empty name");
+
+    /* missing account */
+    ASSERT(emc_account_load("nobody@example.org", &a, err, sizeof(err)) == EMC_ERR_NO_ACCOUNT,
+           "missing account gives EMC_ERR_NO_ACCOUNT");
+    ASSERT(strstr(err, "no such account") != NULL, "missing account text");
+    ASSERT(a.host == NULL && a.pass == NULL, "out zeroed on failure");
+    ASSERT(emc_account_load("../x", &a, err, sizeof(err)) == EMC_ERR_NO_ACCOUNT,
+           "a path is not an account name");
+    ASSERT(emc_account_load("nobody@example.org", &a, NULL, 0) == EMC_ERR_NO_ACCOUNT,
+           "no error buffer is allowed");
+
+    /* plaintext credentials */
+    ec_write_account("plain@example.org",
+        "EMAIL_HOST=imaps://imap.example.org\nEMAIL_USER=plain@example.org\n"
+        "EMAIL_PASS=secret1\nEMAIL_SENT_FOLDER=Sent\nSMTP_HOST=smtps://smtp.example.org\n"
+        "SMTP_PORT=465\nSMTP_USER=smtpuser\nSMTP_PASS=secret2\n");
+    ASSERT(emc_account_load("plain@example.org", &a, err, sizeof(err)) == EMC_OK, "plain loads");
+    ASSERT(strcmp(a.host, "imaps://imap.example.org") == 0, "host");
+    ASSERT(strcmp(a.user, "plain@example.org") == 0, "user");
+    ASSERT(strcmp(a.pass, "secret1") == 0, "pass");
+    ASSERT(strcmp(a.folder, "INBOX") == 0, "folder default");
+    ASSERT(strcmp(a.sent_folder, "Sent") == 0, "sent folder");
+    ASSERT(strcmp(a.smtp_host, "smtps://smtp.example.org") == 0, "smtp host");
+    ASSERT(a.smtp_port == 465, "smtp port");
+    ASSERT(strcmp(a.smtp_user, "smtpuser") == 0, "smtp user");
+    ASSERT(strcmp(a.smtp_pass, "secret2") == 0, "smtp pass");
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "the loaded account opens");
+    emc_close(c);
+    emc_account_free(&a);
+    ASSERT(a.host == NULL && a.pass == NULL, "free zeroes");
+    emc_account_free(NULL);
+
+    /* the file is left as it was (no re-encryption) */
+    {
+        char path[512];
+        snprintf(path, sizeof(path), "%s/email-cli/accounts/plain@example.org/config.ini",
+                 TP("email-cli-test-home-load/.config"));
+        FILE *f = fopen(path, "r");
+        char line[256];
+        int plain_left = 0;
+        while (f && fgets(line, sizeof(line), f))
+            if (strncmp(line, "EMAIL_PASS=secret1", 18) == 0) plain_left = 1;
+        if (f) fclose(f);
+        ASSERT(plain_left, "load does not rewrite the file");
+    }
+
+    /* enc: credentials, written by email-cli's own store */
+    {
+        Config cfg = {0};
+        cfg.host = strdup("imaps://imap.example.org");
+        cfg.user = strdup("enc@example.org");
+        cfg.pass = strdup("topsecret");
+        cfg.folder = strdup("INBOX");
+        ASSERT(config_save_to_store(&cfg) == 0, "store save");
+        free(cfg.host); free(cfg.user); free(cfg.pass); free(cfg.folder);
+    }
+    ASSERT(emc_account_load("enc@example.org", &a, err, sizeof(err)) == EMC_OK, "enc loads");
+    ASSERT(strcmp(a.pass, "topsecret") == 0, "enc: password decrypted");
+    emc_account_free(&a);
+
+    /* undecryptable */
+    ec_write_account("bad@example.org",
+        "EMAIL_HOST=imaps://imap.example.org\nEMAIL_USER=bad@example.org\n"
+        "EMAIL_PASS=enc:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n");
+    ASSERT(emc_account_load("bad@example.org", &a, err, sizeof(err)) == EMC_ERR_CREDENTIAL,
+           "undecryptable gives EMC_ERR_CREDENTIAL");
+    ASSERT(strstr(err, "cannot be decrypted") != NULL, "undecryptable text");
+    ASSERT(a.pass == NULL, "no partial account");
+
+    /* unreadable: incomplete, and a non-TLS server */
+    ec_write_account("half@example.org", "EMAIL_USER=half@example.org\n");
+    ASSERT(emc_account_load("half@example.org", &a, err, sizeof(err)) == EMC_ERR_CONFIG,
+           "incomplete gives EMC_ERR_CONFIG");
+    ASSERT(strstr(err, "cannot be read") != NULL, "unreadable text");
+    ec_write_account("plainnet@example.org",
+        "EMAIL_HOST=imap://imap.example.org\nEMAIL_USER=plainnet@example.org\nEMAIL_PASS=x\n");
+    ASSERT(emc_account_load("plainnet@example.org", &a, err, sizeof(err)) == EMC_ERR_CONFIG,
+           "a non-TLS server is refused");
+
+    /* by address, when the directory has another name */
+    ec_write_account("work",
+        "EMAIL_HOST=imaps://imap.example.org\nEMAIL_USER=byaddr@example.org\nEMAIL_PASS=p\n");
+    ASSERT(emc_account_load("byaddr@example.org", &a, err, sizeof(err)) == EMC_OK,
+           "found by address");
+    emc_account_free(&a);
+
+    if (saved_home) setenv("HOME", saved_home, 1); else unsetenv("HOME");
+    if (saved_xdg) setenv("XDG_CONFIG_HOME", saved_xdg, 1);
+    free(saved_home); free(saved_xdg);
+}
+
 void test_email_client(void)
 {
     signal(SIGPIPE, SIG_IGN);
+    RUN_TEST(test_ec_account_load);
     RUN_TEST(test_ec_version_and_strerror);
     RUN_TEST(test_ec_open_validation);
     RUN_TEST(test_ec_open_copies_account);

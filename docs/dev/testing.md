@@ -5,7 +5,9 @@
 ```bash
 ./manage.sh test        # Unit tests with AddressSanitizer
 ./manage.sh valgrind    # Unit tests with Valgrind
-./manage.sh coverage    # Coverage report + functional tests
+./manage.sh sanitize    # Every program and test with ASan + UBSan; unit, functional, pty, integration
+./manage.sh memcheck # The same suites with every program under Valgrind
+./manage.sh coverage    # Unit scope and external scope (functional + pty + integration)
 ./manage.sh integration # Against a per-agent Dovecot process (no container)
 ```
 
@@ -183,7 +185,7 @@ under `build/`.
 
 `./manage.sh timing [KEY-N]` and the timing log (EMAIL-76): every verb that does
 work (`build`, `debug`, `test`, `coverage`, `valgrind`, `functional`, `pty`,
-`integration`, `integration-local`, `headers`, `names`, `check`, `package`,
+`integration`, `headers`, `names`, `check`, `package`,
 `install`) appends `<UTC time> <verb> <s>s <ok|fail> <commit>` to `build/timing.log`
 (`<commit>` is the short HEAD id, `+` after it when the tree was dirty),
 success or failure. `timing` prints `Gate: <total>s (check .., package ..,
@@ -194,6 +196,8 @@ lines used are kept per key in `build/timing.posted`, the same record posts
 nothing (exit 0), a record from a newer run posts again even if the text is
 identical (EMAIL-121). `./tests/functional/run_timing.sh`
 tests the log and the line against a log under `build/`.
+
+`./tests/functional/run_version.sh` (EMAIL-229) tests the package version derivation (`cmake/derive_version.cmake`: `<project version>.<commit count>`, a tag restarts nothing, no git gives the bare version) and `./manage.sh tag-build VERSION`, which `package` runs to tag the built commit `vVERSION` (annotated, pushed) in a throwaway repository under `build/`.
 
 `./manage.sh functional` (no phase argument, so also in `check`) runs `run_functional` and then every other declared functional script in `build/tests/functional/bin/`, naming each in a summary; `./manage.sh functional <phase>` runs just that phase. `./tests/functional/run_skill_sync.sh` (EMAIL-125) reads the commands and options from the `--help` pages of `email-cli` and `email-cli-ro` and fails when one is missing from `claude/skills/email-cli/SKILL.md` or when the skill names one the CLI does not have (policies/cli-skill-model.md): a change to a command changes the skill and the man page in the same commit.
 
@@ -238,8 +242,7 @@ needs `dovecot-imapd`, `openssl`, `nc`, `gcc` and a password-less `sudo`) with:
 - Two seed emails pre-loaded into the mailbox
 
 ```bash
-./manage.sh integration        # start Dovecot, seed it, run the test, assert output
-./manage.sh integration-local  # the IMAP APPEND test, on the same setup
+./manage.sh integration        # start Dovecot, seed it, run tests/integration (both scripts), assert output
 ```
 
 `tests/integration/dovecot_env.sh` is the one Dovecot setup both scripts source.
@@ -249,6 +252,59 @@ exit trap stops that one process and removes only that directory, so agents
 running the suite side by side share nothing.  A killed run leaves its directory
 for `./manage.sh clean`.  Both Dovecot 2.3 and 2.4 configuration syntax are
 written, by the installed version.
+
+## Sanitizer and Valgrind runs of the whole test set (EMAIL-224)
+
+`./manage.sh check` runs the unit tests under AddressSanitizer and Valgrind.
+The functional and PTY suites start `email-cli`, `email-tui` and `email-sync` as
+programs of their own, so a leak, overflow or use-after-free in them needs the
+programs themselves instrumented.  Two verbs repeat that run; both need no
+person, exit non-zero on a finding, and keep every log under `build/`.
+
+| Verb | Build | What runs | Logs |
+|---|---|---|---|
+| `sanitize` | Debug, ASan + UBSan (`-DENABLE_UBSAN=ON`), every program, mock server and test | unit, functional, PTY suites, `integration` | `build/sanitize/asan.PID`, `ubsan.PID` |
+| `memcheck` | Release, dynamic (`-DEMAIL_STATIC=OFF`, `-g`) | the same, every program started through Valgrind (`--leak-check=full --track-origins=yes --error-exitcode=1`) | `build/valgrind/TEST-PROGRAM.PID.log` |
+
+How it works:
+
+- The suites take the programs from `EMAIL_TEST_BIN_DIR` (default `bin/`);
+  `run_functional.sh` also compiles its mock servers with
+  `EMAIL_TEST_MOCK_CFLAGS`.  The PTY suites get the directory from `manage.sh`.
+- Under Valgrind a program is ten to fifty times slower, so `memcheck`
+  sets `EMAIL_TEST_WAIT_SCALE=6`: every `WAIT_MS` of the PTY tests is
+  multiplied by it (`tests/pty/wait_scale.h`).  Unset, the factor is 1.
+- ASan and UBSan write a log (`log_path=`) only when they have a finding, so
+  *any file* in `build/sanitize/` fails the run (`tests/sanitize/scan_logs.sh`),
+  and the log is named in the output.  `UBSAN_OPTIONS` has `halt_on_error=1`.
+- For Valgrind, `build/valgrind-bin/` holds each program as `NAME.bin` and
+  `tests/sanitize/valgrind-program.sh` as `NAME`: whatever starts `NAME` (a PTY
+  child, the daemon the TUI forks from its own directory) gets its own Valgrind
+  process and log, named with the suite (`VG_TEST_NAME`).  The Release programs
+  are linked static, and Valgrind sees no `malloc` of a static program, so this
+  build is dynamic; `-DEMAIL_STATIC=ON` is restored by every other verb.
+- `tests/sanitize/valgrind.supp` holds suppressions.  An entry is allowed only
+  for a defect of a *system* library (named, with its version and the reason in
+  the comment above it), never for this project's or the workspace libraries'
+  code; today there is none.  `tests/functional/run_sanitize.sh` checks the
+  verdicts with a deliberate leak and overflow, and the comment rule.
+- Findings fixed so far are listed on the ticket (EMAIL-224).  One of them is
+  `email-tui`'s SIGTERM handler, which called `exit()` (not async-signal-safe;
+  a double free inside OpenSSL's cleanup when the signal landed in `free()`):
+  `tests/functional/run_sigterm.sh` checks that it now leaves with status 143.
+- The integration suites need Dovecot; where it is not installed the verbs say
+  `NOT RUN` for them and carry on.  The container variant of the integration
+  suite is the same per-agent Dovecot process since EMAIL-228, so there is no
+  separate container run.
+
+**End-to-end under a sanitizer: not run.**  The e2e tests install the shipped
+package, a static program, into a fresh container; an ASan build cannot be
+static and would need the sanitizer runtime and a copied build tree inside the
+container (`tests/common/testenv.sh` has no push of a tree).  What the e2e test
+exercises, `email-cli send` over implicit TLS, is exercised by the functional
+and PTY send suites against the mock SMTP server under both verbs.  The
+long-term home of these runs is the e2e system (`../policies/testing-model.md`);
+the verbs are written so it can call them (exit status, logs in `build/`).
 
 ## End-to-end Tests (`tests/e2e/`, EMAIL-35)
 
@@ -262,9 +318,9 @@ certificate for another host name and a closed port are refused.  Nothing
 leaves the container, and no `SSL_NO_VERIFY` is set.
 
 ```bash
-./manage.sh e2e                  # build the package, run every tests/e2e test
-./manage.sh e2e smtp_delivery    # one test
-build/tests/e2e/bin/smtp_delivery   # by itself, with a package under build/packages
+./manage.sh package deb          # the package the test installs (build/packages)
+cmake --build build --target tests-e2e   # builds build/tests/e2e/bin/*
+build/tests/e2e/bin/smtp_delivery   # one test, with a package under build/packages
 ```
 
 Needs LXC and `sudo` for `lxc-*` on the container the run creates
@@ -355,6 +411,30 @@ ASSERT_WAIT_FOR(s, "text", timeout_ms);
 
 ---
 
+## Result files and the verbs (EMAIL-233)
+
+`test`, `functional`, `pty`, `integration`, `valgrind` and `coverage` write
+`build/result/<verb>.result` (policies/manage-sh-model.md, *The result file*): the
+file is deleted when the verb starts, written as `status: running` at once and
+written again, final, on every way out (success, a failed suite, a failed build, a
+signal).  One `suite:` line per suite (`unit`, `run_functional` and each declared
+functional script, each PTY label, `run_integration`, `run_local_dovecot`) with the
+assertions its runner counted; the log of each suite is
+`build/result/log/<verb>-<suite>.log`.  Every suite runs, then the verb exits
+non-zero if any failed.  Nothing is skipped: a missing tool (Dovecot, Valgrind,
+lcov) or a runner's exit 77 fails the verb.  An unknown verb prints the usage to
+stderr and exits 2.  `integration` runs both scripts of `tests/integration`;
+there is no `integration-local`, `valgrind-all` (now `memcheck`, a verb of this
+project) or `e2e` verb (the e2e tests are the system-test project's).
+
+`coverage` leaves the raw gcov data for the integrator in `build/coverage/unit/`
+(the unit suites alone) and `build/coverage/external/` (functional, PTY and
+integration together): the `.gcno` and `.gcda` files of the instrumented build
+tree in its own layout, counters zeroed before each scope.  The external scope runs
+`run_functional`, the PTY suites and the integration scripts; the declared
+functional scripts that build packages are not part of it, because they replace
+the instrumented build tree (they run in `functional`).
+
 ## Coverage Requirements
 
 `./manage.sh coverage` measures **line coverage of product code only**
@@ -365,7 +445,7 @@ below the policy floors (policies/testing-model.md, *Coverage*):
 | Figure | Measured from | Requirement |
 |--------|---------------|-------------|
 | Unit tests alone | fresh counters, `test-runner` only | at least 80% (gate) |
-| Functional + PTY together | the black-box suites on the instrumented binaries | at least 80% (gate) |
+| Functional + PTY + integration together (external scope) | the black-box suites on the instrumented binaries | at least 80% (gate) |
 | Everything combined | unit on top of the above | target above 90% (reported, not a gate) |
 
 **Invalid counter files (EMAIL-119).**  A coverage-built program that is killed

@@ -22,6 +22,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "wait_scale.h"
 #include "test_scratch.h"
 #include "pty_editor.h"
 
@@ -66,7 +67,11 @@ static pid_t g_smtp_pid = -1;
 static int   g_imap_port = 0;   /* both ports are picked by the kernel */
 static int   g_smtp_port = 0;
 
-#define WAIT_MS    8000
+#define WAIT_MS (8000 * wait_scale())
+/* A positive screen assertion waits for the text (EMAIL-224): under ASan or
+ * Valgrind the program redraws slowly, and a read in between sees half a screen. */
+#undef ASSERT_SCREEN_CONTAINS
+#define ASSERT_SCREEN_CONTAINS(s, text) ASSERT_WAIT_FOR(s, text, WAIT_MS)
 #define SETTLE_MS   400
 #define ROWS 24
 #define COLS 120
@@ -249,6 +254,24 @@ static void pending_reset(void) {
     unlink(path);
 }
 
+/* EMAIL-227: while and after a send the screen is whole: a title bar, the
+ * progress lines drawn inside the screen from column 2 (never raw at the right
+ * edge of a dialog's row), the last line in the reverse-video status line, and
+ * no piece of an earlier frame (the review's dialog box) left behind. */
+#define ASSERT_SEND_SCREEN_WHOLE(s, last) do { \
+    ASSERT_ROW_CONTAINS(s, 0, "Send: Message"); \
+    ASSERT_CELL_BG(s, 0, 0, 44); \
+    ASSERT_CELL_FG(s, 0, 0, 37); \
+    ASSERT_CELL_ATTR(s, 0, 0, PTY_ATTR_BOLD); \
+    ASSERT_CELL_TEXT(s, 2, 2, "S"); \
+    ASSERT_ROW_CONTAINS(s, 2, "  Sending..."); \
+    ASSERT_SCREEN_NOT_CONTAINS(s, "\xE2\x94\x8C"); \
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Send the message to"); \
+    ASSERT_SCREEN_NOT_CONTAINS(s, "ERROR:"); \
+    ASSERT_ROW_CONTAINS(s, 23, last); \
+    ASSERT_CELL_ATTR(s, 23, 0, PTY_ATTR_REVERSE); \
+} while (0)
+
 /* ══════════════════════════════════════════════════════════════════════
  * TC-SL-01 (US-SL-01): Successful SMTP send → local Sent + pending queue
  * ══════════════════════════════════════════════════════════════════════ */
@@ -281,6 +304,9 @@ static void test_successful_send_saves_locally(void) {
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Message sent.", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Saved locally", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SEND_SCREEN_WHOLE(s, "Saved locally.");
+    ASSERT_ROW_CONTAINS(s, 3, "  Message sent.");
 
     pty_close(s);
 
@@ -318,6 +344,9 @@ static void test_failed_send_saves_to_drafts(void) {
     REVIEW_SEND(s);
     ASSERT_WAIT_FOR(s, "Sending", WAIT_MS);
     ASSERT_WAIT_FOR(s, "Saved to Drafts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SEND_SCREEN_WHOLE(s, "Saved to Drafts");
+    ASSERT_ROW_CONTAINS(s, 3, "  Send failed. Saving to Drafts...");
 
     pty_close(s);
 

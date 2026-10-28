@@ -19,6 +19,7 @@
 
 #include "ptytest.h"
 #include "pty_assert.h"
+#include "wait_scale.h"
 #include "test_scratch.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,7 +43,11 @@ int g_tests_failed = 0;
 #define ROWS 24
 #define COLS 80
 #define STATUS_ROW (ROWS - 1)
-#define WAIT_MS 6000
+#define WAIT_MS (6000 * wait_scale())
+/* A positive screen assertion waits for the text (EMAIL-224): under ASan or
+ * Valgrind the program redraws slowly, and a read in between sees half a screen. */
+#undef ASSERT_SCREEN_CONTAINS
+#define ASSERT_SCREEN_CONTAINS(s, text) ASSERT_WAIT_FOR(s, text, WAIT_MS)
 #define SETTLE_MS 400
 #define ROW_TO 2          /* screen rows (0-based) of the five fields, nothing open above */
 #define ROW_CC 3

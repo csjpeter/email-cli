@@ -6,6 +6,7 @@
 
 #include "compose_service.h"
 #include "config.h"
+#include "config_store.h"
 #include "gmail_auth.h"
 #include "gmail_sync.h"
 #include "local_store.h"
@@ -52,6 +53,8 @@ EMC_API const char *emc_strerror(emc_status status)
     case EMC_ERR_SEND:     return "the server did not accept the message";
     case EMC_ERR_PROTOCOL: return "unusable answer from the server";
     case EMC_ERR_MEMORY:   return "out of memory";
+    case EMC_ERR_NO_ACCOUNT: return "no such account";
+    case EMC_ERR_CREDENTIAL: return "a stored credential cannot be decrypted";
     }
     return "unknown status";
 }
@@ -74,6 +77,85 @@ static emc_status fail_why(emc_client *c, emc_status st, const char *what, const
     if (!why || !why[0]) return fail(c, st, what);
     snprintf(c->err, sizeof(c->err), "%s: %s", what, why);
     return st;
+}
+
+static void set_err(char *err, size_t len, const char *fmt, const char *name,
+                    const char *why)
+{
+    if (err && len) snprintf(err, len, fmt, name, why);
+}
+
+EMC_API void emc_account_free(emc_account *a)
+{
+    if (!a) return;
+    free((void *)a->host);
+    free((void *)a->user);
+    if (a->pass) { memset((void *)a->pass, 0, strlen(a->pass)); free((void *)a->pass); }
+    free((void *)a->folder);
+    free((void *)a->sent_folder);
+    free((void *)a->smtp_host);
+    free((void *)a->smtp_user);
+    if (a->smtp_pass) { memset((void *)a->smtp_pass, 0, strlen(a->smtp_pass)); free((void *)a->smtp_pass); }
+    if (a->gmail_refresh_token) {
+        memset((void *)a->gmail_refresh_token, 0, strlen(a->gmail_refresh_token));
+        free((void *)a->gmail_refresh_token);
+    }
+    free((void *)a->gmail_client_id);
+    free((void *)a->gmail_client_secret);
+    memset(a, 0, sizeof(*a));
+}
+
+EMC_API emc_status emc_account_load(const char *name, emc_account *out,
+                                    char *err, size_t err_len)
+{
+    if (err && err_len) err[0] = '\0';
+    if (!out) return EMC_ERR_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    if (!name || !name[0]) {
+        set_err(err, err_len, "%s%s", "", "account name missing");
+        return EMC_ERR_ARGUMENT;
+    }
+    int reason = 0;
+    Config *cfg = config_load_account_quiet(name, &reason);
+    if (!cfg) {
+        switch (reason) {
+        case CFG_LOAD_UNDECRYPTABLE:
+            set_err(err, err_len, "account '%s': %s", name,
+                    "a stored credential cannot be decrypted (the installation key changed?)");
+            return EMC_ERR_CREDENTIAL;
+        case CFG_LOAD_UNREADABLE:
+            set_err(err, err_len, "account '%s': %s", name,
+                    "the configuration cannot be read, is incomplete or names a server without TLS");
+            return EMC_ERR_CONFIG;
+        default:
+            set_err(err, err_len, "account '%s': %s", name, "no such account");
+            return EMC_ERR_NO_ACCOUNT;
+        }
+    }
+    out->host = dup_or_null(cfg->host);
+    out->user = dup_or_null(cfg->user);
+    out->pass = dup_or_null(cfg->pass);
+    out->folder = dup_or_null(cfg->folder);
+    out->sent_folder = dup_or_null(cfg->sent_folder);
+    out->smtp_host = dup_or_null(cfg->smtp_host);
+    out->smtp_port = cfg->smtp_port;
+    out->smtp_user = dup_or_null(cfg->smtp_user);
+    out->smtp_pass = dup_or_null(cfg->smtp_pass);
+    out->gmail = cfg->gmail_mode;
+    out->gmail_refresh_token = dup_or_null(cfg->gmail_refresh_token);
+    out->gmail_client_id = dup_or_null(cfg->gmail_client_id);
+    out->gmail_client_secret = dup_or_null(cfg->gmail_client_secret);
+    out->insecure_tls = cfg->ssl_no_verify;
+    int oom = (cfg->host && !out->host) || (cfg->user && !out->user) ||
+              (cfg->pass && !out->pass) || (cfg->folder && !out->folder) ||
+              (cfg->smtp_pass && !out->smtp_pass);
+    config_free(cfg);
+    if (oom) {
+        emc_account_free(out);
+        set_err(err, err_len, "%s%s", "", "out of memory");
+        return EMC_ERR_MEMORY;
+    }
+    return EMC_OK;
 }
 
 EMC_API emc_status emc_open(emc_client **out, const emc_account *a)

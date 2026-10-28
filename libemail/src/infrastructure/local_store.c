@@ -318,8 +318,12 @@ void local_hdr_evict_stale(const char *folder,
 
     char (*sorted)[17] = malloc((size_t)keep_count * sizeof(char[17]));
     if (!sorted) return;
-    memcpy(sorted, keep_uids, (size_t)keep_count * sizeof(char[17]));
-    qsort(sorted, (size_t)keep_count, sizeof(char[17]), cmp_uid_evict);
+    /* keep_uids may be NULL when keep_count is 0: memcpy and qsort take no
+     * null pointer even for an empty range (EMAIL-224) */
+    if (keep_count > 0) {
+        memcpy(sorted, keep_uids, (size_t)keep_count * sizeof(char[17]));
+        qsort(sorted, (size_t)keep_count, sizeof(char[17]), cmp_uid_evict);
+    }
 
     /* Walk all 100 buckets (10 × 10) */
     for (int d1 = 0; d1 <= 9; d1++) {

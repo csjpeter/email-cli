@@ -1,0 +1,6 @@
+# Valgrind suppressions of `manage.sh memcheck` (EMAIL-224).
+#
+# Rules: an entry is allowed only for a defect of a SYSTEM library (named, with
+# its version and the reason in the comment above the entry), never for this
+# project's own code or the workspace libraries.  Every entry has a comment.
+# No entry is needed today.

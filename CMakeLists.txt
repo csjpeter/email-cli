@@ -4,49 +4,15 @@
 # Top-level CMake build: options, shared flags and the sub-projects of email-cli.
 
 cmake_minimum_required(VERSION 3.20)
-project(email-cli VERSION 0.3.0 LANGUAGES C)
+project(email-cli VERSION 0.8.2 LANGUAGES C)
 
-# Version string: prefer "git describe", fall back to project version.
-# Only release tags (v<digit>...) count: `--tags` alone accepts every tag, so a
-# bookmark such as "before-some-work" would silently become the product version.
-find_program(GIT_EXECUTABLE git)
-if(GIT_EXECUTABLE)
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} describe --tags --match "v[0-9]*" --always --dirty
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        OUTPUT_VARIABLE _GIT_DESCRIBE
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-endif()
-if(_GIT_DESCRIBE)
-    string(REGEX REPLACE "^v" "" EMAIL_CLI_VERSION "${_GIT_DESCRIBE}")
-else()
-    set(EMAIL_CLI_VERSION "${PROJECT_VERSION}")
-endif()
+# Version: project() version plus the total commit count (EMAIL-229).  Tags take
+# no part in it; manage.sh package tags the built commit with this version.
+# The same number is the binaries' --version and the packages' version.
+include(${CMAKE_SOURCE_DIR}/cmake/derive_version.cmake)
+email_cli_derive_version("${PROJECT_VERSION}" "${CMAKE_SOURCE_DIR}" EMAIL_CLI_PACKAGE_VERSION)
+set(EMAIL_CLI_VERSION "${EMAIL_CLI_PACKAGE_VERSION}")
 add_compile_definitions(EMAIL_CLI_VERSION="${EMAIL_CLI_VERSION}")
-
-# Package version, derived from the same describe.  Taking it from the
-# hardcoded project() version instead lets packages go stale the moment a tag
-# is added: the binary would report the tag while the .deb kept the old number.
-#   v0.3.0               -> 0.3.0
-#   v0.3.0-43-gabc1234   -> 0.3.0.43   (43 commits past the tag)
-#   v0.1                 -> 0.1
-# The "-dirty" marker stays in the binary's --version but is dropped here:
-# dpkg and rpm both need a plain dotted number.
-set(EMAIL_CLI_PACKAGE_VERSION "${PROJECT_VERSION}")
-if(_GIT_DESCRIBE)
-    set(_pkgver "${EMAIL_CLI_VERSION}")
-    string(REGEX REPLACE "-dirty$" "" _pkgver "${_pkgver}")
-    string(REGEX REPLACE "^([0-9]+(\\.[0-9]+)*)-([0-9]+)-g[0-9a-f]+$" "\\1.\\3"
-           _pkgver "${_pkgver}")
-    if(_pkgver MATCHES "^[0-9]+(\\.[0-9]+)*$")
-        set(EMAIL_CLI_PACKAGE_VERSION "${_pkgver}")
-    else()
-        message(WARNING "Cannot derive a package version from '${_GIT_DESCRIBE}'; "
-                        "falling back to ${PROJECT_VERSION}")
-    endif()
-endif()
 
 # Gmail OAuth2 credentials (optional — loaded from gmail_credentials.cmake)
 if(EXISTS "${CMAKE_SOURCE_DIR}/gmail_credentials.cmake")
@@ -66,7 +32,17 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Werror -pedantic -D_GNU_SOURC
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ENABLE_COVERAGE)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+    # `manage.sh sanitize` (EMAIL-224) adds UBSan to every program and test of
+    # the tree; halt_on_error comes from UBSAN_OPTIONS at run time.
+    if(ENABLE_UBSAN)
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=undefined")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=undefined")
+    endif()
 endif()
+
+# `manage.sh memcheck` (EMAIL-224) builds the programs dynamic: Valgrind
+# replaces malloc through the dynamic loader and sees nothing of a static one.
+option(EMAIL_STATIC "Link the programs fully static (the shipped form)" ON)
 
 # Coverage Support
 if(ENABLE_COVERAGE)
@@ -118,7 +94,7 @@ function(email_static_program name source)
     target_link_libraries(${name} libemail)
     # AddressSanitizer cannot be linked static: the Debug build (the unit-test
     # run) keeps the C library dynamic; every other build is fully static.
-    if(NOT (CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ENABLE_COVERAGE))
+    if(EMAIL_STATIC AND NOT (CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ENABLE_COVERAGE))
         target_link_options(${name} PRIVATE -static)
     endif()
 endfunction()

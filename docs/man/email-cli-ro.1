@@ -127,6 +127,44 @@ A script reads
 .BR \-\-json ,
 not the table.
 .TP
+.BI \-\-columns " A,B,C"
+.RB ( list ", " list\-folders ", " list\-labels ", " list\-attachments ", " list\-accounts )
+Print only the named columns, in the order given, in every output format:
+the table has just those columns and
+.B \-\-json
+carries just those fields. Names are not case\-sensitive. An unknown name is a
+usage error that lists the valid names. The columns of
+.B list
+are
+.BR uid ", " date ", " from ", " subject ", " folder ", " status ", " flags ", "
+.BR unread ", " flagged " and " attachments ;
+of
+.B list\-folders
+.BR name ", " separator ", " unread ", " flagged " and " total ;
+of
+.B list\-labels
+.BR name " and " id ;
+of
+.B list\-attachments
+.BR filename " and " size ;
+of
+.B list\-accounts
+.BR account ", " type " and " server .
+.TP
+.BI \-\-sort " COL[:asc|:desc],..."
+Order the rows by one or more columns, shown or not, each ascending
+(the default) or descending; later columns break the ties of earlier ones.
+Columns with a fixed vocabulary sort in the order of that vocabulary, keys such
+as UIDs and numbers sort numerically, other text without regard to case.
+With
+.B list
+the order is applied to all matching messages before
+.B \-\-limit
+and
+.B \-\-offset
+take their window. Given to a command that prints no table, either option is a
+usage error.
+.TP
 .B \-\-raw
 .RB ( show )
 Write the RFC 2822 source exactly as stored: no MIME parsing, no

@@ -70,7 +70,10 @@ fi
 # them once here; the helpers that need a specific XDG_DATA_HOME still export
 # it inside their own subshell.
 unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
-BIN_DIR="$PROJECT_ROOT/bin"
+# EMAIL_TEST_BIN_DIR: the programs under test (manage.sh sanitize / memcheck
+# point it at instrumented ones); EMAIL_TEST_MOCK_CFLAGS: flags for the mocks.
+BIN_DIR="${EMAIL_TEST_BIN_DIR:-$PROJECT_ROOT/bin}"
+MOCK_CFLAGS="${EMAIL_TEST_MOCK_CFLAGS:-}"
 MOCK_SERVER_SRC="$PROJECT_ROOT/tests/functional/mock_imap_server.c"
 MOCK_SERVER_BIN="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_server"
 MOCK_SMTP_SRC="$PROJECT_ROOT/tests/pty/mock_smtp_server.c"
@@ -101,9 +104,9 @@ mkdir -p "$WORK_DIR/homes" "$WORK_DIR/home"
 # The caller's HOME is not the suite's: until a phase picks its own home, HOME
 # is an empty directory of this run.  The XDG_* variables were unset above.
 export HOME="$WORK_DIR/home"
-gcc "$MOCK_SERVER_SRC" -o "$MOCK_SERVER_BIN" -lssl -lcrypto
-gcc "$MOCK_SMTP_SRC"   -o "$MOCK_SMTP_BIN"   -lssl -lcrypto
-gcc "$MOCK_GMAIL_SRC"  -o "$MOCK_GMAIL_BIN"
+gcc $MOCK_CFLAGS "$MOCK_SERVER_SRC" -o "$MOCK_SERVER_BIN" -lssl -lcrypto
+gcc $MOCK_CFLAGS "$MOCK_SMTP_SRC"   -o "$MOCK_SMTP_BIN"   -lssl -lcrypto
+gcc $MOCK_CFLAGS "$MOCK_GMAIL_SRC"  -o "$MOCK_GMAIL_BIN"
 FREE_PORT_BIN="$PROJECT_ROOT/build/tests/functional/free_port"
 gcc "$PROJECT_ROOT/tests/functional/free_port.c" -o "$FREE_PORT_BIN"
 
@@ -7837,6 +7840,200 @@ OUT=$("$BIN_DIR/email-cli" --help 2>&1)
 check "140.53 the general help lists history"               "history" "$OUT"
 check "140.54 the general help names -q"                    "\-q" "$OUT"
 kill "$IMAP140_PID" "$GMAIL140_PID" "$SMTP140_PID"
+
+fi
+
+if phase_wanted 150; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 150 — --columns and --sort on every table command (EMAIL-230)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 150: --columns and --sort on the table commands (EMAIL-230) ---"
+
+alloc_port IMAP150_PORT
+alloc_port IMAP150B_PORT
+alloc_port GMAIL150_PORT
+IMAP150_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_150.log"
+GMAIL150_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_150.log"
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP150_PORT MOCK_IMAP_COUNT=12 MOCK_IMAP_FOLDERS=3 \
+    "$MOCK_SERVER_BIN") >"$IMAP150_LOG" 2>&1 &
+IMAP150_PID=$!
+# a second mock with one message that has two attachments (notes.txt, data.bin)
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP150B_PORT "$MOCK_SERVER_BIN") \
+    >"$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_150b.log" 2>&1 &
+IMAP150B_PID=$!
+(MOCK_GMAIL_PORT=$GMAIL150_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="cols@gmail.example" \
+    "$MOCK_GMAIL_BIN") >"$GMAIL150_LOG" 2>&1 &
+GMAIL150_PID=$!
+sleep 1
+
+H150="./build/tests/functional/work-$$/homes/f150-$$"
+case "$H150" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe path $H150" >&2; exit 1 ;; esac
+rm -rf "$H150"
+mkdir -p "$H150/.config/email-cli/accounts/cols@example.org" "$H150/.config/email-cli/accounts/cols2@example.org" "$H150/.config/email-cli/accounts/cols@gmail.example"
+printf 'credential_obfuscation=false\n' > "$H150/.config/email-cli/settings.ini"
+cat > "$H150/.config/email-cli/accounts/cols@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP150_PORT
+EMAIL_USER=cols@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+INI
+cat > "$H150/.config/email-cli/accounts/cols2@example.org/config.ini" <<INI
+EMAIL_HOST=imaps://localhost:$IMAP150B_PORT
+EMAIL_USER=cols2@example.org
+EMAIL_PASS=testpass
+EMAIL_FOLDER=INBOX
+SSL_NO_VERIFY=1
+INI
+cat > "$H150/.config/email-cli/accounts/cols@gmail.example/config.ini" <<INI
+EMAIL_HOST=
+EMAIL_USER=cols@gmail.example
+GMAIL_MODE=1
+GMAIL_REFRESH_TOKEN=fakefaketoken
+INI
+chmod 0600 "$H150"/.config/email-cli/accounts/*/config.ini
+cat > "$H150/.config/email-cli/accounts/cols@example.org/rules.ini" <<'RINI'
+[rule "Zeta rule"]
+if-from    = *@example.net
+then-move-folder  = INBOX.Zeta
+
+[rule "Alpha rule"]
+if-from    = *@example.com
+then-move-folder  = INBOX.Alpha
+RINI
+
+# c150 <bin> <account> <args...>: stdout, then the exit code; stderr in $H150/stderr
+c150() {
+    local bin="$1" acc="$2"; shift 2
+    (export HOME="$H150"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+     export GMAIL_TEST_TOKEN=testtoken
+     export GMAIL_API_BASE_URL="http://localhost:$GMAIL150_PORT/gmail/v1/users/me"
+     "$BIN_DIR/$bin" "$acc" "$@" </dev/null 2>"$H150/stderr"
+     echo "exit-code=$?")
+}
+# p150 <python expression of d> <output>: evaluate on the JSON part
+p150() {
+    local expr="$1" out="$2"
+    printf '%s\n' "$out" | sed '/^exit-code=/d' | python3 -I -c "import json,sys; d=json.load(sys.stdin); print($expr)"
+}
+# rows150 <output>: the table body rows, header and rule removed
+rows150() { printf '%s\n' "$1" | sed '/^exit-code=/d' | awk 'f{print} /═/{f=1}'; }
+# rows150 | strip leading zeros of the 16-digit UIDs
+uid150() { sed 's/^0*//'; }
+
+A=cols@example.org
+A2=cols2@example.org
+G=cols@gmail.example
+for bin in email-cli email-cli-ro; do
+    # --columns: picking and ordering, table and JSON
+    OUT=$(c150 $bin $A list --columns subject,uid)
+    check "150.1 $bin list --columns: exit 0"                        "exit-code=0" "$OUT"
+    check "150.2 $bin list --columns: header has the chosen columns in order" "^  SUBJECT *UID" "$OUT"
+    check_not "150.3 $bin list --columns: no unchosen column"        "FROM\|DATE\|FOLDER" "$OUT"
+    check "150.4 $bin list --columns: first row (newest first)"                   "^  Message 12  *0*12$" "$(rows150 "$OUT" | head -n1)"
+    check "150.4b $bin list --columns: the header names the columns"  "^  SUBJECT  *UID$" "$(printf '%s\n' "$OUT" | sed -n 3p)"
+    check "150.4c $bin list --columns: a rule of box characters under it" "^  ═\{3,\}  ═\{3,\}$" "$(printf '%s\n' "$OUT" | sed -n 4p)"
+    OUT=$(c150 $bin $A list --columns subject,uid --json)
+    check "150.5 $bin list --columns --json: only the chosen keys, in order" "subject,uid" "$(p150 "','.join(d[0].keys())" "$OUT")"
+    check "150.6 $bin list --columns --json: all twelve rows"        "12" "$(p150 "len(d)" "$OUT")"
+
+    # --sort: numeric key order, a different order than shown, a hidden column
+    OUT=$(c150 $bin $A list --columns uid --sort uid:desc)
+    check "150.7 $bin list --sort uid:desc: numerically descending"  "12,11,10,9" "$(rows150 "$OUT" | head -n4 | tr -d ' ' | uid150 | paste -sd,)"
+    OUT=$(c150 $bin $A list --columns uid --sort subject)
+    check "150.8 $bin list --sort by a column that is not shown"     "1,10,11,12,2" "$(rows150 "$OUT" | head -n5 | tr -d ' ' | uid150 | paste -sd,)"
+    OUT=$(c150 $bin $A list --columns uid,subject --sort uid)
+    check "150.9 $bin list --sort uid: numeric (2 before 10)"        "1,2,3,4,5,6,7,8,9,10,11,12" "$(rows150 "$OUT" | awk '{print $1}' | uid150 | paste -sd,)"
+    OUT=$(c150 $bin $A list --sort uid:desc --json)
+    check "150.10 $bin list --sort with the default JSON: all fields, sorted" "12:True" "$(p150 "str(int(d[0]['uid']))+':'+str('subject' in d[0])" "$OUT")"
+    OUT=$(c150 $bin $A list --sort uid:desc --limit 3 --json)
+    check "150.11 $bin list --sort then --limit: the window is taken after" "12,11,10" "$(p150 "','.join(str(int(m['uid'])) for m in d)" "$OUT")"
+
+    # usage errors
+    OUT=$(c150 $bin $A list --columns bogus)
+    check "150.12 $bin list --columns bogus: exit 1"                 "exit-code=1" "$OUT"
+    check "150.13 $bin list --columns bogus: the reason lists the valid names" "unknown column 'bogus'.*valid columns: .*UID" "$(cat "$H150/stderr")"
+    check_not "150.14 $bin list --columns bogus: nothing on stdout"  "UID\|Message" "$OUT"
+    OUT=$(c150 $bin $A list --sort uid:sideways)
+    check "150.15 $bin list --sort bad direction: exit 1"            "exit-code=1" "$OUT"
+    check "150.16 $bin list --sort bad direction: names :asc and :desc" ":asc.*:desc" "$(cat "$H150/stderr")"
+    OUT=$(c150 $bin $A list --sort nope)
+    check "150.17 $bin list --sort nope: unknown column"             "exit-code=1" "$OUT"
+    OUT=$(c150 $bin $A list --columns)
+    check "150.18 $bin list --columns without a value"               "exit-code=1" "$OUT"
+    OUT=$(c150 $bin $A list --columns=uid --sort=uid:desc --json)
+    check "150.19 $bin the --opt=value form"                         "12" "$(p150 "int(d[0]['uid'])" "$OUT")"
+
+    # the other tables
+    OUT=$(c150 $bin $A list-folders --columns total,folder --json)
+    check "150.20 $bin list-folders --columns --json: keys in order" "total,name" "$(p150 "','.join(d[0].keys())" "$OUT")"
+    OUT=$(c150 $bin $A list-folders --columns folder --sort folder:desc)
+    check "150.21 $bin list-folders --sort desc: last folder first"  "INBOX.F02" "$(rows150 "$OUT" | head -n1 | tr -d ' ')"
+    OUT=$(c150 $bin $A list-folders --tree --sort folder:desc)
+    check "150.22 $bin list-folders --tree --sort: exit 0"           "exit-code=0" "$OUT"
+    OUT=$(c150 $bin $A2 list-attachments 1 --sort size:desc --columns filename)
+    check "150.23 $bin list-attachments --sort size:desc, size hidden" "notes.txt" "$(rows150 "$OUT" | head -n1 | tr -d ' ')"
+    OUT=$(c150 $bin $A2 list-attachments 1 --sort filename --columns size,filename --json)
+    check "150.24 $bin list-attachments --sort filename: data.bin first" "9,data.bin" "$(p150 "str(d[0]['size'])+','+d[0]['filename']" "$OUT")"
+    OUT=$(c150 $bin $A list-accounts --sort account:desc --columns account,type)
+    check "150.25 $bin list-accounts --sort account:desc"            "cols@gmail.example" "$(rows150 "$OUT" | head -n1 | awk '{print $1}')"
+    OUT=$(c150 $bin $A list-accounts --columns server --json)
+    check "150.26 $bin list-accounts --columns server --json: only server" "server" "$(p150 "','.join(sorted(set(k for a in d for k in a)))" "$OUT")"
+    OUT=$(c150 $bin $G list-labels --columns id,name --json)
+    check "150.27 $bin list-labels --columns id,name --json"         "id,name" "$(p150 "','.join(d[0].keys())" "$OUT")"
+    OUT=$(c150 $bin $G list-labels --sort name:desc --columns name)
+    check "150.28 $bin list-labels --sort name:desc: exit 0"         "exit-code=0" "$OUT"
+
+    # a command with no table
+    OUT=$(c150 $bin $A show 1 --columns uid)
+    check "150.29 $bin show --columns is a usage error"              "exit-code=1" "$OUT"
+    check "150.30 $bin show --columns: the reason"                   "only for the commands that print a table" "$(cat "$H150/stderr")"
+
+    # help names both options
+    for sub in list list-folders list-labels list-attachments list-accounts; do
+        OUT=$(c150 $bin $A help $sub)
+        check "150.31 $bin help $sub names --columns"                "\-\-columns" "$OUT"
+        check "150.32 $bin help $sub names --sort"                   "\-\-sort" "$OUT"
+    done
+done
+
+# email-cli only: history and rules
+OUT=$(c150 email-cli $A rules list --columns name,then_move_folder --sort name)
+check "150.40 rules list --columns --sort: first row is Alpha"       "^  Alpha rule  *INBOX.Alpha$" "$(rows150 "$OUT" | head -n1)"
+check_not "150.41 rules list --columns: no unchosen column"          "ACCOUNT\|WHEN" "$OUT"
+OUT=$(c150 email-cli $A rules list --columns nr,name --sort nr:desc --json)
+check "150.42 rules list --sort nr:desc --json: numeric descending"  "2,1" "$(p150 "','.join(str(r['nr']) for r in d)" "$OUT")"
+OUT=$(c150 email-cli $A rules list)
+check "150.43 rules list without options keeps the blocks"           "Rules for cols@example.org (2 rules)" "$OUT"
+OUT=$(c150 email-cli $A rules apply --columns name)
+check "150.44 rules apply --columns is a usage error"                "exit-code=1" "$OUT"
+OUT=$(c150 email-cli $A history --columns bogus)
+check "150.45 history --columns bogus: usage error"                  "exit-code=1" "$OUT"
+check "150.46 history --columns bogus: valid names listed"           "valid columns: ID, WHEN, WHO, OP, OBJECT, WHAT, STATE" "$(cat "$H150/stderr")"
+OUT=$(c150 email-cli $A history --json)
+check "150.47 history --json: an array"                              "True" "$(p150 "isinstance(d, list)" "$OUT")"
+OUT=$(c150 email-cli $A mark-read 1 -q)
+OUT=$(c150 email-cli $A history --columns op,id --sort id:desc --json)
+check "150.48 history --columns --sort --json: chosen keys"          "op,id" "$(p150 "','.join(d[0].keys())" "$OUT")"
+OUT=$(c150 email-cli $A history --columns who,id --sort op)
+check "150.49 history table: exit 0 with a hidden sort column"       "exit-code=0" "$OUT"
+OUT=$(c150 email-cli $A help history)
+check "150.50 help history names --columns"                          "\-\-columns" "$OUT"
+check "150.51 help history names --sort"                             "\-\-sort" "$OUT"
+OUT=$(c150 email-cli $A help rules list)
+check "150.52 help rules list names --columns"                     "\-\-columns" "$OUT"
+check "150.53 help rules list names --sort"                        "\-\-sort" "$OUT"
+OUT=$("$BIN_DIR/email-cli" --help 2>&1)
+check "150.54 the general help names --columns"                      "\-\-columns" "$OUT"
+
+# the man pages name both options
+for page in email-cli email-cli-ro; do
+    check "150.55 man $page names --columns"                         "columns" "$(grep -o 'columns' "$PROJECT_ROOT/docs/man/$page.1" | head -n1)"
+    check "150.56 man $page names --sort"                            "sort" "$(grep -o 'sort' "$PROJECT_ROOT/docs/man/$page.1" | head -n1)"
+done
+
+kill "$IMAP150_PID" "$IMAP150B_PID" "$GMAIL150_PID"
 
 fi
 

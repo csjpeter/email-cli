@@ -25,6 +25,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# The programs under test (manage.sh sanitize / memcheck set it).
+BIN_DIR="${EMAIL_TEST_BIN_DIR:-$PROJECT_ROOT/bin}"
 
 IMAP_USER="testuser"
 IMAP_PASS="testpass"
@@ -41,7 +43,7 @@ echo "=== email-cli Integration Test (Dovecot IMAPS / TLS 1.2+) ==="
 echo ""
 
 # 1. Build release binary if needed
-if [ ! -f "$PROJECT_ROOT/bin/email-cli" ]; then
+if [ ! -f "$BIN_DIR/email-cli" ]; then
     echo "Binary not found. Building..."
     (cd "$PROJECT_ROOT" && ./manage.sh build)
 fi
@@ -75,7 +77,7 @@ BEFORE_FLAGS=$(flags_for_user)
 # 5. Run email-cli list (batch) and capture output
 echo "Running: email-cli list --batch ..."
 LIST_RC=0
-LIST_OUTPUT=$(HOME="$TEST_HOME" "$PROJECT_ROOT/bin/email-cli" list --batch 2>&1) || LIST_RC=$?
+LIST_OUTPUT=$(HOME="$TEST_HOME" "$BIN_DIR/email-cli" list --batch 2>&1) || LIST_RC=$?
 echo "email-cli list exit code: $LIST_RC"
 echo "$LIST_OUTPUT"
 echo ""
@@ -85,7 +87,7 @@ UIDS=$(echo "$LIST_OUTPUT" | grep -Eo '^[[:space:]]+[0-9]+' | tr -d ' ' | head -
 SHOW_OUTPUT=""
 for MSG_UID in $UIDS; do
     echo "Running: email-cli show $MSG_UID ..."
-    OUT=$(HOME="$TEST_HOME" "$PROJECT_ROOT/bin/email-cli" --batch show "$MSG_UID" 2>&1) || echo "email-cli show exit code: $?"
+    OUT=$(HOME="$TEST_HOME" "$BIN_DIR/email-cli" --batch show "$MSG_UID" 2>&1) || echo "email-cli show exit code: $?"
     echo "$OUT"
     SHOW_OUTPUT="$SHOW_OUTPUT $OUT"
 done

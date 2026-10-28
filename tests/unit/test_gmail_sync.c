@@ -1096,9 +1096,9 @@ static void test_reconcile_server_error(void) {
     gmail_disconnect(gc);
     gs_wait_child(pid);
 
-    /* gmail_list_messages returns 0 even on 500 (treats as empty list).
-     * So reconcile returns 0 with 0 messages queued. */
-    ASSERT(rc == 0, "reconcile_server_err: returns 0 (empty list) on server 500");
+    /* EMAIL-236: a refused page is an error, not an empty mailbox (which
+     * would let the reconcile treat every stored message as deleted). */
+    ASSERT(rc != 0, "reconcile_server_err: fails on server 500");
     ASSERT(local_pending_fetch_count() == 0,
            "reconcile_server_err: nothing queued when server returns 500");
 }

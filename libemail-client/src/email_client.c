@@ -38,7 +38,7 @@
 struct emc_client {
     Config      *cfg;       /* owned copy of the account */
     MailClient  *mc;        /* connected lazily; NULL until needed */
-    char         err[256];
+    char         err[768];
 };
 
 EMC_API const char *emc_version(void) { return EMC_VERSION_STRING; }
@@ -66,7 +66,12 @@ static char *dup_or_null(const char *s)
 
 static emc_status fail(emc_client *c, emc_status st, const char *what)
 {
-    snprintf(c->err, sizeof(c->err), "%s: %s", what, emc_strerror(st));
+    /* What the server said to the failed call (Gmail REST: EMAIL-236). */
+    const char *said = c->mc ? mail_client_last_error(c->mc) : "";
+    if (said[0])
+        snprintf(c->err, sizeof(c->err), "%s: %s: %s", what, emc_strerror(st), said);
+    else
+        snprintf(c->err, sizeof(c->err), "%s: %s", what, emc_strerror(st));
     return st;
 }
 

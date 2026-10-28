@@ -46,6 +46,10 @@ MailClient *mail_client_connect(Config *cfg);
 void mail_client_free(MailClient *c);
 
 /** @brief Returns 1 for Gmail (label-based), 0 for IMAP (folder-based). */
+/** The server's own words for the last failed call (Gmail: HTTP status,
+ *  error.status, error.message, reason); "" when none is known. */
+const char *mail_client_last_error(const MailClient *c);
+
 int mail_client_uses_labels(const MailClient *c);
 
 /**

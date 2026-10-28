@@ -622,6 +622,56 @@ static void test_ec_gmail_send(void)
 }
 
 
+/* EMAIL-236: a Gmail refusal reaches emc_last_error() with the server's words. */
+static void test_ec_gmail_error_holds_servers_words(void)
+{
+    int lfd = 0, port = 0;
+    lfd = ec_listener(&port);
+    ASSERT(lfd >= 0, "gmail err: listener");
+    pid_t pid = fork();
+    if (pid == 0) {
+        alarm(60);
+        int cfd = accept(lfd, NULL, NULL);
+        if (cfd >= 0) {
+            char req[4096];
+            ssize_t r = read(cfd, req, sizeof(req)); (void)r;
+            const char *body = "{\"error\":{\"code\":403,\"message\":\"Daily Limit Exceeded\","
+                               "\"errors\":[{\"reason\":\"dailyLimitExceeded\"}],"
+                               "\"status\":\"PERMISSION_DENIED\"}}";
+            char head[200];
+            snprintf(head, sizeof(head), "HTTP/1.1 403 Forbidden\r\nContent-Length: %zu\r\n"
+                     "Connection: close\r\n\r\n", strlen(body));
+            ssize_t w = write(cfd, head, strlen(head)); (void)w;
+            w = write(cfd, body, strlen(body)); (void)w;
+            close(cfd);
+        }
+        close(lfd);
+        GCOV_FLUSH();
+        _exit(0);
+    }
+    close(lfd);
+    char base[128];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d/gmail/v1/users/me", port);
+    setenv("GMAIL_TEST_TOKEN", "unit_test_token", 1);
+    setenv("GMAIL_API_BASE_URL", base, 1);
+    emc_account a = {.gmail = 1, .user = "me@example.org", .gmail_refresh_token = "refresh"};
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "gmail err: open");
+    char **names = NULL;
+    int n = 0;
+    ASSERT(emc_list_folders(c, &names, &n) != EMC_OK, "gmail err: refused");
+    const char *e = emc_last_error(c);
+    ASSERT(strstr(e, "list folders") && strstr(e, "GET /labels") && strstr(e, "HTTP 403") &&
+           strstr(e, "PERMISSION_DENIED") && strstr(e, "Daily Limit Exceeded") &&
+           strstr(e, "dailyLimitExceeded") && !strstr(e, "unit_test_token"), e);
+    emc_close(c);
+    unsetenv("GMAIL_TEST_TOKEN");
+    unsetenv("GMAIL_API_BASE_URL");
+    int st;
+    waitpid(pid, &st, 0);
+}
+
+
 static void test_ec_new_functions_validate_arguments(void)
 {
     emc_account a = {.host = "imaps://127.0.0.1:1", .user = "u@example.org"};
@@ -1052,6 +1102,7 @@ void test_email_client(void)
     RUN_TEST(test_ec_send_saves_copy);
     RUN_TEST(test_ec_send_copy_failure_is_not_a_send_failure);
     RUN_TEST(test_ec_gmail_send);
+    RUN_TEST(test_ec_gmail_error_holds_servers_words);
     RUN_TEST(test_ec_new_functions_validate_arguments);
     RUN_TEST(test_ec_compose_and_reply_meta);
     RUN_TEST(test_ec_send_wire_smtp);

@@ -457,6 +457,7 @@ int gmail_sync_reconcile(GmailClient *gc) {
         gmail_set_progress(gc, NULL, NULL);
         free(list_history_id);
         logger_log(LOG_ERROR, "gmail_sync: reconcile failed to list messages");
+        fprintf(stderr, "\nError: list messages: %s\n", gmail_last_error(gc));
         return -1;
     }
     gmail_set_progress(gc, NULL, NULL);

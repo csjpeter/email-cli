@@ -21,7 +21,8 @@ show_help() {
     echo "Usage: ./manage.sh [command]"
     echo ""
     echo "Commands:"
-    echo "  deps           Install system dependencies (supports Ubuntu 24.04, Rocky 9)"
+    echo "  deps           Install system dependencies (supports Ubuntu 24.04, Rocky 9); includes test-base"
+    echo "  test-base      Create or refresh the test base containers in /var/lib/lxc-bases (email-cli has none)"
     echo "  build          Build the project in Release mode"
     echo "  debug          Build the project in Debug mode (with ASAN)"
     echo "  run            Build and run the application"
@@ -216,6 +217,14 @@ ensure_workspace_libs() {
         fi
         echo "$path: $tag (${have:0:12})"
     done
+}
+
+# test_base: creates or refreshes the project's test base containers in
+# /var/lib/lxc-bases, idempotently (agent-container-model.md, section 4a).
+# email-cli has none: its e2e test makes a throwaway container per run
+# (tests/common/testenv.sh), so there is nothing to create or refresh.
+test_base() {
+    echo "test-base: email-cli has no test base container; nothing to create or refresh."
 }
 
 install_deps() {
@@ -669,6 +678,10 @@ case "$1" in
     deps)
         install_deps
         ensure_workspace_libs
+        test_base
+        ;;
+    test-base)
+        test_base
         ;;
     build)
         build_release

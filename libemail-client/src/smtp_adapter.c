@@ -259,14 +259,14 @@ static int smtp_deliver(const char *url, const char *user, const char *pass,
     host[hl] = '\0';
     if (hp[hl] == ':') port = atoi(hp + hl + 1);
 
-    char err[400] = "";
+    char err[500] = "";
     SmtpLink l = {0};
     l.host = host;
     l.port = port;
     l.user = user;
     l.c = net_connect(host, port, implicit, !no_verify, g_smtp_io_timeout, err, sizeof(err));
     if (!l.c) {
-        snprintf(why, why_len, "SMTP %s at %.100s:%d%s%.60s failed: %.150s",
+        snprintf(why, why_len, "SMTP %s at %.80s:%d%s%.40s failed: %.220s",
                  implicit ? "connect/TLS" : "connect", host, port,
                  user && user[0] ? " as " : "", user && user[0] ? user : "",
                  err[0] ? err : "could not connect");

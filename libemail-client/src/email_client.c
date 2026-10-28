@@ -252,7 +252,7 @@ EMC_API emc_status emc_send(emc_client *c, const emc_message *m,
     }
 
     int rc;
-    char why[400] = "";
+    char why[640] = "";
     if (c->cfg->gmail_mode) {
         emc_status st = connect_now(c);
         if (st != EMC_OK) { free(wire); res->status = st; return st; }
@@ -687,7 +687,7 @@ EMC_API emc_status emc_send_wire(emc_client *c, const char *from, const char *to
     }
     c->err[0] = '\0';
     int rc;
-    char why[400] = "";
+    char why[640] = "";
     if (c->cfg->gmail_mode) {
         emc_status st = connect_now(c);
         if (st != EMC_OK) { res->status = st; return st; }

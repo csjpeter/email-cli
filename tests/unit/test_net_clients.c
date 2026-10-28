@@ -467,7 +467,7 @@ static void drain(int fd, char *out, size_t cap)
 
 /* What the last smtp_case() send returned as reason, and what it wrote to
  * stderr (EMAIL-112: nothing). */
-static char g_smtp_why[256];
+static char g_smtp_why[640];
 static char g_smtp_stderr[512];
 
 /* smtp_send() with stderr captured into @p out. */
@@ -570,6 +570,7 @@ static void smtp_expect(SmtpMode mode, int implicit, const char *step, const cha
     ASSERT(strstr(g_smtp_why, what) != NULL, what);
     ASSERT(strstr(g_smtp_why, "as user1") != NULL, "the message names the account");
     snprintf(what, sizeof(what), "the message carries: %s", words);
+    if (!strstr(g_smtp_why, words)) fprintf(stderr, "  actual reason: %s\n", g_smtp_why);
     ASSERT(strstr(g_smtp_why, words) != NULL, what);
     ASSERT(strstr(g_smtp_why, "p@ss") == NULL && strstr(g_smtp_why, "cEBzcw") == NULL &&
            strstr(g_smtp_why, "BODYTEXT") == NULL,
@@ -585,7 +586,7 @@ static void test_smtp_error_messages(void)
     smtp_expect(SM_MAIL_FAIL, 1, "MAIL FROM", "452 4.3.1 Insufficient system storage");
     smtp_expect(SM_RCPT_FAIL, 1, "RCPT TO", "550 5.1.1 no such user");
     smtp_expect(SM_DATA_FAIL, 1, "message", "554 5.7.1 rejected as spam");
-    smtp_expect(SM_HANGUP_MAIL, 1, "MAIL FROM", "the server closed the connection");
+    smtp_expect(SM_HANGUP_MAIL, 1, "MAIL FROM", "no reply, read from 127.0.0.1:");
     smtp_expect(SM_NO_STARTTLS, 0, "STARTTLS", "does not offer STARTTLS");
     smtp_set_io_timeout(1);
     smtp_expect(SM_SILENT_MAIL, 1, "MAIL FROM", "timed out");

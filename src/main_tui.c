@@ -2765,8 +2765,9 @@ int main(int argc, char *argv[]) {
         cfg = setup_wizard_run();
         if (cfg) {
             if (config_save_to_store(cfg) != 0) {
-                logger_log(LOG_ERROR, "Failed to save configuration.");
-                fprintf(stderr, "Error: Failed to save configuration to disk.\n");
+                logger_log(LOG_ERROR, "Failed to save configuration: %s", config_last_error());
+                fprintf(stderr, "Error: Failed to save configuration to disk: %s\n",
+                        config_last_error()[0] ? config_last_error() : "unknown cause");
             } else {
                 printf("Configuration saved. Run 'email-sync' to download your mail.\n");
                 /* Test the credential now rather than letting the first sync
@@ -2783,7 +2784,8 @@ int main(int argc, char *argv[]) {
 
     /* 4. Initialize local store for the first/default account */
     if (local_store_init(cfg->host, cfg->user) != 0)
-        logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
+        fprintf(stderr, "Warning: cannot open the local store of %s: %s\n",
+                cfg->user ? cfg->user : cfg->host, local_store_last_error());
 
     /* 4b. Subcommand dispatch (compose / send / reply) — exits here; TUI not started */
     if (subcmd) {

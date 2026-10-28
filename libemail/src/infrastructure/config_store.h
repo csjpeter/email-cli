@@ -56,6 +56,12 @@ void config_free_account_list(AccountEntry *list, int count);
 int config_save_account(const Config *cfg);
 
 /**
+ * @brief The words of the last failed config_save_account / config_delete_account:
+ *        what failed, the path and the errno text.  Empty when none.
+ */
+const char *config_last_error(void);
+
+/**
  * @brief Deletes a named account profile directory.
  * @return 0 on success or not-found, -1 on error.
  */

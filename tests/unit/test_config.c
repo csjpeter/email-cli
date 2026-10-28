@@ -133,6 +133,10 @@ void test_config_store(void) {
 
         int res = config_save_to_store(&cfg_fail);
         ASSERT(res == -1, "config_save_to_store: mkdir fail should return -1");
+        ASSERT(strstr(config_last_error(), "cannot create directory") != NULL &&
+               strstr(config_last_error(), "test@test.com") != NULL &&
+               strstr(config_last_error(), "Permission denied") != NULL,
+               "config_save_to_store: the error names the operation, the path and the errno text");
 
         chmod(TP("email-cli-test-home-fail/.config"), 0700);
         free(cfg_fail.host);
@@ -159,6 +163,10 @@ void test_config_store(void) {
 
         int res = config_save_to_store(&cfg_fopen);
         ASSERT(res == -1, "config_save_to_store: fopen on dir should return -1");
+        ASSERT(strstr(config_last_error(), "cannot write") != NULL &&
+               strstr(config_last_error(), "config.ini") != NULL &&
+               strstr(config_last_error(), "Is a directory") != NULL,
+               "config_save_to_store: the fopen error names the file and the errno text");
 
         rmdir(TP("email-cli-test-home-fopen/.config/email-cli/accounts/test@test.com/config.ini"));
         free(cfg_fopen.host);

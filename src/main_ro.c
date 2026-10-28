@@ -75,6 +75,7 @@ static void help_general(void) {
         "\n"
         "Help:\n"
         "  help [command]             Show this help, or detailed help for a command\n"
+        "  --debug                    Write a session trace (also: EMAIL_CLI_DEBUG=1)\n"
         "  --help, -h                 Show this help (also: <command> --help)\n"
         "  --version                  Print the version\n"
         "\n"
@@ -339,6 +340,8 @@ static void unknown_option(const char *cmd, const char *opt) {
 #endif
 
 int main(int argc, char *argv[]) {
+    /* --debug / EMAIL_CLI_DEBUG: the trace is written only on request (EMAIL-240). */
+    int debug_trace = logger_debug_requested(&argc, argv);
     setlocale(LC_ALL, "");
 
     /* TERM unset or dumb: no colour or erase codes in the output (EMAIL-108). */
@@ -460,11 +463,15 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
 
     /* 3. Initialize logger */
-    if (fs_mkdir_p(log_dir, 0700) != 0)
-        fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
-    if (logger_init(log_file, LOG_DEBUG) != 0)
-        fprintf(stderr, "Warning: Logging system failed to initialize.\n");
-    emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
+    if (debug_trace) {
+        if (fs_mkdir_p(log_dir, 0700) != 0)
+            fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
+        if (logger_init(log_file, LOG_DEBUG) != 0)
+            fprintf(stderr, "Warning: Logging system failed to initialize.\n");
+        emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
+    } else {
+        logger_stderr_only();        /* no file: errors still reach the user */
+    }
     logger_log(LOG_INFO, "--- email-cli-ro starting (cmd: %s) ---", cmd);
 
     /* --all-accounts iterates over every configured account, so the usual
@@ -793,6 +800,9 @@ int main(int argc, char *argv[]) {
 
     if (result >= 0)
         return EXIT_SUCCESS;
-    fprintf(stderr, "\nFailed. Check logs in %s\n", log_file);
+    if (debug_trace)
+        fprintf(stderr, "\nFailed. Check logs in %s\n", log_file);
+    else
+        fprintf(stderr, "\nFailed. Run again with --debug to write a trace to %s\n", log_file);
     return EXIT_FAILURE;
 }

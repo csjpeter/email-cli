@@ -74,6 +74,7 @@ static void help(void) {
         "    ESC/q     Quit\n"
         "\n"
         "Options:\n"
+        "  --debug      Write a session trace (also: EMAIL_CLI_DEBUG=1)\n"
         "  --help, -h   Show this help message\n"
         "\n"
         "For batch/scriptable operations use email-cli.\n"
@@ -2658,6 +2659,8 @@ static void on_sigterm(int sig) {
 }
 
 int main(int argc, char *argv[]) {
+    /* --debug / EMAIL_CLI_DEBUG: the trace is written only on request (EMAIL-240). */
+    int debug_trace = logger_debug_requested(&argc, argv);
     /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
     setlocale(LC_ALL, "");
@@ -2751,11 +2754,15 @@ int main(int argc, char *argv[]) {
     }
 
     /* 2. Initialize logger */
-    if (fs_mkdir_p(log_dir, 0700) != 0)
-        fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
-    if (logger_init(log_file, LOG_DEBUG) != 0)
-        fprintf(stderr, "Warning: Logging system failed to initialize.\n");
-    emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
+    if (debug_trace) {
+        if (fs_mkdir_p(log_dir, 0700) != 0)
+            fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
+        if (logger_init(log_file, LOG_DEBUG) != 0)
+            fprintf(stderr, "Warning: Logging system failed to initialize.\n");
+        emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
+    } else {
+        logger_stderr_only();        /* no file: errors still reach the user */
+    }
     logger_log(LOG_INFO, "--- email-tui starting ---");
 
     /* 3. Load configuration */

@@ -689,7 +689,16 @@ int config_revert_step(const OpStep *st, char *refusal, size_t size) {
     return -1;
 }
 
+static char g_cfg_error[1300];
+
+const char *config_last_error(void) { return g_cfg_error; }
+
+static void cfg_error(const char *what, const char *path) {
+    snprintf(g_cfg_error, sizeof(g_cfg_error), "%.60s %.1000s: %.100s", what, path, strerror(errno));
+}
+
 int config_save_account(const Config *cfg) {
+    g_cfg_error[0] = '\0';
     if (!cfg || !cfg->user || !cfg->user[0]) return -1;
     Config *before = config_load_account(cfg->user);
 
@@ -699,14 +708,18 @@ int config_save_account(const Config *cfg) {
     char account_dir[1024];
     snprintf(account_dir, sizeof(account_dir), "%s/%s", accounts_dir, cfg->user);
 
-    if (fs_mkdir_p(account_dir, 0700) != 0) { config_free(before); return -1; }
+    if (fs_mkdir_p(account_dir, 0700) != 0) {
+        cfg_error("cannot create directory", account_dir);
+        config_free(before);
+        return -1;
+    }
 
     char path[1088];
     snprintf(path, sizeof(path), "%s/config.ini", account_dir);
 
     {
         RAII_FILE FILE *fp = fopen(path, "w");
-        if (!fp) { config_free(before); return -1; }
+        if (!fp) { cfg_error("cannot write", path); config_free(before); return -1; }
         write_config_to_fp(fp, cfg);
     }
     fs_ensure_permissions(path, 0600);
@@ -722,6 +735,7 @@ int config_save_to_store(const Config *cfg) {
 }
 
 int config_delete_account(const char *name) {
+    g_cfg_error[0] = '\0';
     if (!name || !name[0]) return -1;
     Config *before = config_load_account(name);
 
@@ -735,7 +749,8 @@ int config_delete_account(const char *name) {
     char dir[1024];
     snprintf(dir, sizeof(dir), "%s/%s", accounts_dir, name);
     if (rmdir(dir) != 0 && errno != ENOENT) {
-        logger_log(LOG_WARN, "Could not remove account dir %s", dir);
+        cfg_error("cannot remove directory", dir);
+        logger_log(LOG_WARN, "%s", g_cfg_error);
         config_free(before);
         return -1;
     }

@@ -50,6 +50,13 @@
  */
 int local_store_init(const char *host_url, const char *username);
 
+/**
+ * @brief The words of the last local store failure, for the error shown to the
+ *        user: what failed, the path and the errno text, e.g.
+ *        "cannot create directory /x/y: Permission denied".  Empty when none.
+ */
+const char *local_store_last_error(void);
+
 /** @brief Returns the account name (email address or hostname) set by local_store_init. */
 const char *local_store_account_name(void);
 

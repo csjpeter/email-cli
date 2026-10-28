@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <sys/stat.h>
 
 /* ── Helper to set up a clean test environment ────────────────────────── */
 
@@ -1320,4 +1321,36 @@ void test_local_search_gmail(void) {
     ASSERT(cnt == 0, "gmail empty query: no results");
     ASSERT(local_search(NULL, 0, 1, &res, &cnt) == 0, "gmail NULL query: returns 0");
     ASSERT(cnt == 0, "gmail NULL query: no results");
+}
+
+/* EMAIL-239: a store failure carries the operation, the path and the errno text. */
+void test_local_store_error_text(void) {
+    const char *home = TP("email-cli-store-err-home");
+    setenv("HOME", home, 1);
+    unsetenv("XDG_DATA_HOME");
+    fs_mkdir_p(TP("email-cli-store-err-home/.local/share/email-cli"), 0700);
+    chmod(TP("email-cli-store-err-home/.local/share/email-cli"), 0500);
+
+    int rc = local_store_init("imaps://test.example.com", "erruser");
+    ASSERT(rc == -1, "local_store_init: unwritable data dir returns -1");
+    const char *e = local_store_last_error();
+    ASSERT(strstr(e, "cannot create directory") != NULL &&
+           strstr(e, "erruser") != NULL && strstr(e, "Permission denied") != NULL,
+           "local_store_init: error names the directory and the errno text");
+    chmod(TP("email-cli-store-err-home/.local/share/email-cli"), 0700);
+
+    ASSERT(local_store_init("imaps://test.example.com", "erruser") == 0,
+           "local_store_init: succeeds once the directory is writable");
+    ASSERT(local_store_last_error()[0] == '\0', "a successful init clears the error text");
+
+    /* A file where the bucket directory should be. */
+    fs_mkdir_p(TP("email-cli-store-err-home/.local/share/email-cli/accounts/erruser"), 0700);
+    FILE *fp = fopen(TP("email-cli-store-err-home/.local/share/email-cli/accounts/erruser/store"), "w");
+    if (fp) fclose(fp);
+    rc = local_msg_save("INBOX", "42", "x", 1);
+    ASSERT(rc == -1, "local_msg_save: blocked bucket returns -1");
+    ASSERT(strstr(local_store_last_error(), "cannot create directory") != NULL &&
+           strstr(local_store_last_error(), "store/INBOX") != NULL,
+           "local_msg_save: error names the bucket directory");
+    unlink(TP("email-cli-store-err-home/.local/share/email-cli/accounts/erruser/store"));
 }

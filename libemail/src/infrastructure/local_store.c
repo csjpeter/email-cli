@@ -9,6 +9,7 @@
 #include "raii.h"
 #include "logger.h"
 #include <ctype.h>
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,11 +22,28 @@
 
 static char g_account_base[8192];
 static char g_account_name[520];
+static char g_last_error[1200];
+
+const char *local_store_last_error(void) { return g_last_error; }
+
+static void set_last_error(const char *what, const char *path, int err) {
+    snprintf(g_last_error, sizeof(g_last_error), "%.60s %.1000s: %.100s",
+             what, path ? path : "?", strerror(err));
+}
 
 int local_store_init(const char *host_url, const char *username) {
     const char *data_base = platform_data_dir();
-    if (!data_base) return -1;
-    if (!host_url && (!username || !username[0])) return -1;
+    g_last_error[0] = '\0';
+    if (!data_base) {
+        snprintf(g_last_error, sizeof(g_last_error),
+                 "cannot find the data directory (neither XDG_DATA_HOME nor HOME is set)");
+        return -1;
+    }
+    if (!host_url && (!username || !username[0])) {
+        snprintf(g_last_error, sizeof(g_last_error),
+                 "the account has neither a host nor a user name");
+        return -1;
+    }
 
     /* The email address (username) uniquely identifies an account.
      * Use it directly as the directory key so two accounts on the same
@@ -53,7 +71,10 @@ int local_store_init(const char *host_url, const char *username) {
     logger_log(LOG_DEBUG, "local_store: account base = %s", g_account_base);
     /* Ensure the account base directory exists so callers can write files
      * (e.g. pending_fetch.tsv) before any message has been downloaded. */
-    fs_mkdir_p(g_account_base, 0700);
+    if (fs_mkdir_p(g_account_base, 0700) != 0) {
+        set_last_error("cannot create directory", g_account_base, errno);
+        return -1;
+    }
     return 0;
 }
 
@@ -88,8 +109,11 @@ static char *load_file(const char *path) {
 
 static int write_file(const char *path, const char *content, size_t len) {
     RAII_FILE FILE *fp = fopen(path, "w");
-    if (!fp) return -1;
-    if (fwrite(content, 1, len, fp) != len) return -1;
+    if (!fp) { set_last_error("cannot write", path, errno); return -1; }
+    if (fwrite(content, 1, len, fp) != len) {
+        set_last_error("short write to", path, errno ? errno : EIO);
+        return -1;
+    }
     return 0;
 }
 
@@ -99,7 +123,11 @@ static int ensure_bucket_dir(const char *area, const char *folder, const char *u
     if (asprintf(&dir, "%s/%s/%s/%c/%c",
                  g_account_base, area, folder, digit1(uid), digit2(uid)) == -1)
         return -1;
-    return fs_mkdir_p(dir, 0700);
+    if (fs_mkdir_p(dir, 0700) != 0) {
+        set_last_error("cannot create directory", dir, errno);
+        return -1;
+    }
+    return 0;
 }
 
 /* ── Message store ───────────────────────────────────────────────────── */
@@ -127,13 +155,14 @@ int local_msg_exists(const char *folder, const char *uid) {
 int local_msg_save(const char *folder, const char *uid, const char *content, size_t len) {
     if (!g_account_base[0]) return -1;
     if (ensure_bucket_dir("store", folder, uid) != 0) {
-        logger_log(LOG_ERROR, "Failed to create store bucket for %s/%s", folder, uid);
+        logger_log(LOG_ERROR, "Failed to create store bucket for %s/%s: %s",
+                   folder, uid, g_last_error);
         return -1;
     }
     RAII_STRING char *path = msg_path(folder, uid);
     if (!path) return -1;
     if (write_file(path, content, len) != 0) {
-        logger_log(LOG_ERROR, "Failed to write store file: %s", path);
+        logger_log(LOG_ERROR, "Failed to write store file: %s", g_last_error);
         return -1;
     }
     logger_log(LOG_DEBUG, "Stored %s/%s at %s", folder, uid, path);
@@ -167,7 +196,8 @@ int local_hdr_exists(const char *folder, const char *uid) {
 int local_hdr_save(const char *folder, const char *uid, const char *content, size_t len) {
     if (!g_account_base[0]) return -1;
     if (ensure_bucket_dir("headers", folder, uid) != 0) {
-        logger_log(LOG_ERROR, "Failed to create header bucket for %s/%s", folder, uid);
+        logger_log(LOG_ERROR, "Failed to create header bucket for %s/%s: %s",
+                   folder, uid, g_last_error);
         return -1;
     }
     RAII_STRING char *path = hdr_path(folder, uid);

@@ -32,6 +32,9 @@ struct NetConn {
     SSL_CTX *ctx;
     SSL     *ssl;
     int      timeout_s;
+    int      port;
+    char     host[256];
+    char     last_err[640];   /* why the last read or write failed (EMAIL-238) */
 };
 
 /* ── Trust store ────────────────────────────────────────────────────── */
@@ -96,6 +99,45 @@ static void set_err(char *err, size_t n, const char *msg)
     if (err && n) snprintf(err, n, "%s", msg);
 }
 
+/**
+ * The reason of the failure just seen: the OpenSSL error string when the
+ * library queued one, else the errno text, and the timeout when that is what
+ * happened.  Drains the OpenSSL error queue.
+ */
+static void why_text(char *out, size_t n, int err_no, int timed_out, int timeout_s)
+{
+    char ossl[200] = "";
+    unsigned long e = ERR_peek_last_error();
+    if (e) ERR_error_string_n(e, ossl, sizeof(ossl));
+    ERR_clear_error();
+    out[0] = '\0';
+    if (timed_out || err_no == EAGAIN || err_no == EWOULDBLOCK || err_no == ETIMEDOUT) {
+        snprintf(out, n, "timed out after %d s", timeout_s);
+        if (ossl[0]) { size_t l = strlen(out); snprintf(out + l, n - l, " (%s)", ossl); }
+    } else if (ossl[0]) {
+        snprintf(out, n, "%s", ossl);
+        if (err_no) { size_t l = strlen(out); snprintf(out + l, n - l, " (%s)", strerror(err_no)); }
+    } else if (err_no) {
+        snprintf(out, n, "%s", strerror(err_no));
+    } else {
+        snprintf(out, n, "connection closed by the server");
+    }
+}
+
+/** Record "STAGE HOST:PORT failed: why" as the connection's last error. */
+static void conn_fail(NetConn *c, const char *stage, int err_no, int timed_out)
+{
+    char why[260];
+    why_text(why, sizeof(why), err_no, timed_out, c->timeout_s);
+    snprintf(c->last_err, sizeof(c->last_err), "%s %s:%d failed: %s",
+             stage, c->host, c->port, why);
+}
+
+const char *net_conn_error(const NetConn *c)
+{
+    return c && c->last_err[0] ? c->last_err : "";
+}
+
 static int wait_fd(int fd, short events, int timeout_s)
 {
     struct pollfd p = { .fd = fd, .events = events };
@@ -116,22 +158,31 @@ static int tcp_connect(const char *host, int port, int timeout_s,
     struct addrinfo *ai = NULL;
     int rc = getaddrinfo(host, portstr, &hints, &ai);
     if (rc != 0) {
-        set_err(err, err_len, "Could not resolve hostname");
+        if (err && err_len)
+            snprintf(err, err_len, "Could not resolve hostname %s:%d (resolve failed: %s)",
+                     host, port, gai_strerror(rc));
         logger_log(LOG_ERROR, "getaddrinfo(%s): %s", host, gai_strerror(rc));
         return -1;
     }
     int fd = -1;
+    int last_errno = 0, timed_out = 0;
     for (struct addrinfo *a = ai; a; a = a->ai_next) {
         fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-        if (fd < 0) continue;
+        if (fd < 0) { last_errno = errno; continue; }
         fcntl_nonblock(fd, 1);
         int cr = connect(fd, a->ai_addr, a->ai_addrlen);
+        if (cr < 0) last_errno = errno;
         if (cr < 0 && (errno == EINPROGRESS || errno == EINTR)) {
-            if (wait_fd(fd, POLLOUT, timeout_s) > 0) {
+            int w = wait_fd(fd, POLLOUT, timeout_s);
+            if (w > 0) {
                 int soerr = 0;
                 socklen_t sl = sizeof(soerr);
                 getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &sl);
                 cr = soerr == 0 ? 0 : -1;
+                last_errno = soerr;
+            } else if (w == 0) {
+                timed_out = 1;
+                last_errno = ETIMEDOUT;
             }
         }
         if (cr == 0) { fcntl_nonblock(fd, 0); break; }
@@ -139,7 +190,14 @@ static int tcp_connect(const char *host, int port, int timeout_s,
         fd = -1;
     }
     freeaddrinfo(ai);
-    if (fd < 0) set_err(err, err_len, "Could not connect to server");
+    if (fd < 0 && err && err_len) {
+        if (timed_out)
+            snprintf(err, err_len, "Could not connect to %s:%d (connect failed: timed out after %d s)",
+                     host, port, timeout_s);
+        else
+            snprintf(err, err_len, "Could not connect to %s:%d (connect failed: %s)",
+                     host, port, last_errno ? strerror(last_errno) : "no address to try");
+    }
     return fd;
 }
 
@@ -203,21 +261,26 @@ static int tls_handshake(NetConn *c, const char *host, int verify,
     sigpipe_block(&old);        /* a server that hangs up is an error, not a signal */
     do {
         errno = 0;
+        ERR_clear_error();
         hs = SSL_connect(c->ssl);
         /* an interrupted handshake read or write is continued, not failed */
     } while (hs != 1 && errno == EINTR);
     sigpipe_unblock(&old);
     if (hs != 1) {
+        int hs_errno = errno;
         long vr = SSL_get_verify_result(c->ssl);
-        if (verify && vr != X509_V_OK) {
-            char m[160];
-            snprintf(m, sizeof(m), "server certificate rejected: %s",
-                     X509_verify_cert_error_string(vr));
-            set_err(err, err_len, m);
-        } else {
-            set_err(err, err_len, "TLS handshake failed");
+        char why[260];
+        why_text(why, sizeof(why), hs_errno, 0, c->timeout_s);
+        if (err && err_len) {
+            if (verify && vr != X509_V_OK)
+                snprintf(err, err_len,
+                         "TLS handshake failed with %s:%d: server certificate rejected: %s (%s)",
+                         host, c->port, X509_verify_cert_error_string(vr), why);
+            else
+                snprintf(err, err_len, "TLS handshake failed with %s:%d: %s",
+                         host, c->port, why);
         }
-        logger_log(LOG_ERROR, "TLS handshake failed with %s", host);
+        logger_log(LOG_ERROR, "TLS handshake failed with %s:%d: %s", host, c->port, why);
         return -1;
     }
     logger_log(LOG_DEBUG, "TLS handshake OK with %s (%s)", host, SSL_get_version(c->ssl));
@@ -247,6 +310,8 @@ NetConn *net_connect(const char *host, int port, int use_tls, int verify,
     if (!c) { set_err(err, err_len, "Out of memory"); close(fd); return NULL; }
     c->fd = fd;
     c->timeout_s = timeout_s;
+    c->port = port;
+    snprintf(c->host, sizeof(c->host), "%s", host);
     if (use_tls && tls_handshake(c, host, verify, err, err_len) != 0) {
         net_close(c);
         return NULL;
@@ -271,19 +336,25 @@ ssize_t net_conn_read(NetConn *c, void *buf, size_t len)
             errno = 0;
             int n = SSL_read(c->ssl, buf, (int)(len > 1 << 30 ? 1 << 30 : len));
             if (n > 0) return n;
+            int rd_errno = errno;
             int e = SSL_get_error(c->ssl, n);
             if (e == SSL_ERROR_ZERO_RETURN) return 0;
             if (e == SSL_ERROR_SYSCALL && n == 0 && errno == 0) return 0;   /* EOF without close_notify */
             if (e == SSL_ERROR_SYSCALL && errno == EINTR) continue;
             if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) {
-                if (wait_fd(c->fd, e == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT,
-                            c->timeout_s) > 0) continue;
+                int w = wait_fd(c->fd, e == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT,
+                                c->timeout_s);
+                if (w > 0) continue;
+                conn_fail(c, "read from", 0, w == 0);
+                return -1;
             }
+            conn_fail(c, "read from", rd_errno, 0);
             return -1;
         }
         ssize_t n = read(c->fd, buf, len);
         if (n >= 0) return n;
         if (errno == EINTR) continue;
+        conn_fail(c, "read from", errno, 0);
         return -1;
     }
 }
@@ -299,11 +370,16 @@ static int write_nosigpipe(NetConn *c, const unsigned char *p, size_t len)
             errno = 0;
             int n = SSL_write(c->ssl, p, (int)(len > 1 << 30 ? 1 << 30 : len));
             if (n > 0) { p += n; len -= (size_t)n; continue; }
+            int wr_errno = errno;
             int e = SSL_get_error(c->ssl, n);
-            if (e == SSL_ERROR_SYSCALL && errno == EINTR) continue;
+            if (e == SSL_ERROR_SYSCALL && wr_errno == EINTR) continue;
             if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) {
-                if (wait_fd(c->fd, e == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT,
-                            c->timeout_s) > 0) continue;
+                int w = wait_fd(c->fd, e == SSL_ERROR_WANT_READ ? POLLIN : POLLOUT,
+                                c->timeout_s);
+                if (w > 0) continue;
+                conn_fail(c, "write to", 0, w == 0);
+            } else {
+                conn_fail(c, "write to", wr_errno, 0);
             }
             rc = -1;
             break;
@@ -311,6 +387,7 @@ static int write_nosigpipe(NetConn *c, const unsigned char *p, size_t len)
             ssize_t n = send(c->fd, p, len, MSG_NOSIGNAL);
             if (n > 0) { p += n; len -= (size_t)n; continue; }
             if (n < 0 && errno == EINTR) continue;
+            conn_fail(c, "write to", n < 0 ? errno : 0, 0);
             rc = -1;
             break;
         }

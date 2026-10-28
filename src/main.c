@@ -1402,8 +1402,9 @@ int main(int argc, char *argv[]) {
                 cfg = setup_wizard_run();
                 if (cfg) {
                     if (config_save_to_store(cfg) != 0) {
-                        logger_log(LOG_ERROR, "Failed to save configuration.");
-                        fprintf(stderr, "Error: Failed to save configuration to disk.\n");
+                        logger_log(LOG_ERROR, "Failed to save configuration: %s", config_last_error());
+                        fprintf(stderr, "Error: Failed to save configuration to disk: %s\n",
+                        config_last_error()[0] ? config_last_error() : "unknown cause");
                     } else {
                         printf("Configuration saved. Run 'email-cli sync' to download your mail.\n");
                         /* The wizard used to promise a connection check and
@@ -1423,7 +1424,8 @@ int main(int argc, char *argv[]) {
 
     /* 5. Initialize local store */
     if (cfg && local_store_init(cfg->host, cfg->user) != 0)
-        logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
+        fprintf(stderr, "Warning: cannot open the local store of %s: %s\n",
+                cfg->user ? cfg->user : cfg->host, local_store_last_error());
 
     /* 6. Dispatch — batch mode only (no interactive TUI) */
     /* result: >= 0 succeeded; -1 failed and the log file may explain why;
@@ -1548,8 +1550,9 @@ int main(int argc, char *argv[]) {
                         if (!accs[ai].cfg) continue;
                         printf("=== %s ===\n", accs[ai].name ? accs[ai].name : "?");
                         if (local_store_init(accs[ai].cfg->host, accs[ai].cfg->user) != 0) {
-                            fprintf(stderr, "Warning: local store unavailable for %s\n",
-                                    accs[ai].name ? accs[ai].name : "?");
+                            fprintf(stderr, "Warning: local store unavailable for %s: %s\n",
+                                    accs[ai].name ? accs[ai].name : "?",
+                                    local_store_last_error());
                             continue;
                         }
                         EmailListOpts aopts = opts;
@@ -2320,7 +2323,13 @@ int main(int argc, char *argv[]) {
             } else if (!confirm_irreversible(q)) {
                 result = declined();
             } else {
-                config_delete_account(account_name);
+                if (config_delete_account(account_name) != 0) {
+                    fprintf(stderr, "Error: could not remove the account '%s': %s\n",
+                            account_name,
+                            config_last_error()[0] ? config_last_error() : "unknown cause");
+                    logger_close();
+                    return EXIT_FAILURE;
+                }
 
                 const char *data_base = platform_data_dir();
                 printf("Account '%s' removed.\n", account_name);

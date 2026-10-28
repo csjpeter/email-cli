@@ -514,7 +514,8 @@ int main(int argc, char *argv[]) {
 
     /* 5. Initialize local store */
     if (cfg && local_store_init(cfg->host, cfg->user) != 0)
-        logger_log(LOG_WARN, "Failed to initialize local store for %s", cfg->host);
+        fprintf(stderr, "Warning: cannot open the local store of %s: %s\n",
+                cfg->user ? cfg->user : cfg->host, local_store_last_error());
 
     /* 6. Dispatch — batch mode only (pager = 0) */
     int result = -1;
@@ -636,8 +637,9 @@ int main(int argc, char *argv[]) {
                         if (!accs[ai].cfg) continue;
                         printf("=== %s ===\n", accs[ai].name ? accs[ai].name : "?");
                         if (local_store_init(accs[ai].cfg->host, accs[ai].cfg->user) != 0) {
-                            fprintf(stderr, "Warning: local store unavailable for %s\n",
-                                    accs[ai].name ? accs[ai].name : "?");
+                            fprintf(stderr, "Warning: local store unavailable for %s: %s\n",
+                                    accs[ai].name ? accs[ai].name : "?",
+                                    local_store_last_error());
                             continue;
                         }
                         EmailListOpts aopts = opts;

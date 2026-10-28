@@ -504,7 +504,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     struct addrinfo *ai = NULL;
     int rc = getaddrinfo(host, port, &hints, &ai);
     if (rc != 0) {
-        logger_log(LOG_ERROR, "getaddrinfo(%s:%s): %s", host, port, gai_strerror(rc));
+        logger_log(LOG_ERROR, "Could not resolve %s:%s (resolve failed: %s)", host, port, gai_strerror(rc));
         return NULL;
     }
 
@@ -533,7 +533,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     freeaddrinfo(ai);
 
     if (fd < 0) {
-        logger_log(LOG_ERROR, "connect to %s:%s failed: %s", host, port, strerror(errno));
+        logger_log(LOG_ERROR, "connect to %s:%s failed: %s", host, port, strerror(errno));  /* stage, host:port, errno text (EMAIL-238) */
         return NULL;
     }
 
@@ -582,11 +582,25 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         int hs;
         do {
             errno = 0;
+            ERR_clear_error();
             hs = SSL_connect(ssl);
             /* An interrupted handshake read or write is continued, not failed. */
         } while (hs != 1 && errno == EINTR);
         if (hs != 1) {
-            logger_log(LOG_ERROR, "SSL handshake failed with %s", host);
+            int hs_errno = errno;
+            long vr = SSL_get_verify_result(ssl);
+            char ossl[200] = "";
+            unsigned long oe = ERR_peek_last_error();
+            if (oe) ERR_error_string_n(oe, ossl, sizeof(ossl));
+            ERR_clear_error();
+            /* stage, host:port, the OpenSSL string, the certificate verify
+             * reason and the errno text (EMAIL-238) */
+            logger_log(LOG_ERROR, "SSL handshake failed with %s:%s: %s%s%s%s%s%s", host, port,
+                       ossl[0] ? ossl : "no OpenSSL error",
+                       verify_tls && vr != X509_V_OK ? "; certificate verify: " : "",
+                       verify_tls && vr != X509_V_OK ? X509_verify_cert_error_string(vr) : "",
+                       hs_errno ? " (" : "", hs_errno ? strerror(hs_errno) : "",
+                       hs_errno ? ")" : "");
             SSL_free(ssl); SSL_CTX_free(ctx); free(c); close(fd);
             return NULL;
         }

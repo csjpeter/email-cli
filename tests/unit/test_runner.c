@@ -25,6 +25,7 @@ void test_wizard(void);
 void test_imap_client(void);
 void test_mime_util(void);
 void test_local_msg_store(void);
+void test_local_store_error_text(void);
 void test_local_msg_find_folders(void);
 void test_local_hdr_evict(void);
 void test_local_index(void);
@@ -133,6 +134,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_imap_client);
     RUN_TEST(test_mime_util);
     RUN_TEST(test_local_msg_store);
+    RUN_TEST(test_local_store_error_text);
     RUN_TEST(test_local_msg_find_folders);
     RUN_TEST(test_local_hdr_evict);
     RUN_TEST(test_local_index);

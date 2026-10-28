@@ -6338,7 +6338,14 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
                 snprintf(data_path, sizeof(data_path),
                          "%s/email-cli/accounts/%s", data_base, name);
 
-            config_delete_account(name);
+            if (config_delete_account(name) != 0) {
+                snprintf(flash_note, sizeof(flash_note),
+                         "  Could not remove account %.60s: %.300s", name,
+                         config_last_error()[0] ? config_last_error() : "unknown cause");
+                flash_msg = flash_note;
+                ACC_FREE();
+                continue;
+            }
             ACC_FREE();
             if (cursor > 0) cursor--;
 

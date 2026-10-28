@@ -45,4 +45,10 @@ int smtp_send(const Config *cfg,
               char *err,
               size_t err_len);
 
+/**
+ * @brief Set the connect, read and write limit of an SMTP session, in seconds
+ *        (default 30; a value below 1 restores it).  Process-wide.
+ */
+void smtp_set_io_timeout(int seconds);
+
 #endif /* SMTP_ADAPTER_H */

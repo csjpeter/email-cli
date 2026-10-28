@@ -52,7 +52,57 @@ struct ImapClient {
     int      caps;
     int      caps_queried;
     int      qresync_enabled;  /* 1 after ENABLE QRESYNC sent */
+
+    /* Where an error message says it happened (EMAIL-237) */
+    char     host[256];
+    char     port[16];
+    char     user[128];
+    char     folder[256];      /* the folder last selected or being selected */
+    char     cmd[24];          /* verb of the command in flight ("UID FETCH") */
+    int      quiet;            /* >0: failures are expected, say nothing */
+    int      io_errno;         /* errno of the last failed read, 0 for EOF */
+    int      timed_out;        /* the last read ran into the receive timeout */
 };
+
+/** Receive and send limit, seconds (imap_set_io_timeout). */
+static int g_imap_io_timeout = 15;
+
+void imap_set_io_timeout(int seconds) {
+    g_imap_io_timeout = seconds > 0 ? seconds : 15;
+}
+
+/** Copy @p s, as one printable line of at most @p cap-1 bytes. */
+static void said_clean(char *out, size_t cap, const char *s) {
+    size_t n = 0;
+    for (; s && *s && n + 1 < cap; s++) {
+        if (*s == '\r' || *s == '\n') break;
+        out[n++] = ((unsigned char)*s < 0x20 || *s == 0x7f) ? ' ' : *s;
+    }
+    out[n] = '\0';
+}
+
+/**
+ * Tell the user, on stderr, what failed and what the server said: the
+ * protocol step, the server and port, the account, and the server's status
+ * line (bounded).  Never the password or a message body: @p said is a status
+ * line the server sent, or our own description of a transport fault.
+ */
+static void imap_report(const char *user, const char *host, const char *port,
+                        const char *folder, const char *step, const char *said) {
+    char line[300];
+    said_clean(line, sizeof(line), said);
+    char where[300] = "";
+    if (folder && folder[0]) snprintf(where, sizeof(where), ", folder %.200s", folder);
+    logger_log(LOG_WARN, "IMAP %s failed at %s:%s: %s", step, host, port, line);
+    logger_note_stderr_error();
+    fprintf(stderr, "ERROR: IMAP %s failed at %s:%s as %s%s: %s\n",
+            step, host, port, user && user[0] ? user : "(no user)", where, line);
+}
+
+static void client_report(const ImapClient *c, const char *step, const char *said) {
+    if (c->quiet) return;
+    imap_report(c->user, c->host, c->port, c->folder, step, said);
+}
 
 /* ── Low-level I/O ───────────────────────────────────────────────────── */
 
@@ -104,11 +154,18 @@ static ssize_t net_read_raw(ImapClient *c, char *buf, size_t n) {
              * OpenSSL reports EINTR as WANT_READ.  The 15-second receive
              * timeout is EAGAIN and stays an error. */
             if (errno == EINTR) continue;
+            int saved_errno = errno;
+            c->io_errno = saved_errno;
+            c->timed_out = saved_errno == EAGAIN || saved_errno == EWOULDBLOCK;
             logger_log(LOG_WARN, "SSL_read error %d", err);
             return -1;
         }
     }
     ssize_t r = read(c->fd, buf, n);
+    if (r < 0) {
+        c->io_errno = errno;
+        c->timed_out = errno == EAGAIN || errno == EWOULDBLOCK;
+    }
     if (r < 0 && (errno == EINTR || errno == EAGAIN)) return 0;
     return r;
 }
@@ -160,6 +217,8 @@ static int rbuf_fill(ImapClient *c) {
     /* Compact: move unused data to front */
     c->rbuf_pos = 0;
     c->rbuf_len = 0;
+    c->io_errno = 0;
+    c->timed_out = 0;
     ssize_t r = net_read(c, c->rbuf, RBUF_SIZE);
     if (r <= 0) return -1;
     c->rbuf_len = (size_t)r;
@@ -248,6 +307,20 @@ static int send_cmd(ImapClient *c, char tag_out[16], const char *fmt, ...) {
     buf[len]     = '\r';
     buf[len + 1] = '\n';
     buf[len + 2] = '\0';
+
+    /* The verb (and "UID"'s subcommand) names the step in an error message;
+     * never the arguments, which may carry the password. */
+    {
+        size_t vn = 0, words = 0;
+        for (const char *q = buf; *q && *q != '\r' && vn + 1 < sizeof(c->cmd); q++) {
+            if (*q == ' ') {
+                words++;
+                if (words >= (strncmp(buf, "UID ", 4) == 0 ? 2u : 1u)) break;
+            }
+            c->cmd[vn++] = *q;
+        }
+        c->cmd[vn] = '\0';
+    }
 
     /* Log command — mask password in LOGIN commands */
     if (strncmp(buf, "LOGIN ", 6) == 0) {
@@ -393,19 +466,42 @@ static int read_response(ImapClient *c, const char *tag, Response *r) {
     for (;;) {
         if (read_line(c, &lb) != 0) {
             linebuf_free(&lb);
+            char why[160];
+            if (c->timed_out)
+                snprintf(why, sizeof(why), "no reply within %d seconds (timed out)",
+                         g_imap_io_timeout);
+            else if (c->io_errno)
+                snprintf(why, sizeof(why), "no reply, connection error: %s",
+                         strerror(c->io_errno));
+            else
+                snprintf(why, sizeof(why), "no reply, the server closed the connection");
+            client_report(c, c->cmd[0] ? c->cmd : "command", why);
             return -1;
         }
 
         const char *line = lb.data ? lb.data : "";
         logger_log(LOG_DEBUG, "IMAP [ IN] %s", line);
 
+        /* The server ends the session: say so with its words. */
+        if (strncasecmp(line, "* BYE", 5) == 0 && strcmp(c->cmd, "LOGOUT") != 0) {
+            client_report(c, c->cmd[0] ? c->cmd : "command", line + 2);
+            r->tagged = NULL;
+            linebuf_free(&lb);
+            return -1;
+        }
+
         /* Tagged response? */
         size_t tlen = strlen(tag);
         if (strncmp(line, tag, tlen) == 0 && line[tlen] == ' ') {
             const char *status = line + tlen + 1;
             int ok = (strncasecmp(status, "OK", 2) == 0);
-            if (!ok)
+            if (!ok) {
                 logger_log(LOG_WARN, "IMAP %s", line);
+                /* LOGIN has its own message (imap_connect); a CREATE that
+                 * finds the folder there is not a failure. */
+                if (strcmp(c->cmd, "LOGIN") != 0 && !strcasestr(status, "[ALREADYEXISTS]"))
+                    client_report(c, c->cmd[0] ? c->cmd : "command", status);
+            }
             r->tagged = strdup(line);
             linebuf_free(&lb);  /* free AFTER all accesses to line/status */
             return ok ? 0 : -1;
@@ -480,6 +576,9 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     int  use_tls = 1;
     if (parse_url(host_url, host, sizeof(host), port, sizeof(port), &use_tls) != 0) {
         logger_log(LOG_ERROR, "imap_connect: bad URL: %s", host_url);
+        fprintf(stderr, "ERROR: IMAP connect failed as %s: the server URL \"%.100s\" cannot be parsed\n",
+                user, host_url);
+        logger_note_stderr_error();
         return NULL;
     }
 
@@ -505,6 +604,9 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     int rc = getaddrinfo(host, port, &hints, &ai);
     if (rc != 0) {
         logger_log(LOG_ERROR, "Could not resolve %s:%s (resolve failed: %s)", host, port, gai_strerror(rc));
+        char why[200];
+        snprintf(why, sizeof(why), "could not resolve the host name: %s", gai_strerror(rc));
+        imap_report(user, host, port, NULL, "connect", why);
         return NULL;
     }
 
@@ -533,13 +635,16 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     freeaddrinfo(ai);
 
     if (fd < 0) {
-        logger_log(LOG_ERROR, "connect to %s:%s failed: %s", host, port, strerror(errno));  /* stage, host:port, errno text (EMAIL-238) */
+        logger_log(LOG_ERROR, "connect to %s:%s failed: %s", host, port, strerror(errno));
+        char why[200];
+        snprintf(why, sizeof(why), "could not connect: %s", strerror(errno));
+        imap_report(user, host, port, NULL, "connect", why);
         return NULL;
     }
 
     /* Apply a 15-second read/write timeout so blocking ops don't hang forever */
     {
-        struct timeval tv = { .tv_sec = 15, .tv_usec = 0 };
+        struct timeval tv = { .tv_sec = g_imap_io_timeout, .tv_usec = 0 };
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     }
@@ -548,6 +653,10 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     if (!c) { close(fd); return NULL; }
     c->fd = fd;
     c->use_tls = use_tls;
+    snprintf(c->host, sizeof(c->host), "%s", host);
+    snprintf(c->port, sizeof(c->port), "%s", port);
+    snprintf(c->user, sizeof(c->user), "%s", user ? user : "");
+    snprintf(c->cmd, sizeof(c->cmd), "greeting");
 
     /* TLS handshake */
     if (use_tls) {
@@ -601,6 +710,15 @@ ImapClient *imap_connect(const char *host_url, const char *user,
                        verify_tls && vr != X509_V_OK ? X509_verify_cert_error_string(vr) : "",
                        hs_errno ? " (" : "", hs_errno ? strerror(hs_errno) : "",
                        hs_errno ? ")" : "");
+            {
+                char why[240];
+                if (verify_tls && vr != X509_V_OK)
+                    snprintf(why, sizeof(why), "server certificate rejected: %s",
+                             X509_verify_cert_error_string(vr));
+                else
+                    snprintf(why, sizeof(why), "handshake failed%s%s", ossl[0] ? ": " : "", ossl);
+                imap_report(user, host, port, NULL, "TLS", why);
+            }
             SSL_free(ssl); SSL_CTX_free(ctx); free(c); close(fd);
             return NULL;
         }
@@ -618,9 +736,26 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     LineBuf lb = {NULL, 0, 0};
     if (read_line(c, &lb) != 0) {
         logger_log(LOG_ERROR, "No greeting from %s", host);
+        linebuf_free(&lb);
+        char why[160];
+        if (c->timed_out)
+            snprintf(why, sizeof(why), "no greeting within %d seconds (timed out)",
+                     g_imap_io_timeout);
+        else if (c->io_errno)
+            snprintf(why, sizeof(why), "no greeting, connection error: %s", strerror(c->io_errno));
+        else
+            snprintf(why, sizeof(why), "no greeting, the server closed the connection");
+        client_report(c, "greeting", why);
         goto fail;
     }
     logger_log(LOG_DEBUG, "IMAP [ IN] %s", lb.data ? lb.data : "");
+    /* "* OK" and "* PREAUTH" greet; "* BYE" (or anything else) refuses. */
+    if (strncasecmp(lb.data ? lb.data : "", "* OK", 4) != 0 &&
+        strncasecmp(lb.data ? lb.data : "", "* PREAUTH", 9) != 0) {
+        client_report(c, "greeting", lb.data ? lb.data : "(empty line)");
+        linebuf_free(&lb);
+        goto fail;
+    }
     linebuf_free(&lb);
 
     /* LOGIN */
@@ -632,6 +767,12 @@ ImapClient *imap_connect(const char *host_url, const char *user,
 
     Response resp = {0};
     rc = read_response(c, tag, &resp);
+    if (rc != 0 && !resp.tagged) {
+        /* No tagged answer: the connection ended or timed out; read_response()
+         * already said so, with the server's words when it had any. */
+        response_free(&resp);
+        goto fail;
+    }
     if (rc != 0) {
         /* The server answered, and it said no.  That is a different fact from
          * "could not connect": it is the credential, not the network.  Writing
@@ -650,7 +791,8 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         logger_log(LOG_WARN, "LOGIN rejected for %s on %s: %s", user, host,
                    resp.tagged ? resp.tagged : "(no response line)");
         logger_note_stderr_error();
-        fprintf(stderr, "ERROR: %s rejected the login for %s.\n", host, user);
+        fprintf(stderr, "ERROR: IMAP LOGIN failed at %s:%s: %s rejected the login for %s.\n",
+                host, port, host, user);
         if (said && said[0])
             fprintf(stderr, "  The server said: %s\n", said);
         fprintf(stderr,
@@ -680,7 +822,9 @@ void imap_disconnect(ImapClient *c) {
     char tag[16];
     send_cmd(c, tag, "LOGOUT");
     Response r = {0};
+    c->quiet++;
     read_response(c, tag, &r);
+    c->quiet--;
     response_free(&r);
 
     if (c->ssl) {
@@ -836,6 +980,7 @@ int imap_delete_folder(ImapClient *c, const char *name) {
 /* ── SELECT ──────────────────────────────────────────────────────────── */
 
 int imap_select(ImapClient *c, const char *folder) {
+    snprintf(c->folder, sizeof(c->folder), "%s", folder);
     char *utf7 = imap_utf7_encode(folder);
     const char *name = utf7 ? utf7 : folder;
 
@@ -927,7 +1072,10 @@ static char *uid_fetch_part(ImapClient *c, const char *uid, const char *section)
     response_free(&resp);
 
     if (!result)
+    {
         logger_log(LOG_WARN, "UID FETCH %s %s: no literal in response", uid, section);
+        client_report(c, "UID FETCH", "the server's answer carried no message data");
+    }
     return result;
 }
 
@@ -1055,7 +1203,10 @@ int imap_append(ImapClient *c, const char *folder,
      * treats as an untagged line before reading the true tagged response. */
 
     /* Step 1: ensure the target folder exists (idempotent). */
-    if (imap_create_folder(c, folder) != 0)
+    c->quiet++;
+    int pre_rc = imap_create_folder(c, folder);
+    c->quiet--;
+    if (pre_rc != 0)
         logger_log(LOG_WARN, "IMAP APPEND: pre-create of '%s' failed, trying anyway",
                    folder);
 
@@ -1063,6 +1214,8 @@ int imap_append(ImapClient *c, const char *folder,
     c->tag_num++;
     char tag[16];
     snprintf(tag, sizeof(tag), "A%04d", c->tag_num);
+    snprintf(c->cmd, sizeof(c->cmd), "APPEND");
+    snprintf(c->folder, sizeof(c->folder), "%s", folder);
 
     char cmd[1024];
     int cmdlen = snprintf(cmd, sizeof(cmd),
@@ -1075,7 +1228,7 @@ int imap_append(ImapClient *c, const char *folder,
 
     /* Generous 30-second receive timeout for the response. */
     {
-        struct timeval tv = { .tv_sec = 30, .tv_usec = 0 };
+        struct timeval tv = { .tv_sec = 2 * g_imap_io_timeout, .tv_usec = 0 };
         setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     }
 
@@ -1084,6 +1237,7 @@ int imap_append(ImapClient *c, const char *folder,
         net_write(c, msg, msg_len) != 0 ||
         net_write(c, "\r\n", 2) != 0) {
         logger_log(LOG_ERROR, "IMAP APPEND: write failed");
+        client_report(c, "APPEND", "could not send the message to the server (connection error)");
     } else {
         logger_log(LOG_DEBUG, "IMAP APPEND: sent %zu-byte literal", msg_len);
         Response resp = {0};
@@ -1093,7 +1247,7 @@ int imap_append(ImapClient *c, const char *folder,
 
     /* Restore normal 15-second receive timeout. */
     {
-        struct timeval tv = { .tv_sec = 15, .tv_usec = 0 };
+        struct timeval tv = { .tv_sec = g_imap_io_timeout, .tv_usec = 0 };
         setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     }
     return rc;
@@ -1108,7 +1262,10 @@ int imap_get_caps(ImapClient *c) {
     char tag[16];
     if (send_cmd(c, tag, "CAPABILITY") != 0) return 0;
     Response resp = {0};
-    if (read_response(c, tag, &resp) != 0) { response_free(&resp); return 0; }
+    c->quiet++;
+    int caps_rc = read_response(c, tag, &resp);
+    c->quiet--;
+    if (caps_rc != 0) { response_free(&resp); return 0; }
     for (int i = 0; i < resp.count; i++) {
         const char *line = resp.untagged[i];
         if (strstr(line, "CONDSTORE")) c->caps |= IMAP_CAP_CONDSTORE;
@@ -1136,6 +1293,7 @@ static void parse_select_result(const Response *resp, ImapSelectResult *res) {
 }
 
 int imap_select_condstore(ImapClient *c, const char *folder, ImapSelectResult *res) {
+    snprintf(c->folder, sizeof(c->folder), "%s", folder);
     memset(res, 0, sizeof(*res));
 
     char *utf7 = imap_utf7_encode(folder);
@@ -1157,13 +1315,16 @@ int imap_select_qresync(ImapClient *c, const char *folder,
                          uint32_t known_uidval, uint64_t known_modseq,
                          ImapSelectResult *res) {
     memset(res, 0, sizeof(*res));
+    snprintf(c->folder, sizeof(c->folder), "%s", folder);
 
     /* ENABLE QRESYNC once per session (RFC 5161/5162) */
     if (!c->qresync_enabled) {
         char entag[16];
         if (send_cmd(c, entag, "ENABLE QRESYNC") == 0) {
             Response enr = {0};
+            c->quiet++;
             read_response(c, entag, &enr);  /* ignore errors */
+            c->quiet--;
             response_free(&enr);
         }
         c->qresync_enabled = 1;

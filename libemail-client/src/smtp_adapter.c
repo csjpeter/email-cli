@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <errno.h>
 #include <stdio.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -61,10 +62,60 @@ static char *build_smtp_url(const Config *cfg) {
 /* ── SMTP session ─────────────────────────────────────────────────── */
 
 typedef struct {
-    NetConn *c;
-    char     buf[4096];
-    size_t   pos, len;
+    NetConn    *c;
+    char        buf[4096];
+    size_t      pos, len;
+    /* Where the failure message says it happened (EMAIL-237). */
+    const char *host;
+    int         port;
+    const char *user;
+    int         io_state;   /* 0 none, 1 closed by the server, 2 error or timeout */
+    int         io_errno;
 } SmtpLink;
+
+/** Read and write limit of an SMTP session, seconds (smtp_set_io_timeout). */
+static int g_smtp_io_timeout = 30;
+
+void smtp_set_io_timeout(int seconds)
+{
+    g_smtp_io_timeout = seconds > 0 ? seconds : 30;
+}
+
+/** Make @p s one printable line: cut at the first line end, controls to blanks. */
+static void clean_line(char *s)
+{
+    for (; *s; s++) {
+        if (*s == '\r' || *s == '\n') { *s = '\0'; return; }
+        if ((unsigned char)*s < 0x20 || *s == 0x7f) *s = ' ';
+    }
+}
+
+/**
+ * Write the failure message of one protocol step: the step, the server and
+ * port, the account, and the server's status line (bounded), or what happened
+ * to the connection when there was no reply.  No credential and no message
+ * body is ever put into it.  @p code 0 means no reply.
+ */
+static void smtp_why(const SmtpLink *l, const char *step, int code, const char *text,
+                     char *why, size_t why_len)
+{
+    char acct[160] = "";
+    if (l->user && l->user[0]) snprintf(acct, sizeof(acct), " as %.100s", l->user);
+    if (code > 0) {
+        char line[220];
+        snprintf(line, sizeof(line), "%.200s", text ? text : "");
+        clean_line(line);
+        snprintf(why, why_len, "SMTP %s at %s:%d%s failed: server replied %d %s",
+                 step, l->host, l->port, acct, code, line);
+    } else if (l->io_state == 1) {
+        snprintf(why, why_len, "SMTP %s at %s:%d%s failed: no reply, the server closed the connection",
+                 step, l->host, l->port, acct);
+    } else {
+        const char *ne = net_conn_error(l->c);
+        snprintf(why, why_len, "SMTP %s at %s:%d%s failed: no reply, %s",
+                 step, l->host, l->port, acct, ne[0] ? ne : "connection error");
+    }
+}
 
 /** One reply line (without CRLF): 1 ok, 0 end of stream, -1 error. */
 static int link_line(SmtpLink *l, char *line, size_t cap)
@@ -72,9 +123,10 @@ static int link_line(SmtpLink *l, char *line, size_t cap)
     size_t n = 0;
     for (;;) {
         if (l->pos >= l->len) {
+            errno = 0;
             ssize_t r = net_conn_read(l->c, l->buf, sizeof(l->buf));
-            if (r < 0) return -1;
-            if (r == 0) { if (n == 0) return 0; break; }
+            if (r < 0) { l->io_state = 2; l->io_errno = errno; return -1; }
+            if (r == 0) { l->io_state = 1; if (n == 0) return 0; break; }
             l->pos = 0;
             l->len = (size_t)r;
         }
@@ -126,22 +178,23 @@ static int link_send(SmtpLink *l, const char *fmt, ...)
     return net_conn_write_all(l->c, out, (size_t)n);
 }
 
-/** Send a command and expect reply @p want (the first digit when @p want < 10). */
-static int link_cmd(SmtpLink *l, int want, char *why, size_t why_len,
+/** Send a command and expect reply @p want (the first digit when @p want < 10);
+ *  @p step names the step in the failure message. */
+static int link_cmd(SmtpLink *l, const char *step, int want, char *why, size_t why_len,
                     const char *fmt, const char *arg)
 {
     char text[512];
+    l->io_state = 0;
     if (link_send(l, fmt, arg) != 0) {
-        snprintf(why, why_len, "Failed sending data to the server: %.190s", net_conn_error(l->c));
+        l->io_state = 2;
+        l->io_errno = errno;
+        smtp_why(l, step, 0, NULL, why, why_len);
         return -1;
     }
     int code = link_reply(l, text, sizeof(text));
     int ok = want < 10 ? code / 100 == want : code == want;
     if (!ok) {
-        char *nl = strchr(text, '\n');
-        if (nl) *nl = '\0';
-        if (code == 0) snprintf(why, why_len, "Server closed the connection or timed out: %.190s", net_conn_error(l->c));
-        else snprintf(why, why_len, "Server replied %d %.200s", code, text);
+        smtp_why(l, step, code, text, why, why_len);
         return -1;
     }
     return 0;
@@ -201,40 +254,53 @@ static int smtp_deliver(const char *url, const char *user, const char *pass,
     char host[256];
     int port = implicit ? 465 : 25;
     size_t hl = strcspn(hp, ":/");
-    if (hl == 0 || hl >= sizeof(host)) { snprintf(why, why_len, "Bad SMTP URL"); return -1; }
+    if (hl == 0 || hl >= sizeof(host)) { snprintf(why, why_len, "SMTP connect failed: the SMTP URL has no usable host name"); return -1; }
     memcpy(host, hp, hl);
     host[hl] = '\0';
     if (hp[hl] == ':') port = atoi(hp + hl + 1);
 
-    char err[400] = "";
+    char err[500] = "";
     SmtpLink l = {0};
-    l.c = net_connect(host, port, implicit, !no_verify, 30, err, sizeof(err));
-    if (!l.c) { snprintf(why, why_len, "%s", err[0] ? err : "Could not connect to server"); return -1; }
+    l.host = host;
+    l.port = port;
+    l.user = user;
+    l.c = net_connect(host, port, implicit, !no_verify, g_smtp_io_timeout, err, sizeof(err));
+    if (!l.c) {
+        snprintf(why, why_len, "SMTP %s at %.80s:%d%s%.40s failed: %.220s",
+                 implicit ? "connect/TLS" : "connect", host, port,
+                 user && user[0] ? " as " : "", user && user[0] ? user : "",
+                 err[0] ? err : "could not connect");
+        return -1;
+    }
 
     int rc = -1;
     char text[1024];
     char me[128];
     local_name(me, sizeof(me));
     int code = link_reply(&l, text, sizeof(text));
-    if (code != 220) { snprintf(why, why_len, "Bad greeting from server: %.190s", net_conn_error(l.c)); goto out; }
-    if (link_send(&l, "EHLO %s", me) != 0) goto out;
+    if (code != 220) { smtp_why(&l, "greeting", code, text, why, why_len); goto out; }
+    if (link_send(&l, "EHLO %s", me) != 0) { smtp_why(&l, "EHLO", 0, NULL, why, why_len); goto out; }
     code = link_reply(&l, text, sizeof(text));
-    if (code / 100 != 2) { snprintf(why, why_len, "Server rejected EHLO"); goto out; }
+    if (code / 100 != 2) { smtp_why(&l, "EHLO", code, text, why, why_len); goto out; }
     if (!implicit) {
         /* STARTTLS is mandatory: a plain session would carry the password */
         if (!strcasestr(text, "STARTTLS")) {
-            snprintf(why, why_len, "Server does not offer STARTTLS (TLS required)");
+            snprintf(why, why_len, "SMTP STARTTLS at %s:%d%s%.60s failed: the server does not offer "
+                     "STARTTLS (TLS is required, the password is not sent in the clear)", host, port,
+                     user && user[0] ? " as " : "", user && user[0] ? user : "");
             goto out;
         }
-        if (link_cmd(&l, 220, why, why_len, "%s", "STARTTLS") != 0) goto out;
+        if (link_cmd(&l, "STARTTLS", 220, why, why_len, "%s", "STARTTLS") != 0) goto out;
         l.pos = l.len = 0;
         if (net_start_tls(l.c, host, !no_verify, err, sizeof(err)) != 0) {
-            snprintf(why, why_len, "%s", err[0] ? err : "TLS handshake failed");
+            snprintf(why, why_len, "SMTP TLS at %.100s:%d%s%.60s failed: %.150s", host, port,
+                     user && user[0] ? " as " : "", user && user[0] ? user : "",
+                     err[0] ? err : "TLS handshake failed");
             goto out;
         }
-        if (link_send(&l, "EHLO %s", me) != 0) goto out;
+        if (link_send(&l, "EHLO %s", me) != 0) { smtp_why(&l, "EHLO", 0, NULL, why, why_len); goto out; }
         code = link_reply(&l, text, sizeof(text));
-        if (code / 100 != 2) { snprintf(why, why_len, "Server rejected EHLO"); goto out; }
+        if (code / 100 != 2) { smtp_why(&l, "EHLO", code, text, why, why_len); goto out; }
     }
 
     if (user && user[0]) {
@@ -251,38 +317,33 @@ static int smtp_deliver(const char *url, const char *user, const char *pass,
                 char *enc = b64(raw, ul + pl + 2);
                 free(raw);
                 if (!enc) goto out;
-                int ar = link_cmd(&l, 235, why, why_len, "AUTH PLAIN %s", enc);
+                int ar = link_cmd(&l, "AUTH", 235, why, why_len, "AUTH PLAIN %s", enc);
                 free(enc);
-                if (ar != 0) {
-                    char said[160];
-                    snprintf(said, sizeof(said), "%s", why);
-                    snprintf(why, why_len, "Authentication failed: %.100s", said);
-                    goto out;
-                }
+                if (ar != 0) goto out;
             } else {
                 char *eu = b64((const unsigned char *)user, ul);
                 char *ep = b64((const unsigned char *)(pass ? pass : ""), pl);
                 int ar = -1;
-                if (eu && ep && link_cmd(&l, 334, why, why_len, "%s", "AUTH LOGIN") == 0 &&
-                    link_cmd(&l, 334, why, why_len, "%s", eu) == 0 &&
-                    link_cmd(&l, 235, why, why_len, "%s", ep) == 0) ar = 0;
+                if (eu && ep && link_cmd(&l, "AUTH", 334, why, why_len, "%s", "AUTH LOGIN") == 0 &&
+                    link_cmd(&l, "AUTH", 334, why, why_len, "%s", eu) == 0 &&
+                    link_cmd(&l, "AUTH", 235, why, why_len, "%s", ep) == 0) ar = 0;
                 free(eu);
                 free(ep);
-                if (ar != 0) { snprintf(why, why_len, "Authentication failed"); goto out; }
+                if (ar != 0) goto out;
             }
         }
     }
-    if (link_cmd(&l, 2, why, why_len, "MAIL FROM:%s", from_env) != 0) goto out;
+    if (link_cmd(&l, "MAIL FROM", 2, why, why_len, "MAIL FROM:%s", from_env) != 0) goto out;
     /* to_env is a newline-separated list of "<addr>" (envelope_list) */
     for (const char *r = to_env; *r; ) {
         size_t rl = strcspn(r, "\n");
         if (rl == 0) { r++; continue; }
         char one[600];
         snprintf(one, sizeof(one), "%.*s", (int)rl, r);
-        if (link_cmd(&l, 2, why, why_len, "RCPT TO:%s", one) != 0) goto out;
+        if (link_cmd(&l, "RCPT TO", 2, why, why_len, "RCPT TO:%s", one) != 0) goto out;
         r += rl;
     }
-    if (link_cmd(&l, 354, why, why_len, "%s", "DATA") != 0) goto out;
+    if (link_cmd(&l, "DATA", 354, why, why_len, "%s", "DATA") != 0) goto out;
 
     /* the message: CRLF line ends, leading dots doubled, closed by "." */
     {
@@ -302,15 +363,16 @@ static int smtp_deliver(const char *url, const char *user, const char *pass,
         o[n++] = '.'; o[n++] = '\r'; o[n++] = '\n';
         int wr = net_conn_write_all(l.c, o, n);
         free(o);
-        if (wr != 0) { snprintf(why, why_len, "Failed sending the message: %.190s", net_conn_error(l.c)); goto out; }
+        if (wr != 0) {
+            l.io_state = 2;
+            l.io_errno = errno;
+            smtp_why(&l, "message", 0, NULL, why, why_len);
+            goto out;
+        }
     }
+    l.io_state = 0;
     code = link_reply(&l, text, sizeof(text));
-    if (code / 100 != 2) {
-        char *nl = strchr(text, '\n');
-        if (nl) *nl = '\0';
-        snprintf(why, why_len, "Server did not accept the message: %d %.150s", code, text);
-        goto out;
-    }
+    if (code / 100 != 2) { smtp_why(&l, "message", code, text, why, why_len); goto out; }
     link_send(&l, "QUIT");
     rc = 0;
 out:
@@ -372,7 +434,7 @@ int smtp_send(const Config *cfg,
     char to_env[2048];
     envelope_list(to, to_env, sizeof(to_env));
 
-    char why[256] = "";
+    char why[400] = "";
     int rc = smtp_deliver(url, smtp_user, smtp_pass, cfg->ssl_no_verify,
                           from_env, to_env, message, message_len, why, sizeof(why));
     if (rc != 0) {

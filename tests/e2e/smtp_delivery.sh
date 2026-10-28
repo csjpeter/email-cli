@@ -15,7 +15,7 @@
 # Gmail is tested at the functional level against a mock and has no end-to-end
 # test: there is no Gmail to run in a container (policies/testing-model.md).
 #
-# Needs the package (./manage.sh package deb; `./manage.sh e2e` makes it), LXC
+# Needs the package (./manage.sh package deb makes it), LXC
 # and sudo for lxc-* on the container this run creates.  Runs by itself:
 #   build/tests/e2e/bin/smtp_delivery
 set -u

@@ -172,6 +172,10 @@ static void test_net_tls_handshake_with_a_non_tls_peer(void)
     NetConn *c = peer_connect(port, 1, 5, err, sizeof(err));
     ASSERT(c == NULL, "a peer that does not speak TLS: no connection");
     ASSERT(strstr(err, "TLS handshake failed") != NULL, "the handshake failure is named");
+    char where[32];
+    snprintf(where, sizeof(where), "127.0.0.1:%d", port);
+    ASSERT(strstr(err, where) != NULL, "the message holds host:port");
+    ASSERT(strstr(err, "error:") != NULL, "and the OpenSSL error string");
     fi_stop(p);
 }
 
@@ -197,6 +201,10 @@ static void test_net_tls_read_after_reset(void)
     char buf[64];
     ssize_t n = net_conn_read(c, buf, sizeof(buf));
     ASSERT(n < 0, "a reset connection is a read error, not end of file");
+    char where[48];
+    snprintf(where, sizeof(where), "read from 127.0.0.1:%d failed", port);
+    ASSERT(strstr(net_conn_error(c), where) != NULL, "the read error names stage, host and port");
+    ASSERT(strlen(net_conn_error(c)) > strlen(where) + 10, "and carries a reason");
     net_close(c);
     fi_stop(p);
 }
@@ -213,6 +221,9 @@ static void test_net_tls_write_after_reset(void)
     memset(big, 'x', sizeof(big));
     ASSERT(net_conn_write_all(c, big, sizeof(big)) != 0,
            "writing to a reset connection fails and does not kill the process");
+    char where[48];
+    snprintf(where, sizeof(where), "write to 127.0.0.1:%d failed", port);
+    ASSERT(strstr(net_conn_error(c), where) != NULL, "the write error names stage, host and port");
     /* SIGPIPE was blocked and swallowed: it is not left pending */
     sigset_t pend;
     sigpending(&pend);
@@ -232,6 +243,10 @@ static void test_net_plain_write_after_reset(void)
     static unsigned char big[4 << 20];
     memset(big, 'y', sizeof(big));
     ASSERT(net_conn_write_all(c, big, sizeof(big)) != 0, "plain write to a reset peer fails");
+    ASSERT(strstr(net_conn_error(c), "write to 127.0.0.1:") != NULL &&
+           (strstr(net_conn_error(c), "Connection reset") != NULL ||
+            strstr(net_conn_error(c), "Broken pipe") != NULL),
+           "the errno text of the reset is in the message");
     char b[8];
     ASSERT(net_conn_read(c, b, sizeof(b)) <= 0, "plain read after a reset yields no data");
     net_close(c);
@@ -249,6 +264,9 @@ static void test_net_tls_read_times_out_on_a_silent_peer(void)
     time_t t0 = time(NULL);
     ASSERT(net_conn_read(c, buf, sizeof(buf)) < 0, "a silent peer times out the read");
     ASSERT(time(NULL) - t0 < 4, "and does so after the timeout, not never");
+    ASSERT(strstr(net_conn_error(c), "read from 127.0.0.1:") != NULL &&
+           strstr(net_conn_error(c), "timed out after 1 s") != NULL,
+           "the message names the read and the timeout");
     net_close(c);
     fi_stop(p);
 }

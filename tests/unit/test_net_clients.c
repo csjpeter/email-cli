@@ -278,10 +278,17 @@ static void test_http_bad_urls_and_unreachable(void)
     r.url = url;
     ASSERT(http_request(&r, &st, &b, &n, err, sizeof(err)) == -1, "a refused connection is an error");
     ASSERT(strstr(err, "Could not connect") != NULL, "named as such");
+    char where[64];
+    snprintf(where, sizeof(where), "127.0.0.1:%d", atoi(strrchr(url, ':') + 1));
+    ASSERT(strstr(err, where) != NULL, "the message holds host:port");
+    ASSERT(strstr(err, "connect failed: Connection refused") != NULL,
+           "the stage and the errno text are in it");
 
     r.url = "http://no-such-host.invalid/";
     ASSERT(http_request(&r, &st, &b, &n, err, sizeof(err)) == -1, "an unresolvable host is an error");
     ASSERT(strstr(err, "resolve") != NULL, "named as such");
+    ASSERT(strstr(err, "no-such-host.invalid:80") != NULL, "with host and port");
+    ASSERT(strstr(err, "resolve failed: ") != NULL, "and the resolver's own words");
 }
 
 static void test_http_url_escape(void)
@@ -572,6 +579,11 @@ static void test_smtp_verifies_the_certificate(void)
     int rc = smtp_case(SM_OK, 1, 0, "user1", "Subject: v\r\n\r\nb\r\n", t, sizeof(t));
     ASSERT(rc == -1, "a self-signed server certificate is refused when verifying");
     ASSERT(g_smtp_why[0] != '\0', "the TLS failure comes back as a reason");
+    ASSERT(strstr(g_smtp_why, "TLS handshake failed with 127.0.0.1:") != NULL,
+           "the reason names the stage, host and port");
+    ASSERT(strstr(g_smtp_why, "server certificate rejected: ") != NULL &&
+           strstr(g_smtp_why, "certificate verify failed") != NULL,
+           "and the certificate verify reason from OpenSSL");
     ASSERT(g_smtp_stderr[0] == '\0', "and smtp_send printed nothing (EMAIL-112)");
     ASSERT(t[0] == '\0', "and nothing was said to that server");
 }
@@ -591,6 +603,8 @@ static void test_smtp_connect_failure_is_returned_not_printed(void)
     ASSERT(smtp_send_captured(&cfg, "Subject: c\r\n\r\nb\r\n", why, sizeof(why),
                               out, sizeof(out)) == -1, "a refused connection fails the send");
     ASSERT(why[0] != '\0', "the reason comes back through the interface");
+    ASSERT(strstr(why, "127.0.0.1:") != NULL && strstr(why, "Connection refused") != NULL,
+           "and names host, port and errno text");
     ASSERT(out[0] == '\0', "smtp_send printed nothing on stderr");
     ASSERT(smtp_send_captured(&cfg, "x", NULL, 0, out, sizeof(out)) == -1 && out[0] == '\0',
            "without a buffer it is still silent");

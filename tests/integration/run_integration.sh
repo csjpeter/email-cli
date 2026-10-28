@@ -25,7 +25,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-# The programs under test (manage.sh sanitize / valgrind-all set it).
+# The programs under test (manage.sh sanitize / memcheck set it).
 BIN_DIR="${EMAIL_TEST_BIN_DIR:-$PROJECT_ROOT/bin}"
 
 IMAP_USER="testuser"

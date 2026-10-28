@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Peter Csaszar (Császár Péter)
 # Created: 2026-10-22
-# Runs one program of the project under Valgrind, for `manage.sh valgrind-all`.
+# Runs one program of the project under Valgrind, for `manage.sh memcheck`.
 
 # manage.sh copies this script into the directory of the instrumented programs
 # once for each program, under the program's own name; the real executable sits

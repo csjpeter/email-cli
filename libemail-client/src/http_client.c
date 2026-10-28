@@ -38,6 +38,12 @@ static int buf_add(Buf *b, const void *d, size_t n)
     return 0;
 }
 
+static void set_err_net(char *err, size_t n, const NetConn *c, const char *msg)
+{
+    const char *why = net_conn_error(c);
+    if (err && n) snprintf(err, n, "%s%s%s", msg, *why ? ": " : "", why);
+}
+
 static void set_err(char *err, size_t n, const char *msg)
 {
     if (err && n) snprintf(err, n, "%s", msg);
@@ -276,12 +282,12 @@ int http_request(const HttpRequest *req, long *status, char **body_out,
         goto done;
     }
     if (net_conn_write_all(c, head.p, head.len) != 0) {
-        set_err(err, err_len, "Send failed");
+        set_err_net(err, err_len, c, "Send failed");
         goto done;
     }
 
     char line[8192];
-    if (rd_line(r, line, sizeof(line)) <= 0) { set_err(err, err_len, "No response from server"); goto done; }
+    if (rd_line(r, line, sizeof(line)) <= 0) { set_err_net(err, err_len, c, "No response from server"); goto done; }
     long code = 0;
     if (strncmp(line, "HTTP/1.", 7) != 0 || sscanf(line + 8, "%ld", &code) != 1) {
         set_err(err, err_len, "Bad HTTP response");
@@ -292,7 +298,7 @@ int http_request(const HttpRequest *req, long *status, char **body_out,
     size_t hbytes = 0;
     for (;;) {
         int rl = rd_line(r, line, sizeof(line));
-        if (rl <= 0) { set_err(err, err_len, "Truncated HTTP response"); goto done; }
+        if (rl <= 0) { set_err_net(err, err_len, c, "Truncated HTTP response"); goto done; }
         if (line[0] == '\0') break;
         hbytes += strlen(line);
         if (hbytes > HTTP_MAX_HEADERS) { set_err(err, err_len, "HTTP headers too large"); goto done; }
@@ -307,7 +313,7 @@ int http_request(const HttpRequest *req, long *status, char **body_out,
     else if (chunked) rc = rd_chunked(r, &body, max);
     else if (clen >= 0) rc = (size_t)clen > max ? -1 : rd_body_n(r, &body, (size_t)clen, max);
     else rc = rd_until_close(r, &body, max);
-    if (rc != 0) { set_err(err, err_len, "Truncated or oversized HTTP body"); goto done; }
+    if (rc != 0) { set_err_net(err, err_len, c, "Truncated or oversized HTTP body"); goto done; }
     if (!body.p && buf_add(&body, "", 0) != 0) {
         set_err(err, err_len, "Out of memory");
         goto done;

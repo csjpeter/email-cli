@@ -132,7 +132,7 @@ static int link_cmd(SmtpLink *l, int want, char *why, size_t why_len,
 {
     char text[512];
     if (link_send(l, fmt, arg) != 0) {
-        snprintf(why, why_len, "Failed sending data to the server");
+        snprintf(why, why_len, "Failed sending data to the server: %.190s", net_conn_error(l->c));
         return -1;
     }
     int code = link_reply(l, text, sizeof(text));
@@ -140,7 +140,7 @@ static int link_cmd(SmtpLink *l, int want, char *why, size_t why_len,
     if (!ok) {
         char *nl = strchr(text, '\n');
         if (nl) *nl = '\0';
-        if (code == 0) snprintf(why, why_len, "Server closed the connection or timed out");
+        if (code == 0) snprintf(why, why_len, "Server closed the connection or timed out: %.190s", net_conn_error(l->c));
         else snprintf(why, why_len, "Server replied %d %.200s", code, text);
         return -1;
     }
@@ -206,7 +206,7 @@ static int smtp_deliver(const char *url, const char *user, const char *pass,
     host[hl] = '\0';
     if (hp[hl] == ':') port = atoi(hp + hl + 1);
 
-    char err[160] = "";
+    char err[400] = "";
     SmtpLink l = {0};
     l.c = net_connect(host, port, implicit, !no_verify, 30, err, sizeof(err));
     if (!l.c) { snprintf(why, why_len, "%s", err[0] ? err : "Could not connect to server"); return -1; }
@@ -216,7 +216,7 @@ static int smtp_deliver(const char *url, const char *user, const char *pass,
     char me[128];
     local_name(me, sizeof(me));
     int code = link_reply(&l, text, sizeof(text));
-    if (code != 220) { snprintf(why, why_len, "Bad greeting from server"); goto out; }
+    if (code != 220) { snprintf(why, why_len, "Bad greeting from server: %.190s", net_conn_error(l.c)); goto out; }
     if (link_send(&l, "EHLO %s", me) != 0) goto out;
     code = link_reply(&l, text, sizeof(text));
     if (code / 100 != 2) { snprintf(why, why_len, "Server rejected EHLO"); goto out; }
@@ -302,7 +302,7 @@ static int smtp_deliver(const char *url, const char *user, const char *pass,
         o[n++] = '.'; o[n++] = '\r'; o[n++] = '\n';
         int wr = net_conn_write_all(l.c, o, n);
         free(o);
-        if (wr != 0) { snprintf(why, why_len, "Failed sending the message"); goto out; }
+        if (wr != 0) { snprintf(why, why_len, "Failed sending the message: %.190s", net_conn_error(l.c)); goto out; }
     }
     code = link_reply(&l, text, sizeof(text));
     if (code / 100 != 2) {

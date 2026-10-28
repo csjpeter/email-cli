@@ -9,7 +9,6 @@
 # build/packages/ and nothing there when the run fails (EMAIL-18).
 # Run from anywhere after a build; it does its own release build.
 set -u
-export MANAGE_NO_TAG=1   # EMAIL-229: a test build is not a release, no tag
 cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
 PKG="$ROOT/build/packages"
@@ -21,6 +20,7 @@ bad()  { echo "  [FAIL] $1"; FAILED=$((FAILED + 1)); }
 count() { find "$PKG" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l; }
 
 mkdir -p "$PKG" || exit 1
+TAGS_BEFORE=$(git -C "$ROOT" tag -l | sort)
 
 # 1. A stale package from an older run is removed, the new one is the only one.
 STALE="$PKG/email-cli_0.0.1_amd64.deb"
@@ -31,6 +31,9 @@ out=$("$ROOT/manage.sh" package deb 2>&1); rc=$?
 [ "$(count)" -eq 3 ]       && ok "1.3 exactly one run's three packages present" || bad "1.3 package count is $(count)"
 [ "$(find "$PKG" -mindepth 1 | wc -l)" -eq 3 ] && ok "1.5 nothing but those packages is there" || bad "1.5 extra entries: $(ls "$PKG" | tr '\n' ' ')"
 ls "$PKG"/email-cli_*_amd64.deb > /dev/null && ok "1.4 it is the email-cli deb" || bad "1.4 no email-cli deb"
+
+# 1b. package creates no tag (EMAIL-241).
+[ "$(git -C "$ROOT" tag -l | sort)" = "$TAGS_BEFORE" ] && ok "1.6 package created no tag" || bad "1.6 package changed the tags"
 
 # 2. A failing cpack leaves the directory empty and the run non-zero.
 mkdir -p "$STUBS" || exit 1

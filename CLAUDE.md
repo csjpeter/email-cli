@@ -43,7 +43,7 @@ Working through the approved tickets of this project by itself is the
                        # raw data in build/coverage/{unit,external}
 ./manage.sh clean      # Remove build artifacts
 ./manage.sh integration # Integration test against a per-agent Dovecot process (no container)
-./manage.sh deps       # Install system dependencies (Ubuntu 24.04 / Rocky 9)
+./manage.sh deps       # Install system dependencies (Ubuntu 24.04 / Rocky 9); includes test-base
 ./manage.sh run        # Release build + launch email-cli
 ./manage.sh install    # Release build + install binaries into ~/.local/bin
 ./manage.sh uninstall  # Remove installed binaries from ~/.local/bin

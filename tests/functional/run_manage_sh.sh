@@ -74,6 +74,15 @@ out=$("$ROOT/tests/functional/coverage_summary.sh" d c "$C/none.info" "$C/func.i
 [ "$rc" -eq 1 ] && echo "$out" | grep -q "none.info" && ok "5.2 a missing tracefile is an error that names it" || bad "5.2 rc=$rc: $out"
 grep -q 'coverage-summary.txt' "$ROOT/manage.sh" && ok "5.3 the coverage run records the line" || bad "5.3 not recorded"
 
+# 6. test-base (EMAIL-242): a verb of its own, listed in help, run by deps; a
+# project with no test base says so and exits 0.
+out=$("$ROOT/manage.sh" test-base 2>&1); rc=$?
+[ "$rc" -eq 0 ] && echo "$out" | grep -q "no test base" && ok "6.1 test-base says there is no base and exits 0" || bad "6.1 rc=$rc: $out"
+out2=$("$ROOT/manage.sh" test-base 2>&1); rc=$?
+[ "$rc" -eq 0 ] && [ "$out" = "$out2" ] && ok "6.2 test-base is idempotent" || bad "6.2 rc=$rc: $out2"
+"$ROOT/manage.sh" help | grep -q '^  test-base ' && ok "6.3 help lists test-base" || bad "6.3 help does not list test-base"
+awk '/^    deps\)/,/;;/' "$ROOT/manage.sh" | grep -q 'test_base' && ok "6.4 deps includes test-base" || bad "6.4 deps does not call test_base"
+
 case "$WORK" in
     "$ROOT"/build/manage-sh-test-*) ;;
     *) echo "ERROR: refusing unsafe path '$WORK'" >&2; exit 1 ;;

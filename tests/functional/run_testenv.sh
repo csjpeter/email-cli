@@ -6,7 +6,7 @@
 
 # EMAIL-35: testenv_destroy removes only a container of this project and this
 # run, and the other functions refuse to work without one.  The container
-# calls themselves are covered by tests/e2e/smtp_delivery.sh.
+# calls themselves are covered by tests/integration/smtp_delivery.sh.
 set -u
 cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"

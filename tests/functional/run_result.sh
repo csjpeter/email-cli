@@ -151,14 +151,14 @@ run integration
     && ok "8.1 both scripts ran; the failing one fails the verb" || bad "8.1 rc=$rc $(cat "$RES/integration.result")"
 
 # 9. unknown verbs: usage on stderr, exit 2; help exits 0; the removed names are unknown.
-for v in nosuch e2e valgrind-all integration-local; do
+for v in nosuch valgrind-all integration-local; do
     (cd "$T" && ./manage.sh "$v" > "$WORK/o.txt" 2> "$WORK/e.txt"); rc=$?
     [ "$rc" -eq 2 ] && [ ! -s "$WORK/o.txt" ] && grep -q '^Usage:' "$WORK/e.txt" \
         && ok "9.1 '$v' prints the usage to stderr and exits 2" || bad "9.1 '$v': rc=$rc"
 done
 (cd "$T" && ./manage.sh help > "$WORK/o.txt" 2> "$WORK/e.txt"); rc=$?
 [ "$rc" -eq 0 ] && grep -q '^Usage:' "$WORK/o.txt" && [ ! -s "$WORK/e.txt" ] && ok "9.2 help exits 0 on stdout" || bad "9.2 rc=$rc"
-for v in e2e valgrind-all integration-local; do
+for v in valgrind-all integration-local; do
     grep -q "^  $v " "$WORK/o.txt" && bad "9.3 help still lists $v" || ok "9.3 help does not list $v"
 done
 

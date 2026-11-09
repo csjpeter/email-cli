@@ -297,18 +297,18 @@ How it works:
   suite is the same per-agent Dovecot process since EMAIL-228, so there is no
   separate container run.
 
-**End-to-end under a sanitizer: not run.**  The e2e tests install the shipped
+**The container integration test under a sanitizer: not run.**  `smtp_delivery` installs the shipped
 package, a static program, into a fresh container; an ASan build cannot be
 static and would need the sanitizer runtime and a copied build tree inside the
-container (`tests/common/testenv.sh` has no push of a tree).  What the e2e test
+container (`tests/common/testenv.sh` has no push of a tree).  What that test
 exercises, `email-cli send` over implicit TLS, is exercised by the functional
 and PTY send suites against the mock SMTP server under both verbs.  The
-long-term home of these runs is the e2e system (`../policies/testing-model.md`);
+long-term home of system-wide runs is the system-test project (`../policies/testing-model.md`);
 the verbs are written so it can call them (exit status, logs in `build/`).
 
-## End-to-end Tests (`tests/e2e/`, EMAIL-35)
+## Container integration test (`tests/integration/smtp_delivery.sh`, EMAIL-35, EMAIL-283)
 
-An end-to-end test uses real server software in an LXC container the test
+The test uses real server software in an LXC container the test
 creates itself, and installs the product from its package.  `smtp_delivery`:
 Postfix (Debian package) listens for implicit TLS with a certificate the
 container's CA store trusts; the `email-cli` .deb built from this tree is
@@ -319,8 +319,8 @@ leaves the container, and no `SSL_NO_VERIFY` is set.
 
 ```bash
 ./manage.sh package deb          # the package the test installs (build/packages)
-cmake --build build --target tests-e2e   # builds build/tests/e2e/bin/*
-build/tests/e2e/bin/smtp_delivery   # one test, with a package under build/packages
+cmake --build build --target tests-integration   # builds build/tests/integration/bin/*
+build/tests/integration/bin/smtp_delivery   # one test, with a package under build/packages
 ```
 
 Needs LXC and `sudo` for `lxc-*` on the container the run creates
@@ -329,14 +329,14 @@ functions `testenv_create/install/push/exec/destroy`, the container is removed
 by the test's `trap`, also on failure).  A missing tool is a failure.  The
 test is not part of `./manage.sh check`: it needs a package and a container.
 
-**What has no end-to-end test: Gmail.**  The Gmail branch talks to Google's API,
+**What has no container test: Gmail.**  The Gmail branch talks to Google's API,
 there is no Gmail to run in a container and no test may use a public service
 (`../policies/testing-model.md`); it is covered by the functional suite against
 `mock-gmail-server`, and that is all it is: "tested against a mock", not
-"tested end to end".  The environment variables `GMAIL_TEST_NO_CLIENT_ID`,
+"tested against a real server".  The environment variables `GMAIL_TEST_NO_CLIENT_ID`,
 `GMAIL_TEST_TOKEN_URL`, `GMAIL_TEST_TOKEN` and `GMAIL_API_BASE_URL` are test
 hooks that ship in the product so the functional and PTY suites can point it at
-the mock; the e2e tests do not use them.
+the mock; this test does not use them.
 
 ## PTY-based TUI Tests (`libs/libptytest`, submodule)
 
@@ -425,7 +425,7 @@ non-zero if any failed.  Nothing is skipped: a missing tool (Dovecot, Valgrind,
 lcov) or a runner's exit 77 fails the verb.  An unknown verb prints the usage to
 stderr and exits 2.  `integration` runs both scripts of `tests/integration`;
 there is no `integration-local`, `valgrind-all` (now `memcheck`, a verb of this
-project) or `e2e` verb (the e2e tests are the system-test project's).
+project) verb for the container test (it is a ctest test, not a verb).
 
 `coverage` leaves the raw gcov data for the integrator in `build/coverage/unit/`
 (the unit suites alone) and `build/coverage/external/` (functional, PTY and

@@ -221,7 +221,7 @@ ensure_workspace_libs() {
 
 # test_base: creates or refreshes the project's test base containers in
 # /var/lib/lxc-bases, idempotently (agent-container-model.md, section 4a).
-# email-cli has none: its e2e test makes a throwaway container per run
+# email-cli has none: its smtp_delivery integration test makes a throwaway container per run
 # (tests/common/testenv.sh), so there is nothing to create or refresh.
 test_base() {
     echo "test-base: email-cli has no test base container; nothing to create or refresh."

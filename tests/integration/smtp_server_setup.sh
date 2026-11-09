@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Peter Csaszar (Császár Péter)
 # Created: 2026-10-13
-# Runs inside the e2e container: configures Postfix as the SMTP counterpart.
+# Runs inside the test container: configures Postfix as the SMTP counterpart.
 
 # Postfix listens for implicit TLS (smtps, port 465) on the loopback address
 # with a certificate for mail.example.org that the container's own CA store

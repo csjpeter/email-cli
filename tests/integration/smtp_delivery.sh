@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 Peter Csaszar (Császár Péter)
 # Created: 2026-10-13
-# End-to-end test: email-cli sends through a real SMTP daemon and the message arrives.
+# Integration test: email-cli sends through a real SMTP daemon and the message arrives.
 
 # EMAIL-35.  What this tests, in a fresh LXC container:
 #   - the email-cli package, built from this tree, installs from its .deb
@@ -12,12 +12,12 @@
 #     and, with --attach, the attachment
 #   - a certificate for another name is refused
 #   - a closed port makes the send fail with a non-zero status
-# Gmail is tested at the functional level against a mock and has no end-to-end
+# Gmail is tested at the functional level against a mock and has no integration
 # test: there is no Gmail to run in a container (policies/testing-model.md).
 #
 # Needs the package (./manage.sh package deb makes it), LXC
 # and sudo for lxc-* on the container this run creates.  Runs by itself:
-#   build/tests/e2e/bin/smtp_delivery
+#   build/tests/integration/bin/smtp_delivery
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -46,7 +46,7 @@ if [ -z "$DEB" ]; then
     echo "ERROR: no email-cli .deb under build/packages; run ./manage.sh package deb" >&2
     exit 1
 fi
-echo "=== e2e: SMTP delivery through Postfix ($(basename "$DEB")) ==="
+echo "=== integration: SMTP delivery through Postfix ($(basename "$DEB")) ==="
 
 testenv_create smtp || { echo "ERROR: container not created" >&2; exit 1; }
 testenv_install postfix openssl ca-certificates "$DEB" ||
@@ -76,7 +76,7 @@ CFGTXT=$(testenv_exec su sender -c 'cat ~/.config/email-cli/accounts/sender@mail
 check_not_contains "1.2 verification is on (no SSL_NO_VERIFY)" "SSL_NO_VERIFY" "$CFGTXT"
 
 # 2. A plain message.
-OUT=$(testenv_exec su sender -c 'email-cli --account sender@mail.example.org -q send --to rcpt@mail.example.org --subject "E2E plain" --body "hello-e2e-body"')
+OUT=$(testenv_exec su sender -c 'email-cli --account sender@mail.example.org -q send --to rcpt@mail.example.org --subject "ITEST plain" --body "hello-itest-body"')
 RC=$?
 echo "$OUT"
 [ "$RC" -eq 0 ] && ok "2.1 send exits 0" || fail "2.1 send exits 0 (status $RC)"
@@ -85,48 +85,48 @@ check_contains "2.2 send reports success" "Message sent" "$OUT"
 BOX=""
 for _ in $(seq 1 30); do
     BOX=$(testenv_exec cat /var/mail/rcpt)
-    printf '%s' "$BOX" | grep -q "hello-e2e-body" && break
+    printf '%s' "$BOX" | grep -q "hello-itest-body" && break
     sleep 1
 done
-check_contains "2.3 the message is in the mailbox"      "hello-e2e-body"            "$BOX"
-check_contains "2.4 Subject header arrived"             "^Subject: E2E plain"       "$BOX"
+check_contains "2.3 the message is in the mailbox"      "hello-itest-body"            "$BOX"
+check_contains "2.4 Subject header arrived"             "^Subject: ITEST plain"       "$BOX"
 check_contains "2.5 To header arrived"                  "^To: .*rcpt@mail.example.org" "$BOX"
 check_contains "2.6 From header arrived"                "^From: .*sender@mail.example.org" "$BOX"
 
 # 3. A message with an attachment.
 testenv_exec su sender -c 'printf "hello-attachment" > ~/note.txt' >/dev/null
-OUT=$(testenv_exec su sender -c 'email-cli --account sender@mail.example.org -q send --to rcpt@mail.example.org --subject "E2E attach" --body "with file" --attach ~/note.txt')
+OUT=$(testenv_exec su sender -c 'email-cli --account sender@mail.example.org -q send --to rcpt@mail.example.org --subject "ITEST attach" --body "with file" --attach ~/note.txt')
 RC=$?
 echo "$OUT"
 [ "$RC" -eq 0 ] && ok "3.1 send with attachment exits 0" || fail "3.1 send with attachment exits 0 (status $RC)"
 BOX=""
 for _ in $(seq 1 30); do
     BOX=$(testenv_exec cat /var/mail/rcpt)
-    printf '%s' "$BOX" | grep -q "E2E attach" && break
+    printf '%s' "$BOX" | grep -q "ITEST attach" && break
     sleep 1
 done
-check_contains "3.2 the attachment message arrived"     "^Subject: E2E attach"      "$BOX"
+check_contains "3.2 the attachment message arrived"     "^Subject: ITEST attach"      "$BOX"
 check_contains "3.3 it carries the file name"           "filename=\"note.txt\""     "$BOX"
 # "hello-attachment" in base64
 check_contains "3.4 it carries the file content"        "aGVsbG8tYXR0YWNobWVudA=="  "$BOX"
 
 # 4. A certificate for another name is refused (verification really is on).
 mkcfg wrongname@mail.example.org localhost 465 >/dev/null
-OUT=$(testenv_exec su sender -c 'email-cli --account wrongname@mail.example.org -q send --to rcpt@mail.example.org --subject "E2E wrong name" --body "never"')
+OUT=$(testenv_exec su sender -c 'email-cli --account wrongname@mail.example.org -q send --to rcpt@mail.example.org --subject "ITEST wrong name" --body "never"')
 RC=$?
 echo "$OUT"
 [ "$RC" -ne 0 ] && ok "4.1 a certificate for another host name fails" \
                 || fail "4.1 a certificate for another host name fails (status 0)"
 BOX=$(testenv_exec cat /var/mail/rcpt)
-check_not_contains "4.2 nothing was delivered"          "E2E wrong name"            "$BOX"
+check_not_contains "4.2 nothing was delivered"          "ITEST wrong name"            "$BOX"
 
 # 5. A closed port fails.
 mkcfg closedport@mail.example.org mail.example.org 1 >/dev/null
-OUT=$(testenv_exec su sender -c 'email-cli --account closedport@mail.example.org -q send --to rcpt@mail.example.org --subject "E2E closed" --body "never"')
+OUT=$(testenv_exec su sender -c 'email-cli --account closedport@mail.example.org -q send --to rcpt@mail.example.org --subject "ITEST closed" --body "never"')
 RC=$?
 echo "$OUT"
 [ "$RC" -ne 0 ] && ok "5.1 a closed port fails with a non-zero status" \
                 || fail "5.1 a closed port fails with a non-zero status (status 0)"
 
-echo "=== e2e smtp_delivery: $PASSED passed, $FAILED failed ==="
+echo "=== integration smtp_delivery: $PASSED passed, $FAILED failed ==="
 [ "$FAILED" -eq 0 ]

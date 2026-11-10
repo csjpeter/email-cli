@@ -200,7 +200,6 @@ int mail_client_set_flag(MailClient *c, const char *uid,
             }
         }
         /* Unknown flag — ignore for Gmail */
-        logger_log(LOG_DEBUG, "mail_client: Gmail ignoring flag '%s'", flag);
         return 0;
     }
     return imap_uid_set_flag(c->imap, uid, flag, add);
@@ -222,7 +221,6 @@ int mail_client_delete(MailClient *c, const char *uid) {
 
 int mail_client_move_to_folder(MailClient *c, const char *uid, const char *target_folder) {
     if (c->is_gmail) {
-        logger_log(LOG_DEBUG, "mail_client: Gmail ignoring move to '%s'", target_folder);
         return 0;
     }
     return imap_uid_move(c->imap, uid, target_folder);

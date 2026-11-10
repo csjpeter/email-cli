@@ -71,6 +71,7 @@ typedef struct {
     const char *user;
     int         io_state;   /* 0 none, 1 closed by the server, 2 error or timeout */
     int         io_errno;
+    int         in_auth;    /* the AUTH step: its data lines are masked in the traffic log */
 } SmtpLink;
 
 /** Read and write limit of an SMTP session, seconds (smtp_set_io_timeout). */
@@ -158,7 +159,7 @@ static int link_reply(SmtpLink *l, char *text, size_t text_cap)
             size_t have = strlen(text);
             snprintf(text + have, text_cap - have, "%s\n", line + (line[3] ? 4 : 3));
         }
-        logger_log(LOG_DEBUG, "SMTP [ IN] %s", line);
+        logger_traffic("SMTP [ IN] %s", line);
         if (line[3] != '-') return code;
     }
 }
@@ -172,7 +173,12 @@ static int link_send(SmtpLink *l, const char *fmt, ...)
     int n = vsnprintf(out, sizeof(out) - 2, fmt, ap);
     va_end(ap);
     if (n < 0 || (size_t)n >= sizeof(out) - 2) return -1;
-    logger_log(LOG_DEBUG, "SMTP [OUT] %.*s", n > 5 && strncasecmp(out, "AUTH", 4) == 0 ? 4 : n, out);
+    /* credentials never reach the traffic log: the data lines of an AUTH
+     * exchange are masked whole, AUTH PLAIN <data> by logger_mask_secret() */
+    if (l->in_auth && strncasecmp(out, "AUTH", 4) != 0)
+        logger_traffic("SMTP [OUT] xxxxx");
+    else
+        logger_traffic("SMTP [OUT] %s", out);
     out[n++] = '\r';
     out[n++] = '\n';
     return net_conn_write_all(l->c, out, (size_t)n);
@@ -185,6 +191,7 @@ static int link_cmd(SmtpLink *l, const char *step, int want, char *why, size_t w
 {
     char text[512];
     l->io_state = 0;
+    l->in_auth = strcmp(step, "AUTH") == 0;
     if (link_send(l, fmt, arg) != 0) {
         l->io_state = 2;
         l->io_errno = errno;
@@ -401,7 +408,7 @@ int smtp_send(const Config *cfg,
     char *url = build_smtp_url(cfg);
     if (!url) {
         if (err && err_len) snprintf(err, err_len, "failed to build the SMTP URL");
-        logger_log(LOG_ERROR, "smtp_send: failed to build the SMTP URL");
+        logger_error("smtp_send: failed to build the SMTP URL");
         return -1;
     }
 
@@ -413,7 +420,7 @@ int smtp_send(const Config *cfg,
                      "refused to send via %s - only smtps:// is allowed (TLS required). "
                      "Set SMTP_HOST=smtps://smtp.example.com in your config "
                      "(for test environments only: SSL_NO_VERIFY=1)", url);
-        logger_log(LOG_ERROR,
+        logger_error(
                    "smtp_send: rejected insecure SMTP URL: %s", url);
         free(url);
         return -1;
@@ -439,9 +446,8 @@ int smtp_send(const Config *cfg,
                           from_env, to_env, message, message_len, why, sizeof(why));
     if (rc != 0) {
         if (err && err_len) snprintf(err, err_len, "%s", why);
-        logger_log(LOG_ERROR, "smtp_send failed: %s", why);
+        logger_error("smtp_send failed: %s", why);
     } else {
-        logger_log(LOG_INFO, "smtp_send: message sent from %s to %s", from, to);
     }
     free(url);
     return rc;

@@ -57,7 +57,7 @@ static void help(void) {
         "                      automatic sync seems stuck or out of sync)\n"
         "  --verbose, -v       Print per-rule firing details during sync or\n"
         "                      --apply-rules\n"
-        "  --debug             Write a session trace (also: EMAIL_CLI_DEBUG=1)\n"
+        "  --debug             Write a protocol traffic log\n"
         "  --help, -h          Show this help message\n"
         "\n"
         "Exit Codes:\n"
@@ -92,7 +92,7 @@ static void help_cron(void) {
 #endif
 
 int main(int argc, char *argv[]) {
-    /* --debug / EMAIL_CLI_DEBUG: the trace is written only on request (EMAIL-240). */
+    /* --debug: the traffic log is written only on request (EMAIL-284). */
     int debug_trace = logger_debug_requested(&argc, argv);
     setlocale(LC_ALL, "");
 
@@ -149,7 +149,7 @@ int main(int argc, char *argv[]) {
     if (debug_trace) {
         if (fs_mkdir_p(log_dir, 0700) != 0)
             fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
-        if (logger_init(log_file, LOG_DEBUG) != 0)
+        if (logger_init(log_file) != 0)
             fprintf(stderr, "Warning: Logging system failed to initialize.\n");
         emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
     } else {
@@ -158,7 +158,6 @@ int main(int argc, char *argv[]) {
 
     /* 'cron setup' needs config for sync_interval */
     if (cmd && strcmp(cmd, "cron") == 0) {
-        logger_log(LOG_INFO, "--- email-sync cron setup ---");
         Config *cfg = config_load_from_store();
         if (!cfg) {
             fprintf(stderr, "Error: No configuration found. Run 'email-cli config' or "
@@ -178,7 +177,6 @@ int main(int argc, char *argv[]) {
         return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
-    logger_log(LOG_INFO, "--- email-sync starting ---");
 
     /* Parse remaining options (sync mode) */
     const char *account_filter    = NULL;
@@ -252,7 +250,6 @@ int main(int argc, char *argv[]) {
     email_service_set_verbose(do_verbose);
     int result = email_service_sync_all(account_filter, do_force_reconcile);
 
-    logger_log(LOG_INFO, "--- email-sync finished (result: %d) ---", result);
     logger_close();
 
     if (result >= 0)

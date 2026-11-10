@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
 /* Created: 2026-03-24 */
-/* Leveled, rotating log file writer. */
+/* Traffic log (--debug only) with rotation, and the stderr error output. */
 #include "logger.h"
 #include "raii.h"
 #include <stdarg.h>
@@ -11,27 +11,17 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <strings.h>
 
 #define MAX_LOG_SIZE (5 * 1024 * 1024) // 5MB
 #define MAX_ROTATED_LOGS 5
 
 static FILE *g_log_fp = NULL;
-static LogLevel g_log_level = LOG_INFO;
 static char *g_log_path = NULL;
 static int g_log_stderr = 1;
 static int g_stderr_only = 0;   /* no file, but errors still go to stderr */
 static unsigned g_stderr_errors;
-
-/** @brief Converts a LogLevel enum to its string representation. */
-static const char* level_to_str(LogLevel level) {
-    switch (level) {
-        case LOG_DEBUG: return "DEBUG";
-        case LOG_INFO:  return "INFO";
-        case LOG_WARN:  return "WARN";
-        case LOG_ERROR: return "ERROR";
-        default:        return "UNKNOWN";
-    }
-}
 
 /**
  * @brief Rotates log files: session.log → session.log.1, dropping session.log.5.
@@ -64,8 +54,6 @@ static void rotate_logs() {
 
 int logger_debug_requested(int *argc, char **argv) {
     int on = 0;
-    const char *env = getenv("EMAIL_CLI_DEBUG");
-    if (env && env[0] && strcmp(env, "0") != 0) on = 1;
     int w = 1;
     for (int r = 1; r < *argc; r++) {
         if (strcmp(argv[r], "--debug") == 0) { on = 1; continue; }
@@ -76,17 +64,15 @@ int logger_debug_requested(int *argc, char **argv) {
     return on;
 }
 
-int logger_init(const char *log_file_path, LogLevel level) {
+int logger_init(const char *log_file_path) {
     /* A program and libemail-client (linked static: one copy of this state)
      * both open the log; the second call must not leak the first one's file
-     * and path, nor repeat the banner. */
-    if (g_log_fp && g_log_path && strcmp(g_log_path, log_file_path) == 0) {
-        g_log_level = level;
+     * and path. */
+    if (g_log_fp && g_log_path && strcmp(g_log_path, log_file_path) == 0)
         return 0;
-    }
     logger_close();
-    g_log_level = level;
     g_log_path = strdup(log_file_path);
+    if (!g_log_path) return -1;
 
     // Check size and rotate if necessary
     struct stat st;
@@ -94,48 +80,150 @@ int logger_init(const char *log_file_path, LogLevel level) {
         rotate_logs();
     }
 
-    g_log_fp = fopen(g_log_path, "a");
+    /* The traffic log is private: 0600 (the directory is made 0700). */
+    int fd = open(g_log_path, O_WRONLY | O_CREAT | O_APPEND, 0600);
+    g_log_fp = fd >= 0 ? fdopen(fd, "a") : NULL;
     if (!g_log_fp) {
+        if (fd >= 0) close(fd);
         free(g_log_path);
         g_log_path = NULL;
         return -1;
     }
-
-    logger_log(LOG_INFO, "Logging initialized. Level: %s", level_to_str(level));
     return 0;
 }
 
-void logger_log(LogLevel level, const char *format, ...) {
-    /* The file is optional (EMAIL-240: the trace is written only on request);
-     * an error is still shown on stderr when that is enabled. */
-    int to_file = g_log_fp && level >= g_log_level;
-    int to_stderr = level == LOG_ERROR && g_log_stderr && (g_log_fp || g_stderr_only);
-    if (!to_file && !to_stderr) return;
+int logger_traffic_enabled(void) {
+    return g_log_fp != NULL;
+}
 
+/** Replaces line[from, to) with "xxxxx", keeping the rest; bounded by cap. */
+static void mask_range(char *line, size_t cap, size_t from, size_t to) {
+    size_t len = strlen(line);
+    if (to > len) to = len;
+    if (from >= to) return;
+    size_t tail = len - to;
+    size_t mark = 5;
+    if (from + mark >= cap) mark = cap > from + 1 ? cap - from - 1 : 0;
+    if (from + mark + tail >= cap) tail = cap - 1 - from - mark;
+    memmove(line + from + mark, line + to, tail);
+    memcpy(line + from, "xxxxx", mark);
+    line[from + mark + tail] = '\0';
+}
+
+/** End of the token starting at @p p: a quoted string or up to a space. */
+static size_t token_end(const char *line, size_t p) {
+    if (line[p] == '"') {
+        const char *q = strchr(line + p + 1, '"');
+        return q ? (size_t)(q - line) + 1 : strlen(line);
+    }
+    while (line[p] && line[p] != ' ') p++;
+    return p;
+}
+
+/** Masks the value of KEY in JSON ("key":"v") or form (key=v) text. */
+static void mask_key_value(char *line, size_t cap, const char *key) {
+    size_t kl = strlen(key);
+    size_t from = 0;
+    for (;;) {
+        if (from > strlen(line)) return;
+        char *hit = strcasestr(line + from, key);
+        if (!hit) return;
+        size_t p = (size_t)(hit - line) + kl;
+        from = p;
+        if (line[p] == '"') p++;                     /* closing quote of the key */
+        while (line[p] == ' ') p++;
+        if (line[p] != ':' && line[p] != '=') continue;
+        p++;
+        while (line[p] == ' ') p++;
+        size_t e;
+        if (line[p] == '"') {
+            p++;
+            e = p;
+            while (line[e] && line[e] != '"') e++;
+        } else {
+            e = p;
+            while (line[e] && line[e] != '&' && line[e] != ' ' && line[e] != ',' &&
+                   line[e] != '}' && line[e] != '"') e++;
+        }
+        mask_range(line, cap, p, e);
+        from = p + 5;
+    }
+}
+
+void logger_mask_secret(char *line, size_t cap) {
+    if (!line || cap < 8) return;
+
+    /* Authorization: <scheme> <value> */
+    char *ah = strcasestr(line, "Authorization:");
+    if (ah) {
+        size_t p = (size_t)(ah - line) + 14;
+        while (line[p] == ' ') p++;
+        size_t sch = p;
+        while (line[sch] && line[sch] != ' ') sch++;
+        if (line[sch] == ' ') mask_range(line, cap, sch + 1, strlen(line));
+        else mask_range(line, cap, p, strlen(line));
+    }
+
+    /* LOGIN user pass | AUTHENTICATE mech data | AUTH mech data: the command
+     * is within the first words of the line (after the direction and tag). */
+    static const char *const cmds[] = { "AUTHENTICATE", "AUTH", "LOGIN" };
+    size_t best = (size_t)-1, wl = 0;
+    for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
+        size_t l = strlen(cmds[i]);
+        const char *h = line;
+        while ((h = strcasestr(h, cmds[i])) != NULL) {
+            size_t pos = (size_t)(h - line);
+            if (pos >= 48) break;
+            int before = pos == 0 || line[pos - 1] == ' ' || line[pos - 1] == ']';
+            if (before && line[pos + l] == ' ') {
+                if (pos < best) { best = pos; wl = l; }
+                break;
+            }
+            h++;
+        }
+    }
+    if (best != (size_t)-1) {
+        size_t p = best + wl + 1;
+        while (line[p] == ' ') p++;
+        size_t e = token_end(line, p);       /* the user, or the mechanism */
+        while (line[e] == ' ') e++;
+        if (line[e]) mask_range(line, cap, e, strlen(line));
+    }
+
+    mask_key_value(line, cap, "access_token");
+    mask_key_value(line, cap, "refresh_token");
+    mask_key_value(line, cap, "client_secret");
+    mask_key_value(line, cap, "password");
+}
+
+void logger_traffic(const char *format, ...) {
+    if (!g_log_fp) return;
+    char buf[8192];
     va_list args;
+    va_start(args, format);
+    int n = vsnprintf(buf, sizeof(buf), format, args);
+    va_end(args);
+    if (n < 0) return;
+    logger_mask_secret(buf, sizeof(buf));
 
-    if (to_file) {
-        time_t now = time(NULL);
-        struct tm *tm_info = localtime(&now);
-        char time_str[26];
-        strftime(time_str, 26, "%Y-%m-%d %H:%M:%S", tm_info);
+    time_t now = time(NULL);
+    struct tm tm_info;
+    localtime_r(&now, &tm_info);
+    char time_str[26];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_info);
+    fprintf(g_log_fp, "[%s] %s\n", time_str, buf);
+    fflush(g_log_fp);
+}
 
-        fprintf(g_log_fp, "[%s] [%s] ", time_str, level_to_str(level));
-        va_start(args, format);
-        vfprintf(g_log_fp, format, args);
-        va_end(args);
-        fprintf(g_log_fp, "\n");
-        fflush(g_log_fp);
-    }
-
-    if (to_stderr) {
-        g_stderr_errors++;
-        fprintf(stderr, "ERROR: ");
-        va_start(args, format);
-        vfprintf(stderr, format, args);
-        va_end(args);
-        fprintf(stderr, "\n");
-    }
+void logger_error(const char *format, ...) {
+    if (!g_log_stderr || !(g_log_fp || g_stderr_only)) return;
+    g_stderr_errors++;
+    va_list args;
+    va_start(args, format);
+    fprintf(stderr, "ERROR: ");
+    vfprintf(stderr, format, args);
+    fprintf(stderr, "\n");
+    va_end(args);
 }
 
 void logger_stderr_only(void) {

@@ -157,8 +157,6 @@ static void apply_rules_to_new_message(const MailRules *rules, const char *uid,
     free(lcsv);
     if (fired <= 0) return;
 
-    logger_log(LOG_INFO, "gmail_sync: rules fired=%d for %s (add=%d rm=%d)",
-               fired, uid, add_count, rm_count);
 
     /* Update local .hdr and label indexes */
     local_hdr_update_labels("", uid,
@@ -353,9 +351,6 @@ static void rebuild_label_indexes(const char (*uids)[17], int uid_count) {
 
     fprintf(stderr, "\r\033[K  Label indexes rebuilt (%d labels)\n",
             labels_written);
-    logger_log(LOG_INFO,
-               "gmail_sync: rebuilt %d label indexes from %d messages",
-               labels_written, uid_count);
 }
 
 /**
@@ -390,7 +385,6 @@ static int store_fetched_message(GmailClient *gc, const char *uid,
     int label_count = 0;
     char *raw = gmail_fetch_message(gc, uid, &labels, &label_count);
     if (!raw) {
-        logger_log(LOG_WARN, "gmail_sync: failed to fetch %s", uid);
         for (int j = 0; j < label_count; j++) free(labels[j]);
         free(labels);
         return -1;
@@ -444,7 +438,6 @@ static int store_fetched_message(GmailClient *gc, const char *uid,
 static void ensure_user_label_indexes(char **ids, int count);
 
 int gmail_sync_reconcile(GmailClient *gc) {
-    logger_log(LOG_INFO, "gmail_sync: reconcile — listing server messages");
 
     fprintf(stderr, "  Listing messages...");
     fflush(stderr);
@@ -456,7 +449,7 @@ int gmail_sync_reconcile(GmailClient *gc) {
     if (gmail_list_messages(gc, NULL, NULL, &all_uids, &uid_count, &list_history_id) != 0) {
         gmail_set_progress(gc, NULL, NULL);
         free(list_history_id);
-        logger_log(LOG_ERROR, "gmail_sync: reconcile failed to list messages");
+        logger_error("gmail_sync: reconcile failed to list messages");
         fprintf(stderr, "\nError: list messages: %s\n", gmail_last_error(gc));
         return -1;
     }
@@ -502,8 +495,6 @@ int gmail_sync_reconcile(GmailClient *gc) {
         RAII_STRING char *hid = gmail_get_history_id(gc);
         if (hid)
             local_gmail_history_save(hid);
-        else
-            logger_log(LOG_WARN, "gmail_sync: reconcile: could not retrieve historyId");
     }
 
     /* Save label ID→name mapping */
@@ -519,8 +510,6 @@ int gmail_sync_reconcile(GmailClient *gc) {
     }
 
     free(all_uids);
-    logger_log(LOG_INFO, "gmail_sync: reconcile done — %d cached, %d queued",
-               cached, queued);
     return queued;
 }
 
@@ -541,7 +530,6 @@ int gmail_sync_fetch_pending(GmailClient *gc) {
         return 0;
     }
 
-    logger_log(LOG_INFO, "gmail_sync: fetch_pending — %d messages to download", count);
     fprintf(stderr, "  Downloading %d message(s)...\n", count);
 
     MailRules *rules = mail_rules_load(local_store_account_name());
@@ -572,15 +560,12 @@ int gmail_sync_fetch_pending(GmailClient *gc) {
 
     mail_rules_free(rules);
     free(uids);
-    logger_log(LOG_INFO, "gmail_sync: fetch_pending done — %d/%d downloaded",
-               fetched, count);
     return fetched;
 }
 
 /* ── Full Sync ────────────────────────────────────────────────────── */
 
 int gmail_sync_full(GmailClient *gc) {
-    logger_log(LOG_INFO, "gmail_sync: starting full sync");
 
     gmail_sync_flush_pending_labels(gc);
     int queued = gmail_sync_reconcile(gc);
@@ -849,8 +834,6 @@ static void recover_unread_labels(GmailClient *gc) {
 
     if (server_count == 0) { free(server_uids); return; }
 
-    logger_log(LOG_INFO, "gmail_sync: recover_unread: %d unread on server",
-               server_count);
 
     /* Load current local UNREAD index to skip already-correct entries */
     char (*local_uids)[17] = NULL;
@@ -892,9 +875,6 @@ static void recover_unread_labels(GmailClient *gc) {
     free(local_uids);
 
     if (updated > 0 || fetched > 0) {
-        logger_log(LOG_INFO,
-                   "gmail_sync: recover_unread: patched=%d fetched=%d",
-                   updated, fetched);
         if (updated > 0)
             fprintf(stderr, "  Recovered UNREAD flag for %d cached messages.\n",
                     updated);
@@ -908,18 +888,15 @@ static void recover_unread_labels(GmailClient *gc) {
 int gmail_sync_incremental(GmailClient *gc) {
     char *history_id = local_gmail_history_load();
     if (!history_id) {
-        logger_log(LOG_INFO, "gmail_sync: no historyId, need full sync");
         return -2;
     }
 
-    logger_log(LOG_INFO, "gmail_sync: incremental from historyId %s", history_id);
 
     char *resp = gmail_get_history(gc, history_id);
     free(history_id);
 
     if (!resp) {
         fprintf(stderr, "  Incremental: History API returned error/404 (historyId expired or network issue).\n");
-        logger_log(LOG_WARN, "gmail_sync: history expired or error");
         return -2;  /* Signal: need full sync */
     }
 
@@ -971,8 +948,6 @@ int gmail_sync_incremental(GmailClient *gc) {
     else
         fprintf(stderr, "  Incremental sync: up to date.\n");
 
-    logger_log(LOG_INFO, "gmail_sync: incremental done — added=%d deleted=%d labels=%d",
-               hc.added, hc.deleted, hc.label_changes);
     return 0;
 }
 
@@ -1115,7 +1090,6 @@ int gmail_sync_flush_pending_labels(GmailClient *gc) {
         if (ok) for (int m = 0; m < nm; m++) done[members[m]] = 1;
         if (!ok || unresolved > 0) {
             failed++;
-            logger_log(LOG_WARN, "gmail_sync: label push for %s failed; kept queued", uid);
         }
         for (int a = 0; a < na; a++) free(add_ids[a]);
         for (int r = 0; r < nr; r++) free(rm_ids[r]);
@@ -1183,7 +1157,6 @@ static int gmail_sync_pull(GmailClient *gc) {
             return 0; /* fast path — done; the callee reported the outcome */
         if (rc != -2) return rc; /* unexpected error */
         fprintf(stderr, "  Incremental sync: historyId expired — falling back to full reconcile.\n");
-        logger_log(LOG_INFO, "gmail_sync: historyId expired, falling back to reconcile");
     } else {
         fprintf(stderr, "  No saved historyId — full reconcile needed.\n");
     }

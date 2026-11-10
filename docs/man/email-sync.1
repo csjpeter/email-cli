@@ -25,9 +25,10 @@ CONDSTORE/QRESYNC when the server offers it.
 .SH OPTIONS
 .TP
 .B \-\-debug
-Write a session trace (a debug\-level log, which may contain server responses)
-under \fI~/.cache/email\-cli/logs/\fP.  Off by default.  Setting the environment
-variable \fBEMAIL_CLI_DEBUG\fP to anything but empty or 0 does the same.
+Write a protocol traffic log (IMAP, SMTP and Gmail REST commands and responses;
+passwords and tokens are masked) under \fI~/.cache/email\-cli/logs/\fP.
+There is no other log: errors are written to standard error.  Off by default;
+this option is the only way to turn it on.
 .TP
 .BI \-\-account " email"
 Sync only this account instead of all of them.
@@ -66,7 +67,7 @@ Remove the entry.
 .SH FILES
 .TP
 .I ~/.cache/email\-cli/logs/sync-session.log
-Sync diagnostics, written only with \fB\-\-debug\fP or EMAIL_CLI_DEBUG=1.
+Protocol traffic log (credentials masked), written only with \fB\-\-debug\fP.
 .PP
 Store and configuration paths are as in
 .BR email\-cli\-ro (1).

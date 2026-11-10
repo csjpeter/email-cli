@@ -73,12 +73,12 @@ SSL_CTX *net_tls_ctx_new(int verify)
     if (env && *env) {
         /* the caller names the trusted certificates: nothing else is trusted */
         if (SSL_CTX_load_verify_locations(ctx, env, NULL) != 1)
-            logger_log(LOG_ERROR, "TLS: cannot load SSL_CERT_FILE %s", env);
+            logger_error("TLS: cannot load SSL_CERT_FILE %s", env);
     } else {
         SSL_CTX_set_default_verify_paths(ctx);
         const char *bundle = net_tls_ca_bundle();
-        if (bundle && SSL_CTX_load_verify_locations(ctx, bundle, NULL) != 1)
-            logger_log(LOG_WARN, "TLS: cannot load CA bundle %s", bundle);
+        if (bundle)
+            (void)SSL_CTX_load_verify_locations(ctx, bundle, NULL);
     }
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
     tls_revocation_attach(ctx);
@@ -161,7 +161,7 @@ static int tcp_connect(const char *host, int port, int timeout_s,
         if (err && err_len)
             snprintf(err, err_len, "Could not resolve hostname %s:%d (resolve failed: %s)",
                      host, port, gai_strerror(rc));
-        logger_log(LOG_ERROR, "getaddrinfo(%s): %s", host, gai_strerror(rc));
+        logger_error("getaddrinfo(%s): %s", host, gai_strerror(rc));
         return -1;
     }
     int fd = -1;
@@ -280,10 +280,9 @@ static int tls_handshake(NetConn *c, const char *host, int verify,
                 snprintf(err, err_len, "TLS handshake failed with %s:%d: %s",
                          host, c->port, why);
         }
-        logger_log(LOG_ERROR, "TLS handshake failed with %s:%d: %s", host, c->port, why);
+        logger_error("TLS handshake failed with %s:%d: %s", host, c->port, why);
         return -1;
     }
-    logger_log(LOG_DEBUG, "TLS handshake OK with %s (%s)", host, SSL_get_version(c->ssl));
     return 0;
 }
 

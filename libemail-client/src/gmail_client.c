@@ -144,7 +144,7 @@ static char *api_call(GmailClient *c, const char *method, const char *url,
     char err[160];
     c->err[0] = '\0';
     if (http_request(&req, http_code, &resp, NULL, err, sizeof(err)) != 0) {
-        logger_log(LOG_ERROR, "gmail: %s %s failed: %s", method, url, err);
+        logger_error("gmail: %s %s failed: %s", method, url, err);
         note_failure(c, method, url, 0, NULL, err);
         return NULL;
     }
@@ -288,13 +288,13 @@ char *gmail_base64url_encode(const unsigned char *data, size_t len) {
 
 GmailClient *gmail_connect(Config *cfg) {
     if (!cfg || !cfg->gmail_mode) {
-        logger_log(LOG_ERROR, "gmail_connect: not a Gmail account");
+        logger_error("gmail_connect: not a Gmail account");
         return NULL;
     }
 
     char *token = gmail_auth_refresh(cfg);
     if (!token) {
-        logger_log(LOG_ERROR, "gmail_connect: failed to obtain access token");
+        logger_error("gmail_connect: failed to obtain access token");
         return NULL;
     }
 
@@ -302,7 +302,6 @@ GmailClient *gmail_connect(Config *cfg) {
     if (!c) { free(token); return NULL; }
     c->access_token = token;
     c->cfg = cfg;
-    logger_log(LOG_DEBUG, "gmail_connect: connected for %s", cfg->user ? cfg->user : "(unknown)");
     return c;
 }
 
@@ -356,7 +355,7 @@ int gmail_create_label(GmailClient *c, const char *name, char **id_out) {
     long code = 0;
     RAII_STRING char *resp = api_post_retry(c, url, body, &code);
     if (!resp || code != 200) {
-        logger_log(LOG_ERROR, "gmail_create_label: HTTP %ld", code);
+        logger_error("gmail_create_label: HTTP %ld", code);
         return -1;
     }
 
@@ -373,11 +372,11 @@ int gmail_delete_label(GmailClient *c, const char *label_id) {
     long code = 0;
     RAII_STRING char *resp = api_delete_retry(c, url, &code);
     if (!resp) {
-        logger_log(LOG_ERROR, "gmail_delete_label: transport error for label %s", label_id);
+        logger_error("gmail_delete_label: transport error for label %s", label_id);
         return -1;
     }
     if (code != 204 && code != 200) {
-        logger_log(LOG_ERROR, "gmail_delete_label: HTTP %ld for label %s", code, label_id);
+        logger_error("gmail_delete_label: HTTP %ld for label %s", code, label_id);
         return -1;
     }
     return 0;
@@ -425,7 +424,7 @@ int gmail_list_labels(GmailClient *c, char ***names_out,
     long code = 0;
     RAII_STRING char *resp = api_get_retry(c, url, &code);
     if (!resp || code != 200) {
-        logger_log(LOG_ERROR, "gmail_list_labels: HTTP %ld", code);
+        logger_error("gmail_list_labels: HTTP %ld", code);
         return -1;
     }
 
@@ -544,9 +543,8 @@ char *gmail_fetch_message(GmailClient *c, const char *uid,
     RAII_STRING char *resp = api_get_retry(c, url, &code);
     if (!resp || code != 200) {
         if (code == 404) {
-            logger_log(LOG_WARN, "gmail: message %s not found (deleted?)", uid);
         } else {
-            logger_log(LOG_ERROR, "gmail_fetch_message %s: HTTP %ld", uid, code);
+            logger_error("gmail_fetch_message %s: HTTP %ld", uid, code);
         }
         return NULL;
     }
@@ -554,7 +552,7 @@ char *gmail_fetch_message(GmailClient *c, const char *uid,
     /* Extract and decode raw message */
     RAII_STRING char *raw_b64 = json_get_string(resp, "raw");
     if (!raw_b64) {
-        logger_log(LOG_ERROR, "gmail_fetch_message %s: no 'raw' field", uid);
+        logger_error("gmail_fetch_message %s: no 'raw' field", uid);
         return NULL;
     }
 
@@ -615,7 +613,7 @@ int gmail_modify_labels(GmailClient *c, const char *uid,
     free(resp);
 
     if (code != 200) {
-        logger_log(LOG_ERROR, "gmail_modify_labels %s: HTTP %ld", uid, code);
+        logger_error("gmail_modify_labels %s: HTTP %ld", uid, code);
         return -1;
     }
     return 0;
@@ -631,7 +629,7 @@ int gmail_trash(GmailClient *c, const char *uid) {
     long code = 0;
     RAII_STRING char *resp = api_post_retry(c, url, NULL, &code);
     if (code != 200) {
-        logger_log(LOG_ERROR, "gmail_trash %s: HTTP %ld", uid, code);
+        logger_error("gmail_trash %s: HTTP %ld", uid, code);
         return -1;
     }
     return 0;
@@ -645,7 +643,7 @@ int gmail_untrash(GmailClient *c, const char *uid) {
     long code = 0;
     RAII_STRING char *resp = api_post_retry(c, url, NULL, &code);
     if (code != 200) {
-        logger_log(LOG_ERROR, "gmail_untrash %s: HTTP %ld", uid, code);
+        logger_error("gmail_untrash %s: HTTP %ld", uid, code);
         return -1;
     }
     return 0;
@@ -659,7 +657,7 @@ int gmail_delete_permanently(GmailClient *c, const char *uid) {
     long code = 0;
     RAII_STRING char *resp = api_delete(c, url, &code);
     if (code != 204) {
-        logger_log(LOG_ERROR, "gmail_delete_permanently %s: HTTP %ld", uid, code);
+        logger_error("gmail_delete_permanently %s: HTTP %ld", uid, code);
         return -1;
     }
     return 0;
@@ -689,10 +687,9 @@ int gmail_send(GmailClient *c, const char *raw_msg, size_t len) {
     free(resp);
 
     if (code != 200) {
-        logger_log(LOG_ERROR, "gmail_send: HTTP %ld", code);
+        logger_error("gmail_send: HTTP %ld", code);
         return -1;
     }
-    logger_log(LOG_INFO, "gmail_send: message sent successfully");
     return 0;
 }
 
@@ -727,13 +724,11 @@ char *gmail_get_history(GmailClient *c, const char *history_id) {
 
     if (code == 404) {
         fprintf(stderr, "  History API: 404 — historyId %s expired.\n", history_id);
-        logger_log(LOG_WARN, "gmail: history %s expired — full resync needed", history_id);
         free(resp);
         return NULL;
     }
     if (code != 200) {
         fprintf(stderr, "  History API: HTTP %ld for historyId %s.\n", code, history_id);
-        logger_log(LOG_WARN, "gmail_get_history: HTTP %ld (will retry with full sync)", code);
         free(resp);
         return NULL;
     }

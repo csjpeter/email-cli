@@ -1101,7 +1101,7 @@ static void run_mock_server_vanished_noearlier(int listen_fd, SSL_CTX *ctx) {
                      "%s OK SELECT completed\r\n", tag);
             SSL_write(ssl, resp, (int)strlen(resp));
         } else if (strstr(buf, "BODY.PEEK[]")) {
-            /* Return OK but NO literal body — exercises line 798 logger_log */
+            /* Return OK but NO literal body — exercises the no-literal path */
             snprintf(resp, sizeof(resp),
                      "* 1 FETCH (UID 1)\r\n%s OK FETCH completed\r\n", tag);
             SSL_write(ssl, resp, (int)strlen(resp));

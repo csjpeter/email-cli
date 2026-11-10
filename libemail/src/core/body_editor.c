@@ -67,7 +67,7 @@ static void draw(tui_textedit *te, const char *header, const char *note,
         { "F1", "help", SL_PRIO_MID },
     };
     char status[256];
-    if (status_line_format(cols, hints, 3, NULL, 0, 0, note, status, sizeof(status)) < 0)
+    if (status_line_format(cols, hints, 3, NULL, 0, 0, NULL, status, sizeof(status)) < 0)
         status[0] = '\0';
     tui_style bar = tui_style_attrs(TUI_ATTR_REVERSE);
     tui_canvas_fill(c, tui_rect_make(rows - 1, 0, 1, cols), bar);
@@ -81,6 +81,8 @@ static void draw(tui_textedit *te, const char *header, const char *note,
     }
     tui_buf_free(&out);
     tui_screen_free(scr);
+    status_line_set_header_width(0);
+    status_line_notice_draw(cols, note);       /* the note goes to the header (EMAIL-285) */
 }
 
 /* The help overlay (EMAIL-169): the editor's keys; h is text here, so F1 or

@@ -3244,8 +3244,17 @@ void test_email_service(void) {
                "status_line: hints and position");
         n = status_line_format(80, h, 3, "?", 2, 9, "Moved to Trash",
                                line, sizeof(line));
-        ASSERT(n > 0 && strstr(line, "Moved to Trash") && !strstr(line, "Enter open"),
-               "status_line: message replaces hints");
+        ASSERT(n > 0 && !strstr(line, "Moved to Trash") && strstr(line, "Enter open"),
+               "status_line: a message never replaces the hints (EMAIL-285)");
+        n = status_line_format(80, NULL, 0, NULL, 0, 0, "Sending...", line, sizeof(line));
+        ASSERT(n > 0 && strstr(line, "Sending..."), "status_line: with no hints the text is the line");
+        char note[128];
+        int w = status_line_notice_format(80, "  Moved to Trash", note, sizeof(note));
+        ASSERT(w == 14 && strcmp(note, "Moved to Trash") == 0, "notice: blanks dropped");
+        w = status_line_notice_format(20, "A very long message that must be cut", note, sizeof(note));
+        ASSERT(w == 15 && (int)strlen(note) == 15, "notice: cut to three quarters of the width");
+        ASSERT(status_line_notice_is_error("Could not move to Trash") &&
+               !status_line_notice_is_error("Archived"), "notice: failure red, other green");
         n = status_line_format(36, h, 3, "?", 2, 9, NULL, line, sizeof(line));
         ASSERT(n > 0 && strstr(line, "Esc/q/BS folders") && strstr(line, "[2/9]")
                && !strstr(line, "compose"),

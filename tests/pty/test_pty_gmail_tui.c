@@ -67,7 +67,13 @@ int g_tests_failed = 0;
 #define SETTLE_MS 700
 #define ROWS 30
 #define COLS 120
-#define FEEDBACK_ROW (ROWS - 1)   /* 0-indexed PTY row of the status line */
+static int feedback_has(PtySession *s, const char *t);
+/* The feedback of an operation is a notice in the header (EMAIL-285): on the
+ * header row, or on the free row under it when the header text leaves no room. */
+#define FEEDBACK_ROW 0
+static int feedback_has(PtySession *s, const char *t) {
+    return pty_row_contains(s, FEEDBACK_ROW, t) || pty_row_contains(s, 1, t);
+}
 
 /* The keys of the keyboard policy (EMAIL-175): the registry keys act at once
  * ('*' star, '+' read, '-' unread), 'd' asks before it deletes, and the rest
@@ -547,7 +553,7 @@ static void test_label_picker_esc_discards_enter_applies(void) {
     pty_send_key(s, PTY_KEY_ESC);               /* discard */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
-    ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Label removed"),
+    ASSERT(!feedback_has(s, "Label removed"),
            "picker-esc: Esc changes no label");
 
     pty_send_str(s, "t");                       /* the label is still there */
@@ -559,7 +565,7 @@ static void test_label_picker_esc_discards_enter_applies(void) {
     pty_send_key(s, PTY_KEY_ENTER);             /* apply */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Toggle Labels");
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Label removed"),
+    ASSERT(feedback_has(s, "Label removed"),
            "picker-esc: Enter applies the unticked label");
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -1583,7 +1589,7 @@ static void test_D_permanent_delete_in_trash_view(void) {
         if (row >= 0)
             ASSERT(strcmp(pty_cell_text(s, row, 1), "D") == 0,
                    "D-perm: 'D' pending marker in Trash view after D");
-        ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Permanently deleted"),
+        ASSERT(feedback_has(s, "Permanently deleted"),
                "D-perm: feedback shows 'Permanently deleted'");
 
         pty_send_key(s, PTY_KEY_ESC);
@@ -1693,11 +1699,11 @@ static void test_feedback_empty_on_open(void) {
     ASSERT(pty_run(s, args) == 0, "fb-open: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "fb-open: navigate_to_inbox");
     /* No key pressed yet — feedback row must not contain any op-result text */
-    ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Label removed"),
+    ASSERT(!feedback_has(s, "Label removed"),
            "fb-open: no 'Label removed' on feedback row at open");
-    ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Archived"),
+    ASSERT(!feedback_has(s, "Archived"),
            "fb-open: no 'Archived' on feedback row at open");
-    ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Moved to Trash"),
+    ASSERT(!feedback_has(s, "Moved to Trash"),
            "fb-open: no 'Moved to Trash' on feedback row at open");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1714,7 +1720,7 @@ static void test_feedback_D_trash(void) {
     ASSERT(navigate_to_inbox(s) == 0, "fb-D: navigate_to_inbox");
     gm_trash(s);
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Moved to Trash"),
+    ASSERT(feedback_has(s, "Moved to Trash"),
            "fb-D: feedback row shows 'Moved to Trash'");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1731,7 +1737,7 @@ static void test_feedback_d_label_removed(void) {
     ASSERT(navigate_to_inbox(s) == 0, "fb-d: navigate_to_inbox");
     gm_rm_label(s);
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Label removed: INBOX"),
+    ASSERT(feedback_has(s, "Label removed: INBOX"),
            "fb-d: feedback row shows 'Label removed: INBOX'");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1750,7 +1756,7 @@ static void test_feedback_d_undo(void) {
     pty_settle(s, SETTLE_MS);
     gm_rm_label(s);  /* undo */
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Undo: INBOX restored"),
+    ASSERT(feedback_has(s, "Undo: INBOX restored"),
            "fb-dundo: feedback row shows 'Undo: INBOX restored'");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1767,7 +1773,7 @@ static void test_feedback_a_archive(void) {
     ASSERT(navigate_to_inbox(s) == 0, "fb-arch: navigate_to_inbox");
     gm_archive(s);
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Archived"),
+    ASSERT(feedback_has(s, "Archived"),
            "fb-arch: feedback row shows 'Archived'");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1809,7 +1815,7 @@ static void test_feedback_a_noop(void) {
         ASSERT_SCREEN_NOT_CONTAINS(s, "Archive - remove every label");   /* EMAIL-206 */
         pty_send_key(s, PTY_KEY_ESC);
         pty_settle(s, SETTLE_MS);
-        ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Already in Archive"),
+        ASSERT(!feedback_has(s, "Already in Archive"),
                "fb-anoop: nothing was archived again");
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -1887,7 +1893,7 @@ static void test_feedback_f_star(void) {
     ASSERT(navigate_to_inbox(s) == 0, "fb-f: navigate_to_inbox");
     pty_send_str(s, "*");   /* message 5 is not starred → becomes starred */
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Starred"),
+    ASSERT(feedback_has(s, "Starred"),
            "fb-f: feedback row shows 'Starred'");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1905,7 +1911,7 @@ static void test_feedback_n_read(void) {
     /* Message 5 starts with UNREAD label → pressing 'n' marks it as read */
     pty_send_str(s, "+");
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Marked as read"),
+    ASSERT(feedback_has(s, "Marked as read"),
            "fb-n: feedback row shows 'Marked as read'");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -1939,7 +1945,7 @@ static void test_feedback_u_restore(void) {
         pty_settle(s, SETTLE_MS);
         gm_restore(s);   /* restore from trash */
         pty_settle(s, SETTLE_MS);
-        ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Restored to Inbox"),
+        ASSERT(feedback_has(s, "Restored to Inbox"),
                "fb-u: feedback row shows 'Restored to Inbox'");
         pty_send_key(s, PTY_KEY_ESC);
         pty_close(s);
@@ -1966,7 +1972,7 @@ static void test_feedback_t_label_added(void) {
     pty_send_key(s, PTY_KEY_ENTER);   /* Enter applies the ticked set */
     pty_settle(s, SETTLE_MS);
     /* Feedback must mention the label that was added */
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "Label added"),
+    ASSERT(feedback_has(s, "Label added"),
            "fb-t: feedback row shows 'Label added'");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -2195,20 +2201,20 @@ static void test_keys_jk_move(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "jk: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "jk: navigate_to_inbox");
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "[1/"), "jk: starts on the first row");
+    ASSERT(pty_row_contains(s, ROWS - 1, "[1/"), "jk: starts on the first row");
     pty_send_str(s, "j");
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "[2/"), "jk: j moves down");
+    ASSERT(pty_row_contains(s, ROWS - 1, "[2/"), "jk: j moves down");
     pty_send_str(s, "j");
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "[3/"), "jk: j moves down again");
+    ASSERT(pty_row_contains(s, ROWS - 1, "[3/"), "jk: j moves down again");
     pty_send_str(s, "k");
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "[2/"), "jk: k moves up");
+    ASSERT(pty_row_contains(s, ROWS - 1, "[2/"), "jk: k moves up");
     pty_send_str(s, "k");
     pty_send_str(s, "k");
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, FEEDBACK_ROW, "[1/"), "jk: no wrap above the first row");
+    ASSERT(pty_row_contains(s, ROWS - 1, "[1/"), "jk: no wrap above the first row");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -2232,7 +2238,7 @@ static void test_keys_d_asks_default_no(void) {
     ASSERT(row >= 0, "d-asks: message still listed");
     if (row >= 0)
         ASSERT(strcmp(pty_cell_text(s, row, 1), " ") == 0, "d-asks: no pending mark");
-    ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Moved to Trash"), "d-asks: nothing moved");
+    ASSERT(!feedback_has(s, "Moved to Trash"), "d-asks: nothing moved");
     pty_send_str(s, "d");
     ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
     pty_send_str(s, "y");
@@ -2258,11 +2264,11 @@ static void test_keys_old_letters_do_nothing(void) {
         int row = find_row(s, GMAIL_TOP_MSG);
         ASSERT(row >= 0 && strcmp(pty_cell_text(s, row, 1), " ") == 0,
                "old: no pending mark after an old letter");
-        ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Archived") &&
-               !pty_row_contains(s, FEEDBACK_ROW, "Moved") &&
-               !pty_row_contains(s, FEEDBACK_ROW, "Marked") &&
-               !pty_row_contains(s, FEEDBACK_ROW, "tarred") &&
-               !pty_row_contains(s, FEEDBACK_ROW, "Restored"),
+        ASSERT(!feedback_has(s, "Archived") &&
+               !feedback_has(s, "Moved") &&
+               !feedback_has(s, "Marked") &&
+               !feedback_has(s, "tarred") &&
+               !feedback_has(s, "Restored"),
                "old: no feedback after an old letter");
     }
     pty_send_key(s, PTY_KEY_ESC);
@@ -2618,7 +2624,7 @@ static void test_menu_keys_gmail_list(void) {
         pty_send_key(s, no[i]);
         pty_settle(s, SETTLE_MS);
         ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
-        ASSERT(!pty_row_contains(s, FEEDBACK_ROW, "Moved to Trash"), "menu keys gmail list: nothing moved");
+        ASSERT(!feedback_has(s, "Moved to Trash"), "menu keys gmail list: nothing moved");
     }
     gm_menu_letter(s, sync);
     ASSERT_WAIT_FOR(s, "Start a background sync", WAIT_MS);

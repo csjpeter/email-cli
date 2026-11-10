@@ -470,6 +470,12 @@ static const PtyStyleKey LEGEND[] = {
      * drop-down (bold cyan); the same on the selected row (EMAIL-110). */
     { 'T', PTY_ATTR_BOLD,                    PTY_FG_CYAN,    PTY_BG_DEFAULT },
     { 'Q', PTY_ATTR_BOLD,                    96,             PTY_COLOR_IDX(17) },
+    /* The notice area of EMAIL-285: bold bright letters, on the header band
+     * (N green, F red) or, below the header, on the terminal's background. */
+    { 'N', PTY_ATTR_BOLD,                    92,             PTY_BG_BLUE    },
+    { 'F', PTY_ATTR_BOLD,                    91,             PTY_BG_BLUE    },
+    { 'o', PTY_ATTR_BOLD,                    92,             PTY_BG_DEFAULT },
+    { 'O', PTY_ATTR_BOLD,                    91,             PTY_BG_DEFAULT },
     { 0 }
 };
 
@@ -588,6 +594,9 @@ static void check_view(PtySession *s, const char *const exp[],
                  * compared (and the style of its row is not). */
                 char row[MAXCOLS * 4 + 4];
                 pty_row_text(s, t + offset, row, sizeof(row));
+                if (!match_prefix(row, exp[t] + 1))
+                    fprintf(stderr, "    row %d\n    - %s...\n    + %s\n", t + offset,
+                            exp[t] + 1, row);
                 ASSERT(match_prefix(row, exp[t] + 1),
                        "row with a variable path starts as in its picture");
                 t++;

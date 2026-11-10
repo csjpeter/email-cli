@@ -41,6 +41,8 @@ Working through the approved tickets of this project by itself is the
 ./manage.sh memcheck   # the same suites with every program under Valgrind (logs in build/valgrind)
 ./manage.sh coverage   # GCOV/LCOV coverage: unit scope and external scope (functional+pty+integration);
                        # raw data in build/coverage/{unit,external}
+./manage.sh check      # QA 1 (the developer's gate): unit, functional, pty, integration, package checks; skips the suites when only non-code paths changed
+./manage.sh check-deep # QA 2 (a checker agent, not a ticket): valgrind, sanitize, coverage; results in build/result/
 ./manage.sh clean      # Remove build artifacts
 ./manage.sh integration # Integration test against a per-agent Dovecot process (no container)
 ./manage.sh deps       # Install system dependencies (Ubuntu 24.04 / Rocky 9); includes test-base

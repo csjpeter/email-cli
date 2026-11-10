@@ -268,8 +268,9 @@ static void write_cache(const char *path, const unsigned char *d, size_t len)
     if (fs_mkdir_p(state_dir(), 0700) != 0) return;
     FILE *f = fopen(path, "wb");
     if (!f) return;
-    if (fwrite(d, 1, len, f) != len)
-        logger_log(LOG_WARN, "CRL cache write failed: %s", path);
+    if (fwrite(d, 1, len, f) != len) {
+        /* a short cache file is refetched next time */
+    }
     fclose(f);
 }
 
@@ -418,7 +419,7 @@ static void signal_unknown(X509 *cert, const char *why)
     if (signalled_recently(fp)) return;
     char subj[200] = "?";
     X509_NAME_oneline(X509_get_subject_name(cert), subj, sizeof(subj));
-    logger_log(LOG_ERROR,
+    logger_error(
                "revocation of the certificate %s could not be checked (%s); "
                "the connection goes on", subj, why);
     snprintf(g_notice, sizeof(g_notice),
@@ -439,7 +440,7 @@ int tls_revocation_verify_cb(int preverify_ok, X509_STORE_CTX *sctx)
     if (st == TLS_REV_REVOKED) {
         char subj[200] = "?";
         X509_NAME_oneline(X509_get_subject_name(cert), subj, sizeof(subj));
-        logger_log(LOG_ERROR, "server certificate %s is revoked (%s): refused",
+        logger_error("server certificate %s is revoked (%s): refused",
                    subj, why);
         X509_STORE_CTX_set_error(sctx, X509_V_ERR_CERT_REVOKED);
         return 0;

@@ -75,7 +75,7 @@ static void help_general(void) {
         "\n"
         "Help:\n"
         "  help [command]             Show this help, or detailed help for a command\n"
-        "  --debug                    Write a session trace (also: EMAIL_CLI_DEBUG=1)\n"
+        "  --debug                    Write a protocol traffic log\n"
         "  --help, -h                 Show this help (also: <command> --help)\n"
         "  --version                  Print the version\n"
         "\n"
@@ -340,7 +340,7 @@ static void unknown_option(const char *cmd, const char *opt) {
 #endif
 
 int main(int argc, char *argv[]) {
-    /* --debug / EMAIL_CLI_DEBUG: the trace is written only on request (EMAIL-240). */
+    /* --debug: the traffic log is written only on request (EMAIL-284). */
     int debug_trace = logger_debug_requested(&argc, argv);
     setlocale(LC_ALL, "");
 
@@ -466,13 +466,12 @@ int main(int argc, char *argv[]) {
     if (debug_trace) {
         if (fs_mkdir_p(log_dir, 0700) != 0)
             fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
-        if (logger_init(log_file, LOG_DEBUG) != 0)
+        if (logger_init(log_file) != 0)
             fprintf(stderr, "Warning: Logging system failed to initialize.\n");
         emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
     } else {
         logger_stderr_only();        /* no file: errors still reach the user */
     }
-    logger_log(LOG_INFO, "--- email-cli-ro starting (cmd: %s) ---", cmd);
 
     /* --all-accounts iterates over every configured account, so the usual
      * "which account?" resolution below must be skipped for it. */
@@ -782,7 +781,6 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Error: '%s' is not available in read-only mode (email-cli-ro).\n", cmd);
                 fprintf(stderr, "Use 'email-cli' for write operations.\n");
                 config_free(cfg);
-                logger_log(LOG_INFO, "--- email-cli-ro session finished ---");
                 logger_close();
                 return EXIT_FAILURE;
             }
@@ -795,7 +793,6 @@ int main(int argc, char *argv[]) {
 
     /* 7. Cleanup */
     config_free(cfg);
-    logger_log(LOG_INFO, "--- email-cli-ro session finished ---");
     logger_close();
 
     if (result >= 0)

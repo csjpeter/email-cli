@@ -5,6 +5,8 @@
 #include "test_helpers.h"
 #include "gmail_client.h"
 #include "config.h"
+#include "logger.h"
+#include "fs_util.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -452,6 +454,42 @@ static void test_list_labels(void) {
     free(ids);
     gmail_disconnect(c);
     wait_child(pid);
+}
+
+/* EMAIL-284: with the traffic log open, a Gmail REST call leaves the request
+ * and the response status line in it, and the bearer token is not there. */
+static void test_traffic_log_masks_bearer(void) {
+    const char *dir = TP("email-cli-gmail-traffic");
+    const char *lf = TP("email-cli-gmail-traffic/t.log");
+    fs_mkdir_p(dir, 0700);
+    unlink(lf);
+    ASSERT(logger_init(lf) == 0, "traffic: log opens");
+
+    int port = 0;
+    pid_t pid = start_mock_server(&port, 1);
+    if (pid < 0) { ASSERT(0, "traffic: could not start mock server"); logger_close(); return; }
+    usleep(20000);
+    GmailClient *c = make_test_client(port);
+    ASSERT(c != NULL, "traffic: client connected");
+    char **names = NULL, **ids = NULL;
+    int count = 0;
+    ASSERT(gmail_list_labels(c, &names, &ids, &count) == 0, "traffic: list_labels works");
+    for (int i = 0; i < count; i++) { free(names[i]); free(ids[i]); }
+    free(names);
+    free(ids);
+    gmail_disconnect(c);
+    wait_child(pid);
+    logger_close();
+
+    char text[16384] = "";
+    FILE *f = fopen(lf, "r");
+    if (f) { size_t n = fread(text, 1, sizeof(text) - 1, f); text[n] = '\0'; fclose(f); }
+    ASSERT(strstr(text, "HTTP [OUT] GET ") != NULL, "traffic: the request line is logged");
+    ASSERT(strstr(text, "HTTP [ IN] HTTP/1.") != NULL, "traffic: the status line is logged");
+    ASSERT(strstr(text, "Authorization: Bearer xxxxx") != NULL, "traffic: the header is logged, masked");
+    ASSERT(strstr(text, "test_access_token_12345") == NULL, "traffic: the bearer token is not in the file");
+    unlink(lf);
+    rmdir(dir);
 }
 
 static void test_list_messages(void) {
@@ -1513,6 +1551,7 @@ void test_gmail_client(void) {
     RUN_TEST(test_connect_with_test_token);
     RUN_TEST(test_set_progress);
     RUN_TEST(test_list_labels);
+    RUN_TEST(test_traffic_log_masks_bearer);
     RUN_TEST(test_list_messages);
     RUN_TEST(test_list_messages_with_query);
     RUN_TEST(test_list_messages_with_history_id);

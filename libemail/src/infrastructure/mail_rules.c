@@ -150,8 +150,6 @@ MailRules *mail_rules_load_path(const char *path) {
     if (!fp) return NULL;   /* no rules file — not an error */
 
     MailRules *r = rules_parse_fp(fp);
-    if (r)
-        logger_log(LOG_INFO, "mail_rules_load: loaded %d rule(s) from %s", r->count, path);
     return r;
 }
 

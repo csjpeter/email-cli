@@ -33,7 +33,7 @@ recorded weakness, not coverage of the promise.
 | `email-cli --help` | F:1.1 | |
 | `email-cli --version` | F:74.1 | |
 | `email-cli -q` | F:140.10 F:140.24 F:140.31 F:140.37 | answers the confirmation of a revert or an irreversible operation Yes |
-| `email-cli --debug` | F:160.2 F:160.3 F:160.5 F:160.6 F:160.8 | default off F:160.1, F:160.7; unit test `test_logger_debug_requested` |
+| `email-cli --debug` | F:160.2 F:160.3 F:160.4 F:160.4b F:160.8 F:160.14 | default off F:160.1 F:160.1b; env var gone F:160.5 F:160.6 F:160.9; password masked F:1.22b; unit tests `test_logger_debug_requested`, `test_logger_masks_credentials`, `test_logger_no_file_without_init` |
 | `email-cli --columns` | F:150.1 F:150.5 F:150.20 F:150.27 F:150.40 | with `--sort`: F:150.7 F:150.8 F:150.21 F:150.23; unknown name F:150.12; unit tests `tests/unit/test_cli_table.c` |
 | `email-cli history` | F:140.3 F:140.5 F:140.25 F:150.47 | the history of one object and the recent changes; PTY page P:test_hist_cli_history_page |
 | `email-cli revert` | F:140.7 F:140.10 F:140.15 F:140.17 | confirms (default No); refuses an overtaken, a reverted and an irreversible step; PTY page P:test_hist_cli_revert_page |

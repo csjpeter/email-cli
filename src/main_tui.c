@@ -74,7 +74,7 @@ static void help(void) {
         "    ESC/q     Quit\n"
         "\n"
         "Options:\n"
-        "  --debug      Write a session trace (also: EMAIL_CLI_DEBUG=1)\n"
+        "  --debug      Write a protocol traffic log\n"
         "  --help, -h   Show this help message\n"
         "\n"
         "For batch/scriptable operations use email-cli.\n"
@@ -2659,7 +2659,7 @@ static void on_sigterm(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-    /* --debug / EMAIL_CLI_DEBUG: the trace is written only on request (EMAIL-240). */
+    /* --debug: the traffic log is written only on request (EMAIL-284). */
     int debug_trace = logger_debug_requested(&argc, argv);
     /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
@@ -2757,22 +2757,20 @@ int main(int argc, char *argv[]) {
     if (debug_trace) {
         if (fs_mkdir_p(log_dir, 0700) != 0)
             fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
-        if (logger_init(log_file, LOG_DEBUG) != 0)
+        if (logger_init(log_file) != 0)
             fprintf(stderr, "Warning: Logging system failed to initialize.\n");
         emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
     } else {
         logger_stderr_only();        /* no file: errors still reach the user */
     }
-    logger_log(LOG_INFO, "--- email-tui starting ---");
 
     /* 3. Load configuration */
     Config *cfg = config_load_from_store();
     if (!cfg) {
-        logger_log(LOG_INFO, "No configuration found. Starting setup wizard.");
         cfg = setup_wizard_run();
         if (cfg) {
             if (config_save_to_store(cfg) != 0) {
-                logger_log(LOG_ERROR, "Failed to save configuration: %s", config_last_error());
+                logger_error("Failed to save configuration: %s", config_last_error());
                 fprintf(stderr, "Error: Failed to save configuration to disk: %s\n",
                         config_last_error()[0] ? config_last_error() : "unknown cause");
             } else {
@@ -2782,7 +2780,7 @@ int main(int argc, char *argv[]) {
                 email_service_check_credential(cfg);
             }
         } else {
-            logger_log(LOG_ERROR, "Configuration aborted by user.");
+            logger_error("Configuration aborted by user.");
             fprintf(stderr, "Configuration aborted. Exiting.\n");
             logger_close();
             return EXIT_FAILURE;
@@ -2874,7 +2872,6 @@ int main(int argc, char *argv[]) {
         }
 
         config_free(cfg);
-        logger_log(LOG_INFO, "--- email-tui subcommand finished ---");
         logger_close();
         return rc;
     }
@@ -2964,9 +2961,6 @@ int main(int argc, char *argv[]) {
             /* acc == 1: Enter → open account */
         }
 
-        logger_log(LOG_INFO, "Switching to account: user=%s host=%s",
-                   sel_cfg->user ? sel_cfg->user : "(null)",
-                   sel_cfg->host ? sel_cfg->host : "(null)");
         local_store_init(sel_cfg->host, sel_cfg->user);
 
         /* Remember this as the last-used account for next startup */
@@ -3143,7 +3137,6 @@ int main(int argc, char *argv[]) {
 
     /* 6. Cleanup */
     config_free(cfg);
-    logger_log(LOG_INFO, "--- email-tui session finished ---");
     logger_close();
 
     return result >= 0 ? EXIT_SUCCESS : EXIT_FAILURE;

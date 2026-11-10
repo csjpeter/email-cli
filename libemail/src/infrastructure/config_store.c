@@ -411,7 +411,6 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
                 "Warning: Could not decrypt stored password for '%s'.\n"
                 "  The system key may have changed. Re-enter the password with:\n"
                 "    email-cli config password\n", email);
-            if (!g_lc_quiet) logger_log(LOG_WARN, "credential decrypt failed for %s", email);
             cfg->pass = NULL;
             g_lc_reason = CFG_LOAD_UNDECRYPTABLE;
         }
@@ -433,7 +432,6 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
             if (!g_lc_quiet) fprintf(stderr,
                 "Warning: Could not decrypt stored refresh token for '%s'.\n"
                 "  Re-run the Gmail OAuth2 setup: email-cli add-account\n", email);
-            if (!g_lc_quiet) logger_log(LOG_WARN, "refresh token decrypt failed for %s", email);
             cfg->gmail_refresh_token = NULL;
             g_lc_reason = CFG_LOAD_UNDECRYPTABLE;
         }
@@ -454,9 +452,6 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
             if (!g_lc_quiet) fprintf(stderr,
                 "Error: EMAIL_HOST must start with imaps:// (TLS required).\n"
                 "  Got: %s\n", cfg->host);
-            if (!g_lc_quiet) logger_log(LOG_ERROR,
-                       "Rejected insecure EMAIL_HOST in account config: %s",
-                       cfg->host);
             g_lc_reason = CFG_LOAD_UNREADABLE;
             config_free(cfg);
             return NULL;
@@ -466,23 +461,10 @@ static Config *load_config_from_path(const char *path, int *out_needs_resave) {
             if (!g_lc_quiet) fprintf(stderr,
                 "Error: SMTP_HOST must start with smtps:// (TLS required).\n"
                 "  Got: %s\n", cfg->smtp_host);
-            if (!g_lc_quiet) logger_log(LOG_ERROR,
-                       "Rejected insecure SMTP_HOST in account config: %s",
-                       cfg->smtp_host);
             g_lc_reason = CFG_LOAD_UNREADABLE;
             config_free(cfg);
             return NULL;
         }
-    } else if (cfg->host) {
-        if (strncmp(cfg->host, "imaps://", 8) != 0)
-            if (!g_lc_quiet) logger_log(LOG_WARN,
-                       "SSL_NO_VERIFY=1: connecting without TLS to %s "
-                       "(test/dev mode only)", cfg->host);
-        if (cfg->smtp_host && cfg->smtp_host[0] &&
-            strncmp(cfg->smtp_host, "smtps://", 8) != 0)
-            if (!g_lc_quiet) logger_log(LOG_WARN,
-                       "SSL_NO_VERIFY=1: SMTP without TLS to %s "
-                       "(test/dev mode only)", cfg->smtp_host);
     }
     if (out_needs_resave)
         *out_needs_resave = (plaintext_cred_found &&  g_credential_obfuscation)  /* plaintext → encrypt */
@@ -726,7 +708,6 @@ int config_save_account(const Config *cfg) {
 
     record_account_diff(before, cfg);
     config_free(before);
-    logger_log(LOG_INFO, "Account saved: %s", cfg->user);
     return 0;
 }
 
@@ -750,7 +731,6 @@ int config_delete_account(const char *name) {
     snprintf(dir, sizeof(dir), "%s/%s", accounts_dir, name);
     if (rmdir(dir) != 0 && errno != ENOENT) {
         cfg_error("cannot remove directory", dir);
-        logger_log(LOG_WARN, "%s", g_cfg_error);
         config_free(before);
         return -1;
     }
@@ -766,7 +746,6 @@ int config_delete_account(const char *name) {
         op_history_record(&rec);
     }
     config_free(before);
-    logger_log(LOG_INFO, "Account deleted: %s", name);
     return 0;
 }
 
@@ -797,7 +776,6 @@ AccountEntry *config_list_accounts(int *count_out) {
         Config *cfg = load_config_from_path(path, &needs_resave);
         if (!cfg) continue;
         if (needs_resave) {
-            logger_log(LOG_INFO, "Re-encrypting plaintext credentials for %s", ent->d_name);
             RAII_FILE FILE *wfp = fopen(path, "w");
             if (wfp) {
                 write_config_to_fp(wfp, cfg);

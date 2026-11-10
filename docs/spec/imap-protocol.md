@@ -145,7 +145,9 @@ ways:
 
 ## Debug logging
 
-All IMAP traffic is forwarded to the logger at `LOG_DEBUG` level.
-Sent commands and received responses are logged as `[OUT]` / `[ IN]` lines.
+Only with `--debug` on the command line, IMAP traffic is written to the traffic
+log (`logger_traffic`).  Sent commands and received responses are logged as
+`[OUT]` / `[ IN]` lines; the `LOGIN` password and any `AUTHENTICATE` data are
+masked (`xxxxx`).
 
 Log destination: `~/.cache/email-cli/logs/session.log`.

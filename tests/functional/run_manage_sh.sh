@@ -32,11 +32,12 @@ echo "$out" | grep -q "Build complete"         && bad "1.3 claims 'Build complet
 # 2. check: every gate is named, a failing gate is FAIL, the verb exits 1.
 out=$(cd "$WORK/tree" && PATH="$WORK/stubs:$PATH" ./manage.sh check 2>&1); rc=$?
 [ "$rc" -ne 0 ]                              && ok "2.1 check exits non-zero when gates fail"  || bad "2.1 check exited 0"
-for g in test functional pty valgrind; do
+for g in test functional pty integration; do
     echo "$out" | grep -Eq "^  $g +FAIL$"    && ok "2.2 summary shows $g FAIL"               || bad "2.2 no '$g FAIL' line"
 done
-echo "$out" | grep -Eq "^  (test|functional|pty|valgrind) +PASS$" && bad "2.3 a failing gate is shown as PASS" || ok "2.3 no failing gate shown as PASS"
+echo "$out" | grep -Eq "^  (test|functional|pty|integration) +PASS$" && bad "2.3 a failing gate is shown as PASS" || ok "2.3 no failing gate shown as PASS"
 echo "$out" | grep -Eq "^  headers +(PASS|FAIL)$" && ok "2.4 summary names the headers gate"   || bad "2.4 no headers gate in the summary"
+echo "$out" | grep -Eq "check: (valgrind|sanitize|coverage)" && bad "2.5 check starts a QA 2 gate" || ok "2.5 check never starts valgrind, sanitize or coverage"
 
 # 3. the script itself suppresses nothing.
 SUPPRESS=$(grep -c -E '2>/dev/null|\|\| true|set \+e' "$ROOT/manage.sh")
@@ -78,10 +79,47 @@ grep -q 'coverage-summary.txt' "$ROOT/manage.sh" && ok "5.3 the coverage run rec
 # project with no test base says so and exits 0.
 out=$("$ROOT/manage.sh" test-base 2>&1); rc=$?
 [ "$rc" -eq 0 ] && echo "$out" | grep -q "no test base" && ok "6.1 test-base says there is no base and exits 0" || bad "6.1 rc=$rc: $out"
+
 out2=$("$ROOT/manage.sh" test-base 2>&1); rc=$?
 [ "$rc" -eq 0 ] && [ "$out" = "$out2" ] && ok "6.2 test-base is idempotent" || bad "6.2 rc=$rc: $out2"
 "$ROOT/manage.sh" help | grep -q '^  test-base ' && ok "6.3 help lists test-base" || bad "6.3 help does not list test-base"
 awk '/^    deps\)/,/;;/' "$ROOT/manage.sh" | grep -q 'test_base' && ok "6.4 deps includes test-base" || bad "6.4 deps does not call test_base"
+
+# 7. QA levels (EMAIL-286): check is QA 1 and skips its suites when only
+# non-code paths changed; check-deep is QA 2.  A scratch git repository, a stub
+# cmake that builds nothing: the gates fail, their names are what is read.
+G7="$WORK/qa"
+mkdir -p "$G7/docs" "$G7/tests/unit" "$WORK/stubs7" || exit 1
+cp "$ROOT/manage.sh" "$G7/manage.sh" || exit 1
+printf '#!/bin/sh\nexit 0\n' > "$WORK/stubs7/cmake"; chmod 755 "$WORK/stubs7/cmake"
+printf 'doc\n' > "$G7/docs/a.txt"; printf 'int x;\n' > "$G7/tests/unit/t.c"
+( cd "$G7" && git init -q . && git add . \
+    && git -c user.name=t -c user.email=t@example.org commit -q -m base ) || { bad "7.0 scratch repository"; exit 1; }
+BASE7=$(git -C "$G7" rev-parse HEAD)
+qa() {  # qa <verb>: output in $out
+    out=$(cd "$G7" && MANAGE_CHECK_BASE="$BASE7" WORKSPACE_LIBS=system PATH="$WORK/stubs7:$PATH" ./manage.sh "$@" 2>&1)
+}
+printf 'more\n' >> "$G7/docs/a.txt"; printf '# note\n' > "$G7/README.md"
+qa check
+echo "$out" | grep -q "^no code changed: suites skipped: test functional pty integration$" \
+    && ok "7.1 a docs-only diff says which suites are skipped" || bad "7.1 no skip line in: $out"
+echo "$out" | grep -Eq "^=== check: (test|functional|pty|integration) ===$" \
+    && bad "7.2 a docs-only diff ran a suite" || ok "7.2 a docs-only diff runs no suite"
+echo "$out" | grep -q "^=== check: headers ===$" && ok "7.3 the cheap gates still run" || bad "7.3 no headers gate"
+printf 'int y;\n' >> "$G7/tests/unit/t.c"
+qa check
+echo "$out" | grep -q "no code changed" && bad "7.4 a test-file change was skipped" || ok "7.4 a test-file change is not skipped"
+for g in test functional pty integration; do
+    echo "$out" | grep -q "^=== check: $g ===$" && ok "7.5 $g runs on a code change" || bad "7.5 $g did not run"
+done
+echo "$out" | grep -q "Running unit tests with Valgrind" && bad "7.6 check started valgrind" || ok "7.6 check never starts valgrind"
+qa check-deep
+for g in valgrind sanitize coverage; do
+    echo "$out" | grep -q "^=== check-deep: $g ===$" && ok "7.7 check-deep runs $g" || bad "7.7 check-deep did not run $g"
+done
+echo "$out" | grep -q "Running unit tests with Valgrind" && ok "7.8 check-deep starts valgrind" || bad "7.8 valgrind not started: $out"
+[ -f "$G7/build/result/check-deep.result" ] && ok "7.9 check-deep keeps its result in build/result/" || bad "7.9 no check-deep.result"
+"$ROOT/manage.sh" help | grep -q '^  check-deep ' && ok "7.10 help lists check-deep" || bad "7.10 help lacks check-deep"
 
 case "$WORK" in
     "$ROOT"/build/manage-sh-test-*) ;;

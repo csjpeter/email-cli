@@ -17,6 +17,11 @@ BIN_PATH="$BIN_DIR/$PROJECT_NAME"
 INSTALL_DIR="${HOME}/.local/bin"
 INSTALL_BINS="email-cli email-cli-ro email-sync email-tui email-import-rules"
 
+# QA 1 (check) skips its suites when every path changed against the mainline
+# matches one of these shell patterns (policies/testing-model.md, "QA levels").
+# A test file, a script and a packaging file are code and are not listed.
+NON_CODE_PATHS="*.md docs/* man/* LICENSE* .gitignore"
+
 show_help() {
     echo "Usage: ./manage.sh [command]"
     echo ""
@@ -43,7 +48,10 @@ show_help() {
     echo "  headers [DIR]  Fail on a source file or script without the source header"
     echo "  names [DIR]    Fail when a tracked file names the owner's private domain"
     echo "  declared       Fail when a declared test is not built or a built test is not declared"
-    echo "  check          Run every gate (headers, names, declared, test, functional, pty, valgrind) and summarise"
+    echo "  check          QA 1: headers, names, declared, test, functional, pty, integration; summary."
+    echo "                 Only non-code paths changed against the mainline: cheap gates only, says so."
+    echo "                 Never runs valgrind, sanitizers or coverage"
+    echo "  check-deep     QA 2: valgrind, sanitize and coverage one after the other; results in build/result/"
     echo "  coverage       Run the unit scope and the external scope (functional + pty +"
     echo "                 integration), report line coverage, keep the raw data in"
     echo "                 build/coverage/unit and build/coverage/external"
@@ -626,7 +634,7 @@ run_integration_suites() {
 # overrides the log path (the tests keep theirs under build/).
 TIMING_LOG="${MANAGE_TIMING_LOG:-$BUILD_DIR/timing.log}"
 case "$1" in
-    build|debug|test|coverage|valgrind|functional|pty|integration|headers|names|declared|check|package|install)
+    build|debug|test|coverage|valgrind|functional|pty|integration|headers|names|declared|check|check-deep|package|install)
         if [ -z "${MANAGE_TIMED:-}" ]; then
             timed_start=$(date +%s)
             timed_rc=0
@@ -642,6 +650,62 @@ case "$1" in
         fi
         ;;
 esac
+
+# The paths changed against the mainline (committed, uncommitted and new), one
+# per line.  MANAGE_CHECK_BASE names the commit to compare with (the tests set
+# it); otherwise the merge base with origin/main, else main.  Fails when there
+# is no base, so the caller runs everything.
+changed_paths() {
+    local base="${MANAGE_CHECK_BASE:-}"
+    if [ -z "$base" ]; then
+        base=$(git merge-base HEAD origin/main) || base=$(git merge-base HEAD main) || return 1
+    fi
+    git diff --name-only "$base" || return 1
+    git ls-files --others --exclude-standard || return 1
+}
+
+# non_code_only: succeeds when there is at least one changed path and each
+# matches a pattern of NON_CODE_PATHS.  Any doubt (no base, no change) fails,
+# so the whole of QA 1 runs: a wrong skip costs more than a run.
+non_code_only() {
+    local paths path pat code
+    paths=$(changed_paths) || return 1
+    [ -n "$paths" ] || return 1
+    while IFS= read -r path; do
+        code=1
+        for pat in $NON_CODE_PATHS; do
+            # shellcheck disable=SC2254
+            case "$path" in $pat) code=0; break ;; esac
+        done
+        [ "$code" -eq 0 ] || return 1
+    done <<< "$paths"
+    return 0
+}
+
+# run_gates VERB GATE...: each gate in its own run, one summary.
+run_gates() {
+    local verb="$1" gate rc=0 summary=""
+    shift
+    for gate in "$@"; do
+        echo "=== $verb: $gate ==="
+        # MANAGE_TIMED is cleared so every gate logs its own time.
+        if MANAGE_TIMED= "$0" "$gate"; then
+            summary="${summary}  $(printf '%-12s' "$gate") PASS"$'\n'
+        else
+            summary="${summary}  $(printf '%-12s' "$gate") FAIL"$'\n'
+            rc=1
+        fi
+    done
+    echo ""
+    echo "=== $verb: summary ==="
+    printf '%s' "$summary"
+    if [ "$rc" -ne 0 ]; then
+        echo "$verb FAILED" >&2
+    else
+        echo "$verb passed"
+    fi
+    return $rc
+}
 
 # Prints the gate line from the latest run of each of check, package and install
 # in the log.  A part that never ran through this script is left out; with none
@@ -934,29 +998,24 @@ case "$1" in
         check_declared_tests "${2:-tests/CMakeLists.txt}" "${3:-$BUILD_DIR/tests}"
         ;;
     check)
-        # Every gate, each in its own run, one summary to compare with CI.
-        # Coverage joins when it has a threshold that fails (EMAIL-15).
-        check_rc=0
-        check_summary=""
-        for gate in headers names declared test functional pty valgrind; do
-            echo "=== check: $gate ==="
-            # MANAGE_TIMED is cleared so every gate logs its own time.
-            if MANAGE_TIMED= "$0" "$gate"; then
-                check_summary="${check_summary}  $(printf '%-12s' "$gate") PASS"$'\n'
-            else
-                check_summary="${check_summary}  $(printf '%-12s' "$gate") FAIL"$'\n'
-                check_rc=1
-            fi
-        done
-        echo ""
-        echo "=== check: summary ==="
-        printf '%s' "$check_summary"
-        if [ "$check_rc" -ne 0 ]; then
-            echo "check FAILED" >&2
+        # QA 1 (policies/testing-model.md): no valgrind, sanitizer or coverage.
+        if non_code_only; then
+            echo "no code changed: suites skipped: test functional pty integration"
+            run_gates check headers names declared || exit 1
         else
-            echo "check passed"
+            run_gates check headers names declared test functional pty integration || exit 1
         fi
-        exit $check_rc
+        ;;
+    check-deep)
+        # QA 2: the slow checks, one after the other; each keeps its result in
+        # build/result/ (sanitize writes none of its own: its logs are in build/sanitize/).
+        result_begin check-deep
+        for gate in valgrind sanitize coverage; do
+            echo "=== check-deep: $gate ==="
+            run_suite "$gate" . env MANAGE_TIMED= "$0" "$gate" || deep_rc=1
+        done
+        [ "${deep_rc:-0}" -eq 0 ] || { echo "check-deep FAILED" >&2; exit 1; }
+        echo "check-deep passed"
         ;;
     install)
         do_install

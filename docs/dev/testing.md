@@ -9,7 +9,17 @@
 ./manage.sh memcheck # The same suites with every program under Valgrind
 ./manage.sh coverage    # Unit scope and external scope (functional + pty + integration)
 ./manage.sh integration # Against a per-agent Dovecot process (no container)
+./manage.sh check       # QA 1: headers, names, declared, test, functional, pty, integration
+./manage.sh check-deep  # QA 2: valgrind, sanitize, coverage; results in build/result/
 ```
+
+`check` is QA 1 and is the developer's gate; it never runs valgrind, a sanitizer
+or the coverage measurement.  When every path changed against the mainline
+matches `NON_CODE_PATHS` (top of `manage.sh`: `*.md`, `docs/*`, `man/*`,
+`LICENSE*`, `.gitignore`), it runs only `headers`, `names` and `declared` and
+prints `no code changed: suites skipped: LIST`; any other path, a test file
+included, runs all of QA 1.  `check-deep` is QA 2, run by a checker agent when
+the queue is empty (policies/testing-model.md, "QA levels").
 
 ### Running one test
 
@@ -185,7 +195,7 @@ under `build/`.
 
 `./manage.sh timing [KEY-N]` and the timing log (EMAIL-76): every verb that does
 work (`build`, `debug`, `test`, `coverage`, `valgrind`, `functional`, `pty`,
-`integration`, `headers`, `names`, `check`, `package`,
+`integration`, `headers`, `names`, `check`, `check-deep`, `package`,
 `install`) appends `<UTC time> <verb> <s>s <ok|fail> <commit>` to `build/timing.log`
 (`<commit>` is the short HEAD id, `+` after it when the tree was dirty),
 success or failure. `timing` prints `Gate: <total>s (check .., package ..,
@@ -255,7 +265,7 @@ written, by the installed version.
 
 ## Sanitizer and Valgrind runs of the whole test set (EMAIL-224)
 
-`./manage.sh check` runs the unit tests under AddressSanitizer and Valgrind.
+`./manage.sh check-deep` (QA 2) runs the unit tests under Valgrind, the sanitizer run and the coverage measurement.
 The functional and PTY suites start `email-cli`, `email-tui` and `email-sync` as
 programs of their own, so a leak, overflow or use-after-free in them needs the
 programs themselves instrumented.  Two verbs repeat that run; both need no

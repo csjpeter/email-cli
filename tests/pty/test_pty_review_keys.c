@@ -289,7 +289,7 @@ static void test_ed_ctrl_s_note(void) {
     pty_send_str(s, "one");
     pty_send_str(s, CTRL_S);
     ASSERT_WAIT_FOR(s, "saved", WAIT_MS);
-    ASSERT_ROW_CONTAINS(s, ROWS - 1, "saved");
+    ASSERT(pty_row_contains(s, 0, "saved") && pty_row_contains(s, ROWS - 1, "Ctrl-S save"), "ed ctrl-s: the note is in the header, the hints stay");
     ASSERT(draft_has("one"), "ed ctrl-s: written");
     pty_send_str(s, "x");                       /* the note goes with the next redraw */
     pty_settle(s, SETTLE_MS);

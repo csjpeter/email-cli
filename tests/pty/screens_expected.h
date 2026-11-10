@@ -309,7 +309,7 @@ static const char *const exp_accounts_help[] = {
     "         │ d            Delete selected account                                          │",
     "         │ i            Edit IMAP for account                                            │",
     "         │ e            Edit SMTP for account                                            │",
-    "         │ Esc          Quit (Backspace does nothing here)                               │",
+    "         │ Esc / q      Quit (Backspace does nothing here)                               │",
     "         │ ?            Show this help                                                   │",
     "         └───────────────────────────────────────────────────────────────────────────────┘",
     NULL
@@ -331,7 +331,7 @@ static const char *const sty_accounts_help[] = {
     "         T b                                                                             T          ",
     "         T b                                                                             T          ",
     "         T b                                                                             T          ",
-    "         T bbb                                                                           T          ",
+    "         T bbbbbbb                                                                       T          ",
     "         T b                                                                             T          ",
     "         TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT          ",
     "                                                                                                    ",
@@ -622,7 +622,7 @@ static const char *const sty_wizard_type[] = {
 static const int cur_wizard_type[3] = { 23, 12, 1 };
 
 static const char *const exp_account_delete[] = {
-    "  Email Accounts (0)",
+    "%  Email Accounts (0)",
     "",
     "No accounts configured.",
     "",
@@ -645,7 +645,7 @@ static const char *const exp_account_delete[] = {
     "",
     "",
     "",
-    "%   Account removed. Local messages preserved: ",
+    "% j/k select  Enter open  n add  d delete  i IMAP  e SMTP",
     NULL
 };
 static const char *const sty_account_delete[] = {
@@ -2481,7 +2481,7 @@ static const char *const sty_gmail_inbox_second[] = {
 static const int cur_gmail_inbox_second[3] = { 23, 99, 0 };
 
 static const char *const exp_gmail_inbox_d[] = {
-    "  1-5 of 5 message(s) in INBOX (5 unread) [screens@example.org].",
+    "  1-5 of 5 message(s) in INBOX (5 unread) [screens@example.org].                Label removed: INBOX",
     "",
     "  Date             Sts    Subject                                   From",
     "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
@@ -2504,11 +2504,11 @@ static const char *const exp_gmail_inbox_d[] = {
     "",
     "",
     "",
-    " Label removed: INBOX                                                                         [1/5]",
+    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_d[] = {
-    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHNNNNNNNNNNNNNNNNNNNN",
     "                                                                                                    ",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
@@ -2537,7 +2537,7 @@ static const char *const sty_gmail_inbox_d[] = {
 static const int cur_gmail_inbox_d[3] = { 23, 99, 0 };
 
 static const char *const exp_gmail_inbox_trash_mark[] = {
-    "  1-5 of 5 message(s) in INBOX (5 unread) [screens@example.org].",
+    "  1-5 of 5 message(s) in INBOX (5 unread) [screens@example.org].                      Moved to Trash",
     "",
     "  Date             Sts    Subject                                   From",
     "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
@@ -2560,11 +2560,11 @@ static const char *const exp_gmail_inbox_trash_mark[] = {
     "",
     "",
     "",
-    " Moved to Trash                                                                               [1/5]",
+    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_trash_mark[] = {
-    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHNNNNNNNNNNNNNN",
     "                                                                                                    ",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
@@ -2593,7 +2593,7 @@ static const char *const sty_gmail_inbox_trash_mark[] = {
 static const int cur_gmail_inbox_trash_mark[3] = { 23, 99, 0 };
 
 static const char *const exp_gmail_inbox_archive_mark[] = {
-    "  1-5 of 5 message(s) in INBOX (5 unread) [screens@example.org].",
+    "  1-5 of 5 message(s) in INBOX (5 unread) [screens@example.org].                            Archived",
     "",
     "  Date             Sts    Subject                                   From",
     "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
@@ -2616,11 +2616,11 @@ static const char *const exp_gmail_inbox_archive_mark[] = {
     "",
     "",
     "",
-    " Archived                                                                                     [1/5]",
+    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_archive_mark[] = {
-    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHNNNNNNNN",
     "                                                                                                    ",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
@@ -3576,7 +3576,7 @@ static const char *const sty_list_delete_ask[] = {
 static const int cur_list_delete_ask[3] = { 13, 81, 0 };
 
 static const char *const exp_list_bulk_done[] = {
-    "  1-3 of 3 message(s) in INBOX (3 unread) [testuser].",
+    "  1-3 of 3 message(s) in INBOX (3 unread) [testuser].                                        Starred",
     "",
     "  Date             Sts    Subject                                   From",
     "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
@@ -3599,11 +3599,11 @@ static const char *const exp_list_bulk_done[] = {
     "",
     "",
     "",
-    " Starred                                                                                      [2/3]",
+    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [2/3]",
     NULL
 };
 static const char *const sty_list_bulk_done[] = {
-    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHNNNNNNN",
     "                                                                                                    ",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
@@ -3773,7 +3773,7 @@ static const char *const sty_gmail_picker_toggled[] = {
 static const int cur_gmail_picker_toggled[3] = { 14, 60, 0 };
 
 static const char *const exp_gmail_picker_done[] = {
-    "  1-5 of 5 message(s) in INBOX (5 unread) [screens@example.org].",
+    "  1-5 of 5 message(s) in INBOX (5 unread) [screens@example.org].                Label removed: INBOX",
     "",
     "  Date             Sts    Subject                                   From",
     "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
@@ -3796,11 +3796,11 @@ static const char *const exp_gmail_picker_done[] = {
     "",
     "",
     "",
-    " Label removed: INBOX                                                                         [1/5]",
+    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/5]",
     NULL
 };
 static const char *const sty_gmail_picker_done[] = {
-    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHNNNNNNNNNNNNNNNNNNNN",
     "                                                                                                    ",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
@@ -4073,8 +4073,8 @@ static const char *const exp_att_saved[] = {
     "1. First",
     "2. Second",
     "--------------------------------------------------------------------------------",
-    "Code sample here",
-    "%   Saved: ",
+    "%  Saved: ",
+    " j/k scroll  Esc/q/BS list  : actions  r reply  * star  d del  a save(2)  / search  ? help    [1/2]",
     NULL
 };
 static const char *const sty_att_saved[] = {
@@ -5166,7 +5166,7 @@ static const char *const sty_list_new_mail[] = {
 static const int cur_list_new_mail[3] = { 23, 99, 0 };
 
 static const char *const exp_list_star_feedback[] = {
-    "  1-3 of 3 message(s) in INBOX (3 unread) [testuser].",
+    "  1-3 of 3 message(s) in INBOX (3 unread) [testuser].                                        Starred",
     "",
     "  Date             Sts    Subject                                   From",
     "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
@@ -5189,11 +5189,11 @@ static const char *const exp_list_star_feedback[] = {
     "",
     "",
     "",
-    " Starred                                                                                      [1/3]",
+    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [1/3]",
     NULL
 };
 static const char *const sty_list_star_feedback[] = {
-    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHNNNNNNN",
     "                                                                                                    ",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
@@ -6700,7 +6700,7 @@ static const int cur_rule_when_added[3] = { 23, 99, 0 };
 
 static const char *const exp_rule_when_bad[] = {
     "Add new rule for testuser — conditions (step 1/2)",
-    "",
+    "  Not a valid condition: (((  (e.g. from:*@example.org)",
     "(empty — press 'a' to add a condition)",
     "",
     "",
@@ -6722,12 +6722,12 @@ static const char *const exp_rule_when_bad[] = {
     "",
     "",
     "",
-    "   Not a valid condition: (((  (e.g. from:*@example.org)",
+    " j/k move  Enter/e edit  a add  d delete  Tab next  Esc/q cancel  ? help",
     NULL
 };
 static const char *const sty_rule_when_bad[] = {
     "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
-    "                                                                                                    ",
+    "  OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO                                             ",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",

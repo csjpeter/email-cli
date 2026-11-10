@@ -1163,6 +1163,9 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
             }
             HINT("/", "search", 55);
             HINT("v", view_raw ? "rendered" : "source", 35);
+            /* The reader has no header bar: a notice goes on the last body row. */
+            status_line_set_header_width(term_cols);
+            status_line_set_notice_row(term_rows - 1);
             status_line_draw(term_rows, term_cols, h, nh, "?", cur_page,
                              total_pages, info_msg);
         }
@@ -6213,7 +6216,8 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
 #define ACC_FREE() do { free(acc_unseen); free(acc_flagged); \
                         config_free_account_list(accounts, count); } while(0)
 
-        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC) {
+        /* The top-level view: Esc and q quit, Backspace never (EMAIL-285). */
+        if (key == TERM_KEY_QUIT || key == TERM_KEY_ESC || ch == 'q') {
             if (cursor_inout) *cursor_inout = cursor;
             ACC_FREE(); return 0;
         }
@@ -6268,7 +6272,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
                 { "d",               "Delete selected account"     },
                 { "i",               "Edit IMAP for account"       },
                 { "e",               "Edit SMTP for account"       },
-                { "Esc",             "Quit (Backspace does nothing here)" },
+                { "Esc / q",         "Quit (Backspace does nothing here)" },
                 { "?",               "Show this help"              },
                 { ":",               "Actions of a Gmail account"  },
             };

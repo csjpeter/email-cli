@@ -612,7 +612,8 @@ static void test_rk_cond_edit_keys(void) {
     pty_wait_for(s, "new:", WAIT_MS);
     pty_send_str(s, "(((");
     press(s, "Enter");
-    CHECK(s, pty_row_contains(s, STATUS_ROW, "Not a valid condition"), "an invalid condition is refused with a reason");
+    CHECK(s, (pty_row_contains(s, 0, "Not a valid condition") || pty_row_contains(s, 1, "Not a valid condition")) && pty_row_contains(s, STATUS_ROW, "? help"),
+          "an invalid condition is refused with a reason in the header notice, the hints stay");
     CHECK(s, !pty_screen_contains(s, "5. ((("), "an invalid condition is not added");
     press(s, "G"); press(s, "d");
     CHECK(s, !pty_screen_contains(s, "four*") && cursor_has(s, "3. to:"), "d deletes the selected one");

@@ -26,6 +26,11 @@ int tui_frame_draw_table(const char *header, tui_table *table, int rows, int col
     if (!(flags & TUI_FRAME_PLAIN_TITLE))
         tui_canvas_fill(c, tui_rect_make(0, 0, 1, cols), title);
     tui_canvas_put(c, 0, 0, header ? header : "", title);
+    {   /* where the notice area may start (EMAIL-285) */
+        int used = 0;
+        tui_str_fit(header ? header : "", cols, &used);
+        status_line_set_header_width(used);
+    }
 
     if (subtitle && *subtitle)
         tui_canvas_put(c, 1, 0, subtitle, TUI_STYLE_DEFAULT);
@@ -56,6 +61,7 @@ void tui_frame_print_bar(int row, const char *text, int cols) {
     if (!text) text = "";
     int used = 0;
     size_t n = tui_str_fit(text, cols, &used);
+    if (row == 1) status_line_set_header_width(used);
     printf("\033[%d;1H\033[1;37;44m%.*s", row, (int)n, text);
     for (int i = used; i < cols; i++) putchar(' ');
     printf("\033[0m");

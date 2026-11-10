@@ -232,8 +232,8 @@ Header `Email Accounts (N)`; with no account the table says
 | `e` | `e SMTP` | SMTP wizard of the account; same messages with SMTP | nothing | `test_accounts_screen_wizards_can_be_abandoned`, `test_accounts_keys_one_account` |
 | `:` | `: actions` (Gmail) | Gmail: menu with renewal of the authorization; IMAP: notice `No actions for an IMAP account here` | nothing | `test_tui_accounts_colon_on_imap_account`, `test_accounts_keys_no_account` |
 | `?` | `? help` | Help overlay `Accounts shortcuts`; Esc closes it, other keys change nothing; the `:` row only on a Gmail account | works | `test_tui_accounts_help_panel`, `test_accounts_keys_one_account`, `test_accounts_keys_no_account` |
-| Esc | `ESC quit` | Quits with status 0 | works | `test_tui_accounts_esc_quit`, `test_accounts_keys_cursor` |
-| `q`, Backspace | - | Ignored (top level) | ignored | `test_tui_accounts_esc_quit`, `test_tui_accounts_backspace_ignored` |
+| Esc, `q` | `ESC quit` | Quit with status 0 (EMAIL-285: `q` too, as the TUI policy says) | works | `test_tui_accounts_esc_quit`, `test_tui_accounts_q_quit`, `test_accounts_keys_cursor` |
+| Backspace | - | Ignored (top level) | ignored | `test_tui_accounts_backspace_ignored` |
 | Ctrl-C | - | Quits at once | works | `test_interactive_list_ctrl_c_quits_at_once` |
 | any other key | - | Nothing | nothing | `test_accounts_keys_cursor` |
 
@@ -760,3 +760,23 @@ changes nothing, and Yes performs it.
 | `review` | `e` | Edit headers | routine |
 | `review` | `r` | Remove an attachment | routine |
 | `accounts-gmail` | `r` | Renew the authorization... | rare |
+
+## Messages and the status line (EMAIL-285)
+
+Owner's TUI policy of 2026-11-08 (`policies/tui-interface-model.md`):
+
+- **A message never replaces the key hints.** `status_line_draw()` keeps the
+  hints and the position on the last row; a message goes to the **notice
+  area of the header** (row 1, right aligned, at most three quarters of the
+  width): bold letters on the header's own blue band, red for a failure
+  (`status_line_notice_is_error`), green otherwise; it clears on the next key.
+  A line with no hints (a prompt, the send screen's progress) is the text itself.
+  Tests: `test_email_service` (status_line, notice), `test_pty_rules_keys`
+  (rules pty: the refusal is on row 1, `? help` stays).
+- **Top level**: Esc and `q` quit, Backspace never, ctrl-c at once.
+
+Not done yet, waiting for libtuikit `tui_header` (TUI-109) and `tui_menu`
+(TUI-108), which the installed v0.13.0 does not have: the orange standing
+warning role, the header without counters, the library-drawn notice area, the
+main menu in place of the accounts list, and the hint line without the
+self-evident keys. They are carried by follow-up tickets once the library ships.

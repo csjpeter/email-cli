@@ -548,7 +548,7 @@ static void test_interactive_list_statusbar(void) {
 }
 
 /* policies/tui-interface-model.md: Esc goes back one level, q is Esc, ctrl-c
- * quits at once; Esc on the top level (accounts) quits with status 0. */
+ * quits at once; Esc and q on the top level (accounts) quit with status 0. */
 static void test_interactive_list_esc_quit(void) {
     restart_mock();
     PtySession *s = tui_open_to_list();
@@ -578,11 +578,11 @@ static void test_interactive_list_q_goes_back(void) {
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "q");                              /* top level: q never quits */
+    pty_send_key(s, PTY_KEY_BACK);                /* top level: Backspace never quits */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
-    pty_send_key(s, PTY_KEY_CTRL_C);                   /* ctrl-c quits at once */
-    ASSERT(pty_wait_exit(s, 5000) == 0, "accounts ctrl-c: program exits with status 0");
+    pty_send_str(s, "q");                              /* top level: q quits (EMAIL-285) */
+    ASSERT(pty_wait_exit(s, 5000) == 0, "accounts q: program exits with status 0");
     pty_close(s);
 }
 
@@ -2960,8 +2960,8 @@ static void test_statusline_message_replaces_hints(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "*");
     pty_settle(s, SETTLE_MS);
-    ASSERT(pty_row_contains(s, 23, "arred"), "status message: shown on the last row");
-    ASSERT(!pty_row_contains(s, 23, "Enter open"), "status message: replaces the hints");
+    ASSERT(pty_row_contains(s, 0, "arred"), "status message: shown in the header notice area");
+    ASSERT(pty_row_contains(s, 23, "Enter open"), "status message: the hints stay on the last row");
     pty_send_key(s, PTY_KEY_DOWN);
     pty_settle(s, SETTLE_MS);
     ASSERT(pty_row_contains(s, 23, "Enter open"), "status message: the hints return");
@@ -4968,17 +4968,26 @@ static void test_tui_accounts_screen_shows(void) {
 
 static void test_tui_accounts_esc_quit(void) {
     /* US-21: Esc on the accounts screen (the top level) exits the TUI with
-     * status 0; q does not (it only goes back, and there is nowhere to go). */
+     * status 0, and so does q (EMAIL-285); Backspace never quits. */
     restart_mock();
     PtySession *s = cli_run(NULL);
     ASSERT(s != NULL, "accounts ESC quit: opens");
     ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "q");
-    pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT(pty_wait_exit(s, 5000) == 0, "accounts ESC: program exits with status 0");
+    pty_close(s);
+}
+
+static void test_tui_accounts_q_quit(void) {
+    /* EMAIL-285: q on the top-level view quits, like Esc. */
+    restart_mock();
+    PtySession *s = cli_run(NULL);
+    ASSERT(s != NULL, "accounts q quit: opens");
+    ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");
+    ASSERT(pty_wait_exit(s, 5000) == 0, "accounts q: program exits with status 0");
     pty_close(s);
 }
 
@@ -8467,6 +8476,7 @@ int main(int argc, char *argv[]) {
     restart_mock();
     RUN_TEST(test_tui_accounts_screen_shows);
     RUN_TEST(test_tui_accounts_esc_quit);
+    RUN_TEST(test_tui_accounts_q_quit);
     RUN_TEST(test_tui_accounts_enter_opens_list);
     RUN_TEST(test_tui_accounts_backspace_from_list);
     RUN_TEST(test_tui_accounts_multiple_shown);

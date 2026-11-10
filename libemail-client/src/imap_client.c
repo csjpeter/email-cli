@@ -93,7 +93,6 @@ static void imap_report(const char *user, const char *host, const char *port,
     said_clean(line, sizeof(line), said);
     char where[300] = "";
     if (folder && folder[0]) snprintf(where, sizeof(where), ", folder %.200s", folder);
-    logger_log(LOG_WARN, "IMAP %s failed at %s:%s: %s", step, host, port, line);
     logger_note_stderr_error();
     fprintf(stderr, "ERROR: IMAP %s failed at %s:%s as %s%s: %s\n",
             step, host, port, user && user[0] ? user : "(no user)", where, line);
@@ -157,7 +156,6 @@ static ssize_t net_read_raw(ImapClient *c, char *buf, size_t n) {
             int saved_errno = errno;
             c->io_errno = saved_errno;
             c->timed_out = saved_errno == EAGAIN || saved_errno == EWOULDBLOCK;
-            logger_log(LOG_WARN, "SSL_read error %d", err);
             return -1;
         }
     }
@@ -191,8 +189,6 @@ static int net_write_raw(ImapClient *c, const char *buf, size_t n) {
             int w = SSL_write(c->ssl, buf + sent, (int)(n - sent));
             if (w <= 0) {
                 if (errno == EINTR) continue;   /* interrupted, not failed */
-                logger_log(LOG_WARN, "SSL_write error %d",
-                           SSL_get_error(c->ssl, w));
                 return -1;
             }
             r = (ssize_t)w;
@@ -200,7 +196,6 @@ static int net_write_raw(ImapClient *c, const char *buf, size_t n) {
             r = write(c->fd, buf + sent, n - sent);
             if (r < 0) {
                 if (errno == EINTR) continue;
-                logger_log(LOG_WARN, "write: %s", strerror(errno));
                 return -1;
             }
         }
@@ -337,13 +332,13 @@ static int send_cmd(ImapClient *c, char tag_out[16], const char *fmt, ...) {
             user_end = strchr(p, ' ');
         }
         if (user_end) {
-            logger_log(LOG_DEBUG, "IMAP [OUT] %s LOGIN %.*s xxxxx",
+            logger_traffic("IMAP [OUT] %s LOGIN %.*s xxxxx",
                        tag_out, (int)(user_end - p), p);
         } else {
-            logger_log(LOG_DEBUG, "IMAP [OUT] %s LOGIN <redacted>", tag_out);
+            logger_traffic("IMAP [OUT] %s LOGIN <redacted>", tag_out);
         }
     } else {
-        logger_log(LOG_DEBUG, "IMAP [OUT] %s %.*s", tag_out, len, buf);
+        logger_traffic("IMAP [OUT] %s %.*s", tag_out, len, buf);
     }
 
     /* Write tag + space + command + CRLF as a single buffer so the entire
@@ -480,7 +475,7 @@ static int read_response(ImapClient *c, const char *tag, Response *r) {
         }
 
         const char *line = lb.data ? lb.data : "";
-        logger_log(LOG_DEBUG, "IMAP [ IN] %s", line);
+        logger_traffic("IMAP [ IN] %s", line);
 
         /* The server ends the session: say so with its words. */
         if (strncasecmp(line, "* BYE", 5) == 0 && strcmp(c->cmd, "LOGOUT") != 0) {
@@ -496,7 +491,6 @@ static int read_response(ImapClient *c, const char *tag, Response *r) {
             const char *status = line + tlen + 1;
             int ok = (strncasecmp(status, "OK", 2) == 0);
             if (!ok) {
-                logger_log(LOG_WARN, "IMAP %s", line);
                 /* LOGIN has its own message (imap_connect); a CREATE that
                  * finds the folder there is not a failure. */
                 if (strcmp(c->cmd, "LOGIN") != 0 && !strcasestr(status, "[ALREADYEXISTS]"))
@@ -526,7 +520,7 @@ static int read_response(ImapClient *c, const char *tag, Response *r) {
             /* Read the remainder line after the literal (e.g. ")" or empty) */
             LineBuf trail = {NULL, 0, 0};
             if (read_line(c, &trail) == 0 && trail.data && trail.data[0])
-                logger_log(LOG_DEBUG, "IMAP [ IN] %s", trail.data);
+                logger_traffic("IMAP [ IN] %s", trail.data);
             linebuf_free(&trail);
         }
     }
@@ -575,7 +569,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     char host[256], port[16];
     int  use_tls = 1;
     if (parse_url(host_url, host, sizeof(host), port, sizeof(port), &use_tls) != 0) {
-        logger_log(LOG_ERROR, "imap_connect: bad URL: %s", host_url);
+        logger_error("imap_connect: bad URL: %s", host_url);
         fprintf(stderr, "ERROR: IMAP connect failed as %s: the server URL \"%.100s\" cannot be parsed\n",
                 user, host_url);
         logger_note_stderr_error();
@@ -585,7 +579,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     /* Hard enforcement: never connect without TLS unless verify_tls == 0
      * (SSL_NO_VERIFY=1 in config — test/dev environments only). */
     if (!use_tls && verify_tls) {
-        logger_log(LOG_ERROR,
+        logger_error(
                    "imap_connect: refused to connect to %s without TLS — "
                    "use imaps:// to protect credentials", host_url);
         fprintf(stderr,
@@ -603,7 +597,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     struct addrinfo *ai = NULL;
     int rc = getaddrinfo(host, port, &hints, &ai);
     if (rc != 0) {
-        logger_log(LOG_ERROR, "Could not resolve %s:%s (resolve failed: %s)", host, port, gai_strerror(rc));
+        logger_error("Could not resolve %s:%s (resolve failed: %s)", host, port, gai_strerror(rc));
         char why[200];
         snprintf(why, sizeof(why), "could not resolve the host name: %s", gai_strerror(rc));
         imap_report(user, host, port, NULL, "connect", why);
@@ -635,7 +629,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     freeaddrinfo(ai);
 
     if (fd < 0) {
-        logger_log(LOG_ERROR, "connect to %s:%s failed: %s", host, port, strerror(errno));
+        logger_error("connect to %s:%s failed: %s", host, port, strerror(errno));
         char why[200];
         snprintf(why, sizeof(why), "could not connect: %s", strerror(errno));
         imap_report(user, host, port, NULL, "connect", why);
@@ -663,13 +657,13 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         /* Init OpenSSL (idempotent in OpenSSL 1.1+) */
         SSL_CTX *ctx = net_tls_ctx_new(verify_tls);
         if (!ctx) {
-            logger_log(LOG_ERROR, "SSL_CTX_new failed");
+            logger_error("SSL_CTX_new failed");
             free(c); close(fd);
             return NULL;
         }
         SSL *ssl = SSL_new(ctx);
         if (!ssl) {
-            logger_log(LOG_ERROR, "SSL_new failed");
+            logger_error("SSL_new failed");
             SSL_CTX_free(ctx); free(c); close(fd);
             return NULL;
         }
@@ -681,7 +675,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
             int hc = is_ip ? X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), host)
                            : SSL_set1_host(ssl, host);
             if (hc != 1) {
-                logger_log(LOG_ERROR, "TLS host name check could not be set for %s", host);
+                logger_error("TLS host name check could not be set for %s", host);
                 SSL_free(ssl); SSL_CTX_free(ctx); free(c); close(fd);
                 return NULL;
             }
@@ -704,7 +698,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
             ERR_clear_error();
             /* stage, host:port, the OpenSSL string, the certificate verify
              * reason and the errno text (EMAIL-238) */
-            logger_log(LOG_ERROR, "SSL handshake failed with %s:%s: %s%s%s%s%s%s", host, port,
+            logger_error("SSL handshake failed with %s:%s: %s%s%s%s%s%s", host, port,
                        ossl[0] ? ossl : "no OpenSSL error",
                        verify_tls && vr != X509_V_OK ? "; certificate verify: " : "",
                        verify_tls && vr != X509_V_OK ? X509_verify_cert_error_string(vr) : "",
@@ -724,18 +718,13 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         }
         c->ctx = ctx;
         c->ssl = ssl;
-        logger_log(LOG_DEBUG, "IMAP TLS handshake OK with %s (TLS/%s)",
-                   host, SSL_get_version(ssl));
     } else {
-        logger_log(LOG_WARN,
-                   "IMAP connecting to %s:%s WITHOUT TLS — "
-                   "credentials will be sent in plaintext!", host, port);
     }
 
     /* Read server greeting */
     LineBuf lb = {NULL, 0, 0};
     if (read_line(c, &lb) != 0) {
-        logger_log(LOG_ERROR, "No greeting from %s", host);
+        logger_error("No greeting from %s", host);
         linebuf_free(&lb);
         char why[160];
         if (c->timed_out)
@@ -748,7 +737,7 @@ ImapClient *imap_connect(const char *host_url, const char *user,
         client_report(c, "greeting", why);
         goto fail;
     }
-    logger_log(LOG_DEBUG, "IMAP [ IN] %s", lb.data ? lb.data : "");
+    logger_traffic("IMAP [ IN] %s", lb.data ? lb.data : "");
     /* "* OK" and "* PREAUTH" greet; "* BYE" (or anything else) refuses. */
     if (strncasecmp(lb.data ? lb.data : "", "* OK", 4) != 0 &&
         strncasecmp(lb.data ? lb.data : "", "* PREAUTH", 9) != 0) {
@@ -784,12 +773,10 @@ ImapClient *imap_connect(const char *host_url, const char *user,
             if (said) said++;
         }
         /* The user-facing message is written here rather than left to the
-         * logger's LOG_ERROR mirror: that mirror is a global toggle, and what
+         * logger's stderr output: that mirror is a global toggle, and what
          * the user is told about their own credential must not depend on it.
          * The log keeps the record at WARN, next to read_response()'s copy of
          * the server's exact answer. */
-        logger_log(LOG_WARN, "LOGIN rejected for %s on %s: %s", user, host,
-                   resp.tagged ? resp.tagged : "(no response line)");
         logger_note_stderr_error();
         fprintf(stderr, "ERROR: IMAP LOGIN failed at %s:%s: %s rejected the login for %s.\n",
                 host, port, host, user);
@@ -803,7 +790,6 @@ ImapClient *imap_connect(const char *host_url, const char *user,
     }
     response_free(&resp);
 
-    logger_log(LOG_DEBUG, "IMAP connected and authenticated: %s@%s", user, host);
     return c;
 
 fail:
@@ -1073,7 +1059,6 @@ static char *uid_fetch_part(ImapClient *c, const char *uid, const char *section)
 
     if (!result)
     {
-        logger_log(LOG_WARN, "UID FETCH %s %s: no literal in response", uid, section);
         client_report(c, "UID FETCH", "the server's answer carried no message data");
     }
     return result;
@@ -1204,11 +1189,8 @@ int imap_append(ImapClient *c, const char *folder,
 
     /* Step 1: ensure the target folder exists (idempotent). */
     c->quiet++;
-    int pre_rc = imap_create_folder(c, folder);
+    (void)imap_create_folder(c, folder);   /* missing folder: APPEND says so */
     c->quiet--;
-    if (pre_rc != 0)
-        logger_log(LOG_WARN, "IMAP APPEND: pre-create of '%s' failed, trying anyway",
-                   folder);
 
     /* Step 2: send command + literal with LITERAL+. */
     c->tag_num++;
@@ -1223,7 +1205,7 @@ int imap_append(ImapClient *c, const char *folder,
                           tag, folder, msg_len);
     if (cmdlen < 0 || (size_t)cmdlen >= sizeof(cmd)) return -1;
 
-    logger_log(LOG_DEBUG, "IMAP [OUT] %s APPEND \"%s\" (\\Seen) {%zu+}",
+    logger_traffic("IMAP [OUT] %s APPEND \"%s\" (\\Seen) {%zu+}",
                tag, folder, msg_len);
 
     /* Generous 30-second receive timeout for the response. */
@@ -1236,10 +1218,9 @@ int imap_append(ImapClient *c, const char *folder,
     if (net_write(c, cmd, (size_t)cmdlen) != 0 ||
         net_write(c, msg, msg_len) != 0 ||
         net_write(c, "\r\n", 2) != 0) {
-        logger_log(LOG_ERROR, "IMAP APPEND: write failed");
+        logger_error("IMAP APPEND: write failed");
         client_report(c, "APPEND", "could not send the message to the server (connection error)");
     } else {
-        logger_log(LOG_DEBUG, "IMAP APPEND: sent %zu-byte literal", msg_len);
         Response resp = {0};
         rc = read_response(c, tag, &resp);
         response_free(&resp);

@@ -468,7 +468,8 @@ check_not "1.20 list: no STORE sent to server" "STORE" "$(cat "$MOCK_LOG1")"
 SESSION1="$H_ALPHA/.cache/email-cli/logs/session.log"
 SESS1=$(cat "$SESSION1" 2>/dev/null || true)
 check_not "1.21 no login rejection in output" "rejected the login" "$L1"
-check     "1.22 LOGIN completed in session" "LOGIN completed\|authenticated" "$SESS1"
+check     "1.22 LOGIN is in the traffic log" "IMAP \[OUT\] .* LOGIN " "$SESS1"
+check_not "1.22b the password is not in the traffic log" "testpass" "$SESS1"
 
 fi
 
@@ -802,7 +803,10 @@ check "11.3 SMTP mock: RECEIVED confirmation"   "RECEIVED"      "$SMTP_CONTENT"
 
 CLI_LOG="$H_ALPHA/.cache/email-cli/logs/session.log"
 CLI_CONTENT=$(cat "$CLI_LOG" 2>/dev/null || true)
-check "11.4 IMAP APPEND command issued"         "APPEND"        "$CLI_CONTENT"
+check "11.4 the SMTP exchange is in the traffic log" "SMTP \[OUT\] MAIL FROM" "$CLI_CONTENT"
+check "11.4b SMTP traffic is in the --debug log"   "SMTP \[OUT\]"  "$CLI_CONTENT"
+check_not "11.4c no password in the traffic log"   "testpass"      "$CLI_CONTENT"
+check_not "11.4d no base64 password in the log"    "dGVzdHBhc3M"   "$CLI_CONTENT"
 
 fi
 
@@ -8045,11 +8049,12 @@ if phase_wanted 160; then
 # Phase 160 — the session log is off unless asked for (EMAIL-240)
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "--- Phase 160: the session log is off by default (EMAIL-240) ---"
+echo "--- Phase 160: no session log; --debug writes a traffic log only (EMAIL-284) ---"
 
 H160="./build/tests/functional/work-$$/homes/f160-$$"
 mkdir -p "$H160"
 L160="$H160/.cache/email-cli/logs/session.log"
+D160="$H160/.cache/email-cli/logs"
 # r160 <env-assignment-or-NONE> <args...>: email-cli with stderr merged
 r160() {
     local envv="$1"; shift
@@ -8058,24 +8063,23 @@ r160() {
      "$BIN_DIR/email-cli" "$@" 2>&1 || true)
 }
 has160() { if [ -e "$L160" ]; then echo present; else echo absent; fi; }
+hasdir160() { if [ -e "$D160" ]; then echo present; else echo absent; fi; }
 r160 NONE list-accounts >/dev/null
 check "160.1 no log file by default" "absent" "$(has160)"
+check "160.1b and no log directory" "absent" "$(hasdir160)"
 OUT160=$(r160 NONE --debug list-accounts)
 check "160.2 --debug writes the log" "present" "$(has160)"
 check_not "160.3 --debug is taken out of the arguments" "nknown" "$OUT160"
-check "160.4 the trace is at debug level" "Level: DEBUG" "$(cat "$L160")"
+check "160.4 the log file is 0600" "600" "$(stat -c %a "$L160")"
+check "160.4b in a 0700 directory" "700" "$(stat -c %a "$D160")"
 rm -f "$L160"
 r160 EMAIL_CLI_DEBUG=1 list-accounts >/dev/null
-check "160.5 EMAIL_CLI_DEBUG=1 writes the log" "present" "$(has160)"
-rm -f "$L160"
+check "160.5 EMAIL_CLI_DEBUG=1 no longer writes the log" "absent" "$(has160)"
 r160 EMAIL_CLI_DEBUG=0 list-accounts >/dev/null
 check "160.6 EMAIL_CLI_DEBUG=0 writes none" "absent" "$(has160)"
-r160 EMAIL_CLI_DEBUG= list-accounts >/dev/null
-check "160.7 an empty EMAIL_CLI_DEBUG writes none" "absent" "$(has160)"
 check "160.8 help names --debug" "[-][-]debug" "$(r160 NONE --help)"
-check "160.9 help names EMAIL_CLI_DEBUG" "EMAIL_CLI_DEBUG" "$(r160 NONE --help)"
-LRO160="$H160/.cache/email-cli/logs/session.log"
-rm -f "$LRO160"
+check_not "160.9 help does not name EMAIL_CLI_DEBUG" "EMAIL_CLI_DEBUG" "$(r160 NONE --help)"
+rm -f "$L160"
 (export HOME="$H160"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME EMAIL_CLI_DEBUG
  "$BIN_DIR/email-cli-ro" list-accounts >/dev/null 2>&1 || true)
 check "160.10 email-cli-ro: no log by default" "absent" "$(has160)"
@@ -8090,6 +8094,7 @@ check "160.12 email-sync: no log by default" "absent" "$(if [ -e "$SL160" ]; the
 (export HOME="$H160"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME EMAIL_CLI_DEBUG
  "$BIN_DIR/email-sync" --debug cron setup >/dev/null 2>&1 || true)
 check "160.13 email-sync --debug writes the log" "present" "$(if [ -e "$SL160" ]; then echo present; else echo absent; fi)"
+check "160.14 a run with no traffic leaves an empty log (no banner, no INFO line)" "^0$" "$(stat -c %s "$SL160")"
 
 fi
 

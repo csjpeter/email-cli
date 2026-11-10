@@ -105,7 +105,7 @@ static void help_general(void) {
         "\n"
         "Options for every command:\n"
         "  -q, --quiet                 Do not ask before an irreversible operation\n"
-        "  --debug                     Write a session trace (also: EMAIL_CLI_DEBUG=1)\n"
+        "  --debug                     Write a protocol traffic log\n"
         "\n"
         "Help:\n"
         "  help [command]              Show this help, or detailed help for a command\n"
@@ -1129,7 +1129,7 @@ static int print_history(const OpHistory *h, const char *object, int limit, int 
 #endif
 
 int main(int argc, char *argv[]) {
-    /* --debug / EMAIL_CLI_DEBUG: the trace is written only on request (EMAIL-240). */
+    /* --debug: the traffic log is written only on request (EMAIL-284). */
     int debug_trace = logger_debug_requested(&argc, argv);
     /* 0. Set locale so wcwidth() and mbsrtowcs() work correctly for
      *    multi-byte UTF-8 characters (needed for column-width calculations). */
@@ -1348,13 +1348,12 @@ int main(int argc, char *argv[]) {
     if (debug_trace) {
         if (fs_mkdir_p(log_dir, 0700) != 0)
             fprintf(stderr, "Warning: Could not create log directory %s\n", log_dir);
-        if (logger_init(log_file, LOG_DEBUG) != 0)
+        if (logger_init(log_file) != 0)
             fprintf(stderr, "Warning: Logging system failed to initialize.\n");
         emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
     } else {
         logger_stderr_only();        /* no file: errors still reach the user */
     }
-    logger_log(LOG_INFO, "--- email-cli starting (cmd: %s) ---", cmd);
 
     /* Determine if this command needs a specific account config.
      * migrate-credentials operates on all accounts and handles its own loading. */
@@ -1405,11 +1404,10 @@ int main(int argc, char *argv[]) {
             } else {
                 config_free_account_list(list, count);
                 /* No accounts: run setup wizard */
-                logger_log(LOG_INFO, "No configuration found. Starting setup wizard.");
                 cfg = setup_wizard_run();
                 if (cfg) {
                     if (config_save_to_store(cfg) != 0) {
-                        logger_log(LOG_ERROR, "Failed to save configuration: %s", config_last_error());
+                        logger_error("Failed to save configuration: %s", config_last_error());
                         fprintf(stderr, "Error: Failed to save configuration to disk: %s\n",
                         config_last_error()[0] ? config_last_error() : "unknown cause");
                     } else {
@@ -1420,7 +1418,7 @@ int main(int argc, char *argv[]) {
                         email_service_check_credential(cfg);
                     }
                 } else {
-                    logger_log(LOG_ERROR, "Configuration aborted by user.");
+                    logger_error("Configuration aborted by user.");
                     fprintf(stderr, "Configuration aborted. Exiting.\n");
                     logger_close();
                     return EXIT_FAILURE;
@@ -2864,7 +2862,6 @@ int main(int argc, char *argv[]) {
 
     /* 7. Cleanup */
     config_free(cfg);
-    logger_log(LOG_INFO, "--- email-cli session finished ---");
     logger_close();
 
     if (result >= 0)

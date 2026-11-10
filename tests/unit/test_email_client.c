@@ -938,6 +938,7 @@ static void test_ec_gmail_send_wire(void)
 static void test_ec_log_open_writes_the_file(void)
 {
     const char *path = TP("emc-library.log");
+    unlink(path);
     emc_log_open(path, 1);
     emc_account a = {.host = "imaps://127.0.0.1:1", .user = "u@example.org",
                      .insecure_tls = 1};
@@ -947,15 +948,13 @@ static void test_ec_log_open_writes_the_file(void)
     emc_close(c);
     emc_log_close();
     emc_log_open("", 0);              /* blank path: nothing happens */
-    FILE *f = fopen(path, "r");
-    ASSERT(f != NULL, "log: the file exists");
-    char line[512];
-    int saw_error = 0;
-    while (fgets(line, sizeof(line), f))
-        if (strstr(line, "connect to 127.0.0.1:1 failed")) saw_error = 1;
-    fclose(f);
+    struct stat sb;
+    ASSERT(stat(path, &sb) == 0, "log: the file exists");
+    ASSERT((sb.st_mode & 0777) == 0600, "log: the file is private");
     ASSERT(st == EMC_ERR_CONNECT, "log: the connect failed");
-    ASSERT(saw_error, "log: the library's failure is in the file");
+    /* a refused connect has no traffic, and there is no session log: the
+     * failure is on stderr (EMAIL-284), the file holds no INFO/ERROR line */
+    ASSERT(sb.st_size == 0, "log: no session lines in the traffic file");
 }
 
 /* ── emc_account_load (EMAIL-231) ──────────────────────────────────── */

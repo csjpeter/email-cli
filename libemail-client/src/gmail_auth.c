@@ -60,7 +60,7 @@ static char *http_post(const char *url, const char *postdata, long *http_code) {
     char *resp = NULL;
     char err[160];
     if (http_request(&req, http_code, &resp, NULL, err, sizeof(err)) != 0) {
-        logger_log(LOG_ERROR, "gmail_auth: HTTP POST %s failed: %s", url, err);
+        logger_error("gmail_auth: HTTP POST %s failed: %s", url, err);
         return NULL;
     }
     return resp;
@@ -75,7 +75,7 @@ static void ui_error(GmailAuthUi *ui, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(ui->error, sizeof(ui->error), fmt, ap);
     va_end(ap);
-    logger_log(LOG_ERROR, "gmail_auth: %s", ui->error);
+    logger_error("gmail_auth: %s", ui->error);
 }
 
 /* ── Localhost redirect listener ─────────────────────────────────── */
@@ -355,8 +355,6 @@ int gmail_auth_authorize(Config *cfg, GmailAuthUi *ui) {
         cfg->gmail_refresh_token = refresh;
     }
 
-    logger_log(LOG_INFO, "gmail_auth: authorization completed for %s",
-               cfg->user ? cfg->user : "(unknown)");
     return 0;
 }
 
@@ -369,7 +367,7 @@ char *gmail_auth_refresh(const Config *cfg) {
         return strdup(test_token);
 
     if (!cfg->gmail_refresh_token || !cfg->gmail_refresh_token[0]) {
-        logger_log(LOG_ERROR, "gmail_auth: no refresh_token available");
+        logger_error("gmail_auth: no refresh_token available");
         return NULL;
     }
 
@@ -393,15 +391,12 @@ char *gmail_auth_refresh(const Config *cfg) {
 
     if (code == 200) {
         char *token = json_get_string(resp, "access_token");
-        if (token)
-            logger_log(LOG_DEBUG, "gmail_auth: access token refreshed");
         return token;
     }
 
     /* Error handling */
     RAII_STRING char *error = json_get_string(resp, "error");
     if (error && strcmp(error, "invalid_grant") == 0) {
-        logger_log(LOG_WARN, "gmail_auth: refresh token expired or revoked");
         /* Name the cause and the cure.  "Re-authorization needed" was true and
          * useless: there was no command to do it with, and nothing said that a
          * changed Google password is what revokes the token. */
@@ -416,7 +411,7 @@ char *gmail_auth_refresh(const Config *cfg) {
                         "Check GMAIL_CLIENT_ID/SECRET in config.ini.\n"
                         "  'email-cli help gmail' walks through creating them.\n");
     } else {
-        logger_log(LOG_ERROR, "gmail_auth: token refresh failed (HTTP %ld): %s",
+        logger_error("gmail_auth: token refresh failed (HTTP %ld): %s",
                    code, error ? error : "unknown");
     }
 

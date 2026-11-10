@@ -68,7 +68,6 @@ int local_store_init(const char *host_url, const char *username) {
         snprintf(g_account_name, sizeof(g_account_name), "imap.%s", hostname);
     }
 
-    logger_log(LOG_DEBUG, "local_store: account base = %s", g_account_base);
     /* Ensure the account base directory exists so callers can write files
      * (e.g. pending_fetch.tsv) before any message has been downloaded. */
     if (fs_mkdir_p(g_account_base, 0700) != 0) {
@@ -155,17 +154,16 @@ int local_msg_exists(const char *folder, const char *uid) {
 int local_msg_save(const char *folder, const char *uid, const char *content, size_t len) {
     if (!g_account_base[0]) return -1;
     if (ensure_bucket_dir("store", folder, uid) != 0) {
-        logger_log(LOG_ERROR, "Failed to create store bucket for %s/%s: %s",
+        logger_error("Failed to create store bucket for %s/%s: %s",
                    folder, uid, g_last_error);
         return -1;
     }
     RAII_STRING char *path = msg_path(folder, uid);
     if (!path) return -1;
     if (write_file(path, content, len) != 0) {
-        logger_log(LOG_ERROR, "Failed to write store file: %s", g_last_error);
+        logger_error("Failed to write store file: %s", g_last_error);
         return -1;
     }
-    logger_log(LOG_DEBUG, "Stored %s/%s at %s", folder, uid, path);
     return 0;
 }
 
@@ -196,14 +194,13 @@ int local_hdr_exists(const char *folder, const char *uid) {
 int local_hdr_save(const char *folder, const char *uid, const char *content, size_t len) {
     if (!g_account_base[0]) return -1;
     if (ensure_bucket_dir("headers", folder, uid) != 0) {
-        logger_log(LOG_ERROR, "Failed to create header bucket for %s/%s: %s",
+        logger_error("Failed to create header bucket for %s/%s: %s",
                    folder, uid, g_last_error);
         return -1;
     }
     RAII_STRING char *path = hdr_path(folder, uid);
     if (!path) return -1;
     if (write_file(path, content, len) != 0) return -1;
-    logger_log(LOG_DEBUG, "Stored header %s/%s", folder, uid);
     return 0;
 }
 
@@ -380,8 +377,6 @@ void local_hdr_evict_stale(const char *folder,
                     RAII_STRING char *path = NULL;
                     if (asprintf(&path, "%s/%s", dir, name) != -1) {
                         remove(path);
-                        logger_log(LOG_DEBUG,
-                                   "Evicted stale header: UID %s in %s", key, folder);
                     }
                 }
             }
@@ -584,7 +579,6 @@ int local_msg_delete(const char *folder, const char *uid) {
     /* For from/: we'd need to know which file has this ref.
      * Since we don't track that, just load the message (if still cached)
      * or accept the stale entry.  A full re-index can clean up. */
-    logger_log(LOG_DEBUG, "Deleted %s/%s", folder, uid);
     return 0;
 }
 
@@ -639,7 +633,6 @@ int ui_pref_set_int(const char *key, int value) {
         free(existing);
     }
     fprintf(fp, "%s=%d\n", key, value);
-    logger_log(LOG_DEBUG, "UI pref %s=%d saved", key, value);
     return 0;
 }
 
@@ -689,7 +682,6 @@ int ui_pref_set_str(const char *key, const char *value) {
         free(existing);
     }
     fprintf(fp, "%s=%s\n", key, value);
-    logger_log(LOG_DEBUG, "UI pref %s=%s saved", key, value);
     return 0;
 }
 
@@ -713,8 +705,6 @@ static char *sanitise(const char *s) {
 
 Manifest *manifest_load(const char *folder) {
     RAII_STRING char *path = manifest_path(folder);
-    logger_log(LOG_DEBUG, "manifest_load: folder=%s account_base=%s path=%s",
-               folder, g_account_base, path ? path : "(null)");
     if (!path) return NULL;
 
     char *data = load_file(path);
@@ -806,7 +796,6 @@ int manifest_save(const char *folder, const Manifest *m) {
         RAII_STRING char *d = sanitise(e->date);
         fprintf(fp, "%s\t%s\t%s\t%s\t%d\n", e->uid, f ? f : "", s ? s : "", d ? d : "", e->flags);
     }
-    logger_log(LOG_DEBUG, "Manifest saved: %s (%d entries)", folder, m->count);
     return 0;
 }
 
@@ -900,7 +889,6 @@ int local_folder_list_save(const char **folders, int count, char sep) {
     fprintf(fp, "sep=%c\n", sep);
     for (int i = 0; i < count; i++)
         fprintf(fp, "%s\n", folders[i] ? folders[i] : "");
-    logger_log(LOG_DEBUG, "Folder list cache saved: %d folders", count);
     return 0;
 }
 
@@ -940,7 +928,6 @@ char **local_folder_list_load(int *count_out, char *sep_out) {
     }
     *count_out = cnt;
     if (sep_out) *sep_out = sep;
-    logger_log(LOG_DEBUG, "Folder list cache loaded: %d folders", cnt);
     return folders;
 }
 
@@ -1595,7 +1582,6 @@ int label_idx_write(const char *label, const char (*uids)[17], int count) {
         if (fwrite(padded, 1, 17, fp) != 17) return -1;
     }
 
-    logger_log(LOG_DEBUG, "label_idx_write: %s → %d entries", label, count);
     return 0;
 }
 
@@ -2133,7 +2119,6 @@ void local_contacts_rebuild(void) {
     /* Infrastructure must not print to the user's screen — the TUI calls this
      * while a full-screen dialog is on display.  Callers that want a message
      * (e.g. email-sync --rebuild-contacts) print their own. */
-    logger_log(LOG_INFO, "contacts rebuilt: %d entries written to %s", cb.count, path);
     free(arr);
 }
 
@@ -2441,8 +2426,6 @@ int local_save_outgoing(const char *folder, const char *msg, size_t msg_len) {
     /* Queue for IMAP APPEND on next sync */
     local_pending_append_add(folder, uid);
 
-    logger_log(LOG_INFO, "local_save_outgoing: saved %s/%s, queued for APPEND",
-               folder, uid);
     return 0;
 }
 

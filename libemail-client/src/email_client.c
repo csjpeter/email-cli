@@ -726,7 +726,8 @@ EMC_API void emc_log_open(const char *path, int verbose)
     if (blank(path)) return;
     /* Appends to the file; errors are mirrored on stderr as the program's own
      * logger does, so the user sees the same messages whichever side logs. */
-    logger_init(path, verbose ? LOG_DEBUG : LOG_INFO);
+    (void)verbose;   /* kept for the interface; the traffic log has no levels */
+    logger_init(path);
 }
 
 EMC_API void emc_log_close(void)

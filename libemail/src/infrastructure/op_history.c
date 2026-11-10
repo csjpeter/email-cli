@@ -125,7 +125,6 @@ long op_history_record(const OpRecord *rec) {
     if (fd < 0) {
         fprintf(stderr, "Warning: the change history is not recorded: cannot open %s: %s\n",
                 path, strerror(errno));
-        logger_log(LOG_WARN, "history: cannot open %s: %s", path, strerror(errno));
         free(path);
         return -1;
     }
@@ -157,7 +156,6 @@ long op_history_record(const OpRecord *rec) {
         else {
             fprintf(stderr, "Warning: the change history is not recorded: write failed: %s\n",
                     strerror(errno));
-            logger_log(LOG_WARN, "history: write failed: %s", strerror(errno));
         }
         free(line);
     }

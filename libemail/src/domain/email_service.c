@@ -3257,7 +3257,6 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
         folder_display = search_display;
     }
 
-    logger_log(LOG_INFO, "Listing %s @ %s/%s", cfg->user, cfg->host, folder);
 
     /* Load manifest (or build synthetic manifest for virtual views) */
     Manifest *manifest = NULL;
@@ -6449,7 +6448,6 @@ static char *load_message(const Config *cfg, const char *folder, const char *uid
     }
 
     if (local_msg_exists(folder, uid)) {
-        logger_log(LOG_DEBUG, "Cache hit for UID %s in %s", uid, folder);
         raw = local_msg_load(folder, uid);
     } else if (cfg->sync_interval > 0) {
         /* cron/offline mode: serve only from local cache; do not connect */

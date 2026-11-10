@@ -281,6 +281,12 @@ int http_request(const HttpRequest *req, long *status, char **body_out,
         set_err(err, err_len, "Out of memory");
         goto done;
     }
+    if (logger_traffic_enabled()) {
+        logger_traffic("HTTP [OUT] %s %s://%s%s", req->method, u.tls ? "https" : "http",
+                       hostline, u.path);
+        for (const char *const *h = req->headers; h && *h; h++)
+            logger_traffic("HTTP [OUT] %s", *h);
+    }
     if (net_conn_write_all(c, head.p, head.len) != 0) {
         set_err_net(err, err_len, c, "Send failed");
         goto done;
@@ -293,6 +299,7 @@ int http_request(const HttpRequest *req, long *status, char **body_out,
         set_err(err, err_len, "Bad HTTP response");
         goto done;
     }
+    logger_traffic("HTTP [ IN] %s", line);
     long clen = -1;
     int chunked = 0;
     size_t hbytes = 0;

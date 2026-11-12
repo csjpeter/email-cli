@@ -13,7 +13,7 @@
  *
  * Runs libtuikit's tui_histview full screen over the steps of
  * history_service.h: the history of one object, or the recent changes.  The
- * Revert entry (':' menu, or Enter) calls history_revert(); a refusal is
+ * Revert entry ('-' menu, or Enter) calls history_revert(); a refusal is
  * shown in its words at the bottom of the screen.  The screen returns on Esc,
  * q or Backspace; the caller redraws its own view.
  */

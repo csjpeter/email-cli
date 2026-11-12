@@ -37,13 +37,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-/* EMAIL-175: sending is in the review screen's ':' menu (row 0) and asks
+/* EMAIL-175: sending is in the review screen's '-' menu (row 0) and asks
  * first, naming the recipients; removing the last attachment is row 2. */
-#define REVIEW_SEND(s) do { pty_send_str((s), ":"); \
+#define REVIEW_SEND(s) do { pty_send_str((s), "-"); \
     pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
     pty_send_key((s), PTY_KEY_ENTER); \
     pty_wait_for((s), "Yes", 8000); pty_send_str((s), "y"); } while (0)
-#define REVIEW_UNATTACH(s) do { pty_send_str((s), ":"); \
+#define REVIEW_UNATTACH(s) do { pty_send_str((s), "-"); \
     pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
     pty_send_key((s), PTY_KEY_DOWN); pty_send_key((s), PTY_KEY_DOWN); \
     pty_send_key((s), PTY_KEY_ENTER); } while (0)

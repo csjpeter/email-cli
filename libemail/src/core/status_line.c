@@ -26,6 +26,25 @@ static void setup(tui_statusline *sl, const tui_statusline_hint *hints, int nhin
 int status_line_format(int tcols, const tui_statusline_hint *hints, int nhints,
                        const char *help_key, int cur, int total,
                        const char *message, char *out, size_t outsz) {
+    if (message && *message && nhints <= 0) {
+        /* A prompt or a progress line: libtuikit 1.x shows hints and the
+         * position only, so the text is laid out here, one blank before it,
+         * cut at a character boundary to the width. */
+        size_t o = 0;
+        int col = 0;
+        if (outsz < 2) return -1;
+        out[o++] = ' '; col++;
+        for (const unsigned char *q = (const unsigned char *)message; *q; q++) {
+            if ((*q & 0xC0) != 0x80) {
+                if (col >= tcols) break;
+                col++;
+            }
+            if (o + 1 >= outsz) break;
+            out[o++] = (char)*q;
+        }
+        out[o] = '\0';
+        return (int)o;
+    }
     tui_statusline sl;
     setup(&sl, hints, nhints, help_key, cur, total, message);
     int n = tui_statusline_format(&sl, tcols, out, outsz);

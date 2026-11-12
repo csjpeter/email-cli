@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
 /* Created: 2026-10-19 */
-/* The key table of email-tui: one table for the key handler, the help and the ':' menu. */
+/* The key table of email-tui: one table for the key handler, the help and the '-' menu. */
 #ifndef CORE_KEY_TABLE_H
 #define CORE_KEY_TABLE_H
 
@@ -18,7 +18,7 @@
  * menu".  Every key of the message list, the message reader, the label browser
  * and the review screen is a row of one libtuikit key table.  The key
  * handlers ask the table what a key means (ekeys_find()), the help overlay is
- * made from the same table (ekeys_help()), and ':' opens the action menu of
+ * made from the same table (ekeys_help()), and '-' opens the action menu of
  * the view (ekeys_menu()): every state-changing action there, with the
  * confirmation of a serious one naming its target and No as the default.
  */
@@ -27,8 +27,7 @@
 typedef enum {
     EA_NONE = 0,
     EA_STAR,          /**< '*'  toggle the star (flag)                      */
-    EA_READ,          /**< '+'  mark read                                   */
-    EA_UNREAD,        /**< '-'  mark unread                                 */
+    EA_READ,          /**< '+'  toggle read / unread                        */
     EA_JUNK,          /**< '!'  toggle junk                                 */
     EA_DELETE,        /**< 'd', Delete: move to Trash / delete for good     */
     EA_LABELS,        /**< 't'  Gmail label picker                          */
@@ -94,7 +93,7 @@ int ekeys_init(char *why, size_t size);
 EmailAction ekeys_find(const char *view, TermKey key, int ch);
 
 /**
- * @brief Opens the ':' menu of @p view over the screen and runs it.
+ * @brief Opens the '-' menu of @p view over the screen and runs it.
  * @param targets  Per action number, the text a confirmation names (the
  *                 message, the account, the label), or NULL for none.
  * @return The chosen action (confirmed when it needed it), or EA_NONE.
@@ -125,11 +124,11 @@ const char *ekeys_view_desc(const char *view);
  *        table row the handler is checked against). */
 int ekeys_help_has(const char *view, tui_keycode key);
 
-/** @brief The quick key of action @p a in the ':' menu of @p view (the
+/** @brief The quick key of action @p a in the '-' menu of @p view (the
  *         library's assignment, the one the menu draws), 0 when it has none. */
 char ekeys_quick_key(const char *view, EmailAction a);
 
-/** One row of a view's ':' menu, as the menu draws it (EMAIL-225). */
+/** One row of a view's '-' menu, as the menu draws it (EMAIL-225). */
 typedef struct {
     char letter;         /**< the quick key; 0 only when the assignment failed */
     const char *name;    /**< the entry's name */
@@ -137,14 +136,14 @@ typedef struct {
     int direct;          /**< 1 when the entry also has a direct key */
 } EkeysMenuRow;
 
-/** @brief Fills @p rows (at most @p max) with the entries of @p view's ':' menu
+/** @brief Fills @p rows (at most @p max) with the entries of @p view's '-' menu
  *         in table order, with the letters the menu draws; the docs, the help
  *         and the tests read the same table.
  *  @return the number of rows, -1 when the view is unknown. */
 int ekeys_menu_rows(const char *view, EkeysMenuRow *rows, int max);
 
 /** @brief 1 when the table of @p view has an entry for the action @p a (a key
- *         or a row of the ':' menu), 0 when the view does not offer it. */
+ *         or a row of the '-' menu), 0 when the view does not offer it. */
 int ekeys_menu_has(const char *view, EmailAction a);
 
 #endif /* CORE_KEY_TABLE_H */

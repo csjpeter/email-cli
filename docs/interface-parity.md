@@ -37,9 +37,9 @@ existing references and every `no` has a reason.
 | Raw message source | yes (`show --raw`) | F:122.21 | yes (`v`) | P:test_interactive_show_source_toggle | |
 | List IMAP folders (counts, tree) | yes | F:25.13 | yes | P:test_screen_folders | |
 | List Gmail labels | yes | F:26.11 | yes | P:test_screen_gmail_labels | |
-| Create / delete an IMAP folder | yes | F:51.2 | yes (`:` menu of the folder browser; delete asks first) | P:test_folder_create P:test_folder_delete_asks | |
+| Create / delete an IMAP folder | yes | F:51.2 | yes (`-` menu of the folder browser; delete asks first) | P:test_folder_create P:test_folder_delete_asks | |
 | Create a Gmail label | yes | F:122.24 | yes (`c` in the label browser) | P:test_label_browser_create_label_confirmed | |
-| Delete a Gmail label | yes | F:122.25 | yes (`:` menu, `Delete the label`, asks first) | P:test_label_browser_delete_label_uses_id | the TUI sends the label id, not its name |
+| Delete a Gmail label | yes | F:122.25 | yes (`-` menu, `Delete the label`, asks first) | P:test_label_browser_delete_label_uses_id | the TUI sends the label id, not its name |
 | Mark read / unread | yes | F:16.1 | yes (`n`) | P:test_feedback_n_read | |
 | Star / unstar | yes | F:17.1 | yes (`f`) | P:test_feedback_f_star | |
 | Add / remove a Gmail label on a message | yes | F:60.1 | yes (`t` picker) | P:test_feedback_t_label_added | |
@@ -47,7 +47,7 @@ existing references and every `no` has a reason.
 | Move a message to a folder | yes (`move`) | F:124.29 | yes (`m`) | P:test_screen_list_move_prompt | |
 | Delete (trash) / archive a message | yes (`trash`, `archive`) | F:132.2 | yes (`d`, `D`, `a`) | P:test_tui_list_bulk_delete_confirm | |
 | Operation history: the steps of one object, the recent changes | yes (`history [<object>]`) | F:140.3 F:140.5 | yes (`H` in the list, `H` in the reader; libtuikit `tui_histview`) | P:test_hist_tui_recent P:test_hist_tui_reader | `email-cli-ro` has no `history`: it reads mail only, the history is the writer's own record |
-| Revert a recorded operation (the revert is a step, and can be reverted) | yes (`revert <id>`, confirms unless `-q`) | F:140.10 F:140.15 | yes (`:` menu or Enter on a step, confirms, default No) | P:test_hist_tui_revert_and_revert_again P:test_hist_tui_confirm_default_no | |
+| Revert a recorded operation (the revert is a step, and can be reverted) | yes (`revert <id>`, confirms unless `-q`) | F:140.10 F:140.15 | yes (`-` menu or Enter on a step, confirms, default No) | P:test_hist_tui_revert_and_revert_again P:test_hist_tui_confirm_default_no | |
 | An overtaken step is refused in the server's words | yes | F:140.17 | yes (one line at the bottom) | P:test_hist_tui_overtaken | |
 | Irreversible operations confirm first (default No) and show as not revertable | yes (`delete-folder`, `trash --folder Trash`, `forward`, ...) | F:140.21 F:140.28 F:140.34 | yes | P:test_hist_tui_not_revertable P:test_folder_delete_asks | |
 | Mark several messages at once | no (one UID per call; a script loops) | | yes (`Space`, `m`) | P:test_tui_list_bulk_star_marked | medium: a script loops; not a gap |
@@ -60,7 +60,7 @@ existing references and every `no` has a reason.
 | Add an account (wizard) | yes | F:76.1 | yes (`n`) | P:test_wizard_complete | |
 | Remove an account | yes | F:122.22 | yes (`d`) | P:test_screen_account_delete | |
 | Edit account settings (IMAP, SMTP) | yes (`config imap`, `config smtp`) | F:73.3 | yes (`e`, the wizard) | P:test_wizard_with_smtp | |
-| Renew a Gmail authorization | yes (`config reauth`) | F:89.21 | yes (`:` menu on the accounts screen) | P:test_reauth_paste_renews_the_token | browser, address only or paste, as the CLI; `--import-token` stays CLI-only |
+| Renew a Gmail authorization | yes (`config reauth`) | F:89.21 | yes (`-` menu on the accounts screen) | P:test_reauth_paste_renews_the_token | browser, address only or paste, as the CLI; `--import-token` stays CLI-only |
 | Re-encrypt stored credentials | yes (`migrate-credentials`) | F:122.26 | no | | maintenance, run by hand; `n/a` in a screen, not a gap |
 | List sorting rules | yes | F:34.1 | yes (`l`) | P:test_screen_rules_list | |
 | Add a sorting rule | yes | F:37.1 | yes | P:test_tui_rules_add_form_saves_new_rule | |

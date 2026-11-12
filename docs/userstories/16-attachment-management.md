@@ -19,7 +19,7 @@ The interactive show view is active for a message that contains MIME attachments
    - Enter accepts the path; ESC cancels.
    - On success, `Saved: <path>` is shown briefly on the status bar.
    - Backspace returns to the show view without saving.
-4. "Save all attachments" in the `:` menu of the show view (IMAP and Gmail alike) opens a prompt `Save all to: <dir>` for batch saving.
+4. "Save all attachments" in the `-` menu of the show view (IMAP and Gmail alike) opens a prompt `Save all to: <dir>` for batch saving.
    - Enter saves all attachments to the given directory.
    - ESC cancels without saving any file.
    - On success, `Saved N/N` is shown on the status bar.

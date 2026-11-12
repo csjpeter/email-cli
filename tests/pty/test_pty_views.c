@@ -60,11 +60,11 @@ static char  g_batch_cli_bin[512];  /* email-cli (batch), never changes */
 #define ROWS 24
 #define COLS 100
 
-/** Opens the ':' action menu, moves to row @p row (0 is the first) and
+/** Opens the '-' action menu, moves to row @p row (0 is the first) and
  *  presses Enter.  The rows are the entries of the view's key table that
  *  change state, in table order (libemail/src/core/key_table.c). */
 static void menu_pick(PtySession *s, int row) {
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     pty_wait_for(s, "Actions", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     for (int i = 0; i < row; i++) pty_send_key(s, PTY_KEY_DOWN);
@@ -73,12 +73,11 @@ static void menu_pick(PtySession *s, int row) {
 
 #define MENU_IMAP_STAR 0
 #define MENU_IMAP_READ 1
-#define MENU_IMAP_UNREAD 2
-#define MENU_IMAP_JUNK 3
-#define MENU_IMAP_SYNC 6
-#define MENU_IMAP_MOVE 7
-#define MENU_IMAP_DONE 8
-#define MENU_READER_SAVE_ALL 6
+#define MENU_IMAP_JUNK 2
+#define MENU_IMAP_SYNC 5
+#define MENU_IMAP_MOVE 6
+#define MENU_IMAP_DONE 7
+#define MENU_READER_SAVE_ALL 5
 
 static void write_config(void) {
     char d1[300], d2[300], d3[350], d4[400], path[450];
@@ -1061,7 +1060,7 @@ static void test_interactive_show_search_then_unread_keys(void) {
     ASSERT_SCREEN_NOT_CONTAINS(s, "Marked as");
     pty_send_str(s, "+");
     ASSERT_WAIT_FOR(s, "Marked as read", WAIT_MS);
-    pty_send_str(s, "-");
+    pty_send_str(s, "+");
     ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
@@ -1558,7 +1557,7 @@ static void test_show_attachment_statusbar(void) {
     ASSERT(s != NULL, "att statusbar: opens");
 
     ASSERT_SCREEN_CONTAINS(s, "a save(2)");
-    /* saving all of them is in the ':' menu, not on a key */
+    /* saving all of them is in the '-' menu, not on a key */
     ASSERT_SCREEN_NOT_CONTAINS(s, "A save-all");
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -2532,8 +2531,8 @@ static void test_tui_list_bulk_cursor_row(void) {
     ASSERT(s != NULL, "bulk cursor: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    menu_pick(s, MENU_IMAP_UNREAD);
-    ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
+    menu_pick(s, MENU_IMAP_READ);                      /* the mock's message is unread */
+    ASSERT_WAIT_FOR(s, "Marked as read", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -2546,7 +2545,7 @@ static void test_tui_list_bulk_cancel(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, " ");
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
@@ -2597,7 +2596,7 @@ static void test_keys_registry_routine(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "+");
     ASSERT_WAIT_FOR(s, "Marked as read", WAIT_MS);
-    pty_send_str(s, "-");
+    pty_send_str(s, "+");
     ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
     pty_send_str(s, "!");
     ASSERT_WAIT_FOR(s, "Marked as junk", WAIT_MS);
@@ -2723,12 +2722,11 @@ static void test_keys_action_menu(void) {
     ASSERT(s != NULL, "action menu: opens");
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Star");
-    ASSERT_SCREEN_CONTAINS(s, "Mark read");
-    ASSERT_SCREEN_CONTAINS(s, "Mark unread");
+    ASSERT_SCREEN_CONTAINS(s, "Read / unread");
     ASSERT_SCREEN_CONTAINS(s, "Junk");
     ASSERT_SCREEN_CONTAINS(s, "Delete");
     ASSERT_SCREEN_CONTAINS(s, "Start a sync");
@@ -2789,11 +2787,11 @@ static void test_folder_menu_lists_actions(void) {
     PtySession *s = open_folder_browser("folder menu: opens");
     if (!s) return;
     int sb = find_row(s, "step");
-    ASSERT(sb >= 0 && pty_row_contains(s, sb, ": actions"), "folder menu: the hint bar names the menu");
+    ASSERT(sb >= 0 && pty_row_contains(s, sb, "- actions"), "folder menu: the hint bar names the menu");
     pty_send_str(s, "d");                          /* no direct delete key */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Delete the folder");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Create a folder...");
@@ -3622,7 +3620,7 @@ static void test_lk_empty_folder(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "0 of 0 message(s)");
     ASSERT_SCREEN_NOT_CONTAINS(s, "From:");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
@@ -3865,8 +3863,35 @@ static void test_rk_search(void) {
     lk_env(0);
 }
 
-/* * + - ! act at once and say so; a second press undoes; v shows the source
- * and back; ? opens the help, only Esc/q close it; : opens the menu, Esc
+/* EMAIL-287: ':' is reserved for a command line this program does not have:
+ * in the list and in the reader it opens no menu and changes nothing. */
+static void test_colon_is_unbound(void) {
+    restart_mock();
+    PtySession *s = tui_open_to_list();
+    ASSERT(s != NULL, "colon list: opens");
+    if (!s) return;
+    ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, ":");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Actions");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Marked as");
+    ASSERT_SCREEN_CONTAINS(s, "message(s) in");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+
+    s = rk_open(0);
+    ASSERT(s != NULL, "colon reader: opens");
+    if (!s) return;
+    pty_send_str(s, ":");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Actions");
+    ASSERT_SCREEN_CONTAINS(s, "From:");
+    rk_end(s);
+}
+
+/* * + ! act at once and say so; a second press undoes; v shows the source
+ * and back; ? opens the help, only Esc/q close it; - opens the menu, Esc
  * closes it. */
 static void test_rk_state_keys(void) {
     PtySession *s = rk_open(0);
@@ -3876,13 +3901,13 @@ static void test_rk_state_keys(void) {
     ASSERT_WAIT_FOR(s, "Starred", WAIT_MS);
     pty_send_str(s, "*");
     ASSERT_WAIT_FOR(s, "Unstarred", WAIT_MS);
-    pty_send_str(s, "-");                              /* the mock's message is unread */
-    ASSERT_WAIT_FOR(s, "Already unread", WAIT_MS);
+    pty_send_str(s, "+");                              /* the mock's message is unread */
+    ASSERT_WAIT_FOR(s, "Marked as read", WAIT_MS);
+    pty_send_str(s, "+");
+    ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
     pty_send_str(s, "+");
     ASSERT_WAIT_FOR(s, "Marked as read", WAIT_MS);
     pty_send_str(s, "+");
-    ASSERT_WAIT_FOR(s, "Already read", WAIT_MS);
-    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
     pty_send_str(s, "!");
     ASSERT_WAIT_FOR(s, "Marked as junk", WAIT_MS);
@@ -3892,7 +3917,7 @@ static void test_rk_state_keys(void) {
     ASSERT_WAIT_FOR(s, "Content-Type", WAIT_MS);
     pty_send_str(s, "v");
     ASSERT_WAIT_FOR(s, "Hello from Mock Server", WAIT_MS);
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
@@ -4221,7 +4246,7 @@ static void test_fk_tree_open_close(void) {
     ASSERT_WAIT_FOR(s, "Folder INBOX.Projects deleted", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "- INBOX");
     /* the menu names the new actions, the help the new keys */
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Open all folders", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Close all folders");
     pty_send_key(s, PTY_KEY_ESC);
@@ -4473,7 +4498,7 @@ static void test_fk_zero_folders(void) {
     PtySession *s = fk_open_wait("No folders in this account");
     ASSERT(s != NULL, "folders zero: the browser opens and says so");
     if (!s) { fk_env(-1); return; }
-    ASSERT_SCREEN_CONTAINS(s, "Create one in the : menu");
+    ASSERT_SCREEN_CONTAINS(s, "Create one in the - menu");
     ASSERT_SCREEN_NOT_CONTAINS(s, "Connection failed");
     ASSERT_SCREEN_CONTAINS(s, "Folders \xe2\x80\x94 testuser  (8)");
     ASSERT_ROW_CONTAINS(s, 23, "[2/8]");
@@ -4489,7 +4514,7 @@ static void test_fk_zero_folders(void) {
     ASSERT_WAIT_FOR(s, "message(s) in Unread", WAIT_MS);
     pty_send_str(s, "q");
     ASSERT_WAIT_FOR(s, "No folders in this account", WAIT_MS);
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Create a folder", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);                      /* closes the menu */
     pty_settle(s, SETTLE_MS);
@@ -4570,7 +4595,7 @@ static void test_fk_help(void) {
     fk_end(s);
 }
 
-/* ---- EMAIL-225: every entry of every ':' menu has a quick key ---------- */
+/* ---- EMAIL-225: every entry of every '-' menu has a quick key ---------- */
 
 /* The IMAP list menu: nine rows, each with a unique letter; the letter of a
  * routine entry (Star) performs it; the serious ones (Delete, Start a sync)
@@ -4582,10 +4607,10 @@ static void test_menu_keys_list_imap(void) {
     if (!s) { lk_env(0); return; }
     MenuRow rows[MENU_MAX_ROWS];
     int n = 0;
-    const char *want[] = { "Star", "Mark read", "Mark unread", "Junk", "Delete",
+    const char *want[] = { "Star", "Read / unread", "Junk", "Delete",
                            "Start a sync", "Move to", "Toggle Done" };
-    ASSERT_MENU_LETTERS(s, 24, rows, n, want, 8, "list menu");
-    ASSERT(n == 9, "list menu: nine rows");
+    ASSERT_MENU_LETTERS(s, 24, rows, n, want, 7, "list menu");
+    ASSERT(n == 8, "list menu: eight rows");
     char star = menu_letter(rows, n, "Star");
     char del = menu_letter(rows, n, "Delete");
     char sync = menu_letter(rows, n, "Start a sync");
@@ -4593,7 +4618,7 @@ static void test_menu_keys_list_imap(void) {
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
     /* routine: the letter performs it */
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     char k[2] = { star, 0 };
     pty_send_str(s, k);
@@ -4602,7 +4627,7 @@ static void test_menu_keys_list_imap(void) {
     /* serious: Delete names the message, Enter and Esc are No, y performs */
     PtyKey no[] = { PTY_KEY_ENTER, PTY_KEY_ESC };
     for (int i = 0; i < 2; i++) {
-        pty_send_str(s, ":");
+        pty_send_str(s, "-");
         ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
         k[0] = del;
         pty_send_str(s, k);
@@ -4614,7 +4639,7 @@ static void test_menu_keys_list_imap(void) {
         ASSERT_SCREEN_NOT_CONTAINS(s, "Moved to Trash");
         ASSERT_SCREEN_CONTAINS(s, "of 30 message(s)");
     }
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     k[0] = del;
     pty_send_str(s, k);
@@ -4623,7 +4648,7 @@ static void test_menu_keys_list_imap(void) {
     ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     /* serious: the sync */
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     k[0] = sync;
     pty_send_str(s, k);
@@ -4632,7 +4657,7 @@ static void test_menu_keys_list_imap(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Start a background sync");
     ASSERT_SCREEN_NOT_CONTAINS(s, "syncing");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     k[0] = sync;
     pty_send_str(s, k);
@@ -4666,7 +4691,7 @@ static void test_menu_keys_folders(void) {
     }
     ASSERT(er >= 0 && pty_row_contains(s, er, ">"), "menu keys folders: the cursor is on Empty");
     char k[2] = { create, 0 };
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_str(s, k);
     ASSERT_WAIT_FOR(s, "New folder name:", WAIT_MS);
@@ -4674,7 +4699,7 @@ static void test_menu_keys_folders(void) {
     pty_settle(s, SETTLE_MS);
     /* serious: names the folder, Enter is No, y deletes */
     k[0] = del;
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_str(s, k);
     ASSERT_WAIT_FOR(s, "Delete the folder INBOX.Empty on the server?", WAIT_MS);
@@ -4682,7 +4707,7 @@ static void test_menu_keys_folders(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "on the server?");
     ASSERT_SCREEN_NOT_CONTAINS(s, "deleted");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_str(s, k);
     ASSERT_WAIT_FOR(s, "Delete the folder INBOX.Empty on the server?", WAIT_MS);
@@ -4690,12 +4715,12 @@ static void test_menu_keys_folders(void) {
     ASSERT_WAIT_FOR(s, "Folder INBOX.Empty deleted", WAIT_MS);
     /* routine: close all, open all */
     k[0] = close;
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_str(s, k);
     ASSERT_WAIT_FOR(s, "+ INBOX", WAIT_MS);
     k[0] = open;
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_str(s, k);
     ASSERT_WAIT_FOR(s, "- INBOX", WAIT_MS);
@@ -4711,7 +4736,7 @@ static void test_menu_keys_reader(void) {
     MenuRow rows[MENU_MAX_ROWS];
     int n = 0;
     const char *want[] = { "Delete", "Toggle Done" };
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, 300);
     n = menu_read(s, rows, 24);
@@ -4723,7 +4748,7 @@ static void test_menu_keys_reader(void) {
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
     char k[2] = { del, 0 };
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_str(s, k);
     ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
@@ -4732,7 +4757,7 @@ static void test_menu_keys_reader(void) {
     ASSERT_SCREEN_NOT_CONTAINS(s, "to Trash");
     ASSERT_SCREEN_CONTAINS(s, "From:");
     pty_settle(s, SETTLE_MS);
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_str(s, k);
     ASSERT_WAIT_FOR(s, "to Trash", WAIT_MS);
@@ -4756,14 +4781,14 @@ static void test_menu_keys_help(void) {
     rk_end(s);
 }
 
-/* The ':' menu lists the view switch with its key, the creation and the
+/* The '-' menu lists the view switch with its key, the creation and the
  * deletion; Esc closes it. */
 static void test_fk_menu(void) {
     fk_env(-1);
     PtySession *s = fk_open();
     ASSERT(s != NULL, "folders menu: opens");
     if (!s) return;
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
     ASSERT_SCREEN_CONTAINS(s, "Create a folder");
@@ -4784,7 +4809,7 @@ static void test_fk_unbound_keys(void) {
     char before[4096], after[4096];
     pty_screen_text(s, before, sizeof before);
     const char *dead[] = { "n", "f", "s", "m", "D", "u", "v", "a", "A", "d", "r", "x", "Z",
-                           "1", "2", " ", "*", "+", "-", "!", "U", "N", NULL };
+                           "1", "2", " ", "*", "+", ":", "!", "U", "N", NULL };
     for (int i = 0; dead[i]; i++) pty_send_str(s, dead[i]);
     pty_send_key(s, PTY_KEY_TAB);
     pty_send_key(s, PTY_KEY_DELETE);
@@ -5197,7 +5222,7 @@ static void test_tui_folder_cursor_persisted(void) {
 }
 
 static void test_tui_accounts_colon_on_imap_account(void) {
-    /* EMAIL-130: the ':' menu of the accounts screen holds the renewal of a
+    /* EMAIL-130: the '-' menu of the accounts screen holds the renewal of a
      * Gmail authorization; an IMAP account has none, and says so. */
     restart_mock();
     const char *args[] = {g_tui_bin, NULL};
@@ -5207,7 +5232,7 @@ static void test_tui_accounts_colon_on_imap_account(void) {
     ASSERT_WAIT_FOR(s, "Email Accounts", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "actions");        /* no hint on an IMAP account */
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "No actions for an IMAP account", WAIT_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Renew the authorization");
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
@@ -8093,17 +8118,17 @@ static void test_bk_prompt_one_item(void) {
     pty_send_str(s, " ");
     ASSERT_WAIT_FOR(s, "[1 marked]", WAIT_MS);
     pty_send_str(s, "d");
-    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Trash?", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Test Message");
     ASSERT_SCREEN_NOT_CONTAINS(s, "marked messages");
     pty_send_str(s, "m");
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "to Trash?");
+    ASSERT_SCREEN_CONTAINS(s, "Trash?");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Not deleted", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "[1 marked]");
     pty_send_str(s, "d");
-    ASSERT_WAIT_FOR(s, "to Trash?", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Trash?", WAIT_MS);
     pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
     pty_send_key(s, PTY_KEY_CTRL_C);
@@ -8412,6 +8437,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_rk_short_message);
     RUN_TEST(test_rk_search);
     RUN_TEST(test_rk_state_keys);
+    RUN_TEST(test_colon_is_unbound);
     RUN_TEST(test_rk_delete);
     RUN_TEST(test_rk_reply_forward);
     RUN_TEST(test_rk_attachments);

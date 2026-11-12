@@ -38,8 +38,9 @@ void test_key_table(void) {
     const char *lists[] = { EKV_LIST_IMAP, EKV_LIST_GMAIL, EKV_READ_IMAP, EKV_READ_GMAIL };
     for (int i = 0; i < 4; i++) {
         ASSERT(find(lists[i], '*') == EA_STAR, "key table: * stars");
-        ASSERT(find(lists[i], '+') == EA_READ, "key table: + marks read");
-        ASSERT(find(lists[i], '-') == EA_UNREAD, "key table: - marks unread");
+        ASSERT(find(lists[i], '+') == EA_READ, "key table: + toggles read / unread");
+        ASSERT(find(lists[i], '-') == EA_NONE, "key table: - is the menu key, no action");
+        ASSERT(find(lists[i], ':') == EA_NONE, "key table: : is unbound");
         ASSERT(find(lists[i], '!') == EA_JUNK, "key table: ! toggles junk");
         ASSERT(find(lists[i], 'd') == EA_DELETE, "key table: d deletes");
         ASSERT(ekeys_find(lists[i], TERM_KEY_DELETE, 0) == EA_DELETE,
@@ -53,7 +54,7 @@ void test_key_table(void) {
             ASSERT(find(lists[i], *c) == EA_NONE, "key table: an old state-changing letter is unbound");
 
     /* EMAIL-156: no key stands for "save all" or for a second label removal;
-     * both are in the ':' menu, in IMAP and Gmail readers alike */
+     * both are in the '-' menu, in IMAP and Gmail readers alike */
     ASSERT(find(EKV_READ_IMAP, 'A') == EA_NONE, "key table: A is no key in the IMAP reader");
     ASSERT(find(EKV_READ_GMAIL, 'A') == EA_NONE, "key table: A is no key in the Gmail reader");
     ASSERT(find(EKV_READ_GMAIL, 'r') == EA_NONE, "key table: r removes no label in the Gmail reader");
@@ -140,7 +141,7 @@ void test_key_table(void) {
     ASSERT(!ekeys_help_has(EKV_FOLDERS, 'd'), "key table: help lists no key that does nothing");
 }
 
-/* EMAIL-225: every entry of every ':' menu has a unique quick key, and
+/* EMAIL-225: every entry of every '-' menu has a unique quick key, and
  * docs/spec/tui-keys.md lists each of them with its letter and class. */
 static char g_doc[200000];
 

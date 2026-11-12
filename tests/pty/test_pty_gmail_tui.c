@@ -77,14 +77,14 @@ static int feedback_has(PtySession *s, const char *t) {
 
 /* The keys of the keyboard policy (EMAIL-175): the registry keys act at once
  * ('*' star, '+' read, '-' unread), 'd' asks before it deletes, and the rest
- * of the actions that change state are in the ':' menu.  The rows of the
+ * of the actions that change state are in the '-' menu.  The rows of the
  * Gmail message list menu, in table order (libemail/src/core/key_table.c). */
-#define GM_MENU_ARCHIVE   9
-#define GM_MENU_RESTORE   10
-#define GM_MENU_RM_LABEL  10
+#define GM_MENU_ARCHIVE   8
+#define GM_MENU_RESTORE   9
+#define GM_MENU_RM_LABEL  9
 
 static void gm_menu_pick(PtySession *s, int row) {
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     pty_wait_for(s, "Actions", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     for (int i = 0; i < row; i++) pty_send_key(s, PTY_KEY_DOWN);
@@ -796,7 +796,7 @@ static void drop_label_indexes(void) {
     closedir(dp);
 }
 
-/** EMAIL-162: with no user labels the ':' menu still creates the first one
+/** EMAIL-162: with no user labels the '-' menu still creates the first one
  *  (the browser always lists the system labels, so it is never empty). */
 static void test_label_browser_empty_can_create(void) {
     int posts_before = mock_log_count("POST /gmail/v1/users/me/labels");
@@ -1004,7 +1004,7 @@ static void test_trash_statusbar_restore_hint(void) {
     /* The status bar (last row) points at the action menu, where the restore
      * is (EMAIL-175: no direct key writes to the server but the registry's).
      * An empty Trash has nothing to delete, so no "d del" hint (EMAIL-188). */
-    ASSERT_SCREEN_CONTAINS(s, ": actions");
+    ASSERT_SCREEN_CONTAINS(s, "- actions");
     ASSERT_SCREEN_NOT_CONTAINS(s, "d del");
     ASSERT_SCREEN_NOT_CONTAINS(s, "u restore");
 
@@ -1389,7 +1389,7 @@ static void test_a_in_archive_no_strikethrough(void) {
 
         /* The message is archived already: the menu does not offer Archive
          * (EMAIL-206), so there is nothing to press and no marker appears. */
-        pty_send_str(s, ":");
+        pty_send_str(s, "-");
         pty_wait_for(s, "Actions", WAIT_MS);
         pty_settle(s, SETTLE_MS);
         ASSERT_SCREEN_NOT_CONTAINS(s, "Archive - remove every label");
@@ -1809,7 +1809,7 @@ static void test_feedback_a_noop(void) {
         navigate_labels_to_archive(s);
         pty_wait_for(s, GMAIL_TOP_MSG, WAIT_MS);
         pty_settle(s, SETTLE_MS);
-        pty_send_str(s, ":");
+        pty_send_str(s, "-");
         pty_wait_for(s, "Actions", WAIT_MS);
         pty_settle(s, SETTLE_MS);
         ASSERT_SCREEN_NOT_CONTAINS(s, "Archive - remove every label");   /* EMAIL-206 */
@@ -2284,7 +2284,7 @@ static void test_keys_gmail_menu(void) {
     if (!s) return;
     ASSERT(pty_run(s, args) == 0, "menu: pty_run");
     ASSERT(navigate_to_inbox(s) == 0, "menu: navigate_to_inbox");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Archive");
@@ -2465,7 +2465,7 @@ static void test_reauth_menu_offers_the_renewal(void) {
     ASSERT(s != NULL, "reauth: accounts screen");
     if (!s) return;
     ASSERT_SCREEN_CONTAINS(s, "actions");               /* the hint names the menu */
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Actions");
     pty_send_key(s, PTY_KEY_ESC);                       /* closing it changes nothing */
@@ -2485,7 +2485,7 @@ static void test_reauth_paste_renews_the_token(void) {
     PtySession *s = open_accounts();
     ASSERT(s != NULL, "reauth paste: accounts screen");
     if (!s) return;
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "The saved token is replaced", WAIT_MS);   /* EMAIL-225: it asks first */
@@ -2510,7 +2510,7 @@ static void test_reauth_refused_code_changes_nothing(void) {
     PtySession *s = open_accounts();
     ASSERT(s != NULL, "reauth refused: accounts screen");
     if (!s) return;
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "The saved token is replaced", WAIT_MS);   /* EMAIL-225: it asks first */
@@ -2535,7 +2535,7 @@ static void test_reauth_wait_is_announced_and_cancellable(void) {
     PtySession *s = open_accounts();
     ASSERT(s != NULL, "reauth wait: accounts screen");
     if (!s) return;
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "The saved token is replaced", WAIT_MS);   /* EMAIL-225: it asks first */
@@ -2567,7 +2567,7 @@ static void test_reauth_choice_can_be_left(void) {
     PtySession *s = open_accounts();
     ASSERT(s != NULL, "reauth esc: accounts screen");
     if (!s) return;
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Renew the authorization", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "The saved token is replaced", WAIT_MS);   /* EMAIL-225: it asks first */
@@ -2583,13 +2583,13 @@ static void test_reauth_choice_can_be_left(void) {
 
 
 /* ══════════════════════════════════════════════════════════════════════
- *  EMAIL-225: every entry of every ':' menu has a quick key
+ *  EMAIL-225: every entry of every '-' menu has a quick key
  * ══════════════════════════════════════════════════════════════════════ */
 
 /* Presses ':' and then the quick key @p letter. */
 static void gm_menu_letter(PtySession *s, char letter) {
     char k[2] = { letter, 0 };
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     pty_wait_for(s, "Actions", WAIT_MS);
     pty_settle(s, 300);
     pty_send_str(s, k);
@@ -2608,7 +2608,7 @@ static void test_menu_keys_gmail_list(void) {
     ASSERT(navigate_to_inbox(s) == 0, "menu keys gmail list: navigate_to_inbox");
     MenuRow rows[MENU_MAX_ROWS];
     int n = 0;
-    const char *want[] = { "Star", "Mark read", "Junk", "Delete", "Start a sync", "Labels",
+    const char *want[] = { "Star", "Read / unread", "Junk", "Delete", "Start a sync", "Labels",
                            "Archive", "Remove this label", "Add a label", "Remove a label" };
     ASSERT_MENU_LETTERS(s, ROWS, rows, n, want, 10, "gmail list menu");
     char del = menu_letter(rows, n, "Delete");
@@ -2866,9 +2866,9 @@ static void gk_quit(PtySession *s) {
     pty_close(s);
 }
 
-/** Opens the ':' menu and returns 1 when it lists @p name. */
+/** Opens the '-' menu and returns 1 when it lists @p name. */
 static int gk_menu_lists(PtySession *s, const char *name) {
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     if (pty_wait_for(s, "Actions", WAIT_MS) != 0) return 0;
     pty_settle(s, 300);
     return pty_screen_contains(s, name);
@@ -3142,7 +3142,7 @@ static void test_gk_delete(void) {
     gk_quit(s);
 }
 
-/* * + - ! act at once on the cursor row, the status column and the feedback
+/* * + ! act at once on the cursor row, the status column and the feedback
  * follow, and the second press undoes the first. */
 static void test_gk_registry_keys(void) {
     ASSERT(gk_mock(45) == 0, "gmail list registry: mock");
@@ -3161,10 +3161,10 @@ static void test_gk_registry_keys(void) {
     ASSERT_WAIT_FOR(s, "Marked as read", WAIT_MS);
     ASSERT(strstr(gk_cursor_row(s, row, sizeof row), " ------ ") != NULL,
            "gmail list registry: + clears the unread letter");
-    pty_send_str(s, "-");
+    pty_send_str(s, "+");
     ASSERT_WAIT_FOR(s, "Marked as unread", WAIT_MS);
     ASSERT(strstr(gk_cursor_row(s, row, sizeof row), " N----- ") != NULL,
-           "gmail list registry: - sets the unread letter");
+           "gmail list registry: + toggles back to unread");
     pty_send_str(s, "!");
     ASSERT_WAIT_FOR(s, "Marked as junk", WAIT_MS);
     ASSERT(strstr(gk_cursor_row(s, row, sizeof row), " J----- ") != NULL,
@@ -3252,7 +3252,7 @@ static void test_gk_t_picker(void) {
     gk_quit(s);
 }
 
-/* The ':' menu lists what applies in the view and no more (EMAIL-206). */
+/* The '-' menu lists what applies in the view and no more (EMAIL-206). */
 static void test_gk_menu_by_view(void) {
     ASSERT(gk_mock(45) == 0, "gmail list menu: mock");
     PtySession *s = gk_open("inbox");
@@ -3295,7 +3295,7 @@ static void test_gk_menu_by_view(void) {
     ASSERT_WAIT_FOR(s, "Moved to Trash", WAIT_MS);
     pty_send_str(s, "j");
     ASSERT(gk_menu_lists(s, "Archive"), "gmail list menu: Inbox lists Archive");
-    for (int i = 0; i < 9; i++) pty_send_key(s, PTY_KEY_DOWN);
+    for (int i = 0; i < 8; i++) pty_send_key(s, PTY_KEY_DOWN);
     pty_send_key(s, PTY_KEY_ENTER);                     /* Archive */
     ASSERT_WAIT_FOR(s, "Archived", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
@@ -3352,9 +3352,9 @@ static void test_gk_trash_view(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "for good?");
     ASSERT_SCREEN_CONTAINS(s, "Not deleted");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Restore from Trash", WAIT_MS);
-    for (int i = 0; i < 10; i++) pty_send_key(s, PTY_KEY_DOWN);
+    for (int i = 0; i < 9; i++) pty_send_key(s, PTY_KEY_DOWN);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Restored to Inbox", WAIT_MS);
     ASSERT(pty_cell_text(s, 4, 1)[0] == 'u', "gmail trash: the restored row is marked u");
@@ -3370,15 +3370,15 @@ static void test_gk_label_and_archive_views(void) {
     if (!s) return;
     ASSERT_SCREEN_CONTAINS(s, "of 5 message(s) in Work");
     ASSERT_SCREEN_CONTAINS(s, "[1/5]");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Remove this label", WAIT_MS);
-    for (int i = 0; i < 10; i++) pty_send_key(s, PTY_KEY_DOWN);
+    for (int i = 0; i < 9; i++) pty_send_key(s, PTY_KEY_DOWN);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Label removed: Work", WAIT_MS);
     ASSERT(pty_cell_text(s, 4, 1)[0] == 'd', "gmail label view: the row is marked d");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Remove this label", WAIT_MS);
-    for (int i = 0; i < 10; i++) pty_send_key(s, PTY_KEY_DOWN);
+    for (int i = 0; i < 9; i++) pty_send_key(s, PTY_KEY_DOWN);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Undo: Work restored", WAIT_MS);
     gk_quit(s);
@@ -3411,7 +3411,7 @@ static void test_gk_empty_views(void) {
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Start a sync", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Restore from Trash");
     gk_menu_close(s);
@@ -3423,7 +3423,7 @@ static void test_gk_empty_views(void) {
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "in Archive", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "The Archive action of the : menu files a message here.");
+    ASSERT_SCREEN_CONTAINS(s, "The Archive action of the - menu files a message here.");
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "Labels", WAIT_MS);
     gk_quit(s);
@@ -3624,13 +3624,13 @@ static void test_lb_back_keys(void) {
 }
 
 /** Keys with no meaning in the browser change nothing and show nothing; the
- *  old letters c and d (create, delete) are in the ':' menu now. */
+ *  old letters c and d (create, delete) are in the '-' menu now. */
 static void test_lb_unbound_keys(void) {
     ASSERT(gk_mock(45) == 0, "label browser unbound: mock");
     PtySession *s = lb_open();
     ASSERT(s != NULL, "label browser unbound: opens");
     if (!s) return;
-    const char *keys[] = { " ", "c", "d", "t", "x", "n", "r", "e", "i", "D", "Z", "l", "a", "u", "1", "-", "U", NULL };
+    const char *keys[] = { " ", "c", "d", "t", "x", "n", "r", "e", "i", "D", "Z", "l", "a", "u", "1", ":", "U", NULL };
     for (int i = 0; keys[i]; i++) {
         pty_send_str(s, keys[i]);
         pty_settle(s, 250);
@@ -3662,7 +3662,7 @@ static void test_lb_help_and_status(void) {
     if (!s) return;
     ASSERT_ROW_CONTAINS(s, 23, "j/k select");
     ASSERT_ROW_CONTAINS(s, 23, "Enter open");
-    ASSERT_ROW_CONTAINS(s, 23, ": actions");
+    ASSERT_ROW_CONTAINS(s, 23, "- actions");
     ASSERT_ROW_CONTAINS(s, 23, "? help");
     ASSERT_ROW_CONTAINS(s, 23, "[9/14]");
     ASSERT_CELL_ATTR(s, 23, 2, PTY_ATTR_REVERSE);
@@ -3759,7 +3759,7 @@ static void test_lb_search(void) {
     pty_close(s);
 }
 
-/** ':' menu: create is always there, delete only on a label of the user's own
+/** '-' menu: create is always there, delete only on a label of the user's own
  *  (EMAIL-218); Esc, q and Backspace close the menu and the confirmation
  *  (EMAIL-210); the menu has a status line (EMAIL-213); the label-name prompt
  *  has its hints and ctrl-c quits (EMAIL-215, EMAIL-219). */
@@ -3770,7 +3770,7 @@ static void test_lb_menu(void) {
     ASSERT(s != NULL, "label browser menu: opens");
     if (!s) return;
     /* on a system label (Inbox) the menu creates only */
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "Create a label...");
@@ -3788,7 +3788,7 @@ static void test_lb_menu(void) {
         ASSERT_SCREEN_NOT_CONTAINS(s, "Actions");
         ASSERT_SCREEN_CONTAINS(s, "[9/14]");
         ASSERT_ROW_CONTAINS(s, 23, "Esc/q/BS accounts");
-        pty_send_str(s, ":");
+        pty_send_str(s, "-");
         ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
         pty_settle(s, 300);
     }
@@ -3797,7 +3797,7 @@ static void test_lb_menu(void) {
     /* on a label of the user's own: both entries, g and G move in the menu */
     pty_send_str(s, "k");
     ASSERT(pty_wait_for(s, "[7/14]", WAIT_MS) == 0, "label browser menu: k to Work");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "Create a label...");
@@ -3825,7 +3825,7 @@ static void test_lb_menu(void) {
         ASSERT_SCREEN_CONTAINS(s, "Work");
         ASSERT(lb_requests("DELETE ") == deletes, "label browser menu: nothing was deleted");
         if (i < 2) {
-            pty_send_str(s, ":");
+            pty_send_str(s, "-");
             ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
             pty_send_key(s, PTY_KEY_END);
             pty_send_key(s, PTY_KEY_ENTER);
@@ -3833,7 +3833,7 @@ static void test_lb_menu(void) {
         }
     }
     /* the label-name prompt: its own hints; Esc cancels; ctrl-c quits */
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);                     /* Create a label... */
     ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
@@ -3844,7 +3844,7 @@ static void test_lb_menu(void) {
     ASSERT_WAIT_FOR(s, "New label name: q", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "Esc/q/BS accounts", WAIT_MS);
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
@@ -3856,7 +3856,7 @@ static void test_lb_menu(void) {
     s = lb_open();
     ASSERT(s != NULL, "label browser menu: opens again");
     if (!s) return;
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_key(s, PTY_KEY_CTRL_C);
     ASSERT(pty_wait_exit(s, 5000) == 0, "label browser menu: ctrl-c in the menu quits");
@@ -3866,7 +3866,7 @@ static void test_lb_menu(void) {
     if (!s) return;
     pty_send_str(s, "k");
     pty_wait_for(s, "[7/14]", WAIT_MS);
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_key(s, PTY_KEY_END);
     pty_send_key(s, PTY_KEY_ENTER);
@@ -3892,7 +3892,7 @@ static void test_lb_no_user_labels(void) {
     ASSERT(gk_char(s, "j", "[5/10]"), "label browser empty: j skips the Folders heading");
     ASSERT(gk_char(s, "G", "[10/10]"), "label browser empty: G");
     ASSERT(gk_char(s, "g", "[2/10]"), "label browser empty: g");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, 300);
     ASSERT_SCREEN_CONTAINS(s, "Create a label...");

@@ -28,7 +28,7 @@ is the end of the text of its row.
 | Delete asked (`account_delete_ask`) | `d` on accounts | information line `Delete account NAME? (y/N)`, the list unchanged | y, any other key |
 | Account deleted (`account_delete`) | `d`, `y` on accounts | "No accounts configured." | n |
 | Wizard type (`wizard_type`) | `n` on accounts | plain prompt: account type menu, `Choice [1]:` | 1, 2 |
-| Folder browser (`folders`, `folders_flat`) | Enter on an account | header bar with count; heads Unread, Flagged, Folder, Total; "Tags / Flags" section (dim, 6 virtual rows) and "Folders" tree (closed on opening; `+ ` closed, `- ` open, blank leaf; l/Right open, h/Left close); cursor row selected (dark blue, `>`); status bar with `[n/N]` | ↑↓ g G PgUp/PgDn Home End Enter t h l / : Esc q BS; `:` menu: create a folder (name asked), delete the folder (asks, No default), open all, close all |
+| Folder browser (`folders`, `folders_flat`) | Enter on an account | header bar with count; heads Unread, Flagged, Folder, Total; "Tags / Flags" section (dim, 6 virtual rows) and "Folders" tree (closed on opening; `+ ` closed, `- ` open, blank leaf; l/Right open, h/Left close); cursor row selected (dark blue, `>`); status bar with `[n/N]` | ↑↓ g G PgUp/PgDn Home End Enter t h l / : Esc q BS; `-` menu: create a folder (name asked), delete the folder (asks, No default), open all, close all |
 | Folder help (`folders_help`) | `?` | overlay (as the accounts help) | Esc q BS |
 | Folder search (`folders_search`) | `/` | filter prompt line | text, Enter, Esc |
 | Message list (`list`, `list_second_row`, `list_narrow`) | Enter on INBOX | header bar "1-3 of 3 message(s) in INBOX (3 unread) [account]."; heads Date, Sts, Subject, From; ruler; rows with status column (`N` green = unread); status bar; marked rows carry `*` and the header adds `[N marked]` (US-86) | ↑↓ jk g G PgUp/PgDn Home End Enter c r F A U l * + - ! d t Space x / : ? h Left Esc q BS |
@@ -51,7 +51,7 @@ is the end of the text of its row.
 | Gmail label picker (`gmail_picker`, `gmail_picker_second`, `gmail_picker_toggled`, `gmail_picker_done`) | `t` on a Gmail message | libtuikit checklist "Toggle Labels" as an overlay (EMAIL-110): rows `[x]`/`[ ]` per label; Space ticks, Enter applies what was ticked, Esc leaves everything as it was; the feedback line names the change (`Label removed: INBOX`); its own status line `j/k select  Space tick  Enter apply  Esc/q/BS cancel`; the labels sorted by name | ↑↓ g G Space Enter Esc q Backspace (EMAIL-145) |
 | Reader with attachments (`att_reader`) | Enter on the multipart message | the reader plus `Attach:  2 files: notes.txt, data.bin` and `a save(2)` in the status line; the rendered HTML body keeps its bold/italic/underline/strike/colour |  a A |
 | Attachment picker (`att_picker`, `att_picker_second`) | `a` in the reader | "Attachments (N):", one row per file (name, type, size), selected row dark blue with `>`; status line `↑↓ select  Enter choose  Esc/q/BS back  [n/N]`; the keys are in `tui-keys.md` | ↑↓ jk gG Home End PgUp PgDn Enter Esc q ? |
-| Save prompts and result (`att_save_prompt`, `att_saved`, `att_save_all`) | Enter in the picker, `:` menu | `Save as: <path>` (line editor, scrolls), `Saved: <path>`, `Save all to: <dir>`; the golden pictures compare these rows by their start only (paths differ per machine) | Enter Esc |
+| Save prompts and result (`att_save_prompt`, `att_saved`, `att_save_all`) | Enter in the picker, `-` menu | `Save as: <path>` (line editor, scrolls), `Saved: <path>`, `Save all to: <dir>`; the golden pictures compare these rows by their start only (paths differ per machine) | Enter Esc |
 | Review states (`review_full`, `review_long_to`, `review_attach_ask`, `review_attach_removed`, `review_send_failed`) | `s`, `a`, `d` in the review | Cc, Bcc and Attach rows when present (`Attach:  (none)` otherwise); a To, Cc or Bcc list that does not fit the width is broken between addresses (after the `;` or `,`), the continuation line indented to the value column, never inside an address (EMAIL-107; `w80_review_long_to`, `w140_review_long_to`); `Add Attachment` / `Path:` prompt; a send replaces the review with the send screen (EMAIL-227): `Send: Message` title bar, the lines `Sending...`, `Send failed. Saving to Drafts...`, `Saved to Drafts (will retry on next sync).` (or `Message sent.`, `Saved locally.`) drawn inside the screen from column 2, the last one in the status line, no raw output and no piece of the review or its dialog left | s e b a d q |
 | Address drop-down (`dd_many`, `dd_one`, `dd_second`, `dd_none`, `dd_wide`, `dd_accepted`) | typing 2+ characters in To/Cc/Bcc | up to five candidate rows under the field, each a `tui_table` row of address (cyan) and name, drawn as an overlay (EMAIL-110), `>` and the selection style on the chosen row; none when nothing matches; Down moves, Enter takes the address | text ↓ ↑ Enter ; Tab |
 | Path completion (`path_many`, `path_one`) | typing a path in Attach | the typed path scrolls in the field; candidate file names below as table rows (EMAIL-110); status line `Tab complete  Enter add  Enter (empty) ok  d remove last  Esc cancel` | Tab Enter d |
@@ -178,7 +178,7 @@ Policy: `policies/tui-interface-model.md`, "Actions that change state: the
 action menu".  The keys of the message list, the message reader, the Gmail
 label browser and the review screen are rows of one libtuikit key table
 (`libemail/src/core/key_table.c`).  The key handler asks the table
-(`ekeys_find`), the help overlay is made from it (`ekeys_help`) and `:` opens
+(`ekeys_find`), the help overlay is made from it (`ekeys_help`) and `-` opens
 the menu of the view (`ekeys_menu`); the table is validated when `email-tui`
 starts and the program refuses to start with a table that breaks the policy.
 
@@ -189,9 +189,9 @@ starts and the program refuses to start with a table that breaks the policy.
 | `!` | toggle junk | routine, at once |
 | `d`, `Delete` | move to Trash (for good in Trash) | serious: a dialog names sender and subject, default No |
 | `t` | Gmail label picker | routine |
-| `:` | the action menu | lists every state-changing action |
+| `-` | the action menu | lists every state-changing action |
 
-These act on the marked rows, or on the row under the cursor.  In the `:` menu
+These act on the marked rows, or on the row under the cursor.  In the `-` menu
 only: start a sync (a dialog names the account and folder), send (review
 screen; names the recipients), delete a label (names it), create a label,
 archive, restore from Trash, remove a label, add/remove a named label, move,

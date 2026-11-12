@@ -89,7 +89,7 @@ static const char *const exp_folders[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help         [2/9]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  - actions  t flat  Esc/q/BS back  ? help         [2/9]",
     NULL
 };
 static const char *const sty_folders[] = {
@@ -145,7 +145,7 @@ static const char *const exp_list[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [1/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [1/3]",
     NULL
 };
 static const char *const sty_list[] = {
@@ -200,7 +200,7 @@ static const char *const exp_reader[] = {
     "",
     "",
     "",
-    " j/k scroll  Esc/q/BS list  : actions  r reply  * star  +/- read  d del  / search  ? help     [1/1]",
+    " j/k scroll  Esc/q/BS list  - actions  r reply  * star  + read  d del  / search  ? help       [1/1]",
     NULL
 };
 static const char *const sty_reader[] = {
@@ -349,25 +349,25 @@ static const char *const exp_folders_help[] = {
     "  Un│ The folders of the IMAP account, as a tree or one level at a time. The cursor is on one │Total",
     "  ══│ folder; Enter opens its messages.                                                       │═════",
     "  Ta│                                                                                         │─────",
-    ">   │ j                  Down - move down (also Down)                                         │    -",
-    "    │ k                  Up - move up (also Up)                                               │    -",
-    "    │ PageDown           Page down                                                            │    -",
-    "    │ PageUp             Page up                                                              │    -",
-    "    │ Home               First row - also g                                                   │    -",
-    "    │ End                Last row - also G                                                    │    -",
-    "  Fo│ Enter              Open - the folder, or step into its subfolders                       │─────",
-    "    │ l                  Open branch - tree: open; flat view: as Enter (Right)                │",
-    "    │ h                  Close - tree: close, or go up; flat view: one level up               │",
-    "    │ /                  Search - cross-folder content search                                 │",
-    "    │ c                  Compose - a new message                                              │",
-    "    │ ?                  Help                                                                 │",
-    "    │ :                  Actions - the menu of everything that changes state                  │",
-    "    │ Esc, q, Backspace  Back - up one level; the accounts at the top (also Backspace)        │",
-    "    │ Esc                Back - up one level; the accounts at the top                         │",
-    "    │ :c                 Create a folder... - on the server, name asked for                   │",
-    "    │ :d                 Delete the folder - on the server                                    │",
+    ">   │ j                  Down - move down (also Down)                                        █│    -",
+    "    │ k                  Up - move up (also Up)                                              █│    -",
+    "    │ PageDown           Page down                                                           █│    -",
+    "    │ PageUp             Page up                                                             █│    -",
+    "    │ Home               First row - also g                                                  █│    -",
+    "    │ End                Last row - also G                                                   █│    -",
+    "  Fo│ Enter              Open - the folder, or step into its subfolders                      █│─────",
+    "    │ l                  Open branch - tree: open; flat view: as Enter (Right)               █│",
+    "    │ h                  Close - tree: close, or go up; flat view: one level up              █│",
+    "    │ /                  Search - cross-folder content search                                █│",
+    "    │ c                  Compose - a new message                                             █│",
+    "    │ ?                  Help                                                                █│",
+    "    │ -                  Actions - the menu of everything that changes state                 █│",
+    "    │ Esc, q, Backspace  Back - up one level; the accounts at the top (also Backspace)       █│",
+    "    │ Esc                Back - up one level; the accounts at the top                        ││",
+    "    │ :c                 Create a folder... - on the server, name asked for                  ││",
+    "    │ :d                 Delete the folder - on the server                                   ││",
     "    └─────────────────────────────────────────────────────────────────────────────────────────┘",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help         [2/9]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  - actions  t flat  Esc/q/BS back  ? help         [2/9]",
     NULL
 };
 static const char *const sty_folders_help[] = {
@@ -390,9 +390,9 @@ static const char *const sty_folders_help[] = {
     "    T b                                                                                       T     ",
     "    T b                                                                                       T     ",
     "    T bbbbbbbbbbbbbbbbb                                                                       T     ",
-    "    T bbb                                                                                     T     ",
-    "    T bb                                                                                      T     ",
-    "    T bb                                                                                      T     ",
+    "    T bbb                                                                                    dT     ",
+    "    T bb                                                                                     dT     ",
+    "    T bb                                                                                     dT     ",
     "    TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT     ",
     "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
@@ -405,23 +405,23 @@ static const char *const exp_list_help[] = {
     "  Date       │ The messages of one folder, newest first. The cursor is on one         │",
     "  ═══════════│ message. Enter reads it; space marks several to act on together.       │═════════════",
     "> 2020-01-03 │                                                                        │xample.com>",
-    "  2020-01-02 │ j                  Down - move the cursor down (also Down)             │xample.com>",
-    "  2020-01-01 │ k                  Up - move the cursor up (also Up)                   │xample.com>",
-    "             │ PageDown           Page down                                           │",
-    "             │ PageUp             Page up                                             │",
-    "             │ Home               First message - also g                              │",
-    "             │ End                Last message - also G                               │",
-    "             │ Enter              Open - read the message                             │",
-    "             │ /                  Filter - type to filter; Esc clears it              │",
-    "             │ Space              Mark - mark the message and step down               │",
-    "             │ x                  Clear marks                                         │",
-    "             │ c                  Compose - a new message                             │",
-    "             │ r                  Reply                                               │",
-    "             │ A                  Reply-all                                           │",
-    "             │ F                  Forward                                             │",
-    "             │ U                  Refresh - after a sync                              │",
-    "             │ l                  Rules - the rules editor                            │",
-    "             │ H                  History - recent changes, with Revert               │",
+    "  2020-01-02 │ j                  Down - move the cursor down (also Down)            █│xample.com>",
+    "  2020-01-01 │ k                  Up - move the cursor up (also Up)                  █│xample.com>",
+    "             │ PageDown           Page down                                          █│",
+    "             │ PageUp             Page up                                            █│",
+    "             │ Home               First message - also g                             █│",
+    "             │ End                Last message - also G                              █│",
+    "             │ Enter              Open - read the message                            █│",
+    "             │ /                  Filter - type to filter; Esc clears it             █│",
+    "             │ Space              Mark - mark the message and step down              █│",
+    "             │ x                  Clear marks                                        ││",
+    "             │ c                  Compose - a new message                            ││",
+    "             │ r                  Reply                                              ││",
+    "             │ A                  Reply-all                                          ││",
+    "             │ F                  Forward                                            ││",
+    "             │ U                  Refresh - after a sync                             ││",
+    "             │ l                  Rules - the rules editor                           ││",
+    "             │ H                  History - recent changes, with Revert              ││",
     "             └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -440,14 +440,14 @@ static const char *const sty_list_help[] = {
     "             T bbbbb                                                                  T             ",
     "             T b                                                                      T             ",
     "             T bbbbb                                                                  T             ",
-    "             T b                                                                      T             ",
-    "             T b                                                                      T             ",
-    "             T b                                                                      T             ",
-    "             T b                                                                      T             ",
-    "             T b                                                                      T             ",
-    "             T b                                                                      T             ",
-    "             T b                                                                      T             ",
-    "             T b                                                                      T             ",
+    "             T b                                                                     dT             ",
+    "             T b                                                                     dT             ",
+    "             T b                                                                     dT             ",
+    "             T b                                                                     dT             ",
+    "             T b                                                                     dT             ",
+    "             T b                                                                     dT             ",
+    "             T b                                                                     dT             ",
+    "             T b                                                                     dT             ",
     "             TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT             ",
     "                                                                                                    ",
     NULL
@@ -461,22 +461,22 @@ static const char *const exp_reader_help[] = {
     "UID:     0000│ reply to it; q goes back to the list.                                  │",
     "%File:    ",
     "%",
-    "DMARC:   Not │ k                  Up - scroll a line (also Up)                        │",
-    "─────────────│ PageDown           Page down                                           │",
-    "Body of messa│ PageUp             Page up                                             │",
-    "             │ Home               Top - also g                                        │",
-    "             │ End                Bottom - also G                                     │",
-    "             │ r                  Reply                                               │",
-    "             │ A                  Reply-all                                           │",
-    "             │ F                  Forward                                             │",
-    "             │ v                  Source - toggle rendered / raw source               │",
-    "             │ /                  Search - in the message body                        │",
-    "             │ N                  Previous match - n: next match                      │",
-    "             │ a                  Save attachment                                     │",
-    "             │ H                  History - of this message, with Revert              │",
-    "             │ *, :s              Star - toggle the star (flag)                       │",
-    "             │ +, :m              Mark read                                           │",
-    "             │ -, :u              Mark unread                                         │",
+    "DMARC:   Not │ k                  Up - scroll a line (also Up)                       █│",
+    "─────────────│ PageDown           Page down                                          █│",
+    "Body of messa│ PageUp             Page up                                            █│",
+    "             │ Home               Top - also g                                       █│",
+    "             │ End                Bottom - also G                                    █│",
+    "             │ r                  Reply                                              █│",
+    "             │ A                  Reply-all                                          █│",
+    "             │ F                  Forward                                            █│",
+    "             │ v                  Source - toggle rendered / raw source              █│",
+    "             │ /                  Search - in the message body                       █│",
+    "             │ N                  Previous match - n: next match                     ││",
+    "             │ a                  Save attachment                                    ││",
+    "             │ H                  History - of this message, with Revert             ││",
+    "             │ *, :s              Star - toggle the star (flag)                      ││",
+    "             │ +, :r              Read / unread - toggle read and unread             ││",
+    "             │ !, :u              Junk - toggle junk                                 ││",
     "             └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -497,12 +497,12 @@ static const char *const sty_reader_help[] = {
     "             T b                                                                      T             ",
     "             T b                                                                      T             ",
     "             T b                                                                      T             ",
-    "             T b                                                                      T             ",
-    "             T b                                                                      T             ",
-    "             T b                                                                      T             ",
-    "             T bbbbb                                                                  T             ",
-    "             T bbbbb                                                                  T             ",
-    "             T bbbbb                                                                  T             ",
+    "             T b                                                                     dT             ",
+    "             T b                                                                     dT             ",
+    "             T b                                                                     dT             ",
+    "             T bbbbb                                                                 dT             ",
+    "             T bbbbb                                                                 dT             ",
+    "             T bbbbb                                                                 dT             ",
     "             TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT             ",
     "                                                                                                    ",
     NULL
@@ -533,7 +533,7 @@ static const char *const exp_list_search[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [1/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [1/3]",
     NULL
 };
 static const char *const sty_list_search[] = {
@@ -649,7 +649,7 @@ static const char *const exp_account_delete[] = {
     NULL
 };
 static const char *const sty_account_delete[] = {
-    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -701,7 +701,7 @@ static const char *const exp_list_second_row[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [2/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [2/3]",
     NULL
 };
 static const char *const sty_list_second_row[] = {
@@ -757,7 +757,7 @@ static const char *const exp_list_narrow[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  d trash  ? help       [1/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  d trash  ? help       [1/3]",
     NULL
 };
 static const char *const sty_list_narrow[] = {
@@ -813,7 +813,7 @@ static const char *const exp_list_empty[] = {
     "",
     "",
     "",
-    " Esc/q/BS folders  : actions  c compose  U refresh  l rules  ? help",
+    " Esc/q/BS folders  - actions  c compose  U refresh  l rules  ? help",
     NULL
 };
 static const char *const sty_list_empty[] = {
@@ -869,7 +869,7 @@ static const char *const exp_folders_flat[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t tree  Esc/q/BS back  ? help         [9/9]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  - actions  t tree  Esc/q/BS back  ? help         [9/9]",
     NULL
 };
 static const char *const sty_folders_flat[] = {
@@ -980,7 +980,7 @@ static const char *const exp_reader_source[] = {
     "",
     "",
     "",
-    " j/k scroll  Esc/q/BS list  : actions  r reply  * star  +/- read  d del  / search  ? help     [1/1]",
+    " j/k scroll  Esc/q/BS list  - actions  r reply  * star  + read  d del  / search  ? help       [1/1]",
     NULL
 };
 static const char *const sty_reader_source[] = {
@@ -1259,7 +1259,7 @@ static const char *const exp_w80_review_long_to[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " - actions (send)  e edit headers  b edit body  a add attachment  q discard",
     NULL
 };
 static const char *const sty_w80_review_long_to[] = {
@@ -1314,7 +1314,7 @@ static const char *const exp_w140_review_long_to[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " - actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_w140_review_long_to[] = {
@@ -1521,17 +1521,24 @@ static const char *const exp_list_sync_ask[] = {
     "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
     "> 2020-01-03 12:00 N----- Message 3                                 Sender 3 <sender3@example.com>",
     "  2020-01-02 12:00 N----- Message 2                                 Sender 2 <sender2@example.com>",
-    "  2020-01-01 12:00 N-┌─ Actions ──────────────────────────────────────────────┐ender1@example.com>",
+    "  2020-01-01 12:00 N----- Message 1                                 Sender 1 <sender1@example.com>",
+    "                     ┌─ Actions ──────────────────────────────────────────────┐",
     "                     │   s  *       Star - toggle the star (flag)             │",
-    "                     │   r  +       Mark read                                 │",
-    "                     │   u┌─ Start a sync ───────────────────────────────┐    │",
-    "                     │   n│ Start a background sync of INBOX (testuser)? │    │",
+    "                     │   r┌─ Start a sync ───────────────────────────────┐    │",
+    "                     │   u│ Start a background sync of INBOX (testuser)? │    │",
     "                     │   d│                                              │    │",
     "                     │   e│               [ Yes ]  [ No ]                │    │",
     "                     │ > b└──────────────────────────────────────────────┘    │",
     "                     │   m          Move to... - a folder or label, asked for │",
     "                     │   t          Toggle Done - the $Done flag              │",
     "                     └────────────────────────────────────────────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " y yes  n no  Esc/q/BS cancel",
     NULL
 };
 static const char *const sty_list_sync_ask[] = {
@@ -1541,8 +1548,8 @@ static const char *const sty_list_sync_ask[] = {
     "                                                                                                    ",
     "ASSSSSSSSSSSSSSSSSSnSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                   g                                                                                ",
-    "                   g TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                     ",
-    "                     T   T                                                    T                     ",
+    "                   g                                                                                ",
+    "                     TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                     ",
     "                     T   T                                                    T                     ",
     "                     T   TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT    T                     ",
     "                     T   TT                                              T    T                     ",
@@ -1558,7 +1565,7 @@ static const char *const sty_list_sync_ask[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_list_sync_ask[3] = { 13, 74, 0 };
@@ -1578,6 +1585,16 @@ static const char *const exp_list_delete_key_ask[] = {
     "                  │                                                             │",
     "                  │                       [ Yes ]  [ No ]                       │",
     "                  └─────────────────────────────────────────────────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " y yes  n no  Esc/q/BS cancel",
     NULL
 };
 static const char *const sty_list_delete_key_ask[] = {
@@ -1604,7 +1621,7 @@ static const char *const sty_list_delete_key_ask[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_list_delete_key_ask[3] = { 13, 81, 0 };
@@ -1618,14 +1635,21 @@ static const char *const exp_reader_menu[] = {
     "DMARC:   Not evaluated (no Authentication-Results header)",
     "─────────────────┌─ Actions ─────────────────────────────────────────────────────┐",
     "Body of message 3│ > s  *       Star - toggle the star (flag)                    │",
-    "                 │   m  +       Mark read                                        │",
-    "                 │   u  -       Mark unread                                      │",
-    "                 │   n  !       Junk - toggle junk                               │",
+    "                 │   r  +       Read / unread - toggle read and unread           │",
+    "                 │   u  !       Junk - toggle junk                               │",
     "                 │   d  d       Delete - to Trash; in Trash for good             │",
     "                 │   e  Delete  Delete (Delete key)                              │",
     "                 │   a          Save all attachments - to a directory, asked for │",
     "                 │   t          Toggle Done - the $Done flag                     │",
     "                 └───────────────────────────────────────────────────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " letter run  j/k select  Enter choose  Esc/q/BS close                                         [1/7]",
     NULL
 };
 static const char *const sty_reader_menu[] = {
@@ -1643,7 +1667,6 @@ static const char *const sty_reader_menu[] = {
     "                 T   T                                                           T                  ",
     "                 T   T                                                           T                  ",
     "                 T   T                                                           T                  ",
-    "                 T   T                                                           T                  ",
     "                 TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                  ",
     "                                                                                                    ",
     "                                                                                                    ",
@@ -1652,9 +1675,10 @@ static const char *const sty_reader_menu[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
-static const int cur_reader_menu[3] = { 15, 82, 0 };
+static const int cur_reader_menu[3] = { 14, 82, 0 };
 
 static const char *const exp_review_menu[] = {
     "  Review: Message",
@@ -1829,11 +1853,11 @@ static const char *const exp_gmail_menu[] = {
     "",
     "  Date             Sts    Subject                                   From",
     "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
-    "> 2024-01-01 00:0┌─ Actions ─────────────────────────────────────────────────────┐",
+    "> 2024-01-01 00:00 N----- Message 5                                 Sender 5",
+    "  2024-01-01 00:0┌─ Actions ─────────────────────────────────────────────────────┐",
     "  2024-01-01 00:0│ > s  *       Star - toggle the star (flag)                    │",
-    "  2024-01-01 00:0│   r  +       Mark read                                        │",
-    "  2024-01-01 00:0│   u  -       Mark unread                                      │",
-    "  2024-01-01 00:0│   n  !       Junk - toggle junk                               │",
+    "  2024-01-01 00:0│   r  +       Read / unread - toggle read and unread           │",
+    "  2024-01-01 00:0│   u  !       Junk - toggle junk                               │",
     "                 │   d  d       Delete - to Trash; in Trash for good             │",
     "                 │   e  Delete  Delete (Delete key)                              │",
     "                 │   b          Start a sync - in the background                 │",
@@ -1844,6 +1868,11 @@ static const char *const exp_gmail_menu[] = {
     "                 │   1          Add a label... - to the messages, asked for      │",
     "                 │   o          Remove a label... - from the messages, asked for │",
     "                 └───────────────────────────────────────────────────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    " letter run  j/k select  Enter choose  Esc/q/BS close                                        [1/12]",
     NULL
 };
 static const char *const sty_gmail_menu[] = {
@@ -1851,9 +1880,9 @@ static const char *const sty_gmail_menu[] = {
     "                                                                                                    ",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "                                                                                                    ",
-    "ASSSSSSSSSSSSSSSSTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTSSSSSSSSSSSSSSSSSS",
+    "ASSSSSSSSSSSSSSSSSSnSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+    "                 TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                  ",
     "                 T ASASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS T                  ",
-    "                 T   T                                                           T                  ",
     "                 T   T                                                           T                  ",
     "                 T   T                                                           T                  ",
     "                 T   T                                                           T                  ",
@@ -1870,7 +1899,7 @@ static const char *const sty_gmail_menu[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_gmail_menu[3] = { 18, 82, 0 };
@@ -1890,6 +1919,16 @@ static const char *const exp_gmail_delete_ask[] = {
     "                 │                                                                │",
     "                 │                        [ Yes ]  [ No ]                         │",
     "                 └────────────────────────────────────────────────────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " y yes  n no  Esc/q/BS cancel",
     NULL
 };
 static const char *const sty_gmail_delete_ask[] = {
@@ -1916,7 +1955,7 @@ static const char *const sty_gmail_delete_ask[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_gmail_delete_ask[3] = { 13, 83, 0 };
@@ -2115,7 +2154,7 @@ static const char *const exp_review[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " - actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review[] = {
@@ -2224,7 +2263,7 @@ static const char *const exp_gmail_labels[] = {
     "",
     "",
     "",
-    " j/k select  PgDn/PgUp page  Enter open  / search  : actions  Esc/q/BS accounts  ? help      [2/10]",
+    " j/k select  PgDn/PgUp page  Enter open  / search  - actions  Esc/q/BS accounts  ? help      [2/10]",
     NULL
 };
 static const char *const sty_gmail_labels[] = {
@@ -2280,7 +2319,7 @@ static const char *const exp_gmail_unread[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [1/5]",
     NULL
 };
 static const char *const sty_gmail_unread[] = {
@@ -2336,7 +2375,7 @@ static const char *const exp_gmail_flagged[] = {
     "",
     "",
     "",
-    " Esc/q/BS labels  : actions  c compose  U refresh  l rules  ? help",
+    " Esc/q/BS labels  - actions  c compose  U refresh  l rules  ? help",
     NULL
 };
 static const char *const sty_gmail_flagged[] = {
@@ -2392,7 +2431,7 @@ static const char *const exp_gmail_inbox[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [1/5]",
     NULL
 };
 static const char *const sty_gmail_inbox[] = {
@@ -2448,7 +2487,7 @@ static const char *const exp_gmail_inbox_second[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [2/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [2/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_second[] = {
@@ -2504,7 +2543,7 @@ static const char *const exp_gmail_inbox_d[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [1/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_d[] = {
@@ -2560,7 +2599,7 @@ static const char *const exp_gmail_inbox_trash_mark[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [1/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_trash_mark[] = {
@@ -2616,7 +2655,7 @@ static const char *const exp_gmail_inbox_archive_mark[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [1/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_archive_mark[] = {
@@ -2672,7 +2711,7 @@ static const char *const exp_gmail_inbox_marked[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [2/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [2/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_marked[] = {
@@ -2710,7 +2749,7 @@ static const char *const exp_gmail_archive[] = {
     "  Date              Sts     Subject                                    From",
     "  ════════════════  ══════  ═════════════════════════════════════════  ════════════════════════════",
     "",
-    "  (empty)  The Archive action of the : menu files a message here.",
+    "  (empty)  The Archive action of the - menu files a message here.",
     "",
     "",
     "",
@@ -2728,7 +2767,7 @@ static const char *const exp_gmail_archive[] = {
     "",
     "",
     "",
-    " Esc/q/BS labels  : actions  c compose  U refresh  l rules  ? help",
+    " Esc/q/BS labels  - actions  c compose  U refresh  l rules  ? help",
     NULL
 };
 static const char *const sty_gmail_archive[] = {
@@ -2784,7 +2823,7 @@ static const char *const exp_gmail_inbox_d_off[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [2/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [2/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_d_off[] = {
@@ -2840,7 +2879,7 @@ static const char *const exp_gmail_inbox_trash_off[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [2/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [2/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_trash_off[] = {
@@ -2896,7 +2935,7 @@ static const char *const exp_gmail_inbox_archive_off[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [2/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [2/5]",
     NULL
 };
 static const char *const sty_gmail_inbox_archive_off[] = {
@@ -2952,7 +2991,7 @@ static const char *const exp_gmail_starred_filled[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/1]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [1/1]",
     NULL
 };
 static const char *const sty_gmail_starred_filled[] = {
@@ -3008,7 +3047,7 @@ static const char *const exp_gmail_trash_filled[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  * star  d del  ? help  [1/1]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  * star  d del  ? help  [1/1]",
     NULL
 };
 static const char *const sty_gmail_trash_filled[] = {
@@ -3064,7 +3103,7 @@ static const char *const exp_gmail_archive_filled[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/1]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [1/1]",
     NULL
 };
 static const char *const sty_gmail_archive_filled[] = {
@@ -3120,7 +3159,7 @@ static const char *const exp_gmail_label_user[] = {
     "",
     "",
     "",
-    " j/k select  PgDn/PgUp page  Enter open  / search  : actions  Esc/q/BS accounts  ? help      [6/11]",
+    " j/k select  PgDn/PgUp page  Enter open  / search  - actions  Esc/q/BS accounts  ? help      [6/11]",
     NULL
 };
 static const char *const sty_gmail_label_user[] = {
@@ -3176,7 +3215,7 @@ static const char *const exp_gmail_user_label[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/1]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [1/1]",
     NULL
 };
 static const char *const sty_gmail_user_label[] = {
@@ -3232,7 +3271,7 @@ static const char *const exp_gmail_trash[] = {
     "",
     "",
     "",
-    " Esc/q/BS labels  : actions  c compose  U refresh  l rules  ? help",
+    " Esc/q/BS labels  - actions  c compose  U refresh  l rules  ? help",
     NULL
 };
 static const char *const sty_gmail_trash[] = {
@@ -3288,7 +3327,7 @@ static const char *const exp_list_marked[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [2/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [2/3]",
     NULL
 };
 static const char *const sty_list_marked[] = {
@@ -3344,7 +3383,7 @@ static const char *const exp_list_marked_two[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [3/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [3/3]",
     NULL
 };
 static const char *const sty_list_marked_two[] = {
@@ -3383,17 +3422,24 @@ static const char *const exp_list_bulk_prompt[] = {
     "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
     " *2020-01-03 12:00 N----- Message 3                                 Sender 3 <sender3@example.com>",
     "> 2020-01-02 12:00 N----- Message 2                                 Sender 2 <sender2@example.com>",
-    "  2020-01-01 12:00 N-┌─ Actions ──────────────────────────────────────────────┐ender1@example.com>",
+    "  2020-01-01 12:00 N----- Message 1                                 Sender 1 <sender1@example.com>",
+    "                     ┌─ Actions ──────────────────────────────────────────────┐",
     "                     │ > s  *       Star - toggle the star (flag)             │",
-    "                     │   r  +       Mark read                                 │",
-    "                     │   u  -       Mark unread                               │",
-    "                     │   n  !       Junk - toggle junk                        │",
+    "                     │   r  +       Read / unread - toggle read and unread    │",
+    "                     │   u  !       Junk - toggle junk                        │",
     "                     │   d  d       Delete - to Trash; in Trash for good      │",
     "                     │   e  Delete  Delete (Delete key)                       │",
     "                     │   b          Start a sync - in the background          │",
     "                     │   m          Move to... - a folder or label, asked for │",
     "                     │   t          Toggle Done - the $Done flag              │",
     "                     └────────────────────────────────────────────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " letter run  j/k select  Enter choose  Esc/q/BS close                                         [1/8]",
     NULL
 };
 static const char *const sty_list_bulk_prompt[] = {
@@ -3403,9 +3449,9 @@ static const char *const sty_list_bulk_prompt[] = {
     "                                                                                                    ",
     " b                 g                                                                                ",
     "ASSSSSSSSSSSSSSSSSSnSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
-    "                   g TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                     ",
+    "                   g                                                                                ",
+    "                     TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                     ",
     "                     T ASASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS T                     ",
-    "                     T   T                                                    T                     ",
     "                     T   T                                                    T                     ",
     "                     T   T                                                    T                     ",
     "                     T   T                                                    T                     ",
@@ -3420,7 +3466,7 @@ static const char *const sty_list_bulk_prompt[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_list_bulk_prompt[3] = { 16, 79, 0 };
@@ -3432,17 +3478,24 @@ static const char *const exp_list_bulk_cursor_prompt[] = {
     "  ════════════════ ══════ ═════════════════════════════════════════ ════════════════════════════════",
     "> 2020-01-03 12:00 N----- Message 3                                 Sender 3 <sender3@example.com>",
     "  2020-01-02 12:00 N----- Message 2                                 Sender 2 <sender2@example.com>",
-    "  2020-01-01 12:00 N-┌─ Actions ──────────────────────────────────────────────┐ender1@example.com>",
+    "  2020-01-01 12:00 N----- Message 1                                 Sender 1 <sender1@example.com>",
+    "                     ┌─ Actions ──────────────────────────────────────────────┐",
     "                     │ > s  *       Star - toggle the star (flag)             │",
-    "                     │   r  +       Mark read                                 │",
-    "                     │   u  -       Mark unread                               │",
-    "                     │   n  !       Junk - toggle junk                        │",
+    "                     │   r  +       Read / unread - toggle read and unread    │",
+    "                     │   u  !       Junk - toggle junk                        │",
     "                     │   d  d       Delete - to Trash; in Trash for good      │",
     "                     │   e  Delete  Delete (Delete key)                       │",
     "                     │   b          Start a sync - in the background          │",
     "                     │   m          Move to... - a folder or label, asked for │",
     "                     │   t          Toggle Done - the $Done flag              │",
     "                     └────────────────────────────────────────────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " letter run  j/k select  Enter choose  Esc/q/BS close                                         [1/8]",
     NULL
 };
 static const char *const sty_list_bulk_cursor_prompt[] = {
@@ -3452,9 +3505,9 @@ static const char *const sty_list_bulk_cursor_prompt[] = {
     "                                                                                                    ",
     "ASSSSSSSSSSSSSSSSSSnSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
     "                   g                                                                                ",
-    "                   g TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                     ",
+    "                   g                                                                                ",
+    "                     TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                     ",
     "                     T ASASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS T                     ",
-    "                     T   T                                                    T                     ",
     "                     T   T                                                    T                     ",
     "                     T   T                                                    T                     ",
     "                     T   T                                                    T                     ",
@@ -3469,7 +3522,7 @@ static const char *const sty_list_bulk_cursor_prompt[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_list_bulk_cursor_prompt[3] = { 16, 79, 0 };
@@ -3544,6 +3597,16 @@ static const char *const exp_list_delete_ask[] = {
     "                  │                                                             │",
     "                  │                       [ Yes ]  [ No ]                       │",
     "                  └─────────────────────────────────────────────────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " y yes  n no  Esc/q/BS cancel",
     NULL
 };
 static const char *const sty_list_delete_ask[] = {
@@ -3570,7 +3633,7 @@ static const char *const sty_list_delete_ask[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_list_delete_ask[3] = { 13, 81, 0 };
@@ -3599,7 +3662,7 @@ static const char *const exp_list_bulk_done[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [2/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [2/3]",
     NULL
 };
 static const char *const sty_list_bulk_done[] = {
@@ -3647,6 +3710,15 @@ static const char *const exp_gmail_picker[] = {
     "                                       │   [ ] SENT        │",
     "                                       │   [ ] DRAFTS      │",
     "                                       └───────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " j/k select  Space tick  Enter apply  Esc/q/BS cancel                                         [1/5]",
     NULL
 };
 static const char *const sty_gmail_picker[] = {
@@ -3673,7 +3745,7 @@ static const char *const sty_gmail_picker[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_gmail_picker[3] = { 14, 60, 0 };
@@ -3694,6 +3766,15 @@ static const char *const exp_gmail_picker_second[] = {
     "                                       │   [ ] SENT        │",
     "                                       │   [ ] DRAFTS      │",
     "                                       └───────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " j/k select  Space tick  Enter apply  Esc/q/BS cancel                                         [2/5]",
     NULL
 };
 static const char *const sty_gmail_picker_second[] = {
@@ -3720,7 +3801,7 @@ static const char *const sty_gmail_picker_second[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_gmail_picker_second[3] = { 14, 60, 0 };
@@ -3741,6 +3822,15 @@ static const char *const exp_gmail_picker_toggled[] = {
     "                                       │   [ ] SENT        │",
     "                                       │   [ ] DRAFTS      │",
     "                                       └───────────────────┘",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    " j/k select  Space tick  Enter apply  Esc/q/BS cancel                                         [2/5]",
     NULL
 };
 static const char *const sty_gmail_picker_toggled[] = {
@@ -3767,7 +3857,7 @@ static const char *const sty_gmail_picker_toggled[] = {
     "                                                                                                    ",
     "                                                                                                    ",
     "                                                                                                    ",
-    "                                                                                                    ",
+    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
     NULL
 };
 static const int cur_gmail_picker_toggled[3] = { 14, 60, 0 };
@@ -3796,7 +3886,7 @@ static const char *const exp_gmail_picker_done[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS labels  : actions  c compose  r reply  d trash  ? help        [1/5]",
+    " j/k step  Enter open  Esc/q/BS labels  - actions  c compose  r reply  d trash  ? help        [1/5]",
     NULL
 };
 static const char *const sty_gmail_picker_done[] = {
@@ -3851,7 +3941,7 @@ static const char *const exp_att_reader[] = {
     "2. Second",
     "--------------------------------------------------------------------------------",
     "Code sample here",
-    " j/k scroll  Esc/q/BS list  : actions  r reply  * star  d del  a save(2)  / search  ? help    [1/2]",
+    " j/k scroll  Esc/q/BS list  - actions  r reply  * star  d del  a save(2)  / search  ? help    [1/2]",
     NULL
 };
 static const char *const sty_att_reader[] = {
@@ -4074,7 +4164,7 @@ static const char *const exp_att_saved[] = {
     "2. Second",
     "--------------------------------------------------------------------------------",
     "%  Saved: ",
-    " j/k scroll  Esc/q/BS list  : actions  r reply  * star  d del  a save(2)  / search  ? help    [1/2]",
+    " j/k scroll  Esc/q/BS list  - actions  r reply  * star  d del  a save(2)  / search  ? help    [1/2]",
     NULL
 };
 static const char *const sty_att_saved[] = {
@@ -4184,7 +4274,7 @@ static const char *const exp_review_full[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " - actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_full[] = {
@@ -4240,7 +4330,7 @@ static const char *const exp_review_long_to[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " - actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_long_to[] = {
@@ -4352,7 +4442,7 @@ static const char *const exp_review_attach_removed[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " - actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_review_attach_removed[] = {
@@ -5077,7 +5167,7 @@ static const char *const exp_list_syncing[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [1/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [1/3]",
     NULL
 };
 static const char *const sty_list_syncing[] = {
@@ -5133,7 +5223,7 @@ static const char *const exp_list_new_mail[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [2/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [2/3]",
     NULL
 };
 static const char *const sty_list_new_mail[] = {
@@ -5189,7 +5279,7 @@ static const char *const exp_list_star_feedback[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [1/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [1/3]",
     NULL
 };
 static const char *const sty_list_star_feedback[] = {
@@ -6890,7 +6980,7 @@ static const char *const exp_w80_folders[] = {
     "",
     "",
     "",
-    " ↑↓ step  Enter open/select  : actions  t flat  Esc/q/BS back  ? help     [2/9]",
+    " ↑↓ step  Enter open/select  - actions  t flat  Esc/q/BS back  ? help     [2/9]",
     NULL
 };
 static const char *const sty_w80_folders[] = {
@@ -6946,7 +7036,7 @@ static const char *const exp_w80_list[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  d trash  ? help       [1/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  d trash  ? help       [1/3]",
     NULL
 };
 static const char *const sty_w80_list[] = {
@@ -6988,7 +7078,7 @@ static const char *const exp_w80_reader[] = {
     "────────────────────────────────────────────────────────────────────────────────",
     "Body of message 3",
     "==",
-    " j/k scroll  Esc/q/BS list  : actions  r reply  d del  / search  ? help   [1/1]",
+    " j/k scroll  Esc/q/BS list  - actions  r reply  d del  / search  ? help   [1/1]",
     NULL
 };
 static const char *const sty_w80_reader[] = {
@@ -7012,23 +7102,23 @@ static const char *const exp_w80_list_help[] = {
     "  D│ The messages of one folder, newest first. The cursor is on one         │",
     "  ═│ message. Enter reads it; space marks several to act on together.       │═══",
     "> 2│                                                                        │",
-    "  2│ j                  Down - move the cursor down (also Down)             │",
-    "  2│ k                  Up - move the cursor up (also Up)                   │",
-    "   │ PageDown           Page down                                           │",
-    "   │ PageUp             Page up                                             │",
-    "   │ Home               First message - also g                              │",
-    "   │ End                Last message - also G                               │",
-    "   │ Enter              Open - read the message                             │",
-    "   │ /                  Filter - type to filter; Esc clears it              │",
-    "   │ Space              Mark - mark the message and step down               │",
-    "   │ x                  Clear marks                                         │",
-    "   │ c                  Compose - a new message                             │",
-    "   │ r                  Reply                                               │",
-    "   │ A                  Reply-all                                           │",
-    "   │ F                  Forward                                             │",
-    "   │ U                  Refresh - after a sync                              │",
-    "   │ l                  Rules - the rules editor                            │",
-    "   │ H                  History - recent changes, with Revert               │",
+    "  2│ j                  Down - move the cursor down (also Down)            █│",
+    "  2│ k                  Up - move the cursor up (also Up)                  █│",
+    "   │ PageDown           Page down                                          █│",
+    "   │ PageUp             Page up                                            █│",
+    "   │ Home               First message - also g                             █│",
+    "   │ End                Last message - also G                              █│",
+    "   │ Enter              Open - read the message                            █│",
+    "   │ /                  Filter - type to filter; Esc clears it             █│",
+    "   │ Space              Mark - mark the message and step down              █│",
+    "   │ x                  Clear marks                                        ││",
+    "   │ c                  Compose - a new message                            ││",
+    "   │ r                  Reply                                              ││",
+    "   │ A                  Reply-all                                          ││",
+    "   │ F                  Forward                                            ││",
+    "   │ U                  Refresh - after a sync                             ││",
+    "   │ l                  Rules - the rules editor                           ││",
+    "   │ H                  History - recent changes, with Revert              ││",
     "   └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -7047,14 +7137,14 @@ static const char *const sty_w80_list_help[] = {
     "   T bbbbb                                                                  T   ",
     "   T b                                                                      T   ",
     "   T bbbbb                                                                  T   ",
-    "   T b                                                                      T   ",
-    "   T b                                                                      T   ",
-    "   T b                                                                      T   ",
-    "   T b                                                                      T   ",
-    "   T b                                                                      T   ",
-    "   T b                                                                      T   ",
-    "   T b                                                                      T   ",
-    "   T b                                                                      T   ",
+    "   T b                                                                     dT   ",
+    "   T b                                                                     dT   ",
+    "   T b                                                                     dT   ",
+    "   T b                                                                     dT   ",
+    "   T b                                                                     dT   ",
+    "   T b                                                                     dT   ",
+    "   T b                                                                     dT   ",
+    "   T b                                                                     dT   ",
     "   TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT   ",
     "                                                                                ",
     NULL
@@ -7197,7 +7287,7 @@ static const char *const exp_w80_review[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  q discard",
+    " - actions (send)  e edit headers  b edit body  a add attachment  q discard",
     NULL
 };
 static const char *const sty_w80_review[] = {
@@ -7365,7 +7455,7 @@ static const char *const exp_w140_folders[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help                                                 [2/9]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  - actions  t flat  Esc/q/BS back  ? help                                                 [2/9]",
     NULL
 };
 static const char *const sty_w140_folders[] = {
@@ -7421,7 +7511,7 @@ static const char *const exp_w140_list[] = {
     "",
     "",
     "",
-    " j/k step  PgDn/PgUp page  Enter open  Esc/q/BS folders  : actions  c compose  r reply  * star  +/- read  ! junk  d trash  ? help     [1/3]",
+    " j/k step  PgDn/PgUp page  Enter open  Esc/q/BS folders  - actions  c compose  r reply  * star  + read  ! junk  d trash  ? help       [1/3]",
     NULL
 };
 static const char *const sty_w140_list[] = {
@@ -7476,7 +7566,7 @@ static const char *const exp_w140_reader[] = {
     "",
     "",
     "",
-    " j/k scroll  Esc/q/BS list  : actions  r reply  F fwd  * star  +/- read  ! junk  d del  / search  v source  ? help                    [1/1]",
+    " j/k scroll  Esc/q/BS list  - actions  r reply  F fwd  * star  + read  ! junk  d del  / search  v source  ? help                      [1/1]",
     NULL
 };
 static const char *const sty_w140_reader[] = {
@@ -7513,23 +7603,23 @@ static const char *const exp_w140_list_help[] = {
     "  Date             Sts    Subject│ The messages of one folder, newest first. The cursor is on one         │",
     "  ════════════════ ══════ ═══════│ message. Enter reads it; space marks several to act on together.       │═════════════════════════════════",
     "> 2020-01-03 12:00 N----- Message│                                                                        │r3@example.com>",
-    "  2020-01-02 12:00 N----- Message│ j                  Down - move the cursor down (also Down)             │r2@example.com>",
-    "  2020-01-01 12:00 N----- Message│ k                  Up - move the cursor up (also Up)                   │r1@example.com>",
-    "                                 │ PageDown           Page down                                           │",
-    "                                 │ PageUp             Page up                                             │",
-    "                                 │ Home               First message - also g                              │",
-    "                                 │ End                Last message - also G                               │",
-    "                                 │ Enter              Open - read the message                             │",
-    "                                 │ /                  Filter - type to filter; Esc clears it              │",
-    "                                 │ Space              Mark - mark the message and step down               │",
-    "                                 │ x                  Clear marks                                         │",
-    "                                 │ c                  Compose - a new message                             │",
-    "                                 │ r                  Reply                                               │",
-    "                                 │ A                  Reply-all                                           │",
-    "                                 │ F                  Forward                                             │",
-    "                                 │ U                  Refresh - after a sync                              │",
-    "                                 │ l                  Rules - the rules editor                            │",
-    "                                 │ H                  History - recent changes, with Revert               │",
+    "  2020-01-02 12:00 N----- Message│ j                  Down - move the cursor down (also Down)            █│r2@example.com>",
+    "  2020-01-01 12:00 N----- Message│ k                  Up - move the cursor up (also Up)                  █│r1@example.com>",
+    "                                 │ PageDown           Page down                                          █│",
+    "                                 │ PageUp             Page up                                            █│",
+    "                                 │ Home               First message - also g                             █│",
+    "                                 │ End                Last message - also G                              █│",
+    "                                 │ Enter              Open - read the message                            █│",
+    "                                 │ /                  Filter - type to filter; Esc clears it             █│",
+    "                                 │ Space              Mark - mark the message and step down              █│",
+    "                                 │ x                  Clear marks                                        ││",
+    "                                 │ c                  Compose - a new message                            ││",
+    "                                 │ r                  Reply                                              ││",
+    "                                 │ A                  Reply-all                                          ││",
+    "                                 │ F                  Forward                                            ││",
+    "                                 │ U                  Refresh - after a sync                             ││",
+    "                                 │ l                  Rules - the rules editor                           ││",
+    "                                 │ H                  History - recent changes, with Revert              ││",
     "                                 └────────────────────────────────────────────────────────────────────────┘",
     NULL
 };
@@ -7548,14 +7638,14 @@ static const char *const sty_w140_list_help[] = {
     "                                 T bbbbb                                                                  T                                 ",
     "                                 T b                                                                      T                                 ",
     "                                 T bbbbb                                                                  T                                 ",
-    "                                 T b                                                                      T                                 ",
-    "                                 T b                                                                      T                                 ",
-    "                                 T b                                                                      T                                 ",
-    "                                 T b                                                                      T                                 ",
-    "                                 T b                                                                      T                                 ",
-    "                                 T b                                                                      T                                 ",
-    "                                 T b                                                                      T                                 ",
-    "                                 T b                                                                      T                                 ",
+    "                                 T b                                                                     dT                                 ",
+    "                                 T b                                                                     dT                                 ",
+    "                                 T b                                                                     dT                                 ",
+    "                                 T b                                                                     dT                                 ",
+    "                                 T b                                                                     dT                                 ",
+    "                                 T b                                                                     dT                                 ",
+    "                                 T b                                                                     dT                                 ",
+    "                                 T b                                                                     dT                                 ",
     "                                 TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT                                 ",
     "                                                                                                                                            ",
     NULL
@@ -7698,7 +7788,7 @@ static const char *const exp_w140_review[] = {
     "",
     "",
     "",
-    " : actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
+    " - actions (send)  e edit headers  b edit body  a add attachment  ? help  q discard",
     NULL
 };
 static const char *const sty_w140_review[] = {
@@ -7810,7 +7900,7 @@ static const char *const exp_list_third_row[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [3/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [3/3]",
     NULL
 };
 static const char *const sty_list_third_row[] = {
@@ -7866,7 +7956,7 @@ static const char *const exp_folders_second_row[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help         [3/9]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  - actions  t flat  Esc/q/BS back  ? help         [3/9]",
     NULL
 };
 static const char *const sty_folders_second_row[] = {
@@ -7922,7 +8012,7 @@ static const char *const exp_list_wide_subject[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [1/1]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [1/1]",
     NULL
 };
 static const char *const sty_list_wide_subject[] = {
@@ -7977,7 +8067,7 @@ static const char *const exp_reader_wide_subject[] = {
     "2. Second",
     "--------------------------------------------------------------------------------",
     "Code sample here",
-    " j/k scroll  Esc/q/BS list  : actions  r reply  * star  d del  a save(2)  / search  ? help    [1/2]",
+    " j/k scroll  Esc/q/BS list  - actions  r reply  * star  d del  a save(2)  / search  ? help    [1/2]",
     NULL
 };
 static const char *const sty_reader_wide_subject[] = {
@@ -8032,7 +8122,7 @@ static const char *const exp_list_long_subject[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [1/1]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [1/1]",
     NULL
 };
 static const char *const sty_list_long_subject[] = {
@@ -8144,7 +8234,7 @@ static const char *const exp_folders_8colour[] = {
     "",
     "",
     "",
-    " ↑↓ step  PgDn/PgUp page  Enter open/select  : actions  t flat  Esc/q/BS back  ? help         [2/9]",
+    " ↑↓ step  PgDn/PgUp page  Enter open/select  - actions  t flat  Esc/q/BS back  ? help         [2/9]",
     NULL
 };
 static const char *const sty_folders_8colour[] = {
@@ -8200,7 +8290,7 @@ static const char *const exp_list_8colour[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [1/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [1/3]",
     NULL
 };
 static const char *const sty_list_8colour[] = {
@@ -8256,7 +8346,7 @@ static const char *const exp_list_8colour_third[] = {
     "",
     "",
     "",
-    " j/k step  Enter open  Esc/q/BS folders  : actions  c compose  r reply  d trash  ? help       [3/3]",
+    " j/k step  Enter open  Esc/q/BS folders  - actions  c compose  r reply  d trash  ? help       [3/3]",
     NULL
 };
 static const char *const sty_list_8colour_third[] = {
@@ -8311,7 +8401,7 @@ static const char *const exp_reader_8colour[] = {
     "",
     "",
     "",
-    " j/k scroll  Esc/q/BS list  : actions  r reply  * star  +/- read  d del  / search  ? help     [1/1]",
+    " j/k scroll  Esc/q/BS list  - actions  r reply  * star  + read  d del  / search  ? help       [1/1]",
     NULL
 };
 static const char *const sty_reader_8colour[] = {

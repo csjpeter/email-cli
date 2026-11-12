@@ -834,9 +834,9 @@ static PtySession *at_compose_form(void) {
     return s;
 }
 
-/* EMAIL-175: the ':' menu is opened, row @p row (0 is the first) is chosen. */
+/* EMAIL-175: the '-' menu is opened, row @p row (0 is the first) is chosen. */
 static void menu_row(PtySession *s, int row) {
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     pty_wait_for(s, "Actions", WAIT_MS);
     pty_settle(s, 200);
     for (int i = 0; i < row; i++) pty_send_key(s, PTY_KEY_DOWN);
@@ -848,10 +848,10 @@ static void menu_row_yes(PtySession *s, int row) {
     pty_wait_for(s, "Yes", WAIT_MS);
     pty_send_str(s, "y");
 }
-/* IMAP list menu: Star 0, Mark read 1, Mark unread 2, Junk 3, Delete 4,
- * Delete (Delete key) 5, Start a sync 6, Move to... 7, Toggle Done 8.
- * Gmail: ..., Move 7, Labels 8, Archive 9, Restore 10, Remove this label 11,
- * Add a label 12, Remove a label 13.  Reader (IMAP): ..., Save all 6. */
+/* IMAP list menu: Star 0, Read/unread 1, Junk 2, Delete 3,
+ * Delete (Delete key) 4, Start a sync 5, Move to... 6, Toggle Done 7.
+ * Gmail: ..., Move 6, Labels 7, Archive 8, Restore 9, Remove this label 10,
+  * Add a label 11, Remove a label 12.  Reader (IMAP): ..., Save all 5. */
 
 #define VIEW(name, open_expr, setup) \
     static void test_screen_##name(void) { \
@@ -994,12 +994,12 @@ VIEW(list_marked,       at_list(), (pty_send_str(s, " "), pty_settle(s, SETTLE_M
 VIEW(list_marked_two,   at_list(),
      (pty_send_str(s, " "), pty_send_str(s, " "), pty_settle(s, SETTLE_MS)))
 VIEW(list_bulk_prompt,  at_list(),
-     (pty_send_str(s, " "), pty_send_str(s, ":"), pty_wait_for(s, "Actions", WAIT_MS),
+     (pty_send_str(s, " "), pty_send_str(s, "-"), pty_wait_for(s, "Actions", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
 VIEW(list_bulk_cursor_prompt, at_list(),
-     (pty_send_str(s, ":"), pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
+     (pty_send_str(s, "-"), pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(list_move_prompt,  at_list(),
-     (pty_send_str(s, " "), menu_row(s, 7), pty_wait_for(s, "Move to folder", WAIT_MS),
+     (pty_send_str(s, " "), menu_row(s, 6), pty_wait_for(s, "Move to folder", WAIT_MS),
       pty_send_str(s, "Archive"), pty_settle(s, SETTLE_MS)))
 VIEW(list_delete_ask,   at_list(),
      (pty_send_str(s, " "), pty_send_str(s, "d"), pty_wait_for(s, "to Trash", WAIT_MS),
@@ -1008,7 +1008,7 @@ VIEW(list_bulk_done,    at_list(),
      (pty_send_str(s, " "), menu_row(s, 0), pty_wait_for(s, "tarred", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
 VIEW(list_sync_ask,     at_list(),
-     (menu_row(s, 6), pty_wait_for(s, "Start a background sync", WAIT_MS),
+     (menu_row(s, 5), pty_wait_for(s, "Start a background sync", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
 VIEW(list_delete_key_ask, at_list(),
      (pty_send_key(s, PTY_KEY_DELETE), pty_wait_for(s, "to Trash", WAIT_MS),
@@ -1030,9 +1030,9 @@ VIEW(att_saved,         at_attach_reader(),
       pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Saved:", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
 VIEW(att_save_all,      at_attach_reader(),
-     (menu_row(s, 6), pty_wait_for(s, "Save all to:", WAIT_MS), pty_settle(s, SETTLE_MS)))
+     (menu_row(s, 5), pty_wait_for(s, "Save all to:", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(reader_menu,       at_reader(),
-     (pty_send_str(s, ":"), pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
+     (pty_send_str(s, "-"), pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
 
 VIEW(review_full,       at_list(), (to_review_full(s, "ann@example.org"), (void)0))
 VIEW(review_long_to,    at_list(),
@@ -1047,7 +1047,7 @@ VIEW(review_send_failed, at_list(),
      (to_review_full(s, "ann@example.org"), menu_row_yes(s, 0),
       pty_wait_for(s, "Saved to Drafts", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(review_menu,       at_list(),
-     (to_review_full(s, "ann@example.org"), pty_send_str(s, ":"),
+     (to_review_full(s, "ann@example.org"), pty_send_str(s, "-"),
       pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(review_send_ask,   at_list(),
      (to_review_full(s, "ann@example.org"), menu_row(s, 0),
@@ -1074,9 +1074,9 @@ VIEW(err_connect,       at_error(1), (void)0)
 VIEW(err_login,         at_error(2), (void)0)
 VIEW(err_tls,           at_error(3), (void)0)
 VIEW(list_syncing,      at_cron_list(),
-     (menu_row_yes(s, 6), pty_wait_for(s, "syncing", WAIT_MS), pty_settle(s, 100)))
+     (menu_row_yes(s, 5), pty_wait_for(s, "syncing", WAIT_MS), pty_settle(s, 100)))
 VIEW(list_new_mail,     at_cron_list(),
-     (menu_row_yes(s, 6), pty_wait_for(s, "syncing", WAIT_MS),
+     (menu_row_yes(s, 5), pty_wait_for(s, "syncing", WAIT_MS),
       pty_wait_until(s, sync_is_done, NULL, WAIT_MS * 10), pty_settle(s, 3000),
       pty_send_key(s, PTY_KEY_DOWN), pty_wait_for(s, "New mail", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
@@ -1184,25 +1184,25 @@ GVIEW(gmail_inbox,      at_gmail_entry(2), (void)0)
 GVIEW(gmail_inbox_second, at_gmail_entry(2),
       (pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_d,    at_gmail_entry(2),
-      (menu_row(s, 10), pty_settle(s, SETTLE_MS)))
+      (menu_row(s, 9), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_trash_mark, at_gmail_entry(2),
       (pty_send_str(s, "d"), pty_wait_for(s, "Yes", WAIT_MS), pty_send_str(s, "y"),
        pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_archive_mark, at_gmail_entry(2),
-      (menu_row(s, 9), pty_settle(s, SETTLE_MS)))
+      (menu_row(s, 8), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_menu,       at_gmail_entry(2),
-      (pty_send_str(s, ":"), pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
+      (pty_send_str(s, "-"), pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_delete_ask, at_gmail_entry(2),
       (pty_send_str(s, "d"), pty_wait_for(s, "to Trash", WAIT_MS), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_marked, at_gmail_entry(2),
       (pty_send_str(s, " "), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_d_off, at_gmail_entry(2),
-      (menu_row(s, 10), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+      (menu_row(s, 9), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_trash_off, at_gmail_entry(2),
       (pty_send_str(s, "d"), pty_wait_for(s, "Yes", WAIT_MS), pty_send_str(s, "y"),
        pty_settle(s, 300), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_inbox_archive_off, at_gmail_entry(2),
-      (menu_row(s, 9), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
+      (menu_row(s, 8), pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
 GVIEW(gmail_starred_filled, at_gmail_entry(2),
       (pty_send_str(s, "*"), pty_settle(s, SETTLE_MS), pty_send_key(s, PTY_KEY_ESC),
        pty_wait_for(s, "Labels", WAIT_MS), pty_settle(s, SETTLE_MS), gmail_open_entry(s, 1)))
@@ -1211,12 +1211,12 @@ GVIEW(gmail_trash_filled, at_gmail_entry(2),
        pty_settle(s, SETTLE_MS), pty_send_key(s, PTY_KEY_ESC),
        pty_wait_for(s, "Labels", WAIT_MS), pty_settle(s, SETTLE_MS), gmail_open_entry(s, 7)))
 GVIEW(gmail_archive_filled, at_gmail_entry(2),
-      (menu_row(s, 9), pty_settle(s, SETTLE_MS), pty_send_key(s, PTY_KEY_ESC),
+      (menu_row(s, 8), pty_settle(s, SETTLE_MS), pty_send_key(s, PTY_KEY_ESC),
        pty_wait_for(s, "Labels", WAIT_MS), pty_settle(s, SETTLE_MS), gmail_open_entry(s, 5)))
 /* A label exists in the browser once a message carries it: add "Work" to the
  * first message through the action menu ("Add a label..."). */
 static void gmail_add_work_label(PtySession *s) {
-    menu_row(s, 11);
+    menu_row(s, 10);
     pty_wait_for(s, "Add label", WAIT_MS);
     pty_send_str(s, "Work");
     pty_send_key(s, PTY_KEY_ENTER);
@@ -1246,7 +1246,7 @@ GVIEW(gmail_picker_done,  at_gmail_entry(2),
        pty_settle(s, SETTLE_MS)))
 
 GVIEW(gmail_label_menu, at_gmail_labels(),
-      (pty_send_str(s, ":"), pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
+      (pty_send_str(s, "-"), pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
 
 GVIEW(gmail_archive,    at_gmail_entry(5), (void)0)
 GVIEW(gmail_trash,      at_gmail_entry(7), (void)0)

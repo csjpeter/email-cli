@@ -456,7 +456,7 @@ static void test_rv_colon_menu(void) {
     fresh();
     PtySession *s = review("Menu", "x");
     ASSERT(s != NULL, "rv menu: reached");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Send");
     ASSERT_SCREEN_CONTAINS(s, "Remove an attachment");
@@ -464,7 +464,7 @@ static void test_rv_colon_menu(void) {
     pty_settle(s, SETTLE_MS);
     ASSERT_ROW_CONTAINS(s, 0, "Review: Message");
     ASSERT_SCREEN_NOT_CONTAINS(s, "Discard draft?");
-    pty_send_str(s, ":");                       /* Remove with nothing attached: nothing */
+    pty_send_str(s, "-");                       /* Remove with nothing attached: nothing */
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_DOWN); pty_send_key(s, PTY_KEY_DOWN);
@@ -494,14 +494,14 @@ static void test_rv_menu_keys(void) {
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
     char k[2] = { rm, 0 };
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_str(s, k);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "(none)");
     ASSERT_ROW_CONTAINS(s, 0, "Review: Message");
     k[0] = send;
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_str(s, k);
     ASSERT_WAIT_FOR(s, "alice@example.com", WAIT_MS);
@@ -511,7 +511,7 @@ static void test_rv_menu_keys(void) {
     ASSERT_ROW_CONTAINS(s, 0, "Review: Message");
     ASSERT_SCREEN_NOT_CONTAINS(s, "Message sent");
     ASSERT(draft_has("x"), "rv menu keys: Enter on the default keeps the draft");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_send_str(s, k);
     ASSERT_WAIT_FOR(s, "Yes", WAIT_MS);
@@ -524,7 +524,7 @@ static void test_rv_send_asks_and_declines(void) {
     fresh();
     PtySession *s = review("Send ask", "x");
     ASSERT(s != NULL, "rv send: reached");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ENTER);
@@ -542,7 +542,7 @@ static void test_rv_send_yes(void) {
     fresh();
     PtySession *s = review("Send yes", "x");
     ASSERT(s != NULL, "rv send yes: reached");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     pty_settle(s, 200);
     pty_send_key(s, PTY_KEY_ENTER);

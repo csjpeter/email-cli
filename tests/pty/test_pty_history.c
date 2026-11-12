@@ -243,7 +243,7 @@ static void test_hist_tui_confirm_default_no(void) {
     ASSERT(s != NULL, "the recent changes open");
     if (!s) return;
     pty_send_key(s, PTY_KEY_DOWN);
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     pty_settle(s, 400);
     CHECK(s, find_row(s, "Actions") >= 0 && find_row(s, "Revert - undo the selected step") >= 0,
           ": opens the action menu with Revert");

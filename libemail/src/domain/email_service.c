@@ -387,14 +387,14 @@ static void list_status_line(int trows, int tcols, int is_gmail, int in_trash,
         HINT("Enter", "open", 90);
     }
     HINT("Esc/q/BS", is_gmail ? "labels" : "folders", SL_PRIO_KEEP);
-    HINT(":", "actions", 80);
+    HINT("-", "actions", 80);
     HINT("c", "compose", 50);
     if (items) {
         HINT("r", "reply", 50);
         HINT("F", "fwd", 30);
         HINT("A", "r-all", 30);
         HINT("*", "star", 45);
-        HINT("+/-", "read", 45);
+        HINT("+", "read", 45);
         HINT("!", "junk", 45);
         HINT("d", in_trash ? "del" : "trash", 55);
         if (is_gmail) HINT("t", "labels", 35);
@@ -1149,11 +1149,11 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
             snprintf(attlbl, sizeof(attlbl), "save-all(%d)", att_count);
             HINT("j/k", "scroll", 60);
             HINT("Esc/q/BS", "list", SL_PRIO_KEEP);
-            HINT(":", "actions", 80);
+            HINT("-", "actions", 80);
             HINT("r", "reply", 50);
             HINT("F", "fwd", 40);
             HINT("*", "star", 45);
-            HINT("+/-", "read", 45);
+            HINT("+", "read", 45);
             HINT("!", "junk", 45);
             HINT("d", "del", 55);
             if (cfg->gmail_mode) HINT("t", "labels", 35);
@@ -1223,7 +1223,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
             int ch = terminal_last_printable();
             int is_gmail = cfg->gmail_mode;
             /* The keys that change state come from the key table, and so
-             * does the ':' menu (EMAIL-175). */
+             * does the '-' menu (EMAIL-175). */
             const char *rview = is_gmail ? EKV_READ_GMAIL : EKV_READ_IMAP;
             if (deferred_now) ch = 0;
             EmailAction act = deferred_now ? deferred_now : ekeys_find(rview, key, ch);
@@ -1239,7 +1239,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                          fr, su);
             }
             int menu_confirmed = deferred_now != EA_NONE;
-            if (ch == ':') {
+            if (ch == '-') {
                 const char *tt[EA_COUNT] = { NULL };
                 tt[EA_DELETE] = del_q;
                 act = ekeys_menu(rview, tt);
@@ -1464,14 +1464,9 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 snprintf(info_msg, sizeof(info_msg),
                          currently ? "Unstarred" : "Starred");
                 break;
-            } else if (act == EA_READ || act == EA_UNREAD) {
-                /* Mark read ('+') or unread ('-') */
+            } else if (act == EA_READ) {
+                /* Toggle read / unread ('+') */
                 int currently = reader_flags & MSG_FLAG_UNSEEN;
-                if ((act == EA_UNREAD) == (currently != 0)) {
-                    snprintf(info_msg, sizeof(info_msg),
-                             currently ? "Already unread" : "Already read");
-                    break;
-                }
                 int add_flag  = currently ? 1 : 0; /* add \\Seen if currently unseen */
                 reader_flags ^= MSG_FLAG_UNSEEN;
                 if (is_gmail) local_hdr_update_flags("", uid, reader_flags);
@@ -1685,7 +1680,7 @@ void email_service_print_json_string(const char *s) { print_json_string(s); }
 
 /* True when no batch filter is configured — the common case, kept cheap. */
 /**
- * The ':' menu of a list with no rows: only a sync can be started, after a
+ * The '-' menu of a list with no rows: only a sync can be started, after a
  * confirmation that names the account and the folder (EMAIL-175).
  */
 static int sync_start_background(void);
@@ -2421,7 +2416,7 @@ static int is_virtual_folder_name(const char *f) {
 /**
  * The TUI screen of a list with no message: the title bar, the column
  * headings, "(empty)" and the keys that still work: Esc, q and Backspace go
- * back, ctrl-c quits, ':' opens the sync menu, '?' the help, c composes, U
+ * back, ctrl-c quits, '-' opens the sync menu, '?' the help, c composes, U
  * lists again and l opens the rules editor.
  *
  * @param note  Appended to the title bar (the no-cache advice), or NULL.
@@ -2455,7 +2450,7 @@ static int list_empty_screen(const Config *cfg, const char *folder,
         /* Say what fills the list (EMAIL-207). */
         const char *fills = in_trash ? "d on a message moves it here."
                           : (cfg->gmail_mode && strcmp(folder, "_nolabel") == 0)
-                            ? "The Archive action of the : menu files a message here."
+                            ? "The Archive action of the - menu files a message here."
                             : "U lists again after a sync.";
         printf("\n  \033[2m(empty)\033[0m  %s\n", fills);
         fflush(stdout);
@@ -2470,7 +2465,7 @@ static int list_empty_screen(const Config *cfg, const char *folder,
         if (key != TERM_KEY_IGNORE) continue;
         int ch = terminal_last_printable();
         if (ch == 'c') return 2; /* compose */
-        if (ch == ':') sync_menu(cfg, folder, folder_display);
+        if (ch == '-') sync_menu(cfg, folder, folder_display);
         if (ch == '?')
             ekeys_help(list_view_for(cfg, folder),
                        cfg->gmail_mode ? "Message list shortcuts (Gmail)"
@@ -2702,7 +2697,7 @@ static int bulk_delete(BulkCtx *b, int ei) {
 /* ── The keys that change state in the message list (EMAIL-175) ──────────
  *
  * The registry keys ('*', '+', '-', '!', 'd', Delete) and the actions of the
- * ':' menu act on the marked rows, or on the row under the cursor when none
+ * '-' menu act on the marked rows, or on the row under the cursor when none
  * is marked.  Routine ones happen at once, in the list and on the server; a
  * delete asks first, naming the message; the actions that start a process
  * or cannot be undone are confirmed by the table (key_table.c). */
@@ -2890,7 +2885,7 @@ static int ask_line(const char *prompt, char *buf, size_t size) {
  * Performs @p act on the @p nt entries @p tg (indexes into the entries), the
  * marked rows or the row under the cursor, and leaves a message in @p fb.
  * @param view       The table's view, for the confirmation.
- * @param confirmed  1 when the ':' menu has asked already.
+ * @param confirmed  1 when the '-' menu has asked already.
  * @return 1 when the marks should be cleared (something was done), else 0.
  */
 static int list_act(EmailAction act, BulkCtx *b, const int *tg, int nt, int marked,
@@ -2909,9 +2904,8 @@ static int list_act(EmailAction act, BulkCtx *b, const int *tg, int nt, int mark
         many = want ? "starred" : "unstarred";
         break;
     }
-    case EA_READ:
-    case EA_UNREAD: {
-        int unseen = act == EA_UNREAD;
+    case EA_READ: {
+        int unseen = !(first_flags & MSG_FLAG_UNSEEN);   /* '+' toggles */
         for (int i = 0; i < nt; i++)
             if (bulk_set_flag(b, tg[i], MSG_FLAG_UNSEEN, "\\Seen", unseen) == 0) done++; else failed++;
         one = unseen ? "Marked as unread" : "Marked as read";
@@ -3572,7 +3566,7 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     /* Feedback message shown on the second-to-last row after each operation.
      * Cleared only when the list is re-opened (R/ESC/Backspace restart the view). */
     char feedback_msg[256] = "";
-    /* An action of the ':' menu that asks for a line (move, add or remove a
+    /* An action of the '-' menu that asks for a line (move, add or remove a
      * label) runs after the view has been drawn again, so that no part of the
      * menu is left on the screen under the prompt (EMAIL-175). */
     EmailAction deferred_act = EA_NONE;
@@ -4370,7 +4364,7 @@ read_key_again: ;
                 break;
             }
 
-            /* ── Keys that change state and the ':' menu (EMAIL-175) ──────
+            /* ── Keys that change state and the '-' menu (EMAIL-175) ──────
              * Every one of them comes from the key table (key_table.c); the
              * routine ones act at once on the marked rows, or on the row
              * under the cursor, a delete asks first naming the message, and
@@ -4379,7 +4373,7 @@ read_key_again: ;
             if (deferred_now) ch = 0;
             EmailAction act = deferred_now ? deferred_now
                             : filter_input ? EA_NONE : ekeys_find(list_view, key, ch);
-            if (!filter_input && (ch == ':' || act != EA_NONE)) {
+            if (!filter_input && (ch == '-' || act != EA_NONE)) {
                 int *targets = malloc((size_t)(disp_count > 0 ? disp_count : 1) * sizeof(int));
                 int nt = 0;
                 for (int di = 0; targets && di < disp_count; di++)
@@ -4392,7 +4386,7 @@ read_key_again: ;
                                  is_virtual_flags, is_virtual_search,
                                  pending_remove, pending_label, pending_restore };
                 int confirmed = deferred_now != EA_NONE;
-                if (ch == ':') {
+                if (ch == '-') {
                     char sync_t[400], del_t[600];
                     const char *tt[EA_COUNT] = { NULL };
                     snprintf(sync_t, sizeof(sync_t), "%s (%s)", folder_display,
@@ -4911,7 +4905,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
                 int mrow = 5 + display_count - wstart;
                 if (mrow < trows_d)
                     printf("\033[%d;3H\033[2mNo folders in this account.  "
-                           "Create one in the : menu.\033[0m",
+                           "Create one in the - menu.\033[0m",
                            mrow);
             }
         }
@@ -4928,7 +4922,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
             HINT("\u2191\u2193", "step", 60);
             HINT("PgDn/PgUp", "page", 40);
             HINT("Enter", "open/select", 90);
-            HINT(":", "actions", 80);
+            HINT("-", "actions", 80);
             HINT("t", up ? "tree" : (tree_mode ? "flat" : "tree"), 50);
             HINT("Esc/q/BS", up ? "up" : "back", SL_PRIO_KEEP);
 #undef HINT
@@ -5077,7 +5071,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
             int ch = fdeferred ? 0 : terminal_last_printable();
             EmailAction fact = fdeferred;
             int do_toggle = 0;
-            if (ch == ':') {
+            if (ch == '-') {
                 /* Creating and deleting a folder are in the menu (EMAIL-129);
                  * deleting names the folder and asks, No being the default. */
                 const char *tt[EA_COUNT] = { NULL };
@@ -5797,7 +5791,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
             HINT("PgDn/PgUp", "page", 40);
             HINT("Enter", "open", 90);
             HINT("/", "search", 50);
-            HINT(":", "actions", 80);
+            HINT("-", "actions", 80);
             HINT("Esc/q/BS", "accounts", SL_PRIO_KEEP);
 #undef HINT
             status_line_draw(trows, tcols, h, nh, "?", cursor + 1, lbl_count,
@@ -5925,7 +5919,7 @@ char *email_service_list_labels_interactive(const Config *cfg,
             if (lbl_deferred) { ch = 0; lact = lbl_deferred; }
             if (ch == '?')
                 ekeys_help(EKV_LABELS, "Label browser shortcuts");
-            if (ch == ':') {
+            if (ch == '-') {
                 /* Creating and deleting a label are in the menu (EMAIL-175);
                  * deleting names the label and asks, No being the default. */
                 const char *tt[EA_COUNT] = { NULL };
@@ -6196,7 +6190,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             HINT("i", "IMAP", 40);
             HINT("e", "SMTP", 40);
             if (count > 0 && accounts[cursor].cfg->gmail_mode)
-                HINT(":", "actions", 40);
+                HINT("-", "actions", 40);
             HINT("ESC", "quit", SL_PRIO_KEEP);
 #undef HINT
             status_line_draw(trows, tcols, h, nh, "?", count > 0 ? cursor + 1 : 0,
@@ -6273,7 +6267,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
                 { "e",               "Edit SMTP for account"       },
                 { "Esc / q",         "Quit (Backspace does nothing here)" },
                 { "?",               "Show this help"              },
-                { ":",               "Actions of a Gmail account"  },
+                { "-",               "Actions of a Gmail account"  },
             };
             int nhelp = (int)(sizeof(help)/sizeof(help[0]));
             if (!(count > 0 && accounts[cursor].cfg->gmail_mode)) nhelp--;
@@ -6292,7 +6286,7 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
             accounts[cursor].cfg = NULL;
             ACC_FREE(); return 2;
         }
-        if (ch == ':' && count > 0) {
+        if (ch == '-' && count > 0) {
             if (!accounts[cursor].cfg->gmail_mode) {
                 snprintf(flash_note, sizeof(flash_note),
                          "  No actions for an IMAP account here (i, e edit its settings).");

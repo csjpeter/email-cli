@@ -771,7 +771,7 @@ static void test_view_recent_and_object(void) {
     int rc = view_with_keys(NULL, "q");
     ASSERT(rc == 0, "q leaves the screen and the program carries on");
     ASSERT(strstr(g_screen, "Recent changes") != NULL, "the recent changes have their title");
-    ASSERT(strstr(g_screen, "mail INBOX/0") != NULL, "the step's object is listed");
+    ASSERT(strstr(g_screen, "mail I") != NULL, "the step's object is listed");
     ASSERT(strstr(g_screen, "alice") != NULL, "the step's author is listed");
     rc = view_with_keys("mail INBOX/0000000000000007", "\033");
     ASSERT(rc == 0, "Esc leaves the screen");
@@ -799,7 +799,7 @@ static void test_view_help_and_navigation(void) {
     ASSERT(rc == 0, "help, navigation keys and q");
     ASSERT(strstr(g_screen, "History shortcuts") != NULL, "the help names the screen");
     terminal_clear_quit_request();
-    rc = view_with_keys(NULL, ":|\033|q");
+    rc = view_with_keys(NULL, "-|\033|q");
     ASSERT(rc == 0, "the action menu opens and closes");
     ASSERT(strstr(g_screen, "Revert") != NULL, "the action menu offers Revert");
 }

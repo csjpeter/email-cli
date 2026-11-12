@@ -976,7 +976,7 @@ static void pcr_render(const char *from, const char *to, const char *cc,
         printf("  \033[31m%s\033[0m\n\n", status_msg);
 
     static const tui_statusline_hint h[] = {
-        { ":", "actions (send)", SL_PRIO_KEEP },
+        { "-", "actions (send)", SL_PRIO_KEEP },
         { "e", "edit headers", SL_PRIO_HIGH },
         { "b", "edit body", SL_PRIO_HIGH },
         { "a", "add attachment", SL_PRIO_MID },
@@ -1137,7 +1137,7 @@ static int post_compose_review(const char *from, const char *to,
         TermKey key = terminal_read_key();
         int ch = (key == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
 
-        if (ch == ':') {
+        if (ch == '-') {
             /* Sending, and removing an attachment, are in the action menu;
              * sending asks first, naming the recipients (EMAIL-175). */
             const char *tt[EA_COUNT] = { NULL };
@@ -2931,7 +2931,7 @@ int main(int argc, char *argv[]) {
             }
             if (!sel_cfg) continue;
             if (acc == 5) {
-                /* ':' menu → renew the Gmail authorization of the account */
+                /* '-' menu → renew the Gmail authorization of the account */
                 acc_flash = tui_reauth_gmail(sel_cfg);
                 config_free(sel_cfg);
                 continue;

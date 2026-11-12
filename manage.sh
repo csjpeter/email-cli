@@ -180,7 +180,7 @@ check_declared_tests() {
 # selects bundled (the default), system or auto (policies/dependencies-model.md).
 # For the bundled way the submodules are fetched here, so nobody types a
 # `git submodule` command: a missing or out-of-pin submodule is updated, and a
-# pin that is not a release tag (vX.Y.Z) fails the run.
+# pin that is not a release tag (vX.Y.Z or vX.Y.Z.N) fails the run.
 WORKSPACE_LIBS="${WORKSPACE_LIBS:-bundled}"
 
 ensure_workspace_libs() {
@@ -218,9 +218,9 @@ ensure_workspace_libs() {
             fi
             have=$(git -C "$path" rev-parse HEAD) || return 1
         fi
-        tag=$(git -C "$path" tag --points-at "$have" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+        tag=$(git -C "$path" tag --points-at "$have" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$' | head -n 1)
         if [ -z "$tag" ]; then
-            echo "ERROR: $path is pinned to ${have:0:12}, which is not a release tag (vX.Y.Z)." >&2
+            echo "ERROR: $path is pinned to ${have:0:12}, which is not a release tag (vX.Y.Z or vX.Y.Z.N)." >&2
             return 1
         fi
         echo "$path: $tag (${have:0:12})"

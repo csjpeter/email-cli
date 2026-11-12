@@ -163,7 +163,7 @@ This matters most for faults the tests cannot produce without the real server (G
 **Keep external dependencies minimal.**  The project intentionally uses only the C standard library, POSIX, and libssl (OpenSSL).  Before reaching for a new library, exhaust stdlib/POSIX options first.  New runtime dependencies require explicit justification and user approval.
 
 The one library of the workspace used at run time is **libtuikit**
-(`deps/libtuikit`, a git submodule pinned to a release tag, now v0.13.0), linked
+(`deps/libtuikit`, a git submodule pinned to a release tag, now v1.2.0.166), linked
 **statically**: the binaries carry no run-time dependency on it, and the
 package declares none.  It replaces this project's own terminal code module by
 module (EMAIL-28).  Migrated: terminal size, raw mode, key decoding and

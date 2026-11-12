@@ -8,7 +8,7 @@ so.  Policy: `policies/tui-interface-model.md`.
 
 The picker opens with `a` in the reader when the message has two or more
 attachments; with exactly one, `a` goes straight to the save prompt; with none,
-`a` shows `No attachments` in the reader.  Saving all attachments is in the `:`
+`a` shows `No attachments` in the reader.  Saving all attachments is in the `-`
 menu of the reader (`Save all attachments`, prompt `Save all to:`).  The help
 (`?`) is made from the key table view `attach-picker`
 (`libemail/src/core/key_table.c`).  Tests are in `tests/pty/test_pty_views.c`
@@ -69,9 +69,9 @@ a time, so a test that needs a quit or a server action starts a fresh session.
 | `/` | `/ search` | prompt `/text_` on the status line; `Enter` goes to the first match, `Esc` cancels, `Backspace` edits, a miss says `No match: text`, letters are text | `test_rk_search` |
 | `n` / `N` | help: next / previous match | the search wraps round at the ends; nothing before a search | `test_rk_search` |
 | `ctrl-c` in the prompt | | quits at once | `test_rk_search` |
-| `*` `+` `-` `!` | `* star` ... | act at once and say so (`Starred`, `Marked as read`...); a second press undoes; `Already read` / `Already unread` | `test_rk_state_keys` |
+| `*` `+` `!` | `* star` ... | act at once and say so (`Starred`, `Marked as read`...); a second press undoes; `+` toggles read and unread | `test_rk_state_keys` |
 | `v` | `v rendered` | toggles rendered / raw source, back to the top | `test_rk_state_keys` |
-| `:` | help | the actions menu, `Esc` closes it | `test_rk_state_keys` |
+| `-` | help | the actions menu, `Esc` closes it | `test_rk_state_keys` |
 | `?` | help | overlay; `Esc` or `q` close it, other keys do nothing | `test_rk_state_keys` |
 | `d`, `Delete` | `d delete` | asks naming the message, No is the default (`Enter`, `Esc`, `n`: `Not deleted`); `y` moves it to the Trash and returns to the list | `test_rk_delete` |
 | `r` / `A` / `F` | `r reply` ... | reply / reply-all / forward dialog for this message, back to the list afterwards | `test_rk_reply_forward` |
@@ -113,12 +113,12 @@ The Gmail list is studied in EMAIL-144.
 | `Space` / `x` | `Space mark` | marks the row and steps down / clears all marks | `test_lk_marks`, `test_lk_one_message` |
 | `/` | help: Filter | filter bar (Tab changes the scope); `Enter` commits, `Esc` clears | `test_tui_list_search_filter`, `test_lk_filter_without_match` |
 | `d`, `Delete` | `d trash` | asks first naming the message, No is the default; Trash: `del` | `test_lk_delete_asks`, `test_tui_list_bulk_delete_confirm` |
-| `*` `+` `-` `!` | `* star`, `+/- read`, `! junk` | act at once on the marked rows or the cursor row | `test_keys_registry_routine`, `test_keys_junk_toggle_imap` |
-| `:` | `: actions` | the action menu (star, read, unread, junk, delete, sync, move, `$Done`) | `test_tui_list_bulk_star_marked`, `test_tui_list_sync_and_refresh` |
+| `*` `+` `!` | `* star`, `+ read`, `! junk` | act at once on the marked rows or the cursor row | `test_keys_registry_routine`, `test_keys_junk_toggle_imap` |
+| `-` | `- actions` | the action menu (star, read, unread, junk, delete, sync, move, `$Done`) | `test_tui_list_bulk_star_marked`, `test_tui_list_sync_and_refresh` |
 | `?` | `? help` | overlay from the key table; scrolls with `j`, `End`; `Esc`/`q` close only it | `test_lk_help_overlay` |
 | `n f s m D R a t u v N`, `Right`, `Tab` | | change nothing, show nothing | `test_lk_unbound_keys` |
 
-0 messages (the folder is empty): the status line offers only `Esc/q/BS`, `:`
+0 messages (the folder is empty): the status line offers only `Esc/q/BS`, `-`
 (the sync menu), `c`, `U`, `l` and `?`; those work, every other key is
 ignored (`test_lk_empty_folder`).  1 message: every cursor key stays on it,
 `Space` marks without stepping (`test_lk_one_message`).  30 messages:
@@ -142,7 +142,7 @@ Unread, Archive, Trash, a search result).  The code of the list is the one of
 the IMAP list (above); this section is what Gmail adds.  The table has 19 data
 rows at 80x24, the title bar names the range (`a-b of N message(s)`, or
 `Showing n of N [filter:...]` with a filter) and the status line ends with
-`[cursor/rows]`.  The help (`?`) and the `:` menu are made from the key table
+`[cursor/rows]`.  The help (`?`) and the `-` menu are made from the key table
 views of `libemail/src/core/key_table.c`: `list-gmail` (a label), `list-gmail-virtual`
 (a search result), `list-gmail-archive`, `list-gmail-trash`.  Tests are in
 `tests/pty/test_pty_gmail_tui.c`, named `test_gk_*` (80x24; the mock with 45
@@ -162,14 +162,14 @@ carry the label Work, so Work has 5).
 | `c` `r` `A` `F` | `c compose`, `r reply`, `A r-all`, `F fwd` | the dialog for the cursor message; the list returns with the cursor kept | `test_gk_compose_refresh_rules`, `test_gk_filter` |
 | `U` | `U refresh` | lists again, the cursor stays | `test_gk_compose_refresh_rules` |
 | `l` | `l rules` | the rules editor; `Esc` returns with the cursor kept | `test_gk_compose_refresh_rules` |
-| `*` `+` `-` `!` | `* star`, `+/- read`, `! junk` | act at once on the marked rows or the cursor row; the status column and the feedback line follow; a second press undoes | `test_gk_registry_keys`, `test_gk_marks`, `test_keys_junk_toggle_gmail` |
+| `*` `+` `!` | `* star`, `+ read`, `! junk` | act at once on the marked rows or the cursor row; the status column and the feedback line follow; a second press undoes | `test_gk_registry_keys`, `test_gk_marks`, `test_keys_junk_toggle_gmail` |
 | `d`, `Delete` | `d trash` (`d del` in the Trash) | asks first naming the message ("Move ... to Trash?", in the Trash "Delete ... for good?"), No is the default (`Enter`, `Esc`, `n`); `y` moves it, the row stays marked `D` until the next list; marked rows: one question for all | `test_gk_delete`, `test_gk_trash_view`, `test_keys_d_asks_default_no` |
 | `t` | `t labels` | the label picker of the message (studied in EMAIL-145); `Esc` closes it and changes nothing | `test_gk_t_picker`, `test_feedback_t_label_added` |
-| `:` | `: actions` | the action menu of what applies in the view (below) | `test_gk_menu_by_view`, `test_keys_gmail_menu` |
+| `-` | `- actions` | the action menu of what applies in the view (below) | `test_gk_menu_by_view`, `test_keys_gmail_menu` |
 | `?` | `? help` | overlay `Message list shortcuts (Gmail)`; scrolls with `j`, `End`; `Esc`, `q`, `Backspace` close only it; other keys change nothing | `test_gk_help` |
 | `D a u f n m s v R N e i p o`, `Right`, `Tab`, `Insert`, `F1` | | change nothing, show nothing | `test_gk_unbound_keys` |
 
-The `:` menu of each view (table order): `* + - ! d Delete`, `Start a sync`,
+The `-` menu of each view (table order): `* + ! d Delete`, `Start a sync`,
 `Move to...`, `t Labels`, then `Archive`, `Restore from Trash`, `Remove this
 label`, `Add a label...`, `Remove a label...` as far as they apply:
 
@@ -187,8 +187,8 @@ Trash header at 80 columns: `1-1 of 1 message(s) in Trash (1 unread).  auto-dele
 (the account in brackets is dropped from the title when it does not fit;
 `test_gk_trash_view`).  Empty Trash, Archive or other list: `(empty)` and one
 line saying what fills it (Trash: `d on a message moves it here.`; Archive: the
-Archive action of the `:` menu; others: `U lists again after a sync.`); the status
-line offers only `Esc/q/BS`, `:`, `c`, `U`, `l`, `?`, and every other key does
+Archive action of the `-` menu; others: `U lists again after a sync.`); the status
+line offers only `Esc/q/BS`, `-`, `c`, `U`, `l`, `?`, and every other key does
 nothing (`test_gk_empty_views`).  1 message: every cursor key stays on it,
 `Space` marks without stepping (`test_gk_one_message`).
 
@@ -201,7 +201,7 @@ EMAIL-206 (the menu offered Restore outside the Trash, Archive in the Archive,
 Remove this label where there is none), EMAIL-207 (an empty list did not say
 what fills it).  Already right: `j k Down Up`, `PgUp`/`PgDn` clamping by 19,
 `Home`/`End`, `Enter` and the reader round trip, `Esc`/`q`/`Backspace` back and
-the marks first, `ctrl-c`, `Space`/`x`/`Esc` marks, `*` `+` `-` `!` with their
+the marks first, `ctrl-c`, `Space`/`x`/`Esc` marks, `*` `+` `!` with their
 status column and feedback, the delete dialog with No as the default and the
 named message, the Trash dialog `for good`, `c r A F l` keeping the cursor, the
 filter and its no-match case, the old letters `D a u f n` doing nothing, the
@@ -217,7 +217,7 @@ Header `Email Accounts (N)`; with no account the table says
 `No accounts configured.`  The status line shows
 `j/k select  Enter open  n add  d delete  i IMAP  e SMTP  ESC quit  ?`
 (lowest priority hints drop first at 80 columns; Esc and the position
-`[n/N]` stay).  `:` shows as `actions` only on a Gmail account.
+`[n/N]` stay).  `-` shows as `actions` only on a Gmail account.
 
 | Key | Label | Behaviour | With no account | Test |
 |-----|-------|-----------|-----------------|------|
@@ -230,8 +230,8 @@ Header `Email Accounts (N)`; with no account the table says
 | `d` | `d delete` | Asks `Delete account NAME? (y/N)`; `y`/`Y` removes it and the status line says `Account removed. Local messages preserved: PATH`; any other key keeps it (`Account NAME kept.`) | nothing | `test_tui_accounts_delete_key`, `test_tui_accounts_delete_declined`, `test_accounts_keys_delete_position`, `test_accounts_keys_no_account` |
 | `i` | `i IMAP` | IMAP wizard of the account; done: `IMAP settings saved.`, Ctrl-D: `Cancelled - nothing was changed.` | nothing | `test_tui_accounts_imap_edit_key`, `test_accounts_keys_one_account` |
 | `e` | `e SMTP` | SMTP wizard of the account; same messages with SMTP | nothing | `test_accounts_screen_wizards_can_be_abandoned`, `test_accounts_keys_one_account` |
-| `:` | `: actions` (Gmail) | Gmail: menu with renewal of the authorization; IMAP: notice `No actions for an IMAP account here` | nothing | `test_tui_accounts_colon_on_imap_account`, `test_accounts_keys_no_account` |
-| `?` | `? help` | Help overlay `Accounts shortcuts`; Esc closes it, other keys change nothing; the `:` row only on a Gmail account | works | `test_tui_accounts_help_panel`, `test_accounts_keys_one_account`, `test_accounts_keys_no_account` |
+| `-` | `- actions` (Gmail) | Gmail: menu with renewal of the authorization; IMAP: notice `No actions for an IMAP account here` | nothing | `test_tui_accounts_colon_on_imap_account`, `test_accounts_keys_no_account` |
+| `?` | `? help` | Help overlay `Accounts shortcuts`; Esc closes it, other keys change nothing; the `-` row only on a Gmail account | works | `test_tui_accounts_help_panel`, `test_accounts_keys_one_account`, `test_accounts_keys_no_account` |
 | Esc, `q` | `ESC quit` | Quit with status 0 (EMAIL-285: `q` too, as the TUI policy says) | works | `test_tui_accounts_esc_quit`, `test_tui_accounts_q_quit`, `test_accounts_keys_cursor` |
 | Backspace | - | Ignored (top level) | ignored | `test_tui_accounts_backspace_ignored` |
 | Ctrl-C | - | Quits at once | works | `test_interactive_list_ctrl_c_quits_at_once` |
@@ -259,17 +259,17 @@ screens are `folders_help` and `folders_search` in `test_pty_screens.c`.
 | `Enter` | `Enter open/select` | tree: the folder or virtual list under the cursor; flat: a folder with subfolders steps into it (its own row first), a leaf opens; `Esc`, `q`, `Backspace` in the list return to the same row | `test_fk_enter`, `test_fk_flat` |
 | `l`, `Right` | help: Open branch | tree: opens the folder's subfolders (on an open row: moves to its first child; on a leaf: nothing); flat view: as `Enter` | `test_fk_tree_open_close`, `test_fk_flat` |
 | `h`, `Left` | help: Close branch | tree: closes an open row, else moves to the parent folder (nothing at the top level); flat view: as `Esc` | `test_fk_tree_open_close`, `test_fk_flat` |
-| `t` | `t flat` / `t tree` (the view it switches to) | switches tree / flat, kept in the stored preference; also in the `:` menu as `Tree / flat` | `test_fk_flat`, `test_fk_menu` |
+| `t` | `t flat` / `t tree` (the view it switches to) | switches tree / flat, kept in the stored preference; also in the `-` menu as `Tree / flat` | `test_fk_flat`, `test_fk_menu` |
 | `Esc`, `q`, `Backspace` | `Esc/q/BS back` (flat, inside a folder: `Esc/q/BS up`) | tree and flat root: back to the accounts; flat inside a folder: one level up | `test_fk_back_keys`, `test_fk_flat` |
 | `ctrl-c` | help: none (the help overlay does not take it) | the program quits at once, status 0 | `test_fk_ctrl_c`, `test_fk_search` |
 | `/` | `/ search` | prompt `Search [Subject]: _`; text (also `q j t`), `Backspace` deletes, `Tab` Subject/From/To/Body, `Enter` searches (empty: cancels), `Esc` cancels, `ctrl-c` quits; the status line shows `Enter search  Tab scope  Esc cancel`; a result returns to the row the search started from | `test_fk_search`, screen `folders_search` |
 | `c` | help: Compose | the new message dialog; the browser comes back on the same row (and flat level), also when it was reached from a message list | `test_fk_compose_keeps_row` |
-| `:` | `: actions` | menu: `Create a folder...`, `Delete the folder`, `Open all folders`, `Close all folders`, `Tree / flat` | `test_fk_menu`, `test_fk_tree_open_close`, `test_folder_create`, `test_folder_delete_asks` |
+| `-` | `- actions` | menu: `Create a folder...`, `Delete the folder`, `Open all folders`, `Close all folders`, `Tree / flat` | `test_fk_menu`, `test_fk_tree_open_close`, `test_folder_create`, `test_folder_delete_asks` |
 | `?` | `? help` | overlay `Folder browser shortcuts`; `Esc`, `q`, `Backspace` close it, other keys change nothing | `test_fk_help`, screen `folders_help` |
 | any other key | | changes nothing, shows nothing | `test_fk_unbound_keys` |
 
 0 folders (the server answers `LIST` with nothing): the browser opens with the
-virtual rows and says `No folders in this account.  Create one in the : menu.`
+virtual rows and says `No folders in this account.  Create one in the - menu.`
 (`test_fk_zero_folders`).  1 folder: every cursor key stays on it, `t` and
 `Enter` work (`test_fk_one_folder`).  40 folders: `test_fk_navigation`.
 
@@ -292,7 +292,7 @@ the branches first with the menu's `Open all folders` (`fk_open`).
 Already right: `Enter` on folders and virtual rows, `Esc`/`q`/`Backspace`
 back, `j k` and the arrows stopping at the ends, `PgUp`/`PgDn` by 19 rows,
 `Home`/`End`, `t` both ways with the hint following, the search editing keys,
-`?` and its closing keys, the `:` menu, unbound keys.  Not in this view's
+`?` and its closing keys, the `-` menu, unbound keys.  Not in this view's
 scope: the help overlay takes no `ctrl-c` (EMAIL-153), has no description or
 search (EMAIL-181, TUI-59) and does not list `Backspace` (EMAIL-183).
 
@@ -305,7 +305,7 @@ table has `rows - 5` data rows (19 at 80x24); the status line ends with
 `[cursor/rows]`.  The cursor starts on the label last left (Inbox), the
 headings are never selectable, the user's labels are sorted by name, the
 system labels (Unread, Flagged, Inbox, Sent, Drafts, the categories, Archive,
-Spam, Trash) come in fixed places.  The help (`?`) and the `:` menu are made
+Spam, Trash) come in fixed places.  The help (`?`) and the `-` menu are made
 from the key table views `labels` (a label of the user's own) and
 `labels-system` (any other row) of `libemail/src/core/key_table.c`.  Tests are
 in `tests/pty/test_pty_gmail_tui.c`, named `test_lb_*` (browser) and `test_lp_*`
@@ -321,12 +321,12 @@ labels for the paging tests).
 | `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q/BS accounts` | back to the accounts | `test_lb_back_keys` |
 | `ctrl-c` | help: none | the program quits at once, status 0, nothing printed | `test_lb_back_keys`, `test_lb_search`, `test_lb_menu` |
 | `/` | `/ search` | prompt `Search [Subject]: _`; text (also `q j t g`), `Backspace` deletes, `Tab` Subject/From/To/Body, `Enter` searches (empty: cancels), `Esc` cancels, `ctrl-c` quits; the status line shows `Enter search  Tab scope  Esc cancel`; a result returns to the row the search started from | `test_lb_search` |
-| `:` | `: actions` | menu: `Create a label...` on every row, `Delete the label` on a label of the user's own only; `j k g G Home End` move, `Enter` chooses, `Esc`, `q`, `Backspace` close; status line `j/k select  Enter choose  Esc/q/BS close [n/N]` | `test_lb_menu` |
+| `-` | `- actions` | menu: `Create a label...` on every row, `Delete the label` on a label of the user's own only; `j k g G Home End` move, `Enter` chooses, `Esc`, `q`, `Backspace` close; status line `j/k select  Enter choose  Esc/q/BS close [n/N]` | `test_lb_menu` |
 | `Create a label...` | prompt `New label name:` | status line `Enter create  Esc cancel`; `Enter` creates, `Esc` cancels, `ctrl-c` quits; `q` is text | `test_lb_menu`, `test_label_browser_create_*` |
 | `Delete the label` | `Delete the label X on the server? ...  [Yes] [No]` | No is the default; `y` deletes by id, `n`, `Esc`, `q`, `Backspace` refuse; status line `y yes  n no  Esc/q/BS cancel`; `ctrl-c` quits, nothing deleted | `test_lb_menu`, `test_label_browser_delete_label_uses_id` |
 | `?` | `? help` | overlay `Label browser shortcuts`; `Esc`, `q`, `Backspace` close it, other keys change nothing | `test_lb_help_and_status` |
 | resize | | redrawn at once, the status line on the new last row | `test_lb_help_and_status` |
-| `Space c d t x n r e i D l a u U 1 -`, `Right`, `Tab`, `Insert`, `Delete`, `F1` | | change nothing, show nothing (`c` and `d` are in the `:` menu) | `test_lb_unbound_keys` |
+| `Space c d t x n r e i D l a u U 1 -`, `Right`, `Tab`, `Insert`, `Delete`, `F1` | | change nothing, show nothing (`c` and `d` are in the `-` menu) | `test_lb_unbound_keys` |
 
 Without a label of the user's own the browser has 10 rows and works the same
 (`test_lb_no_user_labels`); there is no 0-row or 1-row browser, the system
@@ -348,14 +348,14 @@ has are ticked.  The status line is the picker's own while it is open.
 | `ctrl-c` | | quits at once, applies nothing | `test_lp_keys` |
 | any other key | | changes nothing | `test_lp_keys` |
 
-The same `q`, `Backspace`, `g`, `G`, `ctrl-c` and status line serve the `:`
+The same `q`, `Backspace`, `g`, `G`, `ctrl-c` and status line serve the `-`
 menu and its confirmation in every view (`tui_frame_modal_key`,
 `tui_frame_modal_status`; `terminal_request_quit()` makes the view underneath
 quit on its next read).  A picker with 0 or 1 labels does not exist: the five
 system labels are always listed.
 
 Findings of the study, fixed with EMAIL-145: EMAIL-208 (`g`, `G` did nothing),
-EMAIL-209 (`Left`, `h` did not go back), EMAIL-210 (the `:` menu and its
+EMAIL-209 (`Left`, `h` did not go back), EMAIL-210 (the `-` menu and its
 confirmation did not close with `q` or `Backspace`), EMAIL-211 (the picker did
 not close with `q` or `Backspace`), EMAIL-212 (`g`, `G` in the picker and the
 menu), EMAIL-213 (the picker and the menu had no status line), EMAIL-214
@@ -506,7 +506,7 @@ the mock servers (`tests/pty/test_pty_review_keys.c`, suite `review-keys`).
 
 Title bar `Message body - To: ... Subject: ...`, status line `Esc save and
 continue  Ctrl-S save  F1 help`.  The editor is libtuikit's `tui_textedit`; a letter is
-text here, so there is no `?` help, no `:` menu and no `q`.  Below 80x24 only
+text here, so there is no `?` help, no `-` menu and no `q`.  Below 80x24 only
 `Terminal too small` is shown and nothing is edited, `Esc` still leaves.
 Leaving without keeping the draft: `Esc` to the review screen, then `q` and `y`.
 
@@ -527,12 +527,12 @@ Leaving without keeping the draft: `Esc` to the review screen, then `q` and `y`.
 ### Review screen
 
 Status line `: actions (send)  e edit headers  b edit body  a add attachment
-? help  q discard` (what fits at the width).  Sending is in the `:` menu
+? help  q discard` (what fits at the width).  Sending is in the `-` menu
 (`Send`, then `Send the message to ...?` Yes/No); there is no `s` and no `d`.
 
 | Key | Label | Behaviour | Test |
 |---|---|---|---|
-| `:` | `actions (send)` | menu `Send` / `Edit headers` / `Remove an attachment`; `Esc` closes only the menu; Remove with nothing attached does nothing | `test_rv_colon_menu` |
+| `-` | `actions (send)` | menu `Send` / `Edit headers` / `Remove an attachment`; `Esc` closes only the menu; Remove with nothing attached does nothing | `test_rv_colon_menu` |
 | `Send` in the menu | | asks naming the recipients; Yes sends, removes the draft; `Esc` or No returns to the review | `test_rv_send_asks_and_declines`, `test_rv_send_yes` |
 | `e` | `edit headers` | the dialog `Edit Message`, prefilled; `Esc` asks `Discard what was typed?`, Yes returns to the review | `test_rv_e_edit_headers` |
 | `b` | `edit body` | the body editor with the text kept; the line count follows | `test_rv_b_edit_body` |
@@ -640,9 +640,9 @@ Findings: none; every view behaves the same.  Not changed (known from
 EMAIL-146): the overlays do not list `Backspace`, `Left`, `h`.
 
 
-## Quick keys of the ':' menus (EMAIL-225)
+## Quick keys of the '-' menus (EMAIL-225)
 
-Every entry of every `:` menu has a quick key: a letter drawn at the left of the
+Every entry of every `-` menu has a quick key: a letter drawn at the left of the
 entry.  Typing it in the open menu runs the entry (a serious or rare entry opens
 its dialog first).  The letters come from libtuikit (`tui_keytable_assign_quick`,
 v0.13.0, TUI-62), assigned from the key table in `libemail/src/core/key_table.c`,
@@ -658,7 +658,7 @@ target and has No as the default, so Enter on the default never performs them;
 **rare** entries (Move to..., Add or Remove a label..., Create, Save all
 attachments, Renew the authorization) open a name prompt or dialog first, and
 cancelling does nothing.  Renew the authorization is also irreversible: the
-dialog says that the saved token is replaced.  Views with no `:` menu are the
+dialog says that the saved token is replaced.  Views with no `-` menu are the
 rules views and the IMAP accounts list.
 
 Tests (80x24, `./manage.sh pty`): `test_menu_keys_list_imap`,
@@ -667,24 +667,22 @@ Tests (80x24, `./manage.sh pty`): `test_menu_keys_list_imap`,
 `test_menu_keys_labels`, `test_menu_keys_accounts` (gmail-tui suite) and
 `test_rv_menu_keys` (review-keys suite) check a unique letter on every entry and
 that a routine letter performs its entry; the serious entries are driven with
-`:` and the letter, the dialog names the target, Enter on the default is No and
+`-` and the letter, the dialog names the target, Enter on the default is No and
 changes nothing, and Yes performs it.
 
 | View | Letter | Entry | Class |
 |---|---|---|---|
 | `list-imap` | `s` | Star | routine |
-| `list-imap` | `r` | Mark read | routine |
-| `list-imap` | `u` | Mark unread | routine |
-| `list-imap` | `n` | Junk | routine |
+| `list-imap` | `r` | Read / unread | routine |
+| `list-imap` | `u` | Junk | routine |
 | `list-imap` | `d` | Delete | serious |
 | `list-imap` | `e` | Delete (Delete key) | serious |
 | `list-imap` | `b` | Start a sync | serious |
 | `list-imap` | `m` | Move to... | rare |
 | `list-imap` | `t` | Toggle Done | routine |
 | `list-gmail` | `s` | Star | routine |
-| `list-gmail` | `r` | Mark read | routine |
-| `list-gmail` | `u` | Mark unread | routine |
-| `list-gmail` | `n` | Junk | routine |
+| `list-gmail` | `r` | Read / unread | routine |
+| `list-gmail` | `u` | Junk | routine |
 | `list-gmail` | `d` | Delete | serious |
 | `list-gmail` | `e` | Delete (Delete key) | serious |
 | `list-gmail` | `b` | Start a sync | serious |
@@ -695,9 +693,8 @@ changes nothing, and Yes performs it.
 | `list-gmail` | `1` | Add a label... | rare |
 | `list-gmail` | `o` | Remove a label... | rare |
 | `list-gmail-virtual` | `s` | Star | routine |
-| `list-gmail-virtual` | `r` | Mark read | routine |
-| `list-gmail-virtual` | `u` | Mark unread | routine |
-| `list-gmail-virtual` | `n` | Junk | routine |
+| `list-gmail-virtual` | `r` | Read / unread | routine |
+| `list-gmail-virtual` | `u` | Junk | routine |
 | `list-gmail-virtual` | `d` | Delete | serious |
 | `list-gmail-virtual` | `e` | Delete (Delete key) | serious |
 | `list-gmail-virtual` | `b` | Start a sync | serious |
@@ -707,9 +704,8 @@ changes nothing, and Yes performs it.
 | `list-gmail-virtual` | `1` | Add a label... | rare |
 | `list-gmail-virtual` | `o` | Remove a label... | rare |
 | `list-gmail-archive` | `s` | Star | routine |
-| `list-gmail-archive` | `r` | Mark read | routine |
-| `list-gmail-archive` | `u` | Mark unread | routine |
-| `list-gmail-archive` | `n` | Junk | routine |
+| `list-gmail-archive` | `r` | Read / unread | routine |
+| `list-gmail-archive` | `u` | Junk | routine |
 | `list-gmail-archive` | `d` | Delete | serious |
 | `list-gmail-archive` | `e` | Delete (Delete key) | serious |
 | `list-gmail-archive` | `b` | Start a sync | serious |
@@ -718,9 +714,8 @@ changes nothing, and Yes performs it.
 | `list-gmail-archive` | `a` | Add a label... | rare |
 | `list-gmail-archive` | `o` | Remove a label... | rare |
 | `list-gmail-trash` | `s` | Star | routine |
-| `list-gmail-trash` | `r` | Mark read | routine |
-| `list-gmail-trash` | `u` | Mark unread | routine |
-| `list-gmail-trash` | `n` | Junk | routine |
+| `list-gmail-trash` | `r` | Read / unread | routine |
+| `list-gmail-trash` | `u` | Junk | routine |
 | `list-gmail-trash` | `d` | Delete | serious |
 | `list-gmail-trash` | `e` | Delete (Delete key) | serious |
 | `list-gmail-trash` | `b` | Start a sync | serious |
@@ -731,23 +726,21 @@ changes nothing, and Yes performs it.
 | `list-gmail-trash` | `1` | Add a label... | rare |
 | `list-gmail-trash` | `o` | Remove a label... | rare |
 | `reader-imap` | `s` | Star | routine |
-| `reader-imap` | `m` | Mark read | routine |
-| `reader-imap` | `u` | Mark unread | routine |
-| `reader-imap` | `n` | Junk | routine |
+| `reader-imap` | `r` | Read / unread | routine |
+| `reader-imap` | `u` | Junk | routine |
 | `reader-imap` | `d` | Delete | serious |
 | `reader-imap` | `e` | Delete (Delete key) | serious |
 | `reader-imap` | `a` | Save all attachments | rare |
 | `reader-imap` | `t` | Toggle Done | routine |
 | `reader-gmail` | `s` | Star | routine |
-| `reader-gmail` | `m` | Mark read | routine |
-| `reader-gmail` | `u` | Mark unread | routine |
-| `reader-gmail` | `n` | Junk | routine |
+| `reader-gmail` | `r` | Read / unread | routine |
+| `reader-gmail` | `u` | Junk | routine |
 | `reader-gmail` | `d` | Delete | serious |
 | `reader-gmail` | `e` | Delete (Delete key) | serious |
 | `reader-gmail` | `v` | Save all attachments | rare |
 | `reader-gmail` | `l` | Labels | routine |
 | `reader-gmail` | `a` | Archive | routine |
-| `reader-gmail` | `r` | Remove this label | routine |
+| `reader-gmail` | `t` | Remove this label | routine |
 | `labels` | `c` | Create a label... | rare |
 | `labels` | `d` | Delete the label | serious |
 | `labels-system` | `c` | Create a label... | rare |

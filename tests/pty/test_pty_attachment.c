@@ -37,13 +37,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-/* EMAIL-175: sending is in the review screen's ':' menu (row 0) and asks
+/* EMAIL-175: sending is in the review screen's '-' menu (row 0) and asks
  * first, naming the recipients; removing the last attachment is row 2. */
-#define REVIEW_SEND(s) do { pty_send_str((s), ":"); \
+#define REVIEW_SEND(s) do { pty_send_str((s), "-"); \
     pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
     pty_send_key((s), PTY_KEY_ENTER); \
     pty_wait_for((s), "Yes", 8000); pty_send_str((s), "y"); } while (0)
-#define REVIEW_UNATTACH(s) do { pty_send_str((s), ":"); \
+#define REVIEW_UNATTACH(s) do { pty_send_str((s), "-"); \
     pty_wait_for((s), "Actions", 8000); pty_settle((s), 200); \
     pty_send_key((s), PTY_KEY_DOWN); pty_send_key((s), PTY_KEY_DOWN); \
     pty_send_key((s), PTY_KEY_ENTER); } while (0)
@@ -553,7 +553,7 @@ static void test_review_s_sends_message(void)
     pty_close(s);
 }
 
-/* EMAIL-175: 's' no longer sends; the ':' menu does, after asking with the
+/* EMAIL-175: 's' no longer sends; the '-' menu does, after asking with the
  * recipient named, and No is the default. */
 static void test_review_send_asks_default_no(void)
 {
@@ -564,7 +564,7 @@ static void test_review_send_asks_default_no(void)
     pty_settle(s, 500);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Sending");
     ASSERT_SCREEN_NOT_CONTAINS(s, "sent");
-    pty_send_str(s, ":");
+    pty_send_str(s, "-");
     ASSERT_WAIT_FOR(s, "Actions", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Send");
     ASSERT_SCREEN_CONTAINS(s, "Edit headers");
@@ -787,7 +787,7 @@ static void test_review_d_removes_attachment(void)
     pty_send_str(s, g_attach_file1);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "report.pdf", WAIT_MS);
-    /* Remove via the ':' menu */
+    /* Remove via the '-' menu */
     REVIEW_UNATTACH(s);
     pty_settle(s, 200);
     ASSERT_SCREEN_NOT_CONTAINS(s, "report.pdf");

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
 /* Created: 2026-10-19 */
-/* The key table of email-tui: one table for the key handler, the help and the ':' menu. */
+/* The key table of email-tui: one table for the key handler, the help and the '-' menu. */
 #include "key_table.h"
 #include "key_events.h"
 #include "tui_frame.h"
@@ -66,8 +66,7 @@
     H(V, 'l', "Rules", "the rules editor"),                                         \
     H(V, 'H', "History", "recent changes, with Revert"),                            \
     R(V, '*', TUI_VERB_STAR, "Star", "toggle the star (flag)", EA_STAR),            \
-    R(V, '+', TUI_VERB_READ, "Mark read", NULL, EA_READ),                           \
-    R(V, '-', TUI_VERB_UNREAD, "Mark unread", NULL, EA_UNREAD),                     \
+    R(V, '+', TUI_VERB_READ, "Read / unread", "toggle read and unread", EA_READ),   \
     R(V, '!', TUI_VERB_JUNK, "Junk", "toggle junk", EA_JUNK),                       \
     S(V, 'd', TUI_VERB_DELETE, "Delete", "to Trash; in Trash for good",             \
       CONF_DELETE, EA_DELETE),                                                      \
@@ -77,7 +76,7 @@
       CONF_SYNC, EA_SYNC),                                                          \
     M(V, "Move to...", "a folder or label, asked for", EA_MOVE),                    \
     H(V, '?', "Help", NULL),                                                        \
-    H(V, ':', "Actions", "the menu of everything that changes state"),              \
+    H(V, '-', "Actions", "the menu of everything that changes state"),              \
     H(V, 'q', "Back", "also h, Left and Backspace"),                                           \
     H(V, TUI_KEY_ESC, "Back", "first clears marks and filter"),                     \
     H(V, TUI_KC_QUIT, "Quit", NULL)
@@ -111,8 +110,7 @@
     H(V, 'a', "Save attachment", NULL),                                             \
     H(V, 'H', "History", "of this message, with Revert"),                           \
     R(V, '*', TUI_VERB_STAR, "Star", "toggle the star (flag)", EA_STAR),            \
-    R(V, '+', TUI_VERB_READ, "Mark read", NULL, EA_READ),                           \
-    R(V, '-', TUI_VERB_UNREAD, "Mark unread", NULL, EA_UNREAD),                     \
+    R(V, '+', TUI_VERB_READ, "Read / unread", "toggle read and unread", EA_READ),   \
     R(V, '!', TUI_VERB_JUNK, "Junk", "toggle junk", EA_JUNK),                       \
     S(V, 'd', TUI_VERB_DELETE, "Delete", "to Trash; in Trash for good",             \
       CONF_DELETE, EA_DELETE),                                                      \
@@ -120,7 +118,7 @@
       CONF_DELETE, EA_DELETE),                                                      \
     M(V, "Save all attachments", "to a directory, asked for", EA_SAVE_ALL),         \
     H(V, '?', "Help", NULL),                                                        \
-    H(V, ':', "Actions", "the menu of everything that changes state"),              \
+    H(V, '-', "Actions", "the menu of everything that changes state"),              \
     H(V, 'q', "Back", "to the list (also h, Left, Backspace)"),                     \
     H(V, TUI_KEY_ESC, "Back", "to the list"),                                       \
     H(V, TUI_KC_QUIT, "Quit", NULL)
@@ -137,7 +135,7 @@
     H(V, TUI_KEY_ENTER, "Open", "the messages of the label"),                       \
     H(V, '/', "Search", "cross-folder content search"),                             \
     H(V, '?', "Help", NULL),                                                        \
-    H(V, ':', "Actions", "the menu of everything that changes state"),              \
+    H(V, '-', "Actions", "the menu of everything that changes state"),              \
     H(V, 'q', "Back", "to the accounts (also h, Left, Backspace)"),                         \
     H(V, TUI_KEY_ESC, "Back", "to the accounts"),                                   \
     M(V, "Create a label...", "on the server, name asked for", EA_LABEL_CREATE)
@@ -179,7 +177,7 @@ static const tui_keyentry g_entries[] = {
     /* The Trash: the only view that can restore. */
     DESC(EKV_LIST_GMAIL_TRASH,
          "The messages in the Gmail Trash. The cursor is on one message; "
-         "Enter reads it, the : menu restores it to the inbox."),
+         "Enter reads it, the - menu restores it to the inbox."),
     LIST_COMMON(EKV_LIST_GMAIL_TRASH),
     GMAIL_LIST_T(EKV_LIST_GMAIL_TRASH),
     GMAIL_LIST_ARCHIVE(EKV_LIST_GMAIL_TRASH),
@@ -202,7 +200,7 @@ static const tui_keyentry g_entries[] = {
      * deleted, so the menu does not offer it (EMAIL-218). */
     DESC(EKV_LABELS,
          "The labels of the Gmail account. The cursor is on one of your own labels; "
-         "Enter opens its messages, the : menu can delete it."),
+         "Enter opens its messages, the - menu can delete it."),
     LABELS_COMMON(EKV_LABELS),
     S(EKV_LABELS, TUI_KC_NONE, TUI_VERB_NONE, "Delete the label", "on the server",
       "Delete the label %s on the server? Its messages keep their other labels.",
@@ -231,7 +229,7 @@ static const tui_keyentry g_entries[] = {
     H(EKV_FOLDERS, '/', "Search", "cross-folder content search"),
     H(EKV_FOLDERS, 'c', "Compose", "a new message"),
     H(EKV_FOLDERS, '?', "Help", NULL),
-    H(EKV_FOLDERS, ':', "Actions", "the menu of everything that changes state"),
+    H(EKV_FOLDERS, '-', "Actions", "the menu of everything that changes state"),
     H(EKV_FOLDERS, 'q', "Back", "up one level; the accounts at the top (also Backspace)"),
     H(EKV_FOLDERS, TUI_KEY_ESC, "Back", "up one level; the accounts at the top"),
     M(EKV_FOLDERS, "Create a folder...", "on the server, name asked for", EA_FOLDER_CREATE),
@@ -268,7 +266,7 @@ static const tui_keyentry g_entries[] = {
     H(EKV_ACCOUNTS_GMAIL, TUI_KEY_END, "Last account", NULL),
     H(EKV_ACCOUNTS_GMAIL, TUI_KEY_ENTER, "Open", "the labels of the account"),
     H(EKV_ACCOUNTS_GMAIL, '?', "Help", NULL),
-    H(EKV_ACCOUNTS_GMAIL, ':', "Actions", "the menu of everything that changes state"),
+    H(EKV_ACCOUNTS_GMAIL, '-', "Actions", "the menu of everything that changes state"),
     H(EKV_ACCOUNTS_GMAIL, TUI_KEY_ESC, "Quit", NULL),
     /* rare, and it replaces the saved token: a dialog names the account (EMAIL-225) */
     { EKV_ACCOUNTS_GMAIL, TUI_KC_NONE, TUI_VERB_NONE, "Renew the authorization...",
@@ -295,7 +293,7 @@ static const tui_keyentry g_entries[] = {
     /* The review of a composed message. */
     DESC(EKV_REVIEW,
          "The composed message, ready to send. Check the headers and the body; "
-         "e, b and a change them, the : menu sends the message."),
+         "e, b and a change them, the - menu sends the message."),
     S(EKV_REVIEW, TUI_KC_NONE, TUI_VERB_NONE, "Send", "the message",
       "Send the message to %s?", EA_SEND),
     R(EKV_REVIEW, 'e', TUI_VERB_EDIT, "Edit headers", "To, Cc, Bcc, Subject, attachments",
@@ -303,7 +301,7 @@ static const tui_keyentry g_entries[] = {
     H(EKV_REVIEW, 'b', "Edit body", NULL),
     H(EKV_REVIEW, 'a', "Add attachment", NULL),
     H(EKV_REVIEW, '?', "Help", NULL),
-    H(EKV_REVIEW, ':', "Actions", "send the message, remove an attachment"),
+    H(EKV_REVIEW, '-', "Actions", "send the message, remove an attachment"),
     H(EKV_REVIEW, 'q', "Discard", "asks first"),
     H(EKV_REVIEW, TUI_KEY_ESC, "Discard", "asks first"),
     RM(EKV_REVIEW, "Remove an attachment", NULL, EA_UNATTACH),

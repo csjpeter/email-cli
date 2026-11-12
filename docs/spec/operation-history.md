@@ -105,7 +105,7 @@ question says so (`This cannot be undone and is not revertable. Continue?
 
 **email-tui:** `H` in the message list opens the recent changes; `H` in the
 reader opens the history of that message (key table, `libemail/src/core/key_table.c`).
-The page is libtuikit's `tui_histview`: the keys of every list, `:` for the menu
+The page is libtuikit's `tui_histview`: the keys of every list, `-` for the menu
 with **Revert**, `Enter` on a step opens the confirmation naming the step, the
 thing and what it will become (default No), a step marked not revertable shows a
 notice and no dialog, a refusal is shown in one line at the bottom, `?` opens

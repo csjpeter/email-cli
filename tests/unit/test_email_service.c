@@ -3985,8 +3985,8 @@ void test_email_service(void) {
         label_idx_add("UNREAD", gr_uid);
         local_msg_save("INBOX", gr_uid, gr_msg, strlen(gr_msg));
 
-        /* ':' menu, Archive (row 8 of the Gmail reader menu), then ESC (EMAIL-175) */
-        INJECT_STDIN(":\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\r\033x", 28, saved_stdin);
+        /* '-' menu, Archive (row 7 of the Gmail reader menu), then ESC (EMAIL-175) */
+        INJECT_STDIN("-\033[B\033[B\033[B\033[B\033[B\033[B\033[B\r\033x", 25, saved_stdin);
         SUPPRESS_OUT(sout, serr);
         int gr_r = show_uid_interactive(&gr_cfg, NULL, "INBOX", gr_uid, 25, 3, NULL);
         RESTORE_OUT(sout, serr);
@@ -4122,9 +4122,9 @@ void test_email_service(void) {
         /* the menu's "Remove this label" removes INBOX label from message → no real labels remain → _nolabel
          * 'd' again on same entry → undo (restore) path
          * then ESC to exit */
-        INJECT_STDIN(":\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\r"
-                     ":\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\r"
-                     "\033x", 72, saved_stdin);
+        INJECT_STDIN("-\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\r"
+                     "-\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\r"
+                     "\033x", 66, saved_stdin);
         int sout, serr;
         SUPPRESS_OUT(sout, serr);
         int lr_r = email_service_list(&lr_cfg, &lr_opts);

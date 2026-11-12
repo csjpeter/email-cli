@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
 /* Created: 2026-10-22 */
-/* Reads the quick keys of the ':' action menu off the screen (EMAIL-225). */
+/* Reads the quick keys of the '-' action menu off the screen (EMAIL-225). */
 #ifndef TESTS_PTY_MENU_KEYS_H
 #define TESTS_PTY_MENU_KEYS_H
 
 /**
  * @file menu_keys.h
- * @brief What the PTY tests of EMAIL-225 need to see of an open ':' menu: its
+ * @brief What the PTY tests of EMAIL-225 need to see of an open '-' menu: its
  *        rows, each with the quick key drawn at the left of the entry.
  *
  * A row of the menu is drawn as "L  key  Action - description", L being the
@@ -98,7 +98,7 @@ static int menu_letters_ok(const MenuRow *rows, int n) {
  */
 #define ASSERT_MENU_LETTERS(s, screen_rows, rows, n, want, nwant, what)                    \
     do {                                                                                   \
-        pty_send_str((s), ":");                                                            \
+        pty_send_str((s), "-");                                                            \
         ASSERT_WAIT_FOR((s), "Actions", WAIT_MS);                                          \
         pty_settle((s), 300);                                                              \
         (n) = menu_read((s), (rows), (screen_rows));                                       \

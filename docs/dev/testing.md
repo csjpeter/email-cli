@@ -198,9 +198,9 @@ work (`build`, `debug`, `test`, `coverage`, `valgrind`, `functional`, `pty`,
 `integration`, `headers`, `names`, `check`, `check-deep`, `package`,
 `install`) appends `<UTC time> <verb> <s>s <ok|fail> <commit>` to `build/timing.log`
 (`<commit>` is the short HEAD id, `+` after it when the tree was dirty),
-success or failure. `timing` prints `Gate: <total>s (check .., package ..,
-install ..)` from the latest run of each, leaves out a part that never ran, and
-prints `Gate: not measured` with a non-zero status when there is none; with a
+success or failure. `timing [KEY-N]` prints `Gate 1 (PROJECT, KEY-N): <total>s (check .., package ..,
+install ..)` (`PROJECT` = the directory name; `, KEY-N` left out with no key) from the latest run of each, leaves out a part that never ran, and
+prints `Gate 1 (PROJECT[, KEY-N]): not measured` with a non-zero status when there is none; with a
 key it comments the line on the ticket, once per measured record: the log
 lines used are kept per key in `build/timing.posted`, the same record posts
 nothing (exit 0), a record from a newer run posts again even if the text is

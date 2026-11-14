@@ -36,26 +36,37 @@ printf 'int x;\n' > "$T/a.c"; git -C "$T" add a.c
 # 2. the timing verb with no log
 rm -f "$MANAGE_TIMING_LOG"
 out=$("$ROOT/manage.sh" timing 2>&1); rc=$?
-[ "$rc" -ne 0 ] && [ "$out" = "Gate: not measured" ] \
+[ "$rc" -ne 0 ] && [ "$out" = "Gate 1 (email-cli): not measured" ] \
     && ok "2.1 no log: 'not measured' and non-zero" || bad "2.1 (rc=$rc: $out)"
 
 # 3. only parts that ran are summed, latest run of each wins
 printf '2026-10-11T10:00:00Z check 100s ok\n2026-10-11T10:05:00Z test 40s ok\n2026-10-11T10:10:00Z check 120s ok\n2026-10-11T10:12:00Z package 30s ok\n' > "$MANAGE_TIMING_LOG"
 out=$("$ROOT/manage.sh" timing 2>&1); rc=$?
-[ "$rc" -eq 0 ] && [ "$out" = "Gate: 150s (check 120s, package 30s)" ] \
+[ "$rc" -eq 0 ] && [ "$out" = "Gate 1 (email-cli): 150s (check 120s, package 30s)" ] \
     && ok "3.1 latest of each part, missing install left out" || bad "3.1 (rc=$rc: $out)"
 
 printf '2026-10-11T10:20:00Z install 5s ok\n' >> "$MANAGE_TIMING_LOG"
 out=$("$ROOT/manage.sh" timing 2>&1)
-[ "$out" = "Gate: 155s (check 120s, package 30s, install 5s)" ] \
+[ "$out" = "Gate 1 (email-cli): 155s (check 120s, package 30s, install 5s)" ] \
     && ok "3.2 all three parts" || bad "3.2 ($out)"
 
 # 4. with a key the same line is commented through issue-cli
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" > "%s/issue-args"\n' "$WORK" > "$WORK/stubs/issue-cli"
 chmod +x "$WORK/stubs/issue-cli"
 PATH="$WORK/stubs:$PATH" "$ROOT/manage.sh" timing KEY-1 > "$WORK/out" 2>&1; rc=$?
-[ "$rc" -eq 0 ] && [ "$(cat "$WORK/issue-args")" = "issue comment KEY-1 Gate: 155s (check 120s, package 30s, install 5s)" ] \
+[ "$rc" -eq 0 ] && [ "$(cat "$WORK/issue-args")" = "issue comment KEY-1 Gate 1 (email-cli, KEY-1): 155s (check 120s, package 30s, install 5s)" ] \
     && ok "4.1 timing KEY posts the line as a comment" || bad "4.1 (rc=$rc: $(cat "$WORK/issue-args"))"
+
+# 4b. the printed line names the gate and project; with a key, the key; without, no key part
+out=$("$ROOT/manage.sh" timing KEY-1 2>&1 | head -n 1)
+[ "$out" = "Gate 1 (email-cli, KEY-1): 155s (check 120s, package 30s, install 5s)" ] \
+    && ok "4.2 printed line with a key names gate, project and key" || bad "4.2 ($out)"
+out=$("$ROOT/manage.sh" timing 2>&1)
+case "$out" in *", KEY"*) bad "4.3 ($out)" ;; "Gate 1 (email-cli): "*) ok "4.3 no key leaves the key part out" ;; *) bad "4.3 ($out)" ;; esac
+
+rm -f "$MANAGE_TIMING_LOG"
+out=$("$ROOT/manage.sh" timing KEY-1 2>&1)
+[ "$out" = "Gate 1 (email-cli, KEY-1): not measured" ] && ok "4.4 not measured names the key" || bad "4.4 ($out)"
 
 # 5. a record is posted once; a newer record is posted again, even with the
 # same text (EMAIL-121)

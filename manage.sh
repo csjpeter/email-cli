@@ -60,7 +60,7 @@ show_help() {
     echo "  uninstall      Remove installed binaries from ~/.local/bin"
     echo "  package [deb|rpm|all]  Build release and create package(s) in build/packages/"
     echo "  tag-build VERSION  Annotated tag vVERSION on HEAD (ticket keys since the previous tag); local only, pushes nothing"
-    echo "  timing [KEY-N] Print the Gate line from build/timing.log; with a key, comment it on the ticket"
+    echo "  timing [KEY-N] Print the line \"Gate 1 (PROJECT[, KEY-N]): ...\" from build/timing.log; with a key, comment it on the ticket"
     echo "  clean-logs     Purge all application log files"
     echo "  clean          Remove all build artifacts"
     echo "  help           Show this help message"
@@ -709,7 +709,7 @@ run_gates() {
 
 # Prints the gate line from the latest run of each of check, package and install
 # in the log.  A part that never ran through this script is left out; with none
-# of them the line is "Gate: not measured" and the status is non-zero.
+# of them the line is "Gate 1 (PROJECT): not measured" and the status is non-zero.
 # gate_record: the log lines the gate line is made from (the latest of each
 # part), which is what makes two reports the same or different.
 gate_record() {
@@ -720,8 +720,11 @@ gate_record() {
     done
 }
 
+# gate_line [KEY-N]: "Gate 1 (PROJECT, KEY-N): ..."; PROJECT is the directory
+# name of the project, the ", KEY-N" part is left out when no key is given.
 gate_line() {
-    local verb secs total=0 parts="" n=0
+    local verb secs total=0 parts="" n=0 who
+    who="$(basename "$(dirname "$(readlink -f "$0")")")${1:+, $1}"
     if [ -s "$TIMING_LOG" ]; then
         for verb in check package install; do
             secs=$(awk -v v="$verb" '$2 == v { s = $3 } END { sub(/s$/, "", s); print s }' "$TIMING_LOG")
@@ -732,10 +735,10 @@ gate_line() {
         done
     fi
     if [ "$n" -eq 0 ]; then
-        echo "Gate: not measured"
+        echo "Gate 1 ($who): not measured"
         return 1
     fi
-    echo "Gate: ${total}s ($parts)"
+    echo "Gate 1 ($who): ${total}s ($parts)"
 }
 
 case "$1" in
@@ -1085,7 +1088,7 @@ case "$1" in
         tag_package_build "$tver" || exit 1
         ;;
     timing)
-        line=$(gate_line) || { echo "$line"; exit 1; }
+        line=$(gate_line "${2:-}") || { echo "$line"; exit 1; }
         echo "$line"
         if [ -n "$2" ]; then
             # A measurement is posted once: build/timing.posted keeps, per key,

@@ -36,7 +36,7 @@ typedef enum {
 /**
  * @brief Check one leaf certificate.
  * @param cert   Verified leaf certificate.
- * @param chain  Verified chain (leaf first); the issuer is looked up in it.
+ * @param chain  Verified chain (leaf first); the certificate issuer is looked up in it.
  * @param store  Trust store used to verify OCSP responses; may be NULL.
  * @param why    Receives a short reason when the result is not GOOD/REVOKED
  *               or says which source decided; may be NULL.

@@ -406,8 +406,8 @@ static void test_rev_issuer_missing(void)
     sk_X509_push(only, p.leaf);
     char why[256];
     ASSERT(tls_revocation_check(p.leaf, only, p.store, why, sizeof(why)) == TLS_REV_UNKNOWN,
-           "without the issuer nothing can be asked");
-    ASSERT(strstr(why, "issuer") != NULL, "says the issuer is missing");
+           "without the certificate issuer nothing can be asked");
+    ASSERT(strstr(why, "certificate issuer") != NULL, "says the certificate issuer is missing");
     sk_X509_free(only);
     ASSERT(tls_revocation_check(p.leaf, p.chain, p.store, NULL, 0) == TLS_REV_UNKNOWN,
            "a NULL reason buffer is accepted");

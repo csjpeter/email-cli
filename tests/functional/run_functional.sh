@@ -8133,6 +8133,19 @@ fi
 
 fi
 
+if phase_wanted 161; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 161 — the email-tui libtuikit inventory table (EMAIL-290)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 161: docs/dev/tui-inventory.md is complete and every row has a status (EMAIL-290) ---"
+OUT161=$(bash "$PROJECT_ROOT/tests/functional/run_tui_inventory.sh" 2>&1)
+RC161=$?
+check "161.1 inventory check passes (exit status)" "rc=0" "rc=$RC161"
+check "161.2 inventory check: all rows pass" "Passed: 10 / 10" "$OUT161"
+
+fi
+
 # ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════

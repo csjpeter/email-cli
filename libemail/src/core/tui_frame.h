@@ -7,6 +7,8 @@
 
 #include <tuikit/canvas.h>
 #include <tuikit/dialog.h>
+#include <tuikit/filechooser.h>
+#include <stddef.h>
 #include <tuikit/table.h>
 
 /**
@@ -109,5 +111,20 @@ void tui_frame_modal_status(const char *const verbs[][2], int nverbs,
  *        (both 1-based), as an overlay (see tui_frame_overlay()).
  */
 int tui_frame_overlay_rows(tui_table *table, int row, int col, int h, int w);
+
+/**
+ * @brief Runs libtuikit's file chooser over the screen (EMAIL-291): a typing
+ *        field with Tab completion over the directory list.
+ *
+ * @param title  frame title; NULL for the library's default
+ * @param mode   TUI_FC_OPEN a file, TUI_FC_DIR a directory, TUI_FC_SAVE a name to write
+ * @param start  directory to start in; NULL: the current one
+ * @param name   text typed into the field at the start (a suggested file
+ *               name), or NULL
+ * @param out    receives the absolute path chosen
+ * @return 0 chosen, -1 cancelled or failed.  The caller redraws its view.
+ */
+int tui_frame_run_filechooser(const char *title, tui_fc_mode mode, const char *start,
+                              const char *name, char *out, size_t outsz);
 
 #endif /* CORE_TUI_FRAME_H */

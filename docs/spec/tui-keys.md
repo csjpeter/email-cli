@@ -9,7 +9,7 @@ so.  Policy: `policies/tui-interface-model.md`.
 The picker opens with `a` in the reader when the message has two or more
 attachments; with exactly one, `a` goes straight to the save prompt; with none,
 `a` shows `No attachments` in the reader.  Saving all attachments is in the `-`
-menu of the reader (`Save all attachments`, prompt `Save all to:`).  The help
+menu of the reader (`Save all attachments`, chooser `Save all to`).  The help
 (`?`) is made from the key table view `attach-picker`
 (`libemail/src/core/key_table.c`).  Tests are in `tests/pty/test_pty_views.c`
 (80x24, the mock with `MOCK_IMAP_ATTACHMENTS`), test names below.
@@ -20,20 +20,20 @@ menu of the reader (`Save all attachments`, prompt `Save all to:`).  The help
 | `Up`, `k` | `select` | cursor up one row, stops at the first | `test_picker_navigation` |
 | `PgDn` / `PgUp` | help: Page down / up | one page (rows of the screen less 4), clamped | `test_picker_navigation` |
 | `Home`, `g` / `End`, `G` | help: First / Last attachment | first / last row | `test_picker_navigation` |
-| `Enter` | `choose` | the row under the cursor; prompt `Save as:` with the path in `Downloads` or the home directory | `test_picker_navigation`, `test_picker_choose_second_then_cancel`, `test_show_save_single` |
+| `Enter` | `choose` | the row under the cursor; chooser `Save attachment as` with the path in `Downloads` or the home directory | `test_picker_navigation`, `test_picker_choose_second_then_cancel`, `test_show_save_single` |
 | `Esc`, `q`, `Backspace` | `Esc/q/BS back` | back to the reader | `test_picker_back_keys` |
 | `ctrl-c` | help: Quit | the program quits at once | `test_picker_ctrl_c_quits` |
 | `?` | help | overlay from the key table; `Esc` closes only the overlay | `test_picker_help` |
 | any other key | | changes nothing, shows nothing | `test_picker_unbound_key` |
 | `[n/N]` | status line | cursor row of the count | `test_picker_back_keys` |
 
-Save prompts (`Save as:`, `Save all to:`; the line editor is in `input-line.md`):
+Save choosers (`Save attachment as`, `Save all to`; libtuikit's `tui_filechooser`, EMAIL-291; typing, Tab, Up/Down, Enter on a directory enters it):
 
 | Key | Behaviour | Test |
 |---|---|---|
 | `Enter` | save and say `Saved: PATH` / `Saved N/N files to: DIR` | `test_show_save_single`, `test_a_one_attachment`, `test_show_save_all_confirm` |
 | `Esc` | cancel, nothing written, back to the reader | `test_picker_choose_second_then_cancel`, `test_a_one_attachment`, `test_show_save_all_cancel` |
-| `Home` `End` `Left` `Right` `Backspace` `Delete` | line editing | `test_show_save_input_line_cursor` |
+| `Home` `End` `Left` `Right` `Backspace` `Delete` | editing of the typing field | `test_show_save_input_line_cursor` |
 | `Tab` / `Shift-Tab` | path completion forward / back | `test_show_save_tab_completion` |
 
 0 attachments: `test_a_without_attachments`; 1 attachment: `test_a_one_attachment`;

@@ -62,7 +62,7 @@ recorded weakness, not coverage of the promise.
 | `email-cli rules edit` | F:37.20 | `--new-name` F:37.29 |
 | `email-cli rules list` | F:34.1 | `--json` F:122.16; `--columns` / `--sort` F:150.40 |
 | `email-cli rules remove` | F:37.12 | |
-| `email-cli save-attachment` | F:15.2 | |
+| `email-cli save-attachment` | F:15.2 | unchanged by the TUI file chooser (EMAIL-291); the TUI side is P:test_show_save_chooser_browse |
 | `email-cli reply` | F:133.3 F:133.8 | `--all` F:133.7 |
 | `email-cli trash` | F:132.2 F:132.6 | |
 | `email-cli archive` | F:132.5 F:132.13 | |
@@ -132,6 +132,7 @@ recorded weakness, not coverage of the promise.
 | `email-tui reply` | F:114.7 | refusal without a UID; the reply itself P:test_review_reply_uses_review_screen |
 | `email-tui` rules editor | P:test_tui_rules_add_form_saves_new_rule P:test_screen_rules_deleted P:test_tui_rules_preview_and_apply P:test_screen_rules_preview | |
 | `email-tui` Gmail labels and flags | P:test_feedback_t_label_added P:test_feedback_f_star | |
+| TUI file chooser: attach (`Ctrl-O`) and save (`a`, `A`) | | P:test_attach_file_chooser_browse P:test_attach_file_chooser_typing P:test_attach_file_chooser_cancel P:test_show_save_chooser_browse; no CLI form (the CLI takes a path), EMAIL-291 |
 | TUI mark junk (`j`) | | gap: no PTY test; also listed in `docs/interface-parity.md`; ticket to be opened by the owner |
 | TUI delete label (`d` in the label browser) | | gap: no PTY test, and it deletes by name not id; ticket to be opened by the owner |
 | libemail-client IMAP, Gmail, SMTP over verified TLS | S:run_static_binaries.sh | the static binaries run against the mock servers with certificate checking in an empty root; protocol detail in the unit tests |

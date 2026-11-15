@@ -440,6 +440,80 @@ static void test_attach_shown_in_review(void)
     pty_close(s);
 }
 
+/* TC-AT-12 (EMAIL-291): Ctrl-O opens the file chooser; the file is picked by
+ * browsing (the directory typed so far is where it opens) and added. */
+static void test_attach_file_chooser_browse(void)
+{
+    restart_servers();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "TC-AT-12: inbox opens");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    nav_to_attach_field(s);
+    char dir[700];
+    snprintf(dir, sizeof(dir), "%s/attachments/", g_test_home);
+    pty_send_str(s, dir);
+    pty_send_str(s, "\x0f");                          /* Ctrl-O */
+    ASSERT_SCREEN_CONTAINS(s, "Attach file");
+    ASSERT_SCREEN_CONTAINS(s, "report.pdf");           /* the directory list */
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");
+    pty_send_str(s, "report");                         /* typed after the directory */
+    pty_send_key(s, PTY_KEY_TAB);                      /* completes to report.pdf */
+    pty_send_key(s, PTY_KEY_ENTER);                    /* the file is chosen */
+    pty_settle(s, 300);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Attach file");
+    pty_send_key(s, PTY_KEY_ENTER);                    /* adds the path now in the field */
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "report.pdf");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* TC-AT-13 (EMAIL-291): the chooser's typing field takes a full path. */
+static void test_attach_file_chooser_typing(void)
+{
+    restart_servers();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "TC-AT-13: inbox opens");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    nav_to_attach_field(s);
+    char dir[700];
+    snprintf(dir, sizeof(dir), "%s/attachments/", g_test_home);
+    pty_send_str(s, dir);
+    pty_send_str(s, "\x0f");
+    ASSERT_SCREEN_CONTAINS(s, "Attach file");
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");
+    pty_send_str(s, "notes.txt");                      /* the whole name typed */
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Attach file");
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/* TC-AT-14 (EMAIL-291): Esc in the chooser leaves the field as it was. */
+static void test_attach_file_chooser_cancel(void)
+{
+    restart_servers();
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "TC-AT-14: inbox opens");
+    pty_send_str(s, "c");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    nav_to_attach_field(s);
+    pty_send_str(s, "\x0f");
+    ASSERT_SCREEN_CONTAINS(s, "Attach file");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_settle(s, 300);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Attach file");
+    ASSERT_SCREEN_CONTAINS(s, "New Message");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  * TC-PCR — Post-compose review screen (US-85)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -965,6 +1039,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_attach_multiple_files);
     RUN_TEST(test_attach_shift_tab_back_to_subject);
     RUN_TEST(test_attach_shown_in_review);
+    RUN_TEST(test_attach_file_chooser_browse);
+    RUN_TEST(test_attach_file_chooser_typing);
+    RUN_TEST(test_attach_file_chooser_cancel);
 
     /* ── TC-PCR: Post-compose review screen ─────────────────────────── */
     printf("\n--- TC-PCR: Post-compose review screen (US-85) ---\n");

@@ -202,6 +202,8 @@ TermKey terminal_read_key(void) {
         return TERM_KEY_IGNORE;                 /* end of input, error, paste */
 
     if (ev.key == TUI_KEY_CHAR) {
+        if ((ev.mods & ~(unsigned)TUI_MOD_CTRL) == 0 && (ev.mods & TUI_MOD_CTRL) && ev.cp == 'o')
+            return TERM_KEY_BROWSE;
         if (ev.mods & TUI_MOD_CTRL)
             return (ev.cp == 'c' && !(ev.mods & ~(unsigned)TUI_MOD_CTRL))
                        ? TERM_KEY_QUIT : TERM_KEY_IGNORE;

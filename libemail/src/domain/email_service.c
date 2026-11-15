@@ -14,7 +14,6 @@
 #include <tuikit/text.h>
 #include <tuikit/tree.h>
 #include <tuikit/dialog.h>
-#include "path_complete.h"
 #include "mail_account.h"
 #include "local_store.h"
 #include "mail_rules.h"
@@ -260,6 +259,7 @@ static int pager_prompt(int cur_page, int total_pages, int page_size,
         case TERM_KEY_PREV_LINE: return -1;
         case TERM_KEY_ENTER:
         case TERM_KEY_TAB:
+        case TERM_KEY_BROWSE:
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_LEFT:
         case TERM_KEY_RIGHT:
@@ -1218,6 +1218,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
         case TERM_KEY_RIGHT:
         case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
+        case TERM_KEY_BROWSE:
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
@@ -1581,15 +1582,16 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                              dir ? dir : ".", fname ? fname : "attachment");
                     free(dir);
                     free(fname);
-                    InputLine il;
-                    input_line_init(&il, dest, sizeof(dest), dest);
-                    path_complete_attach(&il);
-                    int ok = input_line_run(&il, term_rows - 1, "Save as: ");
-                    path_complete_reset();
-                    /* Clear the edited line and the completion row */
-                    printf("\033[%d;1H\033[2K\033[%d;1H\033[2K\033[?25l",
-                           term_rows - 1, term_rows);
-                    if (ok == 1) {
+                    char ddir[2048];
+                    snprintf(ddir, sizeof(ddir), "%s", dest);
+                    char *slash = strrchr(ddir, '/');
+                    const char *dname = slash ? slash + 1 : ddir;
+                    if (slash) *slash = '\0';
+                    int ok = tui_frame_run_filechooser("Save attachment as", TUI_FC_SAVE,
+                                                       slash ? ddir : NULL, dname,
+                                                       dest, sizeof(dest)) == 0;
+                    printf("\033[2J\033[?25l");   /* the view is drawn again */
+                    if (ok) {
                         int r = mime_save_attachment(&atts[sel], dest);
                         snprintf(info_msg, sizeof(info_msg),
                                  r == 0 ? "  Saved: %.1900s"
@@ -1609,15 +1611,11 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 snprintf(dest_dir, sizeof(dest_dir), "%s",
                          def_dir ? def_dir : ".");
                 free(def_dir);
-                InputLine il;
-                input_line_init(&il, dest_dir, sizeof(dest_dir), dest_dir);
-                path_complete_attach(&il);
-                int ok = input_line_run(&il, term_rows - 1, "Save all to: ");
-                path_complete_reset();
-                /* Clear the edited line and the completion row */
-                printf("\033[%d;1H\033[2K\033[%d;1H\033[2K\033[?25l",
-                       term_rows - 1, term_rows);
-                if (ok == 1) {
+                int ok = tui_frame_run_filechooser("Save all to", TUI_FC_DIR,
+                                                   dest_dir, NULL,
+                                                   dest_dir, sizeof(dest_dir)) == 0;
+                printf("\033[2J\033[?25l");   /* the view is drawn again */
+                if (ok) {
                     int saved = 0;
                     for (int i = 0; i < att_count; i++) {
                         char *fname = safe_filename_for_path(atts[i].filename);
@@ -4303,6 +4301,7 @@ read_key_again: ;
         case TERM_KEY_RIGHT:
         case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
+        case TERM_KEY_BROWSE:
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = terminal_last_printable();
@@ -5066,6 +5065,7 @@ char *email_service_list_folders_interactive(const Config *cfg,
         case TERM_KEY_RIGHT:
         case TERM_KEY_DELETE:
         case TERM_KEY_TAB:
+        case TERM_KEY_BROWSE:
         case TERM_KEY_SHIFT_TAB:
         case TERM_KEY_IGNORE: {
             int ch = fdeferred ? 0 : terminal_last_printable();

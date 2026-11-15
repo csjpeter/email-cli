@@ -52,8 +52,8 @@ existing references and every `no` has a reason.
 | Irreversible operations confirm first (default No) and show as not revertable | yes (`delete-folder`, `trash --folder Trash`, `forward`, ...) | F:140.21 F:140.28 F:140.34 | yes | P:test_hist_tui_not_revertable P:test_folder_delete_asks | |
 | Mark several messages at once | no (one UID per call; a script loops) | | yes (`Space`, `m`) | P:test_tui_list_bulk_star_marked | medium: a script loops; not a gap |
 | List attachments | yes | F:14.1 | yes | P:test_show_attachment_picker | |
-| Save an attachment / all attachments | yes | F:15.2 | yes (`a`, `A`) | P:test_show_save_single | |
-| Compose and send a new message | yes (`send`) | F:11.3 | yes (`c`) | P:test_review_s_sends_message | |
+| Save an attachment / all attachments | yes | F:15.2 | yes (`a`, `A`: the file chooser of libtuikit, the path can still be typed; `A` chooses a directory) | P:test_show_save_single P:test_show_save_chooser_browse | EMAIL-291; the CLI takes the path as an argument |
+| Compose and send a new message | yes (`send`) | F:11.3 | yes (`c`; an attachment is typed or picked with `Ctrl-O`, the file chooser) | P:test_review_s_sends_message P:test_attach_file_chooser_browse P:test_attach_file_chooser_typing | EMAIL-291 |
 | Reply, reply to all | yes (`reply`, `reply --all`) | F:133.3 | yes (`r`, `R`) | P:test_reply_all_send | the answered mark is local until the next sync |
 | Forward | yes (`forward`) | F:134.1 | yes (`F`) | P:test_forward_fill_to_opens_editor | |
 | List accounts | yes | F:18.1 | yes | P:test_screen_accounts | |

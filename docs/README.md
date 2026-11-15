@@ -29,6 +29,7 @@ See the project [README](../README.md) for installation, configuration, interact
 ## Developer Guides
 
 - [Testing](dev/testing.md) — unit, functional, integration tests; coverage requirements
+- [email-tui libtuikit inventory](dev/tui-inventory.md) — every TUI part, its widget, what waits for the TUI project
 - [Logging](dev/logging.md) — log levels, rotation, IMAP traffic capture
 - [Portability](portability.md) — what binds the project to Linux
 - [Interface parity](interface-parity.md) — CLI / TUI / web UI: which operation each offers, and the test behind each `yes`

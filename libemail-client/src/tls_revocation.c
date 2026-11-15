@@ -355,7 +355,7 @@ TlsRevStatus tls_revocation_check(X509 *cert, STACK_OF(X509) *chain,
     why[0] = '\0';
     X509 *issuer = find_issuer(cert, chain);
     if (!issuer) {
-        snprintf(why, why_len, "the issuer of the certificate is not in the chain");
+        snprintf(why, why_len, "the certificate issuer is not in the chain");
         return TLS_REV_UNKNOWN;
     }
     unsigned char fp[32];

@@ -1398,13 +1398,18 @@ static int cmd_compose_interactive(Config *cfg,
     {
         ComposeDraft old;
         if (compose_draft_load(&old) == 0) {
-            printf("\033[2J\033[H\n  Unsent draft found (To: %s, Subject: %s).\n"
-                   "  Resume it? [y/N] ", old.to, old.subject);
-            fflush(stdout);
-            RAII_TERM_RAW TermRawState *rawq = terminal_raw_enter();
-            TermKey qk = terminal_read_key();
-            int qc = (qk == TERM_KEY_IGNORE) ? terminal_last_printable() : 0;
-            if (qc == 'y' || qc == 'Y') {
+            char qtext[2048];
+            snprintf(qtext, sizeof qtext, "To: %s\nSubject: %s\n\nResume it?",
+                     old.to, old.subject);
+            int resume = 0;
+            tui_dialog qd;
+            if (tui_dialog_confirm(&qd, "Unsent draft found", qtext, 0) == 0) {
+                RAII_TERM_RAW TermRawState *rawq = terminal_raw_enter();
+                tui_frame_run_dialog(&qd);
+                resume = qd.state == TUI_DIALOG_OK && qd.answer == 1;
+                tui_dialog_free(&qd);
+            }
+            if (resume) {
                 snprintf(to_buf, sizeof(to_buf), "%s", old.to);
                 snprintf(cc_buf, sizeof(cc_buf), "%s", old.cc);
                 snprintf(bcc_buf, sizeof(bcc_buf), "%s", old.bcc);

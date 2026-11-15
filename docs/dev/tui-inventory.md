@@ -30,7 +30,7 @@ widgets". One row per part of email-tui. **Status** is one of:
 | Pre-compose dialog fields (To, Cc, Bcc, Subject, Attach) | main_tui.c (`compose_dialog`) | printf rows and cursor | todo (`tui_fieldset`) |
 | Add-attachment prompt | main_tui.c | printf rows | todo (`tui_fieldset`) |
 | Send screen | main_tui.c (`send_screen_*`) | printf rows | todo (`tui_textview`) |
-| Unsent-draft question | main_tui.c | printf text | todo (`tui_dialog_confirm`) |
+| Unsent-draft question | main_tui.c | `tui_dialog_confirm` | done |
 | Rule add form | main_tui.c (`tui_rules_add_form`) | printf rows and cursor | todo (`tui_fieldset`) |
 | Rule detail | main_tui.c (`tui_rules_detail`) | printf rows | todo (`tui_textview`) |
 | Rules report | main_tui.c (`tui_rules_report`) | printf rows | todo (`tui_textview`) |

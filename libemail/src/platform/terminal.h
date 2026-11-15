@@ -25,7 +25,8 @@ typedef enum {
     TERM_KEY_HOME      = 12, /* Home key                        */
     TERM_KEY_END       = 13, /* End key                         */
     TERM_KEY_DELETE    = 14, /* Delete (forward delete)         */
-    TERM_KEY_SHIFT_TAB = 15  /* Shift+Tab (backtab, ESC[Z)      */
+    TERM_KEY_SHIFT_TAB = 15, /* Shift+Tab (backtab, ESC[Z)      */
+    TERM_KEY_BROWSE    = 16  /* Ctrl-O: open the file chooser   */
 } TermKey;
 
 /** Opaque saved terminal state (used for raw-mode enter/exit). */

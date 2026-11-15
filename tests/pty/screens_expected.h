@@ -4085,62 +4085,6 @@ static const char *const sty_att_picker_second[] = {
 };
 static const int cur_att_picker_second[3] = { 23, 99, 0 };
 
-static const char *const exp_att_save_prompt[] = {
-    "  Attachments (2):",
-    "",
-    "> notes.txt                                             text/plain; name=\"notes.txt\"            11 B",
-    "  data.bin                                              application/octet-stream; name=\"da…      9 B",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "%  Save as: ",
-    " ↑↓ select  Enter choose  Esc/q/BS back                                                       [1/2]",
-    NULL
-};
-static const char *const sty_att_save_prompt[] = {
-    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
-    "                                                                                                    ",
-    "ASSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
-    NULL
-};
-static const int cur_att_save_prompt[3] = { 22, -1, 1 };
-
 static const char *const exp_att_saved[] = {
     "From:    Test User <test@example.com>",
     "Subject: Test Message (folded continuation)",
@@ -4195,60 +4139,6 @@ static const char *const sty_att_saved[] = {
     NULL
 };
 static const int cur_att_saved[3] = { 22, 99, 0 };
-
-static const char *const exp_att_save_all[] = {
-    "From:    Test User <test@example.com>",
-    "Subject: Test Message (folded continuation)",
-    "Date:    2026-03-26 12:00",
-    "UID:     0000000000000001",
-    "@@",
-    "DMARC:   Not evaluated (no Authentication-Results header)",
-    "Attach:  2 files: notes.txt, data.bin",
-    "────────────────────────────────────────────────────────────────────────────────",
-    "Hello from Mock Server. Welcome!",
-    "",
-    "Bold <styled> • em text",
-    "",
-    "Dark italic ä text 3 <3 html",
-    "",
-    "Underline strike deleted",
-    "> Quoted section. Ünicode.",
-    "• Item one",
-    "• Item two",
-    "1. First",
-    "2. Second",
-    "--------------------------------------------------------------------------------",
-    "%  Save all to: ",
-    NULL
-};
-static const char *const sty_att_save_all[] = {
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb                                                                    ",
-    "                                                                                                    ",
-    "xxxxxxxxxxxxxxxxXXxxxxx                                                                             ",
-    "                                                                                                    ",
-    "iiiiiiiiiiiiiiiiiiiiiiiiiiii                                                                        ",
-    "                                                                                                    ",
-    "uuuuuuuuuukkkkkkukkkkkkk                                                                            ",
-    "         bbbbbbb                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "",
-    "                                                                                                    ",
-    NULL
-};
-static const int cur_att_save_all[3] = { 21, -1, 1 };  /* end of its row: the path holds a pid */
 
 static const char *const exp_review_full[] = {
     "  Review: Message",
@@ -4386,7 +4276,7 @@ static const char *const exp_review_attach_ask[] = {
     "",
     "",
     "",
-    " Tab complete  Enter add  Esc cancel",
+    " Tab complete  ^O browse  Enter add  Esc cancel",
     NULL
 };
 static const char *const sty_review_attach_ask[] = {
@@ -4890,7 +4780,7 @@ static const char *const exp_path_many[] = {
     "",
     "",
     "",
-    " Tab complete  Shift-Tab prev  Enter add  d remove last  Enter (empty) ok  Esc cancel",
+    " Tab complete  ^O browse  Shift-Tab prev  Enter add  d remove last  Enter (empty) ok",
     NULL
 };
 static const char *const sty_path_many[] = {
@@ -4946,7 +4836,7 @@ static const char *const exp_path_one[] = {
     "",
     "",
     "",
-    " Tab complete  Shift-Tab prev  Enter add  d remove last  Enter (empty) ok  Esc cancel",
+    " Tab complete  ^O browse  Shift-Tab prev  Enter add  d remove last  Enter (empty) ok",
     NULL
 };
 static const char *const sty_path_one[] = {

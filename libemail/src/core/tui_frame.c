@@ -9,10 +9,13 @@
 
 #include <tuikit/buf.h>
 #include <tuikit/canvas.h>
+#include <tuikit/filechooser.h>
 #include <tuikit/screen.h>
 #include <tuikit/text.h>
 #include <tuikit/tty.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 int tui_frame_draw_table(const char *header, tui_table *table, int rows, int cols,
@@ -185,4 +188,80 @@ int tui_frame_overlay_rows(tui_table *table, int row, int col, int h, int w) {
     if (col - 1 + w > cols) w = cols - (col - 1);
     RowsOverlay o = { table, row, col, h, w };
     return tui_frame_overlay(draw_rows, &o, rows, cols);
+}
+
+/* ── File chooser (EMAIL-291) ─────────────────────────────────────────── */
+
+static void draw_chooser(tui_canvas c, void *ctx) {
+    tui_filechooser_render((tui_filechooser *)ctx, c);
+}
+
+/* The next UTF-8 character of s as a key event; returns its length, 0 at the end. */
+static size_t char_event(const char *s, tui_event *ev) {
+    unsigned char b = (unsigned char)s[0];
+    size_t n = b < 0x80 ? 1 : b >= 0xF0 ? 4 : b >= 0xE0 ? 3 : b >= 0xC0 ? 2 : 1;
+    uint32_t cp = n == 1 ? b : (uint32_t)(b & (0xFF >> (n + 1)));
+    for (size_t i = 1; i < n; i++) {
+        if (!s[i]) return 0;
+        cp = (cp << 6) | ((unsigned char)s[i] & 0x3F);
+    }
+    memset(ev, 0, sizeof(*ev));
+    ev->type = TUI_EV_KEY;
+    ev->key = TUI_KEY_CHAR;
+    ev->cp = cp;
+    memcpy(ev->utf8, s, n);
+    return n;
+}
+
+int tui_frame_run_filechooser(const char *title, tui_fc_mode mode, const char *start,
+                              const char *name, char *out, size_t outsz) {
+    if (!out || outsz < 2) return -1;
+    tui_filechooser fc;
+    if (tui_filechooser_open(&fc, title, mode,
+                             start, NULL) != 0)
+        return -1;
+    for (const char *p = name; p && *p;) {          /* the suggested name, typed */
+        tui_event ev;
+        size_t n = char_event(p, &ev);
+        if (n == 0) break;
+        tui_filechooser_handle(&fc, &ev);
+        p += n;
+    }
+    tui_decoder dec;
+    tui_decoder_init(&dec);
+    KeyEvents winch;
+    key_events_begin(&winch);
+    while (fc.state == TUI_FC_ACTIVE) {
+        int rows = terminal_rows(), cols = terminal_cols();
+        if (rows <= 0) rows = 24;
+        if (cols <= 0) cols = 80;
+        static const char *const v[][2] = {
+            { "Tab", "complete" }, { "Enter", "choose" }, { "Alt-H", "hidden" },
+            { "Esc", "cancel" } };
+        tui_frame_modal_status(v, 4, 0, 0);
+        tui_frame_overlay(draw_chooser, &fc, rows, cols);
+        tui_event ev;
+        int r = key_events_next(STDIN_FILENO, &dec, &ev, 50);
+        if (r < 0 || (r > 0 && ev.type == TUI_EV_HANGUP)) {
+            fc.state = TUI_FC_CANCELLED;
+            break;
+        }
+        if (r == 0) {                                /* idle: a directory may have arrived */
+            tui_filechooser_poll(&fc);
+            continue;
+        }
+        tui_filechooser_poll(&fc);
+        if (ev.type == TUI_EV_RESIZE) continue;
+        if (TUI_EV_IS_CTRL(&ev, 'c')) terminal_request_quit();
+        tui_filechooser_handle(&fc, &ev);
+    }
+    key_events_end(&winch);
+    tui_decoder_free(&dec);
+    int rc = -1;
+    if (fc.state == TUI_FC_OK && fc.path && strlen(fc.path) < outsz) {
+        memcpy(out, fc.path, strlen(fc.path) + 1);
+        rc = 0;
+    }
+    tui_filechooser_free(&fc);
+    return rc;
 }

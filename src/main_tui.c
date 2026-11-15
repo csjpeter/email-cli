@@ -263,6 +263,18 @@ static void cd_current_token(const char *buf, int cur, char *tok, int toksz) {
     tok[len] = '\0';
 }
 
+/* The directory a typed attachment path names: up to its last '/', so the
+ * file chooser opens where the user already is (EMAIL-291).  "" when none. */
+static void cd_browse_start(const char *typed, char *dir, size_t sz) {
+    dir[0] = '\0';
+    const char *sl = strrchr(typed, '/');
+    if (!sl) return;
+    size_t n = (size_t)(sl - typed) + 1;
+    if (n >= sz) return;
+    memcpy(dir, typed, n);
+    dir[n] = '\0';
+}
+
 /** Replace the current token in buf with addr; update *cur.
  *  buf is CD_FIELD_BUFSZ bytes. */
 static void cd_complete(char *buf, int *cur, const char *addr) {
@@ -478,6 +490,7 @@ static int cd_render(const char *title,
     if (active == CD_FIELD_ATTACH) {
         static const tui_statusline_hint h[] = {
             { "Tab", "complete", SL_PRIO_HIGH },
+            { "^O", "browse", SL_PRIO_HIGH },
             { "Shift-Tab", "prev", SL_PRIO_LOW },
             { "Enter", "add", SL_PRIO_KEEP },
             { "d", "remove last", SL_PRIO_MID },
@@ -665,6 +678,22 @@ static int compose_dialog(const Config *cfg,
                 } else {
                     goto confirm_dialog;
                 }
+                continue;
+            }
+
+            if (key == TERM_KEY_BROWSE && active == CD_FIELD_ATTACH) {
+                /* The file chooser (EMAIL-291): the typed path starts it. */
+                char chosen[CD_FIELD_BUFSZ], from[CD_FIELD_BUFSZ];
+                cd_browse_start(bufs[CD_FIELD_ATTACH], from, sizeof(from));
+                if (tui_frame_run_filechooser("Attach file", TUI_FC_OPEN,
+                                              from[0] ? from : NULL, NULL,
+                                              chosen, sizeof(chosen)) == 0) {
+                    snprintf(bufs[CD_FIELD_ATTACH], CD_FIELD_BUFSZ, "%s", chosen);
+                    cursors[CD_FIELD_ATTACH] = (int)strlen(bufs[CD_FIELD_ATTACH]);
+                    attach_state.error[0] = '\0';
+                }
+                dd_hidden = 0;
+                printf("\033[2J");
                 continue;
             }
 
@@ -1023,10 +1052,11 @@ static int pcr_pick_attach_raw(char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_S
         {
             static const tui_statusline_hint h[] = {
                 { "Tab", "complete", SL_PRIO_HIGH },
+                { "^O", "browse", SL_PRIO_HIGH },
                 { "Enter", "add", SL_PRIO_KEEP },
                 { "Esc", "cancel", SL_PRIO_KEEP },
             };
-            screen_bar(h, 3, NULL, NULL);
+            screen_bar(h, 4, NULL, NULL);
         }
         if (file_match_count > 0) {
             CDDropdown dd = { NULL, NULL, file_matches };
@@ -1058,6 +1088,19 @@ static int pcr_pick_attach_raw(char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_S
             attach_paths[*attach_count][CD_ATTACH_PATH_SZ - 1] = '\0';
             (*attach_count)++;
             return 1;
+        }
+
+        if (key == TERM_KEY_BROWSE) {
+            char chosen[CD_FIELD_BUFSZ], from[CD_FIELD_BUFSZ];
+            cd_browse_start(input, from, sizeof(from));
+            if (tui_frame_run_filechooser("Attach file", TUI_FC_OPEN,
+                                          from[0] ? from : NULL, NULL,
+                                          chosen, sizeof(chosen)) == 0) {
+                snprintf(input, sizeof(input), "%s", chosen);
+                cursor = (int)strlen(input);
+                error[0] = '\0';
+            }
+            continue;
         }
 
         if (key == TERM_KEY_TAB && file_match_count > 0) {

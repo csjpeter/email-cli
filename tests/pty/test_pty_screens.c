@@ -1020,17 +1020,43 @@ VIEW(att_picker,        at_attach_reader(),
 VIEW(att_picker_second, at_attach_reader(),
      (pty_send_str(s, "a"), pty_wait_for(s, "Attachments", WAIT_MS),
       pty_send_key(s, PTY_KEY_DOWN), pty_settle(s, SETTLE_MS)))
-VIEW(att_save_prompt,   at_attach_reader(),
-     (pty_send_str(s, "a"), pty_wait_for(s, "Attachments", WAIT_MS), pty_settle(s, 200),
-      pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Save as:", WAIT_MS),
-      pty_settle(s, SETTLE_MS)))
 VIEW(att_saved,         at_attach_reader(),
      (pty_send_str(s, "a"), pty_wait_for(s, "Attachments", WAIT_MS), pty_settle(s, 200),
-      pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Save as:", WAIT_MS), pty_settle(s, 200),
+      pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Save attachment as", WAIT_MS), pty_settle(s, 200),
       pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Saved:", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
-VIEW(att_save_all,      at_attach_reader(),
-     (menu_row(s, 5), pty_wait_for(s, "Save all to:", WAIT_MS), pty_settle(s, SETTLE_MS)))
+
+/* The save choosers (EMAIL-291) are libtuikit's tui_filechooser: the entries,
+ * sizes and dates differ per machine, so these two are not cell-for-cell
+ * pictures but check the frame, the typing field and the hint. */
+static void test_screen_att_save_prompt(void) {
+    restart_mock();
+    use_home("att_save_prompt");
+    PtySession *s = at_attach_reader();
+    ASSERT(s != NULL, "att_save_prompt: the view opens");
+    pty_send_str(s, "a");
+    pty_wait_for(s, "Attachments", WAIT_MS);
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_SCREEN_CONTAINS(s, "Save attachment as");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");          /* the suggested name, typed */
+    ASSERT_SCREEN_CONTAINS(s, "../");                /* the directory list */
+    ASSERT_SCREEN_CONTAINS(s, "Enter");              /* the hint on the status line */
+    pty_close(s);
+}
+
+static void test_screen_att_save_all(void) {
+    restart_mock();
+    use_home("att_save_all");
+    PtySession *s = at_attach_reader();
+    ASSERT(s != NULL, "att_save_all: the view opens");
+    menu_row(s, 5);
+    ASSERT_SCREEN_CONTAINS(s, "Save all to");
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "./");                 /* directory mode: the directory itself */
+    pty_close(s);
+}
 VIEW(reader_menu,       at_reader(),
      (pty_send_str(s, "-"), pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
 

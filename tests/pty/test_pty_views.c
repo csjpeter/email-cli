@@ -1593,11 +1593,13 @@ static void test_show_save_single(void) {
 
     /* Select first attachment (notes.txt) */
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Save attachment as", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    /* Accept pre-filled path */
+    /* Accept the suggested name; an existing file is asked about first */
     pty_send_key(s, PTY_KEY_ENTER);
+    pty_settle(s, SETTLE_MS);
+    if (pty_screen_contains(s, "Replace it?")) pty_send_str(s, "y");
     ASSERT_WAIT_FOR(s, "Saved:", WAIT_MS);
 
     /* File must exist on disk */
@@ -1605,6 +1607,36 @@ static void test_show_save_single(void) {
     snprintf(path, sizeof(path), "%s/notes.txt", g_test_home);
     ASSERT(access(path, F_OK) == 0, "notes.txt saved to disk");
 
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+}
+
+/** EMAIL-291: the save chooser browses: a directory is entered from the list,
+ *  the name is typed, the file lands in that directory. */
+static void test_show_save_chooser_browse(void) {
+    char sub[512], out[600];
+    snprintf(sub, sizeof(sub), "%s/zzsave", g_test_home);
+    if (mkdir(sub, 0700) != 0 && access(sub, F_OK) != 0) perror("mkdir zzsave");
+    snprintf(out, sizeof(out), "%s/zzsave/browsed.txt", g_test_home);
+    remove(out);
+
+    PtySession *s = open_show_view();
+    ASSERT(s != NULL, "save browse: opens");
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Attachments", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Save attachment as", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "zzsave/", WAIT_MS);           /* the directory list */
+    for (int i = 0; i < 9; i++) pty_send_key(s, PTY_KEY_BACK);  /* the suggested name */
+    pty_send_str(s, "zzsave");                        /* the list selects the directory */
+    pty_send_key(s, PTY_KEY_ENTER);                   /* ... and enters it */
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "browsed.txt");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Saved:", WAIT_MS);
+    ASSERT(access(out, F_OK) == 0, "save browse: the file is in the chosen directory");
+    remove(out);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 }
@@ -1620,7 +1652,7 @@ static void test_show_save_all_cancel(void) {
     remove(path);
 
     menu_pick(s, MENU_READER_SAVE_ALL);
-    ASSERT_WAIT_FOR(s, "Save all to:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Save all to", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
     pty_send_key(s, PTY_KEY_ESC);
@@ -1640,7 +1672,7 @@ static void test_show_save_all_confirm(void) {
     ASSERT(s != NULL, "save-all confirm: opens");
 
     menu_pick(s, MENU_READER_SAVE_ALL);
-    ASSERT_WAIT_FOR(s, "Save all to:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Save all to", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
     /* Accept the pre-filled default (g_test_home) */
@@ -1678,7 +1710,7 @@ static void test_show_save_input_line_cursor(void) {
     pty_settle(s, SETTLE_MS);
 
     pty_send_key(s, PTY_KEY_ENTER);           /* select first attachment */
-    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Save attachment as", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
     /* Exercise cursor movement keys while input_line_run is active */
@@ -1700,41 +1732,35 @@ static void test_show_save_input_line_cursor(void) {
 static void test_show_save_tab_completion(void) {
     /* Ensure two known files exist in the test home for completion to find. */
     char tab1[512], tab2[512];
-    snprintf(tab1, sizeof(tab1), "%s/zztab1.txt", g_test_home);
-    snprintf(tab2, sizeof(tab2), "%s/zztab2.txt", g_test_home);
-    { FILE *f = fopen(tab1, "w"); if (f) fclose(f); }
-    { FILE *f = fopen(tab2, "w"); if (f) fclose(f); }
+    snprintf(tab1, sizeof(tab1), "%s/zztab1", g_test_home);
+    snprintf(tab2, sizeof(tab2), "%s/zztab2", g_test_home);
+    /* the directory chooser lists directories only */
+    if (mkdir(tab1, 0700) != 0 && access(tab1, F_OK) != 0) perror("mkdir zztab1");
+    if (mkdir(tab2, 0700) != 0 && access(tab2, F_OK) != 0) perror("mkdir zztab2");
 
     PtySession *s = open_show_view();
     ASSERT(s != NULL, "tab complete: opens show view");
 
-    menu_pick(s, MENU_READER_SAVE_ALL);       /* "Save all to:" dialog */
-    ASSERT_WAIT_FOR(s, "Save all to:", WAIT_MS);
+    menu_pick(s, MENU_READER_SAVE_ALL);       /* "Save all to" dialog */
+    ASSERT_WAIT_FOR(s, "Save all to", WAIT_MS);
     pty_settle(s, SETTLE_MS);
 
-    /* Pre-filled: $HOME.  Append "/zz" so TAB prefix is "zz". */
-    pty_send_key(s, PTY_KEY_END);
-    pty_send_str(s, "/zz");
-
-    /* First TAB: scans dir, finds zztab1/zztab2, completes to zztab1 */
-    pty_send_key(s, PTY_KEY_TAB);
+    /* The field holds the start directory; typing "zztab" and Tab completes the
+     * leaf from the entries shown, the list shows both files. */
     ASSERT_WAIT_FOR(s, "zztab1", WAIT_MS);
-
-    /* Second TAB: cycles to zztab2 */
-    pty_send_key(s, PTY_KEY_TAB);
     ASSERT_WAIT_FOR(s, "zztab2", WAIT_MS);
-
-    /* Shift+Tab: cycles back to zztab1 */
-    pty_send_str(s, "\033[Z");
-    ASSERT_WAIT_FOR(s, "zztab1", WAIT_MS);
+    pty_send_str(s, "zztab");
+    pty_send_key(s, PTY_KEY_TAB);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "zztab");
 
     pty_send_key(s, PTY_KEY_ESC);             /* cancel — no file written */
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
 
-    remove(tab1);
-    remove(tab2);
+    rmdir(tab1);
+    rmdir(tab2);
 }
 
 
@@ -1835,7 +1861,7 @@ static void test_picker_navigation(void) {
     /* Enter chooses the row under the cursor */
     pty_send_key(s, PTY_KEY_DOWN); ASSERT_WAIT_FOR(s, "[2/25]", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Save attachment as", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "data.bin");
     pty_close(s);
 }
@@ -1881,15 +1907,15 @@ static void test_a_one_attachment(void) {
     snprintf(path, sizeof(path), "%s/notes.txt", g_test_home);
     remove(path);
     pty_send_str(s, "a");
-    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Save attachment as", WAIT_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "Attachments (");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Save as:");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Save attachment as");
     ASSERT(access(path, F_OK) != 0, "one attachment: Esc saved nothing");
     pty_send_str(s, "a");
-    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Save attachment as", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Saved:", WAIT_MS);
     ASSERT(access(path, F_OK) == 0, "one attachment: Enter saved the file");
@@ -1920,12 +1946,12 @@ static void test_picker_choose_second_then_cancel(void) {
     pty_send_key(s, PTY_KEY_DOWN);
     ASSERT_WAIT_FOR(s, "[2/2]", WAIT_MS);
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "Save as:", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Save attachment as", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "data.bin");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Save as:");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Save attachment as");
     ASSERT(access(path, F_OK) != 0, "picker choose: Esc saved nothing");
     pty_close(s);
 }
@@ -8308,6 +8334,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_show_attachment_statusbar);
     RUN_TEST(test_show_attachment_picker);
     RUN_TEST(test_show_save_single);
+    RUN_TEST(test_show_save_chooser_browse);
     RUN_TEST(test_show_save_all_cancel);
     RUN_TEST(test_show_save_all_confirm);
     RUN_TEST(test_show_save_input_line_cursor);

@@ -474,8 +474,8 @@ static void run_mock_server_full(int listen_fd, SSL_CTX *ctx) {
                      "* LIST (\\HasNoChildren) \"/\" \"INBOX/../../x\"\r\n"
                      "* LIST (\\HasNoChildren) \"/\" \"/etc/passwd\"\r\n"
                      "* LIST (\\HasNoChildren) \"/\" \"INBOX/..\"\r\n"
-                     "* LIST (\\HasNoChildren) \".\" \"INBOX.a\tb\"\r\n"
                      "* LIST (\\HasNoChildren) \"/\" \"INBOX/..hidden\"\r\n"
+                     "* LIST (\\HasNoChildren) \".\" \"INBOX.a\tb\"\r\n"
                      "%s OK LIST completed\r\n", tag);
             SSL_write(ssl, resp, (int)strlen(resp));
         } else if (strstr(buf, "CREATE")) {

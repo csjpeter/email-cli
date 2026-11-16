@@ -32,6 +32,12 @@ typedef enum {
 } GmailLoginMode;
 
 /**
+ * Start xdg-open on @p url in the background, without a shell: the URL is one
+ * argument of the program, so no character in it is interpreted.
+ */
+void gmail_login_open_browser(const char *url);
+
+/**
  * @brief Authorize @p cfg's account and store the new refresh token in it.
  *
  * Messages for the person go to stderr; @p in is where a pasted redirect is

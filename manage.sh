@@ -682,11 +682,28 @@ non_code_only() {
     return 0
 }
 
-# run_gates VERB GATE...: each gate in its own run, one summary.
+# step_name GATE: the one-word step name of a gate for the "step N/M: NAME" line
+# (policies/manage-sh-model.md): test is unit, functional is component, the
+# static checks (headers, names, declared) are package checks, sanitize is sanitizer.
+step_name() {
+    case "$1" in
+        test) echo unit ;;
+        functional) echo component ;;
+        headers|names|declared) echo package ;;
+        sanitize) echo sanitizer ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# run_gates VERB GATE...: each gate in its own run, one summary.  Each gate
+# starts with the line "step N/M: NAME"; M is the number of gates of this run.
 run_gates() {
-    local verb="$1" gate rc=0 summary=""
+    local verb="$1" gate rc=0 summary="" n=0 m
     shift
+    m=$#
     for gate in "$@"; do
+        n=$((n + 1))
+        echo "step $n/$m: $(step_name "$gate")"
         echo "=== $verb: $gate ==="
         # MANAGE_TIMED is cleared so every gate logs its own time.
         if MANAGE_TIMED= "$0" "$gate"; then
@@ -1013,7 +1030,10 @@ case "$1" in
         # QA 2: the slow checks, one after the other; each keeps its result in
         # build/result/ (sanitize writes none of its own: its logs are in build/sanitize/).
         result_begin check-deep
+        deep_n=0
         for gate in valgrind sanitize coverage; do
+            deep_n=$((deep_n + 1))
+            echo "step $deep_n/3: $(step_name "$gate")"
             echo "=== check-deep: $gate ==="
             run_suite "$gate" . env MANAGE_TIMED= "$0" "$gate" || deep_rc=1
         done

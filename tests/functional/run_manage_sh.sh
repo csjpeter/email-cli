@@ -121,6 +121,25 @@ echo "$out" | grep -q "Running unit tests with Valgrind" && ok "7.8 check-deep s
 [ -f "$G7/build/result/check-deep.result" ] && ok "7.9 check-deep keeps its result in build/result/" || bad "7.9 no check-deep.result"
 "$ROOT/manage.sh" help | grep -q '^  check-deep ' && ok "7.10 help lists check-deep" || bad "7.10 help lacks check-deep"
 
+# 8. step lines (EMAIL-293): "step N/M: NAME", M = the steps that really run.
+git -C "$G7" checkout -q -- tests/unit/t.c && git -C "$G7" clean -fdq
+printf 'more\n' >> "$G7/docs/a.txt"
+qa check
+echo "$out" | grep -q "^step 1/3: package$" && echo "$out" | grep -q "^step 3/3: package$" \
+    && ok "8.1 a skipped run counts only the steps that run (M=3)" || bad "8.1 step lines: $(echo "$out" | grep '^step')"
+echo "$out" | grep -Eq "^step [0-9]+/[0-9]+: (unit|component|pty|integration)$" \
+    && bad "8.2 a skipped suite is announced" || ok "8.2 skipped suites have no step line"
+printf 'int y;\n' >> "$G7/tests/unit/t.c"
+qa check
+for want in "1/7: package" "2/7: package" "3/7: package" "4/7: unit" "5/7: component" "6/7: pty" "7/7: integration"; do
+    echo "$out" | grep -q "^step $want$" && ok "8.3 step $want" || bad "8.3 no 'step $want'"
+done
+[ "$(echo "$out" | grep -c '^step ')" -eq 7 ] && ok "8.4 exactly seven step lines" || bad "8.4 wrong count"
+qa check-deep
+for want in "1/3: valgrind" "2/3: sanitizer" "3/3: coverage"; do
+    echo "$out" | grep -q "^step $want$" && ok "8.5 step $want" || bad "8.5 no 'step $want'"
+done
+
 case "$WORK" in
     "$ROOT"/build/manage-sh-test-*) ;;
     *) echo "ERROR: refusing unsafe path '$WORK'" >&2; exit 1 ;;

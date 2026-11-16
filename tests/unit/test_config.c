@@ -493,6 +493,99 @@ void test_config_settings(void) {
     if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
 }
 
+
+/* ── settings drop-in (EMAIL-294) ────────────────────────────────────── */
+
+static int file_exists(const char *p) { return access(p, F_OK) == 0; }
+
+static char *slurp(const char *p, char *buf, size_t n) {
+    buf[0] = '\0';
+    FILE *f = fopen(p, "r");
+    if (!f) return buf;
+    size_t r = fread(buf, 1, n - 1, f);
+    buf[r] = '\0';
+    fclose(f);
+    return buf;
+}
+
+static void put_file(const char *p, const char *text) {
+    FILE *f = fopen(p, "w");
+    if (f) { fputs(text, f); fclose(f); }
+}
+
+void test_config_settings_dropin(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    const char *home = TP("email-cli-dropin-home");
+    setenv("HOME", home, 1);
+    unsetenv("XDG_CONFIG_HOME");
+    char dir[1024], op[1100], other[1100], legacy[1100], buf[256];
+    snprintf(dir, sizeof(dir), "%s/.config/email-cli/settings.d", home);
+    snprintf(op, sizeof(op), "%s/99-operator.conf", dir);
+    snprintf(other, sizeof(other), "%s/50-infra-mgr.conf", dir);
+    snprintf(legacy, sizeof(legacy), "%s/.config/email-cli/settings.ini", home);
+    fs_mkdir_p(dir, 0700);
+    unlink(op); unlink(other); unlink(legacy);
+    app_settings_reload();
+
+    /* shipped value, nothing on disk */
+    ASSERT(app_settings_get_obfuscation() == 1, "dropin: shipped default is ON");
+    ASSERT(strcmp(app_settings_obfuscation_source(), "shipped") == 0, "dropin: source shipped");
+    ASSERT(!file_exists(op), "dropin: reading writes nothing");
+
+    /* first change goes to the operator drop-in, nothing else */
+    ASSERT(app_settings_set_obfuscation(0) == 0, "dropin: first change saved");
+    ASSERT(file_exists(op), "dropin: 99-operator.conf written");
+    ASSERT(strcmp(slurp(op, buf, sizeof(buf)), "credential_obfuscation=false\n") == 0,
+           "dropin: the file holds the differing key");
+    ASSERT(strncmp(app_settings_obfuscation_source(), "operator", 8) == 0, "dropin: source operator");
+    ASSERT(!file_exists(legacy), "dropin: no settings.ini is created");
+
+    /* back to the shipped value: the file is removed */
+    ASSERT(app_settings_set_obfuscation(1) == 0, "dropin: back to default saved");
+    ASSERT(!file_exists(op), "dropin: an empty drop-in is removed");
+    ASSERT(strcmp(app_settings_obfuscation_source(), "shipped") == 0, "dropin: source shipped again");
+
+    /* a drop-in of another program is read, shown and never touched */
+    put_file(other, "credential_obfuscation=false\n");
+    app_settings_reload();
+    ASSERT(app_settings_get_obfuscation() == 0, "dropin: another program's drop-in is read");
+    ASSERT(strstr(app_settings_obfuscation_source(), "drop-in") &&
+           strstr(app_settings_obfuscation_source(), "50-infra-mgr.conf"),
+           "dropin: source names the other drop-in");
+    ASSERT(app_settings_set_obfuscation(0) == 0, "dropin: same as the other drop-in");
+    ASSERT(!file_exists(op), "dropin: equal to the base, so no operator line");
+    ASSERT(app_settings_set_obfuscation(1) == 0, "dropin: operator overrides the other drop-in");
+    ASSERT(strcmp(slurp(op, buf, sizeof(buf)), "credential_obfuscation=true\n") == 0,
+           "dropin: the override is the operator's line");
+    ASSERT(strcmp(slurp(other, buf, sizeof(buf)), "credential_obfuscation=false\n") == 0,
+           "dropin: the other program's file is unchanged");
+
+    /* two editors: a second process image sees the first one's change */
+    app_settings_reload();
+    ASSERT(app_settings_get_obfuscation() == 1, "dropin: a second editor reads the operator file");
+    unlink(op); unlink(other);
+
+    /* a legacy settings.ini is moved once and removed */
+    app_settings_reload();
+    put_file(legacy, "credential_obfuscation=false\n");
+    ASSERT(app_settings_get_obfuscation() == 0, "dropin: legacy value is kept");
+    ASSERT(!file_exists(legacy), "dropin: legacy file is removed");
+    ASSERT(strcmp(slurp(op, buf, sizeof(buf)), "credential_obfuscation=false\n") == 0,
+           "dropin: legacy value moved into the operator drop-in");
+
+    /* a legacy file holding the shipped value leaves no drop-in */
+    unlink(op);
+    app_settings_reload();
+    put_file(legacy, "credential_obfuscation=true\n");
+    ASSERT(app_settings_get_obfuscation() == 1, "dropin: legacy default value");
+    ASSERT(!file_exists(legacy) && !file_exists(op), "dropin: legacy cleaned, no drop-in needed");
+
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
+    app_settings_reload();
+}
+
 /* ── config_load_account ─────────────────────────────────────────────── */
 
 void test_config_load_account(void) {

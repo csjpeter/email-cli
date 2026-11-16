@@ -44,12 +44,30 @@ static char *get_accounts_dir(void) {
     return dir;
 }
 
-/* ── Global application settings ────────────────────────────────────────── */
+/* ── Global application settings ────────────────────────────────────────── *
+ * The shipped value of every key is built in (credential_obfuscation=true).
+ * Drop-ins in <config>/email-cli/settings.d/NAME.conf override it in name order;
+ * an editor (the TUI, the CLI) writes only 99-operator.conf, and only the keys
+ * whose value differs from what the shipped value and the other drop-ins give
+ * (policies/network-and-config-model.md).  The retired settings.ini is read
+ * once, moved into the drop-in and removed. */
+
+#define SETTINGS_OPERATOR_FILE "99-operator.conf"
 
 static int g_obfuscation_loaded = 0;
-static int g_credential_obfuscation = 1; /* default: ON */
+static int g_credential_obfuscation = 1; /* shipped default: ON */
+static char g_obfuscation_source[4400] = "shipped";
 
-static char *get_settings_path(void) {
+static char *get_settings_dir(void) {
+    const char *config_base = platform_config_dir();
+    if (!config_base) return NULL;
+    char *path = NULL;
+    if (asprintf(&path, "%s/%s/settings.d", config_base, CONFIG_APP_DIR) == -1)
+        return NULL;
+    return path;
+}
+
+static char *get_legacy_settings_path(void) {
     const char *config_base = platform_config_dir();
     if (!config_base) return NULL;
     char *path = NULL;
@@ -58,43 +76,122 @@ static char *get_settings_path(void) {
     return path;
 }
 
-static void write_settings(const char *path) {
-    const char *config_base = platform_config_dir();
-    if (!config_base) return;
-    char dir[4096];
-    snprintf(dir, sizeof(dir), "%s/%s", config_base, CONFIG_APP_DIR);
-    if (fs_mkdir_p(dir, 0700) != 0) return;
-    FILE *fp = fopen(path, "w");
-    if (!fp) return;
-    fprintf(fp, "credential_obfuscation=%s\n", g_credential_obfuscation ? "true" : "false");
-    fclose(fp);
-    fs_ensure_permissions(path, 0600);
-}
-
-static void load_settings_once(void) {
-    if (g_obfuscation_loaded) return;
-    g_obfuscation_loaded = 1;
-
-    RAII_STRING char *path = get_settings_path();
-    if (!path) return;
-
+/** Parses the credential_obfuscation line of @p path; 1 when it sets the key. */
+static int settings_read_file(const char *path, int *value) {
     FILE *fp = fopen(path, "r");
-    if (!fp) {
-        /* First run — create settings.ini with defaults */
-        write_settings(path);
-        return;
-    }
-
+    if (!fp) return 0;
+    int found = 0;
     char line[256];
     while (fgets(line, sizeof(line), fp)) {
         char *key = strtok(line, "=");
         char *val = strtok(NULL, "\n");
         if (!key || !val) continue;
         key = trim(key); val = trim(val);
-        if (strcmp(key, "credential_obfuscation") == 0)
-            g_credential_obfuscation = (strcmp(val, "true") == 0 || strcmp(val, "1") == 0) ? 1 : 0;
+        if (key[0] == '#') continue;
+        if (strcmp(key, "credential_obfuscation") == 0) {
+            *value = (strcmp(val, "true") == 0 || strcmp(val, "1") == 0) ? 1 : 0;
+            found = 1;
+        } else {
+            fprintf(stderr, "Error: unknown key '%s' in %s\n", key, path);
+        }
     }
     fclose(fp);
+    return found;
+}
+
+static int name_cmp(const void *a, const void *b) {
+    return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/**
+ * Value of the setting after the shipped default and every drop-in, except
+ * the operator's file when @p skip_operator.  @p source (may be NULL) receives
+ * where the effective value comes from.
+ */
+static int settings_effective(int skip_operator, char *source, size_t ssize) {
+    int value = 1;
+    if (source) snprintf(source, ssize, "shipped");
+    RAII_STRING char *dir = get_settings_dir();
+    if (!dir) return value;
+    DIR *d = opendir(dir);
+    if (!d) return value;
+    char **names = NULL;
+    size_t n = 0;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        size_t l = strlen(e->d_name);
+        if (e->d_name[0] == '.' || l < 6 || strcmp(e->d_name + l - 5, ".conf") != 0)
+            continue;
+        if (skip_operator && strcmp(e->d_name, SETTINGS_OPERATOR_FILE) == 0) continue;
+        char **nn = realloc(names, (n + 1) * sizeof(*names));
+        if (!nn) break;
+        names = nn;
+        names[n] = strdup(e->d_name);
+        if (names[n]) n++;
+    }
+    closedir(d);
+    if (n > 1) qsort(names, n, sizeof(*names), name_cmp);
+    for (size_t i = 0; i < n; i++) {
+        char path[4096];
+        snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
+        if (settings_read_file(path, &value) && source) {
+            if (strcmp(names[i], SETTINGS_OPERATOR_FILE) == 0)
+                snprintf(source, ssize, "operator (%s)", path);
+            else
+                snprintf(source, ssize, "drop-in %s", path);
+        }
+        free(names[i]);
+    }
+    free(names);
+    return value;
+}
+
+/**
+ * Makes 99-operator.conf hold @p value when it differs from @p base, and
+ * removes the file when it does not.  Written atomically (temp file, rename).
+ * @return 0 on success, -1 on error.
+ */
+static int settings_write_operator(int value, int base) {
+    RAII_STRING char *dir = get_settings_dir();
+    if (!dir) return -1;
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/%s", dir, SETTINGS_OPERATOR_FILE);
+    if (value == base) {
+        if (unlink(path) != 0 && errno != ENOENT) return -1;
+        return 0;
+    }
+    if (fs_mkdir_p(dir, 0700) != 0) return -1;
+    char tmp[4200];
+    snprintf(tmp, sizeof(tmp), "%s/.%s.%d.tmp", dir, SETTINGS_OPERATOR_FILE, (int)getpid());
+    FILE *fp = fopen(tmp, "w");
+    if (!fp) return -1;
+    fprintf(fp, "credential_obfuscation=%s\n", value ? "true" : "false");
+    if (fclose(fp) != 0) { unlink(tmp); return -1; }
+    fs_ensure_permissions(tmp, 0600);
+    if (rename(tmp, path) != 0) { unlink(tmp); return -1; }
+    return 0;
+}
+
+/** Moves a legacy settings.ini into the operator drop-in, once. */
+static void settings_migrate_legacy(void) {
+    RAII_STRING char *old = get_legacy_settings_path();
+    if (!old || access(old, F_OK) != 0) return;
+    int v = 1;
+    int has = settings_read_file(old, &v);
+    /* This program never writes settings.ini, so one that exists was written
+     * after the last drop-in: its value wins and is moved into the drop-in. */
+    if (has && settings_write_operator(v, settings_effective(1, NULL, 0)) != 0)
+        return; /* keep the old file; try again next run */
+    if (unlink(old) != 0)
+        fprintf(stderr, "Warning: cannot remove the migrated %s: %s\n", old, strerror(errno));
+}
+
+static void load_settings_once(void) {
+    if (g_obfuscation_loaded) return;
+    g_obfuscation_loaded = 1;
+    settings_migrate_legacy();
+    g_credential_obfuscation = settings_effective(0, g_obfuscation_source,
+                                                  sizeof(g_obfuscation_source));
 }
 
 int app_settings_get_obfuscation(void) {
@@ -102,13 +199,23 @@ int app_settings_get_obfuscation(void) {
     return g_credential_obfuscation;
 }
 
+void app_settings_reload(void) {
+    g_obfuscation_loaded = 0;
+}
+
+const char *app_settings_obfuscation_source(void) {
+    load_settings_once();
+    return g_obfuscation_source;
+}
+
 int app_settings_set_obfuscation(int enabled) {
     load_settings_once();
     int was = g_credential_obfuscation;
-    g_credential_obfuscation = enabled ? 1 : 0;
-    RAII_STRING char *path = get_settings_path();
-    if (!path) return -1;
-    write_settings(path);
+    enabled = enabled ? 1 : 0;
+    int base = settings_effective(1, NULL, 0);
+    if (settings_write_operator(enabled, base) != 0) return -1;
+    g_obfuscation_loaded = 0; /* re-read the value and its source */
+    load_settings_once();
     OpRecord rec = { "", "setting", "settings", "credential_obfuscation",
                      was ? "true" : "false", g_credential_obfuscation ? "true" : "false",
                      "", OPH_REVERTABLE, 0 };
@@ -524,7 +631,7 @@ Config *config_load_account_quiet(const char *name, int *reason) {
 }
 
 Config* config_load_from_store(void) {
-    load_settings_once(); /* ensure settings.ini exists */
+    load_settings_once(); /* migrate a legacy settings.ini */
     int count = 0;
     AccountEntry *list = config_list_accounts(&count);
     if (!list || count == 0) {
@@ -750,7 +857,7 @@ int config_delete_account(const char *name) {
 }
 
 AccountEntry *config_list_accounts(int *count_out) {
-    load_settings_once(); /* ensure settings.ini exists */
+    load_settings_once(); /* migrate a legacy settings.ini */
     *count_out = 0;
 
     RAII_STRING char *accounts_dir = get_accounts_dir();

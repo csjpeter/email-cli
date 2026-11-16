@@ -12,8 +12,10 @@
  * Accounts are stored exclusively as:
  *   ~/.config/email-cli/accounts/<email>/config.ini
  *
- * Global application settings are stored in:
- *   ~/.config/email-cli/settings.ini
+ * Global application settings: the shipped value is built in; drop-ins in
+ *   ~/.config/email-cli/settings.d/NAME.conf override it, and editors write only
+ *   settings.d/99-operator.conf, holding just the keys that differ.  A legacy
+ *   ~/.config/email-cli/settings.ini is moved into it once.
  *
  * Use config_load_account(name) to load a specific account by email address.
  * config_load_from_store() is kept for single-account convenience.
@@ -108,7 +110,7 @@ int config_save_to_store(const Config *cfg);
 /**
  * @brief Re-saves all accounts using the current obfuscation setting.
  *
- * Call this after changing credential_obfuscation in settings.ini to
+ * Call this after changing credential_obfuscation in the operator drop-in to
  * convert all stored credentials to the new format (encrypted ↔ plaintext).
  *
  * @return 0 on success, -1 if any account could not be migrated.
@@ -119,9 +121,18 @@ int config_migrate_credentials(void);
 
 /**
  * @brief Returns 1 if credential obfuscation is enabled, 0 otherwise.
- * Reads ~/.config/email-cli/settings.ini on first call; default is 1 (ON).
+ * Reads the settings drop-ins on first call; default is 1 (ON).
  */
 int app_settings_get_obfuscation(void);
+
+/**
+ * @brief Where the effective obfuscation value comes from: "shipped",
+ *        "drop-in <path>" or "operator (<path>)".  Valid until the next call.
+ */
+const char *app_settings_obfuscation_source(void);
+
+/** @brief Forgets the cached settings; the next call reads the files again. */
+void app_settings_reload(void);
 
 /**
  * @brief Sets and persists the credential obfuscation setting.

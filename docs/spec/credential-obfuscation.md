@@ -37,8 +37,10 @@ values (no prefix) are always accepted on load for backward compatibility.
 
 ## Disabling Obfuscation
 
-To store credentials as plain text, edit (or create)
-`~/.config/email-cli/settings.ini` and add:
+To store credentials as plain text, write the drop-in
+`~/.config/email-cli/settings.d/99-operator.conf` (the only file an editor of
+this project writes, atomically, holding just the keys that differ from the
+shipped value; it is removed when nothing differs) with:
 
 ```ini
 credential_obfuscation=false
@@ -64,11 +66,11 @@ email-cli migrate-credentials
 
 ## Toggling Summary
 
-| Goal | settings.ini | Command |
+| Goal | 99-operator.conf | Command |
 |------|-------------|---------|
 | Encrypt existing plaintext configs | `credential_obfuscation=true` (default) | `email-cli migrate-credentials` |
 | Decrypt to plaintext | `credential_obfuscation=false` | `email-cli migrate-credentials` |
-| Check current setting | — | `cat ~/.config/email-cli/settings.ini` |
+| Check current setting | — | `email-cli config show` (names the source: shipped, a drop-in, operator) |
 
 ## migrate-credentials
 
@@ -96,3 +98,14 @@ Obfuscation does **not** protect against:
 
 For the strongest protection, combine obfuscation with full-disk encryption and
 a locked screen when away from the machine.
+
+## Settings drop-ins (EMAIL-294)
+
+- The shipped value is built in (`credential_obfuscation=true`).
+- `~/.config/email-cli/settings.d/*.conf` override it in name order; another
+  program writes a drop-in of its own name (e.g. `50-infra-mgr.conf`), never
+  `99-operator.conf`.  An unknown key in a drop-in is reported on stderr.
+- Setting a key to the value the shipped file and the other drop-ins already
+  give removes its line; an empty `99-operator.conf` is removed.
+- A legacy `~/.config/email-cli/settings.ini` is read once, its value moved into
+  `99-operator.conf` (when it differs) and the old file removed.

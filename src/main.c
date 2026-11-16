@@ -1716,6 +1716,10 @@ int main(int argc, char *argv[]) {
                     printf("    (not configured — will be derived from IMAP host)\n");
                 }
             }
+            printf("\n  Settings:\n");
+            printf("    credential_obfuscation: %s  [%s]\n",
+                   app_settings_get_obfuscation() ? "true" : "false",
+                   app_settings_obfuscation_source());
             printf("\n");
             result = 0;
 

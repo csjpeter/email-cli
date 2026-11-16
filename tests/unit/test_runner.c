@@ -90,6 +90,7 @@ void test_local_pending_append(void);
 void test_local_pending_fetch(void);
 void test_local_save_outgoing(void);
 void test_config_settings(void);
+void test_config_settings_dropin(void);
 void test_config_load_account(void);
 void test_config_migrate(void);
 void test_manifest_dmarc_flags(void);
@@ -203,6 +204,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_when_expr);
     RUN_TEST(test_tuikit_link);
     RUN_TEST(test_config_settings);
+    RUN_TEST(test_config_settings_dropin);
     RUN_TEST(test_config_load_account);
     RUN_TEST(test_config_migrate);
     RUN_TEST(test_manifest_dmarc_flags);

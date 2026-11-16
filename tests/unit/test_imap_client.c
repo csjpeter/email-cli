@@ -595,6 +595,19 @@ void test_imap_full_operations(void) {
     rc = imap_uid_set_flag(c, "0000000000000001", "\\Flagged", 1);
     ASSERT(rc == 0, "imap_full_ops: imap_uid_set_flag returns 0");
 
+    /* EMAIL-296: a UID that is not a decimal number is refused, nothing sent */
+    ASSERT(imap_uid_set_flag(c, "1:*", "\\Deleted", 1) != 0,
+           "imap_full_ops: imap_uid_set_flag refuses 1:*");
+    ASSERT(imap_uid_set_flag(c, "1 2", "\\Deleted", 1) != 0,
+           "imap_full_ops: imap_uid_set_flag refuses a space");
+    ASSERT(imap_uid_set_flag(c, "", "\\Deleted", 1) != 0,
+           "imap_full_ops: imap_uid_set_flag refuses empty");
+    ASSERT(imap_uid_copy(c, "1:*", "X") != 0, "imap_full_ops: copy refuses 1:*");
+    ASSERT(imap_uid_move(c, "1:*", "X") != 0, "imap_full_ops: move refuses 1:*");
+    ASSERT(imap_uid_delete(c, "1:*") != 0, "imap_full_ops: delete refuses 1:*");
+    ASSERT(imap_uid_fetch_headers(c, "1:*") == NULL,
+           "imap_full_ops: fetch refuses 1:*");
+
     /* imap_list */
     char **folders = NULL;
     int fc = 0;

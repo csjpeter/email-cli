@@ -174,6 +174,38 @@ void test_local_index(void) {
 
 /* ── Manifest tests ──────────────────────────────────────────────────── */
 
+/** EMAIL-296: CR/LF in a field cannot forge a row; a non-token UID is dropped. */
+void test_manifest_forged_row(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env(TP("email-cli-manifest-forge-test"));
+    Manifest *m = calloc(1, sizeof(Manifest));
+    ASSERT(m != NULL, "forge: calloc");
+    manifest_upsert(m, "0000000000000007", strdup("Bob\n1:*"),
+                    strdup("Hello"), strdup("2026-03-10 15:07"), 0);
+    ASSERT(manifest_save("INBOX", m) == 0, "forge: save");
+    manifest_free(m);
+    m = manifest_load("INBOX");
+    ASSERT(m != NULL && m->count == 1, "forge: exactly one row");
+    ASSERT(manifest_find(m, "0000000000000007") != NULL, "forge: real uid kept");
+    ASSERT(manifest_find(m, "1:*") == NULL, "forge: no 1:* row");
+    manifest_free(m);
+
+    /* a hand-written file with a forged uid is ignored on load */
+    char path[512];
+    snprintf(path, sizeof(path), "%s",
+             TP("email-cli-manifest-forge-test/.local/share/email-cli/"
+                "accounts/testuser/manifests/INBOX.tsv"));
+    FILE *fp = fopen(path, "w");
+    ASSERT(fp != NULL, "forge: open file");
+    fputs("1:*\tA\tS\tD\t0\n0000000000000009\tA\tS\tD\t0\n", fp);
+    fclose(fp);
+    m = manifest_load("INBOX");
+    ASSERT(m != NULL && m->count == 1, "forge: forged uid dropped on load");
+    ASSERT(manifest_find(m, "0000000000000009") != NULL, "forge: valid row kept");
+    manifest_free(m);
+    if (old_home) setenv("HOME", old_home, 1);
+}
+
 void test_manifest(void) {
     char *old_home = getenv("HOME");
     setup_test_env(TP("email-cli-manifest-test"));

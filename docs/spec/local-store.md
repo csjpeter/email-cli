@@ -170,6 +170,14 @@ UTF-8 plain text with Unix line endings.
 
 ---
 
+## Folder manifest integrity (EMAIL-296)
+
+`manifests/<folder>.tsv` holds one row per message: `uid TAB from TAB subject TAB date TAB flags`.
+
+- On save every field has tabs and control characters (CR, LF, ...) replaced by a space, so a decoded header cannot forge a row.
+- On load a row whose UID is not a plain token (letters, digits, `-`, `_`; so never `1:*` or text with spaces) is dropped.
+- The IMAP layer (`imap_uid_*`) refuses a UID that is not a decimal number, so a set such as `1:*` is never sent in `UID STORE/COPY/FETCH`.
+
 ## Thread safety
 
 The local store is not thread-safe.  `email-cli` is single-threaded.

@@ -105,6 +105,12 @@ the error is not propagated — the message content is still returned to the cal
 
 ---
 
+## Folder names from LIST are checked (EMAIL-304)
+
+Folder names become local store paths, so `imap_list` drops (and names on
+stderr) every decoded name that is empty, starts with `/`, contains a NUL or
+control character, or has a `.` or `..` component between `/` characters.
+
 ## IMAP Modified UTF-7 decoding
 
 IMAP folder names may contain non-ASCII characters encoded as IMAP Modified UTF-7

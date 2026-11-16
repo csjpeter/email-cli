@@ -935,6 +935,8 @@ View or update configuration settings.
 #### `config show`
 
 Prints the current configuration to stdout.  Passwords are masked as `****`.
+A `Settings:` block shows each global setting and where its value comes from
+(`shipped`, `drop-in <path>` or `operator (<path>)`).
 
 Output format:
 

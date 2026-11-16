@@ -1021,6 +1021,22 @@ run_cred() {
      "$BIN_DIR/email-cli" "$@" 2>&1 || true)
 }
 
+# ── EMAIL-294: a legacy settings.ini moves into the operator drop-in ────
+make_cred_home
+printf 'credential_obfuscation=false\n' > "$H_CRED/.config/email-cli/settings.ini"
+OUT_294=$(run_cred --account "$CRED_EMAIL" config show)
+check "22-EMAIL-294: config show names the operator drop-in as the source" \
+    "credential_obfuscation: false  \[operator" "$OUT_294"
+check "22-EMAIL-294: the legacy value moved into 99-operator.conf" \
+    "^credential_obfuscation=false" \
+    "$(cat "$H_CRED/.config/email-cli/settings.d/99-operator.conf")"
+check "22-EMAIL-294: the old settings.ini is gone" \
+    "^gone$" "$([ -e "$H_CRED/.config/email-cli/settings.ini" ] && echo present || echo gone)"
+rm -f "$H_CRED/.config/email-cli/settings.d/99-operator.conf"
+OUT_294B=$(run_cred --account "$CRED_EMAIL" config show)
+check "22-EMAIL-294: without a drop-in the value is shipped" \
+    "credential_obfuscation: true  \[shipped\]" "$OUT_294B"
+
 # ── US-09: No settings.ini → obfuscation defaults to ON ──────────────────
 make_cred_home
 # run migrate-credentials without a settings.ini

@@ -62,7 +62,7 @@ refresh token that results works without a person (`email-sync` from cron).
 1. Build `https://accounts.google.com/o/oauth2/v2/auth?client_id=...&redirect_uri=http://localhost:PORT/callback&response_type=code&scope=https://mail.google.com/&access_type=offline&prompt=consent`
    and hand it to the program through the `show_url` callback.  **The library
    prints nothing and starts no browser**; the program shows the URL and, if it
-   wants, opens a browser (`email-cli` starts `xdg-open`).
+   wants, opens a browser (`email-cli` starts `xdg-open` directly, with no shell, the URL as one argument; the client id is percent-encoded in the URL).
 2. Receive the code, one of two ways:
    - **loopback** (default): the library listens on `127.0.0.1`, ports
      8089-8099, for Google's redirect and answers the browser with a short page.

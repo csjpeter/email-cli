@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -807,6 +808,58 @@ static void test_paste_refusals(void) {
     ASSERT(g_auth_stderr[0] == '\0', "paste refusals: the library printed nothing");
 }
 
+static void test_client_id_is_escaped_in_url(void) {
+    Config cfg = {0};
+    cfg.gmail_client_id     = strdup("x';touch pwned;'");
+    cfg.gmail_client_secret = strdup("secret");
+    int rc = authorize_run(&cfg, 1, NULL);
+    free(cfg.gmail_client_id);
+    free(cfg.gmail_client_secret);
+    (void)rc;
+    ASSERT(g_auth_shown == 1, "client id: the URL was shown");
+    ASSERT(strchr(g_auth_url, '\'') == NULL && strchr(g_auth_url, ';') == NULL,
+           "client id: no quote or semicolon reaches the URL");
+    ASSERT(strstr(g_auth_url, "client_id=x%27%3Btouch") != NULL,
+           "client id: percent-encoded in the URL");
+}
+
+static void test_open_browser_runs_no_shell(void) {
+    /* A fake xdg-open records its argument; the URL carries shell syntax. */
+    const char *dir = "build/test-xdg-open";
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", dir);
+    ASSERT(system(cmd) == 0, "xdg-open stub: directory");
+    char script[256], rec[256], marker[256];
+    snprintf(script, sizeof(script), "%s/xdg-open", dir);
+    snprintf(rec, sizeof(rec), "%s/arg.txt", dir);
+    snprintf(marker, sizeof(marker), "%s/pwned", dir);
+    unlink(rec);
+    unlink(marker);
+    FILE *f = fopen(script, "w");
+    ASSERT(f != NULL, "xdg-open stub: written");
+    if (!f) return;
+    fprintf(f, "#!/bin/sh\nprintf '%%s' \"$1\" > '%s'\n", rec);
+    fclose(f);
+    chmod(script, 0755);
+    char *oldpath = getenv("PATH") ? strdup(getenv("PATH")) : strdup("/usr/bin:/bin");
+    char *cwd = getcwd(NULL, 0);
+    char newpath[2048];
+    snprintf(newpath, sizeof(newpath), "%s/%s:%s", cwd, dir, oldpath);
+    setenv("PATH", newpath, 1);
+    char url[512];
+    snprintf(url, sizeof(url), "http://x/?a=x';touch %s/pwned;'", dir);
+    gmail_login_open_browser(url);
+    for (int i = 0; i < 50 && access(rec, F_OK) != 0; i++) usleep(100000);
+    setenv("PATH", oldpath, 1);
+    free(oldpath);
+    free(cwd);
+    char got[512] = "";
+    FILE *r = fopen(rec, "r");
+    if (r) { size_t n = fread(got, 1, sizeof(got) - 1, r); got[n] = '\0'; fclose(r); }
+    ASSERT(strcmp(got, url) == 0, "open browser: the URL is one argument, unchanged");
+    ASSERT(access(marker, F_OK) != 0, "open browser: the shell syntax in the URL ran nothing");
+}
+
 static void test_authorize_needs_callbacks(void) {
     Config cfg = {0};
     cfg.gmail_client_id     = strdup("id");
@@ -1196,6 +1249,8 @@ void test_gmail_auth(void) {
     RUN_TEST(test_paste_redirect_url);
     RUN_TEST(test_paste_bare_code_and_encoded_code);
     RUN_TEST(test_paste_refusals);
+    RUN_TEST(test_client_id_is_escaped_in_url);
+    RUN_TEST(test_open_browser_runs_no_shell);
     RUN_TEST(test_authorize_needs_callbacks);
     RUN_TEST(test_device_flow_no_credentials);
     RUN_TEST(test_device_flow_access_denied);

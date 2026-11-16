@@ -276,18 +276,29 @@ int gmail_auth_authorize(Config *cfg, GmailAuthUi *ui) {
     RAII_STRING char *auth_url = NULL;
     char *escaped_scope = http_url_escape(GMAIL_SCOPE);
     char *escaped_redirect = http_url_escape(redirect_uri);
+    char *escaped_client = http_url_escape(client_id);
+    if (!escaped_scope || !escaped_redirect || !escaped_client) {
+        free(escaped_scope);
+        free(escaped_redirect);
+        free(escaped_client);
+        if (listen_fd >= 0) close(listen_fd);
+        ui_error(ui, "Out of memory");
+        return -1;
+    }
     if (asprintf(&auth_url,
                  "%s?client_id=%s&redirect_uri=%s&response_type=code"
                  "&scope=%s&access_type=offline&prompt=consent",
-                 AUTH_URL, client_id, escaped_redirect, escaped_scope) == -1) {
+                 AUTH_URL, escaped_client, escaped_redirect, escaped_scope) == -1) {
         free(escaped_scope);
         free(escaped_redirect);
+        free(escaped_client);
         if (listen_fd >= 0) close(listen_fd);
         ui_error(ui, "Out of memory");
         return -1;
     }
     free(escaped_scope);
     free(escaped_redirect);
+    free(escaped_client);
 
     ui->show_url(auth_url, port, ui->user);
 

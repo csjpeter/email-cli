@@ -8,6 +8,9 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 /**
  * @file gmail_login.c
@@ -18,6 +21,28 @@ typedef struct {
     GmailLoginMode mode;
     FILE          *in;
 } LoginCtx;
+
+void gmail_login_open_browser(const char *url)
+{
+    /* No shell: the URL is one argv element, whatever it contains. */
+    pid_t pid = fork();
+    if (pid < 0) return;
+    if (pid == 0) {
+        pid_t pid2 = fork();            /* double fork: nobody has to wait */
+        if (pid2 != 0) _exit(0);
+        int nul = open("/dev/null", O_RDWR);
+        if (nul >= 0) {
+            dup2(nul, 0);
+            dup2(nul, 1);
+            dup2(nul, 2);
+        }
+        char *argv[] = { "xdg-open", (char *)url, NULL };
+        execvp("xdg-open", argv);
+        _exit(127);
+    }
+    int st;
+    waitpid(pid, &st, 0);
+}
 
 static void login_show_url(const char *url, int port, void *user)
 {
@@ -47,14 +72,9 @@ static void login_show_url(const char *url, int port, void *user)
                                        : "Gmail authorization:",
         url, port, port);
     if (c->mode == GMAIL_LOGIN_BROWSER) {
-        /* In the background so system() returns at once; on a host without a
-         * desktop it exits quickly and the URL above is what is used. */
-        char *cmd = NULL;
-        if (asprintf(&cmd, "xdg-open '%s' >/dev/null 2>&1 &", url) != -1) {
-            int rc = system(cmd);
-            (void)rc;
-            free(cmd);
-        }
+        /* In the background; on a host without a desktop the launcher exits
+         * quickly and the URL above is what is used. */
+        gmail_login_open_browser(url);
     }
 }
 

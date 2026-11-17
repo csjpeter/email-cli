@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /**
  * @file email_client.c
@@ -221,6 +222,52 @@ static emc_status connect_now(emc_client *c)
 
 static int blank(const char *s) { return !s || !s[0]; }
 
+/**
+ * EMAIL-303: submit @p wire over SMTP the way a mail client must.  The
+ * envelope is @p to plus the Cc and Bcc recipients named in the message
+ * headers; the Bcc header itself is removed from the bytes that go on the
+ * wire, so no recipient can read the hidden list.  The caller keeps its own
+ * copy (Sent) with the Bcc header.
+ */
+static int smtp_submit(const Config *cfg, const char *from, const char *to,
+                       const char *wire, size_t wire_len, char *why, size_t why_len)
+{
+    char *cc = mime_get_header(wire, "Cc");
+    char *bcc = mime_get_header(wire, "Bcc");
+    size_t cap = strlen(to) + (cc ? strlen(cc) : 0) + (bcc ? strlen(bcc) : 0) + 8;
+    char *env = malloc(cap);
+    char *out = malloc(wire_len + 1);
+    if (!env || !out) {
+        free(env); free(out); free(cc); free(bcc);
+        snprintf(why, why_len, "out of memory");
+        return -1;
+    }
+    snprintf(env, cap, "%s%s%s%s%s", to, cc && cc[0] ? "," : "", cc ? cc : "",
+             bcc && bcc[0] ? "," : "", bcc ? bcc : "");
+
+    /* Copy the message without the Bcc header (and its folded lines); only
+     * the header block is looked at, it ends at the first empty line. */
+    size_t n = 0, i = 0;
+    int in_headers = 1, skipping = 0;
+    while (i < wire_len) {
+        size_t e = i;
+        while (e < wire_len && wire[e] != '\n') e++;
+        if (e < wire_len) e++;
+        size_t ll = e - i;
+        int blank_line = ll == 1 || (ll == 2 && wire[i] == '\r');
+        if (in_headers) {
+            if (blank_line) in_headers = 0, skipping = 0;
+            else if (wire[i] == ' ' || wire[i] == '\t') { /* fold: keeps the state */ }
+            else skipping = ll >= 4 && strncasecmp(wire + i, "Bcc:", 4) == 0;
+        }
+        if (!(in_headers && skipping)) { memcpy(out + n, wire + i, ll); n += ll; }
+        i = e;
+    }
+    int rc = smtp_send(cfg, from, env, out, n, why, why_len);
+    free(env); free(out); free(cc); free(bcc);
+    return rc;
+}
+
 EMC_API emc_status emc_send(emc_client *c, const emc_message *m,
                             emc_send_result *res)
 {
@@ -263,7 +310,7 @@ EMC_API emc_status emc_send(emc_client *c, const emc_message *m,
         if (st != EMC_OK) { free(wire); res->status = st; return st; }
         rc = mail_client_append(c->mc, NULL, wire, wire_len);
     } else {
-        rc = smtp_send(c->cfg, from, m->to, wire, wire_len, why, sizeof(why));
+        rc = smtp_submit(c->cfg, from, m->to, wire, wire_len, why, sizeof(why));
     }
     if (rc != 0) {
         free(wire);
@@ -698,7 +745,7 @@ EMC_API emc_status emc_send_wire(emc_client *c, const char *from, const char *to
         if (st != EMC_OK) { res->status = st; return st; }
         rc = mail_client_append(c->mc, NULL, wire, wire_len);
     } else {
-        rc = smtp_send(c->cfg, from, to, wire, wire_len, why, sizeof(why));
+        rc = smtp_submit(c->cfg, from, to, wire, wire_len, why, sizeof(why));
     }
     if (rc != 0) {
         res->status = fail_why(c, EMC_ERR_SEND, "send", why);

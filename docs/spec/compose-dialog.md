@@ -98,7 +98,8 @@ To and Subject; the bottom line is the status line: `Esc save and continue  Ctrl
   a blank line, the body (`libemail/src/core/compose_draft.c`).
 * A later compose finds it and asks `Resume it? [y/N]`.
 * The draft is removed by sending, by a send that was kept in Drafts, and by
-  the review screen's confirmed discard.  Bcc is stripped before sending.
+  the review screen's confirmed discard.  Bcc is stripped from the bytes sent over SMTP
+  and the SMTP envelope is To + Cc + Bcc (EMAIL-303); the copy kept in Sent keeps the Bcc header.
 
 ### Empty-To guard
 

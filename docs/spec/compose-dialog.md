@@ -297,6 +297,7 @@ present in the editor temp file so I can review and edit them before sending.
 - `Cc:` header written to temp file if the Cc field is non-empty.
 - `Bcc:` header written to temp file if the Bcc field is non-empty.
 - `compose_build_message()` generates a `Cc:` header from the Cc field.
+- `compose_build_message()` refuses (returns -1) any header field (From, To, Cc, Bcc, Subject, In-Reply-To) containing CR or LF; `compose_extract_reply_meta()` strips control characters from the decoded Reply-To/From and Subject (EMAIL-301, header injection).
 - Bcc is **not** included in the final RFC 2822 message (stripped before
   send); the SMTP envelope still includes Bcc recipients.
 - The `ComposeParams` struct is extended with `cc` and `bcc` string fields.

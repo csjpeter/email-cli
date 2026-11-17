@@ -24,6 +24,7 @@ program selects content in the following priority order:
 ## HTML Parser
 
 Source: `src/core/html_parser.c`.  API: `html_parse(html)` → `HtmlNode *` tree.
+Appending a child is O(1) (`last_child` pointer) and freeing walks siblings in a loop, so parse time is linear in the sibling count (EMAIL-300).
 
 ### Tokenizer
 

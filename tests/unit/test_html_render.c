@@ -1362,4 +1362,22 @@ void test_html_render_url_color(void) {
         ASSERT(strstr(r, "https://click.example.com") != NULL, "url href color: URL present");
         free(r);
     }
+
+    /* EMAIL-298: message text never brings its own escape sequences */
+    {
+        char *r = html_render("a &#27;]0;title&#7; b <img alt=\"\x1b[31mX\"> "
+                              "<a href=\"http://x/\x1b[2J\">l</a> \xc2\x9b""31m", 80, 0);
+        ASSERT(r != NULL, "sanitise: not NULL");
+        ASSERT(strchr(r, 0x1b) == NULL, "sanitise: no ESC in output");
+        ASSERT(strchr(r, 0x07) == NULL, "sanitise: no BEL in output");
+        ASSERT(strstr(r, "\xc2\x9b") == NULL, "sanitise: no C1 CSI in output");
+        free(r);
+        r = html_render("<b>bold</b> &#27;[2J", 80, 1);
+        ASSERT(r != NULL && strstr(r, "\033[1m") != NULL, "sanitise: own SGR stays");
+        ASSERT(strstr(r, "\033[2J") == NULL, "sanitise: message CSI gone");
+        free(r);
+        char buf[] = "x\x1b]52;c;ZQ==\x07\ty\x7f\r\nz\xc2\x9f";
+        html_sanitize_display(buf);
+        ASSERT(strcmp(buf, "x?]52;c;ZQ==?\ty?\nz?") == 0, "sanitise: markers, \\t and \\n kept");
+    }
 }

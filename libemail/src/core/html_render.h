@@ -25,4 +25,16 @@
  */
 char *html_render(const char *html, int width, int ansi);
 
+/**
+ * @brief Make message-derived text safe to print on a terminal (in place).
+ *
+ * C0 controls except '\n' and '\t', DEL and the C1 controls (U+0080-009F, as
+ * UTF-8) are replaced by '?'; a '\r' directly before '\n' is dropped.  The
+ * result is never longer than the input.
+ *
+ * @param s  NUL-terminated string, may be NULL.
+ * @return s.
+ */
+char *html_sanitize_display(char *s);
+
 #endif /* HTML_RENDER_H */

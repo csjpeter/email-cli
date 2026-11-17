@@ -1040,6 +1040,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
     }
     const char *body_text = body ? body : "(no readable text body)";
     char *body_wrapped = NULL; /* kept for free() at cleanup */
+    char *raw_safe = NULL;     /* terminal-safe copy of raw for the source view */
 
     /* Detect attachments once */
     int att_count = 0;
@@ -1123,7 +1124,11 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
             }
         }
         /* Recompute active body text and pagination for current view mode */
-        body_text  = view_raw ? raw : (body ? body : "(no readable text body)");
+        if (view_raw && !raw_safe) {
+            raw_safe = raw ? strdup(raw) : NULL;
+            html_sanitize_display(raw_safe);
+        }
+        body_text  = view_raw ? (raw_safe ? raw_safe : "") : (body ? body : "(no readable text body)");
         body_vrows = count_visual_rows(body_text, term_cols);
         if (cur_line >= body_vrows) cur_line = body_vrows > 0 ? body_vrows - 1 : 0;
         total_pages = (body_vrows + rows_avail - 1) / rows_avail;
@@ -1641,7 +1646,7 @@ show_int_done:
 #undef SHOW_HDR_LINES_INT
     mime_free_attachments(atts, att_count);
     free(show_path); free(show_dmarc); free(show_to);
-    free(body); free(body_wrapped); free(from); free(subject); free(date); free(show_labels); free(raw);
+    free(body); free(body_wrapped); free(raw_safe); free(from); free(subject); free(date); free(show_labels); free(raw);
     if (flags_out) *flags_out = reader_flags;
     return result;
 }

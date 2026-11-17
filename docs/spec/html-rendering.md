@@ -19,6 +19,8 @@ program selects content in the following priority order:
 
 `multipart/alternative` messages contain both parts; the HTML part is preferred.
 
+Multipart nesting is limited to 32 levels (`MIME_MAX_DEPTH`, EMAIL-299): deeper parts are skipped and the rest of the message still shows.
+
 ---
 
 ## HTML Parser

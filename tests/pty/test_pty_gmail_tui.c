@@ -663,17 +663,22 @@ static void test_label_browser_create_label_prompt(void) {
     pty_close(s);
 }
 
+static int mock_log_count(const char *needle);
+
 static void test_label_browser_create_label_confirmed(void) {
     PtySession *s = open_label_browser();
     ASSERT(s != NULL, "label browser: reaches the label list");
+    int posts_before = mock_log_count("POST /gmail/v1/users/me/labels");
     gm_menu_pick(s, 0);                            /* Create a label... */
     ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
     pty_send_str(s, "PtyMade");
     pty_send_key(s, PTY_KEY_ENTER);
-    /* The browser redraws with the label list rebuilt; it is still the
-     * label browser, and the new name is among the labels. */
-    ASSERT_WAIT_FOR(s, "PtyMade", WAIT_MS);
+    /* The mock answers every create with its own fixed label name, so the typed
+     * name is only on screen while the prompt is open (a race on a loaded
+     * machine); the create request itself is the lasting evidence. */
     pty_settle(s, SETTLE_MS);
+    ASSERT(mock_log_count("POST /gmail/v1/users/me/labels") == posts_before + 1,
+           "label browser: the create was sent once");
     ASSERT_SCREEN_CONTAINS(s, "Labels");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -815,7 +820,6 @@ static void test_label_browser_empty_can_create(void) {
     ASSERT_WAIT_FOR(s, "New label name:", WAIT_MS);
     pty_send_str(s, "PtyFirst");
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "PtyFirst", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT(mock_log_count("POST /gmail/v1/users/me/labels") >= posts_before + 2,
            "empty labels: both creates were sent");

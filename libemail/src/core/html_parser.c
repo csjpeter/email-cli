@@ -68,11 +68,15 @@ static void attr_free_list(HtmlAttr *a) {
     while (a) { HtmlAttr *nx = a->next; free(a->name); free(a->value); free(a); a = nx; }
 }
 void html_node_free(HtmlNode *node) {
-    if (!node) return;
-    html_node_free(node->first_child);
-    html_node_free(node->next_sibling);
-    attr_free_list(node->attrs);
-    free(node->tag); free(node->text); free(node);
+    /* Siblings are walked in a loop, so a flat list of any length does not
+     * recurse; only the nesting depth does. */
+    while (node) {
+        HtmlNode *next = node->next_sibling;
+        html_node_free(node->first_child);
+        attr_free_list(node->attrs);
+        free(node->tag); free(node->text); free(node);
+        node = next;
+    }
 }
 const char *html_attr_get(const HtmlNode *node, const char *name) {
     if (!node || !name) return NULL;
@@ -83,10 +87,9 @@ const char *html_attr_get(const HtmlNode *node, const char *name) {
 static void node_add_child(HtmlNode *parent, HtmlNode *child) {
     if (!parent || !child) return;
     child->parent = parent;
-    if (!parent->first_child) { parent->first_child = child; return; }
-    HtmlNode *last = parent->first_child;
-    while (last->next_sibling) last = last->next_sibling;
-    last->next_sibling = child;
+    if (!parent->first_child) parent->first_child = child;
+    else parent->last_child->next_sibling = child;
+    parent->last_child = child;
 }
 static void attr_prepend(HtmlNode *elem, char *name, char *value) {
     HtmlAttr *a = calloc(1, sizeof(*a));

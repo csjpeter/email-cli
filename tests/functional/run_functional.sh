@@ -6777,8 +6777,19 @@ F113_OUT="$H_F113/loopback.out"
 F113_PID=$!
 for _ in $(seq 1 50); do grep -q "Waiting for authorization" "$F113_OUT" && break; sleep 0.2; done
 F113_FWD_PORT=$(sed -n 's/.*ssh -L \([0-9]*\):localhost.*/\1/p' "$F113_OUT" | head -1)
+F113_STATE=$(sed -n 's/.*[?&]state=\([A-Za-z0-9_-]*\).*/\1/p' "$F113_OUT" | head -1)
+# EMAIL-302: a stray request (no state, then a wrong one, carrying an injected
+# code) is answered with an error and ignored; the listener keeps waiting.
 exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
-printf 'GET /callback?code=good&scope=x HTTP/1.1\r\nHost: localhost\r\n\r\n' >&7
+printf 'GET /callback?code=evil HTTP/1.1\r\nHost: localhost\r\n\r\n' >&7
+IFS= read -r -t 10 F113_STRAY1 <&7
+exec 7<&-
+exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
+printf 'GET /callback?code=evil&state=wrong HTTP/1.1\r\nHost: localhost\r\n\r\n' >&7
+IFS= read -r -t 10 F113_STRAY2 <&7
+exec 7<&-
+exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
+printf 'GET /callback?code=good&scope=x&state=%s HTTP/1.1\r\nHost: localhost\r\n\r\n' "$F113_STATE" >&7
 IFS= read -r -t 10 F113_REPLY <&7
 exec 7<&-
 wait "$F113_PID"; F113_RC=$?
@@ -6791,6 +6802,10 @@ check "113.24 loopback: the browser was answered"    "HTTP/1.1 200 OK"          
 [ ! -e "$H_F113/bin/browser-started" ] && ok113=1 || ok113=0
 check "113.25 --no-browser starts no browser"        "1"                                    "$ok113"
 check "113.26 loopback: the new token is stored"     "GMAIL_REFRESH_TOKEN=mock-refresh"     "$(cat "$F113_INI")"
+check "113.32 loopback: the URL carries a state"     "state="                               "$OUT113"
+check "113.33 loopback: and a PKCE S256 challenge"   "code_challenge_method=S256"           "$OUT113"
+check "113.34 loopback: no state is refused"         "HTTP/1.1 400"                         "$F113_STRAY1"
+check "113.35 loopback: a wrong state is refused"    "HTTP/1.1 400"                         "$F113_STRAY2"
 
 # The default mode starts the browser -- the program does, not the library.
 f113_reset
@@ -6804,8 +6819,9 @@ F113_OUT="$H_F113/browser.out"
 F113_PID=$!
 for _ in $(seq 1 50); do [ -e "$H_F113/bin/browser-started" ] && break; sleep 0.2; done
 F113_FWD_PORT=$(sed -n 's/.*ssh -L \([0-9]*\):localhost.*/\1/p' "$F113_OUT" | head -1)
+F113_STATE=$(sed -n 's/.*[?&]state=\([A-Za-z0-9_-]*\).*/\1/p' "$H_F113/bin/browser-started" | head -1)
 exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
-printf 'GET /callback?code=good HTTP/1.1\r\n\r\n' >&7
+printf 'GET /callback?code=good&state=%s HTTP/1.1\r\n\r\n' "$F113_STATE" >&7
 IFS= read -r -t 10 F113_REPLY <&7
 exec 7<&-
 wait "$F113_PID"; F113_RC=$?

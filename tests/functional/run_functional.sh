@@ -6780,18 +6780,26 @@ F113_FWD_PORT=$(sed -n 's/.*ssh -L \([0-9]*\):localhost.*/\1/p' "$F113_OUT" | he
 F113_STATE=$(sed -n 's/.*[?&]state=\([A-Za-z0-9_-]*\).*/\1/p' "$F113_OUT" | head -1)
 # EMAIL-302: a stray request (no state, then a wrong one, carrying an injected
 # code) is answered with an error and ignored; the listener keeps waiting.
-exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
-printf 'GET /callback?code=evil HTTP/1.1\r\nHost: localhost\r\n\r\n' >&7
-IFS= read -r -t 10 F113_STRAY1 <&7
-exec 7<&-
-exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
-printf 'GET /callback?code=evil&state=wrong HTTP/1.1\r\nHost: localhost\r\n\r\n' >&7
-IFS= read -r -t 10 F113_STRAY2 <&7
-exec 7<&-
-exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
-printf 'GET /callback?code=good&scope=x&state=%s HTTP/1.1\r\nHost: localhost\r\n\r\n' "$F113_STATE" >&7
-IFS= read -r -t 10 F113_REPLY <&7
-exec 7<&-
+# One request to the loopback listener; a connection the listener reset before
+# it answered (a race with the previous request closing) is tried again.
+f113_request() {
+    local path="$1" reply="" try
+    F113_REPLY_LINE=""
+    for try in 1 2 3 4 5; do
+        if exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"; then
+            if printf 'GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n' "$path" >&7; then
+                IFS= read -r -t 10 reply <&7
+            fi
+            exec 7<&-
+        fi
+        if [ -n "$reply" ]; then F113_REPLY_LINE="$reply"; return 0; fi
+        sleep 0.2
+    done
+    return 1
+}
+f113_request "/callback?code=evil";                  F113_STRAY1="$F113_REPLY_LINE"
+f113_request "/callback?code=evil&state=wrong";      F113_STRAY2="$F113_REPLY_LINE"
+f113_request "/callback?code=good&scope=x&state=$F113_STATE"; F113_REPLY="$F113_REPLY_LINE"
 wait "$F113_PID"; F113_RC=$?
 OUT113=$(cat "$F113_OUT")
 check "113.20 loopback: the URL is shown"            "accounts.google.com/o/oauth2/v2/auth" "$OUT113"

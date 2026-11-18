@@ -710,12 +710,25 @@ static char *manifest_path(const char *folder) {
     return path;
 }
 
-/** @brief Duplicates a string, replacing tabs with spaces. */
+/** @brief Duplicates a string, replacing tabs and every control character
+ *         (CR, LF, ...) with spaces, so a field cannot forge a manifest row. */
 static char *sanitise(const char *s) {
     if (!s) return strdup("");
     char *d = strdup(s);
-    if (d) for (char *p = d; *p; p++) if (*p == '\t') *p = ' ';
+    if (d) for (char *p = d; *p; p++)
+        if ((unsigned char)*p < 0x20 || *p == 0x7f) *p = ' ';
     return d;
+}
+
+/** @brief True for a manifest UID: a plain token of letters, digits, '-' and
+ *         '_' (IMAP decimal UID, local 't<ms>', Gmail hex id); never a set
+ *         such as '1:*' or text with spaces. */
+static int manifest_uid_valid(const char *u) {
+    if (!*u) return 0;
+    for (; *u; u++)
+        if (!((*u >= '0' && *u <= '9') || (*u >= 'a' && *u <= 'z') ||
+              (*u >= 'A' && *u <= 'Z') || *u == '-' || *u == '_')) return 0;
+    return 1;
 }
 
 Manifest *manifest_load(const char *folder) {
@@ -744,6 +757,10 @@ Manifest *manifest_load(const char *folder) {
         }
         *t1 = '\0';
         char *uid_field = line;
+        if (!manifest_uid_valid(uid_field)) {
+            line = nl ? nl + 1 : line + strlen(line);
+            continue;
+        }
         char *from_start = t1 + 1;
         char *t2 = strchr(from_start, '\t');
         if (!t2) { line = nl ? nl + 1 : line + strlen(line); continue; }

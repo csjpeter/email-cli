@@ -202,6 +202,40 @@ static void test_extract_reply_to_header(void) {
     free(rt); free(subj); free(msgid);
 }
 
+static void test_extract_strips_crlf_injection(void) {
+    const char *raw =
+        "From: Alice <a@example.org>\r\n"
+        "Reply-To: =?UTF-8?Q?bob@example.org=0D=0ABcc:_spy@example.net?=\r\n"
+        "Subject: =?UTF-8?Q?hi=0D=0AX-Evil:_1?=\r\n"
+        "Message-ID: <z@w>\r\n"
+        "\r\n";
+    char *rt = NULL, *subj = NULL, *msgid = NULL;
+    ASSERT(compose_extract_reply_meta(raw, &rt, &subj, &msgid) == 0,
+           "injection: extract succeeds");
+    ASSERT(strpbrk(rt, "\r\n") == NULL, "injection: reply-to has no CR/LF");
+    ASSERT(strpbrk(subj, "\r\n") == NULL, "injection: subject has no CR/LF");
+    char *out = NULL; size_t len = 0;
+    ComposeParams p = { .from = "me@example.org", .to = rt,
+                        .subject = subj, .body = "ok" };
+    ASSERT(compose_build_message(&p, &out, &len) == 0, "injection: build ok");
+    ASSERT(strstr(out, "\r\nBcc:") == NULL, "injection: no Bcc header line");
+    ASSERT(strstr(out, "\r\nX-Evil:") == NULL, "injection: no X-Evil header line");
+    free(out); free(rt); free(subj); free(msgid);
+}
+
+static void test_build_refuses_crlf_in_headers(void) {
+    char *out = NULL; size_t len = 0;
+    ComposeParams a = { .from = "a@example.org", .to = "b@example.org\r\nBcc: x@example.net",
+                        .subject = "s", .body = "b" };
+    ASSERT(compose_build_message(&a, &out, &len) != 0, "refuse CRLF in To");
+    ComposeParams b = { .from = "a@example.org", .to = "b@example.org",
+                        .subject = "s\nX: 1", .body = "b" };
+    ASSERT(compose_build_message(&b, &out, &len) != 0, "refuse LF in Subject");
+    ComposeParams c = { .from = "a@example.org", .to = "b@example.org",
+                        .subject = "s", .cc = "c@example.org\r\nX: 1", .body = "b" };
+    ASSERT(compose_build_message(&c, &out, &len) != 0, "refuse CRLF in Cc");
+}
+
 /* ── Registration ────────────────────────────────────────────────────── */
 
 static void test_build_cc(void) {
@@ -533,6 +567,8 @@ static void test_build_attachment_nonexistent_file(void)
 }
 
 void test_compose_service(void) {
+    RUN_TEST(test_extract_strips_crlf_injection);
+    RUN_TEST(test_build_refuses_crlf_in_headers);
     RUN_TEST(test_build_null_params);
     RUN_TEST(test_build_missing_fields);
     RUN_TEST(test_build_null_out);

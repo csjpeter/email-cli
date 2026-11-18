@@ -172,6 +172,40 @@ void test_local_index(void) {
     else unsetenv("HOME");
 }
 
+/** EMAIL-295: a hostile From address never writes outside the index. */
+void test_local_index_from_traversal(void) {
+    char *old_home = getenv("HOME");
+    setup_test_env(TP("email-cli-index-traversal-home"));
+
+    const char *hostile[] = {
+        "Evil <victim-file@../../../../../../../planted>",
+        "Evil <../../../../../../../planted2@example.org>",
+        "Evil <a/b@example.org>",
+        "Evil <x@exa/mple.org>",
+        "Evil <.hidden@example.org>",
+        "Evil <x@.hidden.org>",
+        "Evil <x@a..b.org>",
+    };
+    for (size_t i = 0; i < sizeof(hostile) / sizeof(hostile[0]); i++) {
+        char msg[512];
+        snprintf(msg, sizeof(msg), "From: %s\r\nSubject: t\r\n\r\nBody",
+                 hostile[i]);
+        local_index_update("INBOX", "0000000000000301", msg);
+    }
+
+    struct stat st;
+    ASSERT(stat(TP("email-cli-index-traversal-home/planted"), &st) != 0,
+           "traversal: nothing created at <home>/planted");
+    ASSERT(stat(TP("email-cli-index-traversal-home/planted2"), &st) != 0,
+           "traversal: nothing created at <home>/planted2");
+    ASSERT(stat(TP("email-cli-index-traversal-home/.local/share/email-cli/"
+                   "accounts/testuser/index/from/.hidden.org"), &st) != 0,
+           "traversal: no dot-directory in the from index");
+
+    if (old_home) setenv("HOME", old_home, 1);
+    else unsetenv("HOME");
+}
+
 /* ── Manifest tests ──────────────────────────────────────────────────── */
 
 /** EMAIL-296: CR/LF in a field cannot forge a row; a non-token UID is dropped. */

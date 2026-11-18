@@ -66,7 +66,7 @@ static int g_mock_report_fd = -1;
  *
  * Runs in the forked child and never returns.
  */
-static void redirect_child(const char *request, int deadline_ms) {
+static int redirect_deliver(const char *request, int deadline_ms) {
     for (int waited = 0; waited <= deadline_ms; waited += 50) {
         for (int port = REDIRECT_PORT_FIRST; port <= REDIRECT_PORT_LAST; port++) {
             int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -85,7 +85,7 @@ static void redirect_child(const char *request, int deadline_ms) {
                 if (w == (ssize_t)strlen(request)) {
                     char buf[512];
                     ssize_t r = read(fd, buf, sizeof(buf));
-                    if (r > 0) { close(fd); _exit(0); }   /* answered: this was it */
+                    if (r > 0) { close(fd); return 0; }   /* answered: this was it */
                 }
                 close(fd);
                 continue;                                  /* wrong peer — keep looking */
@@ -95,8 +95,15 @@ static void redirect_child(const char *request, int deadline_ms) {
         struct timespec ts = {0, 50000000L};   /* 50 ms */
         nanosleep(&ts, NULL);
     }
-    _exit(1);
+    return 1;
 }
+
+static void redirect_child(const char *request, int deadline_ms) {
+    _exit(redirect_deliver(request, deadline_ms));
+}
+
+/** The state every loopback test redirect carries (GMAIL_TEST_OAUTH_STATE). */
+#define TEST_STATE "unitstate"
 
 
 /* ── The authorization with the program's side stubbed ───────────────── */
@@ -445,7 +452,7 @@ static void test_device_flow_access_denied(void) {
 
     pid_t pid = fork();
     if (pid == 0)
-        redirect_child("GET /callback?error=access_denied HTTP/1.1\r\n"
+        redirect_child("GET /callback?error=access_denied&state=" TEST_STATE " HTTP/1.1\r\n"
                        "Host: localhost\r\n\r\n", 5000);   /* never returns */
 
     int rc = authorize_run(&cfg, 0, NULL);
@@ -658,7 +665,7 @@ static void test_device_flow_full_mock(void) {
     /* Browser redirect child */
     pid_t br_pid = fork();
     if (br_pid == 0)
-        redirect_child("GET /callback?code=full_test_code&scope=x HTTP/1.1\r\n"
+        redirect_child("GET /callback?code=full_test_code&scope=x&state=" TEST_STATE " HTTP/1.1\r\n"
                        "Host: localhost\r\n\r\n", 5000);   /* never returns */
 
     int rc = authorize_run(&cfg, 0, NULL);
@@ -697,7 +704,7 @@ static void test_device_flow_with_code(void) {
 
     pid_t pid = fork();
     if (pid == 0)
-        redirect_child("GET /callback?code=test_code_exchange&scope=x HTTP/1.1\r\n"
+        redirect_child("GET /callback?code=test_code_exchange&scope=x&state=" TEST_STATE " HTTP/1.1\r\n"
                        "Host: localhost\r\n\r\n", 5000);   /* never returns */
 
     int rc = authorize_run(&cfg, 0, NULL);
@@ -1043,16 +1050,29 @@ static void test_authorize_waiting_for_the_redirect_is_interrupted(void) {
 }
 
 static void test_authorize_redirect_connection_without_a_request(void) {
+    /* EMAIL-302: a connection that sends nothing is a stray; it is ignored and
+     * the listener keeps waiting (here until the repeating timer interrupts
+     * the accept). */
     pid_t pid = fork();
     if (pid == 0) redirect_child("", 4000);
+    struct sigaction sa, old;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = auth_tick;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGALRM, &sa, &old);
+    struct itimerval it = { {0, 500000}, {2, 0} };
+    setitimer(ITIMER_REAL, &it, NULL);
     Config cfg;
     fi_cfg(&cfg);
     int rc = authorize_run(&cfg, 0, NULL);
+    struct itimerval off = { {0, 0}, {0, 0} };
+    setitimer(ITIMER_REAL, &off, NULL);
+    sigaction(SIGALRM, &old, NULL);
     kill(pid, SIGKILL);
     wait_child(pid);
-    ASSERT(rc == -1, "a browser that connects and sends nothing fails the authorization");
-    ASSERT(strstr(g_auth_ui.error, "Did not receive the authorization code") != NULL,
-           "and the reason is named");
+    ASSERT(rc == -1, "a wait that only sees a silent connection ends without a code");
+    ASSERT(strstr(g_auth_ui.error, "timed out") != NULL,
+           "the silent connection did not end the login: only the wait did");
     fi_cfg_free(&cfg);
 }
 
@@ -1220,7 +1240,7 @@ static void test_gmail_login_loopback_mode(void) {
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
     setenv("GMAIL_TEST_TOKEN_URL", url, 1);
     pid_t br = fork();
-    if (br == 0) redirect_child("GET /callback?code=LOOPED HTTP/1.1\r\n\r\n", 8000);
+    if (br == 0) redirect_child("GET /callback?code=LOOPED&state=" TEST_STATE " HTTP/1.1\r\n\r\n", 8000);
     Config cfg;
     fi_cfg(&cfg);
     char text[4096];
@@ -1238,7 +1258,113 @@ static void test_gmail_login_loopback_mode(void) {
     fi_cfg_free(&cfg);
 }
 
+/* ── State and PKCE (EMAIL-302) ──────────────────────────────────────── */
+
+/** Value of query parameter @p name in @p url, copied into @p out. */
+static int url_param(const char *url, const char *name, char *out, size_t cap) {
+    char key[40];
+    snprintf(key, sizeof(key), "&%s=", name);
+    const char *p = strstr(url, key);
+    if (!p) return 0;
+    p += strlen(key);
+    size_t n = strcspn(p, "&");
+    if (n >= cap) return 0;
+    memcpy(out, p, n);
+    out[n] = '\0';
+    return 1;
+}
+
+static void test_authorization_url_has_random_state_and_pkce(void) {
+    unsetenv("GMAIL_TEST_OAUTH_STATE");
+    Config cfg;
+    fi_cfg(&cfg);
+    char st1[128] = "", ch1[128] = "", m1[16] = "", st2[128] = "";
+    (void)authorize_run(&cfg, 1, NULL);
+    int a = url_param(g_auth_url, "state", st1, sizeof(st1)) &&
+            url_param(g_auth_url, "code_challenge", ch1, sizeof(ch1)) &&
+            url_param(g_auth_url, "code_challenge_method", m1, sizeof(m1));
+    (void)authorize_run(&cfg, 1, NULL);
+    int b = url_param(g_auth_url, "state", st2, sizeof(st2));
+    setenv("GMAIL_TEST_OAUTH_STATE", TEST_STATE, 1);
+    fi_cfg_free(&cfg);
+    ASSERT(a && b, "the URL carries state, code_challenge and code_challenge_method");
+    ASSERT(strcmp(m1, "S256") == 0, "the challenge method is S256");
+    ASSERT(strlen(st1) >= 32, "the state has at least 128 bits of base64url");
+    ASSERT(strlen(ch1) == 43, "the challenge is a base64url SHA-256 (43 characters)");
+    ASSERT(strcmp(st1, st2) != 0, "every login has its own random state");
+}
+
+static void test_paste_state_is_checked_when_present(void) {
+    char verdict[300] = "", *tok = NULL;
+    int rc = paste_case("http://localhost:8089/callback?code=evil&state=other", NULL,
+                        &tok, verdict, sizeof(verdict));
+    ASSERT(rc == -1, "a pasted redirect with another state is refused");
+    ASSERT(strstr(g_auth_ui.error, "state") != NULL, "and the reason names the state");
+    free(tok);
+    tok = NULL;
+    rc = paste_case("http://localhost:8089/callback?code=good&state=" TEST_STATE,
+                    "code=good", &tok, verdict, sizeof(verdict));
+    ASSERT(rc == 0, "a pasted redirect with this login's state is accepted");
+    free(tok);
+}
+
+/** Stray requests, then the right one: the child of the loopback test. */
+static void stray_then_valid_child(void) {
+    static const char *const strays[] = {
+        "GET /callback?code=evil HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        "GET /callback?code=evil&state=wrong HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        "GET /callback?error=access_denied&state=wrong HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        "GET /favicon.ico HTTP/1.1\r\nHost: localhost\r\n\r\n",
+    };
+    for (size_t i = 0; i < sizeof(strays) / sizeof(strays[0]); i++)
+        if (redirect_deliver(strays[i], 5000) != 0) _exit(1);
+    _exit(redirect_deliver("GET /callback?code=good_code&state=" TEST_STATE
+                           " HTTP/1.1\r\nHost: localhost\r\n\r\n", 5000));
+}
+
+static void test_loopback_ignores_strays_and_sends_verifier(void) {
+    const int mock_port = mock_listen();
+    const char *resp =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+        "{\"access_token\":\"a\",\"refresh_token\":\"stray_test_refresh\"}";
+    static const char *const expect[] = { "code=good_code", "&code_verifier=", NULL };
+    int report[2];
+    ASSERT(pipe(report) == 0, "stray test: report pipe");
+    g_mock_report_fd = report[1];
+    pid_t srv = fork();
+    if (srv == 0) { close(report[0]); run_mock_token_server_expect(mock_port, resp, expect); }
+    close(report[1]);
+    g_mock_report_fd = -1;
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/token", mock_port);
+    setenv("GMAIL_TEST_TOKEN_URL", url, 1);
+    pid_t br = fork();
+    if (br == 0) stray_then_valid_child();
+
+    Config cfg;
+    fi_cfg(&cfg);
+    int rc = authorize_run(&cfg, 0, NULL);
+    char verdict[300] = "";
+    ssize_t vn = read(report[0], verdict, sizeof(verdict) - 1);
+    verdict[vn > 0 ? vn : 0] = '\0';
+    close(report[0]);
+    unsetenv("GMAIL_TEST_TOKEN_URL");
+    wait_child(br);
+    wait_child(srv);
+    int token_ok = cfg.gmail_refresh_token &&
+                   strcmp(cfg.gmail_refresh_token, "stray_test_refresh") == 0;
+    fi_cfg_free(&cfg);
+    ASSERT(rc == 0, "strays (no state, wrong state, error, other path) do not end the login");
+    ASSERT(token_ok, "the right redirect then authorizes");
+    ASSERT(strcmp(verdict, "OK") == 0,
+           verdict[0] ? verdict : "the exchange carries the right code and the code_verifier");
+}
+
 void test_gmail_auth(void) {
+    setenv("GMAIL_TEST_OAUTH_STATE", TEST_STATE, 1);
+    RUN_TEST(test_authorization_url_has_random_state_and_pkce);
+    RUN_TEST(test_paste_state_is_checked_when_present);
+    RUN_TEST(test_loopback_ignores_strays_and_sends_verifier);
     RUN_TEST(test_refresh_no_token);
     RUN_TEST(test_refresh_empty_token);
     RUN_TEST(test_auth_code_extraction);

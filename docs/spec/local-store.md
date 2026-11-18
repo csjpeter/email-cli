@@ -75,7 +75,10 @@ index/from/github.com/noreply     ← "INBOX/42\nINBOX/1042\n"
 index/from/amazon.de/versand      ← "INBOX/891\n"
 ```
 
-Domain and local part are lowercased.
+Domain and local part are lowercased.  A part that is empty, starts with a dot,
+contains `..`, `/`, `\` or a control character is refused and the message is
+not entered in the sender index (EMAIL-295): the index never writes outside
+`<account>/index/`.
 
 ### Date index (`index/date/<year>/<month>/<day>`)
 

@@ -91,8 +91,8 @@ if [ -f "$rt" ] && [ -f "$dev" ]; then
     [ -n "$exported" ] && [ -z "$(echo "$exported" | grep -v '^emc_')" ] \
         && ok "1.23 only emc_* symbols are exported" || bad "1.23 exported: $exported"
     needed=$(readelf -d "$so" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | sort -u)
-    extra=$(echo "$needed" | grep -v -E '^(libc\.so\.6|libm\.so\.6|libssl\.so\.3|libcrypto\.so\.3)$')
-    [ -z "$extra" ] && ok "1.24 the library needs only libc and OpenSSL (no libcurl)" || bad "1.24 extra: $extra"
+    extra=$(echo "$needed" | grep -v -E '^(libc\.so\.6|libm\.so\.6|ld-linux-[a-z0-9_-]+\.so\.[0-9]+|libssl\.so\.3|libcrypto\.so\.3)$')
+    [ -z "$extra" ] && ok "1.24 the library needs only libc (and its loader) and OpenSSL (no libcurl)" || bad "1.24 extra: $extra"
     # A program written against the installed header links and runs.
     printf '#include <email-client.h>\n#include <stdio.h>\nint main(void){puts(emc_version());return 0;}\n' > "$lib/use.c"
     out=$(gcc -o "$lib/use" "$lib/use.c" -I"$lib/usr/include" -L"$(dirname "$so")" -lemail-client 2>&1) \

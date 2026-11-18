@@ -98,7 +98,8 @@ To and Subject; the bottom line is the status line: `Esc save and continue  Ctrl
   a blank line, the body (`libemail/src/core/compose_draft.c`).
 * A later compose finds it and asks `Resume it? [y/N]`.
 * The draft is removed by sending, by a send that was kept in Drafts, and by
-  the review screen's confirmed discard.  Bcc is stripped before sending.
+  the review screen's confirmed discard.  Bcc is stripped from the bytes sent over SMTP
+  and the SMTP envelope is To + Cc + Bcc (EMAIL-303); the copy kept in Sent keeps the Bcc header.
 
 ### Empty-To guard
 
@@ -297,6 +298,7 @@ present in the editor temp file so I can review and edit them before sending.
 - `Cc:` header written to temp file if the Cc field is non-empty.
 - `Bcc:` header written to temp file if the Bcc field is non-empty.
 - `compose_build_message()` generates a `Cc:` header from the Cc field.
+- `compose_build_message()` refuses (returns -1) any header field (From, To, Cc, Bcc, Subject, In-Reply-To) containing CR or LF; `compose_extract_reply_meta()` strips control characters from the decoded Reply-To/From and Subject (EMAIL-301, header injection).
 - Bcc is **not** included in the final RFC 2822 message (stripped before
   send); the SMTP envelope still includes Bcc recipients.
 - The `ComposeParams` struct is extended with `cc` and `bcc` string fields.

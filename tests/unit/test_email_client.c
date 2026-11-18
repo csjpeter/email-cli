@@ -120,6 +120,10 @@ static void ec_smtp_child(int lfd, SSL_CTX *ctx, int report_fd)
             ec_say(ssl, "334 UGFzc3dvcmQ6\r\n"); ec_readline(ssl, buf, sizeof(buf));
             ec_say(ssl, "235 ok\r\n");
         } else if (!strncasecmp(buf, "MAIL FROM", 9) || !strncasecmp(buf, "RCPT TO", 7)) {
+            if (!strncasecmp(buf, "RCPT TO", 7)) {      /* EMAIL-303: the envelope is reported */
+                ssize_t w = write(report_fd, buf, strlen(buf)); (void)w;
+                w = write(report_fd, "\n", 1); (void)w;
+            }
             ec_say(ssl, "250 ok\r\n");
         } else if (!strncasecmp(buf, "DATA", 4)) {
             ec_say(ssl, "354 go\r\n");
@@ -783,6 +787,61 @@ static void test_ec_send_wire_smtp(void)
     ASSERT(strstr(got, "Subject: Raw") != NULL, "wire: the server got the message");
 }
 
+static void test_ec_send_bcc_envelope(void)
+{
+    /* EMAIL-303: the envelope holds To + Cc + Bcc; no Bcc header on the wire. */
+    int port = 0, rd = -1;
+    pid_t pid = ec_start(SRV_SMTP, &port, &rd);
+    ASSERT(pid > 0, "bcc: start server");
+    emc_account a;
+    ec_account(&a, 1, port);
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "bcc: open");
+    emc_message m = {.from = "user@example.org", .to = "to@example.org",
+                     .cc = "cc@example.org", .bcc = "Hidden <bcc@example.org>",
+                     .subject = "Secret", .body = "Body"};
+    emc_send_result r;
+    emc_status st = emc_send(c, &m, &r);
+    emc_close(c);
+    char got[4096];
+    ec_collect(pid, rd, got, sizeof(got));
+    ASSERT(st == EMC_OK, "bcc: sent");
+    ASSERT(strstr(got, "RCPT TO:<to@example.org>") != NULL, "bcc: RCPT To");
+    ASSERT(strstr(got, "RCPT TO:<cc@example.org>") != NULL, "bcc: RCPT Cc");
+    ASSERT(strstr(got, "RCPT TO:<bcc@example.org>") != NULL, "bcc: RCPT Bcc");
+    ASSERT(strstr(got, "Cc: cc@example.org") != NULL, "bcc: Cc header kept");
+    ASSERT(strcasestr(got, "Bcc:") == NULL, "bcc: no Bcc header in DATA");
+    ASSERT(strstr(got, "Subject: Secret") != NULL, "bcc: the rest of the message is intact");
+}
+
+static void test_ec_send_wire_bcc_envelope(void)
+{
+    /* the wire path (the TUI): a folded Bcc is removed whole, the body is untouched */
+    int port = 0, rd = -1;
+    pid_t pid = ec_start(SRV_SMTP, &port, &rd);
+    ASSERT(pid > 0, "wire bcc: start server");
+    emc_account a;
+    ec_account(&a, 1, port);
+    emc_client *c = NULL;
+    ASSERT(emc_open(&c, &a) == EMC_OK, "wire bcc: open");
+    static const char wire[] =
+        "From: user@example.org\r\nTo: to@example.org\r\nCc: cc@example.org\r\n"
+        "Bcc: b1@example.org,\r\n b2@example.org\r\nSubject: S\r\n"
+        "Message-ID: <w-1@example.org>\r\n\r\nBcc: in body stays\r\n";
+    emc_status st = emc_send_wire(c, "user@example.org", "to@example.org", wire,
+                                  strlen(wire), NULL);
+    emc_close(c);
+    char got[4096];
+    ec_collect(pid, rd, got, sizeof(got));
+    ASSERT(st == EMC_OK, "wire bcc: sent");
+    ASSERT(strstr(got, "RCPT TO:<cc@example.org>") != NULL, "wire bcc: RCPT Cc");
+    ASSERT(strstr(got, "RCPT TO:<b1@example.org>") != NULL, "wire bcc: RCPT Bcc 1");
+    ASSERT(strstr(got, "RCPT TO:<b2@example.org>") != NULL, "wire bcc: RCPT Bcc 2");
+    ASSERT(strstr(got, "Bcc: b1") == NULL && strstr(got, " b2@example.org") == NULL,
+           "wire bcc: the header and its folded line are gone");
+    ASSERT(strstr(got, "Bcc: in body stays") != NULL, "wire bcc: the body is untouched");
+}
+
 static void test_ec_imap_operations(void)
 {
     int port = 0, rd = -1;
@@ -1109,5 +1168,7 @@ void test_email_client(void)
     RUN_TEST(test_ec_imap_refusals);
     RUN_TEST(test_ec_send_refusals);
     RUN_TEST(test_ec_gmail_send_wire);
+    RUN_TEST(test_ec_send_bcc_envelope);
+    RUN_TEST(test_ec_send_wire_bcc_envelope);
     RUN_TEST(test_ec_log_open_writes_the_file);
 }

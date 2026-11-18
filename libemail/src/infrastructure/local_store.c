@@ -457,9 +457,24 @@ static int index_has_ref(const char *path, const char *ref) {
     return 0;
 }
 
+/**
+ * @brief Tells whether a string is safe to use as one path component.
+ *
+ * Refuses empty names, a leading dot, "..", "/" and control characters, so an
+ * address taken from a message header cannot leave the index directory.
+ */
+static int index_name_safe(const char *s) {
+    if (!s || !*s || s[0] == '.') return 0;
+    if (strstr(s, "..")) return 0;
+    for (const unsigned char *c = (const unsigned char *)s; *c; c++)
+        if (*c == '/' || *c == '\\' || *c < 0x20 || *c == 0x7f) return 0;
+    return 1;
+}
+
 /** @brief Appends a reference to an index file (skips duplicates). */
 static int index_append(const char *dir_path, const char *file_name,
                         const char *ref) {
+    if (!index_name_safe(file_name)) return -1;
     if (fs_mkdir_p(dir_path, 0700) != 0) return -1;
 
     RAII_STRING char *path = NULL;
@@ -533,7 +548,7 @@ int local_index_update(const char *folder, const char *uid, const char *raw_msg)
         char domain[256], local_part[256];
         extract_email_parts(from_raw, domain, sizeof(domain),
                             local_part, sizeof(local_part));
-        if (domain[0] && local_part[0]) {
+        if (index_name_safe(domain) && index_name_safe(local_part)) {
             RAII_STRING char *idx_dir = NULL;
             if (asprintf(&idx_dir, "%s/index/from/%s",
                          g_account_base, domain) != -1)

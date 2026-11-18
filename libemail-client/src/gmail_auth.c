@@ -7,6 +7,11 @@
 #include "logger.h"
 #include "raii.h"
 #include "http_client.h"
+#include "gmail_client.h"
+#include <openssl/crypto.h>
+#include <openssl/rand.h>
+#include <openssl/sha.h>
+#include <time.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -142,14 +147,51 @@ static char *query_param(const char *text, const char *name) {
     return NULL;
 }
 
+/** Random URL-safe token of @p nbytes random bytes (RAND_bytes), heap, or NULL. */
+static char *random_token(size_t nbytes) {
+    unsigned char buf[64];
+    if (nbytes > sizeof(buf) || RAND_bytes(buf, (int)nbytes) != 1) return NULL;
+    return gmail_base64url_encode(buf, nbytes);
+}
+
+/** The PKCE S256 code_challenge of @p verifier (RFC 7636 4.2), heap, or NULL. */
+static char *pkce_challenge(const char *verifier) {
+    unsigned char md[SHA256_DIGEST_LENGTH];
+    SHA256((const unsigned char *)verifier, strlen(verifier), md);
+    return gmail_base64url_encode(md, sizeof(md));
+}
+
+/** 1 when the "state" parameter of @p text equals @p expect (constant time). */
+static int state_matches(const char *text, const char *expect) {
+    char *st = query_param(text, "state");
+    size_t el = strlen(expect);
+    int ok = st && strlen(st) == el && CRYPTO_memcmp(st, expect, el) == 0;
+    free(st);
+    return ok;
+}
+
 /**
  * @brief The authorization code in what the user's browser was redirected to.
  *
  * @p text is an HTTP request line ("GET /callback?code=... HTTP/1.1"), the
  * redirect URL a person pasted, its query string, or the bare code.
+ * @p state is the value this login sent.  With @p require_state (the loopback
+ * listener, which strangers can reach) the text must carry exactly that state;
+ * in paste mode (only the person can supply the text) a state that is present
+ * must match, and none at all (a bare code) is accepted, PKCE still binding
+ * the code to this login.
  * @return heap code, or NULL with the reason in @p ui->error.
  */
-static char *auth_code_from(const char *text, GmailAuthUi *ui) {
+static char *auth_code_from(const char *text, const char *state, int require_state,
+                            GmailAuthUi *ui) {
+    char *present = query_param(text, "state");
+    int has_state = present != NULL;
+    free(present);
+    if ((require_state || has_state) && !state_matches(text, state)) {
+        ui_error(ui, "The redirect does not carry the state of this login "
+                     "(not from this authorization); ignored");
+        return NULL;
+    }
     char *code = query_param(text, "code");
     if (code && code[0]) return code;
     free(code);
@@ -177,49 +219,67 @@ static char *auth_code_from(const char *text, GmailAuthUi *ui) {
 /**
  * @brief Wait for Google's redirect and extract the authorization code.
  *
- * Accepts one HTTP connection, reads the GET request, extracts the code,
- * sends a simple HTML response and closes the connection.
+ * Accepts connections until one carries the @p state of this login (or the
+ * wait of 300 s ends).  Any other connection (a stray probe, an empty
+ * connection, a page injecting a code) is answered with an error page and
+ * ignored: the listener keeps waiting (RFC 8252 section 8.9, RFC 6749 10.12).
  *
  * @param listen_fd  Listening socket fd (will NOT be closed by this function).
+ * @param state      The state sent in the authorization URL.
  * @return Heap-allocated authorization code, or NULL (reason in @p ui->error).
  */
-static char *wait_for_auth_code(int listen_fd, GmailAuthUi *ui) {
-    struct sockaddr_in cli = {0};
-    socklen_t cli_len = sizeof(cli);
-    int conn = accept(listen_fd, (struct sockaddr *)&cli, &cli_len);
-    if (conn < 0) {
-        ui_error(ui, "Did not receive the authorization code (timed out)");
-        return NULL;
-    }
+static char *wait_for_auth_code(int listen_fd, const char *state, GmailAuthUi *ui) {
+    static const char bad[] =
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+        "<html><body><h2>Authorization failed.</h2>"
+        "<p>This request does not belong to the login in progress.</p></body></html>";
+    time_t deadline = time(NULL) + 300;
+    for (;;) {
+        time_t left = deadline - time(NULL);
+        if (left <= 0) {
+            ui_error(ui, "Did not receive the authorization code (timed out)");
+            return NULL;
+        }
+        struct timeval tv = { left, 0 };
+        setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        struct sockaddr_in cli = {0};
+        socklen_t cli_len = sizeof(cli);
+        int conn = accept(listen_fd, (struct sockaddr *)&cli, &cli_len);
+        if (conn < 0) {
+            ui_error(ui, "Did not receive the authorization code (timed out)");
+            return NULL;
+        }
+        /* A silent stray must not hold the login: bound the read. */
+        struct timeval rtv = {5, 0};
+        setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof(rtv));
 
-    /* Read the HTTP request (small — fits in 4K) */
-    char req[4096] = {0};
-    ssize_t n = read(conn, req, sizeof(req) - 1);
-    if (n <= 0) {
+        char req[4096] = {0};
+        ssize_t n = read(conn, req, sizeof(req) - 1);
+        if (n <= 0) { close(conn); continue; }
+        /* Only the request line matters; the rest is headers. */
+        char *eol = strpbrk(req, "\r\n");
+        if (eol) *eol = '\0';
+
+        if (!state_matches(req, state)) {
+            ssize_t w = write(conn, bad, sizeof(bad) - 1); (void)w;
+            close(conn);
+            continue;
+        }
+        ui->error[0] = '\0';
+        char *auth_code = auth_code_from(req, state, 1, ui);
+        const char *html = auth_code
+            ? "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+              "<html><body><h2>Authorization successful!</h2>"
+              "<p>You can close this tab and return to email-cli.</p></body></html>"
+            : "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+              "<html><body><h2>Authorization failed.</h2>"
+              "<p>Please try again.</p></body></html>";
+        ssize_t wr = write(conn, html, strlen(html)); (void)wr;
         close(conn);
-        ui_error(ui, "Did not receive the authorization code");
-        return NULL;
+        if (!auth_code && !ui->error[0])
+            ui_error(ui, "Did not receive the authorization code");
+        return auth_code;
     }
-    /* Only the request line matters; the rest is headers. */
-    char *eol = strpbrk(req, "\r\n");
-    if (eol) *eol = '\0';
-
-    char *auth_code = auth_code_from(req, ui);
-
-    /* Send a simple response to the browser */
-    const char *html = auth_code
-        ? "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
-          "<html><body><h2>Authorization successful!</h2>"
-          "<p>You can close this tab and return to email-cli.</p></body></html>"
-        : "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
-          "<html><body><h2>Authorization failed.</h2>"
-          "<p>Please try again.</p></body></html>";
-    ssize_t wr = write(conn, html, strlen(html)); (void)wr;
-    close(conn);
-
-    if (!auth_code && !ui->error[0])
-        ui_error(ui, "Did not receive the authorization code");
-    return auth_code;
 }
 
 /* ── Authorization Code Flow (installed application, loopback redirect) ── */
@@ -264,20 +324,32 @@ int gmail_auth_authorize(Config *cfg, GmailAuthUi *ui) {
                      LOOPBACK_PORT_START, LOOPBACK_PORT_END);
             return -1;
         }
-        /* 5-minute timeout so wait_for_auth_code() can't block forever. */
-        struct timeval _tv = {300, 0};
-        setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &_tv, sizeof(_tv));
     }
 
     char redirect_uri[64];
     snprintf(redirect_uri, sizeof(redirect_uri), "http://localhost:%d/callback", port);
+
+    /* A fresh state (CSRF, RFC 6749 10.12) and PKCE verifier (RFC 7636) for
+     * this login.  GMAIL_TEST_OAUTH_STATE fixes the state for the tests. */
+    const char *state_override = getenv("GMAIL_TEST_OAUTH_STATE");
+    RAII_STRING char *state = (state_override && state_override[0])
+                            ? strdup(state_override) : random_token(24);
+    RAII_STRING char *verifier = random_token(32);
+    RAII_STRING char *challenge = verifier ? pkce_challenge(verifier) : NULL;
+    if (!state || !verifier || !challenge) {
+        if (listen_fd >= 0) close(listen_fd);
+        ui_error(ui, "Could not generate the login state (random source failed)");
+        return -1;
+    }
+    char *escaped_state = http_url_escape(state);
 
     /* Step 2: Build the authorization URL and hand it to the program */
     RAII_STRING char *auth_url = NULL;
     char *escaped_scope = http_url_escape(GMAIL_SCOPE);
     char *escaped_redirect = http_url_escape(redirect_uri);
     char *escaped_client = http_url_escape(client_id);
-    if (!escaped_scope || !escaped_redirect || !escaped_client) {
+    if (!escaped_scope || !escaped_redirect || !escaped_client || !escaped_state) {
+        free(escaped_state);
         free(escaped_scope);
         free(escaped_redirect);
         free(escaped_client);
@@ -287,8 +359,11 @@ int gmail_auth_authorize(Config *cfg, GmailAuthUi *ui) {
     }
     if (asprintf(&auth_url,
                  "%s?client_id=%s&redirect_uri=%s&response_type=code"
-                 "&scope=%s&access_type=offline&prompt=consent",
-                 AUTH_URL, escaped_client, escaped_redirect, escaped_scope) == -1) {
+                 "&scope=%s&access_type=offline&prompt=consent"
+                 "&state=%s&code_challenge=%s&code_challenge_method=S256",
+                 AUTH_URL, escaped_client, escaped_redirect, escaped_scope,
+                 escaped_state, challenge) == -1) {
+        free(escaped_state);
         free(escaped_scope);
         free(escaped_redirect);
         free(escaped_client);
@@ -296,6 +371,7 @@ int gmail_auth_authorize(Config *cfg, GmailAuthUi *ui) {
         ui_error(ui, "Out of memory");
         return -1;
     }
+    free(escaped_state);
     free(escaped_scope);
     free(escaped_redirect);
     free(escaped_client);
@@ -308,11 +384,11 @@ int gmail_auth_authorize(Config *cfg, GmailAuthUi *ui) {
         char *text = ui->read_redirect(ui->user);
         if (!text) ui_error(ui, "No redirect address was given");
         else {
-            auth_code = auth_code_from(text, ui);
+            auth_code = auth_code_from(text, state, 0, ui);
             free(text);
         }
     } else {
-        auth_code = wait_for_auth_code(listen_fd, ui);
+        auth_code = wait_for_auth_code(listen_fd, state, ui);
         close(listen_fd);
     }
     if (!auth_code) return -1;
@@ -323,16 +399,18 @@ int gmail_auth_authorize(Config *cfg, GmailAuthUi *ui) {
     char *escaped_id = http_url_escape(client_id);
     char *escaped_secret = http_url_escape(client_secret);
     char *escaped_uri = http_url_escape(redirect_uri);
-    int pr = (escaped_code && escaped_id && escaped_secret && escaped_uri)
+    char *escaped_ver = http_url_escape(verifier);
+    int pr = (escaped_code && escaped_id && escaped_secret && escaped_uri && escaped_ver)
            ? asprintf(&post,
                       "code=%s&client_id=%s&client_secret=%s"
-                      "&redirect_uri=%s&grant_type=authorization_code",
-                      escaped_code, escaped_id, escaped_secret, escaped_uri)
+                      "&redirect_uri=%s&grant_type=authorization_code&code_verifier=%s",
+                      escaped_code, escaped_id, escaped_secret, escaped_uri, escaped_ver)
            : -1;
     free(escaped_code);
     free(escaped_id);
     free(escaped_secret);
     free(escaped_uri);
+    free(escaped_ver);
     free(auth_code);
     if (pr == -1) {
         ui_error(ui, "Out of memory");

@@ -825,6 +825,27 @@ void imap_disconnect(ImapClient *c) {
     free(c);
 }
 
+/**
+ * True when a decoded folder name is safe as a local path (EMAIL-304):
+ * non-empty, no leading '/', no NUL or control characters, and no "." or ".."
+ * component between '/' characters.
+ */
+static int folder_name_is_safe(const char *name) {
+    if (!name || !*name || name[0] == '/') return 0;
+    for (const unsigned char *q = (const unsigned char *)name; *q; q++)
+        if (*q < 0x20 || *q == 0x7f) return 0;
+    const char *p = name;
+    while (*p) {
+        const char *e = strchr(p, '/');
+        size_t len = e ? (size_t)(e - p) : strlen(p);
+        if ((len == 1 && p[0] == '.') || (len == 2 && p[0] == '.' && p[1] == '.'))
+            return 0;
+        if (!e) break;
+        p = e + 1;
+    }
+    return 1;
+}
+
 /* ── LIST ────────────────────────────────────────────────────────────── */
 
 /**
@@ -910,6 +931,12 @@ int imap_list(ImapClient *c, char ***folders_out, int *count_out, char *sep_out)
         char *name = imap_utf7_decode(raw);
         free(raw);
         if (!name) continue;
+        if (!folder_name_is_safe(name)) {
+            fprintf(stderr, "email: IMAP LIST: folder name refused (unsafe for local "
+                    "storage): \"%.80s\"\n", name);
+            free(name);
+            continue;
+        }
 
         if (count == cap) {
             cap = cap ? cap * 2 : 16;

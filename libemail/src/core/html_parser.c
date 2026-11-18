@@ -170,6 +170,8 @@ static char *decode_entities(const char *in) {
                         if (e[k]>='0'&&e[k]<='9') cp=cp*10+(unsigned char)(e[k]-'0');
                 }
                 matched = (cp > 0);
+                if (matched && (cp < 0x20 || (cp >= 0x7F && cp <= 0x9F)) && cp != 9 && cp != 10)
+                    cp = '?';  /* no control characters via entities (EMAIL-298) */
             } else if (el < 10) {
                 char nm[10]={0}; memcpy(nm,e,el);
                 for (int k=0; ENTITIES[k].name; k++)

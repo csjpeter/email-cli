@@ -6,6 +6,7 @@
 #include "html_render.h"
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 
 /* All tests use html_medium_stub (every printable codepoint = 1 column). */
 
@@ -1380,4 +1381,22 @@ void test_html_render_url_color(void) {
         html_sanitize_display(buf);
         ASSERT(strcmp(buf, "x?]52;c;ZQ==?\ty?\nz?") == 0, "sanitise: markers, \\t and \\n kept");
     }
+}
+
+void test_html_render_flat_siblings_linear(void) {
+    /* EMAIL-300: 100k flat siblings must not take quadratic time. */
+    enum { N = 100000 };
+    char *html = malloc((size_t)N * 4 + 1);
+    ASSERT(html != NULL, "flat: alloc");
+    for (int i = 0; i < N; i++) memcpy(html + (size_t)i * 4, "<br>", 4);
+    html[(size_t)N * 4] = '\0';
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    char *r = html_render(html, 80, 0);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double secs = (double)(t1.tv_sec - t0.tv_sec) + (double)(t1.tv_nsec - t0.tv_nsec) / 1e9;
+    ASSERT(r != NULL, "flat: rendered");
+    ASSERT(secs < 3.0, "flat: 100k siblings render in linear time");
+    free(r);
+    free(html);
 }

@@ -59,22 +59,31 @@ refresh token that results works without a person (`email-sync` from cron).
 
 **Flow** (`gmail_auth_authorize()`, `emc_gmail_authorize_with()`):
 
-1. Build `https://accounts.google.com/o/oauth2/v2/auth?client_id=...&redirect_uri=http://localhost:PORT/callback&response_type=code&scope=https://mail.google.com/&access_type=offline&prompt=consent`
+1. Build `https://accounts.google.com/o/oauth2/v2/auth?client_id=...&redirect_uri=http://localhost:PORT/callback&response_type=code&scope=https://mail.google.com/&access_type=offline&prompt=consent&state=...&code_challenge=...&code_challenge_method=S256`
+   (EMAIL-302: `state` is 24 random bytes from `RAND_bytes`, base64url; the PKCE
+   `code_verifier` is 32 random bytes, the challenge its SHA-256, RFC 7636 / RFC 8252).
    and hand it to the program through the `show_url` callback.  **The library
    prints nothing and starts no browser**; the program shows the URL and, if it
    wants, opens a browser (`email-cli` starts `xdg-open` directly, with no shell, the URL as one argument; the client id is percent-encoded in the URL).
 2. Receive the code, one of two ways:
    - **loopback** (default): the library listens on `127.0.0.1`, ports
      8089-8099, for Google's redirect and answers the browser with a short page.
+     A connection whose request does not carry this login's `state` (a stray
+     probe, an empty connection, a page injecting someone else's code) is
+     answered `400` and ignored; the listener keeps waiting (up to 300 s), so it
+     can neither inject a code nor end the login.  Error redirects need the
+     state too.
    - **paste**: no listener.  The person opens the URL on any machine, agrees,
      and the browser is sent to `http://localhost:8089/callback?code=...`, which
      fails to load on that machine; they copy that address (or only the code)
      and the program's `read_redirect` callback returns it.  The pasted text may
      be the whole address, its query string, or the bare code; a percent-encoded
      code is decoded.  A `error=access_denied` redirect is reported as the
-     reason.
+     reason.  Nobody but the person can reach this path, so a pasted text with
+     no `state` (the bare code) is accepted (PKCE still binds the code to this
+     login); one that carries a `state` must match.
 3. POST `https://oauth2.googleapis.com/token` with `grant_type=authorization_code`,
-   the code, the client id and secret and the same `redirect_uri`.
+   the code, the client id and secret, the same `redirect_uri` and the PKCE `code_verifier`.
 4. Store `refresh_token` in `config.ini` (persisted, mode 0600).
    `access_token` is held in memory only (expires in ~3600s).
 

@@ -32,6 +32,7 @@ typedef struct HtmlNode {
     struct HtmlNode *first_child;
     struct HtmlNode *next_sibling;
     struct HtmlNode *parent;
+    struct HtmlNode *last_child;    /**< tail of the child list; makes appending O(1) */
 } HtmlNode;
 
 /**

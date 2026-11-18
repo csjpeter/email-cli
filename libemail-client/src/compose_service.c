@@ -129,11 +129,35 @@ static const char *infer_mime_type(const char *filename)
     return "application/octet-stream";
 }
 
+/** True when @p v contains CR or LF (a header value must be one line). */
+static int has_line_break(const char *v)
+{
+    return v && strpbrk(v, "\r\n") != NULL;
+}
+
+/** Remove every control character (CR, LF, TAB, ...) from @p s in place. */
+static void strip_controls(char *s)
+{
+    if (!s) return;
+    char *w = s;
+    for (const char *r = s; *r; r++)
+        if (!iscntrl((unsigned char)*r)) *w++ = *r;
+    *w = '\0';
+}
+
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 int compose_build_message(const ComposeParams *p, char **out, size_t *outlen) {
     if (!p || !p->from || !p->to || !p->subject || !out || !outlen)
         return -1;
+
+    /* EMAIL-301: a header field is one line; refuse header injection. */
+    if (has_line_break(p->from) || has_line_break(p->to) ||
+        has_line_break(p->subject) || has_line_break(p->cc) ||
+        has_line_break(p->bcc) || has_line_break(p->reply_to_msg_id)) {
+        *out = NULL;
+        return -1;
+    }
 
     /* Date header in RFC 2822 format */
     time_t now = time(NULL);
@@ -346,11 +370,13 @@ int compose_extract_reply_meta(const char *raw_msg,
     }
     *reply_to_out = rt ? mime_decode_words(rt) : strdup("");
     free(rt);
+    strip_controls(*reply_to_out);   /* EMAIL-301: no CR/LF from =0D=0A */
 
     /* Subject: prefix with "Re: " (strip duplicates) */
     char *subj_raw = mime_get_header(raw_msg, "Subject");
     char *subj_dec = subj_raw ? mime_decode_words(subj_raw) : strdup("");
     free(subj_raw);
+    strip_controls(subj_dec);        /* EMAIL-301 */
     char *s = subj_dec ? trim_ws(subj_dec) : NULL;
     /* Strip all leading "Re: " / "re: " prefixes */
     while (s && (strncasecmp(s, "re: ", 4) == 0 || strncasecmp(s, "re:", 3) == 0)) {

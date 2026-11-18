@@ -152,6 +152,33 @@ void test_mime_util(void) {
     /* NULL input */
     ASSERT(mime_get_text_body(NULL) == NULL, "NULL msg should return NULL");
 
+    /* ── EMAIL-299: deeply nested multipart must not overflow the stack ── */
+    {
+        enum { DEPTH = 8000 };
+        size_t cap = (size_t)DEPTH * 160 + 256;
+        char *msg = malloc(cap);
+        ASSERT(msg != NULL, "deep nest: allocation");
+        size_t n = 0;
+        n += (size_t)snprintf(msg + n, cap - n, "MIME-Version: 1.0\r\n");
+        for (int i = 0; i < DEPTH; i++) {
+            n += (size_t)snprintf(msg + n, cap - n,
+                "Content-Type: multipart/mixed; boundary=\"b%d\"\r\n\r\n--b%d\r\n", i, i);
+        }
+        n += (size_t)snprintf(msg + n, cap - n,
+            "Content-Type: text/plain\r\n\r\nx\r\n");
+        for (int i = DEPTH - 1; i >= 0; i--)
+            n += (size_t)snprintf(msg + n, cap - n, "--b%d--\r\n", i);
+        char *t = mime_get_text_body(msg);
+        free(t);
+        char *h = mime_get_html_part(msg);
+        free(h);
+        int cnt = 0;
+        MimeAttachment *al = mime_list_attachments(msg, &cnt);
+        mime_free_attachments(al, cnt);
+        ASSERT(1, "deep nest: survived 8000 nested multiparts");
+        free(msg);
+    }
+
     /* ── mime_decode_words ──────────────────────────────────────────── */
 
     /* Plain string — no encoded words, returned verbatim */

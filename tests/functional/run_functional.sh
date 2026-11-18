@@ -6786,14 +6786,13 @@ f113_request() {
     local path="$1" reply="" try
     F113_REPLY_LINE=""
     for try in 1 2 3 4 5; do
-        if exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"; then
-            if printf 'GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n' "$path" >&7; then
-                IFS= read -r -t 10 reply <&7
-            fi
-            exec 7<&-
-        fi
+        # A subshell: a failed redirection of exec must not end the whole run.
+        reply=$( exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}" || exit 1
+                 printf 'GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n' "$path" >&7 || exit 1
+                 IFS= read -r -t 10 line <&7
+                 printf '%s' "$line" )
         if [ -n "$reply" ]; then F113_REPLY_LINE="$reply"; return 0; fi
-        sleep 0.2
+        sleep 0.3
     done
     return 1
 }

@@ -245,6 +245,10 @@ static char *charset_to_utf8(const char *s, const char *from_charset) {
     return charset_to_utf8_info(s, from_charset, NULL);
 }
 
+/* Nesting limit of multipart containers (EMAIL-299): deeper parts are skipped. */
+#define MIME_MAX_DEPTH 32
+static __thread int mime_depth;
+
 static char *text_from_part_info(const char *part, MimeTextInfo *info);
 
 static char *text_from_multipart_info(const char *msg, const char *ctype,
@@ -310,7 +314,11 @@ static char *text_from_part_info(const char *part, MimeTextInfo *info) {
             }
         }
     } else if (strncasecmp(ctype, "multipart/", 10) == 0) {
-        result = text_from_multipart_info(part, ctype, info);
+        if (mime_depth < MIME_MAX_DEPTH) {
+            mime_depth++;
+            result = text_from_multipart_info(part, ctype, info);
+            mime_depth--;
+        }
     } else if (strncasecmp(ctype, "text/html", 9) == 0) {
         if (body) {
             char *raw = decode_transfer(body, strlen(body), enc);
@@ -580,7 +588,11 @@ static char *html_from_part(const char *part) {
             }
         }
     } else if (ctype && strncasecmp(ctype, "multipart/", 10) == 0) {
-        result = html_from_multipart(part, ctype);
+        if (mime_depth < MIME_MAX_DEPTH) {
+            mime_depth++;
+            result = html_from_multipart(part, ctype);
+            mime_depth--;
+        }
     }
 
     free(ctype); free(enc); free(charset);
@@ -721,7 +733,11 @@ static void collect_parts(const char *msg, AttachList *al, int *unnamed_idx) {
 
     /* Recurse into multipart containers */
     if (ctype && strncasecmp(ctype, "multipart/", 10) == 0) {
-        collect_multipart_attachments(msg, ctype, al, unnamed_idx);
+        if (mime_depth < MIME_MAX_DEPTH) {
+            mime_depth++;
+            collect_multipart_attachments(msg, ctype, al, unnamed_idx);
+            mime_depth--;
+        }
         free(ctype); free(disp); free(enc);
         return;
     }

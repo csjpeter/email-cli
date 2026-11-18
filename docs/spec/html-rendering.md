@@ -19,11 +19,14 @@ program selects content in the following priority order:
 
 `multipart/alternative` messages contain both parts; the HTML part is preferred.
 
+Multipart nesting is limited to 32 levels (`MIME_MAX_DEPTH`, EMAIL-299): deeper parts are skipped and the rest of the message still shows.
+
 ---
 
 ## HTML Parser
 
 Source: `src/core/html_parser.c`.  API: `html_parse(html)` → `HtmlNode *` tree.
+Appending a child is O(1) (`last_child` pointer) and freeing walks siblings in a loop, so parse time is linear in the sibling count (EMAIL-300).
 
 ### Tokenizer
 

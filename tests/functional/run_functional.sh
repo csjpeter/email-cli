@@ -6780,18 +6780,30 @@ F113_FWD_PORT=$(sed -n 's/.*ssh -L \([0-9]*\):localhost.*/\1/p' "$F113_OUT" | he
 F113_STATE=$(sed -n 's/.*[?&]state=\([A-Za-z0-9_-]*\).*/\1/p' "$F113_OUT" | head -1)
 # EMAIL-302: a stray request (no state, then a wrong one, carrying an injected
 # code) is answered with an error and ignored; the listener keeps waiting.
-exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
-printf 'GET /callback?code=evil HTTP/1.1\r\nHost: localhost\r\n\r\n' >&7
-IFS= read -r -t 10 F113_STRAY1 <&7
-exec 7<&-
-exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
-printf 'GET /callback?code=evil&state=wrong HTTP/1.1\r\nHost: localhost\r\n\r\n' >&7
-IFS= read -r -t 10 F113_STRAY2 <&7
-exec 7<&-
-exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
-printf 'GET /callback?code=good&scope=x&state=%s HTTP/1.1\r\nHost: localhost\r\n\r\n' "$F113_STATE" >&7
-IFS= read -r -t 10 F113_REPLY <&7
-exec 7<&-
+# A request is sent again when the write is refused (the listener closes the
+# previous connection while this one is opened: a reset, or SIGPIPE, which is
+# ignored here so that the shell is not killed by it).  The answer, when there
+# is one, is left in F113_ANSWER.
+f113_request() {
+    local try
+    F113_ANSWER=""
+    trap '' PIPE
+    for try in 1 2 3 4 5; do
+        exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
+        if printf 'GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n' "$1" >&7; then
+            IFS= read -r -t 10 F113_ANSWER <&7
+            exec 7<&-
+            break
+        fi
+        echo "run_functional: request $try to the callback listener was refused; asking again" >&2
+        exec 7<&-
+        sleep 1
+    done
+    trap - PIPE
+}
+f113_request "/callback?code=evil";                 F113_STRAY1=$F113_ANSWER
+f113_request "/callback?code=evil&state=wrong";     F113_STRAY2=$F113_ANSWER
+f113_request "/callback?code=good&scope=x&state=$F113_STATE"; F113_REPLY=$F113_ANSWER
 wait "$F113_PID"; F113_RC=$?
 OUT113=$(cat "$F113_OUT")
 check "113.20 loopback: the URL is shown"            "accounts.google.com/o/oauth2/v2/auth" "$OUT113"

@@ -193,7 +193,18 @@ email-tui reply <uid>                 # Reply to a message by UID
 email-tui send --to <addr> \          # Send a message non-interactively
                --subject <text> \
                --body <text>
+email-tui embed show <uid> --account <address> [--folder <name>] [--json]
+                                      # For use inside another program: the message view only
 ```
+
+**Embedding** (`embed`): another program (for example a todo page that lists mail with
+`email-cli list --json`) shows one message with
+`email-tui embed show 4711 --account me@example.org --json`.  The program starts in the
+message view, skipping the account selector; Backspace or `q` leave the view and the program
+(exit 0), Esc cancels (exit 2), a wrong account, folder or uid prints an error and exits 1.
+With `--json` one line `{"viewed":true,"uid":"4711","folder":"INBOX","cancelled":false}` is
+written to stdout when the view is left.  `reply` and `compose` views follow in EMAIL-307
+and EMAIL-308.
 
 When composing or replying, `email-tui` shows a form for the headers, then its own
 body editor (Esc saves and continues, Ctrl-S saves; the text is autosaved as a draft that

@@ -73,6 +73,11 @@ static void help(void) {
         "    Backspace Open the folder browser\n"
         "    ESC/q     Quit\n"
         "\n"
+        "Embedding:\n"
+        "  email-tui embed show <uid> --account <address> [--folder <name>] [--json]\n"
+        "              Start in the message view of one message and end with it\n"
+        "              (see 'email-tui embed --help')\n"
+        "\n"
         "Options:\n"
         "  --debug      Write a protocol traffic log\n"
         "  --help, -h   Show this help message\n"
@@ -2565,6 +2570,104 @@ static void help_reply(void) {
     );
 }
 
+static void help_embed(void) {
+    printf(
+        "Usage: email-tui embed show <uid> --account <address> [--folder <name>] [--json]\n"
+        "\n"
+        "For use inside another program: starts in one view and ends with it.\n"
+        "\n"
+        "  show   The message view of <uid>; the account selector and the lists are\n"
+        "         skipped.  Backspace and q leave the view and the program (exit 0),\n"
+        "         Esc cancels (exit 2).  No other view is entered.\n"
+        "\n"
+        "Options:\n"
+        "  --account <address>  The account (required)\n"
+        "  --folder <name>      The folder; default: the one holding the uid, else INBOX\n"
+        "  --json               One JSON line on stdout when the view is left:\n"
+        "                       {\"viewed\":true,\"uid\":\"..\",\"folder\":\"..\",\"cancelled\":false}\n"
+        "  --help, -h           Show this help message\n"
+        "\n"
+        "Exit codes: 0 done, 2 cancelled (Esc), 1 error (message on stderr, nothing\n"
+        "changed on the server).\n"
+        "\n"
+        "The <uid> is the one 'email-cli list --json' prints.  Example, from a todo page:\n"
+        "  email-tui embed show 4711 --account me@example.org --json\n"
+    );
+}
+
+/** The embedding command (EMAIL-306): `embed show UID --account A [--folder F]
+ *  [--json]`.  Returns the exit code: 0 done, 2 cancelled, 1 error. */
+static int run_embed(int argc, char **argv, int sub_i) {
+    const char *view = NULL, *uid = NULL, *account = NULL, *folder = NULL;
+    int json = 0;
+    for (int i = sub_i + 1; i < argc; i++) {
+        int has_val = i + 1 < argc;
+        if (strcmp(argv[i], "--account") == 0 && has_val) account = argv[++i];
+        else if (strcmp(argv[i], "--folder") == 0 && has_val) folder = argv[++i];
+        else if (strcmp(argv[i], "--json") == 0) json = 1;
+        else if (strcmp(argv[i], "--account") == 0 || strcmp(argv[i], "--folder") == 0) {
+            fprintf(stderr, "Error: %s needs a value.\n", argv[i]);
+            return EXIT_FAILURE;
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "Error: unknown option '%s'.\n"
+                            "Run 'email-tui embed --help' for usage.\n", argv[i]);
+            return EXIT_FAILURE;
+        } else if (!view) view = argv[i];
+        else if (!uid) uid = argv[i];
+        else {
+            fprintf(stderr, "Error: unexpected argument '%s'.\n", argv[i]);
+            return EXIT_FAILURE;
+        }
+    }
+    if (!view || strcmp(view, "show") != 0) {
+        fprintf(stderr, "Error: embed needs a view: 'show'.\n"
+                        "Run 'email-tui embed --help' for usage.\n");
+        return EXIT_FAILURE;
+    }
+    if (!uid || !account) {
+        fprintf(stderr, "Error: embed show needs a <uid> and --account <address>.\n"
+                        "Run 'email-tui embed --help' for usage.\n");
+        return EXIT_FAILURE;
+    }
+    Config *cfg = config_load_account(account);
+    if (!cfg) {
+        fprintf(stderr, "Error: Account '%s' not found.\n"
+                        "Run 'email-cli list-accounts' to list configured accounts.\n",
+                account);
+        return EXIT_FAILURE;
+    }
+    if (local_store_init(cfg->host, cfg->user) != 0) {
+        fprintf(stderr, "Error: cannot open the local store of %s: %s\n",
+                cfg->user ? cfg->user : cfg->host, local_store_last_error());
+        config_free(cfg);
+        return EXIT_FAILURE;
+    }
+    int esc = 0;
+    char *used = NULL;
+    /* The reader expects raw keys, as the list that normally starts it sets up. */
+    TermRawState *raw_state = terminal_raw_enter();
+    int rc = email_service_show_embedded(cfg, folder, uid, detect_page_size(),
+                                         &esc, &used);
+    terminal_raw_exit(&raw_state);
+    /* The reader leaves the cursor hidden; the caller gets the terminal back. */
+    if (rc == 0 && isatty(STDOUT_FILENO)) {
+        printf("\033[?25h\033[2J\033[H");
+        fflush(stdout);
+    }
+    int code = (rc != 0) ? EXIT_FAILURE : (esc ? 2 : EXIT_SUCCESS);
+    if (rc == 0 && json) {
+        printf("{\"viewed\":true,\"uid\":");
+        email_service_print_json_string(uid);
+        printf(",\"folder\":");
+        email_service_print_json_string(used ? used : "");
+        printf(",\"cancelled\":%s}\n", esc ? "true" : "false");
+        fflush(stdout);
+    }
+    free(used);
+    config_free(cfg);
+    return code;
+}
+
 /* ── Entry point ─────────────────────────────────────────────────────── */
 
 #ifndef EMAIL_CLI_VERSION
@@ -2745,7 +2848,8 @@ int main(int argc, char *argv[]) {
         }
         if (strcmp(argv[i], "compose") == 0 ||
             strcmp(argv[i], "send")    == 0 ||
-            strcmp(argv[i], "reply")   == 0) {
+            strcmp(argv[i], "reply")   == 0 ||
+            strcmp(argv[i], "embed")   == 0) {
             subcmd = argv[i];
             sub_i  = i;
             break;
@@ -2767,6 +2871,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(subcmd, "compose") == 0) help_compose();
                 else if (strcmp(subcmd, "send") == 0) help_send();
                 else if (strcmp(subcmd, "reply") == 0) help_reply();
+                else if (strcmp(subcmd, "embed") == 0) help_embed();
                 return EXIT_SUCCESS;
             }
         }
@@ -2810,6 +2915,13 @@ int main(int argc, char *argv[]) {
         emc_log_open(log_file, 1);   /* libemail-client logs into the same file */
     } else {
         logger_stderr_only();        /* no file: errors still reach the user */
+    }
+
+    /* 2b. embed: its own account, no wizard, no other view (EMAIL-306) */
+    if (subcmd && strcmp(subcmd, "embed") == 0) {
+        int erc = run_embed(argc, argv, sub_i);
+        logger_close();
+        return erc;
     }
 
     /* 3. Load configuration */

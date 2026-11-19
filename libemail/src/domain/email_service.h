@@ -206,6 +206,25 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
 int email_service_read(const Config *cfg, const char *folder, const char *uid, int pager, int page_size);
 
 /**
+ * @brief The message view alone, for `email-tui embed show` (EMAIL-306).
+ *
+ * Checks that the message can be loaded (local store, then the server) and
+ * prints a clear error on stderr when not, before any screen is drawn.  Then
+ * runs the interactive reader and returns when it is left.
+ *
+ * @param cfg         Account.
+ * @param folder      Folder, or NULL for the folder the uid is found in / INBOX.
+ * @param uid         Message uid, as `email-cli list --json` prints it.
+ * @param page_size   Rows to fall back on when the terminal size is unknown.
+ * @param esc_out     Set to 1 when the view was left with Esc (may be NULL).
+ * @param folder_out  Set to the folder used, heap-allocated (may be NULL).
+ * @return 0 when the view was shown and left, -1 on error.
+ */
+int email_service_show_embedded(const Config *cfg, const char *folder,
+                                const char *uid, int page_size, int *esc_out,
+                                char **folder_out);
+
+/**
  * @brief Print one message verbatim, as stored (RFC 2822 source).
  *
  * Same lookup as email_service_read() — local store first, server on a miss —

@@ -31,6 +31,14 @@ dovecot_env_init() {
     DOVECOT_CONF="$WORK_DIR/dovecot.conf"
     IMAP_PORT=""
     mkdir -p "$WORK_DIR" "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR"
+    # A clone below a shared-group tree is setgid and carries default ACLs; the
+    # directories made here would inherit both, and Dovecot's own users (the
+    # login process runs as dovenull) would then be refused its sockets.  The
+    # runtime directory is plain: owner, mode, no ACL, no set-group-id.
+    chmod g-s "$WORK_DIR" "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR"
+    if command -v setfacl >/dev/null; then
+        setfacl -b -k "$WORK_DIR" "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR"
+    fi
 }
 
 dovecot_env_require() {

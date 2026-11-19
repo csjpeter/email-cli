@@ -87,6 +87,23 @@ a blank screen); `End` left the indicator at `[1/2]`; `j` / `Down` scrolled
 until the last line stood alone.  Already right: the other keys of the table
 above.  The help overlay lists `Backspace` with the Back entry since EMAIL-183 (on the accounts screen the Esc row says `Quit (Backspace does nothing here)`); it still does not list `Left`, `h`.
 
+## Embedded message view, `email-tui embed show` (EMAIL-306)
+
+The reader of the table above, started alone by `email-tui embed show UID
+--account ADDRESS [--folder NAME] [--json]`: no accounts screen, no folder
+browser, no list.  Leaving the view ends the program.
+
+| Key / case | Result | Test |
+|---|---|---|
+| (start) | the message view at once | `test_embed_show_at_once_backspace` |
+| `Backspace` | program ends, exit 0 | `test_embed_show_at_once_backspace` |
+| `q` | program ends, exit 0 | `test_embed_show_q_exits` |
+| `Esc` | program ends, exit 2 (cancelled) | `test_embed_show_esc_is_cancel` |
+| `--json` | one line `{"viewed":true,"uid":..,"folder":..,"cancelled":..}` on stdout | `test_embed_show_json_line` |
+| message that cannot be loaded (uid or folder unknown, server refuses) | `Could not load message UID ... in folder ...` on stderr, exit 1, no view | `test_embed_show_cannot_load_message` |
+| unknown account, missing `--account` | error on stderr, exit 1 | `test_embed_show_bad_account_and_args` |
+| `--help` | usage, exit 0 | `test_embed_help` |
+
 ## Message list, IMAP account (EMAIL-143)
 
 The list opens with `Enter` on a folder of the folder browser.  The table has

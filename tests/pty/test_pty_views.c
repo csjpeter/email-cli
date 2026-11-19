@@ -1916,6 +1916,10 @@ static void test_a_one_attachment(void) {
     ASSERT(access(path, F_OK) != 0, "one attachment: Esc saved nothing");
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Save attachment as", WAIT_MS);
+    /* The chooser lists the directory after it opens; Enter before the list is
+     * there is taken for the list's own row (a race under load). */
+    ASSERT_WAIT_FOR(s, "entries", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Saved:", WAIT_MS);
     ASSERT(access(path, F_OK) == 0, "one attachment: Enter saved the file");
@@ -2479,6 +2483,140 @@ static PtySession *tui_open_to_list_size(int cols, int rows) {
 
 static PtySession *tui_open_to_list(void) {
     return tui_open_to_list_size(COLS, ROWS);
+}
+
+/* ── EMAIL-306: email-tui embed show ─────────────────────────────────── */
+
+static PtySession *embed_open(const char **extra) {
+    const char *args[16];
+    int n = 0;
+    args[n++] = g_tui_bin;
+    args[n++] = "embed";
+    for (int i = 0; extra[i] && n < 15; i++) args[n++] = extra[i];
+    args[n] = NULL;
+    PtySession *s = pty_open(COLS, ROWS);
+    if (!s) return NULL;
+    if (pty_run(s, args) != 0) { pty_close(s); return NULL; }
+    return s;
+}
+
+static void test_embed_show_at_once_backspace(void) {
+    restart_mock();
+    const char *a[] = {"show", "1", "--account", "testuser", NULL};
+    PtySession *s = embed_open(a);
+    ASSERT(s != NULL, "embed show: opens");
+    /* the message view at once: no accounts screen, no list */
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Hello from Mock Server");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Email Account");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "message(s) in");
+    pty_send_key(s, PTY_KEY_BACK);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "embed show: Backspace exits with 0");
+    pty_close(s);
+}
+
+static void test_embed_show_q_exits(void) {
+    restart_mock();
+    const char *a[] = {"show", "1", "--account", "testuser", "--folder", "INBOX", NULL};
+    PtySession *s = embed_open(a);
+    ASSERT(s != NULL, "embed show q: opens");
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");
+    ASSERT(pty_wait_exit(s, 5000) == 0, "embed show: q exits with 0");
+    pty_close(s);
+}
+
+static void test_embed_show_esc_is_cancel(void) {
+    restart_mock();
+    const char *a[] = {"show", "1", "--account", "testuser", "--json", NULL};
+    PtySession *s = embed_open(a);
+    ASSERT(s != NULL, "embed show esc: opens");
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 2, "embed show: Esc exits with 2");
+    ASSERT_WAIT_FOR(s, "\"cancelled\":true", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_embed_show_json_line(void) {
+    restart_mock();
+    const char *a[] = {"show", "1", "--account", "testuser", "--json", NULL};
+    PtySession *s = embed_open(a);
+    ASSERT(s != NULL, "embed show json: opens");
+    ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "q");
+    ASSERT(pty_wait_exit(s, 5000) == 0, "embed show json: exits with 0");
+    ASSERT_WAIT_FOR(s, "{\"viewed\":true,\"uid\":\"1\",\"folder\":\"INBOX\",\"cancelled\":false}", WAIT_MS);
+    pty_close(s);
+}
+
+/** An account whose server is not there: the message cannot be loaded. */
+static void remove_dead_account(void) {
+    char d[400], path[450];
+    snprintf(d, sizeof(d), "%s/.config/email-cli/accounts/deadacct", g_test_home);
+    snprintf(path, sizeof(path), "%s/config.ini", d);
+    unlink(path);
+    rmdir(d);
+}
+
+static void write_dead_account(void) {
+    char d[400], path[450];
+    snprintf(d, sizeof(d), "%s/.config/email-cli/accounts/deadacct", g_test_home);
+    mkdir(d, 0700);
+    snprintf(path, sizeof(path), "%s/config.ini", d);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return;
+    fprintf(fp,
+        "EMAIL_HOST=imaps://localhost:%d\n"
+        "EMAIL_USER=deadacct\n"
+        "EMAIL_PASS=testpass\n"
+        "EMAIL_FOLDER=INBOX\n"
+        "SSL_NO_VERIFY=1\n"
+        "SMTP_HOST=smtps://localhost:%d\n", g_dead_port, g_dead_port);
+    fclose(fp);
+    chmod(path, 0600);
+}
+
+static void test_embed_show_cannot_load_message(void) {
+    write_dead_account();
+    const char *a[] = {"show", "4711", "--account", "deadacct", "--folder", "INBOX", NULL};
+    PtySession *s = embed_open(a);
+    ASSERT(s != NULL, "embed show unloadable: opens");
+    ASSERT_WAIT_FOR(s, "Could not load message UID 4711 in folder 'INBOX'", WAIT_MS);
+    ASSERT(pty_wait_exit(s, 5000) == 1, "embed show: an unloadable message exits with 1");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "From:");
+    pty_close(s);
+    remove_dead_account();   /* later tests expect the one account */
+}
+
+static void test_embed_show_bad_account_and_args(void) {
+    restart_mock();
+    const char *a[] = {"show", "1", "--account", "nobody", NULL};
+    PtySession *s = embed_open(a);
+    ASSERT(s != NULL, "embed show bad account: opens");
+    ASSERT_WAIT_FOR(s, "Account 'nobody' not found", WAIT_MS);
+    ASSERT(pty_wait_exit(s, 5000) == 1, "embed show: a bad account exits with 1");
+    pty_close(s);
+
+    const char *c[] = {"show", "1", NULL};
+    s = embed_open(c);
+    ASSERT(s != NULL, "embed show no account: opens");
+    ASSERT_WAIT_FOR(s, "needs a <uid> and --account", WAIT_MS);
+    ASSERT(pty_wait_exit(s, 5000) == 1, "embed show: no --account exits with 1");
+    pty_close(s);
+}
+
+static void test_embed_help(void) {
+    const char *a[] = {"--help", NULL};
+    PtySession *s = embed_open(a);
+    ASSERT(s != NULL, "embed help: opens");
+    ASSERT_WAIT_FOR(s, "Usage: email-tui embed show", WAIT_MS);
+    ASSERT(pty_wait_exit(s, 5000) == 0, "embed help: exits with 0");
+    pty_close(s);
 }
 
 static void test_tui_list_content(void) {
@@ -8307,6 +8445,13 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_interactive_show_separator);
     RUN_TEST(test_interactive_show_statusbar);
     RUN_TEST(test_interactive_show_backspace);
+    RUN_TEST(test_embed_show_at_once_backspace);
+    RUN_TEST(test_embed_show_q_exits);
+    RUN_TEST(test_embed_show_esc_is_cancel);
+    RUN_TEST(test_embed_show_json_line);
+    RUN_TEST(test_embed_show_cannot_load_message);
+    RUN_TEST(test_embed_show_bad_account_and_args);
+    RUN_TEST(test_embed_help);
     RUN_TEST(test_interactive_show_esc_exits);
     RUN_TEST(test_interactive_show_q_to_list);
     RUN_TEST(test_interactive_show_pgdn);

@@ -953,6 +953,10 @@ static int gmail_delete_now(const Config *cfg, emc_client *mc, const char *uid) 
     return rc;
 }
 
+/** Set by the reader when it was left with Esc (not q or Backspace); read by
+ *  email_service_show_embedded() for the exit code of the embedding command. */
+static int g_reader_left_by_esc = 0;
+
 static int show_uid_interactive(const Config *cfg, emc_client *mc,
                                 const char *folder,
                                 const char *uid, int page_size,
@@ -1182,6 +1186,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
         switch (key) {
         case TERM_KEY_BACK:
         case TERM_KEY_ESC:
+            g_reader_left_by_esc = (key == TERM_KEY_ESC);
             result = 0;          /* back to list (Esc, q and Backspace alike) */
             goto show_int_done;
         case TERM_KEY_QUIT:
@@ -6493,6 +6498,34 @@ int email_service_read_raw(const Config *cfg, const char *folder, const char *ui
     fflush(stdout);
 
     free(raw);
+    return 0;
+}
+
+int email_service_show_embedded(const Config *cfg, const char *folder,
+                                const char *uid, int page_size, int *esc_out,
+                                char **folder_out) {
+    if (esc_out) *esc_out = 0;
+    if (!cfg || !uid || !uid[0]) return -1;
+    /* Load first: a wrong folder or uid ends here with a message, before any
+     * screen is drawn and without a write to the server. */
+    RAII_STRING char *used_folder = NULL;
+    char *raw = load_message(cfg, folder, uid, &used_folder);
+    if (!raw) return -1;
+    free(raw);
+    const char *f = used_folder ? used_folder : "";
+    int flags = 0;
+    Manifest *m = cfg->gmail_mode ? NULL : manifest_load(f);
+    if (m) {
+        ManifestEntry *e = manifest_find(m, uid);
+        if (e) flags = e->flags;
+        manifest_free(m);
+    }
+    int new_flags = flags;
+    g_reader_left_by_esc = 0;
+    int ret = show_uid_interactive(cfg, NULL, f, uid, page_size, flags, &new_flags);
+    if (ret < 0) return -1;
+    if (esc_out) *esc_out = g_reader_left_by_esc;
+    if (folder_out) *folder_out = strdup(f);
     return 0;
 }
 

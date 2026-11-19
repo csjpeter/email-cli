@@ -5,7 +5,7 @@ email\-tui \- full-screen terminal mail reader for email-cli
 .B email\-tui
 .br
 .B email\-tui
-.RB { compose | reply | send }
+.RB { compose | reply | send | embed }
 .RI [ options ]
 .SH DESCRIPTION
 Interactive reader for the accounts configured with
@@ -284,6 +284,21 @@ Reply to a message.
 .TP
 .B send
 Send a message non\-interactively.
+.TP
+.BI "embed show " uid " \-\-account " address " [\-\-folder " name "] [\-\-json]"
+For use inside another program: start in the message view of one message
+(the account selector and the lists are skipped) and end with it.
+The uid is the one printed by
+.B "email\-cli list \-\-json".
+The folder defaults to the one holding the uid, else INBOX.
+Backspace and q leave the view and the program (exit status 0), Esc cancels
+(2); an unknown account, folder or uid prints an error and exits with 1,
+changing nothing on the server.
+With \fB\-\-json\fP one line
+.B {"viewed":true,"uid":"..","folder":"..","cancelled":false}
+is written to the standard output when the view is left.
+Example, from a todo page:
+.B "email\-tui embed show 4711 \-\-account me@example.org \-\-json"
 .SH FILES
 The protocol traffic log (credentials masked) is written only with \fB\-\-debug\fP.
 As in

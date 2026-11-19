@@ -6787,10 +6787,12 @@ f113_request() {
     F113_REPLY_LINE=""
     for try in 1 2 3 4 5; do
         # A subshell: a failed redirection of exec must not end the whole run.
+        # The status of the subshell (1, or 141 when the write met a closed
+        # socket) is a refused try, not the end of the run under set -e.
         reply=$( exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}" || exit 1
                  printf 'GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n' "$path" >&7 || exit 1
                  IFS= read -r -t 10 line <&7
-                 printf '%s' "$line" )
+                 printf '%s' "$line" ) || reply=""
         if [ -n "$reply" ]; then F113_REPLY_LINE="$reply"; return 0; fi
         sleep 0.3
     done

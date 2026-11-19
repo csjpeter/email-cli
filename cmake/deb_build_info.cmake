@@ -71,6 +71,21 @@ foreach(_deb IN LISTS CPACK_PACKAGE_FILES)
     endif()
     file(WRITE "${_work}/DEBIAN/control"
          "${_control}XB-Git-Commit: ${_commit}\nXB-Build-Date: ${_date}\n")
+    # A build tree below a shared-group directory (set-group-id, default ACLs,
+    # umask 002) makes dpkg-deb -R create directories with mode 2775 (which
+    # dpkg-deb -b refuses for DEBIAN) and files with group bits from the ACL
+    # mask (0654, 0775).  The package carries plain modes: directories and
+    # programs 0755, other files 0644.
+    foreach(_step
+            "find|${_work}|-type|d|-exec|chmod|0755|{}|+"
+            "find|${_work}|-type|f|-perm|-u+x|-exec|chmod|0755|{}|+"
+            "find|${_work}|-type|f|!|-perm|-u+x|-exec|chmod|0644|{}|+")
+        string(REPLACE "|" ";" _cmd "${_step}")
+        execute_process(COMMAND ${_cmd} RESULT_VARIABLE _rc)
+        if(NOT _rc EQUAL 0)
+            message(FATAL_ERROR "deb_build_info: normalising modes in ${_work} failed (${_rc})")
+        endif()
+    endforeach()
     execute_process(COMMAND ${_dpkg_deb} --root-owner-group -Zxz -b "${_work}" "${_deb}"
                     RESULT_VARIABLE _rc)
     if(NOT _rc EQUAL 0)

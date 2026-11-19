@@ -520,10 +520,33 @@ static void traverse(RS *rs, const HtmlNode *node) {
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
+char *html_sanitize_display(char *s) {
+    if (!s) return NULL;
+    unsigned char *r = (unsigned char *)s, *w = (unsigned char *)s;
+    while (*r) {
+        if (*r == '\r' && r[1] == '\n') { r++; continue; }
+        if ((*r < 0x20 && *r != '\n' && *r != '\t') || *r == 0x7F) {
+            *w++ = '?'; r++;
+        } else if (*r == 0xC2 && r[1] >= 0x80 && r[1] <= 0x9F) {
+            *w++ = '?'; r += 2;
+        } else {
+            *w++ = *r++;
+        }
+    }
+    *w = '\0';
+    return s;
+}
+
 char *html_render(const char *html, int width, int ansi) {
     if (!html) return NULL;
 
-    HtmlNode *root = html_parse(html);
+    /* Message text must not bring its own escape sequences: only the
+     * renderer's SGR colours reach the output (EMAIL-298). */
+    char *safe = strdup(html);
+    if (!safe) return NULL;
+    html_sanitize_display(safe);
+    HtmlNode *root = html_parse(safe);
+    free(safe);
     if (!root) {
         char *empty = malloc(1);
         if (empty) *empty = '\0';

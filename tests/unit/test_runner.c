@@ -35,6 +35,7 @@ void test_local_hdr_evict(void);
 void test_local_index(void);
 void test_local_index_from_traversal(void);
 void test_manifest(void);
+void test_manifest_forged_row(void);
 void test_ui_prefs(void);
 void test_local_msg_delete(void);
 void test_local_index_email_extraction(void);
@@ -151,6 +152,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_local_index);
     RUN_TEST(test_local_index_from_traversal);
     RUN_TEST(test_manifest);
+    RUN_TEST(test_manifest_forged_row);
     RUN_TEST(test_ui_prefs);
     RUN_TEST(test_local_msg_delete);
     RUN_TEST(test_local_index_email_extraction);

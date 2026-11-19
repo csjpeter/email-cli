@@ -825,6 +825,27 @@ void imap_disconnect(ImapClient *c) {
     free(c);
 }
 
+/**
+ * True when a decoded folder name is safe as a local path (EMAIL-304):
+ * non-empty, no leading '/', no NUL or control characters, and no "." or ".."
+ * component between '/' characters.
+ */
+static int folder_name_is_safe(const char *name) {
+    if (!name || !*name || name[0] == '/') return 0;
+    for (const unsigned char *q = (const unsigned char *)name; *q; q++)
+        if (*q < 0x20 || *q == 0x7f) return 0;
+    const char *p = name;
+    while (*p) {
+        const char *e = strchr(p, '/');
+        size_t len = e ? (size_t)(e - p) : strlen(p);
+        if ((len == 1 && p[0] == '.') || (len == 2 && p[0] == '.' && p[1] == '.'))
+            return 0;
+        if (!e) break;
+        p = e + 1;
+    }
+    return 1;
+}
+
 /* ── LIST ────────────────────────────────────────────────────────────── */
 
 /**
@@ -910,6 +931,12 @@ int imap_list(ImapClient *c, char ***folders_out, int *count_out, char *sep_out)
         char *name = imap_utf7_decode(raw);
         free(raw);
         if (!name) continue;
+        if (!folder_name_is_safe(name)) {
+            fprintf(stderr, "email: IMAP LIST: folder name refused (unsafe for local "
+                    "storage): \"%.80s\"\n", name);
+            free(name);
+            continue;
+        }
 
         if (count == cap) {
             cap = cap ? cap * 2 : 16;
@@ -1037,10 +1064,19 @@ int imap_uid_search(ImapClient *c, const char *criteria,
     return 0;
 }
 
+/** @brief True when @p uid is a single decimal UID (no ranges, lists, '*',
+ *         whitespace or control characters): it is formatted into a command. */
+static int uid_valid(const char *uid) {
+    if (!uid || !*uid) return 0;
+    for (const char *p = uid; *p; p++) if (*p < '0' || *p > '9') return 0;
+    return 1;
+}
+
 /* ── UID FETCH ───────────────────────────────────────────────────────── */
 
 static char *uid_fetch_part(ImapClient *c, const char *uid, const char *section) {
     char tag[16];
+    if (!uid_valid(uid)) return NULL;
     if (send_cmd(c, tag, "UID FETCH %s (UID %s)", uid, section) != 0)
         return NULL;
 
@@ -1098,6 +1134,7 @@ static int parse_imap_flags(const char *line) {
 
 int imap_uid_fetch_flags(ImapClient *c, const char *uid) {
     char tag[16];
+    if (!uid_valid(uid)) return -1;
     if (send_cmd(c, tag, "UID FETCH %s (UID FLAGS)", uid) != 0) return -1;
 
     Response resp = {0};
@@ -1121,6 +1158,7 @@ int imap_uid_fetch_flags(ImapClient *c, const char *uid) {
 
 int imap_uid_set_flag(ImapClient *c, const char *uid, const char *flag_name, int add) {
     char tag[16];
+    if (!uid_valid(uid)) return -1;
     if (send_cmd(c, tag, "UID STORE %s %sFLAGS (%s)",
                  uid, add ? "+" : "-", flag_name) != 0)
         return -1;
@@ -1131,6 +1169,7 @@ int imap_uid_set_flag(ImapClient *c, const char *uid, const char *flag_name, int
 }
 
 int imap_uid_copy(ImapClient *c, const char *uid, const char *target_folder) {
+    if (!uid_valid(uid)) return -1;
     /* Ensure target folder exists first */
     imap_create_folder(c, target_folder);
     char tag[16];
@@ -1143,6 +1182,7 @@ int imap_uid_copy(ImapClient *c, const char *uid, const char *target_folder) {
 }
 
 int imap_uid_move(ImapClient *c, const char *uid, const char *target_folder) {
+    if (!uid_valid(uid)) return -1;
     if (imap_uid_copy(c, uid, target_folder) != 0) return -1;
     if (imap_uid_set_flag(c, uid, "\\Deleted", 1) != 0) return -1;
     /* EXPUNGE */
@@ -1155,6 +1195,7 @@ int imap_uid_move(ImapClient *c, const char *uid, const char *target_folder) {
 }
 
 int imap_uid_delete(ImapClient *c, const char *uid) {
+    if (!uid_valid(uid)) return -1;
     if (imap_uid_set_flag(c, uid, "\\Deleted", 1) != 0) return -1;
     char tag[16];
     if (send_cmd(c, tag, "EXPUNGE") != 0) return -1;

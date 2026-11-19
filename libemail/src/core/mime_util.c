@@ -608,7 +608,7 @@ char *mime_get_text_body(const char *msg) {
 char *mime_get_text_body_ex(const char *msg, MimeTextInfo *info) {
     if (info) memset(info, 0, sizeof(*info));
     if (!msg) return NULL;
-    return text_from_part_info(msg, info);
+    return html_sanitize_display(text_from_part_info(msg, info));
 }
 
 char *mime_get_html_part(const char *msg) {
@@ -657,6 +657,7 @@ static char *sanitise_filename(const char *name) {
     while (*p == '.') p++;
     if (!*p) { free(s); return strdup("attachment"); }
     if (p != s) memmove(s, p, strlen(p) + 1);
+    html_sanitize_display(s);
     return s;
 }
 

@@ -6780,30 +6780,25 @@ F113_FWD_PORT=$(sed -n 's/.*ssh -L \([0-9]*\):localhost.*/\1/p' "$F113_OUT" | he
 F113_STATE=$(sed -n 's/.*[?&]state=\([A-Za-z0-9_-]*\).*/\1/p' "$F113_OUT" | head -1)
 # EMAIL-302: a stray request (no state, then a wrong one, carrying an injected
 # code) is answered with an error and ignored; the listener keeps waiting.
-# A request is sent again when the write is refused (the listener closes the
-# previous connection while this one is opened: a reset, or SIGPIPE, which is
-# ignored here so that the shell is not killed by it).  The answer, when there
-# is one, is left in F113_ANSWER.
+# One request to the loopback listener; a connection the listener reset before
+# it answered (a race with the previous request closing) is tried again.
 f113_request() {
-    local try
-    F113_ANSWER=""
-    trap '' PIPE
+    local path="$1" reply="" try
+    F113_REPLY_LINE=""
     for try in 1 2 3 4 5; do
-        exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"
-        if printf 'GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n' "$1" >&7; then
-            IFS= read -r -t 10 F113_ANSWER <&7
-            exec 7<&-
-            break
-        fi
-        echo "run_functional: request $try to the callback listener was refused; asking again" >&2
-        exec 7<&-
-        sleep 1
+        # A subshell: a failed redirection of exec must not end the whole run.
+        reply=$( exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}" || exit 1
+                 printf 'GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n' "$path" >&7 || exit 1
+                 IFS= read -r -t 10 line <&7
+                 printf '%s' "$line" )
+        if [ -n "$reply" ]; then F113_REPLY_LINE="$reply"; return 0; fi
+        sleep 0.3
     done
-    trap - PIPE
+    return 1
 }
-f113_request "/callback?code=evil";                 F113_STRAY1=$F113_ANSWER
-f113_request "/callback?code=evil&state=wrong";     F113_STRAY2=$F113_ANSWER
-f113_request "/callback?code=good&scope=x&state=$F113_STATE"; F113_REPLY=$F113_ANSWER
+f113_request "/callback?code=evil";                  F113_STRAY1="$F113_REPLY_LINE"
+f113_request "/callback?code=evil&state=wrong";      F113_STRAY2="$F113_REPLY_LINE"
+f113_request "/callback?code=good&scope=x&state=$F113_STATE"; F113_REPLY="$F113_REPLY_LINE"
 wait "$F113_PID"; F113_RC=$?
 OUT113=$(cat "$F113_OUT")
 check "113.20 loopback: the URL is shown"            "accounts.google.com/o/oauth2/v2/auth" "$OUT113"

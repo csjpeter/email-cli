@@ -1213,4 +1213,39 @@ void test_mime_util(void) {
         ASSERT(d && strstr(d, "Unknown"),
                "describe_dmarc: unknown result → Unknown");
     }
+
+    /* ── EMAIL-298: no terminal escape from body or attachment name ──── */
+    {
+        const char *mime =
+            "MIME-Version: 1.0\r\n"
+            "Content-Type: multipart/mixed; boundary=\"B298\"\r\n"
+            "\r\n"
+            "--B298\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Transfer-Encoding: quoted-printable\r\n"
+            "\r\n"
+            "Hello =1B]52;c;ZWNobyBoaQ==3D=07 =1B[2J world =C2=9B31m\r\n"
+            "--B298\r\n"
+            "Content-Type: application/octet-stream\r\n"
+            "Content-Disposition: attachment; filename=\"=?utf-8?Q?a=1B[2Jb?=\"\r\n"
+            "Content-Transfer-Encoding: base64\r\n"
+            "\r\n"
+            "dGVzdA==\r\n"
+            "--B298--\r\n";
+        char *body = mime_get_text_body(mime);
+        ASSERT(body != NULL, "EMAIL-298: body not NULL");
+        if (body) {
+            ASSERT(strchr(body, 0x1b) == NULL, "EMAIL-298: body has no ESC");
+            ASSERT(strchr(body, 0x07) == NULL, "EMAIL-298: body has no BEL");
+            ASSERT(strstr(body, "\xc2\x9b") == NULL, "EMAIL-298: body has no C1");
+            ASSERT(strstr(body, "world") != NULL, "EMAIL-298: text kept");
+        }
+        free(body);
+        int count = 0;
+        MimeAttachment *list = mime_list_attachments(mime, &count);
+        ASSERT(list != NULL && count == 1, "EMAIL-298: one attachment");
+        if (list && count == 1 && list[0].filename)
+            ASSERT(strchr(list[0].filename, 0x1b) == NULL, "EMAIL-298: name has no ESC");
+        mime_free_attachments(list, count);
+    }
 }

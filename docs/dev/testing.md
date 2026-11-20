@@ -445,6 +445,29 @@ tree in its own layout, counters zeroed before each scope.  The external scope r
 functional scripts that build packages are not part of it, because they replace
 the instrumented build tree (they run in `functional`).
 
+## The work queue (EMAIL-319)
+
+The functional and PTY steps of `manage.sh` run through one queue each:
+
+- **Items:** one test group is one item: a PTY suite, `run_functional`, or one
+  declared functional script. The unit tests are one item (they share the
+  `test-runner` fixture home) and the integration scripts stay serial (one
+  real Dovecot).
+- **Workers:** `MANAGE_JOBS` (default `nproc`) workers each take the next item,
+  the heaviest first (the seconds of the previous run, `build/queue-weights`),
+  until the queue is empty. No devboard is needed.
+- **Output:** a worker writes an item's output to a file of its own and, when
+  the item ended, appends it whole to `build/result/log/<verb>-<item>.log` and
+  the console under a lock; the output of two items never mixes.
+- **Resources:** an item that shares something carries a mark
+  (`queue_add NAME NEEDS ...`); two items of one mark never run at once. The
+  declared functional scripts carry `tree` (they build and package in the
+  checkout), so they run one at a time beside the parallel `run_functional`.
+- **Verdict:** the sum of the items, in registration order, in the same
+  `build/result/<verb>.result` as a serial run (`MANAGE_JOBS=1` is the serial run).
+- **Timing:** the console lists the seconds and verdict per item and the wall
+  time of the step; the verb's wall time goes to `build/timing.log`.
+
 ## Coverage Requirements
 
 `./manage.sh coverage` measures **line coverage of product code only**

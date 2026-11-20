@@ -551,6 +551,17 @@ count_assertions() {
         }' "$1"
 }
 
+# suite_verdict RC LOG prints "STATUS ASSERTIONS FAILED" for one finished suite.
+suite_verdict() {
+    local rc="$1" log="$2" a f st
+    read -r a f < <(count_assertions "$log")
+    if [ "$rc" -eq 0 ] && [ "$a" -ge 1 ] && [ "$f" -eq 0 ]; then st=pass
+    elif [ "$rc" -eq 124 ]; then st=timeout
+    elif [ "$rc" -ne 0 ] && [ "$a" -eq 0 ]; then st=crash
+    else st=fail; fi
+    echo "$st $a $f"
+}
+
 run_suite() {  # run_suite NAME DIR CMD [ARGS...]
     local name="$1" dir="$2" log t0 t1 rc a f st
     shift 2
@@ -560,11 +571,7 @@ run_suite() {  # run_suite NAME DIR CMD [ARGS...]
     ( cd "$dir" && "$@" ) 2>&1 | tee "$log"
     rc=${PIPESTATUS[0]}
     t1=$(date +%s)
-    read -r a f < <(count_assertions "$log")
-    if [ "$rc" -eq 0 ] && [ "$a" -ge 1 ] && [ "$f" -eq 0 ]; then st=pass
-    elif [ "$rc" -eq 124 ]; then st=timeout
-    elif [ "$rc" -ne 0 ] && [ "$a" -eq 0 ]; then st=crash
-    else st=fail; fi
+    read -r st a f < <(suite_verdict "$rc" "$log")
     R_SUITES+=("$R_PREFIX$name $st $a $f $((t1 - t0))")
     result_write running 0 || exit 1
     if [ "$st" != pass ]; then
@@ -574,49 +581,159 @@ run_suite() {  # run_suite NAME DIR CMD [ARGS...]
     fi
 }
 
+# ---- Work queue (EMAIL-319, policies/testing-model.md) -------------------
+# queue_add NAME NEEDS DIR CMD [ARGS...] registers one item (one test group);
+# queue_run runs them: MANAGE_JOBS workers (default nproc) each take the next
+# item, heaviest first (the seconds of the previous run, build/queue-weights),
+# run it with its output in a file of its own and, when it ended, append that
+# file whole to the item's log and to the console under one lock, so the output
+# of two items never mixes.  NEEDS is "-" or a resource name: two items of one
+# resource never run at once (a lock per resource), which is how an item that
+# shares something stays safe.  The verdicts are those of run_suite, in the
+# registration order, so the result file is the one of a serial run.
+Q_NAME=(); Q_NEEDS=(); Q_DIR=(); Q_DIRN=""
+QUEUE_WEIGHTS="$BUILD_DIR/queue-weights"
+
+queue_begin() {
+    Q_NAME=(); Q_NEEDS=(); Q_DIR=()
+    Q_DIRN="$(realpath "$BUILD_DIR")/queue-$$"
+    mkdir -p "$Q_DIRN" || exit 1
+}
+
+queue_add() {  # queue_add NAME NEEDS DIR CMD [ARGS...]
+    local n
+    n=$(printf '%03d' "${#Q_NAME[@]}")
+    Q_NAME+=("$R_PREFIX$1"); Q_NEEDS+=("$2"); Q_DIR+=("$3")
+    shift 3
+    printf '%s\0' "$@" > "$Q_DIRN/$n.cmd" || exit 1
+}
+
+queue_worker() {  # takes items from the order file until none is left
+    local n i res dir rc t0 t1 st a f out log label
+    local -a cmd
+    while read -r i; do
+        n=$(printf '%03d' "$i")
+        mkdir "$Q_DIRN/$n.claim" 2> /dev/null || continue
+        label="${Q_NAME[$i]}"; res="${Q_NEEDS[$i]}"; dir="${Q_DIR[$i]}"
+        out="$Q_DIRN/$n.out"
+        log="$RESULT_DIR/log/$R_VERB-${label//\//-}.log"
+        mapfile -d '' -t cmd < "$Q_DIRN/$n.cmd"
+        t0=$(date +%s)
+        if [ "$res" != "-" ]; then
+            ( flock 8; cd "$dir" && "${cmd[@]}" ) 8> "$Q_DIRN/lock.$res" > "$out" 2>&1
+        else
+            ( cd "$dir" && "${cmd[@]}" ) > "$out" 2>&1
+        fi
+        rc=$?
+        t1=$(date +%s)
+        read -r st a f < <(suite_verdict "$rc" "$out")
+        {
+            flock 9
+            { echo "--- $R_VERB: $label ---"; cat "$out"; } > "$log"
+            cat "$log"
+            if [ "$st" != pass ]; then
+                echo "  [FAILED] $label: $st (exit $rc, $a assertions counted, $f failed)"
+            fi
+        } 9>> "$Q_DIRN/console.lock"
+        echo "$label $st $a $f $((t1 - t0))" > "$Q_DIRN/$n.res"
+    done < "$Q_DIRN/order"
+}
+
+queue_run() {  # runs the registered items; returns 1 when any failed
+    local i n jobs w t0 t1 line st rc=0 label secs
+    jobs="${MANAGE_JOBS:-$(nproc)}"
+    [ "${#Q_NAME[@]}" -gt 0 ] || return 0
+    [ "$jobs" -le "${#Q_NAME[@]}" ] || jobs=${#Q_NAME[@]}
+    # Heaviest first: the seconds of the previous run of each item.
+    for i in "${!Q_NAME[@]}"; do
+        secs=0
+        [ ! -f "$QUEUE_WEIGHTS" ] || secs=$(awk -v l="${Q_NAME[$i]}" '$1 == l { s = $2 } END { print s + 0 }' "$QUEUE_WEIGHTS")
+        echo "$secs $i"
+    done | sort -k1,1nr -k2,2n | awk '{ print $2 }' > "$Q_DIRN/order"
+    : > "$Q_DIRN/console.lock"
+    t0=$(date +%s)
+    echo "--- $R_VERB: ${#Q_NAME[@]} items, $jobs workers ---"
+    for w in $(seq "$jobs"); do queue_worker & done
+    wait
+    t1=$(date +%s)
+    : > "$QUEUE_WEIGHTS.new"
+    for i in "${!Q_NAME[@]}"; do
+        n=$(printf '%03d' "$i")
+        if [ ! -s "$Q_DIRN/$n.res" ]; then
+            echo "  [FAILED] ${Q_NAME[$i]}: not run" >&2
+            R_SUITES+=("${Q_NAME[$i]} crash 0 0 0"); R_BAD=$((R_BAD + 1)); rc=1
+            continue
+        fi
+        read -r line < "$Q_DIRN/$n.res"
+        R_SUITES+=("$line")
+        read -r label st _ _ secs <<< "$line"
+        printf '%s %s\n' "$label" "$secs" >> "$QUEUE_WEIGHTS.new"
+        printf '  %-40s %5ss  %s\n' "$label" "$secs" "$st"
+        [ "$st" = pass ] || { R_BAD=$((R_BAD + 1)); rc=1; }
+    done
+    mv -- "$QUEUE_WEIGHTS.new" "$QUEUE_WEIGHTS"
+    echo "--- $R_VERB: wall $((t1 - t0))s with $jobs workers ---"
+    result_write running 0 || exit 1
+    # Only this run's own files, by literal name; the directory goes with rmdir.
+    ( cd "$Q_DIRN" && rm -f -- ./*.cmd ./*.out ./*.res ./order ./console.lock ./lock.* \
+        && for c in ./*.claim; do [ ! -d "$c" ] || rmdir "$c"; done ) || return 1
+    rmdir "$Q_DIRN"
+    return $rc
+}
+
 # The suites of the verbs, defined once so that a verb and the scope of
 # `coverage` named like it run the same ones.
 run_functional_suites() {  # run_functional_suites [PHASES] [WITH_SCRIPTS: 1|0]
-    local phases="${1:-}" with_scripts="${2:-1}" rc=0 fscript fname
+    local phases="${1:-}" with_scripts="${2:-1}" fscript fname
     cmake --build "$BUILD_DIR" --target tests-functional -- -j"$JOBS" || return 1
-    run_suite run_functional . "$BUILD_DIR/tests/functional/bin/run_functional" ${phases:+--phase "$phases"} || rc=1
+    queue_begin
+    queue_add run_functional - . "$BUILD_DIR/tests/functional/bin/run_functional" ${phases:+--phase "$phases"}
     if [ -z "$phases" ] && [ "$with_scripts" = 1 ]; then
         # The other declared functional tests (scripts for the manage.sh
         # verdicts, the package, the static binaries, the skill and the
         # maps ...) run with it: a declared test that nothing runs proves
-        # nothing.  Every one is a suite of its own in the result file.
+        # nothing.  Every one is an item of its own in the result file.
+        # needs: tree: they build, package and rewrite files of the checkout
+        # and the build directory, so they run one at a time (a lock), beside
+        # the parallel run_functional.
         for fscript in "$BUILD_DIR"/tests/functional/bin/*; do
             fname=$(basename "$fscript")
             [ "$fname" = run_functional ] && continue
-            run_suite "$fname" . env MANAGE_TIMED= "$fscript" || rc=1
+            queue_add "$fname" tree . env MANAGE_TIMED= "$fscript"
         done
     fi
-    return $rc
+    queue_run
 }
 
 run_pty_suites() {  # run_pty_suites [SUITE] : all PTY suites, or the one labelled SUITE
     local pty_suite="${1:-}" abs_build abs_bin
     abs_build="$(realpath "$BUILD_DIR")"
     abs_bin="$(realpath "$BIN_DIR")"
-    pty_rc=0
     pty_ran=0
     # Every mock binds a port the kernel picks and every fixture lives under
-    # build/ with the pid in its name, so suites share nothing; a suite runs
-    # from the build directory so that the mocks find tests/certs/test.crt.
-    run_pty_one() {  # run_pty_one <label> <binary> [args…]
+    # build/ with the pid in its name, so suites share nothing: they run as
+    # items of the work queue (no resource mark), from the build directory so
+    # that the mocks find tests/certs/test.crt.
+    # The waits of the suites end when the awaited screen appears, so a longer
+    # limit costs nothing on a passing run; several suites at once load the
+    # machine, so the limits are 4 times the default (EMAIL_TEST_WAIT_SCALE
+    # overrides), and a loaded machine does not change the verdict.
+    export EMAIL_TEST_WAIT_SCALE="${EMAIL_TEST_WAIT_SCALE:-4}"
+    queue_begin
+    queue_pty_one() {  # queue_pty_one <label> <binary> [args…]
         local label="$1"; shift
         if [ -n "$pty_suite" ] && [ "$pty_suite" != "$label" ]; then
             return 0
         fi
         pty_ran=$((pty_ran + 1))
-        run_suite "$label" "$abs_build" "$@" || pty_rc=1
+        queue_add "$label" - "$abs_build" "$@"
     }
-    for_each_pty_suite run_pty_one "$abs_bin"
+    for_each_pty_suite queue_pty_one "$abs_bin"
     if [ -n "$pty_suite" ] && [ "$pty_ran" -eq 0 ]; then
         echo "ERROR: no PTY suite is called '$pty_suite'" >&2
         return 1
     fi
-    return $pty_rc
+    queue_run
 }
 
 run_integration_suites() {

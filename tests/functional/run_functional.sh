@@ -6798,9 +6798,25 @@ f113_request() {
     done
     return 1
 }
-f113_request "/callback?code=evil";                  F113_STRAY1="$F113_REPLY_LINE"
-f113_request "/callback?code=evil&state=wrong";      F113_STRAY2="$F113_REPLY_LINE"
-f113_request "/callback?code=good&scope=x&state=$F113_STATE"; F113_REPLY="$F113_REPLY_LINE"
+# The refused request is shown with what the program printed, never ends the
+# run silently: the checks below then fail with their own names.
+f113_request_shown() {
+    f113_request "$1" || echo "  [113] no answer from 127.0.0.1:${F113_FWD_PORT:-?} for $1; the program printed: $(cat "$F113_OUT")"
+}
+# Wait until the program listens (event) before the first request.
+f113_listening() {
+    local hex try
+    hex=$(printf '%04X' "${F113_FWD_PORT:-0}")
+    for try in $(seq 1 50); do
+        grep -q -E "^ *[0-9]+: 0100007F:$hex 00000000:0000 0A " /proc/net/tcp && return 0
+        sleep 0.1
+    done
+    return 1
+}
+f113_listening || echo "  [113] nothing listens on 127.0.0.1:${F113_FWD_PORT:-?}; the program printed: $(cat "$F113_OUT")"
+f113_request_shown "/callback?code=evil";                  F113_STRAY1="$F113_REPLY_LINE"
+f113_request_shown "/callback?code=evil&state=wrong";      F113_STRAY2="$F113_REPLY_LINE"
+f113_request_shown "/callback?code=good&scope=x&state=$F113_STATE"; F113_REPLY="$F113_REPLY_LINE"
 wait "$F113_PID"; F113_RC=$?
 OUT113=$(cat "$F113_OUT")
 check "113.20 loopback: the URL is shown"            "accounts.google.com/o/oauth2/v2/auth" "$OUT113"

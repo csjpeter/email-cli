@@ -671,6 +671,9 @@ queue_run() {  # runs the registered items; returns 1 when any failed
         printf '  %-40s %5ss  %s\n' "$label" "$secs" "$st"
         [ "$st" = pass ] || { R_BAD=$((R_BAD + 1)); rc=1; }
     done
+    if [ -f "$QUEUE_WEIGHTS" ]; then
+        awk 'NR == FNR { seen[$1] = 1; next } !($1 in seen)' "$QUEUE_WEIGHTS.new" "$QUEUE_WEIGHTS" >> "$QUEUE_WEIGHTS.new" || return 1
+    fi
     mv -- "$QUEUE_WEIGHTS.new" "$QUEUE_WEIGHTS"
     echo "--- $R_VERB: wall $((t1 - t0))s with $jobs workers ---"
     result_write running 0 || exit 1
@@ -686,23 +689,28 @@ queue_run() {  # runs the registered items; returns 1 when any failed
 run_functional_suites() {  # run_functional_suites [PHASES] [WITH_SCRIPTS: 1|0]
     local phases="${1:-}" with_scripts="${2:-1}" fscript fname
     cmake --build "$BUILD_DIR" --target tests-functional -- -j"$JOBS" || return 1
+    local rc=0
     queue_begin
     queue_add run_functional - . "$BUILD_DIR/tests/functional/bin/run_functional" ${phases:+--phase "$phases"}
+    queue_run || rc=1
     if [ -z "$phases" ] && [ "$with_scripts" = 1 ]; then
         # The other declared functional tests (scripts for the manage.sh
         # verdicts, the package, the static binaries, the skill and the
-        # maps ...) run with it: a declared test that nothing runs proves
+        # maps ...) run after it: a declared test that nothing runs proves
         # nothing.  Every one is an item of its own in the result file.
-        # needs: tree: they build, package and rewrite files of the checkout
-        # and the build directory, so they run one at a time (a lock), beside
-        # the parallel run_functional.
+        # They build, package and rewrite files of the checkout and the build
+        # directory (and replace bin/, whose programs the parallel run
+        # executes: "Text file busy"), so they are a second queue that starts
+        # only when nothing else runs, and one at a time (resource: tree).
+        queue_begin
         for fscript in "$BUILD_DIR"/tests/functional/bin/*; do
             fname=$(basename "$fscript")
             [ "$fname" = run_functional ] && continue
             queue_add "$fname" tree . env MANAGE_TIMED= "$fscript"
         done
+        queue_run || rc=1
     fi
-    queue_run
+    return $rc
 }
 
 run_pty_suites() {  # run_pty_suites [SUITE] : all PTY suites, or the one labelled SUITE

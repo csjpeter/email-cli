@@ -462,7 +462,8 @@ The functional and PTY steps of `manage.sh` run through one queue each:
 - **Resources:** an item that shares something carries a mark
   (`queue_add NAME NEEDS ...`); two items of one mark never run at once. The
   declared functional scripts carry `tree` (they build and package in the
-  checkout), so they run one at a time beside the parallel `run_functional`.
+  checkout and replace `bin/`, whose programs run_functional executes), so they are a
+  second queue that starts when `run_functional` has ended, and run one at a time.
 - **Verdict:** the sum of the items, in registration order, in the same
   `build/result/<verb>.result` as a serial run (`MANAGE_JOBS=1` is the serial run).
 - **Timing:** the console lists the seconds and verdict per item and the wall

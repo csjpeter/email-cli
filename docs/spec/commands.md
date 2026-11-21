@@ -737,6 +737,12 @@ does.
   operations (`delete-folder`, `delete-label`, `remove-account`, permanent
   `trash`, `reply`, `forward`, `send`), which otherwise ask with No as default.
 
+* `rules revert` -- takes back the last `rules apply` that was not reverted
+  (labels, flags, a queued move; a move that ran on the server is moved back or
+  reported as not revertible) and prints `Rules apply ID reverted: N message(s)
+  restored, M not restorable.`; exit 1 when M > 0 or there is nothing to revert.
+  `rules apply` prints the count of changed messages per rule.
+
 `email-cli-ro` refuses both.  Full rules: `operation-history.md`.
 
 ### Exit codes

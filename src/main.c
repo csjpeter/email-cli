@@ -95,6 +95,7 @@ static void help_general(void) {
         "Rules:\n"
         "  rules list                  List sorting rules for the account\n"
         "  rules apply [--dry-run]     Apply rules to locally cached messages\n"
+        "  rules revert                Take back the last rules apply\n"
         "  rules add --name ...        Add a sorting rule\n"
         "  rules edit --name ...       Change a sorting rule in place\n"
         "  rules remove --name ...     Remove a sorting rule by name\n"
@@ -128,6 +129,7 @@ static void help_rules(void) {
         "Subcommands:\n"
         "  rules list                  List all sorting rules for the account\n"
         "  rules apply [--dry-run]     Apply rules to locally cached messages\n"
+        "  rules revert                Take back the last rules apply\n"
         "  rules add --name <name>     Add a new sorting rule\n"
         "  rules edit --name <name>    Change a sorting rule in place\n"
         "  rules remove --name <name>  Remove a sorting rule by name\n"
@@ -213,6 +215,21 @@ static void help_rules_apply(void) {
         "  email-cli rules apply --dry-run\n"
         "  email-cli rules apply --verbose\n"
         "  email-cli user@example.com rules apply --dry-run --verbose\n"
+    );
+}
+
+static void help_rules_revert(void) {
+    printf(
+        "Usage: email-cli [<account>] rules revert\n"
+        "\n"
+        "Take back the last 'rules apply' that was not yet reverted: restores the\n"
+        "labels and flags of every message it changed and cancels the moves it\n"
+        "queued; a move that already ran on the server is moved back, or reported\n"
+        "as not revertible.  Prints how many messages were restored.\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli rules apply\n"
+        "  email-cli rules revert\n"
     );
 }
 
@@ -1307,6 +1324,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(topic2, "add")    == 0) { help_rules_add();    return EXIT_SUCCESS; }
                 if (strcmp(topic2, "edit")   == 0) { help_rules_edit();   return EXIT_SUCCESS; }
                 if (strcmp(topic2, "remove") == 0) { help_rules_remove(); return EXIT_SUCCESS; }
+                if (strcmp(topic2, "revert") == 0) { help_rules_revert(); return EXIT_SUCCESS; }
                 if (strcmp(topic2, "list")   == 0) { help_rules_list();   return EXIT_SUCCESS; }
                 if (strcmp(topic2, "check")  == 0) { help_rules_check();  return EXIT_SUCCESS; }
             }
@@ -2523,6 +2541,15 @@ int main(int argc, char *argv[]) {
             } else {
                 result = bad ? -1 : 0;
             }
+
+        } else if (strcmp(subcmd, "revert") == 0) {
+            for (int i = subcmd_idx + 1; i < argc; i++) {
+                if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+                    help_rules_revert(); return EXIT_SUCCESS;
+                }
+                if (strcmp(argv[i], "--account") == 0) { i++; continue; }
+            }
+            result = email_service_rules_revert(stdout, account_arg) == 0 ? 0 : -1;
 
         } else if (strcmp(subcmd, "add") == 0) {
             /* rules add --name <name> [conditions] [actions] */

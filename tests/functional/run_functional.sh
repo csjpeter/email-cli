@@ -2640,6 +2640,16 @@ RA_AGAIN=$( (export HOME="$H_RA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_
     "$BIN_DIR/email-cli" rules apply 2>&1 || true) )
 check_not "36.7 rules apply again: no messages to modify" "\[rule\]" "$RA_AGAIN"
 
+check "36.11 rules apply: count per rule" "Rule \"Tag alpha\": [0-9]* message" "$RA_REAL"
+
+# EMAIL-315: the last apply is taken back, once
+RA_REV=$( (export HOME="$H_RA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules revert 2>&1 || true) )
+check "36.20 rules revert: restored count printed" "message(s) restored, 0 not restorable" "$RA_REV"
+RA_REV2=$( (export HOME="$H_RA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules revert 2>&1 || true) )
+check "36.21 rules revert again: nothing to revert" "No rules apply to revert" "$RA_REV2"
+
 # help page
 RA_HELP=$( "$BIN_DIR/email-cli" help rules 2>&1 || true )
 check "36.8 help rules: apply mentioned" "apply" "$RA_HELP"

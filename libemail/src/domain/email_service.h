@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include "config.h"
+#include "op_history.h"
 
 /**
  * @file email_service.h
@@ -312,6 +313,26 @@ int email_service_apply_rules(const char *only_account, int dry_run, int verbose
  */
 int email_service_apply_rules_to(FILE *out, const char *only_account,
                                  int dry_run, int verbose);
+
+/**
+ * @brief Takes back the last rules apply that was not yet reverted (EMAIL-315).
+ *
+ * Restores labels, flags and a queued move of every message the apply changed
+ * (a move that already ran on the server is moved back by Message-ID, or
+ * reported as not revertible) and prints how many were restored.
+ *
+ * @param out           Where the summary goes.
+ * @param only_account  Only an apply of this account; NULL: any.
+ * @return 0 when every message was restored, -1 otherwise (also: nothing to revert).
+ */
+int email_service_rules_revert(FILE *out, const char *only_account);
+
+/**
+ * @brief Reverts one "ruleapply" history step.  Used by history_revert().
+ * @return 0, or -1 with the reason in @p refusal.
+ */
+int email_service_rules_revert_step(const Config *cfg, const OpStep *s,
+                                    char *refusal, size_t size);
 
 /**
  * @brief Rebuild the contact suggestion cache from all locally cached headers.

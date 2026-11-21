@@ -405,6 +405,30 @@ Just confirming the meeting is on for 10:00.
 
 Messages are cached locally after the first fetch.
 
+### Sorting rules (`l` in the message list)
+
+`l` opens the **rules overview**: every rule in the order the rules run, with its
+name, what it does in words (`from contains github -> +GitHub -INBOX`), on or
+off, the number of cached messages it matches and when an apply last changed
+something by it.
+
+| Key | Action |
+|-----|--------|
+| `a`, `Enter` / `e` | Add a rule, edit the rule (the rule form) |
+| `d`, `c` | Delete (asks first), copy |
+| `Space` | Switch the rule on or off |
+| `J` / `K` | Move the rule down / up |
+| `p`, `A` | Dry run of the whole set in a scrollable report; `y` there asks, then applies; the undo is offered at once |
+| `u` | Undo the last apply |
+| `R` (message reader) | Which rules match this message, what each would do, and which rule gave its labels |
+
+The **rule form** is made of widgets: pick the field (from, to, subject, label,
+body), the operator (is, contains, matches a glob, not) and the value, join the
+conditions with and / or; the same condition is shown as text and may be edited
+as text, the two stay equal.  The actions (any number of labels to add or
+remove, a folder, an address) are picked from a list.  A live preview shows how
+many cached messages the rule matches and the first of them.
+
 ### Navigation Hierarchy
 
 ```
@@ -549,6 +573,19 @@ email-cli delete-label <name>           # Delete a label
 ```
 
 These commands require a Gmail account (`GMAIL_MODE=1`).
+
+### Sorting rules
+
+```
+email-cli rules list                    # every rule: on/off, matching cached messages, last change
+email-cli rules test <key|message-id>   # which rules match one cached message, and why its labels
+email-cli rules add --name N --when 'from:*@a.org and !label:UNREAD' --add-label X --forward-to me@example.org
+email-cli rules edit --name N --disable # --enable, --when, --forward-to, ...
+email-cli rules copy --name N           # the copy stands under it
+email-cli rules move --name N --to 1    # the order is the run order
+email-cli rules apply --dry-run         # what apply would do; nothing changes
+email-cli rules revert                  # take back the last apply
+```
 
 ### Account management
 

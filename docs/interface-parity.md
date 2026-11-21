@@ -63,11 +63,16 @@ existing references and every `no` has a reason.
 | Edit account settings (IMAP, SMTP) | yes (`config imap`, `config smtp`) | F:73.3 | yes (`e`, the wizard) | P:test_wizard_with_smtp | |
 | Renew a Gmail authorization | yes (`config reauth`) | F:89.21 | yes (`-` menu on the accounts screen) | P:test_reauth_paste_renews_the_token | browser, address only or paste, as the CLI; `--import-token` stays CLI-only |
 | Re-encrypt stored credentials | yes (`migrate-credentials`) | F:122.26 | no | | maintenance, run by hand; `n/a` in a screen, not a gap |
-| List sorting rules | yes | F:34.1 | yes (`l`) | P:test_screen_rules_list | |
-| Add a sorting rule | yes | F:37.1 | yes | P:test_tui_rules_add_form_saves_new_rule | |
-| Remove a sorting rule | yes | F:37.12 | yes | P:test_screen_rules_deleted | |
-| Edit a sorting rule | yes (`rules edit`) | F:37.20 | yes (`e`) | P:test_screen_rule_edit_form | |
-| Apply rules now (also `--dry-run`) | yes | F:36.1 | yes (`A` asks first, `p` previews) | P:test_tui_rules_preview_and_apply | |
+| List sorting rules (with the cached messages each matches and its last change) | yes (`rules list`) | F:163.1 | yes (`l`, the overview) | P:test_rk_overview_columns_and_counts | EMAIL-312 |
+| Add a sorting rule (condition as widgets or text, any number of labels) | yes (`rules add --when`) | F:163.6 | yes (`a`, the rule form) | P:test_rk_form_new_rule | EMAIL-312 |
+| Remove a sorting rule | yes | F:37.12 | yes (`d`) | P:test_rk_list_delete | |
+| Edit a sorting rule | yes (`rules edit`) | F:37.20 | yes (`Enter`, the rule form) | P:test_rk_form_edit_existing | |
+| Switch a rule on or off | yes (`rules edit --enable`, `--disable`) | F:163.11 | yes (`Space`) | P:test_rk_toggle_reorder_copy | EMAIL-312 |
+| Copy and reorder the rules | yes (`rules copy`, `rules move`) | F:163.26 | yes (`c`, `J`, `K`) | P:test_rk_toggle_reorder_copy | EMAIL-312 |
+| Check a condition against the cached messages while editing | yes (`rules apply --dry-run`, `rules list` counts) | F:163.1 | yes (the live preview of the form) | P:test_rk_form_new_rule | EMAIL-312 |
+| Test one message against the rules, and why its labels | yes (`rules test`) | F:163.17 | yes (`R` in the reader) | P:test_rk_reader_rules_and_why | EMAIL-312 |
+| Apply rules now (also `--dry-run`) | yes | F:36.1 | yes (`p` previews, `A` previews and asks) | P:test_rk_preview_apply_undo | |
+| Take back the last rules apply | yes (`rules revert`) | F:36.20 | yes (`u`; offered right after an apply) | P:test_rk_preview_apply_undo | EMAIL-312 |
 | Sync now | yes (`email-sync`) | F:20.1 | yes (`s`) | P:test_screen_list_syncing | |
 | Set up / remove / show the sync cron entry | yes (`email-sync cron`) | F:54.2 | no | | scheduling is the background program's; `n/a` in a screen, not a gap |
 

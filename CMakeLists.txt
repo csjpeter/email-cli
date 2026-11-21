@@ -90,7 +90,7 @@ add_subdirectory(libemail)
 # 2026-10-16).  The libraries they use (libemail-client's static form, OpenSSL,
 # libtuikit) are linked in, and so is the C library.
 function(email_static_program name source)
-    add_executable(${name} ${source})
+    add_executable(${name} ${source} ${ARGN})
     target_link_libraries(${name} libemail)
     # AddressSanitizer cannot be linked static: the Debug build (the unit-test
     # run) keeps the C library dynamic; every other build is fully static.
@@ -102,7 +102,7 @@ endfunction()
 email_static_program(email-cli src/main.c)
 email_static_program(email-cli-ro src/main_ro.c)
 email_static_program(email-sync src/main_sync.c)
-email_static_program(email-tui src/main_tui.c)
+email_static_program(email-tui src/main_tui.c src/rules_tui.c)
 email_static_program(email-import-rules src/main_import_rules.c)
 
 # Test Build

@@ -378,6 +378,102 @@ static void test_314_empty_pattern_and_all(void) {
     when_node_free(n);
 }
 
+
+/* ── EMAIL-312: the form model ───────────────────────────────────────── */
+
+static void test_312_clauses_roundtrip(void) {
+    WhenClause *c = NULL;
+    int n = 0;
+    ASSERT(when_clauses_parse("from:*github* and !subject:*digest* or label:INBOX", &c, &n) == 0,
+           "clauses: a flat condition has clauses");
+    ASSERT(n == 3, "clauses: three clauses");
+    ASSERT(strcmp(c[0].field, "from") == 0 && c[0].op == WOP_CONTAINS && strcmp(c[0].value, "github") == 0,
+           "clauses: *github* is 'from contains github'");
+    ASSERT(!c[0].negated && !c[0].join_or, "clauses: the first is plain");
+    ASSERT(c[1].negated && !c[1].join_or && strcmp(c[1].field, "subject") == 0, "clauses: !subject, joined with and");
+    ASSERT(c[2].join_or && c[2].op == WOP_IS && strcmp(c[2].value, "INBOX") == 0,
+           "clauses: label:INBOX is 'label is INBOX', joined with or");
+    char *back = when_clauses_build(c, n);
+    ASSERT(back && strcmp(back, "from:*github* and !subject:*digest* or label:INBOX") == 0,
+           "clauses: the text is built back unchanged");
+    free(back);
+    when_clauses_free(c, n);
+    free(c);
+}
+
+static void test_312_clauses_glob_and_quote(void) {
+    WhenClause *c = NULL;
+    int n = 0;
+    ASSERT(when_clauses_parse("from:*@a.org", &c, &n) == 0 && n == 1 && c[0].op == WOP_GLOB &&
+           strcmp(c[0].value, "*@a.org") == 0, "clauses: a pattern with a wildcard but no *x* shape is a glob");
+    when_clauses_free(c, n); free(c);
+    ASSERT(when_clauses_parse("subject:\"*big deal*\"", &c, &n) == 0 && c[0].op == WOP_CONTAINS &&
+           strcmp(c[0].value, "big deal") == 0, "clauses: a quoted pattern with a space is read");
+    char *back = when_clauses_build(c, n);
+    ASSERT(back && strcmp(back, "subject:\"*big deal*\"") == 0, "clauses: a value with a space is quoted again");
+    free(back);
+    when_clauses_free(c, n); free(c);
+    ASSERT(when_clauses_parse("age-gt:30 and from:x", &c, &n) == 0 && c[0].op == WOP_IS &&
+           strcmp(c[0].value, "30") == 0, "clauses: an age is 'is N'");
+    when_clauses_free(c, n); free(c);
+}
+
+static void test_312_clauses_refuse_what_they_cannot_hold(void) {
+    WhenClause *c = NULL;
+    int n = 0;
+    ASSERT(when_clauses_parse("from:a and (from:b or from:c)", &c, &n) != 0 && !c && n == 0,
+           "clauses: parentheses that change the precedence are not a clause list");
+    ASSERT(when_clauses_parse("all", &c, &n) != 0, "clauses: 'all' is not a clause list");
+    ASSERT(when_clauses_parse("!(from:a or from:b)", &c, &n) != 0, "clauses: a negated group is not a clause list");
+    ASSERT(when_clauses_parse("from:a or", &c, &n) != 0, "clauses: an invalid text is not a clause list");
+    ASSERT(when_clauses_parse("(from:a and subject:b) or label:c", &c, &n) == 0 && n == 3,
+           "clauses: parentheses that match the precedence are read as the same flat list");
+    when_clauses_free(c, n); free(c);
+}
+
+static void test_312_describe(void) {
+    char *d = when_describe("from:*github* and !subject:*digest*");
+    ASSERT(d && strcmp(d, "from contains github and subject does not contain digest") == 0, "describe: contains / does not contain");
+    free(d);
+    d = when_describe("from:a@b.org or label:UNREAD");
+    ASSERT(d && strcmp(d, "from is a@b.org or label is UNREAD") == 0, "describe: is");
+    free(d);
+    d = when_describe("from:*@x.org and (subject:a or subject:b)");
+    ASSERT(d && strstr(d, "(subject is a or subject is b)"), "describe: an or under an and keeps its parentheses");
+    free(d);
+    d = when_describe("age-gt:30");
+    ASSERT(d && strcmp(d, "older than 30 days") == 0, "describe: age");
+    free(d);
+    d = when_describe("all");
+    ASSERT(d && strcmp(d, "every message") == 0, "describe: all");
+    free(d);
+    ASSERT(when_describe("from:") == NULL, "describe: an invalid condition has none");
+}
+
+static void test_312_long_pattern_refused_not_cut(void) {
+    char expr[4400];
+    int n = snprintf(expr, sizeof(expr), "from:");
+    for (int i = 0; i < 4200; i++) expr[n++] = 'a';
+    expr[n] = '\0';
+    ASSERT(when_parse(expr) == NULL, "long: a pattern over 4095 characters is refused, not cut");
+    char why[300];
+    ASSERT(when_check(expr, why, sizeof(why)) == 0 && strstr(why, "4095"), "long: the reason names the limit");
+    char ok[4300];
+    n = snprintf(ok, sizeof(ok), "from:");
+    for (int i = 0; i < 4000; i++) ok[n++] = 'b';
+    ok[n] = '\0';
+    WhenNode *t = when_parse(ok);
+    ASSERT(t && strlen(t->pattern) == 4000, "long: 4000 characters are kept whole");
+    when_node_free(t);
+}
+
+static void test_312_check_reasons(void) {
+    char why[300];
+    ASSERT(when_check("from:*a*", why, sizeof(why)) == 1, "check: a valid condition");
+    ASSERT(when_check("", why, sizeof(why)) == 0 && strstr(why, "empty"), "check: empty is refused with a reason");
+    ASSERT(when_check("colour:red", why, sizeof(why)) == 0 && strstr(why, "field:pattern"), "check: an unknown field says how it is written");
+}
+
 void test_when_expr(void) {
     RUN_TEST(test_314_empty_pattern_and_all);
     RUN_TEST(test_parse_null_empty);
@@ -423,4 +519,11 @@ void test_when_expr(void) {
     RUN_TEST(test_unquoted_space_still_two_terms);
     RUN_TEST(test_from_flat_quotes_space);
     RUN_TEST(test_from_conds_quotes_space_and_roundtrips);
+
+    RUN_TEST(test_312_clauses_roundtrip);
+    RUN_TEST(test_312_clauses_glob_and_quote);
+    RUN_TEST(test_312_clauses_refuse_what_they_cannot_hold);
+    RUN_TEST(test_312_describe);
+    RUN_TEST(test_312_long_pattern_refused_not_cut);
+    RUN_TEST(test_312_check_reasons);
 }

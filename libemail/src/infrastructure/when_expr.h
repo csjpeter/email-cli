@@ -24,6 +24,7 @@
 #ifndef WHEN_EXPR_H
 #define WHEN_EXPR_H
 
+#include <stddef.h>
 #include <time.h>
 
 typedef enum {
@@ -121,5 +122,59 @@ typedef struct {
  * @return Heap-allocated string, or NULL if nconds == 0. Caller must free().
  */
 char *when_from_conds(const WhenCond *conds, int nconds, int is_or);
+
+/* ── The form model (EMAIL-312) ─────────────────────────────────────── */
+
+/** Operators of a clause of the rule form. */
+typedef enum {
+    WOP_IS = 0,    /**< the field is exactly the value (pattern = value) */
+    WOP_CONTAINS,  /**< the field contains the value (pattern = *value*) */
+    WOP_GLOB       /**< the value is a glob pattern, used as it is */
+} WhenOp;
+
+/** One clause of a flat condition: "[and|or] [not] FIELD OP VALUE". */
+typedef struct {
+    int    join_or;    /**< 1: joined to the previous clause with "or" (0: "and"; ignored on the first) */
+    int    negated;    /**< 1: the clause is negated ("!") */
+    char   field[16];  /**< from, to, subject, label, body, age-gt, age-lt */
+    int    op;         /**< WhenOp (always WOP_IS for the age fields) */
+    char  *value;      /**< heap */
+} WhenClause;
+
+/** @brief Frees the values of @p n clauses (not the array). */
+void when_clauses_free(WhenClause *c, int n);
+
+/**
+ * @brief Splits a condition into clauses when it is flat: atoms (each maybe
+ *        negated) joined by and/or, whose meaning the clause list keeps.
+ *
+ * Anything else ("all", parentheses that change the precedence, a negated
+ * group) is not flat.  Every clause is the same text the rule file holds.
+ * @param expr   The condition text.
+ * @param out    Receives a heap array (free the values with when_clauses_free(), then the array).
+ * @param n      Receives the number of clauses.
+ * @return 0 when flat, -1 when not (or invalid).
+ */
+int when_clauses_parse(const char *expr, WhenClause **out, int *n);
+
+/**
+ * @brief The condition text of @p n clauses ("a and b or !c").
+ * @return Heap string (the empty string for n == 0), or NULL.
+ */
+char *when_clauses_build(const WhenClause *c, int n);
+
+/**
+ * @brief A one-line plain-language description of a condition
+ *        ("from contains github.com and subject does not contain digest").
+ * @return Heap string, or NULL when @p expr is empty or invalid.
+ */
+char *when_describe(const char *expr);
+
+/**
+ * @brief Checks a condition and says why it is refused.
+ * @param reason  Receives the reason when 0 is returned.
+ * @return 1 when valid, 0 when not.
+ */
+int when_check(const char *expr, char *reason, size_t size);
 
 #endif /* WHEN_EXPR_H */

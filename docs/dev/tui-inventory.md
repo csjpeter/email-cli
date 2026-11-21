@@ -22,18 +22,18 @@ widgets". One row per part of email-tui. **Status** is one of:
 | Address and file drop-downs of compose | main_tui.c | `tui_table` overlay | done |
 | Compose body editor | core/body_editor.c | `tui_textedit` | done |
 | History view | domain/history_view.c | `tui_histview` | done |
-| Rules editor list, condition list | main_tui.c | `tui_table` | done |
+| Rules overview (name, what it does, on/off, matches, last change) | rules_tui.c | `tui_table` via `tui_frame_draw_table` | done |
 | Reader: scrolling body with styles | email_service.c | hand-made printf; needs styled text | waits TUI-122 |
 | Reader: HTML to styled text | core/html_render.c, html_parser.c | hand-made renderer | waits TUI-124 |
-| Rules: `(y/N)` prompts on the bottom row | main_tui.c (`tui_read_confirm`, 5 places) | hand-made printf and key read | waits TUI-123 |
+| Rules: delete, apply, undo and discard questions | rules_tui.c | `tui_dialog_confirm` | done |
 | Search line `/` and `Search [..]:` | email_service.c | printf, own cursor | todo (`tui_lineedit`, `tui_cmdline`) |
 | Pre-compose dialog fields (To, Cc, Bcc, Subject, Attach) | main_tui.c (`compose_dialog`) | printf rows and cursor | todo (`tui_fieldset`) |
 | Add-attachment prompt | main_tui.c | printf rows | todo (`tui_fieldset`) |
 | Send screen | main_tui.c (`send_screen_*`) | printf rows | todo (`tui_textview`) |
 | Unsent-draft question | main_tui.c | `tui_dialog_confirm` | done |
-| Rule add form | main_tui.c (`tui_rules_add_form`) | printf rows and cursor | todo (`tui_fieldset`) |
-| Rule detail | main_tui.c (`tui_rules_detail`) | printf rows | todo (`tui_textview`) |
-| Rules report | main_tui.c (`tui_rules_report`) | printf rows | todo (`tui_textview`) |
+| Rule add form | rules_tui.c (`rule_form`) | `tui_table` rows, `tui_fieldset` for a condition, `tui_dialog_checklist` / `menu` / `prompt` | done |
+| Rule detail | rules_tui.c (the rule form replaces it) | `tui_table` | done |
+| Rules report, test on a message | core/tui_frame.c (`tui_frame_run_textview`) | `tui_textview` | done |
 | Gmail re-authorisation text | main_tui.c (`tui_reauth_gmail`) | printf text | todo (`tui_dialog_message`) |
 | Path Tab-completion row | core/path_complete.c | printf drop row | todo (`tui_table` overlay, `tui_fieldset_update_completion`) |
 | Folder size table (non-TUI listing) | email_service.c | printf table | todo (`tui_table`) |

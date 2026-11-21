@@ -129,8 +129,25 @@ which otherwise ask with No as the default.
 .B migrate\-credentials
 Re\-encrypt or decrypt stored passwords.
 .TP
-.B rules list ", " rules apply " [\fB\-\-dry\-run\fP], " rules add ", " rules edit ", " rules remove
-Manage per\-account sorting rules. See
+.B rules list ", " rules test " " KEY ", " rules apply " [\fB\-\-dry\-run\fP], " rules add ", " rules edit ", " rules copy ", " rules move ", " rules remove
+Manage per\-account sorting rules.
+.B rules list
+shows every rule with whether it is on, the cached messages it matches and when an
+apply last changed something by it;
+.B rules test
+tells which rules match one cached message (by its key or Message\-ID), what each
+would do and which rule gave its labels in an earlier apply;
+.B rules add
+and
+.B rules edit
+take
+.BR \-\-when " EXPRESSION and " \-\-forward\-to " ADDRESS (and " rules edit
+also
+.BR \-\-enable " and " \-\-disable );
+.B rules copy
+and
+.B rules move \-\-to
+PLACE change the order the rules run in.  See
 .BR email\-import\-rules (1)
 to import them from Thunderbird.
 .TP

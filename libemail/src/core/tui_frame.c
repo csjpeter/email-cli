@@ -11,6 +11,7 @@
 #include <tuikit/canvas.h>
 #include <tuikit/filechooser.h>
 #include <tuikit/screen.h>
+#include <tuikit/textview.h>
 #include <tuikit/text.h>
 #include <tuikit/tty.h>
 #include <stdint.h>
@@ -163,6 +164,7 @@ tui_dialog_state tui_frame_run_dialog(tui_dialog *d) {
         }
         if (ev.type == TUI_EV_RESIZE) continue;
         if (pick) tui_frame_modal_key(&ev, 1);
+        else if (d->kind == TUI_DIALOG_CONFIRM) tui_frame_modal_key(&ev, 0);   /* q and Backspace answer No (EMAIL-312) */
         tui_dialog_handle(d, &ev);
     }
     key_events_end(&winch);
@@ -264,4 +266,112 @@ int tui_frame_run_filechooser(const char *title, tui_fc_mode mode, const char *s
     }
     tui_filechooser_free(&fc);
     return rc;
+}
+
+/* ── Scrollable text and form modal (EMAIL-312) ──────────────────────── */
+
+typedef struct { tui_textview *tv; } TextDraw;
+
+static void draw_text(tui_canvas c, void *ctx) {
+    TextDraw *d = ctx;
+    int rows = tui_canvas_rows(c), cols = tui_canvas_cols(c);
+    tui_canvas body = tui_canvas_sub(c, tui_rect_make(1, 1, rows - 2 > 0 ? rows - 2 : 1,
+                                                       cols > 2 ? cols - 2 : cols));
+    tui_textview_render(d->tv, body, TUI_STYLE_DEFAULT);
+}
+
+int tui_frame_run_textview(const char *title, const char *text, const char *accept,
+                           const char *accept_label) {
+    tui_textview tv;
+    tui_textview_init(&tv);
+    tui_textview_set_text(&tv, text ? text : "");
+    tui_decoder dec;
+    tui_decoder_init(&dec);
+    KeyEvents winch;
+    key_events_begin(&winch);
+    int result = 0, done = 0;
+    printf("\033[2J");
+    while (!done) {
+        int rows = terminal_rows(), cols = terminal_cols();
+        if (rows <= 0) rows = 24;
+        if (cols <= 0) cols = 80;
+        tui_frame_print_bar(1, title, cols);
+        TextDraw td = { &tv };
+        tui_frame_overlay(draw_text, &td, rows, cols);
+        int page = rows - 3 > 1 ? rows - 3 : 1;
+        char key[2] = { accept && accept[0] ? accept[0] : 0, 0 };
+        int total = tui_textview_lines(&tv);
+        int top = tui_textview_top(&tv);
+        if (accept && accept[0]) {
+            const char *const v[][2] = { { "j/k", "scroll" }, { key, accept_label ? accept_label : "ok" },
+                                         { "Esc/q/BS", "back" } };
+            tui_frame_modal_status(v, 3, top + 1 > total ? total : top + 1, total);
+        } else {
+            static const char *const v[][2] = { { "j/k", "scroll" }, { "Esc/q/BS", "back" } };
+            tui_frame_modal_status(v, 2, top + 1 > total ? total : top + 1, total);
+        }
+        tui_event ev;
+        int r = key_events_next(STDIN_FILENO, &dec, &ev, -1);
+        if (r <= 0 || ev.type == TUI_EV_HANGUP) { done = 1; break; }
+        if (ev.type == TUI_EV_RESIZE) { printf("\033[2J"); continue; }
+        if (ev.type != TUI_EV_KEY) continue;
+        if (accept && ev.key == TUI_KEY_CHAR && ev.mods == 0 && ev.cp < 128 && ev.cp &&
+            strchr(accept, (int)ev.cp)) {
+            result = (int)ev.cp;
+            break;
+        }
+        tui_frame_modal_key(&ev, 1);
+        if (ev.key == TUI_KEY_ESC) break;
+        if (TUI_EV_IS_CHAR(&ev, 'j')) tui_textview_scroll(&tv, 1);
+        else if (TUI_EV_IS_CHAR(&ev, 'k')) tui_textview_scroll(&tv, -1);
+        else if (ev.key == TUI_KEY_PGDN) tui_textview_scroll(&tv, page);
+        else if (ev.key == TUI_KEY_PGUP) tui_textview_scroll(&tv, -page);
+        else tui_textview_handle(&tv, &ev);
+    }
+    key_events_end(&winch);
+    tui_decoder_free(&dec);
+    tui_textview_free(&tv);
+    printf("\033[2J");
+    fflush(stdout);
+    return result;
+}
+
+typedef struct { tui_fieldset *f; const char *title; } FormDraw;
+
+static void draw_form(tui_canvas c, void *ctx) {
+    FormDraw *d = ctx;
+    int rows = tui_canvas_rows(c), cols = tui_canvas_cols(c);
+    int h = d->f->nfields + 5, w = cols - 4 < 70 ? cols - 4 : 70;
+    if (h > rows - 2) h = rows - 2;
+    tui_rect box = tui_rect_center(tui_canvas_rect(c), h, w);
+    tui_canvas_fill(c, box, TUI_STYLE_DEFAULT);
+    tui_canvas_box(c, box, d->title, TUI_STYLE_DEFAULT);
+    tui_canvas inner = tui_canvas_sub(c, tui_rect_inset(box, 1));
+    tui_fieldset_render(d->f, inner);
+}
+
+tui_dialog_state tui_frame_run_fieldset(const char *title, tui_fieldset *f) {
+    tui_decoder dec;
+    tui_decoder_init(&dec);
+    KeyEvents winch;
+    key_events_begin(&winch);
+    FormDraw fd = { f, title };
+    while (f->state == TUI_DIALOG_OPEN) {
+        int rows = terminal_rows(), cols = terminal_cols();
+        if (rows <= 0) rows = 24;
+        if (cols <= 0) cols = 80;
+        static const char *const v[][2] = { { "Tab", "next field" }, { "Left/Right", "change" },
+                                            { "Enter", "ok" }, { "Esc", "cancel" } };
+        tui_frame_modal_status(v, 4, 0, 0);
+        tui_frame_overlay(draw_form, &fd, rows, cols);
+        tui_event ev;
+        int r = key_events_next(STDIN_FILENO, &dec, &ev, -1);
+        if (r <= 0 || ev.type == TUI_EV_HANGUP) { f->state = TUI_DIALOG_CANCELLED; break; }
+        if (ev.type == TUI_EV_RESIZE) { printf("\033[2J"); continue; }
+        if (TUI_EV_IS_CTRL(&ev, 'c')) terminal_request_quit();
+        tui_fieldset_handle(f, &ev);
+    }
+    key_events_end(&winch);
+    tui_decoder_free(&dec);
+    return f->state;
 }

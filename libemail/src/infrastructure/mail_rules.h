@@ -64,6 +64,7 @@ typedef struct {
     int    then_rm_count;
     char  *then_move_folder;                  /**< Destination folder (IMAP only; may be NULL) */
     char  *then_forward_to;                   /**< Forward target address (stored; not yet executed) */
+    int    disabled;                          /**< EMAIL-312: 1 = the rule is switched off ("enabled = no"); it never fires */
     char  *error;                             /**< EMAIL-314: why the rule is unusable (NULL = valid); such a rule never fires */
     int    line;                              /**< EMAIL-314: line of the rules file the error belongs to (0 = unknown) */
 } MailRule;
@@ -188,6 +189,20 @@ int mail_rules_apply_ex(const MailRules *rules,
                         char **move_folder_out);
 
 /**
+ * @brief Like mail_rules_apply_ex(), also naming the rules that fired (EMAIL-312).
+ * @param fired_idx  Receives the indexes of the fired rules in order (may be NULL).
+ * @param fired_max  Capacity of @p fired_idx.
+ */
+int mail_rules_apply_trace(const MailRules *rules,
+                           const char *from, const char *subject,
+                           const char *to, const char *labels_csv,
+                           const char *body, time_t message_date,
+                           char ***add_out, int *add_count,
+                           char ***rm_out,  int *rm_count,
+                           char **move_folder_out,
+                           int *fired_idx, int fired_max);
+
+/**
  * @brief Returns 1 if all conditions of the rule match the message, 0 otherwise.
  *
  * @param rule       Rule to test (NULL → returns 0).
@@ -236,9 +251,52 @@ int mail_rules_apply_ctx(const MailRules *rules, const MailMsgCtx *ctx,
                          char **move_folder_out);
 
 /**
+ * @brief mail_rules_apply_ctx() that also reports which rules fired (EMAIL-312).
+ * @param fired_idx  Receives the indexes of the rules that matched, in order
+ *                   (at most @p fired_max are stored; the return value is the
+ *                   full count).
+ */
+int mail_rules_apply_ctx_trace(const MailRules *rules, const MailMsgCtx *ctx,
+                               const char *labels_csv,
+                               char ***add_out, int *add_count,
+                               char ***rm_out,  int *rm_count,
+                               char **move_folder_out,
+                               int *fired_idx, int fired_max);
+
+/**
  * @brief mail_rule_matches() on a message context.
  */
 int mail_rule_matches_ctx(const MailRule *rule, const MailMsgCtx *ctx,
                           const char *labels_csv);
+
+/* ── Editing helpers of the rules overview (EMAIL-312) ───────────────── */
+
+/**
+ * @brief A one-line plain description of a rule: the condition in words,
+ *        then the actions ("from contains github.com -> +GitHub -INBOX").
+ * @return Heap string, or NULL.
+ */
+char *mail_rule_summary(const MailRule *rule);
+
+/** @brief Deep copy of @p src into @p dst (dst is overwritten, not freed). @return 0 or -1. */
+int mail_rule_clone(const MailRule *src, MailRule *dst);
+
+/** @brief Releases the strings of one rule (not the rule itself). */
+void mail_rule_release(MailRule *rule);
+
+/** @brief Appends a zeroed rule; NULL on out of memory.  The pointer is valid until the next append. */
+MailRule *mail_rules_append(MailRules *rules);
+
+/** @brief Removes (and releases) the rule at @p idx. */
+void mail_rules_remove_at(MailRules *rules, int idx);
+
+/**
+ * @brief Moves the rule at @p idx by @p delta places (-1 up, +1 down).
+ * @return The new index, or -1 when it cannot move that way.
+ */
+int mail_rules_move(MailRules *rules, int idx, int delta);
+
+/** @brief The rule name from @p base that no rule of @p rules has ("X (copy)", "X (copy 2)"); heap. */
+char *mail_rules_copy_name(const MailRules *rules, const char *base);
 
 #endif /* MAIL_RULES_H */

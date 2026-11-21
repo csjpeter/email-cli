@@ -7,6 +7,7 @@
 
 #include <tuikit/canvas.h>
 #include <tuikit/dialog.h>
+#include <tuikit/fieldset.h>
 #include <tuikit/filechooser.h>
 #include <stddef.h>
 #include <tuikit/table.h>
@@ -126,5 +127,31 @@ int tui_frame_overlay_rows(tui_table *table, int row, int col, int h, int w);
  */
 int tui_frame_run_filechooser(const char *title, tui_fc_mode mode, const char *start,
                               const char *name, char *out, size_t outsz);
+
+/**
+ * @brief A full-screen, scrollable text under the header bar @p title
+ *        (EMAIL-312): a report, a test result.
+ *
+ * The movement keys scroll (j/k, arrows, the page keys, Home/End, g/G); Esc,
+ * q and Backspace go back.  When @p accept is not NULL, the first of its
+ * characters that is typed closes the view and is returned, and the status
+ * line names it with @p accept_label ("y" "apply").  The terminal must be in
+ * raw mode; the caller redraws its own view afterwards.
+ *
+ * @return The accepted character, or 0 when the view was left without one.
+ */
+int tui_frame_run_textview(const char *title, const char *text, const char *accept,
+                           const char *accept_label);
+
+/**
+ * @brief Runs the form @p f as a modal box titled @p title over the screen
+ *        until it is submitted or cancelled (EMAIL-312).
+ *
+ * Enter submits (through the form's validate), Esc cancels, ctrl-c cancels
+ * and asks the program to quit.  The terminal must be in raw mode.
+ *
+ * @return TUI_DIALOG_OK or TUI_DIALOG_CANCELLED.
+ */
+tui_dialog_state tui_frame_run_fieldset(const char *title, tui_fieldset *f);
 
 #endif /* CORE_TUI_FRAME_H */

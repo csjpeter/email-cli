@@ -72,7 +72,6 @@ typedef enum {
 #define EKV_ACCOUNTS    "accounts"
 #define EKV_RULES       "rules"
 #define EKV_RULE        "rule"
-#define EKV_CONDITIONS  "conditions"
 #define EKV_BODY_EDITOR "body-editor"
 /** The accounts screen with a Gmail account under the cursor: its ":" menu
  *  holds the renewal of the authorization. */

@@ -748,6 +748,27 @@ does.
   restored, M not restorable.`; exit 1 when M > 0 or there is nothing to revert.
   `rules apply` prints the count of changed messages per rule.
 
+### Rules: the overview data, the test on one message and the editing options (EMAIL-312)
+
+* `rules list` -- every rule with `[off]` when it is switched off
+  (`enabled = no` in `rules.ini`; such a rule never fires), the number of cached
+  messages it matches now (an off rule: what it would match; the same data
+  `email-tui`'s overview shows) and when an apply last changed a message by it.
+* `rules test KEY|MESSAGE-ID` -- for one cached message (its cache key, with or
+  without leading zeros, or its Message-ID): the From, Subject and labels, the
+  rules that match it in order with their actions, the switched-off rules that
+  would match, and "Changed by an earlier apply": which rule gave which label
+  (the apply records the rules in the history step).  Exit 1 and a message when
+  no cached message has that key.
+* `rules add` and `rules edit` take `--when EXPRESSION` (a whole condition,
+  `field:pattern` joined by `and` / `or`, `!` for not, parentheses; not with
+  `--if-*`; an invalid expression, or a pattern over 4095 characters, is refused
+  with the reason) and `--forward-to ADDRESS`; `rules edit` takes `--enable` and
+  `--disable`.
+* `rules copy --name N [--new-name X]` -- a copy right under the rule;
+  `rules move --name N --to PLACE` -- moves the rule (place 1 is the first; the
+  order is the order the rules run in).
+
 `email-cli-ro` refuses both.  Full rules: `operation-history.md`.
 
 ### Exit codes
@@ -1212,7 +1233,7 @@ it on:
 | `list-labels` | array of `{name, id}` |
 | `list-attachments <uid>` | array of `{filename, size}` (bytes) |
 | `list-accounts` | array of `{account, type, server}` |
-| `rules list` (email-cli) | array of `{account, rules: [{name, when, then_add_label[], then_remove_label[], then_move_folder}]}` |
+| `rules list` (email-cli) | array of `{account, rules: [{name, when, then_add_label[], then_remove_label[], then_move_folder, then_forward_to, enabled, matches, last_change}]}` |
 
 Not offered: `config show` (a human summary of settings that include credential
 state; a script reads `config.ini`), the writing commands (`send`, `mark-*`,
@@ -1237,7 +1258,7 @@ command runs, so they may stand anywhere on the line, as `--columns A,B`,
 | `list-attachments` | `filename`, `size` |
 | `list-accounts` | `account`, `type`, `server` |
 | `history` | `id`, `when`, `who`, `op`, `object`, `what`, `state` |
-| `rules list` | `account`, `nr`, `name`, `when`, `then_add_label`, `then_remove_label`, `then_move_folder`, `error` |
+| `rules list` | `account`, `nr`, `name`, `when`, `then_add_label`, `then_remove_label`, `then_move_folder`, `then_forward_to`, `enabled`, `matches`, `last_change`, `error` |
 
 * `--columns A,B,C` prints exactly these columns in this order, in every format:
   the table has only these columns and `--json` has only these fields.  Names

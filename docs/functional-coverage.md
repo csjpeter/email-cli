@@ -60,7 +60,10 @@ recorded weakness, not coverage of the promise.
 | `email-cli rules add` | F:37.1 | |
 | `email-cli rules apply` | F:36.1 | `--dry-run` F:36.3 |
 | `email-cli rules edit` | F:37.20 | `--new-name` F:37.29 |
-| `email-cli rules list` | F:34.1 | `--json` F:122.16; `--columns` / `--sort` F:150.40 |
+| `email-cli rules list` | F:34.1 | counts F:163.1; `--json` F:122.16, enabled / matches F:163.5; `--columns` / `--sort` F:150.40 |
+| `email-cli rules test` | F:163.17 | unknown message F:163.20 |
+| `email-cli rules copy` | F:163.26 | |
+| `email-cli rules move` | F:163.29 | |
 | `email-cli rules remove` | F:37.12 | |
 | `email-cli rules revert` | F:36.20 | the last apply taken back; unit: test_rules_apply_records_and_reverts |
 | `email-cli save-attachment` | F:15.2 | unchanged by the TUI file chooser (EMAIL-291); the TUI side is P:test_show_save_chooser_browse |
@@ -131,7 +134,7 @@ recorded weakness, not coverage of the promise.
 | `email-tui` compose, reply, forward | P:test_review_s_sends_message P:test_reply_all_send P:test_forward_fill_to_opens_editor | |
 | `email-tui send` | F:114.3 | |
 | `email-tui reply` | F:114.7 | refusal without a UID; the reply itself P:test_review_reply_uses_review_screen |
-| `email-tui` rules editor | P:test_tui_rules_add_form_saves_new_rule P:test_screen_rules_deleted P:test_tui_rules_preview_and_apply P:test_screen_rules_preview | |
+| `email-tui` rules editor | P:test_rk_form_new_rule P:test_screen_rules_deleted P:test_rk_preview_apply_undo P:test_screen_rules_preview | |
 | `email-tui` Gmail labels and flags | P:test_feedback_t_label_added P:test_feedback_f_star | |
 | TUI file chooser: attach (`Ctrl-O` in the dialog; `a` in the review opens it at once, EMAIL-309) and save (`a`, `A`) | | P:test_attach_file_chooser_browse P:test_attach_file_chooser_typing P:test_attach_file_chooser_cancel P:test_show_save_chooser_browse; no CLI form (the CLI takes a path), EMAIL-291 |
 | TUI mark junk (`j`) | | gap: no PTY test; also listed in `docs/interface-parity.md`; ticket to be opened by the owner |

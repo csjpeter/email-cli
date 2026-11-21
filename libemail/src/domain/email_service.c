@@ -1192,6 +1192,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
             }
             HINT("/", "search", 55);
             HINT("v", view_raw ? "rendered" : "source", 35);
+            HINT("R", "rules", 30);
             /* The reader has no header bar: a notice goes on the last body row. */
             status_line_set_header_width(term_cols);
             status_line_set_notice_row(term_rows - 1);
@@ -1351,6 +1352,19 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
                 if (history_view_run(cfg, hobj) < 0) {
                     result = 1;
                     goto show_int_done;
+                }
+                break;
+            } else if (ch == 'R') {
+                /* Which rules match this message, and which gave its labels (EMAIL-312) */
+                char *rep = NULL;
+                size_t rl = 0;
+                FILE *ro = open_memstream(&rep, &rl);
+                if (ro) {
+                    int rc = email_service_rules_test(ro, cfg->user ? cfg->user : "", uid);
+                    if (rc != 0) fprintf(ro, "This message is not in the local cache.\n");
+                    fclose(ro);
+                    tui_frame_run_textview("  Rules for this message", rep ? rep : "", NULL, NULL);
+                    free(rep);
                 }
                 break;
             } else if (ch == '?') {
@@ -7484,11 +7498,41 @@ static void rules_apply_id(char *buf, size_t size) {
     snprintf(buf, size, "A%lx-%d-%d", (unsigned long)time(NULL), (int)getpid(), ++seq);
 }
 
+/* EMAIL-312: the step's `thing` says which rules gave the changes: "rules: NAME => +A -B | NAME2 => +C".
+ * Only the changes that really happened are named (a label the message had already is not). */
+static char *rules_why(const MailRules *rules, const int *idx, int n, const char *labels_csv,
+                       const char *move) {
+    char *buf = NULL;
+    size_t len = 0;
+    FILE *fp = open_memstream(&buf, &len);
+    if (!fp) return NULL;
+    fputs("rules:", fp);
+    int named = 0;
+    for (int k = 0; k < n; k++) {
+        const MailRule *r = &rules->rules[idx[k]];
+        char ch[2048] = "";
+        size_t cl = 0;
+        for (int j = 0; j < r->then_add_count && cl + 300 < sizeof(ch); j++)
+            if (!csv_has_label(labels_csv, r->then_add_label[j]))
+                cl += (size_t)snprintf(ch + cl, sizeof(ch) - cl, " +%s", r->then_add_label[j]);
+        for (int j = 0; j < r->then_rm_count && cl + 300 < sizeof(ch); j++)
+            if (csv_has_label(labels_csv, r->then_rm_label[j]))
+                cl += (size_t)snprintf(ch + cl, sizeof(ch) - cl, " -%s", r->then_rm_label[j]);
+        if (r->then_move_folder && move && strcmp(r->then_move_folder, move) == 0 && cl + 300 < sizeof(ch))
+            cl += (size_t)snprintf(ch + cl, sizeof(ch) - cl, " move=%s", r->then_move_folder);
+        if (!cl) continue;
+        fprintf(fp, "%s %s =>%s", named ? " |" : "", r->name ? r->name : "?", ch);
+        named++;
+    }
+    fclose(fp);
+    return buf;
+}
+
 static void note_rule_apply(const Config *cfg, const char *apply_id,
                             const char *folder, const char *uid,
                             const char *old_labels, int old_flags,
                             const char *new_labels, int new_flags,
-                            const char *move, const char *mid) {
+                            const char *move, const char *mid, const char *why) {
     char obj[512];
     history_mail_object(cfg, folder, uid, obj, sizeof(obj));
     char *ov = NULL, *nv = NULL;
@@ -7500,7 +7544,7 @@ static void note_rule_apply(const Config *cfg, const char *apply_id,
         int w = snprintf(nv, n, "labels=%s flags=%d", new_labels ? new_labels : "", new_flags);
         if (move && move[0]) w += snprintf(nv + w, n - (size_t)w, " move=%s", move);
         if (mid && mid[0] && move && move[0]) snprintf(nv + w, n - (size_t)w, " mid=%s", mid);
-        OpRecord r = { cfg->user ? cfg->user : "", "ruleapply", obj, "rules", ov, nv,
+        OpRecord r = { cfg->user ? cfg->user : "", "ruleapply", obj, why && why[0] ? why : "rules", ov, nv,
                        apply_id, OPH_REVERTABLE, 0 };
         op_history_record(&r);
     }
@@ -7716,10 +7760,10 @@ out:
     return rc;
 }
 
-int email_service_rules_revert(FILE *out, const char *only_account) {
+int email_service_rules_revert_to(FILE *out, FILE *err, const char *only_account) {
     OpHistory h = {0};
     if (op_history_load(NULL, NULL, &h) != 0) {
-        fprintf(stderr, "The history could not be read.\n");
+        fprintf(err, "The history could not be read.\n");
         return -1;
     }
     const OpStep *last = NULL;
@@ -7732,7 +7776,7 @@ int email_service_rules_revert(FILE *out, const char *only_account) {
         last = s;
     }
     if (!last) {
-        fprintf(stderr, "No rules apply to revert.\n");
+        fprintf(err, "No rules apply to revert.\n");
         op_history_free(&h);
         return -1;
     }
@@ -7741,7 +7785,7 @@ int email_service_rules_revert(FILE *out, const char *only_account) {
     snprintf(account, sizeof(account), "%s", last->account);
     Config *cfg = config_load_account(account);
     if (!cfg) {
-        fprintf(stderr, "The account '%s' of the last rules apply is not configured.\n", account);
+        fprintf(err, "The account '%s' of the last rules apply is not configured.\n", account);
         op_history_free(&h);
         return -1;
     }
@@ -7756,7 +7800,7 @@ int email_service_rules_revert(FILE *out, const char *only_account) {
         char refusal[1024] = "";
         if (op_history_may_revert(&h, s, refusal, sizeof(refusal)) != 0) {
             failed++;
-            if (failed <= 10) fprintf(stderr, "  not restored: %s\n", refusal);
+            if (failed <= 10) fprintf(err, "  not restored: %s\n", refusal);
             continue;
         }
         op_history_revert_begin(s->id);
@@ -7765,7 +7809,7 @@ int email_service_rules_revert(FILE *out, const char *only_account) {
         if (rc == 0) restored++;
         else {
             failed++;
-            if (failed <= 10) fprintf(stderr, "  not restored: %s\n", refusal);
+            if (failed <= 10) fprintf(err, "  not restored: %s\n", refusal);
         }
     }
     config_free(cfg);
@@ -7773,6 +7817,10 @@ int email_service_rules_revert(FILE *out, const char *only_account) {
     fprintf(out, "Rules apply %s reverted: %d message(s) restored, %d not restorable.\n",
             apply_id, restored, failed);
     return failed ? -1 : 0;
+}
+
+int email_service_rules_revert(FILE *out, const char *only_account) {
+    return email_service_rules_revert_to(out, stderr, only_account);
 }
 
 /* ── apply_rules: print rule match lines ─────────────────────────────── */
@@ -7915,9 +7963,11 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
                 MailMsgCtx mctx;
                 apply_ctx_for(&mctx, "", uid, fields[0], fields[1]);
                 char *lnames = gmail_label_names_csv(fields[3]);
-                int fired = mail_rules_apply_ctx(rules, &mctx, lnames,
-                                                 &add_out, &add_count,
-                                                 &rm_out,  &rm_count, NULL);
+                int fired_idx[64];
+                int fired = mail_rules_apply_ctx_trace(rules, &mctx, lnames,
+                                                       &add_out, &add_count,
+                                                       &rm_out,  &rm_count, NULL,
+                                                       fired_idx, 64);
                 if (fired > 0) {
                     /* Idempotency: skip if all changes already applied */
                     int has_new = 0;
@@ -7939,8 +7989,11 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
                                                      (const char **)rm_out,  rm_count);
                             char new_lbl[4096] = "";
                             gmail_hdr_labels(uid, new_lbl, sizeof(new_lbl));
+                            char *why = rules_why(rules, fired_idx, fired < 64 ? fired : 64,
+                                                  old_lbl, NULL);
                             note_rule_apply(accounts[i].cfg, apply_id, "", uid,
-                                            old_lbl, -1, new_lbl, -1, NULL, NULL);
+                                            old_lbl, -1, new_lbl, -1, NULL, NULL, why);
+                            free(why);
                             for (int j = 0; j < add_count; j++) {
                                 label_idx_add(add_out[j], uid);
                                 local_pending_label_add(uid, add_out[j], 1);
@@ -8029,10 +8082,11 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
                 char **rm_out  = NULL; int rm_count  = 0;
                 MailMsgCtx mctx;
                 apply_ctx_for(&mctx, imap_folder, e->uid, e->from, e->subject);
-                int fired = mail_rules_apply_ctx(rules, &mctx, existing,
-                                                 &add_out, &add_count,
-                                                 &rm_out,  &rm_count,
-                                                 &move_folder);
+                int fired_idx[64];
+                int fired = mail_rules_apply_ctx_trace(rules, &mctx, existing,
+                                                       &add_out, &add_count,
+                                                       &rm_out,  &rm_count,
+                                                       &move_folder, fired_idx, 64);
                 if (fired > 0) {
                     /* Check if any new custom labels would be added/removed */
                     int has_new = 0;
@@ -8071,9 +8125,12 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
                                                                add_out, add_count,
                                                                rm_out,  rm_count);
                             char *mid = move_folder ? history_message_id(imap_folder, e->uid) : NULL;
+                            char *why = rules_why(rules, fired_idx, fired < 64 ? fired : 64,
+                                                  existing, move_folder);
                             note_rule_apply(accounts[i].cfg, apply_id, imap_folder, e->uid,
                                             existing, old_flags, new_lbl, new_flags,
-                                            move_folder, mid);
+                                            move_folder, mid, why);
+                            free(why);
                             free(mid);
                             ul_set(&ul_arr, &ul_count, &ul_cap, e->uid,
                                    new_lbl ? new_lbl : "");
@@ -8148,6 +8205,309 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
 
 int email_service_apply_rules(const char *only_account, int dry_run, int verbose) {
     return email_service_apply_rules_to(stdout, only_account, dry_run, verbose);
+}
+
+/* ── The rules overview, preview and test (EMAIL-312) ────────────────── */
+
+/** 1 when two cache keys name the same message ("42" == "0000000000000042"; hex ignores case). */
+static int rule_uid_equal(const char *a, const char *b) {
+    while (*a == '0') a++;
+    while (*b == '0') b++;
+    return strcasecmp(a, b) == 0;
+}
+
+int email_service_rules_scan(const char *account, RuleScanFn fn, void *ctx) {
+    Config *cfg = config_load_account(account);
+    if (!cfg) return -1;
+    local_store_init(cfg->host, cfg->user);
+    int seen = 0, stop = 0;
+    if (cfg->gmail_mode) {
+        char (*uids)[17] = NULL;
+        int uid_count = 0;
+        local_hdr_list_all_uids("", &uids, &uid_count);
+        for (int u = 0; u < uid_count && !stop; u++) {
+            char *hdr = local_hdr_load("", uids[u]);
+            if (!hdr) continue;
+            char *fields[5] = {NULL};
+            char *p = hdr;
+            for (int f = 0; f < 5; f++) {
+                fields[f] = p;
+                char *tab = strchr(p, '\t');
+                if (tab) { *tab = '\0'; p = tab + 1; }
+                else     { p += strlen(p); }
+            }
+            for (int f = 0; f < 5; f++) {
+                char *nl = fields[f] ? strchr(fields[f], '\n') : NULL;
+                if (nl) *nl = '\0';
+            }
+            char *lnames = gmail_label_names_csv(fields[3]);
+            RuleScanMsg m = { uids[u], "", fields[0] ? fields[0] : "", fields[1] ? fields[1] : "",
+                              lnames };
+            seen++;
+            stop = fn(&m, ctx);
+            free(lnames);
+            free(hdr);
+        }
+        free(uids);
+    } else {
+        const char *folder = (cfg->folder && cfg->folder[0]) ? cfg->folder : "INBOX";
+        const char *data_dir = platform_data_dir();
+        char lpath[8192] = "";
+        if (data_dir && cfg->user && cfg->user[0])
+            snprintf(lpath, sizeof(lpath), "%s/email-cli/accounts/%s/applied_labels.tsv",
+                     data_dir, cfg->user);
+        int ul_count = 0;
+        UidLabel *ul = lpath[0] ? ul_load(lpath, &ul_count) : NULL;
+        Manifest *mf = manifest_load(folder);
+        for (int u = 0; mf && u < mf->count && !stop; u++) {
+            const ManifestEntry *e = &mf->entries[u];
+            RuleScanMsg m = { e->uid, folder, e->from ? e->from : "", e->subject ? e->subject : "",
+                              ul ? ul_get(ul, ul_count, e->uid) : NULL };
+            seen++;
+            stop = fn(&m, ctx);
+        }
+        manifest_free(mf);
+        if (ul) ul_free_all(ul, ul_count);
+    }
+    config_free(cfg);
+    return seen;
+}
+
+/** The rule names a ruleapply step's `thing` names ("rules: A => +x | B => -y"). */
+static int rule_step_names(const char *thing, int (*fn)(const char *name, size_t len, void *ctx),
+                           void *ctx) {
+    if (strncmp(thing, "rules:", 6) != 0) return 0;
+    const char *p = thing + 6;
+    while (*p) {
+        while (*p == ' ') p++;
+        const char *arrow = strstr(p, " =>");
+        if (!arrow) break;
+        if (fn(p, (size_t)(arrow - p), ctx)) return 1;
+        const char *bar = strstr(arrow, " | ");
+        if (!bar) break;
+        p = bar + 3;
+    }
+    return 0;
+}
+
+typedef struct { const char *name; } NameCtx;
+static int rule_name_is(const char *name, size_t len, void *vctx) {
+    const NameCtx *c = vctx;
+    return strlen(c->name) == len && strncmp(c->name, name, len) == 0;
+}
+
+typedef struct { const MailRules *rules; RuleStat *stats; } StatsCtx;
+static int stats_cb(const RuleScanMsg *m, void *vctx) {
+    StatsCtx *c = vctx;
+    MailMsgCtx mc;
+    apply_ctx_for(&mc, m->folder, m->uid, m->from, m->subject);
+    for (int r = 0; r < c->rules->count; r++) {
+        MailRule probe = c->rules->rules[r];
+        probe.disabled = 0;           /* an off rule shows what it would match */
+        if (mail_rule_matches_ctx(&probe, &mc, m->labels))
+            c->stats[r].matches++;
+    }
+    mail_msg_ctx_free(&mc);
+    return 0;
+}
+
+int email_service_rules_stats(const char *account, const MailRules *rules, RuleStat *stats) {
+    memset(stats, 0, (size_t)rules->count * sizeof(RuleStat));
+    StatsCtx c = { rules, stats };
+    if (email_service_rules_scan(account, stats_cb, &c) < 0) return -1;
+    OpHistory h = {0};
+    if (op_history_load(account, NULL, &h) == 0) {
+        for (int i = 0; i < h.count; i++) {
+            const OpStep *s = &h.steps[i];
+            if (strcmp(s->op, "ruleapply") != 0 || s->reverts != 0 ||
+                op_history_reverted_by(&h, s->id) != 0 || !s->time || strlen(s->time) < 16)
+                continue;
+            for (int r = 0; r < rules->count; r++) {
+                NameCtx nc = { rules->rules[r].name ? rules->rules[r].name : "" };
+                if (rule_step_names(s->thing, rule_name_is, &nc)) {
+                    snprintf(stats[r].last, sizeof(stats[r].last), "%.10s %.5s", s->time, s->time + 11);
+                }
+            }
+        }
+        op_history_free(&h);
+    }
+    return 0;
+}
+
+typedef struct {
+    MailRule rule;
+    int total, count, max_first;
+    RulePreviewMsg *first;
+} PreviewCtx;
+
+static int preview_cb(const RuleScanMsg *m, void *vctx) {
+    PreviewCtx *c = vctx;
+    c->total++;
+    MailMsgCtx mc;
+    apply_ctx_for(&mc, m->folder, m->uid, m->from, m->subject);
+    int hit = mail_rule_matches_ctx(&c->rule, &mc, m->labels);
+    mail_msg_ctx_free(&mc);
+    if (!hit)
+        return 0;
+    if (c->count < c->max_first) {
+        RulePreviewMsg *o = &c->first[c->count];
+        snprintf(o->uid, sizeof(o->uid), "%s", m->uid);
+        snprintf(o->from, sizeof(o->from), "%s", m->from);
+        snprintf(o->subject, sizeof(o->subject), "%s", m->subject);
+    }
+    c->count++;
+    return 0;
+}
+
+int email_service_rules_preview(const char *account, const char *when, int *total, int *count,
+                                RulePreviewMsg *first, int max_first) {
+    *total = 0; *count = 0;
+    WhenNode *t = when_parse(when);
+    if (!t) return -1;
+    when_node_free(t);
+    PreviewCtx c = { {0}, 0, 0, max_first, first };
+    c.rule.when = (char *)when;
+    if (email_service_rules_scan(account, preview_cb, &c) < 0) return -1;
+    *total = c.total;
+    *count = c.count;
+    return 0;
+}
+
+typedef struct { const char *key; int by_id; RuleScanMsg msg; char *from, *subject, *labels, *uid, *folder; int found; } FindCtx;
+
+static int find_cb(const RuleScanMsg *m, void *vctx) {
+    FindCtx *c = vctx;
+    int hit = 0;
+    if (c->by_id) {
+        char *id = history_message_id(m->folder, m->uid);
+        hit = id && strcmp(id, c->key) == 0;
+        free(id);
+    } else {
+        hit = rule_uid_equal(m->uid, c->key);
+    }
+    if (!hit) return 0;
+    c->found = 1;
+    c->uid = strdup(m->uid); c->folder = strdup(m->folder);
+    c->from = strdup(m->from); c->subject = strdup(m->subject);
+    c->labels = m->labels ? strdup(m->labels) : NULL;
+    return 1;
+}
+
+/** Prints the earlier applies' reasons for the mail at @p uid: "label X added by rule Y". */
+static void rules_print_history(FILE *out, const char *account, const char *uid) {
+    OpHistory h = {0};
+    if (op_history_load(account, NULL, &h) != 0) return;
+    int printed = 0;
+    for (int i = h.count - 1; i >= 0; i--) {
+        const OpStep *s = &h.steps[i];
+        if (strcmp(s->op, "ruleapply") != 0 || s->reverts != 0 ||
+            op_history_reverted_by(&h, s->id) != 0 || strncmp(s->object, "mail ", 5) != 0)
+            continue;
+        const char *slash = strrchr(s->object, '/');
+        if (!rule_uid_equal(slash ? slash + 1 : s->object + 5, uid)) continue;
+        if (!printed) fprintf(out, "Changed by an earlier apply:\n");
+        printed++;
+        fprintf(out, "  %.10s %.5s  ", s->time ? s->time : "", s->time && strlen(s->time) > 11 ? s->time + 11 : "");
+        if (strncmp(s->thing, "rules:", 6) == 0) {
+            const char *p = s->thing + 6;
+            while (*p) {
+                while (*p == ' ') p++;
+                const char *bar = strstr(p, " | ");
+                int n = bar ? (int)(bar - p) : (int)strlen(p);
+                const char *arrow = strstr(p, " =>");
+                if (arrow && arrow >= p + n) arrow = NULL;
+                if (arrow)
+                    fprintf(out, "rule \"%.*s\" gave%.*s; ", (int)(arrow - p), p,
+                            n - (int)(arrow - p) - 3, arrow + 3);
+                else
+                    fprintf(out, "%.*s; ", n, p);
+                if (!bar) break;
+                p = bar + 3;
+            }
+        } else {
+            fprintf(out, "a rule (not recorded which)");
+        }
+        fprintf(out, "\n");
+    }
+    if (!printed) fprintf(out, "No apply has changed this message yet.\n");
+    op_history_free(&h);
+}
+
+int email_service_rules_test(FILE *out, const char *account, const char *key) {
+    FindCtx fc = { key, key && (key[0] == '<' || strchr(key, '@')), {0}, NULL, NULL, NULL, NULL, NULL, 0 };
+    if (email_service_rules_scan(account, find_cb, &fc) < 0 || !fc.found) {
+        free(fc.from); free(fc.subject); free(fc.labels); free(fc.uid); free(fc.folder);
+        return -1;
+    }
+    fprintf(out, "Message %s\n  From:    %s\n  Subject: %s\n  Labels:  %s\n\n",
+            fc.uid, fc.from, fc.subject, fc.labels && fc.labels[0] ? fc.labels : "(none)");
+    MailRules *rules = mail_rules_load(account);
+    int n = rules ? rules->count : 0;
+    int fired_idx[64];
+    char **add = NULL, **rm = NULL;
+    int na = 0, nr = 0, fired = 0;
+    char *move = NULL;
+    MailMsgCtx mc;
+    apply_ctx_for(&mc, fc.folder ? fc.folder : "", fc.uid, fc.from, fc.subject);
+    if (n > 0)
+        fired = mail_rules_apply_ctx_trace(rules, &mc, fc.labels,
+                                           &add, &na, &rm, &nr, &move, fired_idx, 64);
+    if (fired > 64) fired = 64;
+    if (fired <= 0) {
+        fprintf(out, "No rule matches this message.\n");
+    } else {
+        fprintf(out, "%d rule%s match this message:\n", fired, fired == 1 ? "" : "s");
+        for (int k = 0; k < fired; k++) {
+            char *sum = mail_rule_summary(&rules->rules[fired_idx[k]]);
+            fprintf(out, "  %d. \"%s\": %s\n", fired_idx[k] + 1,
+                    rules->rules[fired_idx[k]].name ? rules->rules[fired_idx[k]].name : "?",
+                    sum ? sum : "");
+            free(sum);
+        }
+    }
+    for (int i = 0; i < n; i++)
+        if (rules->rules[i].disabled &&
+            mail_rule_matches_ctx(&(MailRule){ .when = rules->rules[i].when }, &mc, fc.labels))
+            fprintf(out, "  (rule %d \"%s\" would match but is switched off)\n", i + 1,
+                    rules->rules[i].name ? rules->rules[i].name : "?");
+    for (int j = 0; j < na; j++) free(add[j]);
+    for (int j = 0; j < nr; j++) free(rm[j]);
+    free(add); free(rm); free(move);
+    mail_msg_ctx_free(&mc);
+    fprintf(out, "\n");
+    rules_print_history(out, account, fc.uid);
+    mail_rules_free(rules);
+    free(fc.from); free(fc.subject); free(fc.labels); free(fc.uid); free(fc.folder);
+    return 0;
+}
+
+typedef struct { char **v; int n, cap; } LabelSet;
+static int labels_cb(const RuleScanMsg *m, void *vctx) {
+    LabelSet *ls = vctx;
+    if (!m->labels || !m->labels[0]) return 0;
+    char *copy = strdup(m->labels), *save = NULL;
+    if (!copy) return 0;
+    for (char *t = strtok_r(copy, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
+        int have = 0;
+        for (int i = 0; i < ls->n && !have; i++) have = strcmp(ls->v[i], t) == 0;
+        if (have || ls->n >= 500) continue;
+        if (ls->n == ls->cap) {
+            int nc = ls->cap ? ls->cap * 2 : 16;
+            char **x = realloc(ls->v, (size_t)nc * sizeof(char *));
+            if (!x) break;
+            ls->v = x; ls->cap = nc;
+        }
+        ls->v[ls->n++] = strdup(t);
+    }
+    free(copy);
+    return 0;
+}
+
+char **email_service_rules_known_labels(const char *account, int *count) {
+    LabelSet ls = {0};
+    email_service_rules_scan(account, labels_cb, &ls);
+    *count = ls.n;
+    return ls.v;
 }
 
 int email_service_rebuild_contacts(const char *only_account) {
@@ -9456,10 +9816,14 @@ static const CliCol rule_cols[] = {
     { "then_add_label",     "THEN_ADD_LABEL",     NULL, CLI_COL_TEXT, NULL },
     { "then_remove_label",  "THEN_REMOVE_LABEL",  NULL, CLI_COL_TEXT, NULL },
     { "then_move_folder",   "THEN_MOVE_FOLDER",   NULL, CLI_COL_TEXT, NULL },
+    { "then_forward_to",    "THEN_FORWARD_TO",    NULL, CLI_COL_TEXT, NULL },
+    { "enabled",            "ENABLED",            NULL, CLI_COL_TEXT, NULL },
+    { "matches",            "MATCHES",            NULL, CLI_COL_NUM,  NULL },
+    { "last_change",        "LAST_CHANGE",        NULL, CLI_COL_TEXT, NULL },
     { "error",              "ERROR",              NULL, CLI_COL_TEXT, NULL },
 };
 
-typedef struct { const char *account; int nr; const MailRule *rule; } RuleRow;
+typedef struct { const char *account; int nr; const MailRule *rule; RuleStat stat; } RuleRow;
 
 static void join_labels(char *buf, size_t n, char *const *v, int count) {
     size_t off = 0;
@@ -9479,6 +9843,10 @@ static void rule_cell(void *ctx, int row, int col, char *buf, size_t n) {
     case 4: join_labels(buf, n, (char *const *)m->then_add_label, m->then_add_count); break;
     case 5: join_labels(buf, n, (char *const *)m->then_rm_label, m->then_rm_count); break;
     case 6: snprintf(buf, n, "%s", m->then_move_folder ? m->then_move_folder : ""); break;
+    case 7: snprintf(buf, n, "%s", m->then_forward_to ? m->then_forward_to : ""); break;
+    case 8: snprintf(buf, n, "%s", m->disabled ? "no" : "yes"); break;
+    case 9: snprintf(buf, n, "%d", r[row].stat.matches); break;
+    case 10: snprintf(buf, n, "%s", r[row].stat.last); break;
     default: snprintf(buf, n, "%s", m->error ? m->error : ""); break;
     }
 }
@@ -9486,7 +9854,7 @@ static void rule_cell(void *ctx, int row, int col, char *buf, size_t n) {
 int email_service_rules_table(const char *only_account, int json) {
     CliColumns sel;
     CliSort srt;
-    if (cli_out_resolve(rule_cols, 8, &sel, &srt) != 0) return -1;
+    if (cli_out_resolve(rule_cols, 12, &sel, &srt) != 0) return -1;
     int count = 0;
     AccountEntry *accs = config_list_accounts(&count);
     MailRules **loaded = calloc((size_t)(count > 0 ? count : 1), sizeof *loaded);
@@ -9510,10 +9878,20 @@ int email_service_rules_table(const char *only_account, int json) {
         int k = 0;
         for (int i = 0; i < count; i++)
             for (int r = 0; loaded[i] && r < loaded[i]->count; r++) {
-                rows[k] = (RuleRow){ accs[i].name, r + 1, &loaded[i]->rules[r] };
+                rows[k] = (RuleRow){ accs[i].name, r + 1, &loaded[i]->rules[r], {0, ""} };
                 order[k] = k;
                 k++;
             }
+        /* EMAIL-312: the cached-message count and the last change of every rule */
+        k = 0;
+        for (int i = 0; i < count; i++) {
+            if (!loaded[i] || loaded[i]->count == 0) continue;
+            RuleStat *st = calloc((size_t)loaded[i]->count, sizeof *st);
+            if (st && email_service_rules_stats(accs[i].name, loaded[i], st) == 0)
+                for (int r = 0; r < loaded[i]->count; r++) rows[k + r].stat = st[r];
+            free(st);
+            k += loaded[i]->count;
+        }
         cli_sort_rows(order, nrows, rule_cols, &srt, rule_cell, rows);
         if (json)
             cli_json_print(rule_cols, &sel, order, 0, nrows, rule_cell, rows);
@@ -9539,6 +9917,8 @@ int email_service_rules_json(const char *only_account) {
         if (only_account && only_account[0] && strcmp(accs[i].name, only_account) != 0)
             continue;
         MailRules *rules = mail_rules_load(accs[i].name);
+        RuleStat *stats = rules && rules->count ? calloc((size_t)rules->count, sizeof *stats) : NULL;
+        if (stats && email_service_rules_stats(accs[i].name, rules, stats) != 0) memset(stats, 0, (size_t)rules->count * sizeof *stats);
         printf("%s\n  {\"account\": ", printed ? "," : "");
         print_json_string(accs[i].name);
         printf(", \"rules\": [");
@@ -9560,9 +9940,15 @@ int email_service_rules_json(const char *only_account) {
             }
             printf("], \"then_move_folder\": ");
             print_json_string(rule->then_move_folder);
+            printf(", \"then_forward_to\": ");
+            print_json_string(rule->then_forward_to);
+            printf(", \"enabled\": %s, \"matches\": %d, \"last_change\": ",
+                   rule->disabled ? "false" : "true", stats ? stats[r].matches : 0);
+            print_json_string(stats ? stats[r].last : "");
             printf("}");
         }
         printf("]}");
+        free(stats);
         mail_rules_free(rules);
         printed++;
     }

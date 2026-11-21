@@ -93,7 +93,7 @@ messages, or on the one under the cursor when none is marked.
 Compose, reply, reply to all, forward.
 .TP
 .BR U ", " l
-Refresh after a sync, open the rules editor.
+Refresh after a sync, open the rules overview (see RULES below).
 .TP
 .B *
 Star or unstar (toggle the flag), in the list and on the server at once.
@@ -120,6 +120,10 @@ permanent delete) is marked
 In the reader,
 .B H
 shows the history of that message.
+.TP
+.B R
+In the reader: which rules match this message and what each would do, and, after
+an apply, which rule gave each of its labels (see RULES).
 .TP
 .B t
 Gmail only: pick the labels of the message.
@@ -202,13 +206,12 @@ cursor is on one folder; Enter opens its messages.
 Attachment picker: The attachments of the message. The cursor is on one; Enter
 chooses it and asks where to save it.
 .br
-Rules: The mail rules that sort incoming mail. The cursor is on one rule; Enter
-opens it, a adds a new one.
+Rules: The mail rules that sort incoming mail, in the order they run. The cursor
+is on one rule; Enter edits it, a adds a new one.
 .br
-Rule: One mail rule: its conditions and its actions. e edits it, d deletes it.
-.br
-Conditions: The conditions of the rule being edited. The cursor is on one
-condition; Enter edits it, Tab goes on to the actions.
+Rule: One mail rule as a form: its name, the conditions as rows and as text, the
+actions and a live preview of the cached messages it matches. Enter edits the
+row, s saves the rule.
 .PP
 .TP
 .BR j " or " Down ", " k " or " Up ", " PgDn ", " PgUp ", " Home ", " End
@@ -242,10 +245,9 @@ Tab changes the scope, Enter searches, Esc cancels and ctrl\-C quits.
 Folders: first row, last row (as Home and End).
 .TP
 .BR Esc ", " q ", " Backspace ", " Left ", " h
-Rules list and rule detail: back (g and G are Home and End in the list);
-in the condition editor Esc, Backspace, Left and h cancel the rule (after a
-(y/N) question when it has conditions) and q goes
-on to the actions.  ctrl\-C quits at once, also at the questions.
+Rules overview and rule form: back (g and G are Home and End in the overview);
+the form asks first when something changed.  ctrl\-C quits at once, also at
+the questions.
 .TP
 .BR h " or " Left ", " l " or " Right
 Folders, flat view: go up one level (as Esc) and open the row (as Enter).
@@ -275,6 +277,39 @@ several).
 Review screen (? is the help): edit the headers, edit the body, add an attachment (the file browser opens at once, in the directory of the last
 attachment; its typing field takes a path, with ~ and Tab), discard
 the draft (asks).
+.SH RULES
+.B l
+on the message list opens the rules overview: every rule in the order the rules
+run, with its name, what it does in words (the condition, then
+.BR +label ", " \-label ", move to, forward to" ),
+whether it is on, the number of cached messages it matches and when an apply
+last changed something by it.
+.TP
+.BR a ", " Enter " or " e
+Add a rule, edit the rule: the rule form.  The form has the name, the conditions
+as rows (join with and or or, field from, to, subject, label, body or age,
+operator is, contains or matches a glob, not), the same condition as text
+(editable; both stay equal), the actions (any number of labels to add and to
+remove, a folder, an address) picked from a list, and a live preview: how many
+cached messages match and the first of them.
+.B s
+saves.
+.TP
+.BR d ", " c ", " Space ", " J " and " K
+Delete (asks first), copy, switch on or off, move down or up.
+.TP
+.BR p " or " A
+The dry run of the whole set in a scrollable report; nothing changes until
+.B y
+and a confirmation.  After an apply the undo of it is offered with the number of
+changes;
+.B u
+undoes the last apply later.
+.PP
+The same operations are in
+.BR email\-cli (1):
+.BR "rules list" ", " "rules test" ", " "rules add" ", " "rules edit" ", "
+.BR "rules copy" ", " "rules move" ", " "rules apply" " and " "rules revert" .
 .SH SUBCOMMANDS
 .TP
 .B compose

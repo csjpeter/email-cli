@@ -8362,6 +8362,114 @@ check "162.6 folded + encoded Cc decoded" "Cc:      Zsófia <zs162@example.org>,
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
+# Phase 163 — the rules overview data, rules test and --when/--forward-to (EMAIL-312)
+# ════════════════════════════════════════════════════════════════════════════
+if phase_wanted 163; then
+echo ""
+echo "--- Phase 163: rules list counts, rules test, rules add/edit --when --forward-to (EMAIL-312) ---"
+
+alloc_port P163
+(cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$P163 MOCK_IMAP_COUNT=3 \
+    "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
+PID163=$!
+wait_listen P163
+H163="./build/tests/functional/work-$$/homes/f163"
+A163="u163@example.org"
+make_home "$H163" "$A163" "$P163"
+cat > "$H163/.config/email-cli/accounts/$A163/rules.ini" <<'R163'
+[rule "Tag alpha"]
+when = from:*@example.com*
+then-add-label = AlphaTag
+
+[rule "Off rule"]
+enabled = no
+when = from:*@example.com*
+then-add-label = NeverTag
+
+[rule "Nothing"]
+when = from:*@nowhere.invalid
+then-add-label = NoTag
+R163
+c163() { (export HOME="$H163"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+          "$BIN_DIR/email-cli" "$@" 2>&1; echo "exit=$?"); }
+(export HOME="$H163"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) > /dev/null
+
+OUT=$(c163 rules list)
+check "163.1 rules list: the cached messages a rule matches" "matches      = 3 cached message" "$OUT"
+check "163.2 rules list: an off rule is marked"               "Off rule  \[off\]" "$OUT"
+check "163.3 rules list: a rule that matches nothing says 0"  "matches      = 0 cached message" "$OUT"
+OUT=$(c163 rules list --columns name,enabled,matches)
+check "163.4 rules list --columns: enabled and matches columns" "Off rule .*no .*3" "$OUT"
+OUT=$(c163 rules list --json)
+check "163.5 rules list --json: enabled, matches, last_change" '"enabled": false, "matches": 3, "last_change": ' "$OUT"
+
+OUT=$(c163 rules add --name Fwd --when 'from:*@example.com* and !subject:*zzz*' --forward-to fwd@example.org --add-label F)
+check "163.6 rules add --when --forward-to: added" "Rule added" "$OUT"
+OUT=$(c163 rules list)
+check "163.7 rules list: the when and the forward target are kept" "then-forward-to   = fwd@example.org" "$OUT"
+OUT=$(c163 rules add --name Bad --when 'from:' --add-label X)
+check "163.8 rules add --when: an invalid condition is refused with a reason" "not a valid condition" "$OUT"
+OUT=$(c163 rules add --name Bad --when 'from:a' --if-from b --add-label X)
+check "163.9 rules add --when with --if-from is refused" "cannot be combined" "$OUT"
+LONG163=$(printf 'from:%04200d' 0)
+OUT=$(c163 rules add --name Long --when "$LONG163" --add-label X)
+check "163.10 rules add --when: a pattern over 4095 characters is refused, not cut" "4095" "$OUT"
+OUT=$(c163 rules edit --name "Off rule" --enable)
+check "163.11 rules edit --enable" "Rule updated" "$OUT"
+OUT=$(c163 rules list)
+check_not "163.12 the rule is on again" "Off rule  \[off\]" "$OUT"
+OUT=$(c163 rules edit --name Fwd --forward-to "" --disable --when 'subject:*x*')
+check "163.13 rules edit --when --forward-to --disable" "Rule updated" "$OUT"
+OUT=$(c163 rules list)
+check "163.14 rules list: Fwd is off" "Fwd  \[off\]" "$OUT"
+check_not "163.15 the forward target was cleared" "fwd@example.org" "$OUT"
+
+OUT=$(c163 rules apply --verbose)
+check "163.16 rules apply: changed messages" "modified" "$OUT"
+OUT=$(c163 rules list)
+check "163.34 rules list: the last change of a rule that changed messages" "last changed something 20" "$OUT"
+OUT=$(c163 rules test 1)
+check "163.17 rules test: the message is named" "Message 0*1" "$OUT"
+check "163.18 rules test: the rule that matches and its action" '"Tag alpha": .*+AlphaTag' "$OUT"
+check "163.19 rules test: why the label is there (an earlier apply)" 'rule "Tag alpha" gave' "$OUT"
+OUT=$(c163 rules test 4242)
+check "163.20 rules test: an unknown message is refused" "no cached message" "$OUT"
+check "163.21 rules test: exit status" "exit=1" "$OUT"
+OUT=$(c163 rules test)
+check "163.22 rules test: needs a key" "needs the message" "$OUT"
+OUT=$(c163 rules test --help)
+check "163.23 rules test --help" "rules" "$OUT"
+OUT=$(c163 help rules test)
+check "163.24 help rules test" "Message-ID" "$OUT"
+OUT=$(c163 rules edit --name "Tag alpha" --when 'from:a' --if-to b)
+check "163.25 rules edit --when with --if-to is refused" "cannot be combined" "$OUT"
+
+OUT=$(c163 rules copy --name Nothing)
+check "163.26 rules copy" "Rule copied: \"Nothing\" as \"Nothing (copy)\"" "$OUT"
+OUT=$(c163 rules list --columns nr,name --sort nr)
+check "163.27 rules copy: the copy stands right under the original" "Nothing (copy)" "$OUT"
+OUT=$(c163 rules copy --name Nothing --new-name Nothing)
+check "163.28 rules copy: a name in use is refused" "already exists" "$OUT"
+OUT=$(c163 rules move --name "Nothing (copy)" --to 1)
+check "163.29 rules move" "is now rule 1" "$OUT"
+OUT=$(c163 rules list --columns nr,name --sort nr)
+check "163.30 rules move: the rule is first" "1  Nothing (copy)" "$OUT"
+OUT=$(c163 rules move --name Nothing --to 99)
+check "163.31 rules move: a place past the end is refused" "past the last rule" "$OUT"
+OUT=$(c163 help rules move)
+check "163.32 help rules move" "Move a sorting rule" "$OUT"
+OUT=$(c163 rules edit --name "Tag alpha" --disable)
+OUT=$(c163 rules test 1)
+check "163.33 rules test: a switched-off rule that would match is named" "would match but is switched off" "$OUT"
+
+kill "$PID163" 2>/dev/null; wait "$PID163" 2>/dev/null || true
+wait_closed P163
+rm -rf "./build/tests/functional/work-$$/homes/f163"
+
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════
 echo ""

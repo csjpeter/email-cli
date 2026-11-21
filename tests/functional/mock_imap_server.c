@@ -789,8 +789,12 @@ static void handle_client(SSL *ssl) {
             snprintf(ok, sizeof(ok), "%s OK DELETE completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "COPY")) {
-            char ok[64];
-            snprintf(ok, sizeof(ok), "%s OK COPY completed\r\n", tag);
+            char ok[160];
+            /* EMAIL-318: a target named FailMove is refused, as a server would */
+            if (strstr(buffer, "FailMove"))
+                snprintf(ok, sizeof(ok), "%s NO [CANNOT] Mock refuses the copy to FailMove\r\n", tag);
+            else
+                snprintf(ok, sizeof(ok), "%s OK COPY completed\r\n", tag);
             SSL_write(ssl, ok, (int)strlen(ok));
         } else if (strstr(buffer, "EXPUNGE")) {
             char ok[64];

@@ -657,6 +657,11 @@ void test_imap_full_operations(void) {
  * Also exercises NIL separator in LIST, unquoted folder names, and
  * [ALREADYEXISTS] response for CREATE.
  */
+/* Capability words the extended mock adds (MOVE, UIDPLUS); with them the
+ * mock refuses the commands that would be wrong for such a server: a bare
+ * EXPUNGE (removes every \\Deleted mail) and, with MOVE, UID COPY. */
+static const char *g_ext_caps = "";
+
 static void run_mock_server_ext(int listen_fd, SSL_CTX *ctx) {
     int cfd = accept(listen_fd, NULL, NULL);
     close(listen_fd);
@@ -692,8 +697,8 @@ static void run_mock_server_ext(int listen_fd, SSL_CTX *ctx) {
             SSL_write(ssl, resp, (int)strlen(resp));
         } else if (strstr(buf, "CAPABILITY")) {
             snprintf(resp, sizeof(resp),
-                     "* CAPABILITY IMAP4rev1 CONDSTORE QRESYNC\r\n%s OK CAPABILITY completed\r\n",
-                     tag);
+                     "* CAPABILITY IMAP4rev1 CONDSTORE QRESYNC %s\r\n%s OK CAPABILITY completed\r\n",
+                     g_ext_caps, tag);
             SSL_write(ssl, resp, (int)strlen(resp));
         } else if (strstr(buf, "ENABLE")) {
             snprintf(resp, sizeof(resp),
@@ -732,16 +737,27 @@ static void run_mock_server_ext(int listen_fd, SSL_CTX *ctx) {
                      "* 1 FETCH (UID 1 FLAGS (\\Seen))\r\n%s OK FETCH completed\r\n",
                      tag);
             SSL_write(ssl, resp, (int)strlen(resp));
+        } else if (strstr(buf, "UID MOVE")) {
+            snprintf(resp, sizeof(resp), "%s %s\r\n", tag,
+                     strstr(g_ext_caps, "MOVE") ? "OK MOVE completed" : "BAD no MOVE");
+            SSL_write(ssl, resp, (int)strlen(resp));
         } else if (strstr(buf, "UID COPY")) {
-            snprintf(resp, sizeof(resp), "%s OK COPY completed\r\n", tag);
+            snprintf(resp, sizeof(resp), "%s %s\r\n", tag,
+                     strstr(g_ext_caps, "MOVE") ? "BAD COPY used although MOVE is offered"
+                                                : "OK COPY completed");
             SSL_write(ssl, resp, (int)strlen(resp));
         } else if (strstr(buf, "UID STORE")) {
             snprintf(resp, sizeof(resp),
                      "* 1 FETCH (FLAGS (\\Deleted))\r\n%s OK STORE completed\r\n", tag);
             SSL_write(ssl, resp, (int)strlen(resp));
         } else if (strstr(buf, "EXPUNGE")) {
-            snprintf(resp, sizeof(resp),
-                     "* 1 EXPUNGE\r\n%s OK EXPUNGE completed\r\n", tag);
+            int uid_form = strstr(buf, "UID EXPUNGE") != NULL;
+            if ((strstr(g_ext_caps, "UIDPLUS") && !uid_form) ||
+                (uid_form && !strstr(g_ext_caps, "UIDPLUS")))
+                snprintf(resp, sizeof(resp), "%s BAD wrong EXPUNGE form\r\n", tag);
+            else
+                snprintf(resp, sizeof(resp),
+                         "* 1 EXPUNGE\r\n%s OK EXPUNGE completed\r\n", tag);
             SSL_write(ssl, resp, (int)strlen(resp));
         } else if (strstr(buf, "LIST")) {
             /* Return one folder with NIL separator, one unquoted */
@@ -859,6 +875,39 @@ void test_imap_extended_operations(void) {
     imap_disconnect(c);
 
     wait_child(pid);
+}
+
+/* EMAIL-318: UID MOVE when offered, UID EXPUNGE with UIDPLUS, bare EXPUNGE
+ * only as the last resort. */
+static void move_with_caps(const char *caps, const char *what) {
+    int port = 0;
+    int lfd  = make_listener(&port);
+    SSL_CTX *ctx = create_server_ctx();
+    ASSERT(lfd >= 0 && ctx != NULL, "move caps: listener and context");
+    g_ext_caps = caps;
+    pid_t pid = fork();
+    ASSERT(pid >= 0, "move caps: fork");
+    if (pid == 0) run_mock_server_ext(lfd, ctx);
+    close(lfd);
+    SSL_CTX_free(ctx);
+    char url[64];
+    snprintf(url, sizeof(url), "imaps://127.0.0.1:%d", port);
+    ImapClient *c = imap_connect(url, "user", "pass", 0);
+    ASSERT(c != NULL, "move caps: connect");
+    char msg[128];
+    snprintf(msg, sizeof(msg), "move caps (%s): move accepted", what);
+    ASSERT(imap_uid_move(c, "0000000000000001", "Archive") == 0, msg);
+    snprintf(msg, sizeof(msg), "move caps (%s): delete accepted", what);
+    ASSERT(imap_uid_delete(c, "0000000000000001") == 0, msg);
+    imap_disconnect(c);
+    wait_child(pid);
+    g_ext_caps = "";
+}
+
+void test_imap_move_uses_safe_commands(void) {
+    move_with_caps("MOVE UIDPLUS", "UID MOVE");
+    move_with_caps("UIDPLUS", "UID EXPUNGE");
+    move_with_caps("", "fallback");
 }
 
 /* ── Test: imap_connect with bare host URL and imap:// refusal ──────────── */
@@ -1430,6 +1479,7 @@ void test_imap_client(void) {
     test_imap_append_literal_plus();
     test_imap_full_operations();
     test_imap_extended_operations();
+    test_imap_move_uses_safe_commands();
     test_imap_connect_bare_host();
     test_imap_connect_refused_without_tls();
     test_imap_plain_socket_ops();

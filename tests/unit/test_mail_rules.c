@@ -769,6 +769,37 @@ static void test_rules_history_pairs_action_group(void) {
     if (old_data) setenv("XDG_DATA_HOME", old_data, 1);
 }
 
+/* EMAIL-318: add and remove of one label resolve in rule order. */
+static void test_318_add_remove_resolved_in_rule_order(void) {
+    MailRules *r = mail_rules_parse_text(
+        "[rule \"A\"]\nif-from = *@y.org\nthen-add-label = X\nthen-add-label = KEEP\n"
+        "[rule \"B\"]\nif-from = *@y.org\nthen-remove-label = X\n"
+        "[rule \"C\"]\nif-from = *@y.org\nthen-remove-label = G\n"
+        "[rule \"D\"]\nif-from = *@y.org\nthen-add-label = G\n");
+    ASSERT(r != NULL, "318: rules parse");
+    char **a = NULL, **d = NULL;
+    int ac = 0, dc = 0;
+    int n = mail_rules_apply(r, "x@y.org", "s", "t", "", "b", 0, &a, &ac, &d, &dc);
+    ASSERT(n == 4, "318: all four rules fired");
+    int add_x = 0, rm_x = 0, add_g = 0, rm_g = 0, keep = 0;
+    for (int i = 0; i < ac; i++) {
+        if (!strcmp(a[i], "X")) add_x = 1;
+        if (!strcmp(a[i], "G")) add_g = 1;
+        if (!strcmp(a[i], "KEEP")) keep = 1;
+    }
+    for (int i = 0; i < dc; i++) {
+        if (!strcmp(d[i], "X")) rm_x = 1;
+        if (!strcmp(d[i], "G")) rm_g = 1;
+    }
+    ASSERT(!add_x && rm_x, "318: add then remove: only the remove stays");
+    ASSERT(add_g && !rm_g, "318: remove then add: only the add stays");
+    ASSERT(keep, "318: other labels untouched");
+    for (int i = 0; i < ac; i++) free(a[i]);
+    for (int i = 0; i < dc; i++) free(d[i]);
+    free(a); free(d);
+    mail_rules_free(r);
+}
+
 /* ── Registration ────────────────────────────────────────────────── */
 
 void test_mail_rules(void) {
@@ -801,4 +832,5 @@ void test_mail_rules(void) {
     RUN_TEST(test_rules_find_by_name_and_action);
     RUN_TEST(test_rules_save_refuses_duplicates);
     RUN_TEST(test_rules_history_pairs_action_group);
+    RUN_TEST(test_318_add_remove_resolved_in_rule_order);
 }

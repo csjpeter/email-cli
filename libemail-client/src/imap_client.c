@@ -1181,28 +1181,42 @@ int imap_uid_copy(ImapClient *c, const char *uid, const char *target_folder) {
     return rc;
 }
 
-int imap_uid_move(ImapClient *c, const char *uid, const char *target_folder) {
-    if (!uid_valid(uid)) return -1;
-    if (imap_uid_copy(c, uid, target_folder) != 0) return -1;
-    if (imap_uid_set_flag(c, uid, "\\Deleted", 1) != 0) return -1;
-    /* EXPUNGE */
+/** Removes only message @p uid: UID EXPUNGE (UIDPLUS) or, lacking it, EXPUNGE. */
+static int expunge_one(ImapClient *c, const char *uid) {
     char tag[16];
-    if (send_cmd(c, tag, "EXPUNGE") != 0) return -1;
+    int rc;
+    if (imap_get_caps(c) & IMAP_CAP_UIDPLUS)
+        rc = send_cmd(c, tag, "UID EXPUNGE %s", uid);
+    else
+        rc = send_cmd(c, tag, "EXPUNGE");   /* last resort: removes every \\Deleted */
+    if (rc != 0) return -1;
     Response resp = {0};
-    int rc = read_response(c, tag, &resp);
+    rc = read_response(c, tag, &resp);
     response_free(&resp);
     return rc;
+}
+
+int imap_uid_move(ImapClient *c, const char *uid, const char *target_folder) {
+    if (!uid_valid(uid)) return -1;
+    if (imap_get_caps(c) & IMAP_CAP_MOVE) {          /* RFC 6851 */
+        imap_create_folder(c, target_folder);
+        char tag[16];
+        if (send_cmd(c, tag, "UID MOVE %s \"%s\"", uid, target_folder) != 0)
+            return -1;
+        Response resp = {0};
+        int rc = read_response(c, tag, &resp);
+        response_free(&resp);
+        return rc;
+    }
+    if (imap_uid_copy(c, uid, target_folder) != 0) return -1;
+    if (imap_uid_set_flag(c, uid, "\\Deleted", 1) != 0) return -1;
+    return expunge_one(c, uid);
 }
 
 int imap_uid_delete(ImapClient *c, const char *uid) {
     if (!uid_valid(uid)) return -1;
     if (imap_uid_set_flag(c, uid, "\\Deleted", 1) != 0) return -1;
-    char tag[16];
-    if (send_cmd(c, tag, "EXPUNGE") != 0) return -1;
-    Response resp = {0};
-    int rc = read_response(c, tag, &resp);
-    response_free(&resp);
-    return rc;
+    return expunge_one(c, uid);
 }
 
 int imap_append(ImapClient *c, const char *folder,
@@ -1277,6 +1291,17 @@ int imap_append(ImapClient *c, const char *folder,
 
 /* ── CONDSTORE / QRESYNC (RFC 4551 / RFC 5162) ──────────────────────────── */
 
+/** True when @p tok is a whole space-separated word of the capability line. */
+static int cap_token(const char *line, const char *tok) {
+    size_t n = strlen(tok);
+    for (const char *p = line; (p = strstr(p, tok)) != NULL; p += n) {
+        int before = (p == line) || p[-1] == ' ';
+        int after = p[n] == '\0' || p[n] == ' ' || p[n] == '\r' || p[n] == '\n';
+        if (before && after) return 1;
+    }
+    return 0;
+}
+
 int imap_get_caps(ImapClient *c) {
     if (c->caps_queried) return c->caps;
     c->caps_queried = 1;
@@ -1292,6 +1317,8 @@ int imap_get_caps(ImapClient *c) {
         const char *line = resp.untagged[i];
         if (strstr(line, "CONDSTORE")) c->caps |= IMAP_CAP_CONDSTORE;
         if (strstr(line, "QRESYNC"))   c->caps |= IMAP_CAP_QRESYNC;
+        if (cap_token(line, "MOVE"))    c->caps |= IMAP_CAP_MOVE;
+        if (cap_token(line, "UIDPLUS")) c->caps |= IMAP_CAP_UIDPLUS;
     }
     response_free(&resp);
     return c->caps;

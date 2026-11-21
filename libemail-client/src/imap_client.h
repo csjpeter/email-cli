@@ -224,6 +224,8 @@ void imap_set_progress(ImapClient *c, ImapProgressFn fn, void *ctx);
 /** Bitmask flags returned by imap_get_caps(). */
 #define IMAP_CAP_CONDSTORE (1 << 0)
 #define IMAP_CAP_QRESYNC   (1 << 1)
+#define IMAP_CAP_MOVE      (1 << 2)  /**< RFC 6851 UID MOVE */
+#define IMAP_CAP_UIDPLUS   (1 << 3)  /**< RFC 4315 UID EXPUNGE */
 
 /**
  * Result from imap_select_condstore() or imap_select_qresync().

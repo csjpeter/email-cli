@@ -627,6 +627,16 @@ int mail_rule_matches(const MailRule *rule,
     return 1;
 }
 
+/** Drops every entry equal to @p label from the array (EMAIL-318). */
+static void str_array_drop(char ***arr, int *count, const char *label) {
+    int w = 0;
+    for (int i = 0; i < *count; i++) {
+        if (strcmp((*arr)[i], label) == 0) { free((*arr)[i]); continue; }
+        (*arr)[w++] = (*arr)[i];
+    }
+    *count = w;
+}
+
 int mail_rules_apply_ex(const MailRules *rules,
                         const char *from, const char *subject,
                         const char *to, const char *labels_csv,
@@ -659,10 +669,18 @@ int mail_rules_apply_ex(const MailRules *rules,
             *move_folder_out = strdup(r->then_move_folder);
 
         /* Accumulate add/remove actions */
-        for (int j = 0; j < r->then_add_count; j++)
+        /* A later rule overrides an earlier one on the same label: the add and
+         * the remove of one label never both reach the stores (EMAIL-318). */
+        for (int j = 0; j < r->then_add_count; j++) {
+            str_array_drop(rm_out, rm_count, r->then_add_label[j]);
+            str_array_drop(add_out, add_count, r->then_add_label[j]);
             str_array_add(add_out, add_count, r->then_add_label[j]);
-        for (int j = 0; j < r->then_rm_count; j++)
+        }
+        for (int j = 0; j < r->then_rm_count; j++) {
+            str_array_drop(add_out, add_count, r->then_rm_label[j]);
+            str_array_drop(rm_out, rm_count, r->then_rm_label[j]);
             str_array_add(rm_out, rm_count, r->then_rm_label[j]);
+        }
 
         /* Update working labels so subsequent if-label checks see the new state */
         if (r->then_add_count > 0 || r->then_rm_count > 0) {

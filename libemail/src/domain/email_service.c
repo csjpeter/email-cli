@@ -6957,11 +6957,31 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
             int mcount = 0;
             PendingMove *moves = local_pending_move_load(folder, &mcount);
             if (moves && mcount > 0) {
-                for (int mi = 0; mi < mcount; mi++)
-                    emc_move_to_folder(sync_mc,
-                                               moves[mi].uid,
-                                               moves[mi].target_folder);
-                local_pending_move_clear(folder);
+                /* A failed move stays queued and is reported (EMAIL-318). */
+                int *failed = calloc((size_t)mcount, sizeof(int));
+                int nfail = 0;
+                for (int mi = 0; failed && mi < mcount; mi++) {
+                    if (emc_move_to_folder(sync_mc, moves[mi].uid,
+                                           moves[mi].target_folder) != 0) {
+                        const char *why = emc_last_error(sync_mc);
+                        fprintf(stderr,
+                                "  WARN: move of message %s from %s to '%s' failed%s%s; "
+                                "it stays queued for the next sync\n",
+                                moves[mi].uid, folder, moves[mi].target_folder,
+                                why && why[0] ? ": " : "", why && why[0] ? why : "");
+                        failed[mi] = 1;
+                        nfail++;
+                    }
+                }
+                if (failed) {
+                    local_pending_move_clear(folder);
+                    for (int mi = 0; mi < mcount; mi++)
+                        if (failed[mi])
+                            local_pending_move_add(folder, moves[mi].uid,
+                                                   moves[mi].target_folder);
+                    if (nfail) errors++;
+                }
+                free(failed);
             }
             free(moves);
         }
@@ -7401,6 +7421,16 @@ static char *csv_update_labels(const char *existing,
  * " move=FOLDER" when a move was queued and " mid=MESSAGE-ID" (to find the
  * mail again when the move has run).  flags=-1: the account has no flags
  * (Gmail). */
+
+/** True when a move of @p uid to @p target is already in the pending queue of @p folder. */
+static int move_is_queued(const char *folder, const char *uid, const char *target) {
+    int n = 0, found = 0;
+    PendingMove *q = local_pending_move_load(folder, &n);
+    for (int i = 0; q && i < n; i++)
+        if (strcmp(q[i].uid, uid) == 0 && strcmp(q[i].target_folder, target) == 0) found = 1;
+    free(q);
+    return found;
+}
 
 static void rules_apply_id(char *buf, size_t size) {
     static int seq;
@@ -7935,8 +7965,11 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
                                 new_flags &= ~lmap[k].flag;
                     if (new_flags != e->flags) has_new = 1;
 
-                    /* Also fire if a folder move is requested */
-                    if (move_folder) has_new = 1;
+                    /* Also fire if a folder move is requested and is not yet
+                     * queued (a second apply changes nothing, EMAIL-318). */
+                    if (move_folder && !move_is_queued(imap_folder, e->uid, move_folder) &&
+                        strcmp(move_folder, imap_folder) != 0)
+                        has_new = 1;
 
                     if (has_new) {
                         if (verbose || dry_run)

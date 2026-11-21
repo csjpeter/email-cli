@@ -129,6 +129,40 @@ alloc_port() {
     echo "ERROR: no unused port after 10 attempts" >&2
     exit 1
 }
+
+# wait_listen PORTVAR...: wait (at most 10 s per port) until a mock started in
+# the background listens on the port named by each variable.  Replaces the
+# fixed "sleep N after starting the mock" (EMAIL-321): fast when the mock is
+# up at once, steady when the machine is loaded.  A timeout is reported on
+# stderr with the port; the checks that follow then fail on their own.
+wait_listen() {
+    local v p i
+    for v in "$@"; do
+        p="${!v}"
+        for i in $(seq 1 100); do
+            ss -ltn "sport = :$p" | grep -q LISTEN && continue 2
+            sleep 0.1   # poll interval of the wait itself
+        done
+        echo "wait_listen: nothing listens on port $p ($v) after 10 s" >&2
+    done
+    return 0
+}
+
+# wait_closed PORTVAR...: wait (at most 10 s per port) until nothing listens
+# on the port named by each variable, e.g. after a mock was killed and before
+# another one takes its port (EMAIL-321).
+wait_closed() {
+    local v p i
+    for v in "$@"; do
+        p="${!v}"
+        for i in $(seq 1 100); do
+            ss -ltn "sport = :$p" | grep -q LISTEN || continue 2
+            sleep 0.1   # poll interval of the wait itself
+        done
+        echo "wait_closed: port $p ($v) still listens after 10 s" >&2
+    done
+    return 0
+}
 alloc_port IMAP1_PORT
 alloc_port IMAP2_PORT
 alloc_port IMAP3_PORT
@@ -189,7 +223,6 @@ cleanup_run() {
 }
 trap cleanup_run EXIT
 
-sleep 1
 
 # ── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -1348,7 +1381,7 @@ echo "Starting mock IMAP server B (port $IMAP250_PORT, 250 messages)..."
     MOCK_IMAP_MSG_PREFIX="IMapB-Message" \
     "$MOCK_SERVER_BIN") >"$IMAP250_LOG" 2>&1 &
 SERVER250_PID=$!
-sleep 0.5
+wait_listen IMAP200_PORT IMAP250_PORT
 
 H_200="./build/tests/functional/work-$$/homes/200-$$"
 ACCT200="imap200@test.local"
@@ -1502,7 +1535,7 @@ echo "Starting mock Gmail API server B (port $GMAIL_PORT_B, 150 messages)..."
     MOCK_GMAIL_SUBJECT_PREFIX="GmailB-" \
     "$MOCK_GMAIL_BIN") >"$GMAIL_LOG_B" 2>&1 &
 GMAIL_SERVER_B_PID=$!
-sleep 0.5
+wait_listen GMAIL_PORT_B
 
 # Shared temp home for both Gmail accounts (tests account isolation within one HOME)
 H_GMAIL="./build/tests/functional/work-$$/homes/gmail-$$"
@@ -2065,7 +2098,7 @@ make_home "$H_URL" "urlwrap@test.local" "$URL_PORT"
     MOCK_IMAP_LONG_URL="$LONG_URL" \
     "$MOCK_SERVER_BIN") >"$URL_LOG" 2>&1 &
 URL_SERVER_PID=$!
-sleep 0.3
+wait_listen URL_PORT
 
 URL_OUT=$(run_show "$H_URL" "")
 
@@ -2117,7 +2150,7 @@ GINC_HISTID_A="$GINC_DATA_A/gmail_history_id"
     MOCK_GMAIL_PROFILE_FAIL=1 \
     "$MOCK_GMAIL_BIN") >"$GMAIL_INC_LOG/mock_ginc_a.log" 2>&1 &
 GINC_A_PID=$!
-sleep 0.3
+wait_listen GINC_PORT_A
 
 run_ginc_a_sync() {
     (export XDG_CONFIG_HOME="$H_GINC_A/config"
@@ -2170,7 +2203,7 @@ GINC_HISTID_B="$GINC_DATA_B/gmail_history_id"
     MOCK_GMAIL_HISTID=5000 \
     "$MOCK_GMAIL_BIN") >"$GMAIL_INC_LOG/mock_ginc_b1.log" 2>&1 &
 GINC_B1_PID=$!
-sleep 0.3
+wait_listen GINC_PORT_B
 
 run_ginc_b_sync() {
     (export XDG_CONFIG_HOME="$H_GINC_B/config"
@@ -2198,7 +2231,7 @@ check "32.6 base sync: downloads 5 messages" "fetched\|already\|downloaded" "$SY
 check "32.7 base sync: historyId saved" "5000" "$(cat "$GINC_HISTID_B" 2>/dev/null || echo '')"
 
 kill "$GINC_B1_PID" 2>/dev/null || true
-sleep 0.1
+wait_closed GINC_PORT_B
 
 # Start mock WITH 2 extra messages (messages 6 and 7) available via history
 (cd "$PROJECT_ROOT/build" && \
@@ -2208,7 +2241,7 @@ sleep 0.1
     MOCK_GMAIL_EXTRA_COUNT=2 \
     "$MOCK_GMAIL_BIN") >"$GMAIL_INC_LOG/mock_ginc_b2.log" 2>&1 &
 GINC_B2_PID=$!
-sleep 0.3
+wait_listen GINC_PORT_B2
 
 # Incremental sync: history returns messagesAdded for msgs 6 and 7
 SYNC32D=$(run_ginc_b_sync $GINC_PORT_B2)
@@ -2258,11 +2291,11 @@ run_ginc_c_sync() {
     MOCK_GMAIL_HISTID=9000 \
     "$MOCK_GMAIL_BIN") >"$GMAIL_INC_LOG/mock_ginc_c1.log" 2>&1 &
 GINC_C1_PID=$!
-sleep 0.3
+wait_listen GINC_PORT_C
 run_ginc_c_sync >/dev/null 2>&1
 check "32.12 expired-test setup: historyId saved" "9000" "$(cat "$GINC_HISTID_C" 2>/dev/null || echo '')"
 kill "$GINC_C1_PID" 2>/dev/null || true
-sleep 0.1
+wait_closed GINC_PORT_C
 
 # Start mock with expired history → 404 on /history
 (cd "$PROJECT_ROOT/build" && \
@@ -2272,7 +2305,7 @@ sleep 0.1
     MOCK_GMAIL_HISTORY_EXPIRED=1 \
     "$MOCK_GMAIL_BIN") >"$GMAIL_INC_LOG/mock_ginc_c2.log" 2>&1 &
 GINC_C2_PID=$!
-sleep 0.3
+wait_listen GINC_PORT_C
 
 SYNC32E=$(run_ginc_c_sync)
 # Must have fallen back to full reconcile
@@ -2326,7 +2359,7 @@ run_cs_sync() {
     MOCK_IMAP_COUNT=1 \
     "$MOCK_SERVER_BIN") >"$CS_LOG/mock_cs_a.log" 2>&1 &
 CS_A_PID=$!
-sleep 0.3
+wait_listen CS_PORT
 
 SYNC33A=$(run_cs_sync)
 
@@ -2340,7 +2373,7 @@ SYNC33A2=$(run_cs_sync)
 check "33.3 CONDSTORE same modseq → up to date" "up to date" "$SYNC33A2"
 
 kill "$CS_A_PID" 2>/dev/null || true
-sleep 0.1
+wait_closed CS_PORT
 
 # ── Phase 33b: modseq changed → incremental sync ─────────────────────────
 
@@ -2353,7 +2386,7 @@ sleep 0.1
     MOCK_IMAP_CHANGED_COUNT=1 \
     "$MOCK_SERVER_BIN") >"$CS_LOG/mock_cs_b.log" 2>&1 &
 CS_B_PID=$!
-sleep 0.3
+wait_listen CS_PORT
 
 SYNC33B=$(run_cs_sync)
 # Sync should run (not up to date) and process the change
@@ -2366,7 +2399,7 @@ check "33.6 CONDSTORE sync_state updated to new modseq" "200" \
     "$(cat "$CS_SYNC_STATE" 2>/dev/null || echo '')"
 
 kill "$CS_B_PID" 2>/dev/null || true
-sleep 0.1
+wait_closed CS_PORT
 
 # ── Phase 33c: UIDVALIDITY changed → full resync ─────────────────────────
 
@@ -2378,7 +2411,7 @@ sleep 0.1
     MOCK_IMAP_COUNT=1 \
     "$MOCK_SERVER_BIN") >"$CS_LOG/mock_cs_c.log" 2>&1 &
 CS_C_PID=$!
-sleep 0.3
+wait_listen CS_PORT
 
 SYNC33C=$(run_cs_sync)
 check "33.7 UIDVALIDITY changed → resync warning" "UIDVALIDITY" "$SYNC33C"
@@ -2399,7 +2432,7 @@ CS_SYNC_STATE_D="$H_CS_D/.local/share/email-cli/accounts/$CS_ACCT/sync_state/INB
     MOCK_IMAP_COUNT=1 \
     "$MOCK_SERVER_BIN") >"$PROJECT_ROOT/build/tests/functional/work-$$/mock_cs_d.log" 2>&1 &
 CS_D_PID=$!
-sleep 0.3
+wait_listen CS_PORT
 
 SYNC33D=$( (export HOME="$H_CS_D"
      unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
@@ -3881,7 +3914,7 @@ GMAIL_MODE=1
 GMAIL_REFRESH_TOKEN=faketoken60
 GCFG60
 
-sleep 0.5
+wait_listen GMAIL60_PORT
 
 # Initial sync to populate local message store
 (export XDG_CONFIG_HOME="$H_GMAIL60/config"
@@ -4037,7 +4070,7 @@ run_reconc_sync() {
      "$BIN_DIR/email-sync" "$@" 2>&1 || true)
 }
 
-sleep 0.5
+wait_listen GMAIL_RECONC_PORT
 
 # Initial sync to populate local store
 SYNC62_INIT=$(run_reconc_sync)
@@ -4102,7 +4135,7 @@ run_label_cli() {
      "$BIN_DIR/email-cli" "$ACCT_LABEL" --batch "$@" 2>&1 || true)
 }
 
-sleep 0.5
+wait_listen GMAIL_LABEL_PORT
 
 # 63.1-63.2: create-label
 CL63=$( run_label_cli create-label MyNewLabel )
@@ -4142,7 +4175,7 @@ H_QRESYNC="./build/tests/functional/work-$$/homes/qresync64-$$"
 ACCT_QRESYNC="qresync64@test.local"
 make_home "$H_QRESYNC" "$ACCT_QRESYNC" "$QRESYNC_PORT"
 
-sleep 0.5
+wait_listen QRESYNC_PORT
 
 # First sync: establishes UIDVALIDITY + HIGHESTMODSEQ baseline
 QR64_SYNC1=$( (export HOME="$H_QRESYNC"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
@@ -4295,7 +4328,7 @@ run_expired_sync() {
      "$BIN_DIR/email-sync" 2>&1 || true)
 }
 
-sleep 0.5
+wait_listen GMAIL_EXPIRED_PORT
 
 # First sync
 SYNC68_1=$(run_expired_sync)
@@ -4443,7 +4476,7 @@ H_VANISHED="./build/tests/functional/work-$$/homes/vanished71-$$"
 ACCT_VANISHED="vanished71@test.local"
 make_home "$H_VANISHED" "$ACCT_VANISHED" "$VANISHED_PORT"
 
-sleep 0.5
+wait_listen VANISHED_PORT
 
 # First sync: establishes UIDVALIDITY + HIGHESTMODSEQ baseline (no QRESYNC yet)
 VAN71_SYNC1=$( (export HOME="$H_VANISHED"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
@@ -5227,7 +5260,7 @@ echo "Starting mock IMAP for Phase 80.1 (dmarc=pass, port $DMARC_PORT)..."
     MOCK_IMAP_COUNT=3 MOCK_IMAP_DMARC=pass \
     "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
 DMARC_PID=$!
-sleep 0.3
+wait_listen DMARC_PORT
 make_home "$H_DMARC" "dmarc@example.com" "$DMARC_PORT"
 export HOME="$H_DMARC"
 OUT80_1=$(HOME="$H_DMARC" "$BIN_DIR/email-cli" list 2>&1 || true)
@@ -5238,7 +5271,7 @@ OUT80_2=$(HOME="$H_DMARC" "$BIN_DIR/email-cli" list 2>&1 || true)
 check "80.2 dmarc=pass cached: status still shows v" "N----v" "$OUT80_2"
 
 kill "$DMARC_PID" 2>/dev/null; wait "$DMARC_PID" 2>/dev/null || true
-sleep 0.2
+wait_closed DMARC_PORT
 
 # 80.3: dmarc=fail — status column shows 'x'
 echo "Starting mock IMAP for Phase 80.3 (dmarc=fail, port $DMARC_PORT)..."
@@ -5246,13 +5279,13 @@ echo "Starting mock IMAP for Phase 80.3 (dmarc=fail, port $DMARC_PORT)..."
     MOCK_IMAP_COUNT=3 MOCK_IMAP_DMARC=fail \
     "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
 DMARC_PID=$!
-sleep 0.3
+wait_listen DMARC_PORT
 make_home "$H_DMARC" "dmarc@example.com" "$DMARC_PORT"
 export HOME="$H_DMARC"
 OUT80_3=$(HOME="$H_DMARC" "$BIN_DIR/email-cli" list 2>&1 || true)
 check "80.3 dmarc=fail: status shows x" "N----x" "$OUT80_3"
 kill "$DMARC_PID" 2>/dev/null; wait "$DMARC_PID" 2>/dev/null || true
-sleep 0.2
+wait_closed DMARC_PORT
 
 # 80.4: no Authentication-Results — last status char is '-'
 echo "Starting mock IMAP for Phase 80.4 (no DMARC, port $DMARC_PORT)..."
@@ -5260,7 +5293,7 @@ echo "Starting mock IMAP for Phase 80.4 (no DMARC, port $DMARC_PORT)..."
     MOCK_IMAP_COUNT=3 \
     "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
 DMARC_PID=$!
-sleep 0.3
+wait_listen DMARC_PORT
 make_home "$H_DMARC" "dmarc@example.com" "$DMARC_PORT"
 export HOME="$H_DMARC"
 OUT80_4=$(HOME="$H_DMARC" "$BIN_DIR/email-cli" list 2>&1 || true)
@@ -5365,7 +5398,7 @@ echo "Starting mock IMAP for Phase 83 (port $TRASH83_PORT)..."
 (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$TRASH83_PORT MOCK_IMAP_COUNT=2 \
     "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
 TRASH83_PID=$!
-sleep 0.3
+wait_listen TRASH83_PORT
 
 # 83.1-83.3: TRASH_FOLDER=Trash config loaded → list Trash folder via mock IMAP
 H_TRASH83="./build/tests/functional/work-$$/homes/trash83"
@@ -5786,7 +5819,7 @@ echo "Starting mock Gmail API server C (port $GMAIL_PORT_C, 30 messages)..."
     MOCK_GMAIL_SUBJECT_PREFIX="CronMail-" \
     "$MOCK_GMAIL_BIN") >"$WORK_DIR/mock_gmail_cron.log" 2>&1 &
 GMAIL_SERVER_C_PID=$!
-sleep 0.5
+wait_listen GMAIL_PORT_C
 
 H_F87="./build/tests/functional/work-$$/homes/f87"
 rm -rf "./build/tests/functional/work-$$/homes/f87"
@@ -6200,7 +6233,7 @@ echo "Starting mock IMAP server with password enforcement (port $AUTH_PORT)..."
     MOCK_IMAP_SUBJECT="AuthMsg" "$MOCK_SERVER_BIN") \
     >"$WORK_DIR/mock_auth.log" 2>&1 &
 AUTH_SERVER_PID=$!
-sleep 0.5
+wait_listen AUTH_PORT
 
 H_F91="./build/tests/functional/work-$$/homes/f91-$$"
 case "$H_F91" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F91 path" >&2; exit 1 ;; esac
@@ -6325,7 +6358,7 @@ LOG94="$PROJECT_ROOT/build/tests/functional/work-$$/mock_sigpipe.log"
 (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$P94 MOCK_IMAP_COUNT=250 \
     "$MOCK_SERVER_BIN") >"$LOG94" 2>&1 &
 PID94=$!
-sleep 1
+wait_listen P94
 kill -0 "$PID94" && ALIVE94=yes || ALIVE94=no
 check "94.1 the mock started" "^yes$" "$ALIVE94"
 # Fifteen clients log in, ask for a large response and are cut off by timeout
@@ -6341,6 +6374,8 @@ for c in $CLIENTS94; do
     # Status 124 (timeout) is the expected end of such a client.
     wait "$c" && W94=0 || W94=$?
 done
+# kept: a fixed grace period; the check below is that the mock is still alive
+# some time after the cut-off clients ended, and no event marks "nothing happened"
 sleep 1
 kill -0 "$PID94" && ALIVE94=yes || ALIVE94=no
 check "94.2 the mock is still running" "^yes$" "$ALIVE94"
@@ -6359,7 +6394,7 @@ if phase_wanted 95; then
 echo ""
 echo "=== Phase 95: no mock server outlives the run ==="
 cleanup_mocks
-sleep 1
+wait_closed IMAP1_PORT IMAP2_PORT IMAP3_PORT IMAP200_PORT IMAP250_PORT
 LISTEN95=$(ss -ltn)
 check "95.1 the listener list is readable" "^State" "$LISTEN95"
 for p95 in $IMAP1_PORT $IMAP2_PORT $IMAP3_PORT $IMAP200_PORT $IMAP250_PORT; do
@@ -6385,7 +6420,7 @@ for kind97 in gmail smtp; do
     LOG97="$PROJECT_ROOT/build/tests/functional/work-$$/mock_port97_$kind97"
     (cd "$PROJECT_ROOT/build" && env "$ENV97" "$BIN97") >"$LOG97.a.log" 2>&1 &
     A97=$!
-    sleep 1
+    wait_listen P97
     kill -0 "$A97" && A97UP=yes || A97UP=no
     check "97.1 first $kind97 mock is up" "^yes$" "$A97UP"
     check "97.2 $kind97 mock listens on loopback only" "127.0.0.1:$P97 " "$(ss -ltn)"
@@ -6442,7 +6477,7 @@ run_gr98_sync() {
 
 count_gr98() { awk -v pat="$1" '$0 ~ pat { n++ } END { print n + 0 }' "$GR98_LOG"; }
 
-sleep 0.5
+wait_listen GR98_PORT
 GR98_FIRST=$( run_gr98_sync )
 check "98.0 first Gmail sync succeeds" "exit-code=0" "$GR98_FIRST"
 
@@ -6539,7 +6574,7 @@ run_gf99() {
      "$BIN_DIR/$bin" "$@" 2>&1 && echo "exit-code=0" || echo "exit-code=$?")
 }
 
-sleep 0.5
+wait_listen GF99_PORT
 GF99_FIRST=$( run_gf99 $GF99_PORT email-sync )
 check "99.0 first Gmail sync succeeds" "exit-code=0" "$GF99_FIRST"
 
@@ -6680,7 +6715,7 @@ GMAIL113_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_gmail_113.log"
 (MOCK_GMAIL_PORT=$GMAIL113_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="f113@gmail.com" \
     "$MOCK_GMAIL_BIN") >"$GMAIL113_LOG" 2>&1 &
 GMAIL113_PID=$!
-sleep 1
+wait_listen GMAIL113_PORT
 
 H_F113="./build/tests/functional/work-$$/homes/f113-$$"
 case "$H_F113" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F113 path" >&2; exit 1 ;; esac
@@ -6870,13 +6905,13 @@ IMAP114_PORT_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_114.log
 (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP114_PORT MOCK_IMAP_SUBJECT="Phase114Msg" \
     "$MOCK_SERVER_BIN") >"$IMAP114_PORT_LOG" 2>&1 &
 IMAP114_PORT_PID=$!
-sleep 1
+wait_listen IMAP114_PORT
 # its own SMTP mock: the shared one may be gone by the time this phase runs
 alloc_port SMTP114_PORT
 SMTP114_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp_114.log"
 (cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP114_PORT "$MOCK_SMTP_BIN") >"$SMTP114_LOG" 2>&1 &
 SMTP114_PID=$!
-sleep 1
+wait_listen SMTP114_PORT
 H_F114="./build/tests/functional/work-$$/homes/f114-$$"
 case "$H_F114" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe H_F114 path" >&2; exit 1 ;; esac
 rm -rf "./build/tests/functional/work-$$/homes/f114-$$"
@@ -6977,7 +7012,7 @@ IMAP116_PORT_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_imap_116.log
 (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$IMAP116_PORT MOCK_IMAP_SUBJECT="Phase116Msg" \
     "$MOCK_SERVER_BIN") >"$IMAP116_PORT_LOG" 2>&1 &
 IMAP116_PORT_PID=$!
-sleep 1
+wait_listen IMAP116_PORT
 mk116_home() {      # mk116_home <dir> <account...>: homes with IMAP accounts on mock 1
     local dir="$1"; shift
     case "$dir" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe path $dir" >&2; exit 1 ;; esac
@@ -7240,7 +7275,7 @@ IMAP122_PID=$!
 (MOCK_GMAIL_PORT=$GMAIL122_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="json@gmail.example" \
     "$MOCK_GMAIL_BIN") >"$GMAIL122_LOG" 2>&1 &
 GMAIL122_PID=$!
-sleep 1
+wait_listen IMAP122_PORT GMAIL122_PORT
 
 H122="./build/tests/functional/work-$$/homes/f122-$$"
 case "$H122" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe path $H122" >&2; exit 1 ;; esac
@@ -7364,7 +7399,7 @@ IMAP124_PID=$!
 (MOCK_GMAIL_PORT=$GMAIL124_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="w124@gmail.example" \
     "$MOCK_GMAIL_BIN") >"$GMAIL124_LOG" 2>&1 &
 GMAIL124_PID=$!
-sleep 1
+wait_listen IMAP124_PORT GMAIL124_PORT
 
 H124="./build/tests/functional/work-$$/homes/f124-$$"
 case "$H124" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe path $H124" >&2; exit 1 ;; esac
@@ -7480,7 +7515,7 @@ IMAP132_PID=$!
 (MOCK_GMAIL_PORT=$GMAIL132_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="w132@gmail.example" \
     "$MOCK_GMAIL_BIN") >"$GMAIL132_LOG" 2>&1 &
 GMAIL132_PID=$!
-sleep 1
+wait_listen IMAP132_PORT GMAIL132_PORT
 
 # The home is new for this run (the work directory carries the shell's PID).
 H132="./build/tests/functional/work-$$/homes/f132-$$"
@@ -7573,7 +7608,7 @@ IMAP133_PID=$!
 (cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP133_PORT \
     "$MOCK_SMTP_BIN") >"$SMTP133_LOG" 2>&1 &
 SMTP133_PID=$!
-sleep 1
+wait_listen IMAP133_PORT SMTP133_PORT
 
 H133="./build/tests/functional/work-$$/homes/f133-$$"
 mkdir -p "$H133/.config/email-cli/accounts/w133@example.org"
@@ -7684,7 +7719,7 @@ SMTP134_LOG="$PROJECT_ROOT/build/tests/functional/work-$$/mock_smtp_134.log"
 IMAP134_PID=$!
 (cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP134_PORT "$MOCK_SMTP_BIN") >"$SMTP134_LOG" 2>&1 &
 SMTP134_PID=$!
-sleep 1
+wait_listen IMAP134_PORT SMTP134_PORT
 
 H134="./build/tests/functional/work-$$/homes/f134-$$"
 mkdir -p "$H134/.config/email-cli/accounts/w134@example.org"
@@ -7768,7 +7803,7 @@ IMAP140_PID=$!
 GMAIL140_PID=$!
 (cd "$PROJECT_ROOT/build" && MOCK_SMTP_PORT=$SMTP140_PORT "$MOCK_SMTP_BIN") >"$SMTP140_LOG" 2>&1 &
 SMTP140_PID=$!
-sleep 1
+wait_listen IMAP140_PORT GMAIL140_PORT SMTP140_PORT
 
 H140="./build/tests/functional/work-$$/homes/f140"
 mkdir -p "$H140/.config/email-cli/accounts/w140@example.org" "$H140/.config/email-cli/accounts/w140@gmail.example"
@@ -7929,7 +7964,7 @@ IMAP150B_PID=$!
 (MOCK_GMAIL_PORT=$GMAIL150_PORT MOCK_GMAIL_COUNT=3 MOCK_GMAIL_EMAIL="cols@gmail.example" \
     "$MOCK_GMAIL_BIN") >"$GMAIL150_LOG" 2>&1 &
 GMAIL150_PID=$!
-sleep 1
+wait_listen IMAP150_PORT IMAP150B_PORT GMAIL150_PORT
 
 H150="./build/tests/functional/work-$$/homes/f150-$$"
 case "$H150" in ./build/tests/functional/work-$$/homes/*) ;; *) echo "ERROR: unsafe path $H150" >&2; exit 1 ;; esac

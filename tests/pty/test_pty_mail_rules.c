@@ -126,6 +126,7 @@ static void reset_all_state(void) {
     /* pty_close() only SIGTERMs the child: a previous email-sync may still be
      * flushing its manifest.  Wiping the store while that write is in flight
      * lets stale flags reappear, so give it a moment to finish first. */
+    /* kept: pty_close() does not reap the child, so no event says the flush ended (EMAIL-321) */
     usleep(500000);
     char store[600];
     snprintf(store, sizeof(store), "%s/.local/share/email-cli", g_test_home);

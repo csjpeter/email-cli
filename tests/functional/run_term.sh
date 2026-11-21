@@ -47,7 +47,7 @@ gcc "$ROOT/tests/functional/free_port.c"        -o "$WORK/mocks/free_port" || ex
 PORT=$("$WORK/mocks/free_port") || exit 1
 ( cd "$ROOT/build" && MOCK_IMAP_PORT=$PORT "$WORK/mocks/imap" ) >"$WORK/ports/imap.log" 2>&1 &
 PIDS="$PIDS $!"
-sleep 1
+for _i in $(seq 1 100); do ss -ltn "sport = :$PORT" | grep -q LISTEN && break; sleep 0.1; done  # wait for the mock to listen (EMAIL-321)
 cat > "$WORK/home/.config/email-cli/accounts/testuser/config.ini" <<INI
 EMAIL_HOST=imaps://localhost:$PORT
 EMAIL_USER=testuser@example.com

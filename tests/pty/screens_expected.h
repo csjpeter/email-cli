@@ -4252,62 +4252,6 @@ static const char *const sty_review_long_to[] = {
 };
 static const int cur_review_long_to[3] = { 23, 99, 1 };
 
-static const char *const exp_review_attach_ask[] = {
-    "  Add Attachment",
-    "",
-    "  Path:",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    " Tab complete  ^O browse  Enter add  Esc cancel",
-    NULL
-};
-static const char *const sty_review_attach_ask[] = {
-    "rrrrrrrrrrrrrrrr                                                                                    ",
-    "                                                                                                    ",
-    "  bbbbb                                                                                             ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "                                                                                                    ",
-    "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
-    NULL
-};
-static const int cur_review_attach_ask[3] = { 2, 8, 1 };
-
 static const char *const exp_review_attach_removed[] = {
     "  Review: Message",
     "",

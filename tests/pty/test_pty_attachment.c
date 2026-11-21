@@ -670,6 +670,21 @@ static void test_review_e_reopens_header_dialog(void)
 }
 
 
+/* The chooser's field starts with the directory it shows (the current one for
+ * the first attachment, EMAIL-309): type the path relative to it. */
+static void type_first_attach(PtySession *s, const char *abs)
+{
+    char cwd[700];
+    if (getcwd(cwd, sizeof(cwd))) {
+        size_t n = strlen(cwd);
+        if (strncmp(abs, cwd, n) == 0 && abs[n] == '/') {
+            pty_send_str(s, abs + n + 1);
+            return;
+        }
+    }
+    pty_send_str(s, abs);
+}
+
 /* EMAIL-115: editing the headers from the review keeps the attachments, shows
  * them in the dialog, and takes the changed values back to the review. */
 static void test_review_e_applies_changes(void)
@@ -679,9 +694,11 @@ static void test_review_e_applies_changes(void)
     ASSERT(s != NULL, "edit applies: review reached");
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
-    pty_send_str(s, g_attach_file2);
+    pty_settle(s, 400);
+    type_first_attach(s, g_attach_file2);
+    pty_settle(s, 400);                         /* the listing is asynchronous */
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Attach:  notes.txt", WAIT_MS);
 
     pty_send_str(s, "e");
     ASSERT_WAIT_FOR(s, "Edit Message", WAIT_MS);
@@ -729,80 +746,97 @@ static void test_review_a_opens_attach_picker(void)
     pty_settle(s, 200);
     /* Picker overlay visible */
     ASSERT_SCREEN_CONTAINS(s, "Attach");
-    pty_send_str(s, g_attach_file2);
+    type_first_attach(s, g_attach_file2);
+    pty_settle(s, 400);                         /* the listing is asynchronous */
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Attach:  notes.txt", WAIT_MS);
     pty_send_str(s, "q");
     pty_send_str(s, "y");
     pty_close(s);
 }
 
 
-/* EMAIL-115: the picker of the review screen refuses what cannot be attached,
- * completes a path with Tab, edits with Backspace and gives up with Esc. */
+/* EMAIL-309: [a] opens the file chooser at once (no Path prompt); a directory
+ * is entered, not attached; Esc gives up. */
 static void test_review_picker_errors(void)
 {
     restart_servers();
     PtySession *s = compose_to_review("alice@example.com", "Picker errors");
     ASSERT(s != NULL, "picker errors: review reached");
-    char dir[700];
-    snprintf(dir, sizeof(dir), "%s/attachments", g_test_home);
 
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
-    pty_send_str(s, "/no/such/file.bin");
-    pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "File not found: /no/such/file.bin", WAIT_MS);
-    pty_send_str(s, "x");                       /* typing clears the message */
-    pty_settle(s, 200);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "File not found");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Path:");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);      /* back on the review screen */
+    ASSERT_SCREEN_CONTAINS(s, "(none)");
 
-    pty_send_str(s, "a");
+    pty_send_str(s, "a");                       /* Enter on the empty choice finishes */
     ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
-    pty_send_str(s, dir);
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "Not a file:", WAIT_MS);
-    pty_send_key(s, PTY_KEY_ENTER);             /* the same again: still refused */
-    pty_settle(s, 200);
-    ASSERT_SCREEN_CONTAINS(s, "Not a file:");
+    pty_settle(s, 300);
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
-
-    pty_send_str(s, "a");                       /* an empty path gives up */
-    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
-    pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "(none)");
     pty_send_str(s, "q");
     pty_send_str(s, "y");
     pty_close(s);
 }
 
+/* EMAIL-309: a path with ~ is expanded by the chooser's field; Tab completes. */
 static void test_review_picker_tab_and_backspace(void)
 {
     restart_servers();
     PtySession *s = compose_to_review("alice@example.com", "Picker tab");
     ASSERT(s != NULL, "picker tab: review reached");
-    char prefix[700];
-    snprintf(prefix, sizeof(prefix), "%s/attachments/rep", g_test_home);
 
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
-    pty_send_str(s, prefix);
-    ASSERT_WAIT_FOR(s, "report.pdf", WAIT_MS);  /* the drop-down offers it */
-    pty_send_key(s, PTY_KEY_TAB);               /* Tab takes the first match */
-    pty_settle(s, 200);
-    pty_send_key(s, PTY_KEY_BACK);              /* ... and Backspace edits it */
-    pty_send_str(s, "f");
+    type_first_attach(s, g_attach_file1);
+    pty_settle(s, 400);                         /* the listing is asynchronous */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Attach:  report.pdf", WAIT_MS);
+    pty_send_str(s, "a");                       /* opens where the last one was */
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    pty_send_str(s, "not");
+    pty_settle(s, 400);                         /* the listing is asynchronous */
+    pty_send_key(s, PTY_KEY_TAB);               /* completes to notes.txt */
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "report.pdf");
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");
     pty_send_str(s, "q");
     pty_send_str(s, "y");
     pty_close(s);
 }
 
+/* EMAIL-309: several attachments in turn; the chooser starts where the last
+ * one was, so the bare file name is enough the second time. */
+static void test_review_picker_several(void)
+{
+    restart_servers();
+    PtySession *s = compose_to_review("alice@example.com", "Picker several");
+    ASSERT(s != NULL, "picker several: review reached");
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    type_first_attach(s, g_attach_file1);
+    pty_settle(s, 400);                         /* the listing is asynchronous */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Attach:  report.pdf", WAIT_MS);
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");     /* opened in the last attachment's directory */
+    pty_send_str(s, "notes.txt");
+    pty_settle(s, 400);                         /* the listing is asynchronous */
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "report.pdf");
+    ASSERT_SCREEN_CONTAINS(s, "notes.txt");
+    pty_send_str(s, "q");
+    pty_send_str(s, "y");
+    pty_close(s);
+}
+
+/* EMAIL-309: the ninth attachment is refused with a message on the review. */
 static void test_review_picker_max_attachments(void)
 {
     restart_servers();
@@ -811,18 +845,19 @@ static void test_review_picker_max_attachments(void)
     for (int i = 0; i < 8; i++) {
         pty_send_str(s, "a");
         ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
-        pty_send_str(s, g_attach_file2);
+        if (i == 0) type_first_attach(s, g_attach_file2);
+        else pty_send_str(s, "notes.txt");
+        pty_settle(s, 400);                     /* the listing is asynchronous */
         pty_send_key(s, PTY_KEY_ENTER);
         ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
         pty_settle(s, 100);
     }
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
-    pty_send_str(s, g_attach_file2);
+    pty_send_str(s, "notes.txt");
+    pty_settle(s, 400);                         /* the listing is asynchronous */
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "Max attachments (8) reached", WAIT_MS);
-    pty_send_key(s, PTY_KEY_ESC);
-    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     pty_send_str(s, "q");
     pty_send_str(s, "y");
     pty_close(s);
@@ -858,7 +893,8 @@ static void test_review_d_removes_attachment(void)
     /* Add via [a] */
     pty_send_str(s, "a");
     pty_settle(s, 200);
-    pty_send_str(s, g_attach_file1);
+    type_first_attach(s, g_attach_file1);
+    pty_settle(s, 400);                         /* the listing is asynchronous */
     pty_send_key(s, PTY_KEY_ENTER);
     ASSERT_WAIT_FOR(s, "report.pdf", WAIT_MS);
     /* Remove via the '-' menu */
@@ -887,14 +923,16 @@ static void test_review_help_and_pick_attachment(void)
     ASSERT_SCREEN_CONTAINS(s, "Review");
     pty_send_str(s, "a");
     pty_settle(s, 200);
-    pty_send_str(s, g_attach_file1);
+    type_first_attach(s, g_attach_file1);
+    pty_settle(s, 400);                         /* the listing is asynchronous */
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "report.pdf", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Attach:  report.pdf", WAIT_MS);
     pty_send_str(s, "a");
-    pty_settle(s, 200);
-    pty_send_str(s, g_attach_file2);
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    pty_send_str(s, "notes.txt");
+    pty_settle(s, 400);                         /* the listing is asynchronous */
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     pty_send_str(s, "d");                       /* d does nothing */
     pty_settle(s, 200);
     ASSERT_SCREEN_CONTAINS(s, "report.pdf");
@@ -1059,6 +1097,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_review_a_opens_attach_picker);
     RUN_TEST(test_review_picker_errors);
     RUN_TEST(test_review_picker_tab_and_backspace);
+    RUN_TEST(test_review_picker_several);
     RUN_TEST(test_review_picker_max_attachments);
     RUN_TEST(test_attach_field_max_attachments);
     RUN_TEST(test_review_d_removes_attachment);

@@ -469,6 +469,28 @@ The functional and PTY steps of `manage.sh` run through one queue each:
 - **Timing:** the console lists the seconds and verdict per item and the wall
   time of the step; the verb's wall time goes to `build/timing.log`.
 
+### Proof of the queue (EMAIL-322, commit 9259e05)
+
+Serial run (`MANAGE_JOBS=1`) against parallel runs (8 workers) of the same
+commit; the lists compared are the `suite:` lines of `build/result/<verb>.result`
+(name, verdict, assertions, failed) and the test names in the item logs.
+
+| step       | serial | parallel (par1) | parallel (par2) |
+|------------|--------|-----------------|-----------------|
+| unit       | 350 s  | 358 s, 353 s    | 360 s           |
+| functional | 744 s  | 643 s           | not repeated    |
+| pty        | 3206 s | 985 s           | 980 s           |
+
+- unit, pty: the suite lists, verdicts and assertion counts of serial, par1
+  and par2 are equal (pty: 14 suites, 6094 assertions, 0 failed); the 790
+  test names of the logs are equal in all runs.
+- functional: serial and par1 are equal (owner limit, 2026-11-21: no run may
+  take an hour, so par2 and par3 of the functional and unit steps were not made).
+- No difference was found, so no shared resource needed a new mark.  The
+  marks in use are `tree` (the declared functional scripts) and the unit
+  suites being one item (shared `test-runner` fixture home).
+- The unit item is one item, so its time does not change.
+
 ## Coverage Requirements
 
 `./manage.sh coverage` measures **line coverage of product code only**

@@ -2770,6 +2770,18 @@ ED4=$( RE rules edit --name "Sales" --move-folder "" )
 RE_LIST4=$( RE rules list | awk '/Sales/{f=1;next} /Omega/{f=0} f' )
 check_not "37.40 rules edit --move-folder \"\": folder cleared" "INBOX.Sales" "$RE_LIST4"
 
+# 37.9 a rule is addressed by (name, action) (EMAIL-317)
+RULES_INI=$(find "$H_RW/.config/email-cli" -name rules.ini | head -n 1)
+printf '[rule "Omega" action 2]\nwhen = from:*@group2.test\nthen-add-label = G2\n' >> "$RULES_INI"
+RE rules edit --name "Omega" --action 2 --add-label G2B > /dev/null
+check     "37.41 rules edit --action 2: group 2 changed"    "G2B" "$(cat "$RULES_INI")"
+check_not "37.42 rules edit --action 2: group 1 untouched"  "G2B.*O1\|O1.*G2B" "$(tr '\n' ' ' < "$RULES_INI" | sed 's/\[rule "Omega" action 2\].*//')"
+check     "37.43 rules edit --action 2: header keeps the action" 'rule "Omega" action 2' "$(cat "$RULES_INI")"
+check     "37.44 rules edit --action 9: not found" "No rule named" "$( RE rules edit --name "Omega" --action 9 --add-label X )"
+RE rules remove --name "Omega" --action 2 > /dev/null
+check_not "37.45 rules remove --action 2: group 2 gone"     "action 2" "$(cat "$RULES_INI")"
+check     "37.46 rules remove --action 2: group 1 kept"     'rule "Omega"' "$(cat "$RULES_INI")"
+
 rm -rf "./build/tests/functional/work-$$/homes/rw-$$"
 
 fi

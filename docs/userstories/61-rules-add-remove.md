@@ -61,3 +61,10 @@ email-cli rules remove --name "GitHub"
 * US-57: rules list
 * US-59: rules apply
 * US-62: TUI rules editor
+
+## Addressing a rule (EMAIL-317)
+
+A rule is identified by the pair (name, action group), not by its name alone.
+`rules edit` and `rules remove` take `--action <n>` (default 1); the TUI edit
+keeps the rule's action group; saving refuses two rules with the same
+(name, action) pair; the operation history pairs rules by that pair.

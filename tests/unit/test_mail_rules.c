@@ -612,6 +612,88 @@ static void test_rules_save_load_account(void) {
     if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
 }
 
+static void test_rules_find_by_name_and_action(void) {
+    MailRules *r = make_rules();
+    add_rule(r, "x")->action_index = 0;
+    add_rule(r, "x")->action_index = 2;
+    add_rule(r, "y");
+    ASSERT(mail_rules_find(r, "x", 0) == 0, "find: action 0 is the default group");
+    ASSERT(mail_rules_find(r, "x", 1) == 0, "find: action 1 is the default group");
+    ASSERT(mail_rules_find(r, "x", 2) == 1, "find: action 2 hits the second rule");
+    ASSERT(mail_rules_find(r, "x", 3) == -1, "find: unknown action");
+    ASSERT(mail_rules_find(r, "nope", 1) == -1, "find: unknown name");
+    mail_rules_free(r);
+}
+
+static void test_rules_save_refuses_duplicates(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    setenv("HOME", TP("email-cli-rules-dup-test"), 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    MailRules *r = make_rules();
+    add_rule(r, "dup");
+    add_rule(r, "dup");
+    ASSERT(mail_rules_save("dup@save.test", r) != 0, "save: duplicate (name, action) refused");
+    ASSERT(mail_rules_load("dup@save.test") == NULL, "save: nothing written on refusal");
+    r->rules[1].action_index = 2;
+    ASSERT(mail_rules_save("dup@save.test", r) == 0, "save: same name, other action is fine");
+    mail_rules_free(r);
+
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
+}
+
+static void test_rules_history_pairs_action_group(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    char *old_data = getenv("XDG_DATA_HOME");
+    setenv("HOME", TP("email-cli-rules-hist-test"), 1);
+    unsetenv("XDG_CONFIG_HOME");
+    unsetenv("XDG_DATA_HOME");
+
+    MailRules *r = make_rules();
+    add_rule(r, "x")->when = strdup("from:one@h.test");
+    MailRule *b = add_rule(r, "x");
+    b->action_index = 2;
+    b->when = strdup("from:two@h.test");
+    ASSERT(mail_rules_save("hist@save.test", r) == 0, "history: save");
+    free(r->rules[1].when);
+    r->rules[1].when = strdup("from:three@h.test");
+    ASSERT(mail_rules_save("hist@save.test", r) == 0, "history: edit of group 2 saved");
+    mail_rules_free(r);
+
+    MailRules *l = mail_rules_load("hist@save.test");
+    ASSERT(l && l->count == 2, "history: both rules kept");
+    if (l) {
+        ASSERT(strcmp(l->rules[0].when, "from:one@h.test") == 0, "history: rule 1 untouched");
+        ASSERT(l->rules[1].action_index == 2, "history: action index kept");
+        mail_rules_free(l);
+    }
+
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/.local/share/email-cli/history.tsv", getenv("HOME"));
+    FILE *fp = fopen(path, "r");
+    ASSERT(fp != NULL, "history: file exists");
+    if (fp) {
+        char line[4096];
+        int edit2 = 0, edit1 = 0;
+        while (fgets(line, sizeof(line), fp)) {
+            if (strstr(line, "rule x action 2") && strstr(line, "edit")
+                && strstr(line, "two@h.test") && strstr(line, "three@h.test")) edit2 = 1;
+            if (strstr(line, "rule x\t") && strstr(line, "edit")
+                && strstr(line, "three@h.test")) edit1 = 1;
+        }
+        fclose(fp);
+        ASSERT(edit2, "history: the edit of group 2 is recorded as group 2 text to group 2 text");
+        ASSERT(!edit1, "history: the edit is not paired with rule 1");
+    }
+
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
+    if (old_data) setenv("XDG_DATA_HOME", old_data, 1);
+}
+
 /* ── Registration ────────────────────────────────────────────────── */
 
 void test_mail_rules(void) {
@@ -639,4 +721,7 @@ void test_mail_rules(void) {
     RUN_TEST(test_rules_space_in_glob_fires);
     RUN_TEST(test_rules_then_move_folder);
     RUN_TEST(test_rules_save_load_account);
+    RUN_TEST(test_rules_find_by_name_and_action);
+    RUN_TEST(test_rules_save_refuses_duplicates);
+    RUN_TEST(test_rules_history_pairs_action_group);
 }

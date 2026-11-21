@@ -82,8 +82,8 @@ email-cli forward 42 --to a@example.org [--cc B] [--body NOTE] [--folder F]   # 
 email-cli archive 42 [--folder F]  # IMAP: to Archive folder; Gmail: removes labels, marks read
 email-cli create-folder NAME | delete-folder NAME          # IMAP
 email-cli create-label NAME | delete-label ID | add-label 42 LABEL | remove-label 42 LABEL   # Gmail
-email-cli rules list | rules apply [--dry-run] [--verbose] | rules remove --name N | rules check   # check lists every problem of the rules files
-email-cli rules edit --name N [--new-name M] [--if-from G] [--if-subject G] [--if-to G] [--if-label G] \
+email-cli rules list | rules apply [--dry-run] [--verbose] | rules remove --name N [--action K] | rules check   # check lists every problem of the rules files
+email-cli rules edit --name N [--action K] [--new-name M] [--if-from G] [--if-subject G] [--if-to G] [--if-label G] \
     [--add-label L] [--remove-label L] [--move-folder F]   # changes only what is given
 email-cli rules add --name N [--if-from G] [--if-subject G] [--if-to G] [--if-label G] [--match-all] \
     [--add-label L] [--remove-label L] [--move-folder F]   # a condition or --match-all is required

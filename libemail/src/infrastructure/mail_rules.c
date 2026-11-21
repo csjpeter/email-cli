@@ -259,11 +259,38 @@ static void rule_object(const MailRule *r, char *buf, size_t size) {
         snprintf(buf, size, "rule %s", r->name ? r->name : "");
 }
 
-static int rules_find(const MailRules *rs, const char *object) {
+/** Index of the @p nth (0-based) rule whose history object is @p object, or -1. */
+static int rules_find_nth(const MailRules *rs, const char *object, int nth) {
     char o[1024];
     for (int i = 0; rs && i < rs->count; i++) {
         rule_object(&rs->rules[i], o, sizeof(o));
-        if (strcmp(o, object) == 0) return i;
+        if (strcmp(o, object) == 0 && nth-- == 0) return i;
+    }
+    return -1;
+}
+
+static int rules_find(const MailRules *rs, const char *object) {
+    return rules_find_nth(rs, object, 0);
+}
+
+/** How many rules before index @p upto share the history object of rule @p upto. */
+static int rules_occurrence(const MailRules *rs, int upto) {
+    char a[1024], b[1024];
+    int n = 0;
+    rule_object(&rs->rules[upto], a, sizeof(a));
+    for (int i = 0; i < upto; i++) {
+        rule_object(&rs->rules[i], b, sizeof(b));
+        if (strcmp(a, b) == 0) n++;
+    }
+    return n;
+}
+
+int mail_rules_find(const MailRules *rules, const char *name, int action) {
+    if (action < 1) action = 1;
+    for (int i = 0; rules && name && i < rules->count; i++) {
+        int a = rules->rules[i].action_index < 1 ? 1 : rules->rules[i].action_index;
+        if (rules->rules[i].name && strcmp(rules->rules[i].name, name) == 0 && a == action)
+            return i;
     }
     return -1;
 }
@@ -275,7 +302,7 @@ static void rules_record_diff(const char *account, const MailRules *before,
     for (int i = 0; before && i < before->count; i++) {
         const MailRule *o = &before->rules[i];
         rule_object(o, obj, sizeof(obj));
-        int j = rules_find(after, obj);
+        int j = rules_find_nth(after, obj, rules_occurrence(before, i));
         char *ot = mail_rule_text(o);
         char *nt = j >= 0 ? mail_rule_text(&after->rules[j]) : NULL;
         if (ot && j < 0) {
@@ -293,7 +320,7 @@ static void rules_record_diff(const char *account, const MailRules *before,
     for (int j = 0; j < after->count; j++) {
         const MailRule *n = &after->rules[j];
         rule_object(n, obj, sizeof(obj));
-        if (rules_find(before, obj) >= 0) continue;
+        if (rules_find_nth(before, obj, rules_occurrence(after, j)) >= 0) continue;
         char *nt = mail_rule_text(n);
         snprintf(idx, sizeof(idx), "%d", j);
         OpRecord rec = { account, "rule", obj, "add", "", nt, idx, OPH_REVERTABLE, 0 };
@@ -364,6 +391,18 @@ out:
 int mail_rules_save(const char *account_name, const MailRules *rules) {
     RAII_STRING char *path = rules_path(account_name);
     if (!path) return -1;
+
+    /* A rule is addressed by (name, action): a duplicate pair is refused. */
+    for (int i = 0; i < rules->count; i++) {
+        int j = mail_rules_find(rules, rules->rules[i].name,
+                                rules->rules[i].action_index);
+        if (j >= 0 && j != i) {
+            fprintf(stderr, "Error: more than one rule is named \"%s\" with action %d; "
+                    "the rules were not saved.\n", rules->rules[i].name ? rules->rules[i].name : "",
+                    rules->rules[i].action_index < 1 ? 1 : rules->rules[i].action_index);
+            return -1;
+        }
+    }
 
     /* Ensure directory exists */
     {

@@ -271,6 +271,7 @@ static void help_rules_edit(void) {
         "\n"
         "Options:\n"
         "  --name <name>       Exact name of the rule to edit (required)\n"
+        "  --action <n>        Action group of the rule (default 1)\n"
         "  --account <email>   Account of the rule (required if multiple)\n"
         "  --help, -h          Show this help message\n"
         "\n"
@@ -288,6 +289,7 @@ static void help_rules_remove(void) {
         "\n"
         "Options:\n"
         "  --name <name>       Exact name of the rule to remove (required)\n"
+        "  --action <n>        Action group of the rule (default 1)\n"
         "  --account <email>   Account to remove rule from (required if multiple)\n"
         "  --help, -h          Show this help message\n"
         "\n"
@@ -2688,9 +2690,11 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(subcmd, "remove") == 0) {
             /* rules remove --name <name> */
             const char *rule_name = NULL;
+            int rule_action = 1;
             for (int i = subcmd_idx + 1; i < argc; i++) {
                 if (strcmp(argv[i], "--help")    == 0 ||
                     strcmp(argv[i], "-h")         == 0) { help_rules_remove(); return EXIT_SUCCESS; }
+                if (strcmp(argv[i], "--action")  == 0 && i+1 < argc) { rule_action = atoi(argv[++i]); continue; }
                 if (strcmp(argv[i], "--batch")   == 0) continue;
                 if (strcmp(argv[i], "--account") == 0) { i++; continue; }
                 if (strcmp(argv[i], "--name")    == 0 && i+1 < argc) { rule_name = argv[++i]; continue; }
@@ -2738,15 +2742,10 @@ int main(int argc, char *argv[]) {
                     result = -1;
                     goto rules_done;
                 }
-                int found = -1;
-                for (int r = 0; r < rules->count; r++) {
-                    if (rules->rules[r].name &&
-                        strcmp(rules->rules[r].name, rule_name) == 0) {
-                        found = r; break;
-                    }
-                }
+                int found = mail_rules_find(rules, rule_name, rule_action);
                 if (found < 0) {
-                    fprintf(stderr, "Error: No rule named \"%s\" found.\n", rule_name);
+                    fprintf(stderr, "Error: No rule named \"%s\" with action %d found.\n",
+                            rule_name, rule_action < 1 ? 1 : rule_action);
                     mail_rules_free(rules);
                     result = -1;
                     goto rules_done;
@@ -2778,6 +2777,7 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(subcmd, "edit") == 0) {
             /* rules edit --name <name> [--new-name N] [conditions] [actions] */
             const char *rule_name = NULL, *new_name = NULL;
+            int rule_action = 1;
             const char *if_from = NULL, *if_subject = NULL, *if_to = NULL, *if_label = NULL;
             const char *move_folder = NULL;
             const char *add_labels[MAIL_RULE_MAX_LABELS];
@@ -2788,6 +2788,7 @@ int main(int argc, char *argv[]) {
             for (int i = subcmd_idx + 1; i < argc; i++) {
                 if (strcmp(argv[i], "--help")    == 0 ||
                     strcmp(argv[i], "-h")         == 0) { help_rules_edit(); return EXIT_SUCCESS; }
+                if (strcmp(argv[i], "--action")  == 0 && i+1 < argc) { rule_action = atoi(argv[++i]); continue; }
                 if (strcmp(argv[i], "--batch")   == 0) continue;
                 if (strcmp(argv[i], "--account") == 0) { i++; continue; }
                 if (strcmp(argv[i], "--name")         == 0 && i+1 < argc) { rule_name  = argv[++i]; continue; }
@@ -2863,27 +2864,20 @@ int main(int argc, char *argv[]) {
                     result = -1;
                     goto rules_done;
                 }
-                int found = -1;
-                for (int r = 0; r < rules->count; r++) {
-                    if (rules->rules[r].name &&
-                        strcmp(rules->rules[r].name, rule_name) == 0) { found = r; break; }
-                }
+                int found = mail_rules_find(rules, rule_name, rule_action);
                 if (found < 0) {
-                    fprintf(stderr, "Error: No rule named \"%s\" found.\n", rule_name);
+                    fprintf(stderr, "Error: No rule named \"%s\" with action %d found.\n",
+                            rule_name, rule_action < 1 ? 1 : rule_action);
                     mail_rules_free(rules);
                     result = -1;
                     goto rules_done;
                 }
-                if (new_name && strcmp(new_name, rule_name) != 0) {
-                    for (int r = 0; r < rules->count; r++) {
-                        if (rules->rules[r].name &&
-                            strcmp(rules->rules[r].name, new_name) == 0) {
-                            fprintf(stderr, "Error: A rule named \"%s\" already exists.\n", new_name);
-                            mail_rules_free(rules);
-                            result = -1;
-                            goto rules_done;
-                        }
-                    }
+                if (new_name && strcmp(new_name, rule_name) != 0 &&
+                    mail_rules_find(rules, new_name, rule_action) >= 0) {
+                    fprintf(stderr, "Error: A rule named \"%s\" already exists.\n", new_name);
+                    mail_rules_free(rules);
+                    result = -1;
+                    goto rules_done;
                 }
                 MailRule *er = &rules->rules[found];
                 if (new_name) { free(er->name); er->name = strdup(new_name); }

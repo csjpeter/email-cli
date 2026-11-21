@@ -121,6 +121,11 @@ void history_set_backend(const HistoryBackend *b) {
     g_backend = b ? b : &g_default;
 }
 
+int history_move_back(const Config *cfg, const char *msgid, const char *from,
+                      const char *to, char *refusal, size_t size) {
+    return g_backend->move_back(cfg, msgid, from, to, refusal, size);
+}
+
 /* ── Recording ────────────────────────────────────────────────────────── */
 
 static const char *acct(const Config *cfg) {
@@ -587,6 +592,16 @@ int history_revert(unsigned long id, char *refusal, size_t size) {
     op_history_revert_begin(id);
     if (strcmp(s->op, "rule") == 0) {
         rc = mail_rules_revert_step(s, refusal, size);
+    } else if (strcmp(s->op, "ruleapply") == 0) {
+        Config *cfg = s->account[0] ? config_load_account(s->account) : NULL;
+        if (!cfg) {
+            snprintf(refusal, size, "the account '%s' of step %lu is not configured",
+                     s->account, id);
+        } else {
+            local_store_init(cfg->host, cfg->user);
+            rc = email_service_rules_revert_step(cfg, s, refusal, size);
+            config_free(cfg);
+        }
     } else if (strcmp(s->op, "account") == 0 || strcmp(s->op, "setting") == 0) {
         rc = config_revert_step(s, refusal, size);
     } else {

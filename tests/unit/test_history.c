@@ -13,6 +13,7 @@
 #include "history_view.h"
 #include "pty_stdio.h"
 #include "platform/terminal.h"
+#include "platform/path.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -359,6 +360,212 @@ static void test_revert_junk_overtaken(void) {
     char refusal[512];
     ASSERT(history_revert(first, refusal, sizeof(refusal)) != 0, "overtaken junk step refused");
     ASSERT(strstr(refusal, "overtaken") != NULL, "says overtaken");
+}
+
+
+/* ── Rules apply: recorded per message, reverted as one (EMAIL-315) ──── */
+
+static void rules_save_one(const char *account, const char *when, const char *add,
+                           const char *move) {
+    MailRule rule;
+    memset(&rule, 0, sizeof(rule));
+    rule.name = (char *)"News";
+    rule.when = (char *)when;
+    rule.then_add_label[0] = (char *)add;
+    rule.then_add_count = 1;
+    rule.then_move_folder = (char *)move;
+    MailRules rules;
+    memset(&rules, 0, sizeof(rules));
+    rules.rules = &rule;
+    rules.count = 1;
+    rules.cap = 1;
+    mail_rules_save(account, &rules);
+}
+
+static void rules_clear(const char *account) {
+    MailRules none;
+    memset(&none, 0, sizeof(none));
+    mail_rules_save(account, &none);
+}
+
+static void put_news(const char *folder, const char *uid, const char *from, int flags) {
+    Manifest *m = manifest_load(folder);
+    if (!m) m = calloc(1, sizeof(Manifest));
+    manifest_upsert(m, uid, strdup(from), strdup("Weekly"), strdup("2026-10-22 10:00"), flags);
+    manifest_save(folder, m);
+    manifest_free(m);
+}
+
+static int labels_file_has(const char *uid, const char *label) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/email-cli/accounts/%s/applied_labels.tsv",
+             platform_data_dir(), IMAP_USER);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return 0;
+    char line[2048];
+    int found = 0;
+    while (fgets(line, sizeof(line), fp))
+        if (strncmp(line, uid, strlen(uid)) == 0 && strstr(line, label)) found = 1;
+    fclose(fp);
+    return found;
+}
+
+static int pending_moves(void) {
+    int n = 0;
+    PendingMove *pm = local_pending_move_load("INBOX", &n);
+    free(pm);
+    return n;
+}
+
+/** Runs apply/revert with the report in @p buf. */
+static int run_apply(int dry, char *buf, size_t size) {
+    char *mem = NULL;
+    size_t len = 0;
+    FILE *out = open_memstream(&mem, &len);
+    int rc = email_service_apply_rules_to(out, IMAP_USER, dry, 0);
+    fclose(out);
+    snprintf(buf, size, "%s", mem ? mem : "");
+    free(mem);
+    return rc;
+}
+
+static int run_revert(char *buf, size_t size) {
+    char *mem = NULL;
+    size_t len = 0;
+    FILE *out = open_memstream(&mem, &len);
+    int rc = email_service_rules_revert(out, IMAP_USER);
+    fclose(out);
+    snprintf(buf, size, "%s", mem ? mem : "");
+    free(mem);
+    return rc;
+}
+
+static int count_op(const char *op) {
+    OpHistory h = {0};
+    int n = 0;
+    if (op_history_load(NULL, NULL, &h) != 0) return -1;
+    for (int i = 0; i < h.count; i++)
+        if (strcmp(h.steps[i].op, op) == 0 && h.steps[i].reverts == 0) n++;
+    op_history_free(&h);
+    return n;
+}
+
+static void test_rules_apply_records_and_reverts(void) {
+    setup();
+    use(&g_imap);
+    put_news("INBOX", "0000000000000b01", "x@news.example.org", MSG_FLAG_UNSEEN);
+    put_news("INBOX", "0000000000000b02", "y@news.example.org", 0);
+    put_news("INBOX", "0000000000000b03", "friend@example.org", 0);
+    rules_save_one(IMAP_USER, "from:*@news.example.org", "NewsLbl", "Archive");
+    char rep[4096], rep2[4096];
+
+    int before = count_op("ruleapply");
+    ASSERT(run_apply(1, rep, sizeof(rep)) == 2, "dry run counts two messages");
+    ASSERT(count_op("ruleapply") == before, "a dry run records nothing");
+    ASSERT(pending_moves() == 0, "a dry run queues nothing");
+
+    ASSERT(run_apply(0, rep, sizeof(rep)) == 2, "apply changes two messages");
+    ASSERT(count_op("ruleapply") == before + 2, "one step per changed message");
+    ASSERT(strstr(rep, "Rule \"News\": 2 message(s)") != NULL, "count per rule printed");
+    ASSERT(strstr(rep, "rules revert") != NULL, "the report names the undo");
+    ASSERT(labels_file_has("0000000000000b01", "NewsLbl"), "label stored");
+    ASSERT(!labels_file_has("0000000000000b03", "NewsLbl"), "the other mail is untouched");
+    ASSERT(pending_moves() == 2, "two moves queued");
+
+    ASSERT(run_revert(rep2, sizeof(rep2)) == 0, "revert succeeds");
+    ASSERT(strstr(rep2, "2 message(s) restored, 0 not restorable") != NULL,
+           "the restored count is printed");
+    ASSERT(!labels_file_has("0000000000000b01", "NewsLbl"), "label restored");
+    ASSERT(!labels_file_has("0000000000000b02", "NewsLbl"), "label restored (2)");
+    ASSERT(pending_moves() == 0, "queued moves cancelled");
+    ASSERT(flags_of("INBOX", "0000000000000b01") == MSG_FLAG_UNSEEN, "flags kept");
+    ASSERT(run_revert(rep2, sizeof(rep2)) != 0, "the same apply is not reverted twice");
+
+    ASSERT(run_apply(0, rep, sizeof(rep)) == 2, "a second apply after the revert changes again");
+    ASSERT(labels_file_has("0000000000000b01", "NewsLbl"), "label stored again");
+    ASSERT(run_revert(rep2, sizeof(rep2)) == 0, "the second apply is reverted too");
+    ASSERT(!labels_file_has("0000000000000b01", "NewsLbl"), "and restored");
+    rules_clear(IMAP_USER);
+}
+
+static void test_rules_revert_flags_and_executed_move(void) {
+    setup();
+    use(&g_imap);
+    put_news("INBOX", "0000000000000c01", "x@news.example.org", 0);
+    rules_save_one(IMAP_USER, "from:*@news.example.org", "_done", "Done");
+    char raw[256], rep[4096];
+    snprintf(raw, sizeof(raw), "From: x@news.example.org\r\nMessage-ID: <c01@example.org>\r\n\r\n");
+    local_msg_save("INBOX", "0000000000000c01", raw, strlen(raw));
+    /* make the earlier mails not match again */
+    put_news("INBOX", "0000000000000b01", "none@example.org", 0);
+    put_news("INBOX", "0000000000000b02", "none@example.org", 0);
+    ASSERT(run_apply(0, rep, sizeof(rep)) == 1, "one message changed");
+    ASSERT(flags_of("INBOX", "0000000000000c01") & MSG_FLAG_DONE, "the done flag set");
+
+    /* the move ran on the server meanwhile: the queue is empty */
+    local_pending_move_clear("INBOX");
+    g_srv.calls = 0;
+    ASSERT(run_revert(rep, sizeof(rep)) == 0, "revert succeeds");
+    ASSERT(g_srv.calls == 1 && strcmp(g_srv.last_op, "move_back") == 0, "moved back on the server");
+    ASSERT(strcmp(g_srv.msgid, "<c01@example.org>") == 0, "found by Message-ID");
+    ASSERT(strcmp(g_srv.from, "Done") == 0 && strcmp(g_srv.to, "INBOX") == 0, "from the target to the source");
+    ASSERT(!(flags_of("INBOX", "0000000000000c01") & MSG_FLAG_DONE), "the flag is restored");
+
+    /* the server refuses: reported, local state kept */
+    ASSERT(run_apply(0, rep, sizeof(rep)) == 1, "applied again");
+    local_pending_move_clear("INBOX");
+    g_srv.refuse = 1;
+    ASSERT(run_revert(rep, sizeof(rep)) != 0, "a refused move back is a failure");
+    ASSERT(strstr(rep, "0 message(s) restored, 1 not restorable") != NULL, "counted as not restorable");
+    ASSERT(flags_of("INBOX", "0000000000000c01") & MSG_FLAG_DONE, "nothing changed locally");
+    g_srv.refuse = 0;
+    rules_clear(IMAP_USER);
+}
+
+static void test_rules_revert_partial_failure(void) {
+    setup();
+    use(&g_imap);
+    put_news("INBOX", "0000000000000b01", "none@example.org", 0);
+    put_news("INBOX", "0000000000000b02", "none@example.org", 0);
+    put_news("INBOX", "0000000000000c01", "none@example.org", 0);
+    put_news("INBOX", "0000000000000d01", "x@news.example.org", 0);
+    put_news("INBOX", "0000000000000d02", "y@news.example.org", 0);
+    rules_save_one(IMAP_USER, "from:*@news.example.org", "Part", NULL);
+    char rep[4096];
+    ASSERT(run_apply(0, rep, sizeof(rep)) == 2, "two changed");
+    /* the owner changed one message afterwards */
+    email_service_set_flag(&g_imap, "0000000000000d02", "INBOX", MSG_FLAG_FLAGGED, 1);
+    int rc = run_revert(rep, sizeof(rep));
+    ASSERT(rc != 0, "a partial revert fails as a whole");
+    ASSERT(strstr(rep, "1 message(s) restored, 1 not restorable") != NULL, "the counts are told");
+    ASSERT(!labels_file_has("0000000000000d01", "Part"), "the untouched message is restored");
+    ASSERT(labels_file_has("0000000000000d02", "Part"), "the overtaken one is left alone");
+    rules_clear(IMAP_USER);
+}
+
+static void test_rules_apply_gmail_reverts(void) {
+    setup();
+    use(&g_gmail);
+    const char *hdr = "x@news.example.org\tWeekly\t2026-10-22 10:00\tINBOX\t0";
+    local_hdr_save("", "0000000000000e01", hdr, strlen(hdr));
+    label_idx_add("INBOX", "0000000000000e01");
+    rules_save_one(GMAIL_USER, "from:*@news.example.org", "GmNews", NULL);
+    char *mem = NULL;
+    size_t len = 0;
+    FILE *out = open_memstream(&mem, &len);
+    int before = count_op("ruleapply");
+    ASSERT(email_service_apply_rules_to(out, GMAIL_USER, 0, 0) == 1, "applied");
+    fclose(out);
+    free(mem);
+    ASSERT(count_op("ruleapply") == before + 1, "one step");
+    ASSERT(label_idx_contains("GmNews", "0000000000000e01") > 0, "label added");
+    out = open_memstream(&mem, &len);
+    ASSERT(email_service_rules_revert(out, GMAIL_USER) == 0, "reverted");
+    fclose(out);
+    ASSERT(strstr(mem, "1 message(s) restored") != NULL, "count printed");
+    free(mem);
+    ASSERT(label_idx_contains("GmNews", "0000000000000e01") <= 0, "label removed again");
+    rules_clear(GMAIL_USER);
 }
 
 /* ── Gmail: label, move, trash, archive ──────────────────────────────── */
@@ -855,6 +1062,10 @@ void test_history(void) {
     RUN_TEST(test_revert_imap_move_server_words);
     RUN_TEST(test_revert_imap_move_without_message_id);
     RUN_TEST(test_revert_junk_overtaken);
+    RUN_TEST(test_rules_apply_records_and_reverts);
+    RUN_TEST(test_rules_revert_flags_and_executed_move);
+    RUN_TEST(test_rules_revert_partial_failure);
+    RUN_TEST(test_rules_apply_gmail_reverts);
     RUN_TEST(test_revert_gmail_label);
     RUN_TEST(test_revert_gmail_label_overtaken);
     RUN_TEST(test_revert_gmail_move);

@@ -43,6 +43,11 @@ typedef struct {
 /** @brief Installs @p b as the server backend; NULL restores the default. */
 void history_set_backend(const HistoryBackend *b);
 
+/** @brief Moves the mail with @p msgid from @p from back to @p to through the
+ *         server backend (the revert of a move that already ran). */
+int history_move_back(const Config *cfg, const char *msgid, const char *from,
+                      const char *to, char *refusal, size_t size);
+
 /** @brief The Message-ID of a locally stored mail; heap string, NULL if the
  *         local store has not the mail. */
 char *history_message_id(const char *folder, const char *uid);

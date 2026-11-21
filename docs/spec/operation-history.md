@@ -43,6 +43,7 @@ Object names: `mail FOLDER/UID` (IMAP), `mail UID` (Gmail), `folder NAME`,
 | Move a message (IMAP), also trash and archive of IMAP | revertable | the inverse is a move back, found again by its Message-ID (the UID changes with the move) |
 | Gmail: add / remove a label, move, trash, archive | revertable | the inverse is the label change, in the other direction |
 | Mark junk / not junk | revertable | the inverse is the other mark |
+| Rules apply (`rules apply`, EMAIL-315) | revertable | one step `ruleapply` per changed message, all under one apply id (`ref`); the step holds the old and new labels and flags and a queued move |
 | Rule add, edit, delete | revertable | the rule file is the program's own; the old rule is in the step |
 | Account fields that are not secrets (host, user, folder, ...) | revertable | the old value is in the step |
 | Setting: credential obfuscation | revertable | the old value is in the step |
@@ -78,6 +79,24 @@ A revert is refused, in words, when:
 
 A Gmail trash and archive are reverted by the label state they left, so the
 revert of such a revert needs no memory of its own.
+
+## Rules apply (EMAIL-315)
+
+`rules apply` writes one `ruleapply` step per message it changes: the object is
+the mail, `old` is `labels=CSV flags=N`, `new` the same plus ` move=FOLDER
+mid=MESSAGE-ID` when a move was queued (`flags=-1` on Gmail, which has none), and
+`ref` the apply id shared by every step of the run.  A dry run records nothing.
+The report prints the count of changed messages per rule and the way to undo.
+
+`email-cli [<account>] rules revert` takes back the last apply that was not
+reverted: the labels and flags are restored, a move still in the queue is
+cancelled, a move that already ran on the server is moved back by its
+Message-ID, or the message is reported as not revertible (no recorded
+Message-ID, the server's refusal).  A message that changed after the apply
+(overtaken) is left as it is and counted as not restored.  It prints
+`Rules apply ID reverted: N message(s) restored, M not restorable.` and exits
+non-zero when M > 0.  An apply after a revert changes the messages again and is
+a new apply.  A single step can also be reverted by `revert <id>`.
 
 ## Interfaces
 

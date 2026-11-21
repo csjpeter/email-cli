@@ -7370,7 +7370,319 @@ static char *csv_update_labels(const char *existing,
     return strdup(buf);
 }
 
+/* ── apply_rules: history of one apply (EMAIL-315) ───────────────────── */
+
+/* One step "ruleapply" per changed message, all of one apply sharing the apply
+ * id in `ref`.  old_value: "labels=CSV flags=N"; new_value: the same, plus
+ * " move=FOLDER" when a move was queued and " mid=MESSAGE-ID" (to find the
+ * mail again when the move has run).  flags=-1: the account has no flags
+ * (Gmail). */
+
+static void rules_apply_id(char *buf, size_t size) {
+    static int seq;
+    snprintf(buf, size, "A%lx-%d-%d", (unsigned long)time(NULL), (int)getpid(), ++seq);
+}
+
+static void note_rule_apply(const Config *cfg, const char *apply_id,
+                            const char *folder, const char *uid,
+                            const char *old_labels, int old_flags,
+                            const char *new_labels, int new_flags,
+                            const char *move, const char *mid) {
+    char obj[512];
+    history_mail_object(cfg, folder, uid, obj, sizeof(obj));
+    char *ov = NULL, *nv = NULL;
+    size_t n = strlen(old_labels ? old_labels : "") + strlen(new_labels ? new_labels : "") +
+               strlen(move ? move : "") + strlen(mid ? mid : "") + 128;
+    ov = malloc(n); nv = malloc(n);
+    if (ov && nv) {
+        snprintf(ov, n, "labels=%s flags=%d", old_labels ? old_labels : "", old_flags);
+        int w = snprintf(nv, n, "labels=%s flags=%d", new_labels ? new_labels : "", new_flags);
+        if (move && move[0]) w += snprintf(nv + w, n - (size_t)w, " move=%s", move);
+        if (mid && mid[0] && move && move[0]) snprintf(nv + w, n - (size_t)w, " mid=%s", mid);
+        OpRecord r = { cfg->user ? cfg->user : "", "ruleapply", obj, "rules", ov, nv,
+                       apply_id, OPH_REVERTABLE, 0 };
+        op_history_record(&r);
+    }
+    free(ov); free(nv);
+}
+
+typedef struct { char *labels; int flags; char *move; char *mid; } RuleState;
+
+static void rule_state_free(RuleState *st) {
+    free(st->labels); free(st->move); free(st->mid);
+    memset(st, 0, sizeof(*st));
+}
+
+static int rule_state_parse(const char *v, RuleState *st) {
+    memset(st, 0, sizeof(*st));
+    if (strncmp(v, "labels=", 7) != 0) return -1;
+    const char *fl = strstr(v + 7, " flags=");
+    if (!fl) return -1;
+    st->labels = strndup(v + 7, (size_t)(fl - (v + 7)));
+    st->flags = atoi(fl + 7);
+    const char *mv = strstr(fl, " move=");
+    const char *mi = strstr(fl, " mid=");
+    if (mv) st->move = mi && mi > mv ? strndup(mv + 6, (size_t)(mi - (mv + 6))) : strdup(mv + 6);
+    if (mi) st->mid = strdup(mi + 5);
+    return st->labels ? 0 : -1;
+}
+
+/** Splits "mail FOLDER/UID" or "mail UID"; heap strings. */
+static int rule_object_parse(const char *object, char **folder, char **uid) {
+    if (strncmp(object, "mail ", 5) != 0) return -1;
+    const char *p = object + 5, *slash = strrchr(p, '/');
+    *folder = slash ? strndup(p, (size_t)(slash - p)) : strdup("");
+    *uid = strdup(slash ? slash + 1 : p);
+    return *folder && *uid ? 0 : -1;
+}
+
+/** Path of the account's applied_labels.tsv; "" when unknown. */
+static void applied_labels_path(const Config *cfg, char *buf, size_t size) {
+    const char *data_dir = platform_data_dir();
+    buf[0] = '\0';
+    if (data_dir && cfg->user && cfg->user[0])
+        snprintf(buf, size, "%s/email-cli/accounts/%s/applied_labels.tsv", data_dir, cfg->user);
+}
+
+/** Queues the server side of taking back the label @p label (was added when
+ *  @p was_added, removed otherwise) on an IMAP mail. */
+static void queue_label_undo(const char *folder, const char *uid, const char *label,
+                             int was_added) {
+    if (was_added) {
+        if (strcmp(label, "UNREAD") == 0)
+            local_pending_flag_add(folder, uid, "\\Seen", 1);
+        else if (strcasecmp(label, "_flagged") == 0)
+            local_pending_flag_add(folder, uid, "\\Flagged", 0);
+        else if (strcasecmp(label, "_junk") == 0 || strcasecmp(label, "_spam") == 0)
+            local_pending_flag_add(folder, uid, "$Junk", 0);
+        else if (strcasecmp(label, "_done") == 0)
+            local_pending_flag_add(folder, uid, "$Done", 0);
+        else if (strcasecmp(label, "_trash") == 0)
+            local_pending_flag_add(folder, uid, "\\Deleted", 0);
+    } else {
+        if (strcmp(label, "UNREAD") == 0)
+            local_pending_flag_add(folder, uid, "\\Seen", 0);
+        else if (strcasecmp(label, "_flagged") == 0)
+            local_pending_flag_add(folder, uid, "\\Flagged", 1);
+    }
+}
+
+/** Calls fn(label, add, ctx) for each label of @p a not in @p b (add = @p add_a)
+ *  and each label of @p b not in @p a (!add_a). */
+typedef void (*label_diff_fn)(const char *label, int add, void *ctx);
+static void label_diff(const char *from_csv, const char *to_csv, label_diff_fn fn, void *ctx) {
+    for (int pass = 0; pass < 2; pass++) {
+        const char *src = pass == 0 ? to_csv : from_csv;
+        const char *other = pass == 0 ? from_csv : to_csv;
+        char *copy = strdup(src ? src : "");
+        if (!copy) return;
+        char *save = NULL;
+        for (char *t = strtok_r(copy, ",", &save); t; t = strtok_r(NULL, ",", &save))
+            if (t[0] && !csv_has_label(other, t)) fn(t, pass == 0, ctx);
+        free(copy);
+    }
+}
+
+typedef struct { const char *folder, *uid; int gmail; } UndoCtx;
+
+static void undo_label_cb(const char *label, int add, void *vctx) {
+    UndoCtx *c = vctx;
+    /* The step went from→to; `add` here is for undoing: a label in `from`
+     * missing in `to` was removed by the rules, so it is added back. */
+    if (c->gmail) {
+        if (add) {
+            label_idx_add(label, c->uid);
+            local_hdr_update_labels("", c->uid, &label, 1, NULL, 0);
+        } else {
+            label_idx_remove(label, c->uid);
+            local_hdr_update_labels("", c->uid, NULL, 0, &label, 1);
+        }
+        local_pending_label_add(c->uid, label, add);
+    } else {
+        queue_label_undo(c->folder, c->uid, label, !add);
+    }
+}
+
+/** Reads the labels field of a Gmail .hdr into @p buf; -1 when no such mail. */
+static int gmail_hdr_labels(const char *uid, char *buf, size_t size) {
+    char *hdr = local_hdr_load("", uid);
+    if (!hdr) return -1;
+    char *p = hdr;
+    for (int f = 0; f < 3; f++) {
+        char *tab = strchr(p, '\t');
+        if (!tab) { p += strlen(p); break; }
+        p = tab + 1;
+    }
+    char *end = strchr(p, '\t');
+    if (end) *end = '\0';
+    char *nl = strchr(p, '\n');
+    if (nl) *nl = '\0';
+    snprintf(buf, size, "%s", p);
+    free(hdr);
+    return 0;
+}
+
+static int rules_overtaken(const OpStep *s, const char *what, char *refusal, size_t size) {
+    snprintf(refusal, size, "step %lu was overtaken: %s of %s changed since the apply",
+             s->id, what, s->object);
+    return -1;
+}
+
+int email_service_rules_revert_step(const Config *cfg, const OpStep *s,
+                                    char *refusal, size_t size) {
+    RuleState was = {0}, now = {0};
+    char *folder = NULL, *uid = NULL;
+    int rc = -1;
+    if (rule_state_parse(s->old_value, &was) != 0 || rule_state_parse(s->new_value, &now) != 0 ||
+        rule_object_parse(s->object, &folder, &uid) != 0) {
+        snprintf(refusal, size, "step %lu is not a rules apply step", s->id);
+        goto out;
+    }
+    UndoCtx ctx = { folder, uid, cfg->gmail_mode };
+    if (cfg->gmail_mode) {
+        char cur[4096];
+        if (gmail_hdr_labels(uid, cur, sizeof(cur)) != 0) {
+            snprintf(refusal, size, "the local store has not the mail %s any more", uid);
+            goto out;
+        }
+        if (strcmp(cur, now.labels) != 0) { rules_overtaken(s, "the labels", refusal, size); goto out; }
+        label_diff(now.labels, was.labels, undo_label_cb, &ctx);
+    } else {
+        char lpath[8192];
+        applied_labels_path(cfg, lpath, sizeof(lpath));
+        int ul_count = 0, ul_cap = 0;
+        UidLabel *ul = lpath[0] ? ul_load(lpath, &ul_count) : NULL;
+        const char *cur = ul ? ul_get(ul, ul_count, uid) : NULL;
+        Manifest *mf = manifest_load(folder);
+        ManifestEntry *e = mf ? manifest_find(mf, uid) : NULL;
+        if (strcmp(cur ? cur : "", now.labels) != 0) {
+            rules_overtaken(s, "the labels", refusal, size);
+        } else if (e && now.flags >= 0 && e->flags != now.flags) {
+            rules_overtaken(s, "the flags", refusal, size);
+        } else {
+            int ok = 1, moved_back = 0;
+            if (now.move) {
+                int pn = 0, found = 0;
+                PendingMove *pm = local_pending_move_load(folder, &pn);
+                for (int i = 0; i < pn; i++)
+                    if (strcmp(pm[i].uid, uid) == 0 && strcmp(pm[i].target_folder, now.move) == 0)
+                        found = 1;
+                if (found) {
+                    local_pending_move_clear(folder);
+                    int skipped = 0;
+                    for (int i = 0; i < pn; i++) {
+                        if (!skipped && strcmp(pm[i].uid, uid) == 0 &&
+                            strcmp(pm[i].target_folder, now.move) == 0) { skipped = 1; continue; }
+                        local_pending_move_add(folder, pm[i].uid, pm[i].target_folder);
+                    }
+                } else if (!now.mid || !now.mid[0]) {
+                    snprintf(refusal, size, "the move of %s to '%s' already ran on the server "
+                             "and the mail has no recorded Message-ID: not revertible",
+                             s->object, now.move);
+                    ok = 0;
+                } else if (history_move_back(cfg, now.mid, now.move, folder, refusal, size) != 0) {
+                    ok = 0;
+                } else {
+                    moved_back = 1;
+                }
+                free(pm);
+            }
+            if (ok) {
+                ul_set(&ul, &ul_count, &ul_cap, uid, was.labels);
+                if (lpath[0]) ul_save(lpath, ul, ul_count);
+                if (e && was.flags >= 0 && e->flags != was.flags) {
+                    e->flags = was.flags;
+                    local_hdr_update_flags(folder, uid, was.flags);
+                    manifest_save(folder, mf);
+                }
+                if (!moved_back) label_diff(now.labels, was.labels, undo_label_cb, &ctx);
+                rc = 0;
+            }
+        }
+        manifest_free(mf);
+        if (ul) ul_free_all(ul, ul_count);
+        if (rc != 0) goto out;
+    }
+    {
+        OpRecord r = { s->account, s->op, s->object, s->thing, s->new_value, s->old_value,
+                       s->ref, OPH_IRREVERSIBLE, 0 };
+        op_history_record(&r);
+    }
+    rc = 0;
+out:
+    rule_state_free(&was); rule_state_free(&now);
+    free(folder); free(uid);
+    return rc;
+}
+
+int email_service_rules_revert(FILE *out, const char *only_account) {
+    OpHistory h = {0};
+    if (op_history_load(NULL, NULL, &h) != 0) {
+        fprintf(stderr, "The history could not be read.\n");
+        return -1;
+    }
+    const OpStep *last = NULL;
+    for (int i = h.count - 1; i >= 0 && !last; i--) {
+        const OpStep *s = &h.steps[i];
+        if (strcmp(s->op, "ruleapply") != 0 || s->kind != OPH_REVERTABLE ||
+            op_history_reverted_by(&h, s->id) != 0 || s->reverts != 0)
+            continue;
+        if (only_account && only_account[0] && strcmp(s->account, only_account) != 0) continue;
+        last = s;
+    }
+    if (!last) {
+        fprintf(stderr, "No rules apply to revert.\n");
+        op_history_free(&h);
+        return -1;
+    }
+    char apply_id[128], account[512];
+    snprintf(apply_id, sizeof(apply_id), "%s", last->ref);
+    snprintf(account, sizeof(account), "%s", last->account);
+    Config *cfg = config_load_account(account);
+    if (!cfg) {
+        fprintf(stderr, "The account '%s' of the last rules apply is not configured.\n", account);
+        op_history_free(&h);
+        return -1;
+    }
+    local_store_init(cfg->host, cfg->user);
+    int restored = 0, failed = 0;
+    for (int i = h.count - 1; i >= 0; i--) {
+        const OpStep *s = &h.steps[i];
+        if (strcmp(s->op, "ruleapply") != 0 || s->kind != OPH_REVERTABLE || s->reverts != 0 ||
+            strcmp(s->ref, apply_id) != 0 || strcmp(s->account, account) != 0 ||
+            op_history_reverted_by(&h, s->id) != 0)
+            continue;
+        char refusal[1024] = "";
+        if (op_history_may_revert(&h, s, refusal, sizeof(refusal)) != 0) {
+            failed++;
+            if (failed <= 10) fprintf(stderr, "  not restored: %s\n", refusal);
+            continue;
+        }
+        op_history_revert_begin(s->id);
+        int rc = email_service_rules_revert_step(cfg, s, refusal, sizeof(refusal));
+        op_history_revert_end();
+        if (rc == 0) restored++;
+        else {
+            failed++;
+            if (failed <= 10) fprintf(stderr, "  not restored: %s\n", refusal);
+        }
+    }
+    config_free(cfg);
+    op_history_free(&h);
+    fprintf(out, "Rules apply %s reverted: %d message(s) restored, %d not restorable.\n",
+            apply_id, restored, failed);
+    return failed ? -1 : 0;
+}
+
 /* ── apply_rules: print rule match lines ─────────────────────────────── */
+static void count_rule_matches(const MailRules *rules, int *counts, const char *from,
+                               const char *subject, const char *to, const char *labels) {
+    if (!counts) return;
+    for (int r = 0; r < rules->count; r++)
+        if (mail_rule_matches(&rules->rules[r], from, subject, to, labels, NULL, (time_t)0))
+            counts[r]++;
+}
+
 static void print_rule_matches(FILE *out, const MailRules *rules,
                                 const char *from, const char *subject,
                                 const char *to, const char *labels,
@@ -7424,6 +7736,9 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
         }
 
         int fired_total = 0;
+        int *rule_counts = calloc((size_t)rules->count, sizeof(int));
+        char apply_id[96] = "";
+        rules_apply_id(apply_id, sizeof(apply_id));
 
         if (accounts[i].cfg->gmail_mode) {
             /* ── Gmail path: .hdr files are tab-separated ── */
@@ -7472,10 +7787,18 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
                             print_rule_matches(out, rules, fields[0], fields[1],
                                                NULL, fields[3], uid, dry_run);
                         fired_total++;
+                        count_rule_matches(rules, rule_counts, fields[0], fields[1],
+                                           NULL, fields[3]);
                         if (!dry_run) {
+                            char old_lbl[4096];
+                            snprintf(old_lbl, sizeof(old_lbl), "%s", fields[3] ? fields[3] : "");
                             local_hdr_update_labels("", uid,
                                                      (const char **)add_out, add_count,
                                                      (const char **)rm_out,  rm_count);
+                            char new_lbl[4096] = "";
+                            gmail_hdr_labels(uid, new_lbl, sizeof(new_lbl));
+                            note_rule_apply(accounts[i].cfg, apply_id, "", uid,
+                                            old_lbl, -1, new_lbl, -1, NULL, NULL);
                             for (int j = 0; j < add_count; j++) {
                                 label_idx_add(add_out[j], uid);
                                 local_pending_label_add(uid, add_out[j], 1);
@@ -7518,6 +7841,7 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
                 fprintf(out, "  No messages found in folder %s.\n", imap_folder);
                 manifest_free(mf);
                 if (ul_arr) ul_free_all(ul_arr, ul_count);
+                free(rule_counts);
                 mail_rules_free(rules);
                 done++;
                 continue;
@@ -7597,11 +7921,19 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
                                                e->subject ? e->subject : "",
                                                NULL, existing, e->uid, dry_run);
                         fired_total++;
+                        count_rule_matches(rules, rule_counts, e->from ? e->from : "",
+                                           e->subject ? e->subject : "", NULL, existing);
                         if (!dry_run) {
+                            int old_flags = e->flags;
                             /* Persist custom labels */
                             char *new_lbl = csv_update_labels(existing,
                                                                add_out, add_count,
                                                                rm_out,  rm_count);
+                            char *mid = move_folder ? history_message_id(imap_folder, e->uid) : NULL;
+                            note_rule_apply(accounts[i].cfg, apply_id, imap_folder, e->uid,
+                                            existing, old_flags, new_lbl, new_flags,
+                                            move_folder, mid);
+                            free(mid);
                             ul_set(&ul_arr, &ul_count, &ul_cap, e->uid,
                                    new_lbl ? new_lbl : "");
                             free(new_lbl);
@@ -7646,11 +7978,19 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
             if (ul_arr) ul_free_all(ul_arr, ul_count);
         }
 
+        for (int r = 0; rule_counts && r < rules->count; r++)
+            if (rule_counts[r] > 0)
+                fprintf(out, "  Rule \"%s\": %d message(s)\n",
+                        rules->rules[r].name ? rules->rules[r].name : "?", rule_counts[r]);
+        free(rule_counts);
         mail_rules_free(rules);
         if (dry_run)
             fprintf(out, "  Rules dry-run: %d message(s) would be modified.\n", fired_total);
-        else
+        else {
             fprintf(out, "  Rules applied: %d message(s) modified.\n", fired_total);
+            if (fired_total > 0)
+                fprintf(out, "  Undo with: email-cli rules revert (apply %s)\n", apply_id);
+        }
         total_fired += fired_total;
         done++;
     }

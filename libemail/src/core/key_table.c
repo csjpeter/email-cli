@@ -109,6 +109,7 @@
     H(V, 'N', "Previous match", "n: next match"),                                   \
     H(V, 'a', "Save attachment", NULL),                                             \
     H(V, 'H', "History", "of this message, with Revert"),                           \
+    H(V, 'R', "Rules", "which rules match this message, and why its labels"),       \
     R(V, '*', TUI_VERB_STAR, "Star", "toggle the star (flag)", EA_STAR),            \
     R(V, '+', TUI_VERB_READ, "Read / unread", "toggle read and unread", EA_READ),   \
     R(V, '!', TUI_VERB_JUNK, "Junk", "toggle junk", EA_JUNK),                       \
@@ -247,14 +248,12 @@ static const tui_keyentry g_entries[] = {
          "The accounts of the program. The cursor is on one account; "
          "Enter opens it, n adds a new one."),
     DESC(EKV_RULES,
-         "The mail rules that sort incoming mail. The cursor is on one rule; "
-         "Enter opens it, a adds a new one."),
+         "The mail rules that sort incoming mail, in the order they run. The cursor is on "
+         "one rule; Enter edits it, a adds a new one."),
     DESC(EKV_RULE,
-         "One mail rule: its conditions and its actions. "
-         "e edits it, d deletes it."),
-    DESC(EKV_CONDITIONS,
-         "The conditions of the rule being edited. The cursor is on one condition; "
-         "Enter edits it, Tab goes on to the actions."),
+         "One mail rule as a form: its name, the conditions as rows and as text, the "
+         "actions and a live preview of the cached messages it matches. "
+         "Enter edits the row, s saves the rule."),
     DESC(EKV_BODY_EDITOR,
          "The body of the message being composed, as plain text. "
          "Esc saves it and goes on to the review."),

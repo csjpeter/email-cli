@@ -154,22 +154,12 @@ static PtySession *at_rules(int n) {
     return s;
 }
 
-/* The rules list of n rules, then Enter on the first: the rule's detail. */
-static PtySession *at_detail(int n) {
+/* The rules list of n rules, then Enter on the first: the rule form. */
+static PtySession *at_form(int n) {
     PtySession *s = at_rules(n);
     if (!s) return NULL;
     pty_send_key(s, PTY_KEY_ENTER);
-    if (pty_wait_for(s, "Rule: R01", WAIT_MS) != 0) { pty_close(s); return NULL; }
-    pty_settle(s, SETTLE_MS);
-    return s;
-}
-
-/* The condition editor of the new rule (from the list) or of R01 (detail). */
-static PtySession *at_conditions(int n, int from_detail) {
-    PtySession *s = from_detail ? at_detail(n) : at_rules(n);
-    if (!s) return NULL;
-    pty_send_str(s, from_detail ? "e" : "a");
-    if (pty_wait_for(s, "conditions", WAIT_MS) != 0) { pty_close(s); return NULL; }
+    if (pty_wait_for(s, "Edit rule for testuser", WAIT_MS) != 0) { pty_close(s); return NULL; }
     pty_settle(s, SETTLE_MS);
     return s;
 }
@@ -369,23 +359,13 @@ static void test_hk_rules_list(void) {
     }
 }
 
-static void test_hk_rule_detail(void) {
-    PtySession *s = at_detail(1);
-    ASSERT(s != NULL, "detail help: opens");
+static void test_hk_rule_form(void) {
+    PtySession *s = at_form(1);
+    ASSERT(s != NULL, "form help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Rule shortcuts", "Edit the rule", "Rule: R01",
-               "One mail rule: its conditions");
-    help_scroll(s, "Rule shortcuts");
-    pty_close(s);
-}
-
-static void test_hk_conditions(void) {
-    PtySession *s = at_conditions(1, 1);
-    ASSERT(s != NULL, "conditions help: opens");
-    CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Conditions shortcuts", "Cancel the rule", "(step 1/2)",
-               "The conditions of the rule being");
-    help_scroll(s, "Conditions shortcuts");
+    help_cycle(s, "Rule form shortcuts", "Save the rule", "Edit rule for testuser",
+               "One mail rule as a form");
+    help_scroll(s, "Rule form shortcuts");
     pty_close(s);
 }
 
@@ -423,8 +403,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_hk_list);
     RUN_TEST(test_hk_reader);
     RUN_TEST(test_hk_rules_list);
-    RUN_TEST(test_hk_rule_detail);
-    RUN_TEST(test_hk_conditions);
+    RUN_TEST(test_hk_rule_form);
     RUN_TEST(test_hk_h_is_not_help);
 
     if (g_mock_pid > 0) { kill(g_mock_pid, SIGKILL); waitpid(g_mock_pid, NULL, 0); }

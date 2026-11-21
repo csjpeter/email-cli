@@ -60,7 +60,10 @@ recorded weakness, not coverage of the promise.
 | `email-cli rules add` | F:37.1 | |
 | `email-cli rules apply` | F:36.1 | `--dry-run` F:36.3 |
 | `email-cli rules edit` | F:37.20 | `--new-name` F:37.29 |
-| `email-cli rules list` | F:34.1 | `--json` F:122.16; `--columns` / `--sort` F:150.40 |
+| `email-cli rules list` | F:34.1 | counts F:163.1; `--json` F:122.16, enabled / matches F:163.5; `--columns` / `--sort` F:150.40 |
+| `email-cli rules test` | F:163.17 | unknown message F:163.20 |
+| `email-cli rules copy` | F:163.26 | |
+| `email-cli rules move` | F:163.29 | |
 | `email-cli rules remove` | F:37.12 | |
 | `email-cli rules revert` | F:36.20 | the last apply taken back; unit: test_rules_apply_records_and_reverts |
 | `email-cli save-attachment` | F:15.2 | unchanged by the TUI file chooser (EMAIL-291); the TUI side is P:test_show_save_chooser_browse |

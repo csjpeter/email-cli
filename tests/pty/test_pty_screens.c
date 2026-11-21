@@ -884,13 +884,6 @@ VIEW(list,             at_list(),     (void)0)
 VIEW(reader,           at_reader(),   (void)0)
 VIEW(rules_empty,      (remove_rules(), at_rules()), (void)0)
 VIEW(rules_list,       (write_rules(), at_rules()), (void)0)
-VIEW(rule_detail,      (write_rules(), at_rules()),
-     (pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS)))
-VIEW(rule_add_when,    (remove_rules(), at_rules()),
-     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_settle(s, SETTLE_MS)))
-VIEW(rule_add_actions, (remove_rules(), at_rules()),
-     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS),
-      pty_send_key(s, PTY_KEY_TAB), pty_wait_for(s, "step 2", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(compose_dialog,   at_list(),
      (pty_send_str(s, "c"), pty_wait_for(s, "New Message", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(accounts_help,    at_accounts(),
@@ -944,44 +937,7 @@ SAMEVIEW(rules_pgup, (write_rules(), at_rules()),
          (pty_send_key(s, PTY_KEY_END), pty_send_key(s, PTY_KEY_PGUP), pty_settle(s, SETTLE_MS)),
          rules_list)
 
-/* The condition list: End selects the last condition, so 'd' removes it;
- * Home selects the first, so 'd' removes that one. */
-static void conditions_after(const char *keys_name, int end_key, const char *gone,
-                             const char *kept) {
-    restart_mock();
-    use_home(keys_name);
-    write_rules();
-    PtySession *s = at_rules();
-    ASSERT(s != NULL, "conditions keys: the rules list opens");
-    if (g_record) { pty_close(s); return; }
-    pty_send_str(s, "j");
-    pty_send_key(s, PTY_KEY_ENTER);
-    pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "e");
-    ASSERT(pty_wait_for(s, "conditions", WAIT_MS) == 0, "conditions keys: the list opens");
-    pty_settle(s, SETTLE_MS);
-    if (end_key == PTY_KEY_HOME || end_key == PTY_KEY_PGUP) {
-        pty_send_key(s, PTY_KEY_END);
-        pty_settle(s, SETTLE_MS);
-    }
-    pty_send_key(s, end_key);
-    pty_settle(s, SETTLE_MS);
-    pty_send_str(s, "d");
-    pty_settle(s, SETTLE_MS);
-    ASSERT(pty_screen_contains(s, kept), "conditions keys: the other condition stays");
-    ASSERT(!pty_screen_contains(s, gone), "conditions keys: the selected condition is gone");
-    pty_close(s);
-}
-static void test_conditions_end_home(void) {
-    conditions_after("cond_end", PTY_KEY_END, "from:*@news.example.com", "subject:");
-    conditions_after("cond_home", PTY_KEY_HOME, "subject:", "from:*@news.example.com");
-    conditions_after("cond_pgdn", PTY_KEY_PGDN, "from:*@news.example.com", "subject:");
-    conditions_after("cond_pgup", PTY_KEY_PGUP, "subject:", "from:*@news.example.com");
-}
 
-VIEW(rule_edit_form,   (write_rules(), at_rules()),
-     (pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS),
-      pty_send_str(s, "e"), pty_settle(s, SETTLE_MS)))
 VIEW(compose_typed,    at_list(),
      (pty_send_str(s, "c"), pty_wait_for(s, "New Message", WAIT_MS),
       pty_send_str(s, "ann@example.org"), pty_settle(s, SETTLE_MS)))
@@ -1143,42 +1099,37 @@ VIEW(wiz_bad_type,    at_accounts(),
 
 VIEW(rules_help,        (write_rules(), at_rules()),
      (pty_send_str(s, "?"), pty_wait_for(s, "Rules shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
-VIEW(rule_detail_help,  (write_rules(), at_rules()),
-     (pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS), pty_send_str(s, "?"),
-      pty_wait_for(s, "Rule shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
-VIEW(rule_when_help,    (remove_rules(), at_rules()),
-     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_str(s, "?"),
-      pty_wait_for(s, "Conditions shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(rules_delete_ask,  (write_rules(), at_rules()),
-     (pty_send_str(s, "d"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_settle(s, SETTLE_MS)))
+     (pty_send_str(s, "d"), pty_wait_for(s, "Delete the rule", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(rules_deleted,     (write_rules(), at_rules()),
-     (pty_send_str(s, "d"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_send_str(s, "y"),
+     (pty_send_str(s, "d"), pty_wait_for(s, "Delete the rule", WAIT_MS), pty_send_str(s, "y"),
       pty_settle(s, SETTLE_MS * 2)))
-VIEW(rules_apply_ask,   (write_rules(), at_rules()),
-     (pty_send_str(s, "A"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(rules_apply_ask,   (write_rules_matching(), at_rules()),
+     (pty_send_str(s, "A"), pty_wait_for(s, "Rules preview", WAIT_MS), pty_send_str(s, "y"),
+      pty_wait_for(s, "Change", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(rules_preview,     (write_rules_matching(), at_rules()),
      (pty_send_str(s, "p"), pty_wait_for(s, "Rules dry-run:", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(rules_applied,     (write_rules_matching(), at_rules()),
-     (pty_send_str(s, "A"), pty_wait_for(s, "(y/N)", WAIT_MS), pty_send_str(s, "y"),
+     (pty_send_str(s, "A"), pty_wait_for(s, "Rules preview", WAIT_MS), pty_send_str(s, "y"),
+      pty_wait_for(s, "Change", WAIT_MS), pty_send_str(s, "y"),
       pty_wait_for(s, "Rules applied:", WAIT_MS), pty_settle(s, SETTLE_MS)))
-VIEW(rule_detail_delete_ask, (write_rules(), at_rules()),
-     (pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS), pty_send_str(s, "d"),
-      pty_wait_for(s, "(y/N)", WAIT_MS), pty_settle(s, SETTLE_MS)))
-VIEW(rule_when_typed,   (remove_rules(), at_rules()),
-     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_str(s, "a"),
-      pty_settle(s, 300), pty_send_str(s, "from:*@example.org"), pty_settle(s, SETTLE_MS)))
-VIEW(rule_when_added,   (remove_rules(), at_rules()),
-     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_str(s, "a"),
-      pty_settle(s, 300), pty_send_str(s, "from:*@example.org"), pty_send_key(s, PTY_KEY_ENTER),
+VIEW(rules_undo_offer,  (write_rules_matching(), at_rules()),
+     (pty_send_str(s, "A"), pty_wait_for(s, "Rules preview", WAIT_MS), pty_send_str(s, "y"),
+      pty_wait_for(s, "Change", WAIT_MS), pty_send_str(s, "y"),
+      pty_wait_for(s, "Rules applied:", WAIT_MS), pty_send_key(s, PTY_KEY_ESC),
+      pty_wait_for(s, "Undo this apply now?", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(rule_form_edit,    (write_rules_matching(), at_rules()),
+     (pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Edit rule for", WAIT_MS),
       pty_settle(s, SETTLE_MS)))
-VIEW(rule_when_bad,     (remove_rules(), at_rules()),
-     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_str(s, "a"),
-      pty_settle(s, 300), pty_send_str(s, "((("), pty_send_key(s, PTY_KEY_ENTER),
-      pty_settle(s, SETTLE_MS)))
-VIEW(rule_step2_field,  (remove_rules(), at_rules()),
-     (pty_send_str(s, "a"), pty_wait_for(s, "Add new rule", WAIT_MS), pty_send_key(s, PTY_KEY_TAB),
-      pty_wait_for(s, "step 2", WAIT_MS), pty_settle(s, 300), pty_send_str(s, "Work mail"),
-      pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS)))
+VIEW(rule_form_new,     (remove_rules(), at_rules()),
+     (pty_send_str(s, "a"), pty_wait_for(s, "New rule for", WAIT_MS), pty_settle(s, SETTLE_MS)))
+VIEW(rule_condition_form, (remove_rules(), at_rules()),
+     (pty_send_str(s, "a"), pty_wait_for(s, "New rule for", WAIT_MS), pty_send_str(s, "j"),
+      pty_send_str(s, "j"), pty_send_key(s, PTY_KEY_ENTER),
+      pty_wait_for(s, "Add a condition", WAIT_MS), pty_send_str(s, "news"), pty_settle(s, SETTLE_MS)))
+VIEW(rule_form_help,    (write_rules(), at_rules()),
+     (pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Edit rule for", WAIT_MS),
+      pty_send_str(s, "?"), pty_wait_for(s, "Rule form shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
 
 VIEW(w80_accounts, at_cols(80, at_accounts), (void)0)
 VIEW(w80_folders, at_cols(80, at_folders), (void)0)
@@ -1327,9 +1278,6 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_reader);
     RUN_TEST(test_screen_rules_empty);
     RUN_TEST(test_screen_rules_list);
-    RUN_TEST(test_screen_rule_detail);
-    RUN_TEST(test_screen_rule_add_when);
-    RUN_TEST(test_screen_rule_add_actions);
     RUN_TEST(test_screen_compose_dialog);
     RUN_TEST(test_screen_accounts_help);
     RUN_TEST(test_screen_folders_help);
@@ -1351,8 +1299,6 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_rules_pgdn);
     RUN_TEST(test_screen_rules_home);
     RUN_TEST(test_screen_rules_pgup);
-    RUN_TEST(test_conditions_end_home);
-    RUN_TEST(test_screen_rule_edit_form);
     RUN_TEST(test_screen_compose_typed);
     RUN_TEST(test_screen_compose_empty_to);
     RUN_TEST(test_screen_body_editor);
@@ -1390,18 +1336,16 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_screen_list_8colour_third);
     RUN_TEST(test_screen_reader_8colour);
     RUN_TEST(test_screen_rules_help);
-    RUN_TEST(test_screen_rule_detail_help);
-    RUN_TEST(test_screen_rule_when_help);
     RUN_TEST(test_screen_rules_delete_ask);
     RUN_TEST(test_screen_rules_deleted);
     RUN_TEST(test_screen_rules_apply_ask);
     RUN_TEST(test_screen_rules_preview);
     RUN_TEST(test_screen_rules_applied);
-    RUN_TEST(test_screen_rule_detail_delete_ask);
-    RUN_TEST(test_screen_rule_when_typed);
-    RUN_TEST(test_screen_rule_when_added);
-    RUN_TEST(test_screen_rule_when_bad);
-    RUN_TEST(test_screen_rule_step2_field);
+    RUN_TEST(test_screen_rules_undo_offer);
+    RUN_TEST(test_screen_rule_form_edit);
+    RUN_TEST(test_screen_rule_form_new);
+    RUN_TEST(test_screen_rule_condition_form);
+    RUN_TEST(test_screen_rule_form_help);
     RUN_TEST(test_screen_wiz_imap_host);
     RUN_TEST(test_screen_wiz_imap_port);
     RUN_TEST(test_screen_wiz_imap_user);

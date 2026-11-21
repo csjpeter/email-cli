@@ -878,6 +878,139 @@ static void test_313_chained_labels_in_rule_order(void) {
     mail_rules_free(r);
 }
 
+/* ── EMAIL-312: on/off, trace, summary, editing helpers ───────────────── */
+
+static void test_312_disabled_rule_never_fires_and_roundtrips(void) {
+    MailRules *r = mail_rules_parse_text(
+        "[rule \"Off\"]\nenabled = no\nwhen = from:*@x.org\nthen-add-label = X\n"
+        "[rule \"On\"]\nenabled = yes\nwhen = from:*@x.org\nthen-add-label = Y\n");
+    ASSERT(r && r->count == 2, "enabled: two rules");
+    ASSERT(r->rules[0].disabled == 1 && !r->rules[0].error, "enabled: 'enabled = no' switches the rule off");
+    ASSERT(r->rules[1].disabled == 0, "enabled: 'enabled = yes' keeps it on");
+    ASSERT(!mail_rule_matches(&r->rules[0], "a@x.org", "s", NULL, NULL, NULL, 0), "enabled: an off rule matches nothing");
+    ASSERT(mail_rule_matches(&r->rules[1], "a@x.org", "s", NULL, NULL, NULL, 0), "enabled: an on rule matches");
+    char *t0 = mail_rule_text(&r->rules[0]), *t1 = mail_rule_text(&r->rules[1]);
+    ASSERT(t0 && strstr(t0, "enabled = no\n"), "enabled: an off rule is written with 'enabled = no'");
+    ASSERT(t1 && !strstr(t1, "enabled"), "enabled: an on rule writes no line for it");
+    free(t0); free(t1);
+    mail_rules_free(r);
+    r = mail_rules_parse_text("[rule \"Bad\"]\nenabled = maybe\nwhen = all\n");
+    ASSERT(r && r->rules[0].error && strstr(r->rules[0].error, "enabled"), "enabled: another value is an error");
+    mail_rules_free(r);
+}
+
+static void test_312_apply_trace_names_the_rules(void) {
+    MailRules *r = mail_rules_parse_text(
+        "[rule \"A\"]\nwhen = from:*@x.org\nthen-add-label = X\n"
+        "[rule \"B\"]\nwhen = from:*@y.org\nthen-add-label = Y\n"
+        "[rule \"C\"]\nwhen = label:X\nthen-add-label = Z\n");
+    char **add = NULL, **rm = NULL;
+    int na = 0, nr = 0, idx[8];
+    int fired = mail_rules_apply_trace(r, "a@x.org", "s", NULL, NULL, NULL, 0, &add, &na, &rm, &nr,
+                                       NULL, idx, 8);
+    ASSERT(fired == 2, "trace: two rules fire (the second sees the label the first added)");
+    ASSERT(idx[0] == 0 && idx[1] == 2, "trace: the indexes of the rules that fired, in order");
+    for (int i = 0; i < na; i++) free(add[i]);
+    free(add); free(rm);
+    mail_rules_free(r);
+}
+
+static void test_312_summary_and_helpers(void) {
+    MailRules *r = mail_rules_parse_text(
+        "[rule \"Git\"]\nwhen = from:*github*\nthen-add-label = GitHub\nthen-remove-label = INBOX\n"
+        "then-move-folder = Dev\nthen-forward-to = a@example.org\n"
+        "[rule \"Other\"]\nwhen = all\nthen-add-label = O\n");
+    char *sum = mail_rule_summary(&r->rules[0]);
+    ASSERT(sum && strstr(sum, "from contains github") && strstr(sum, "+GitHub") && strstr(sum, "-INBOX") &&
+           strstr(sum, "move to Dev") && strstr(sum, "forward to a@example.org"),
+           "summary: the condition in words and every action");
+    free(sum);
+    MailRule copy;
+    ASSERT(mail_rule_clone(&r->rules[0], &copy) == 0 && copy.name != r->rules[0].name &&
+           strcmp(copy.name, "Git") == 0 && copy.then_add_count == 1 &&
+           copy.then_add_label[0] != r->rules[0].then_add_label[0], "clone: a deep copy");
+    mail_rule_release(&copy);
+    ASSERT(mail_rules_move(r, 0, -1) == -1, "move: the first cannot go up");
+    ASSERT(mail_rules_move(r, 0, 1) == 1 && strcmp(r->rules[1].name, "Git") == 0, "move: down swaps");
+    ASSERT(mail_rules_move(r, 1, 1) == -1, "move: the last cannot go down");
+    char *cn = mail_rules_copy_name(r, "Git");
+    ASSERT(cn && strcmp(cn, "Git (copy)") == 0, "copy name: first free");
+    free(cn);
+    MailRule *extra = mail_rules_append(r);
+    extra->name = strdup("Git (copy)");
+    cn = mail_rules_copy_name(r, "Git");
+    ASSERT(cn && strcmp(cn, "Git (copy 2)") == 0, "copy name: the next when one exists");
+    free(cn);
+    mail_rules_remove_at(r, 2);
+    mail_rules_remove_at(r, 0);
+    ASSERT(r->count == 1 && strcmp(r->rules[0].name, "Git") == 0, "remove: the rule at the index goes");
+    mail_rules_free(r);
+}
+
+static void test_312_save_records_no_edit_for_a_reorder(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    char *old_data = getenv("XDG_DATA_HOME");
+    setenv("HOME", TP("email-cli-rules-312-reorder"), 1);
+    unsetenv("XDG_CONFIG_HOME");
+    unsetenv("XDG_DATA_HOME");
+    MailRules *r = mail_rules_parse_text("[rule \"A\"]\nwhen = from:a\nthen-add-label = A\n"
+                                         "[rule \"B\"]\nwhen = from:b\nthen-add-label = B\n");
+    ASSERT(mail_rules_save("reorder@save.test", r) == 0, "reorder: saved");
+    OpHistory h0 = {0};
+    op_history_load("reorder@save.test", NULL, &h0);
+    int before = h0.count;
+    op_history_free(&h0);
+    mail_rules_move(r, 0, 1);
+    ASSERT(mail_rules_save("reorder@save.test", r) == 0, "reorder: saved again");
+    OpHistory h1 = {0};
+    op_history_load("reorder@save.test", NULL, &h1);
+    ASSERT(h1.count == before, "reorder: a pure reorder records no edit step");
+    op_history_free(&h1);
+    MailRules *back = mail_rules_load("reorder@save.test");
+    ASSERT(back && back->count == 2 && strcmp(back->rules[0].name, "B") == 0,
+           "reorder: the order is the file's order");
+    mail_rules_free(back);
+    mail_rules_free(r);
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1);
+    if (old_data) setenv("XDG_DATA_HOME", old_data, 1);
+}
+
+
+static void test_312_copy_a_rule_and_save(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    char *old_data = getenv("XDG_DATA_HOME");
+    setenv("HOME", TP("email-cli-rules-312-copy"), 1);
+    unsetenv("XDG_CONFIG_HOME");
+    unsetenv("XDG_DATA_HOME");
+    MailRules *r = mail_rules_parse_text("[rule \"A\"]\nwhen = from:a\nthen-add-label = A\n"
+                                         "[rule \"B\"]\nwhen = from:b\nthen-add-label = B\n"
+                                         "[rule \"C\"]\nwhen = from:c\nthen-add-label = C\n");
+    ASSERT(mail_rules_save("copy@save.test", r) == 0, "copy: saved");
+    MailRule *cp = mail_rules_append(r);
+    ASSERT(cp != NULL, "copy: appended");
+    mail_rule_clone(&r->rules[0], cp);
+    free(cp->name);
+    cp->name = NULL;
+    cp->name = mail_rules_copy_name(r, "A");
+    ASSERT(cp->name && strcmp(cp->name, "A (copy)") == 0, "copy: the name");
+    int at = r->count - 1;
+    while (at > 1) { mail_rules_move(r, at, -1); at--; }
+    ASSERT(strcmp(r->rules[1].name, "A (copy)") == 0, "copy: placed under the original");
+    ASSERT(mail_rules_save("copy@save.test", r) == 0, "copy: saved with the copy");
+    MailRules *back = mail_rules_load("copy@save.test");
+    ASSERT(back && back->count == 4 && strcmp(back->rules[1].name, "A (copy)") == 0 &&
+           back->rules[1].then_add_count == 1 && strcmp(back->rules[1].then_add_label[0], "A") == 0,
+           "copy: the file has the copy in place with its action");
+    mail_rules_free(back);
+    mail_rules_free(r);
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1);
+    if (old_data) setenv("XDG_DATA_HOME", old_data, 1);
+}
+
 /* ── Registration ────────────────────────────────────────────────── */
 
 void test_mail_rules(void) {
@@ -914,4 +1047,9 @@ void test_mail_rules(void) {
     RUN_TEST(test_313_display_name_from_and_to);
     RUN_TEST(test_313_body_and_age_from_raw_message);
     RUN_TEST(test_313_chained_labels_in_rule_order);
+    RUN_TEST(test_312_disabled_rule_never_fires_and_roundtrips);
+    RUN_TEST(test_312_apply_trace_names_the_rules);
+    RUN_TEST(test_312_summary_and_helpers);
+    RUN_TEST(test_312_save_records_no_edit_for_a_reorder);
+    RUN_TEST(test_312_copy_a_rule_and_save);
 }

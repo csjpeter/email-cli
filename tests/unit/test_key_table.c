@@ -26,7 +26,7 @@ void test_key_table(void) {
     const char *views[] = { EKV_LIST_IMAP, EKV_LIST_GMAIL, EKV_LIST_GMAIL_VIRTUAL,
         EKV_LIST_GMAIL_ARCHIVE, EKV_LIST_GMAIL_TRASH, EKV_READ_IMAP, EKV_READ_GMAIL,
         EKV_LABELS, EKV_LABELS_SYSTEM, EKV_FOLDERS, EKV_REVIEW, EKV_ATTACH,
-        EKV_ACCOUNTS, EKV_RULES, EKV_RULE, EKV_CONDITIONS, EKV_BODY_EDITOR };
+        EKV_ACCOUNTS, EKV_RULES, EKV_RULE, EKV_BODY_EDITOR };
     for (size_t i = 0; i < sizeof views / sizeof views[0]; i++) {
         const char *d = ekeys_view_desc(views[i]);
         ASSERT(d != NULL && d[0], "key table: a view has a description");

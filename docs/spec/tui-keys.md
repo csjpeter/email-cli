@@ -408,65 +408,84 @@ description or search (EMAIL-181, TUI-59), does not list `Backspace` (EMAIL-183)
 and takes no `ctrl-c` (EMAIL-153); the status line of the browser omits `/` and
 the page keys (EMAIL-163).
 
-## Rules list, rule detail and condition editor (EMAIL-148)
+## Rules overview and rule form (EMAIL-148, EMAIL-312)
 
-Reached with `l` on the message list.  Tested at 80x24 against the mock server
-(`tests/pty/test_pty_rules_keys.c`, `./manage.sh pty rules-keys`), each key also
-with 0 and 1 rules / conditions.
+Reached with `l` on the message list.  Every part is a libtuikit widget: the
+overview and the form are `tui_table` views, a condition is edited in a
+`tui_fieldset`, the labels are picked in a `tui_dialog_checklist`, questions
+are confirm / prompt / menu dialogs, a report is a scrollable text view.
+Tested at 80x24 against the mock server (`tests/pty/test_pty_rules_keys.c`,
+`./manage.sh pty rules-keys`), each key also with 0 and 1 rules.
 
-### Rules list
+### Rules overview
+
+One row per rule, in the order the rules run: `#`, the name, **what it does**
+(the condition in words, then `+label` / `-label` / `move to` / `forward to`),
+`On` or `off` (an off rule's row is dim), **Matches** (the cached messages the
+rule matches now; an off rule shows what it would match) and **Last change**
+(when an apply last changed a message by it, `never` before).
 
 | Key | Label | Behaviour | Test |
 |---|---|---|---|
-| `Down`, `j` / `Up`, `k` | `j/k navigate` | cursor one row, stops at the ends | `test_rk_list_navigation`, `test_rk_list_zero_and_one` |
-| `Home`, `g` / `End`, `G`, `PgUp`, `PgDn` | | first / last rule, a page (rows - 4) | `test_rk_list_navigation` |
-| `Enter`, `Right`, `l` | `Enter open` | opens the rule detail; the cursor row is kept on return | `test_rk_list_open_keys` |
-| `a` | `a add` | the condition editor, step 1/2 | `test_rk_cond_zero_and_one` |
-| `d` | `d delete` | asks with the rule's name, default No | `test_rk_list_delete` |
-| `p`, `A` | `p preview`, `A apply now` | preview report; apply asks first | `test_rk_list_preview_apply` |
-| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q/BS back` | back to the message list | `test_rk_list_back_keys` |
-| `?` | `? help` | overlay; closes with `Esc`, `q`, `Backspace` | `test_rk_list_help_and_status` |
-| `ctrl-c` | | quits at once with status 0, also at the questions | `test_rk_list_back_keys`, `test_rk_list_delete` |
+| `Down`, `j` / `Up`, `k` | | cursor one row, stops at the ends | `test_rk_list_navigation`, `test_rk_list_zero_and_one` |
+| `Home`, `g` / `End`, `G`, `PgUp`, `PgDn` | | first / last rule, a page | `test_rk_list_navigation` |
+| `Enter`, `e` | | the rule form of the rule; the cursor row is kept on return | `test_rk_form_opens_and_leaves` |
+| `a` | `a add` | the rule form of a new rule | `test_rk_form_new_rule` |
+| `d` | `d delete` | asks, naming the rule; No is the default (`n`, `Esc`, `q`, Backspace answer No) | `test_rk_list_delete` |
+| `c` | `c copy` | a copy ("R (copy)") right under the rule; the cursor goes to it | `test_rk_toggle_reorder_copy` |
+| `Space` | `Space on/off` | switches the rule off or on (`enabled = no` in the file) | `test_rk_toggle_reorder_copy` |
+| `J` / `K` | `J/K move` | moves the rule down / up; the cursor follows; the file order is the run order | `test_rk_toggle_reorder_copy` |
+| `p`, `A` | `p preview`, `A apply` | the dry run of the whole set in a scrollable report (per-message lines with the rule and its labels, then the count of every rule); `y` in it asks "Change N messages now?" (default No) and only then changes; the result is a report too, and the **undo is offered at once** with the count of changes | `test_rk_preview_apply_undo` |
+| `u` | `u undo apply` | takes back the last apply that was not undone (asks first) and reports what was restored | `test_rk_preview_apply_undo` |
+| `Esc`, `q`, `Backspace`, `Left`, `h` | | back to the message list | `test_rk_list_back_keys` |
+| `?` | `? help` | overlay; closes with `Esc`, `q`, Backspace | `test_rk_list_help_and_status` |
+| `ctrl-c` | | quits at once with status 0 | `test_rk_list_back_keys` |
 | any other key | | changes nothing | `test_rk_list_unbound_keys` |
 
-An empty list shows `(no rules -- press 'a' to add one)`; `d`, `Enter`, `p`
-and `A` do nothing there (`test_rk_list_zero_and_one`).
+An empty list shows `(no rules -- press 'a' to add one)`; the rule keys do
+nothing there.  The columns, the words, the counts and the colours:
+`test_rk_overview_columns_and_counts`.
 
-### Rule detail
+### Rule form
 
-| Key | Label | Behaviour | Test |
-|---|---|---|---|
-| `e` | `e edit` | the condition editor prefilled | `test_rk_detail_view` |
-| `d` | `d delete` | asks, default No; Yes returns to the list | `test_rk_detail_delete` |
-| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q/BS back` | back to the list | `test_rk_detail_back_keys` |
-| `?`, `ctrl-c`, other keys | `? help` | as in the list | `test_rk_detail_back_keys`, `test_rk_detail_view` |
+Rows: **Name**, **Enabled**, then **When the message matches**: one row per
+condition (`if` / `and` / `or`, then `[not] field operator value`, the fields
+`from`, `to`, `subject`, `label`, `body`, `age-gt`, `age-lt`; the operators `is`,
+`contains`, `matches glob`), `+ add a condition`, and **as text**: the `when`
+expression, the same condition as the rows, which can be edited as text.  Then
+**Then**: the labels to add and remove (any number), the folder, the
+forwarding address, `+ add an action`.  The last part is the **live preview**:
+`Preview: N of M cached messages match` and the first three of them (From and
+Subject), recomputed after every edit of the condition.
 
-### Condition editor (step 1/2) and the actions form (step 2/2)
+| Key | Behaviour | Test |
+|---|---|---|
+| `Enter`, `e` | edits the row: the name (prompt), a condition (a form of join, field, not, operator, value; an empty or non-numeric age value is refused with the reason), the text (prompt; an invalid text is refused with the reason and changes nothing), a label (prompt), the folder, the address; on `Enabled` switches | `test_rk_form_new_rule`, `test_rk_form_text_view`, `test_rk_form_edit_existing` |
+| `a` | on a condition row: a new condition; elsewhere: the action list (add labels, remove labels, move to a folder, forward to an address); the labels are a checklist of the labels of the cached messages and the rule, with `(a new label...)` | `test_rk_form_new_rule` |
+| `d` | deletes the condition, label, folder or address under the cursor | `test_rk_form_edit_existing` |
+| `s` | saves the rule (a missing name or condition, an invalid condition or a name another rule has is refused with the reason) | `test_rk_form_new_rule`, `test_rk_form_help_and_clash` |
+| `Esc`, `q`, Backspace, `Left`, `h` | leaves; after a change asks "Throw away the changes?" (default No) | `test_rk_form_edit_existing` |
+| `?` | overlay | `test_rk_form_help_and_clash` |
+| a resize | redraws | `test_rk_resize` |
 
-| Key | Label | Behaviour | Test |
-|---|---|---|---|
-| `Down`, `j` / `Up`, `k`, `Home`, `End`, `g`, `G`, `PgUp`, `PgDn` | `j/k move` | cursor, stops at the ends | `test_rk_cond_navigation` |
-| `Enter`, `e` | `Enter/e edit` | edit prompt of the condition; Esc keeps it | `test_rk_cond_edit_keys` |
-| `a` | `a add` | prompt for a new condition | `test_rk_cond_zero_and_one`, `test_rk_cond_edit_keys` |
-| `d` | `d delete` | removes the condition | `test_rk_cond_zero_and_one` |
-| `Tab`, `Right` | `Tab next` | goes on to step 2/2 (EMAIL-221) | `test_rk_cond_leave_keys`, `test_rk_actions_form` |
-| `Esc`, `q`, `Backspace`, `Left`, `h` | `Esc/q cancel` | cancels the rule (asks first when there are conditions) | `test_rk_cond_leave_keys` |
-| `?` | `? help` | overlay (11 rows) | `test_rk_cond_help_and_unbound` |
-| `ctrl-c` | | quits at once with status 0, also in the prompts | `test_rk_cond_leave_keys` |
-| any other key | | changes nothing | `test_rk_cond_help_and_unbound` |
+A condition the clause rows cannot hold (parentheses that change the
+precedence, `all`) is kept as text; the rows say so and `a` explains it
+(`test_rk_form_text_view`).  A long term is kept whole (`test_rk_form_long_term`);
+a pattern over 4095 characters is refused with the reason, never cut.
 
-A resize redraws all three views (`test_rk_resize`).
+### The message reader
 
-Findings of the study, fixed with EMAIL-148 (no ticket): `Backspace`, `Left` and
-`h` did not go back in the list or the detail, nor cancel in the condition
-editor; `g`, `G` were unbound in all three; the help overlays of the list and
-the detail ran without raw mode and could not be closed; ctrl-c at the delete,
-apply and Save? questions and in the input lines only answered or closed
-instead of quitting; the status lines and help texts did not name `Backspace`
-or `h`.  Open: EMAIL-221 (`q` in the condition editor confirms, the policy
-says `q` goes back).  Already right: `j k Down Up` stopping at the ends,
-`Home`/`End`/pages, `Enter` and the kept row, the empty list, the default-No
-questions, the reports, unbound keys, a resize.
+`R` shows which rules match the message and what each would do (a switched-off
+rule that would match is named), and, after an apply, which rule gave each
+label of it ("why this label"): `test_rk_reader_rules_and_why`.  The same data
+is `email-cli rules test KEY`.
+
+Findings of the earlier key study (EMAIL-148) that the new screens keep: `g`
+and `G` are Home and End, Backspace, `Left` and `h` go back, `ctrl-c` quits,
+the help overlays close with `Esc`, `q`, Backspace.  Gone with the hand-made
+editor (EMAIL-312): the three label slots (any number now), the cut of a
+condition at 512 characters, the split of a condition at every ` or ` inside
+parentheses, and the apply report that could not scroll.
 
 ## Compose dialog, address drop-down and path completion (EMAIL-150)
 
@@ -505,30 +524,6 @@ the first cut off at 80 columns, `compose-dialog.md` said eight rows and a
 `Tab` that moves on.  Open: EMAIL-222 (a cancelled dialog still waits for a
 key).  Already right: the field cycle, drop-down keys, the guards, the discard
 question, line editing, the resize.
-
-## Rule actions form: add step 2/2 and the rule edit (EMAIL-149)
-
-Reached with `q` in the condition editor, for a new rule (`a` in the rules list)
-or for the edit of a rule (`e` in the rule detail; the fields are prefilled).
-Nine one-line fields, one after another: `Name`, `add-label [1..3]`,
-`rm-label [1..3]`, `then-move-folder`, `then-forward-to`.  Tested at 80x24
-against the mock server (`tests/pty/test_pty_rules_keys.c`).
-
-| Key | Label | Behaviour | Test |
-|---|---|---|---|
-| printable keys, `Backspace`, `Left`, `Right`, `Home`, `End` | | edit the field in the input line | `test_rk_form_field_keys`, `test_rk_form_layout_and_edit` |
-| `Enter` | `Enter next field` | keeps the field, goes to the next; after the ninth asks `Save? (y/N)` | `test_rk_actions_form`, `test_rk_form_layout_and_edit` |
-| `Esc` | `Esc cancel` | in any field: cancels the rule, nothing is written; back to the list (add) or the detail (edit) | `test_rk_actions_form`, `test_rk_form_esc_and_save_keys` |
-| `ctrl-c` | | quits at once with status 0, also at `Save?` | `test_rk_actions_form` |
-| `Up`, `Down`, `Tab`, `PgUp`, `PgDn`, `F1` | | change nothing; the form has no way back to an earlier field | `test_rk_form_field_keys` |
-| `y`, `Y` at `Save?` | | saves the rule; an edit returns to the detail | `test_rk_form_layout_and_edit` |
-| any other key at `Save?` (`n`, `N`, `Esc`, `Enter`, ...) | | No: nothing is saved | `test_rk_form_esc_and_save_keys` |
-| any key at `Rule name is required` | | returns to the list, nothing is saved | `test_rk_form_name_required_and_resize` |
-
-A resize keeps the form on screen (`test_rk_form_name_required_and_resize`).
-Findings of the study: no defect that this ticket fixes; the form has no help
-overlay (`?` is a typed character in a field) and no step back to an earlier
-field, which the status line (`Enter next field`, `Esc cancel`) states.
 
 ## Body editor and review screen (EMAIL-151)
 

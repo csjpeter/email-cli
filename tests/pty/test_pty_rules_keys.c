@@ -1,16 +1,18 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Copyright (c) 2026 Peter Csaszar (Császár Péter) */
 /* Created: 2026-10-20 */
-/* PTY key study of the rules list, the rule detail and the condition editor. */
+/* PTY tests of the rules overview, the rule form, the preview and the undo. */
 /**
  * @file test_pty_rules_keys.c
- * @brief Every key of the rules editor of email-tui at 80x24 (EMAIL-148).
+ * @brief The rules screens of email-tui at 80x24 (EMAIL-148, EMAIL-312).
  *
- * The rules list (`l` in the message list), the rule detail (`Enter`) and the
- * condition editor (`a`, or `e` in the detail) are driven with the keys a user
- * presses, with 0, 1 and many rules.  The table of what each key does is in
- * docs/spec/tui-keys.md, section "Rules list, rule detail and condition
- * editor"; the test names there are the functions below.
+ * The rules overview (`l` in the message list) and the rule form (`a`, or
+ * Enter on a rule) are driven with the keys a user presses, with 0, 1 and
+ * many rules: the overview with its counts, switching, reordering, copying
+ * and deleting; the form with its condition rows, the text view, the actions
+ * and the live preview; the dry run, the apply and the undo.  The table of
+ * what each key does is in docs/spec/tui-keys.md, section "Rules overview and
+ * rule form"; the test names there are the functions below.
  *
  * Usage: test-pty-rules-keys <email-tui> <mock-imap-server>
  */
@@ -179,26 +181,6 @@ static PtySession *at_rules(int n) {
     return s;
 }
 
-/* The rules list of n rules, then Enter on the first: the rule's detail. */
-static PtySession *at_detail(int n) {
-    PtySession *s = at_rules(n);
-    if (!s) return NULL;
-    pty_send_key(s, PTY_KEY_ENTER);
-    if (pty_wait_for(s, "Rule: R01", WAIT_MS) != 0) { pty_close(s); return NULL; }
-    pty_settle(s, SETTLE_MS);
-    return s;
-}
-
-/* The condition editor of the new rule (from the list) or of R01 (detail). */
-static PtySession *at_conditions(int n, int from_detail) {
-    PtySession *s = from_detail ? at_detail(n) : at_rules(n);
-    if (!s) return NULL;
-    pty_send_str(s, from_detail ? "e" : "a");
-    if (pty_wait_for(s, "conditions", WAIT_MS) != 0) { pty_close(s); return NULL; }
-    pty_settle(s, SETTLE_MS);
-    return s;
-}
-
 /* ── Reading the screen ──────────────────────────────────────────────── */
 
 /* The text of the row the selection marker '>' is on ("" when none). */
@@ -243,42 +225,97 @@ static void press(PtySession *s, const char *k) {
     ASSERT((cond), _w); \
 } while (0)
 
-/* ── The rules list ──────────────────────────────────────────────────── */
+
+/* The number of the rule the cursor is on (R07 -> 7), 0 when none. */
+static int cursor_no(PtySession *s) {
+    const char *t = cursor_text(s);
+    const char *r = strstr(t, " R");
+    return r && r[2] >= '0' && r[2] <= '9' ? atoi(r + 2) : 0;
+}
+
+/* The row of the screen that holds @p needle, or -1. */
+static int row_of(PtySession *s, const char *needle) {
+    char buf[256];
+    for (int r = 1; r < ROWS; r++) {
+        pty_row_text(s, r, buf, sizeof(buf));
+        if (strstr(buf, needle)) return r;
+    }
+    return -1;
+}
+
+static const char *row_text(PtySession *s, const char *needle) {
+    static char buf[256];
+    int r = row_of(s, needle);
+    if (r < 0) { buf[0] = '\0'; return buf; }
+    pty_row_text(s, r, buf, sizeof(buf));
+    return buf;
+}
+
+static void applied_labels_path(char *path, size_t sz) {
+    snprintf(path, sz, "%s/.local/share/email-cli/accounts/testuser/applied_labels.tsv", g_home);
+}
+
+static int labels_file_has(const char *needle) {
+    char path[512], line[1024];
+    applied_labels_path(path, sizeof(path));
+    FILE *fp = fopen(path, "r");
+    if (!fp) return 0;
+    int found = 0;
+    while (fgets(line, sizeof(line), fp)) if (strstr(line, needle)) found = 1;
+    fclose(fp);
+    return found;
+}
+
+/* Rules that match the mock's three messages (from senderN@example.com) or none. */
+static void write_rules_mixed(void) {
+    char path[512];
+    rules_path(path, sizeof(path));
+    FILE *fp = fopen(path, "w");
+    if (!fp) { g_tests_failed++; return; }
+    fprintf(fp, "[rule \"R01\"]\nwhen = from:*example*\nthen-add-label = Tagged\n\n"
+                "[rule \"R02\"]\nwhen = from:*@nowhere.invalid\nthen-add-label = Never\n\n"
+                "[rule \"R03\"]\nenabled = no\nwhen = !to:*z*\n"
+                "then-add-label = O\nthen-remove-label = INBOX\n");
+    fclose(fp);
+}
+
+/* ── The overview ────────────────────────────────────────────────────── */
 
 /** j k Down Up Home End g G PgUp PgDn on 30 rules; they stop at the ends. */
 static void test_rk_list_navigation(void) {
     PtySession *s = at_rules(30);
     ASSERT(s != NULL, "rules list nav: opens");
     CHECK(s, pty_screen_contains(s, "(30 rules)"), "title counts 30 rules");
-    CHECK(s, cursor_has(s, "R01"), "cursor starts on the first rule");
+    CHECK(s, cursor_no(s) == 1, "cursor starts on the first rule");
     press(s, "k"); press(s, "Up");
-    CHECK(s, cursor_has(s, "R01"), "k and Up stop at the first rule");
+    CHECK(s, cursor_no(s) == 1, "k and Up stop at the first rule");
     press(s, "j");
-    CHECK(s, cursor_has(s, "R02"), "j moves down");
+    CHECK(s, cursor_no(s) == 2, "j moves down");
     press(s, "Down");
-    CHECK(s, cursor_has(s, "R03"), "Down moves down");
+    CHECK(s, cursor_no(s) == 3, "Down moves down");
     press(s, "k");
-    CHECK(s, cursor_has(s, "R02"), "k moves up");
+    CHECK(s, cursor_no(s) == 2, "k moves up");
     press(s, "Up");
-    CHECK(s, cursor_has(s, "R01"), "Up moves up");
+    CHECK(s, cursor_no(s) == 1, "Up moves up");
     press(s, "End");
-    CHECK(s, cursor_has(s, "R30"), "End goes to the last rule");
+    CHECK(s, cursor_no(s) == 30, "End goes to the last rule");
     press(s, "j"); press(s, "Down");
-    CHECK(s, cursor_has(s, "R30"), "j and Down stop at the last rule");
+    CHECK(s, cursor_no(s) == 30, "j and Down stop at the last rule");
     press(s, "Home");
-    CHECK(s, cursor_has(s, "R01"), "Home goes to the first rule");
+    CHECK(s, cursor_no(s) == 1, "Home goes to the first rule");
     press(s, "G");
-    CHECK(s, cursor_has(s, "R30"), "G goes to the last rule");
+    CHECK(s, cursor_no(s) == 30, "G goes to the last rule");
     press(s, "g");
-    CHECK(s, cursor_has(s, "R01"), "g goes to the first rule");
+    CHECK(s, cursor_no(s) == 1, "g goes to the first rule");
     press(s, "PgDn");
-    CHECK(s, cursor_has(s, "R21"), "PgDn moves a page of 20 rows");
-    press(s, "PgDn");
-    CHECK(s, cursor_has(s, "R30"), "PgDn stops at the last rule");
+    int page = cursor_no(s);
+    CHECK(s, page > 10 && page < 30, "PgDn moves a page (cursor on R%02d)", page);
+    press(s, "PgDn"); press(s, "PgDn");
+    CHECK(s, cursor_no(s) == 30, "PgDn stops at the last rule");
     press(s, "PgUp");
-    CHECK(s, cursor_has(s, "R10"), "PgUp moves a page back");
-    press(s, "PgUp"); press(s, "PgUp");
-    CHECK(s, cursor_has(s, "R01"), "PgUp stops at the first rule");
+    CHECK(s, cursor_no(s) < 30 && cursor_no(s) > 1, "PgUp moves a page back");
+    press(s, "PgUp"); press(s, "PgUp"); press(s, "PgUp");
+    CHECK(s, cursor_no(s) == 1, "PgUp stops at the first rule");
     pty_close(s);
 }
 
@@ -289,27 +326,28 @@ static void test_rk_list_zero_and_one(void) {
     CHECK(s, pty_screen_contains(s, "(0 rules)"), "0 rules: title");
     CHECK(s, pty_screen_contains(s, "(no rules -- press 'a' to add one)"), "0 rules: the empty message");
     const char *keys[] = { "j", "k", "Down", "Up", "Home", "End", "PgUp", "PgDn", "g", "G",
-                           "Enter", "d", "e", NULL };
+                           "Enter", "d", "e", "c", "J", "K", " ", NULL };
     for (int i = 0; keys[i]; i++) {
         press(s, keys[i]);
-        CHECK(s, pty_screen_contains(s, "(0 rules)") && !pty_screen_contains(s, "(y/N)")
-                 && !pty_screen_contains(s, "Rule:"),
+        CHECK(s, pty_screen_contains(s, "(0 rules)") && !pty_screen_contains(s, "Delete a rule")
+                 && !pty_screen_contains(s, "Edit rule"),
               "0 rules: %s changes nothing", keys[i]);
     }
     press(s, "p");
     CHECK(s, pty_wait_for(s, "No rules found", WAIT_MS) == 0, "0 rules: p previews (no rules found)");
-    press(s, "x");
-    CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0, "0 rules: any key leaves the preview");
+    press(s, "Esc");
+    CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0, "0 rules: Esc leaves the preview");
     pty_close(s);
 
     s = at_rules(1);
     ASSERT(s != NULL, "rules list 1: opens");
     CHECK(s, pty_screen_contains(s, "(1 rule)"), "1 rule: title is singular");
-    const char *k1[] = { "j", "k", "Down", "Up", "Home", "End", "PgUp", "PgDn", "g", "G", NULL };
+    const char *k1[] = { "j", "k", "Down", "Up", "Home", "End", "PgUp", "PgDn", "g", "G", "J", "K", NULL };
     for (int i = 0; k1[i]; i++) {
         press(s, k1[i]);
-        CHECK(s, cursor_has(s, "R01"), "1 rule: %s keeps the cursor on the rule", k1[i]);
+        CHECK(s, cursor_no(s) == 1, "1 rule: %s keeps the cursor on the rule", k1[i]);
     }
+    CHECK(s, rules_in_file() == 1 && !file_has("enabled"), "1 rule: J and K did not touch the file");
     pty_close(s);
 }
 
@@ -319,7 +357,6 @@ static void test_rk_list_back_keys(void) {
     for (int i = 0; keys[i]; i++) {
         PtySession *s = at_rules(2);
         ASSERT(s != NULL, "rules list back: opens");
-        CHECK(s, pty_row_contains(s, STATUS_ROW, "Esc/q/BS back"), "status line names Esc/q/BS back");
         press(s, keys[i]);
         CHECK(s, pty_wait_for(s, "message(s) in", WAIT_MS) == 0 && !pty_screen_contains(s, "Rules for"),
               "rules list: %s goes back to the message list", keys[i]);
@@ -336,14 +373,16 @@ static void test_rk_list_back_keys(void) {
 static void test_rk_list_unbound_keys(void) {
     PtySession *s = at_rules(3);
     ASSERT(s != NULL, "rules list unbound: opens");
-    const char *keys[] = { " ", "x", "c", "r", "e", "l", "t", "D", "Z", "u", "U", "1", "-", "/", ":",
+    const char *keys[] = { "x", "r", "l", "t", "D", "Z", "U", "1", "-", "/", ":",
                            "Tab", "Right", "Del", "Ins", "F1", NULL };
     for (int i = 0; keys[i]; i++) {
         press(s, keys[i]);
-        CHECK(s, pty_screen_contains(s, "(3 rules)") && cursor_has(s, "R01")
-                 && pty_row_contains(s, STATUS_ROW, "Esc/q/BS back") && !pty_screen_contains(s, "(y/N)"),
+        CHECK(s, pty_screen_contains(s, "(3 rules)") && cursor_no(s) == 1
+                 && !pty_screen_contains(s, "Delete a rule") && !pty_screen_contains(s, "Edit rule"),
               "rules list: %s changes nothing", keys[i]);
     }
+    CHECK(s, rules_in_file() == 3 && !file_has("(copy)") && !file_has("enabled"),
+          "rules list: the unbound keys left the file as it was");
     pty_close(s);
 }
 
@@ -351,15 +390,16 @@ static void test_rk_list_unbound_keys(void) {
 static void test_rk_list_help_and_status(void) {
     PtySession *s = at_rules(2);
     ASSERT(s != NULL, "rules list help: opens");
-    CHECK(s, pty_row_contains(s, STATUS_ROW, "Enter open") && pty_row_contains(s, STATUS_ROW, "a add")
-             && pty_row_contains(s, STATUS_ROW, "d delete") && pty_row_contains(s, STATUS_ROW, "? help"),
-          "status line shows the keys");
+    CHECK(s, pty_row_contains(s, STATUS_ROW, "a add") && pty_row_contains(s, STATUS_ROW, "d delete")
+             && pty_row_contains(s, STATUS_ROW, "c copy") && pty_row_contains(s, STATUS_ROW, "? help"),
+          "status line shows the keys of the overview");
+    CHECK(s, pty_row_contains(s, STATUS_ROW, "[1/2]"), "status line shows the position");
     const char *closers[] = { "Esc", "q", "BS", NULL };
     for (int i = 0; closers[i]; i++) {
         press(s, "?");
         CHECK(s, pty_wait_for(s, "Rules shortcuts", WAIT_MS) == 0, "? opens the help");
-        CHECK(s, pty_screen_contains(s, "Add a rule") && pty_screen_contains(s, "also g / G")
-                 && pty_screen_contains(s, "Apply the rules now") && pty_screen_contains(s, "(2 rules)"),
+        CHECK(s, pty_screen_contains(s, "Add a rule") && pty_screen_contains(s, "Copy the rule")
+                 && pty_screen_contains(s, "Undo the last apply") && pty_screen_contains(s, "(2 rules)"),
               "the help lists the keys and the list stays behind it");
         press(s, closers[i]);
         CHECK(s, !pty_screen_contains(s, "Rules shortcuts") && pty_screen_contains(s, "(2 rules)"),
@@ -368,532 +408,536 @@ static void test_rk_list_help_and_status(void) {
     pty_close(s);
 }
 
+/** The columns, the plain description, the counts, on and off, and their colours. */
+static void test_rk_overview_columns_and_counts(void) {
+    restart_mock();
+    make_home("ov");
+    write_rules_mixed();
+    PtySession *s = tui_open();
+    ASSERT(s != NULL, "overview: opens");
+    pty_wait_for(s, "Email Accounts", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "Folders", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_HOME);
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "message(s) in", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    ASSERT(pty_wait_for(s, "Rules for", WAIT_MS) == 0, "overview: the rules screen opens");
+    pty_settle(s, SETTLE_MS);
+    CHECK(s, pty_screen_contains(s, "What it does") && pty_screen_contains(s, "Matches")
+             && pty_screen_contains(s, "On"), "the column heads");
+    CHECK(s, strstr(row_text(s, "R01"), "from contains example") != NULL,
+          "the condition is in words: [%s]", row_text(s, "R01"));
+    CHECK(s, strstr(row_text(s, "R01"), "+Tagged") != NULL, "the action is on the row: [%s]", row_text(s, "R01"));
+    CHECK(s, strstr(row_text(s, "R03"), "does not contain z") != NULL, "a negated condition is in words: [%s]",
+          row_text(s, "R03"));
+    CHECK(s, strstr(row_text(s, "R03"), "-INBOX") != NULL, "a removed label is on the row");
+    CHECK(s, strstr(row_text(s, "R01"), " on ") != NULL && strstr(row_text(s, "R03"), " off ") != NULL,
+          "on and off: [%s] [%s]", row_text(s, "R01"), row_text(s, "R03"));
+    CHECK(s, strstr(row_text(s, "R01"), "  3 ") != NULL, "R01 matches the 3 cached messages: [%s]", row_text(s, "R01"));
+    CHECK(s, strstr(row_text(s, "R02"), "  0 ") != NULL, "R02 matches none: [%s]", row_text(s, "R02"));
+    CHECK(s, strstr(row_text(s, "R03"), "  3 ") != NULL, "an off rule shows what it would match");
+    CHECK(s, strstr(row_text(s, "R01"), "never") != NULL, "a rule that changed nothing yet says never");
+    /* colours: the header bar is bold white on blue; "on" is coloured, "off" is dim */
+    CHECK(s, pty_cell_fg(s, 0, 2) == 37 && pty_cell_bg(s, 0, 2) == 44 && (pty_cell_attr(s, 0, 2) & PTY_ATTR_BOLD),
+          "the title bar is bold white on blue");
+    int r1 = row_of(s, "R01"), r3 = row_of(s, "R03");
+    const char *t1 = row_text(s, "R01");
+    int on_col = (int)(strstr(t1, " on ") - t1) + 1;
+    const char *t3 = row_text(s, "R03");
+    int off_col = (int)(strstr(t3, " off ") - t3) + 1;
+    CHECK(s, pty_cell_fg(s, r1, on_col) != 0, "on is written in a colour of its own");
+    CHECK(s, (pty_cell_attr(s, r3, off_col) & PTY_ATTR_DIM) != 0, "an off rule's row is dim");
+    pty_close(s);
+}
+
 /** d asks first, naming the rule; No is the default; y deletes. */
 static void test_rk_list_delete(void) {
-    const char *no[] = { "n", "Esc", "q", "BS", "x", "Enter", NULL };
+    const char *no[] = { "n", "Esc", "q", "BS", NULL };
     for (int i = 0; no[i]; i++) {
         PtySession *s = at_rules(3);
         ASSERT(s != NULL, "rules list delete: opens");
         press(s, "d");
-        CHECK(s, pty_wait_for(s, "Delete \"R01\"? (y/N)", WAIT_MS) == 0, "d asks and names the rule");
+        CHECK(s, pty_wait_for(s, "Delete the rule \"R01\"?", WAIT_MS) == 0, "d asks and names the rule");
         press(s, no[i]);
-        CHECK(s, pty_screen_contains(s, "(3 rules)") && rules_in_file() == 3,
+        CHECK(s, pty_screen_contains(s, "(3 rules)") && rules_in_file() == 3 && !pty_screen_contains(s, "Delete a rule"),
               "rules list delete: %s refuses", no[i]);
         pty_close(s);
     }
     PtySession *s = at_rules(3);
+    ASSERT(s != NULL, "rules list delete default: opens");
+    press(s, "d");
+    pty_wait_for(s, "Delete the rule", WAIT_MS);
+    press(s, "Enter");
+    CHECK(s, rules_in_file() == 3, "Enter takes the default: No");
+    pty_close(s);
+
+    s = at_rules(3);
     ASSERT(s != NULL, "rules list delete yes: opens");
     press(s, "j");
     press(s, "d");
-    CHECK(s, pty_wait_for(s, "Delete \"R02\"? (y/N)", WAIT_MS) == 0, "d names the selected rule");
+    CHECK(s, pty_wait_for(s, "Delete the rule \"R02\"?", WAIT_MS) == 0, "d names the selected rule");
     press(s, "y");
     CHECK(s, pty_wait_for(s, "(2 rules)", WAIT_MS) == 0 && rules_in_file() == 2 && !file_has("R02"),
           "y deletes the rule");
-    CHECK(s, cursor_has(s, "R03"), "the cursor stays on the row, now R03");
+    CHECK(s, cursor_no(s) == 3, "the cursor stays on the row, now R03");
     press(s, "End"); press(s, "d"); press(s, "y");
-    CHECK(s, pty_wait_for(s, "(1 rule)", WAIT_MS) == 0 && cursor_has(s, "R01"),
+    CHECK(s, pty_wait_for(s, "(1 rule)", WAIT_MS) == 0 && cursor_no(s) == 1,
           "deleting the last row moves the cursor up");
     press(s, "d"); press(s, "y");
     CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0 && rules_in_file() == 0,
           "deleting the only rule leaves the empty list");
     pty_close(s);
+}
 
-    s = at_rules(3);
-    ASSERT(s != NULL, "rules list delete ctrl-c: opens");
-    press(s, "d");
-    pty_wait_for(s, "(y/N)", WAIT_MS);
-    pty_send_key(s, PTY_KEY_CTRL_C);
-    ASSERT_EXIT_STATUS(s, 0, 5000);
-    CHECK(s, rules_in_file() == 3, "ctrl-c at the question deletes nothing");
+/** Space switches a rule off and on; J and K reorder; c copies. */
+static void test_rk_toggle_reorder_copy(void) {
+    PtySession *s = at_rules(3);
+    ASSERT(s != NULL, "toggle: opens");
+    press(s, "j");
+    press(s, " ");
+    CHECK(s, strstr(row_text(s, "R02"), " off ") != NULL && file_has("enabled = no"),
+          "Space switches the rule off and writes 'enabled = no': [%s]", row_text(s, "R02"));
+    CHECK(s, pty_screen_contains(s, "Rule switched off: R02"), "the bottom line says so");
+    press(s, " ");
+    CHECK(s, strstr(row_text(s, "R02"), " on ") != NULL && !file_has("enabled"),
+          "Space again switches it on and the file has no 'enabled' line");
+    /* reorder */
+    press(s, "J");
+    CHECK(s, cursor_no(s) == 2 && strstr(cursor_text(s), "3 R02") != NULL,
+          "J moves the rule down and the cursor follows it: [%s]", cursor_text(s));
+    {
+        char path[512], line[1024];
+        rules_path(path, sizeof(path));
+        FILE *fp = fopen(path, "r");
+        int order[3] = {0}, n = 0;
+        while (fp && fgets(line, sizeof(line), fp))
+            if (strncmp(line, "[rule \"R", 8) == 0 && n < 3) order[n++] = atoi(line + 8);
+        if (fp) fclose(fp);
+        CHECK(s, order[0] == 1 && order[1] == 3 && order[2] == 2, "J wrote the new order: %d %d %d",
+              order[0], order[1], order[2]);
+    }
+    press(s, "K"); press(s, "K");
+    CHECK(s, pty_screen_contains(s, "Rule moved to place 1: R02") || cursor_no(s) == 2, "K moves it up again");
+    press(s, "Home"); press(s, "K");
+    CHECK(s, cursor_no(s) == 2 && strstr(cursor_text(s), "1 R02") != NULL, "K on the first rule moves nothing");
+    /* copy */
+    press(s, "Home");
+    press(s, "c");
+    CHECK(s, pty_screen_contains(s, "(4 rules)") && file_has("[rule \"R02 (copy)\"]")
+             && strstr(cursor_text(s), "2 R02 (copy)") != NULL,
+          "c adds a copy right under the rule, and the cursor goes to it: [%s]", cursor_text(s));
+    {
+        char path[512], line[1024];
+        int n = 0;
+        rules_path(path, sizeof(path));
+        FILE *fp = fopen(path, "r");
+        while (fp && fgets(line, sizeof(line), fp)) if (strstr(line, "= L02")) n++;
+        if (fp) fclose(fp);
+        CHECK(s, n == 2, "the copy has the same actions (%d lines with L02)", n);
+    }
     pty_close(s);
 }
 
-/** p previews, A asks and applies; any key leaves the report; ctrl-c quits. */
-static void test_rk_list_preview_apply(void) {
-    PtySession *s = at_rules(2);
-    ASSERT(s != NULL, "rules list p: opens");
+/** p shows the dry run and changes nothing; A previews, asks, applies and offers the undo; u undoes. */
+static void test_rk_preview_apply_undo(void) {
+    restart_mock();
+    make_home("ap");
+    write_rules_mixed();
+    PtySession *s = tui_open();
+    ASSERT(s != NULL, "apply: opens");
+    pty_wait_for(s, "Email Accounts", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "Folders", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_HOME);
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "message(s) in", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    pty_wait_for(s, "Rules for", WAIT_MS); pty_settle(s, SETTLE_MS);
+
     press(s, "p");
     CHECK(s, pty_wait_for(s, "Rules preview (dry run, nothing changed)", WAIT_MS) == 0
-             && pty_row_contains(s, STATUS_ROW, "any key back"), "p shows the dry run");
+             && pty_row_contains(s, STATUS_ROW, "y apply"), "p shows the dry run, with the apply key on the status line");
+    CHECK(s, pty_screen_contains(s, "[dry-run]") && pty_screen_contains(s, "R01")
+             && pty_screen_contains(s, "+Tagged") && pty_screen_contains(s, "3 message(s) would be modified"),
+          "the report names the rule, its label and the count");
+    CHECK(s, pty_screen_contains(s, "Rule \"R01\": 3 message(s)"), "the report has the per-rule count");
     press(s, "Esc");
-    CHECK(s, pty_wait_for(s, "(2 rules)", WAIT_MS) == 0, "a key leaves the report");
+    CHECK(s, pty_wait_for(s, "(3 rules)", WAIT_MS) == 0 && pty_screen_contains(s, "nothing was changed")
+             && !labels_file_has("Tagged"), "Esc leaves the preview and nothing was changed");
+
     press(s, "A");
-    CHECK(s, pty_wait_for(s, "Apply the rules to the cached messages now? (y/N)", WAIT_MS) == 0, "A asks first");
+    pty_wait_for(s, "Rules preview", WAIT_MS);
+    press(s, "y");
+    CHECK(s, pty_wait_for(s, "Change 3 messages now?", WAIT_MS) == 0, "after the preview, y asks before changing");
     press(s, "n");
-    CHECK(s, pty_screen_contains(s, "(2 rules)") && !pty_screen_contains(s, "Rules applied"), "n refuses");
-    press(s, "A"); press(s, "y");
-    CHECK(s, pty_wait_for(s, "Rules applied:", WAIT_MS) == 0, "y applies and reports");
-    pty_send_key(s, PTY_KEY_CTRL_C);
-    ASSERT_EXIT_STATUS(s, 0, 5000);
+    CHECK(s, pty_wait_for(s, "(3 rules)", WAIT_MS) == 0 && !labels_file_has("Tagged"), "No changes nothing");
+
+    press(s, "A");
+    pty_wait_for(s, "Rules preview", WAIT_MS);
+    press(s, "y");
+    pty_wait_for(s, "Change 3 messages now?", WAIT_MS);
+    press(s, "y");
+    CHECK(s, pty_wait_for(s, "Rules applied: testuser (3 messages changed)", WAIT_MS) == 0
+             && pty_screen_contains(s, "[rule]"), "y applies and shows the report");
+    CHECK(s, labels_file_has("Tagged"), "the labels were written");
+    press(s, "Esc");
+    CHECK(s, pty_wait_for(s, "Undo this apply now?", WAIT_MS) == 0 && pty_screen_contains(s, "3 messages were changed"),
+          "the undo is offered with the count of changes");
+    press(s, "n");
+    CHECK(s, pty_wait_for(s, "(3 rules)", WAIT_MS) == 0 && labels_file_has("Tagged")
+             && pty_screen_contains(s, "Applied: 3 messages changed"), "No keeps the apply");
+    CHECK(s, strstr(row_text(s, "R01"), "never") == NULL, "the last change of the rule is shown now: [%s]", row_text(s, "R01"));
+
+    press(s, "u");
+    CHECK(s, pty_wait_for(s, "Take back the last rules apply", WAIT_MS) == 0, "u asks first");
+    press(s, "y");
+    CHECK(s, pty_wait_for(s, "3 message(s) restored", WAIT_MS) == 0 && !labels_file_has("Tagged"),
+          "y takes the apply back");
+    press(s, "Esc");
+    CHECK(s, pty_wait_for(s, "Apply undone", WAIT_MS) == 0, "the bottom line says it was undone");
+    pty_close(s);
+
+    /* the offer right after an apply: Yes undoes at once */
+    s = tui_open();
+    ASSERT(s != NULL, "apply yes: opens");
+    pty_wait_for(s, "Email Accounts", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "Folders", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_HOME);
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "message(s) in", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    pty_wait_for(s, "Rules for", WAIT_MS); pty_settle(s, SETTLE_MS);
+    press(s, "A"); pty_wait_for(s, "Rules preview", WAIT_MS);
+    press(s, "y"); pty_wait_for(s, "Change 3 messages now?", WAIT_MS);
+    press(s, "y"); pty_wait_for(s, "Rules applied", WAIT_MS);
+    press(s, "Esc"); pty_wait_for(s, "Undo this apply now?", WAIT_MS);
+    press(s, "y");
+    CHECK(s, pty_wait_for(s, "3 message(s) restored", WAIT_MS) == 0 && !labels_file_has("Tagged"),
+          "Yes at the offer takes the apply back at once");
     pty_close(s);
 }
 
-/** a opens the condition editor of a new rule; Enter opens the detail. */
-static void test_rk_list_open_keys(void) {
+/* ── The rule form ───────────────────────────────────────────────────── */
+
+/** a opens the form; Esc leaves it (nothing changed: no question). */
+static void test_rk_form_opens_and_leaves(void) {
     PtySession *s = at_rules(3);
-    ASSERT(s != NULL, "rules list open: opens");
-    press(s, "j");
-    press(s, "Enter");
-    CHECK(s, pty_wait_for(s, "Rule: R02", WAIT_MS) == 0, "Enter opens the selected rule");
-    press(s, "Esc");
-    CHECK(s, pty_wait_for(s, "Rules for", WAIT_MS) == 0 && cursor_has(s, "R02"),
-          "the way back keeps the cursor row");
-    press(s, "a");
-    CHECK(s, pty_wait_for(s, "Add new rule for testuser", WAIT_MS) == 0, "a opens the new-rule form");
-    pty_close(s);
-}
-
-/* ── The rule detail ─────────────────────────────────────────────────── */
-
-static void test_rk_detail_view(void) {
-    PtySession *s = at_detail(1);
-    ASSERT(s != NULL, "detail: opens");
-    CHECK(s, pty_screen_contains(s, "Account: testuser") && pty_screen_contains(s, "when: from:*@one.example.org")
-             && pty_screen_contains(s, "then-add-label:   L01"), "detail shows the rule");
-    CHECK(s, pty_row_contains(s, STATUS_ROW, "e edit") && pty_row_contains(s, STATUS_ROW, "d delete")
-             && pty_row_contains(s, STATUS_ROW, "Esc/q/BS back"), "status line shows e, d and the back keys");
-    const char *keys[] = { "j", "k", "Down", "Up", "Home", "End", "PgUp", "PgDn", "g", "G", "a", "p", "A",
-                           " ", "x", "Tab", "Right", "Del", "Ins", "F1", "Enter", NULL };
-    for (int i = 0; keys[i]; i++) {
-        press(s, keys[i]);
-        CHECK(s, pty_screen_contains(s, "Rule: R01") && !pty_screen_contains(s, "(y/N)"),
-              "detail: %s changes nothing", keys[i]);
-    }
-    press(s, "?");
-    CHECK(s, pty_wait_for(s, "Rule shortcuts", WAIT_MS) == 0 && pty_screen_contains(s, "Edit the rule"),
-          "? opens the help");
-    press(s, "q");
-    CHECK(s, !pty_screen_contains(s, "Rule shortcuts") && pty_screen_contains(s, "Rule: R01"),
-          "q closes the help only");
-    pty_close(s);
-}
-
-static void test_rk_detail_back_keys(void) {
-    const char *keys[] = { "Esc", "q", "BS", "Left", "h", NULL };
-    for (int i = 0; keys[i]; i++) {
-        PtySession *s = at_detail(2);
-        ASSERT(s != NULL, "detail back: opens");
-        press(s, keys[i]);
-        CHECK(s, pty_wait_for(s, "Rules for", WAIT_MS) == 0 && !pty_screen_contains(s, "Rule: R01")
-                 && cursor_has(s, "R01"), "detail: %s goes back to the list", keys[i]);
-        pty_close(s);
-    }
-    PtySession *s = at_detail(2);
-    ASSERT(s != NULL, "detail ctrl-c: opens");
-    pty_send_key(s, PTY_KEY_CTRL_C);
-    ASSERT_EXIT_STATUS(s, 0, 5000);
-    pty_close(s);
-}
-
-static void test_rk_detail_delete(void) {
-    const char *no[] = { "n", "Esc", "q", "BS", "x", NULL };
-    for (int i = 0; no[i]; i++) {
-        PtySession *s = at_detail(2);
-        ASSERT(s != NULL, "detail delete: opens");
-        press(s, "d");
-        CHECK(s, pty_wait_for(s, "Delete \"R01\"? (y/N)", WAIT_MS) == 0, "d asks and names the rule");
-        press(s, no[i]);
-        CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 && rules_in_file() == 2,
-              "detail delete: %s refuses and stays in the detail", no[i]);
-        pty_close(s);
-    }
-    PtySession *s = at_detail(2);
-    ASSERT(s != NULL, "detail delete yes: opens");
-    press(s, "d"); press(s, "y");
-    CHECK(s, pty_wait_for(s, "(1 rule)", WAIT_MS) == 0 && rules_in_file() == 1 && !file_has("R01"),
-          "y deletes the rule and returns to the list");
-    pty_close(s);
-
-    s = at_detail(2);
-    ASSERT(s != NULL, "detail delete ctrl-c: opens");
-    press(s, "d");
-    pty_wait_for(s, "(y/N)", WAIT_MS);
-    pty_send_key(s, PTY_KEY_CTRL_C);
-    ASSERT_EXIT_STATUS(s, 0, 5000);
-    CHECK(s, rules_in_file() == 2, "ctrl-c at the question deletes nothing");
-    pty_close(s);
-
-    s = at_detail(1);
-    ASSERT(s != NULL, "detail delete only: opens");
-    press(s, "d"); press(s, "y");
-    CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0 && rules_in_file() == 0,
-          "deleting the only rule leaves the empty list");
-    pty_close(s);
-}
-
-/* ── The condition editor ────────────────────────────────────────────── */
-
-/** j k Down Up Home End g G PgUp PgDn over the 3 conditions of R01. */
-static void test_rk_cond_navigation(void) {
-    PtySession *s = at_conditions(1, 1);
-    ASSERT(s != NULL, "conditions nav: opens");
-    CHECK(s, pty_screen_contains(s, "Edit rule \"R01\" for testuser") && pty_screen_contains(s, "(step 1/2)"),
-          "title names the rule and the step");
-    CHECK(s, pty_row_contains(s, STATUS_ROW, "Enter/e edit") && pty_row_contains(s, STATUS_ROW, "a add")
-             && pty_row_contains(s, STATUS_ROW, "d delete") && pty_row_contains(s, STATUS_ROW, "Tab next")
-             && pty_row_contains(s, STATUS_ROW, "Esc/q cancel"), "status line shows the keys");
-    CHECK(s, cursor_has(s, "1. from:*@one"), "cursor starts on the first condition");
-    press(s, "k"); press(s, "Up");
-    CHECK(s, cursor_has(s, "1. from:"), "k and Up stop at the first");
-    press(s, "j");
-    CHECK(s, cursor_has(s, "2. subject:"), "j moves down");
-    press(s, "Down");
-    CHECK(s, cursor_has(s, "3. to:"), "Down moves down");
-    press(s, "j"); press(s, "Down");
-    CHECK(s, cursor_has(s, "3. to:"), "j and Down stop at the last");
-    press(s, "k");
-    CHECK(s, cursor_has(s, "2. subject:"), "k moves up");
-    press(s, "Home");
-    CHECK(s, cursor_has(s, "1. from:"), "Home goes to the first");
-    press(s, "End");
-    CHECK(s, cursor_has(s, "3. to:"), "End goes to the last");
-    press(s, "g");
-    CHECK(s, cursor_has(s, "1. from:"), "g goes to the first");
-    press(s, "G");
-    CHECK(s, cursor_has(s, "3. to:"), "G goes to the last");
-    press(s, "PgUp");
-    CHECK(s, cursor_has(s, "1. from:"), "PgUp goes to the first");
-    press(s, "PgDn");
-    CHECK(s, cursor_has(s, "3. to:"), "PgDn goes to the last");
-    pty_close(s);
-}
-
-/** An empty list (0 conditions) and a list of one. */
-static void test_rk_cond_zero_and_one(void) {
-    PtySession *s = at_conditions(0, 0);
-    ASSERT(s != NULL, "conditions 0: opens");
-    CHECK(s, pty_screen_contains(s, "(empty") && pty_screen_contains(s, "press 'a' to add a condition"),
-          "0 conditions: the empty message");
-    const char *keys[] = { "j", "k", "Down", "Up", "Home", "End", "PgUp", "PgDn", "g", "G", "d", "x", " ", NULL };
-    for (int i = 0; keys[i]; i++) {
-        press(s, keys[i]);
-        CHECK(s, pty_screen_contains(s, "(empty") && pty_screen_contains(s, "conditions"),
-              "0 conditions: %s changes nothing", keys[i]);
-    }
-    press(s, "Enter");
-    CHECK(s, pty_wait_for(s, "new:", WAIT_MS) == 0, "Enter on the empty list opens the new-condition prompt");
-    press(s, "Esc");
-    pty_close(s);
-
-    s = at_conditions(2, 0);
-    ASSERT(s != NULL, "conditions 1: opens");
-    pty_send_str(s, "a");
-    pty_wait_for(s, "new:", WAIT_MS);
-    pty_send_str(s, "from:*@only.example.org");
-    press(s, "Enter");
-    CHECK(s, cursor_has(s, "1. from:*@only.example.org"), "a adds the first condition and selects it");
-    const char *k1[] = { "j", "k", "Down", "Up", "Home", "End", "PgUp", "PgDn", "g", "G", NULL };
-    for (int i = 0; k1[i]; i++) {
-        press(s, k1[i]);
-        CHECK(s, cursor_has(s, "1. from:*@only"), "1 condition: %s keeps the cursor", k1[i]);
-    }
-    pty_close(s);
-}
-
-/** a adds, e and Enter edit, d deletes; an invalid condition is refused. */
-static void test_rk_cond_edit_keys(void) {
-    PtySession *s = at_conditions(1, 1);
-    ASSERT(s != NULL, "conditions edit: opens");
-    press(s, "a");
-    CHECK(s, pty_wait_for(s, "new:", WAIT_MS) == 0, "a opens the prompt");
-    pty_send_str(s, "subject:\"*four*\"");
-    press(s, "Enter");
-    CHECK(s, cursor_has(s, "4. subject:\"*four*\""), "the new condition is the 4th and selected");
-    press(s, "e");
-    CHECK(s, pty_wait_for(s, "edit:", WAIT_MS) == 0, "e opens the edit prompt on the condition");
-    pty_send_str(s, "x");
-    press(s, "Esc");
-    CHECK(s, cursor_has(s, "4. subject:\"*four*\"") && !pty_screen_contains(s, "four*\"x"),
-          "Esc in the prompt keeps the condition");
-    press(s, "Enter");
-    CHECK(s, pty_wait_for(s, "edit:", WAIT_MS) == 0, "Enter opens the edit prompt too");
-    press(s, "Esc");
-    press(s, "a");
-    pty_wait_for(s, "new:", WAIT_MS);
-    pty_send_str(s, "(((");
-    press(s, "Enter");
-    CHECK(s, (pty_row_contains(s, 0, "Not a valid condition") || pty_row_contains(s, 1, "Not a valid condition")) && pty_row_contains(s, STATUS_ROW, "? help"),
-          "an invalid condition is refused with a reason in the header notice, the hints stay");
-    CHECK(s, !pty_screen_contains(s, "5. ((("), "an invalid condition is not added");
-    press(s, "G"); press(s, "d");
-    CHECK(s, !pty_screen_contains(s, "four*") && cursor_has(s, "3. to:"), "d deletes the selected one");
-    press(s, "Home"); press(s, "d");
-    CHECK(s, !pty_screen_contains(s, "one.example.org") && cursor_has(s, "1. subject:"),
-          "d on the first deletes it and the cursor stays");
-    pty_close(s);
-}
-
-/** Esc, Backspace, Left, h cancel the rule; q is as Esc, Tab/Right go on; ctrl-c quits. */
-static void test_rk_cond_leave_keys(void) {
-    const char *cancel[] = { "Esc", "BS", "Left", "h", NULL };
-    for (int i = 0; cancel[i]; i++) {
-        PtySession *s = at_conditions(2, 0);
-        ASSERT(s != NULL, "conditions cancel: opens");
-        press(s, cancel[i]);
-        CHECK(s, pty_wait_for(s, "(2 rules)", WAIT_MS) == 0 && rules_in_file() == 2,
-              "conditions: %s cancels and returns to the list", cancel[i]);
-        pty_close(s);
-    }
-    PtySession *s = at_conditions(2, 1);
-    ASSERT(s != NULL, "conditions q: opens");
-    press(s, "Esc");
-    CHECK(s, pty_wait_for(s, "Discard the rule? (y/N)", WAIT_MS) == 0
-             && pty_screen_contains(s, "(step 1/2)"), "Esc with conditions asks before discarding");
-    press(s, "n");
-    CHECK(s, pty_screen_contains(s, "(step 1/2)") && cursor_has(s, "1. from:"), "n keeps the rule form open");
-    press(s, "BS");
-    pty_wait_for(s, "Discard the rule? (y/N)", WAIT_MS);
-    press(s, "y");
-    CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 && rules_in_file() == 2,
-          "y discards: back at the detail, rules file unchanged");
-    press(s, "e");
-    pty_wait_for(s, "conditions", WAIT_MS);
-    press(s, "q");
-    CHECK(s, pty_wait_for(s, "Discard the rule? (y/N)", WAIT_MS) == 0
-             && !pty_screen_contains(s, "step 2/2"), "q is as Esc: asks before discarding, does not go on");
-    press(s, "y");
-    CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 && rules_in_file() == 2, "q then y goes back");
-    press(s, "e");
-    pty_wait_for(s, "conditions", WAIT_MS);
-    press(s, "Right");
-    CHECK(s, pty_wait_for(s, "step 2/2: actions", WAIT_MS) == 0, "Right goes on to the actions");
-    press(s, "Esc");
-    pty_close(s);
-
-    s = at_conditions(0, 0);
-    ASSERT(s != NULL, "conditions q empty: opens");
-    press(s, "q");
-    CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0 && !pty_screen_contains(s, "step 2/2"),
-          "q with no conditions goes back to the rules list");
-    pty_close(s);
-
-    s = at_conditions(0, 0);
-    ASSERT(s != NULL, "conditions Tab: opens");
-    press(s, "Tab");
-    CHECK(s, pty_wait_for(s, "step 2/2: actions", WAIT_MS) == 0, "Tab goes on to the actions");
-    press(s, "Esc");
-    pty_close(s);
-
-    s = at_conditions(2, 0);
-    ASSERT(s != NULL, "conditions ctrl-c: opens");
-    pty_send_key(s, PTY_KEY_CTRL_C);
-    ASSERT_EXIT_STATUS(s, 0, 5000);
-    pty_close(s);
-
-    s = at_conditions(2, 0);
-    ASSERT(s != NULL, "conditions prompt ctrl-c: opens");
-    press(s, "a");
-    pty_wait_for(s, "new:", WAIT_MS);
-    pty_send_key(s, PTY_KEY_CTRL_C);
-    ASSERT_EXIT_STATUS(s, 0, 5000);
-    pty_close(s);
-}
-
-static void test_rk_cond_help_and_unbound(void) {
-    PtySession *s = at_conditions(1, 1);
-    ASSERT(s != NULL, "conditions help: opens");
-    const char *keys[] = { "x", " ", "r", "c", "l", "p", "A", "Del", "Ins", "F1", NULL };
-    for (int i = 0; keys[i]; i++) {
-        press(s, keys[i]);
-        CHECK(s, pty_screen_contains(s, "(step 1/2)") && cursor_has(s, "1. from:")
-                 && pty_screen_contains(s, "3. to:"), "conditions: %s changes nothing", keys[i]);
-    }
-    const char *closers[] = { "Esc", "q", "BS", NULL };
-    for (int i = 0; closers[i]; i++) {
-        press(s, "?");
-        CHECK(s, pty_wait_for(s, "Conditions shortcuts", WAIT_MS) == 0 && pty_screen_contains(s, "Cancel the rule"),
-              "? opens the help");
-        press(s, closers[i]);
-        CHECK(s, !pty_screen_contains(s, "Conditions shortcuts") && pty_screen_contains(s, "(step 1/2)"),
-              "%s closes the help only", closers[i]);
-    }
-    pty_close(s);
-}
-
-/** Step 2: the fields, Save? and ctrl-c. */
-static void test_rk_actions_form(void) {
-    PtySession *s = at_conditions(0, 0);
-    ASSERT(s != NULL, "actions: opens");
-    press(s, "a");
-    pty_wait_for(s, "new:", WAIT_MS);
-    pty_send_str(s, "from:*@new.example.org");
-    press(s, "Enter");
-    press(s, "Tab");
-    CHECK(s, pty_wait_for(s, "step 2/2: actions", WAIT_MS) == 0 && pty_row_contains(s, STATUS_ROW, "Enter next field")
-             && pty_row_contains(s, STATUS_ROW, "Esc cancel"), "step 2 and its status line");
-    pty_send_str(s, "Fresh");
-    press(s, "Enter");
-    for (int i = 0; i < 8; i++) press(s, "Enter");      /* the other 8 fields */
-    CHECK(s, pty_wait_for(s, "Save? (y/N)", WAIT_MS) == 0, "after the last field it asks to save");
-    press(s, "n");
-    CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0 && rules_in_file() == 0, "n saves nothing");
-    press(s, "a"); pty_wait_for(s, "new:", WAIT_MS);
-    pty_send_str(s, "from:*@new.example.org");
-    press(s, "Enter"); press(s, "Tab");
-    pty_wait_for(s, "step 2/2", WAIT_MS);
-    pty_send_str(s, "Fresh");
-    for (int i = 0; i < 9; i++) press(s, "Enter");
-    pty_wait_for(s, "Save? (y/N)", WAIT_MS);
-    press(s, "y");
-    CHECK(s, pty_wait_for(s, "(1 rule)", WAIT_MS) == 0 && file_has("[rule \"Fresh\"]"), "y saves the rule");
-    pty_close(s);
-
-    s = at_conditions(0, 0);
-    ASSERT(s != NULL, "actions empty name: opens");
-    press(s, "Tab");
-    pty_wait_for(s, "step 2/2", WAIT_MS);
-    for (int i = 0; i < 9; i++) press(s, "Enter");
-    CHECK(s, pty_wait_for(s, "Rule name is required", WAIT_MS) == 0, "an empty name is refused");
-    press(s, "x");
-    CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0 && rules_in_file() == 0, "nothing is saved");
-    pty_close(s);
-
-    s = at_conditions(0, 0);
-    ASSERT(s != NULL, "actions esc: opens");
-    press(s, "Tab");
-    pty_wait_for(s, "step 2/2", WAIT_MS);
-    press(s, "Esc");
-    CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0, "Esc in a field cancels the rule");
-    pty_close(s);
-
-    s = at_conditions(0, 0);
-    ASSERT(s != NULL, "actions ctrl-c: opens");
-    press(s, "Tab");
-    pty_wait_for(s, "step 2/2", WAIT_MS);
-    pty_send_key(s, PTY_KEY_CTRL_C);
-    ASSERT_EXIT_STATUS(s, 0, 5000);
-    pty_close(s);
-
-    s = at_conditions(0, 0);
-    ASSERT(s != NULL, "actions save ctrl-c: opens");
-    press(s, "Tab");
-    pty_wait_for(s, "step 2/2", WAIT_MS);
-    pty_send_str(s, "Zed");
-    for (int i = 0; i < 9; i++) press(s, "Enter");
-    pty_wait_for(s, "Save? (y/N)", WAIT_MS);
-    pty_send_key(s, PTY_KEY_CTRL_C);
-    ASSERT_EXIT_STATUS(s, 0, 5000);
-    CHECK(s, rules_in_file() == 0, "ctrl-c at Save? saves nothing");
-    pty_close(s);
-}
-
-/* The step-2 form of a new rule (name given) or of the edit of R01. */
-static PtySession *at_form(int edit) {
-    PtySession *s = at_conditions(edit ? 1 : 0, edit);
-    if (!s) return NULL;
-    if (!edit) {
-        press(s, "a");
-        pty_wait_for(s, "new:", WAIT_MS);
-        pty_send_str(s, "from:*@new.example.org");
-        press(s, "Enter");
-    }
-    press(s, "Tab");
-    if (pty_wait_for(s, "step 2/2: actions", WAIT_MS) != 0) { pty_close(s); return NULL; }
-    pty_settle(s, SETTLE_MS);
-    return s;
-}
-
-/** The form's layout, the prefilled edit, and keeping every field with Enter. */
-static void test_rk_form_layout_and_edit(void) {
-    PtySession *s = at_form(0);
     ASSERT(s != NULL, "form: opens");
-    CHECK(s, pty_screen_contains(s, "Add new rule for testuser") && pty_screen_contains(s, "Name:")
-             && pty_screen_contains(s, "add-label [1]:") && pty_screen_contains(s, "rm-label  [3]:")
-             && pty_screen_contains(s, "then-move-folder:") && pty_screen_contains(s, "then-forward-to:"),
-          "the add form lists the nine fields");
-    pty_close(s);
-
-    s = at_form(1);
-    ASSERT(s != NULL, "form edit: opens");
-    CHECK(s, pty_screen_contains(s, "Edit rule for testuser") && pty_screen_contains(s, "Name:             R01")
-             && pty_screen_contains(s, "add-label [1]:    L01"), "the edit form is prefilled");
-    for (int i = 0; i < 9; i++) press(s, "Enter");
-    CHECK(s, pty_wait_for(s, "Save? (y/N)", WAIT_MS) == 0, "Enter through all fields asks to save");
-    press(s, "y");
-    CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 && rules_in_file() == 1 && file_has("[rule \"R01\"]")
-             && file_has("then-add-label    = L01") && file_has("two"), "the unchanged edit keeps the rule");
-    pty_close(s);
-
-    s = at_form(1);
-    ASSERT(s != NULL, "form edit text: opens");
-    press(s, "Enter");                                  /* name kept */
-    pty_send_str(s, "Extra");                           /* add-label [1]: L01 + Extra */
-    press(s, "BS");
-    press(s, "BS");
-    for (int i = 0; i < 8; i++) press(s, "Enter");
-    pty_wait_for(s, "Save? (y/N)", WAIT_MS);
-    press(s, "Y");
-    CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 && file_has("then-add-label    = L01Ext"),
-          "typing and Backspace edit a field, Y saves");
-    pty_close(s);
-}
-
-/** Esc in any field cancels without a change; Save? takes only y/Y as yes. */
-static void test_rk_form_esc_and_save_keys(void) {
-    for (int field = 0; field < 9; field += 4) {
-        PtySession *s = at_form(1);
-        ASSERT(s != NULL, "form esc: opens");
-        for (int i = 0; i < field; i++) press(s, "Enter");
-        pty_send_str(s, "ZZZ");
-        press(s, "Esc");
-        CHECK(s, pty_wait_for(s, "Rule: R01", WAIT_MS) == 0 || pty_wait_for(s, "(1 rule)", WAIT_MS) == 0,
-              "Esc in field %d leaves the form", field + 1);
-        CHECK(s, !file_has("ZZZ") && rules_in_file() == 1, "Esc in field %d changes nothing", field + 1);
-        pty_close(s);
-    }
-    const char *no_keys[] = { "n", "N", "Esc", "Enter", "x", " ", NULL };
-    for (int i = 0; no_keys[i]; i++) {
-        PtySession *s = at_form(1);
-        ASSERT(s != NULL, "form save keys: opens");
-        press(s, "Enter");
-        pty_send_str(s, "Q");
-        for (int k = 0; k < 8; k++) press(s, "Enter");
-        pty_wait_for(s, "Save? (y/N)", WAIT_MS);
-        press(s, no_keys[i]);
-        CHECK(s, !pty_screen_contains(s, "Save? (y/N)"), "Save? answered with %s closes", no_keys[i]);
-        CHECK(s, !file_has("QL01") && rules_in_file() == 1, "Save? %s is a No", no_keys[i]);
-        pty_close(s);
-    }
-}
-
-/** Keys inside a field: Up, Down, Tab do not move between fields or leave. */
-static void test_rk_form_field_keys(void) {
-    PtySession *s = at_form(0);
-    ASSERT(s != NULL, "form keys: opens");
-    pty_send_str(s, "Nm");
-    const char *keys[] = { "Up", "Down", "Tab", "PgUp", "PgDn", "F1", NULL };
-    for (int i = 0; keys[i]; i++) {
-        press(s, keys[i]);
-        CHECK(s, pty_screen_contains(s, "step 2/2: actions") && pty_screen_contains(s, "Name:             Nm"),
-              "form: %s stays in the name field", keys[i]);
-    }
-    press(s, "Left"); press(s, "Left"); pty_send_str(s, "A"); press(s, "End"); pty_send_str(s, "Z");
+    press(s, "j");
     press(s, "Enter");
-    CHECK(s, pty_screen_contains(s, "Name:             ANmZ"), "Left, End and typing edit the field");
+    CHECK(s, pty_wait_for(s, "Edit rule for testuser", WAIT_MS) == 0, "Enter opens the selected rule in the form");
+    CHECK(s, pty_screen_contains(s, "R02") && pty_screen_contains(s, "from matches glob *@r02.example.org")
+             && pty_screen_contains(s, "from:*@r02.example.org"), "the form shows the name, the clause and the text");
+    CHECK(s, pty_screen_contains(s, "as text") && pty_screen_contains(s, "add label")
+             && pty_screen_contains(s, "L02") && pty_screen_contains(s, "+ add an action")
+             && pty_screen_contains(s, "+ add a condition"), "the form has the condition, the text and the actions");
+    CHECK(s, pty_row_contains(s, STATUS_ROW, "s save") && pty_row_contains(s, STATUS_ROW, "Esc cancel"),
+          "the status line has the keys of the form");
+    press(s, "Esc");
+    CHECK(s, pty_wait_for(s, "Rules for", WAIT_MS) == 0 && cursor_no(s) == 2 && !pty_screen_contains(s, "Edit rule"),
+          "Esc leaves the form (nothing changed) and keeps the cursor row");
+    press(s, "a");
+    CHECK(s, pty_wait_for(s, "New rule for testuser", WAIT_MS) == 0, "a opens the form of a new rule");
+    press(s, "q");
+    CHECK(s, pty_wait_for(s, "(3 rules)", WAIT_MS) == 0, "q leaves the new form");
     pty_close(s);
 }
 
-/** An empty name is refused; any key then returns, nothing is saved. */
-static void test_rk_form_name_required_and_resize(void) {
-    PtySession *s = at_form(0);
-    ASSERT(s != NULL, "form resize: opens");
-    pty_resize(s, 100, 30);
-    pty_settle(s, 600);
-    CHECK(s, pty_screen_contains(s, "step 2/2: actions") && pty_screen_contains(s, "Name:"),
-          "a resize keeps the form");
+/** A new rule from widgets: name, a condition in a form, an action list, saved to the file. */
+static void test_rk_form_new_rule(void) {
+    PtySession *s = at_rules(0);
+    ASSERT(s != NULL, "new rule: opens");
+    press(s, "a");
+    pty_wait_for(s, "New rule for testuser", WAIT_MS);
+    CHECK(s, pty_screen_contains(s, "(not named yet)") && pty_screen_contains(s, "(none yet)")
+             && pty_screen_contains(s, "Preview: (no condition yet)"), "an empty form says what is missing");
+    press(s, "s");
+    CHECK(s, pty_wait_for(s, "The rule needs a name.", WAIT_MS) == 0, "s on an empty form refuses: the name");
+    press(s, "Enter");
+    /* the name */
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "Rule name", WAIT_MS) == 0, "Enter on the name row asks for the name");
+    pty_send_str(s, "Acme mails");
+    pty_settle(s, 200);
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "Acme mails", WAIT_MS) == 0 && !pty_screen_contains(s, "(not named yet)"),
+          "the name is on the row");
+    press(s, "s");
+    CHECK(s, pty_wait_for(s, "The rule needs a condition.", WAIT_MS) == 0, "s without a condition refuses");
+    press(s, "Enter");
+    /* a condition: the fieldset */
+    press(s, "j"); press(s, "j");
+    CHECK(s, cursor_has(s, "+ add a condition"), "the cursor reaches the add-a-condition row");
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "Add a condition", WAIT_MS) == 0 && pty_screen_contains(s, "Field:")
+             && pty_screen_contains(s, "Not:") && pty_screen_contains(s, "Operator:") && pty_screen_contains(s, "Value:"),
+          "the condition form: field, not, operator, value");
+    CHECK(s, pty_screen_contains(s, "contains") && pty_screen_contains(s, "from"), "the defaults are 'from contains'");
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "The value is empty.", WAIT_MS) == 0, "an empty value is refused with a reason");
+    pty_send_str(s, "example.com");
+    pty_settle(s, 200);
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "from contains example.com", WAIT_MS) == 0
+             && pty_screen_contains(s, "from:*example.com*"), "the clause is a row and the text view shows the expression");
+    /* the live preview */
+    CHECK(s, pty_wait_for(s, "Preview: 3 of 3 cached messages match", WAIT_MS) == 0
+             && pty_screen_contains(s, "Sender 1"), "the live preview counts the matches and shows the first ones");
+    /* a second clause joined with and, negated */
+    press(s, "a");
+    pty_wait_for(s, "Add a condition", WAIT_MS);
+    CHECK(s, pty_screen_contains(s, "Join:"), "the second clause has a join field");
+    press(s, "Up"); press(s, "Up"); press(s, "Up");   /* Value -> Operator -> Not -> Field */
+    press(s, "Right"); press(s, "Right"); /* from -> to -> subject */
+    press(s, "Down");                      /* Field -> Not */
+    press(s, "Right");                     /* Not: yes */
+    press(s, "Down"); press(s, "Down");    /* Operator -> Value */
+    pty_send_str(s, "zzz");
+    pty_settle(s, 200);
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "not subject contains zzz", WAIT_MS) == 0
+             && pty_row_contains(s, row_of(s, "not subject contains zzz"), "and")
+             && pty_screen_contains(s, "from:*example.com* and !subject:*zzz*"),
+          "the second clause is joined with and and negated, in both views");
+    CHECK(s, pty_wait_for(s, "Preview: 3 of 3 cached messages match", WAIT_MS) == 0, "the preview follows the edit");
+    CHECK(s, cursor_has(s, "not subject contains zzz"), "the cursor is on the clause just added");
+    /* actions: pick labels from a list, any number of them */
+    press(s, "j"); press(s, "j"); press(s, "j");
+    CHECK(s, cursor_has(s, "+ add an action"), "the cursor reaches the add-an-action row");
+    press(s, "a");
+    CHECK(s, pty_wait_for(s, "Add an action", WAIT_MS) == 0 && pty_screen_contains(s, "Add labels")
+             && pty_screen_contains(s, "Remove labels") && pty_screen_contains(s, "Move to a folder")
+             && pty_screen_contains(s, "Forward to an address"), "a on an action row offers the actions as a list");
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "Labels to add", WAIT_MS) == 0 && pty_screen_contains(s, "UNREAD")
+             && pty_screen_contains(s, "(a new label...)"), "the labels are a list to pick from");
+    press(s, "j");
+    press(s, " ");                           /* tick the second label */
+    press(s, "End");
+    press(s, " ");                           /* (a new label...) */
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "New labels", WAIT_MS) == 0, "a new label is asked for");
+    pty_send_str(s, "Work, Clients, Urgent, Four");
+    pty_settle(s, 200);
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "Four", WAIT_MS) == 0 && pty_screen_contains(s, "Clients") && pty_screen_contains(s, "Urgent")
+             && pty_screen_contains(s, "add label"), "more than three labels are kept: [Work Clients Urgent Four]");
+    press(s, "s");
+    CHECK(s, pty_wait_for(s, "Rule added: Acme mails", WAIT_MS) == 0 && pty_screen_contains(s, "(1 rule)"),
+          "s saves and the overview shows the new rule");
+    CHECK(s, file_has("[rule \"Acme mails\"]") && file_has("when = from:*example.com* and !subject:*zzz*")
+             && file_has("= _flagged") && file_has("= Work") && file_has("= Clients") && file_has("= Urgent") && file_has("= Four"),
+          "the file has the rule: the condition and every label");
     pty_close(s);
+}
 
-    const char *any[] = { "Esc", "Enter", "q", NULL };
-    for (int i = 0; any[i]; i++) {
-        s = at_form(0);
-        ASSERT(s != NULL, "form name: opens");
-        for (int k = 0; k < 9; k++) press(s, "Enter");
-        CHECK(s, pty_wait_for(s, "Rule name is required", WAIT_MS) == 0, "empty name is refused");
-        press(s, any[i]);
-        CHECK(s, pty_wait_for(s, "(0 rules)", WAIT_MS) == 0 && rules_in_file() == 0,
-              "%s after the refusal returns to the list", any[i]);
-        pty_close(s);
-    }
+/** The text view and the clause view are the same condition; a text that has no clause form is kept as text. */
+static void test_rk_form_text_view(void) {
+    PtySession *s = at_rules(3);
+    ASSERT(s != NULL, "text view: opens");
+    press(s, "Enter");                     /* R01: three conditions joined with or */
+    pty_wait_for(s, "Edit rule for testuser", WAIT_MS);
+    CHECK(s, pty_screen_contains(s, "from contains") || pty_screen_contains(s, "from matches")
+             , "R01's three conditions are rows: [from ...]");
+    CHECK(s, pty_screen_contains(s, "or  to matches *@three.example.org") || pty_screen_contains(s, "or"),
+          "the conditions are joined with or");
+    press(s, "j"); press(s, "j"); press(s, "j"); press(s, "j"); press(s, "j");
+    CHECK(s, cursor_has(s, "as text") || cursor_has(s, "+ add a condition"), "the cursor can reach the text row");
+    while (!cursor_has(s, "as text")) press(s, "j");
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "The condition as text", WAIT_MS) == 0, "Enter on the text row edits the text");
+    pty_send_key(s, PTY_KEY_END);
+    pty_send_str(s, " and from:x");
+    press(s, "Enter");                     /* "or ... and from:x" parses */
+    CHECK(s, pty_wait_for(s, "and  from is x", WAIT_MS) == 0 || pty_wait_for(s, "from is x", WAIT_MS) == 0,
+          "the clause rows follow the text");
+    /* invalid text is refused with a reason and changes nothing */
+    press(s, "Enter");
+    pty_wait_for(s, "The condition as text", WAIT_MS);
+    pty_send_key(s, PTY_KEY_END);
+    pty_send_str(s, " and colour:red");
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "Not a valid condition", WAIT_MS) == 0 && pty_screen_contains(s, "field:pattern"),
+          "an invalid text is refused with the reason");
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "from is x", WAIT_MS) == 0, "and the form still holds the earlier condition");
+    /* parentheses that change the meaning: no clause rows, the text is kept */
+    press(s, "Enter");
+    pty_wait_for(s, "The condition as text", WAIT_MS);
+    for (int i = 0; i < 200; i++) pty_send_key(s, PTY_KEY_BACK);
+    pty_settle(s, 200);
+    pty_send_str(s, "from:a and (subject:b or to:c)");
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "has parentheses or 'all': edit it as text", WAIT_MS) == 0
+             && pty_screen_contains(s, "from:a and (subject:b or to:c)"),
+          "a condition with grouping is kept as text and the clause rows say so");
+    press(s, "a");
+    CHECK(s, pty_wait_for(s, "edit it as text", WAIT_MS) == 0 && pty_screen_contains(s, "Add a condition")
+             , "a on such a condition refuses and says why");
+    press(s, "Enter");
+    press(s, "s");
+    CHECK(s, pty_wait_for(s, "Rule saved: R01", WAIT_MS) == 0 && file_has("when = from:a and (subject:b or to:c)"),
+          "the grouped condition is saved as it was typed");
+    pty_close(s);
+}
+
+/** Editing an existing rule: conditions deleted, labels edited, the discard question, save. */
+static void test_rk_form_edit_existing(void) {
+    PtySession *s = at_rules(3);
+    ASSERT(s != NULL, "edit: opens");
+    press(s, "Enter");
+    pty_wait_for(s, "Edit rule for testuser", WAIT_MS);
+    press(s, "j"); press(s, "j");          /* first condition row */
+    press(s, "d");
+    CHECK(s, !pty_screen_contains(s, "*@one.example.org") && pty_screen_contains(s, "two"),
+          "d deletes the condition row and the text view follows");
+    press(s, "Esc");
+    CHECK(s, pty_wait_for(s, "Throw away the changes of this rule?", WAIT_MS) == 0,
+          "Esc after a change asks before throwing it away");
+    press(s, "n");
+    CHECK(s, pty_screen_contains(s, "Edit rule for testuser"), "No stays in the form");
+    press(s, "Esc");
+    pty_wait_for(s, "Throw away", WAIT_MS);
+    press(s, "y");
+    CHECK(s, pty_wait_for(s, "(3 rules)", WAIT_MS) == 0 && file_has("*@one.example.org"), "Yes leaves and the file is untouched");
+    press(s, "Enter");
+    pty_wait_for(s, "Edit rule for testuser", WAIT_MS);
+    while (!cursor_has(s, "add label")) press(s, "j");
+    press(s, "Enter");
+    CHECK(s, pty_wait_for(s, "Label to add", WAIT_MS) == 0, "Enter on a label row edits the label");
+    for (int i = 0; i < 10; i++) pty_send_key(s, PTY_KEY_BACK);
+    pty_send_str(s, "Renamed");
+    pty_settle(s, 200);
+    press(s, "Enter");
+    press(s, "s");
+    CHECK(s, pty_wait_for(s, "Rule saved: R01", WAIT_MS) == 0 && file_has("= Renamed")
+             && !file_has("= L01") && rules_in_file() == 3 && cursor_no(s) == 1,
+          "s saves the edited rule in its place");
+    pty_close(s);
+}
+
+/** The form's help, and the name clash. */
+static void test_rk_form_help_and_clash(void) {
+    PtySession *s = at_rules(2);
+    ASSERT(s != NULL, "form help: opens");
+    press(s, "Enter");
+    pty_wait_for(s, "Edit rule for testuser", WAIT_MS);
+    press(s, "?");
+    CHECK(s, pty_wait_for(s, "Rule form shortcuts", WAIT_MS) == 0 && pty_screen_contains(s, "Save the rule"),
+          "? opens the help of the form");
+    press(s, "Esc");
+    CHECK(s, !pty_screen_contains(s, "Rule form shortcuts") && pty_screen_contains(s, "Edit rule for testuser"),
+          "Esc closes the help and stays in the form");
+    press(s, "Enter");                     /* Name row */
+    pty_wait_for(s, "Rule name", WAIT_MS);
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_BACK);
+    pty_send_str(s, "R02");
+    pty_settle(s, 200);
+    press(s, "Enter");
+    press(s, "s");
+    CHECK(s, pty_wait_for(s, "Another rule has this name.", WAIT_MS) == 0 && file_has("[rule \"R01\"]"),
+          "saving under a name another rule has is refused");
+    pty_close(s);
+}
+
+/** A rule with a long condition term is shown and saved whole. */
+static void test_rk_form_long_term(void) {
+    restart_mock();
+    make_home("lg");
+    char path[512];
+    rules_path(path, sizeof(path));
+    FILE *fp = fopen(path, "w");
+    ASSERT(fp != NULL, "long: file");
+    fprintf(fp, "[rule \"Long\"]\nwhen = subject:*");
+    for (int i = 0; i < 700; i++) fputc('a', fp);
+    fprintf(fp, "end* or from:x\nthen-add-label = A\n");
+    fclose(fp);
+    PtySession *s = tui_open();
+    ASSERT(s != NULL, "long: tui");
+    pty_wait_for(s, "Email Accounts", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "Folders", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_HOME);
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "message(s) in", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    pty_wait_for(s, "Rules for", WAIT_MS); pty_settle(s, SETTLE_MS);
+    press(s, "Enter");
+    pty_wait_for(s, "Edit rule for testuser", WAIT_MS);
+    press(s, "Enter");                     /* name: rename so that a save really writes */
+    pty_wait_for(s, "Rule name", WAIT_MS);
+    pty_send_str(s, "2");
+    press(s, "Enter");
+    press(s, "s");
+    CHECK(s, pty_wait_for(s, "Rule saved: Long2", WAIT_MS) == 0, "the rule saved");
+    FILE *rf = fopen(path, "r");
+    char line[4096] = "";
+    int found = 0;
+    while (rf && fgets(line, sizeof(line), rf))
+        if (strncmp(line, "when = ", 7) == 0) found = (int)strlen(line);
+    if (rf) fclose(rf);
+    CHECK(s, found > 700, "the long term was kept whole in the file (%d characters)", found);
+    pty_close(s);
+}
+
+
+/** In the message reader R tells which rules match the message and, after an apply, which rule gave a label. */
+static void test_rk_reader_rules_and_why(void) {
+    restart_mock();
+    make_home("rd");
+    write_rules_mixed();
+    PtySession *s = tui_open();
+    ASSERT(s != NULL, "reader: opens");
+    pty_wait_for(s, "Email Accounts", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "Folders", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_HOME);
+    for (int i = 0; i < 6; i++) pty_send_key(s, PTY_KEY_DOWN);
+    pty_settle(s, 200);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "message(s) in", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);                     /* read the first message */
+    pty_wait_for(s, "Message ", WAIT_MS); pty_settle(s, SETTLE_MS);
+    press(s, "?");
+    CHECK(s, pty_wait_for(s, "which rules match this message", WAIT_MS) == 0, "the reader's help names R");
+    press(s, "Esc");
+    press(s, "R");
+    CHECK(s, pty_wait_for(s, "Rules for this message", WAIT_MS) == 0 && pty_screen_contains(s, "1 rule match")
+             && pty_screen_contains(s, "\"R01\"") && pty_screen_contains(s, "+Tagged"),
+          "R shows the rule that matches and what it would do");
+    CHECK(s, pty_screen_contains(s, "R03") && pty_screen_contains(s, "switched off"),
+          "a switched-off rule that would match is named");
+    CHECK(s, pty_screen_contains(s, "No apply has changed this message yet."), "before an apply there is no reason to show");
+    press(s, "Esc");
+    CHECK(s, pty_wait_for(s, "Message ", WAIT_MS) == 0 && !pty_screen_contains(s, "Rules for this message"),
+          "Esc goes back to the message");
+    press(s, "q");                                      /* to the list */
+    pty_wait_for(s, "message(s) in", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_str(s, "l");
+    pty_wait_for(s, "Rules for", WAIT_MS); pty_settle(s, SETTLE_MS);
+    press(s, "A"); pty_wait_for(s, "Rules preview", WAIT_MS);
+    press(s, "y"); pty_wait_for(s, "Change 3 messages now?", WAIT_MS);
+    press(s, "y"); pty_wait_for(s, "Rules applied", WAIT_MS);
+    press(s, "Esc"); pty_wait_for(s, "Undo this apply now?", WAIT_MS);
+    press(s, "n"); pty_wait_for(s, "(3 rules)", WAIT_MS);
+    press(s, "Esc");
+    pty_wait_for(s, "message(s) in", WAIT_MS); pty_settle(s, SETTLE_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    pty_wait_for(s, "Message ", WAIT_MS); pty_settle(s, SETTLE_MS);
+    press(s, "R");
+    CHECK(s, pty_wait_for(s, "Changed by an earlier apply:", WAIT_MS) == 0 && pty_screen_contains(s, "rule \"R01\" gave +Tagged"),
+          "after an apply the reader says which rule gave the label");
+    pty_close(s);
 }
 
 /** The editor redraws at once on a resize, the status line on the last row. */
@@ -902,13 +946,19 @@ static void test_rk_resize(void) {
     ASSERT(s != NULL, "resize: opens");
     pty_resize(s, 100, 30);
     pty_settle(s, 600);
-    CHECK(s, pty_screen_contains(s, "(3 rules)") && pty_row_contains(s, 29, "Esc/q/BS back"),
+    CHECK(s, pty_screen_contains(s, "(3 rules)") && pty_row_contains(s, 29, "? help"),
           "the list is redrawn with the status line on the new last row");
+    press(s, "Enter");
+    pty_wait_for(s, "Edit rule for testuser", WAIT_MS);
+    pty_resize(s, 80, 24);
+    pty_settle(s, 600);
+    CHECK(s, pty_screen_contains(s, "Edit rule for testuser") && pty_row_contains(s, STATUS_ROW, "s save"),
+          "the form is redrawn after a resize");
     pty_close(s);
 }
 
 int main(int argc, char *argv[]) {
-    printf("--- email-tui rules editor keys (80x24) ---\n\n");
+    printf("--- email-tui rules overview and rule form (80x24) ---\n\n");
     if (argc < 3) {
         fprintf(stderr, "Usage: %s <email-tui> <mock-imap-server>\n", argv[0]);
         return EXIT_FAILURE;
@@ -931,26 +981,21 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_rk_list_back_keys);
     RUN_TEST(test_rk_list_unbound_keys);
     RUN_TEST(test_rk_list_help_and_status);
+    RUN_TEST(test_rk_overview_columns_and_counts);
     RUN_TEST(test_rk_list_delete);
-    RUN_TEST(test_rk_list_preview_apply);
-    RUN_TEST(test_rk_list_open_keys);
-    RUN_TEST(test_rk_detail_view);
-    RUN_TEST(test_rk_detail_back_keys);
-    RUN_TEST(test_rk_detail_delete);
-    RUN_TEST(test_rk_cond_navigation);
-    RUN_TEST(test_rk_cond_zero_and_one);
-    RUN_TEST(test_rk_cond_edit_keys);
-    RUN_TEST(test_rk_cond_leave_keys);
-    RUN_TEST(test_rk_cond_help_and_unbound);
-    RUN_TEST(test_rk_actions_form);
-    RUN_TEST(test_rk_form_layout_and_edit);
-    RUN_TEST(test_rk_form_esc_and_save_keys);
-    RUN_TEST(test_rk_form_field_keys);
-    RUN_TEST(test_rk_form_name_required_and_resize);
+    RUN_TEST(test_rk_toggle_reorder_copy);
+    RUN_TEST(test_rk_preview_apply_undo);
+    RUN_TEST(test_rk_form_opens_and_leaves);
+    RUN_TEST(test_rk_form_new_rule);
+    RUN_TEST(test_rk_form_text_view);
+    RUN_TEST(test_rk_form_edit_existing);
+    RUN_TEST(test_rk_form_help_and_clash);
+    RUN_TEST(test_rk_form_long_term);
+    RUN_TEST(test_rk_reader_rules_and_why);
     RUN_TEST(test_rk_resize);
 
     if (g_mock_pid > 0) { kill(g_mock_pid, SIGKILL); waitpid(g_mock_pid, NULL, 0); }
-    printf("\n--- Rules editor key study results ---\n");
+    printf("\n--- Rules screens test results ---\n");
     printf("Tests Run:    %d\n", g_tests_run);
     printf("Tests Passed: %d\n", g_tests_run - g_tests_failed);
     printf("Tests Failed: %d\n", g_tests_failed);

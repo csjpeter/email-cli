@@ -172,6 +172,14 @@ static MailRules *rules_parse_fp(FILE *fp) {
             if (!cur->then_move_folder)
                 rule_set_error(cur, lineno, "line %d: out of memory", lineno);
         }
+        else if (strcmp(key, "enabled") == 0) {
+            if (strcasecmp(val, "no") == 0 || strcasecmp(val, "false") == 0 || strcmp(val, "0") == 0)
+                cur->disabled = 1;
+            else if (strcasecmp(val, "yes") == 0 || strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0)
+                cur->disabled = 0;
+            else
+                rule_set_error(cur, lineno, "line %d: 'enabled' must be yes or no, not '%s'", lineno, val);
+        }
         else if (strcmp(key, "then-forward-to") == 0) {
             free(cur->then_forward_to);
             cur->then_forward_to = strdup(val);
@@ -267,6 +275,8 @@ char *mail_rule_text(const MailRule *r) {
         fprintf(fp, "[rule \"%s\" action %d]\n", r->name ? r->name : "", r->action_index);
     else
         fprintf(fp, "[rule \"%s\"]\n", r->name ? r->name : "");
+    if (r->disabled)
+        fprintf(fp, "enabled = no\n");
     /* US-81: write when expression; skip old flat if-* fields */
     if (r->when && r->when[0])
         fprintf(fp, "when = %s\n", r->when);
@@ -344,7 +354,7 @@ static void rules_record_diff(const char *account, const MailRules *before,
             snprintf(idx, sizeof(idx), "%d", i);
             OpRecord rec = { account, "rule", obj, "delete", ot, "", idx, OPH_REVERTABLE, 0 };
             op_history_record(&rec);
-        } else if (ot && nt) {
+        } else if (ot && nt && strcmp(ot, nt) != 0) {   /* EMAIL-312: a reorder is no edit */
             snprintf(idx, sizeof(idx), "%d", j);
             OpRecord rec = { account, "rule", obj, "edit", ot, nt, idx, OPH_REVERTABLE, 0 };
             op_history_record(&rec);
@@ -599,6 +609,7 @@ int mail_rule_matches(const MailRule *rule,
 {
     if (!rule) return 0;
     if (rule->error) return 0;   /* EMAIL-314: a rule with an error touches no mail */
+    if (rule->disabled) return 0;   /* EMAIL-312: a switched-off rule touches no mail */
 
     /* US-81: evaluate boolean when expression when present */
     if (rule->when && rule->when[0]) {
@@ -694,6 +705,20 @@ int mail_rules_apply_ex(const MailRules *rules,
                         char ***rm_out,  int *rm_count,
                         char **move_folder_out)
 {
+    return mail_rules_apply_trace(rules, from, subject, to, labels_csv, body, message_date,
+                                  add_out, add_count, rm_out, rm_count, move_folder_out,
+                                  NULL, 0);
+}
+
+int mail_rules_apply_trace(const MailRules *rules,
+                           const char *from, const char *subject,
+                           const char *to, const char *labels_csv,
+                           const char *body, time_t message_date,
+                           char ***add_out, int *add_count,
+                           char ***rm_out,  int *rm_count,
+                           char **move_folder_out,
+                           int *fired_idx, int fired_max)
+{
     *add_out = NULL; *add_count = 0;
     *rm_out  = NULL; *rm_count  = 0;
     if (move_folder_out) *move_folder_out = NULL;
@@ -711,6 +736,7 @@ int mail_rules_apply_ex(const MailRules *rules,
         if (!mail_rule_matches(r, from, subject, to, working_labels, body, message_date))
             continue;
 
+        if (fired_idx && fired < fired_max) fired_idx[fired] = i;
         fired++;
 
         /* Capture first fired rule's then_move_folder */
@@ -784,10 +810,111 @@ int mail_rules_apply_ctx(const MailRules *rules, const MailMsgCtx *ctx,
                                move_folder_out);
 }
 
+int mail_rules_apply_ctx_trace(const MailRules *rules, const MailMsgCtx *ctx,
+                               const char *labels_csv,
+                               char ***add_out, int *add_count,
+                               char ***rm_out,  int *rm_count,
+                               char **move_folder_out,
+                               int *fired_idx, int fired_max) {
+    return mail_rules_apply_trace(rules, ctx->from ? ctx->from : "",
+                                  ctx->subject ? ctx->subject : "",
+                                  ctx->to ? ctx->to : "", labels_csv,
+                                  ctx->body, ctx->date,
+                                  add_out, add_count, rm_out, rm_count,
+                                  move_folder_out, fired_idx, fired_max);
+}
+
 int mail_rule_matches_ctx(const MailRule *rule, const MailMsgCtx *ctx,
                           const char *labels_csv) {
     return mail_rule_matches(rule, ctx->from ? ctx->from : "",
                              ctx->subject ? ctx->subject : "",
                              ctx->to ? ctx->to : "", labels_csv,
                              ctx->body, ctx->date);
+}
+
+/* ── Editing helpers of the rules overview (EMAIL-312) ───────────────── */
+
+char *mail_rule_summary(const MailRule *r) {
+    char *cond = r->when && r->when[0] ? when_describe(r->when) : NULL;
+    char *buf = NULL;
+    size_t len = 0;
+    FILE *fp = open_memstream(&buf, &len);
+    if (!fp) { free(cond); return NULL; }
+    if (r->error)
+        fprintf(fp, "ERROR: %s", r->error);
+    else
+        fprintf(fp, "%s", cond ? cond : (r->when && r->when[0] ? r->when : "(no condition)"));
+    fprintf(fp, " \xe2\x86\x92");
+    int any = 0;
+    for (int j = 0; j < r->then_add_count; j++) { fprintf(fp, " +%s", r->then_add_label[j]); any = 1; }
+    for (int j = 0; j < r->then_rm_count; j++)  { fprintf(fp, " -%s", r->then_rm_label[j]); any = 1; }
+    if (r->then_move_folder) { fprintf(fp, " move to %s", r->then_move_folder); any = 1; }
+    if (r->then_forward_to)  { fprintf(fp, " forward to %s", r->then_forward_to); any = 1; }
+    if (!any) fprintf(fp, " (no action)");
+    fclose(fp);
+    free(cond);
+    return buf;
+}
+
+static char *dup_or_null(const char *s) { return s ? strdup(s) : NULL; }
+
+int mail_rule_clone(const MailRule *src, MailRule *dst) {
+    *dst = *src;
+    dst->name = dup_or_null(src->name);
+    dst->when = dup_or_null(src->when);
+    dst->if_from = dup_or_null(src->if_from);
+    dst->if_subject = dup_or_null(src->if_subject);
+    dst->if_to = dup_or_null(src->if_to);
+    dst->if_label = dup_or_null(src->if_label);
+    dst->if_not_from = dup_or_null(src->if_not_from);
+    dst->if_not_subject = dup_or_null(src->if_not_subject);
+    dst->if_not_to = dup_or_null(src->if_not_to);
+    dst->if_body = dup_or_null(src->if_body);
+    dst->then_move_folder = dup_or_null(src->then_move_folder);
+    dst->then_forward_to = dup_or_null(src->then_forward_to);
+    dst->error = dup_or_null(src->error);
+    for (int j = 0; j < src->then_add_count; j++) dst->then_add_label[j] = dup_or_null(src->then_add_label[j]);
+    for (int j = 0; j < src->then_rm_count; j++) dst->then_rm_label[j] = dup_or_null(src->then_rm_label[j]);
+    return 0;
+}
+
+void mail_rule_release(MailRule *rule) {
+    rule_free_members(rule);
+    memset(rule, 0, sizeof(*rule));
+}
+
+MailRule *mail_rules_append(MailRules *rules) {
+    MailRule *r = rules_grow(rules);
+    return r;
+}
+
+void mail_rules_remove_at(MailRules *rules, int idx) {
+    if (idx < 0 || idx >= rules->count) return;
+    rule_free_members(&rules->rules[idx]);
+    for (int i = idx; i < rules->count - 1; i++) rules->rules[i] = rules->rules[i + 1];
+    rules->count--;
+}
+
+int mail_rules_move(MailRules *rules, int idx, int delta) {
+    int to = idx + delta;
+    if (idx < 0 || idx >= rules->count || to < 0 || to >= rules->count || delta == 0) return -1;
+    MailRule tmp = rules->rules[idx];
+    rules->rules[idx] = rules->rules[to];
+    rules->rules[to] = tmp;
+    return to;
+}
+
+char *mail_rules_copy_name(const MailRules *rules, const char *base) {
+    size_t n = strlen(base ? base : "") + 32;
+    char *name = malloc(n);
+    if (!name) return NULL;
+    for (int k = 1; k < 1000; k++) {
+        if (k == 1) snprintf(name, n, "%s (copy)", base ? base : "");
+        else snprintf(name, n, "%s (copy %d)", base ? base : "", k);
+        int clash = 0;
+        for (int i = 0; i < rules->count; i++)
+            if (rules->rules[i].name && strcmp(rules->rules[i].name, name) == 0) clash = 1;
+        if (!clash) return name;
+    }
+    return name;
 }

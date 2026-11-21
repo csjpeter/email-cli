@@ -88,6 +88,14 @@ mid=MESSAGE-ID` when a move was queued (`flags=-1` on Gmail, which has none), an
 `ref` the apply id shared by every step of the run.  A dry run records nothing.
 The report prints the count of changed messages per rule and the way to undo.
 
+The step's `thing` says **which rules gave the changes** (EMAIL-312):
+`rules: NAME => +A -B | NAME2 => +C move=FOLDER`, only the changes that really
+happened (a label the message had already is not named).  `rules test` and the
+reader's `R` key read it as "why this label"; the rules overview reads it as the
+rule's "last change" (the time of the newest step, not undone, that names the
+rule).  The TUI offers the revert right after an apply (with the count of
+changes), and `u` in the overview reverts the last apply later.
+
 `email-cli [<account>] rules revert` takes back the last apply that was not
 reverted: the labels and flags are restored, a move still in the queue is
 cancelled, a move that already ran on the server is moved back by its

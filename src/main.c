@@ -93,11 +93,16 @@ static void help_general(void) {
         "  migrate-credentials         Re-encrypt (or decrypt) all stored passwords\n"
         "\n"
         "Rules:\n"
+    );
+    printf(
         "  rules list                  List sorting rules for the account\n"
         "  rules apply [--dry-run]     Apply rules to locally cached messages\n"
+        "  rules test <key>            Which rules match one cached message, and why its labels\n"
         "  rules revert                Take back the last rules apply\n"
         "  rules add --name ...        Add a sorting rule\n"
         "  rules edit --name ...       Change a sorting rule in place\n"
+        "  rules copy --name ...       Copy a sorting rule (the copy stands under it)\n"
+        "  rules move --name ... --to  Move a sorting rule to a place of the list\n"
         "  rules remove --name ...     Remove a sorting rule by name\n"
         "\n"
         "History:\n"
@@ -120,6 +125,22 @@ static void help_general(void) {
     );
 }
 
+/* The account a 'rules' subcommand works on (EMAIL-312): --account, or the only one. */
+static int rules_resolve_account(const char *account_arg, char *buf, size_t size) {
+    if (account_arg && account_arg[0]) {
+        snprintf(buf, size, "%s", account_arg);
+        return 0;
+    }
+    int n = 0;
+    AccountEntry *accs = config_list_accounts(&n);
+    int rc = -1;
+    if (n == 1) { snprintf(buf, size, "%s", accs[0].name); rc = 0; }
+    else if (n > 1) fprintf(stderr, "Multiple accounts configured. Use --account.\n");
+    else fprintf(stderr, "No accounts configured.\n");
+    config_free_account_list(accs, n);
+    return rc;
+}
+
 static void help_rules(void) {
     printf(
         "Usage: email-cli [<account>] rules <subcommand> [options]\n"
@@ -129,9 +150,13 @@ static void help_rules(void) {
         "Subcommands:\n"
         "  rules list                  List all sorting rules for the account\n"
         "  rules apply [--dry-run]     Apply rules to locally cached messages\n"
+        "  rules test <key>            Which rules match one cached message, and why its labels\n"
         "  rules revert                Take back the last rules apply\n"
         "  rules add --name <name>     Add a new sorting rule\n"
         "  rules edit --name <name>    Change a sorting rule in place\n"
+        "  rules copy --name <name>    Copy a sorting rule (the copy stands under it)\n"
+        "  rules move --name <name> --to <place>\n"
+        "                              Move a sorting rule to a place of the list\n"
         "  rules remove --name <name>  Remove a sorting rule by name\n"
         "  rules check                 List every problem of the rules files, with line numbers\n"
         "\n"
@@ -177,7 +202,9 @@ static void help_rules_list(void) {
         "--columns A,B,C: print only these columns, in this order (also under\n"
         "--json).  --sort COL[:asc|:desc],...: order the rows by any column,\n"
         "shown or not.  Columns: account, nr, name, when, then_add_label,\n"
-        "then_remove_label, then_move_folder (either option prints a flat table).\n"
+        "then_remove_label, then_move_folder, then_forward_to, enabled, matches (the\n"
+        "cached messages the rule matches), last_change (when an apply last changed\n"
+        "something by it), error (either option prints a flat table).\n"
         "\n"
         "List all sorting rules configured for the account.\n"
         "\n"
@@ -233,13 +260,60 @@ static void help_rules_revert(void) {
     );
 }
 
+static void help_rules_test(void) {
+    printf(
+        "Usage: email-cli [<account>] rules test <key|message-id>\n"
+        "\n"
+        "Tell which rules match one cached message and what each would do, and\n"
+        "which rule gave the labels an earlier 'rules apply' set (\"why this label\").\n"
+        "Nothing is changed.  The message is named by its cache key (the UID, with or\n"
+        "without leading zeros) or by its Message-ID (<...@...>).\n"
+        "\n"
+        "Examples:\n"
+        "  email-cli rules test 1234\n"
+        "  email-cli user@example.com rules test '<abc@example.org>'\n"
+    );
+}
+
+static void help_rules_copy(void) {
+    printf(
+        "Usage: email-cli [<account>] rules copy --name <name> [--new-name <name>]\n"
+        "\n"
+        "Copy a sorting rule; the copy stands right under the original (rules run in\n"
+        "the order of the list).  The copy is named \"<name> (copy)\" unless --new-name\n"
+        "gives another unused name.\n"
+        "\n"
+        "Options:\n"
+        "  --name <name>       Exact name of the rule to copy (required)\n"
+        "  --action <n>        Action group of the rule (default 1)\n"
+        "  --account <email>   Account of the rule (required if multiple)\n"
+        "  --help, -h          Show this help message\n"
+    );
+}
+
+static void help_rules_move(void) {
+    printf(
+        "Usage: email-cli [<account>] rules move --name <name> --to <place>\n"
+        "\n"
+        "Move a sorting rule to a place of the list (1 is the first).  Rules run in\n"
+        "the order of the list; a later rule sees the labels an earlier one added.\n"
+        "\n"
+        "Options:\n"
+        "  --name <name>       Exact name of the rule to move (required)\n"
+        "  --to <place>        The new place, from 1 to the number of rules (required)\n"
+        "  --action <n>        Action group of the rule (default 1)\n"
+        "  --account <email>   Account of the rule (required if multiple)\n"
+        "  --help, -h          Show this help message\n"
+    );
+}
+
 static void help_rules_add(void) {
     printf(
         "Usage: email-cli [<account>] rules add --name <name>\n"
         "         [--if-from <glob>] [--if-subject <glob>]\n"
-        "         [--if-to <glob>] [--if-label <glob>]\n"
+        "         [--if-to <glob>] [--if-label <glob>] [--when <expression>]\n"
         "         [--add-label <label>]... [--remove-label <label>]...\n"
-        "         [--move-folder <folder>] [--match-all]\n"
+        "         [--move-folder <folder>] [--forward-to <address>] [--match-all]\n"
         "\n"
         "Add a new mail sorting rule for the account.\n"
         "\n"
@@ -248,12 +322,16 @@ static void help_rules_add(void) {
         "  --if-subject <glob>   Match message subject (glob pattern)\n"
         "  --if-to <glob>        Match recipient (glob; the address or the whole header)\n"
         "  --if-label <glob>     Match an existing label (glob pattern)\n"
+        "  --when <expression>   A whole condition: field:pattern joined by and / or, ! for not,\n"
+        "                        e.g. '(from:*@a.org or from:*@b.org) and !label:UNREAD'\n"
+        "                        (not with --if-*; a pattern over 4095 characters is refused)\n"
         "  --match-all           The rule matches every message (written as 'when = all')\n"
         "\n"
         "Actions:\n"
         "  --add-label <label>      Add this label to matching messages\n"
         "  --remove-label <label>   Remove this label from matching messages\n"
         "  --move-folder <folder>   Move to folder (IMAP only; ignored on Gmail)\n"
+        "  --forward-to <address>   Forward to this address (stored; not yet executed)\n"
         "\n"
         "Options:\n"
         "  --name <name>       Rule name (required, must be unique)\n"
@@ -273,15 +351,18 @@ static void help_rules_edit(void) {
         "Usage: email-cli [<account>] rules edit --name <name>\n"
         "         [--new-name <name>]\n"
         "         [--if-from <glob>] [--if-subject <glob>]\n"
-        "         [--if-to <glob>] [--if-label <glob>]\n"
+        "         [--if-to <glob>] [--if-label <glob>] [--when <expression>]\n"
         "         [--add-label <label>]... [--remove-label <label>]...\n"
-        "         [--move-folder <folder>]\n"
+        "         [--move-folder <folder>] [--forward-to <address>] [--enable|--disable]\n"
         "\n"
         "Change the named sorting rule in place; its place in the list is kept.\n"
         "Only what you give is changed:\n"
         "  --new-name <name>        Rename the rule (the new name must be unused)\n"
         "  --if-from, --if-subject, --if-to, --if-label\n"
         "                           Replace the rule's whole condition by the ones given\n"
+        "  --when <expression>      Replace the whole condition by this expression\n"
+        "  --forward-to <address>   Replace the forward target (\"\" clears it)\n"
+        "  --enable, --disable      Switch the rule on or off (a rule that is off never fires)\n"
         "  --add-label <label>      Replace the labels to add (repeatable)\n"
         "  --remove-label <label>   Replace the labels to remove (repeatable)\n"
         "  --move-folder <folder>   Replace the destination folder (\"\" clears it)\n"
@@ -1325,6 +1406,9 @@ int main(int argc, char *argv[]) {
                 if (strcmp(topic2, "edit")   == 0) { help_rules_edit();   return EXIT_SUCCESS; }
                 if (strcmp(topic2, "remove") == 0) { help_rules_remove(); return EXIT_SUCCESS; }
                 if (strcmp(topic2, "revert") == 0) { help_rules_revert(); return EXIT_SUCCESS; }
+                if (strcmp(topic2, "test")   == 0) { help_rules_test();   return EXIT_SUCCESS; }
+                if (strcmp(topic2, "copy")   == 0) { help_rules_copy();   return EXIT_SUCCESS; }
+                if (strcmp(topic2, "move")   == 0) { help_rules_move();   return EXIT_SUCCESS; }
                 if (strcmp(topic2, "list")   == 0) { help_rules_list();   return EXIT_SUCCESS; }
                 if (strcmp(topic2, "check")  == 0) { help_rules_check();  return EXIT_SUCCESS; }
             }
@@ -2465,10 +2549,20 @@ int main(int argc, char *argv[]) {
                        accounts[i].name, rules->count,
                        rules->count == 1 ? "" : "s");
 
+                RuleStat *stats = calloc((size_t)rules->count, sizeof *stats);
+                if (stats && email_service_rules_stats(accounts[i].name, rules, stats) != 0) {
+                    free(stats);
+                    stats = NULL;
+                }
                 for (int r = 0; r < rules->count; r++) {
                     const MailRule *rule = &rules->rules[r];
-                    printf("  %d. %s\n", r + 1,
-                           rule->name && rule->name[0] ? rule->name : "(unnamed)");
+                    printf("  %d. %s%s\n", r + 1,
+                           rule->name && rule->name[0] ? rule->name : "(unnamed)",
+                           rule->disabled ? "  [off]" : "");
+                    if (stats)
+                        printf("       matches      = %d cached message(s)%s%s\n", stats[r].matches,
+                               stats[r].last[0] ? ", last changed something " : "",
+                               stats[r].last);
 
                     /* mail_rules_load() builds `when` from the flat if-* fields,
                      * so a rule with any condition has one. */
@@ -2483,8 +2577,11 @@ int main(int argc, char *argv[]) {
                         printf("       then-remove-label = %s\n", rule->then_rm_label[j]);
                     if (rule->then_move_folder)
                         printf("       then-move-folder  = %s\n", rule->then_move_folder);
+                    if (rule->then_forward_to)
+                        printf("       then-forward-to   = %s\n", rule->then_forward_to);
                     printf("\n");
                 }
+                free(stats);
 
                 mail_rules_free(rules);
                 printed++;
@@ -2542,6 +2639,42 @@ int main(int argc, char *argv[]) {
                 result = bad ? -1 : 0;
             }
 
+        } else if (strcmp(subcmd, "test") == 0) {
+            /* rules test KEY|MESSAGE-ID: which rules match one cached message (EMAIL-312) */
+            const char *key = NULL;
+            for (int i = subcmd_idx + 1; i < argc; i++) {
+                if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+                    help_rules_test(); return EXIT_SUCCESS;
+                }
+                if (strcmp(argv[i], "--batch") == 0) continue;
+                if (strcmp(argv[i], "--account") == 0) { i++; continue; }
+                if (argv[i][0] == '-') {
+                    fprintf(stderr, "Unknown option '%s' for 'rules test'.\n", argv[i]);
+                    fprintf(stderr, "Run 'email-cli help rules test' for usage.\n");
+                    result = -1;
+                    goto rules_done;
+                }
+                key = argv[i];
+            }
+            if (!key) {
+                fprintf(stderr, "Error: 'rules test' needs the message's key or Message-ID.\n");
+                fprintf(stderr, "Run 'email-cli help rules test' for usage.\n");
+                result = -1;
+                goto rules_done;
+            }
+            char test_acct[256] = {0};
+            if (rules_resolve_account(account_arg, test_acct, sizeof(test_acct)) != 0) {
+                result = -1;
+                goto rules_done;
+            }
+            if (email_service_rules_test(stdout, test_acct, key) != 0) {
+                fprintf(stderr, "Error: no cached message of %s has the key or Message-ID '%s'.\n",
+                        test_acct, key);
+                result = -1;
+            } else {
+                result = 0;
+            }
+
         } else if (strcmp(subcmd, "revert") == 0) {
             for (int i = subcmd_idx + 1; i < argc; i++) {
                 if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -2559,6 +2692,7 @@ int main(int argc, char *argv[]) {
             const char *if_to      = NULL;
             const char *if_label   = NULL;
             const char *move_folder = NULL;
+            const char *when_arg = NULL, *fwd_arg = NULL;
             const char *add_labels[MAIL_RULE_MAX_LABELS];
             int   add_label_count = 0;
             const char *rm_labels[MAIL_RULE_MAX_LABELS];
@@ -2577,6 +2711,8 @@ int main(int argc, char *argv[]) {
                 if (strcmp(argv[i], "--if-to")        == 0 && i+1 < argc) { if_to      = argv[++i]; continue; }
                 if (strcmp(argv[i], "--if-label")     == 0 && i+1 < argc) { if_label   = argv[++i]; continue; }
                 if (strcmp(argv[i], "--move-folder")  == 0 && i+1 < argc) { move_folder = argv[++i]; continue; }
+                if (strcmp(argv[i], "--when")         == 0 && i+1 < argc) { when_arg = argv[++i]; continue; }
+                if (strcmp(argv[i], "--forward-to")   == 0 && i+1 < argc) { fwd_arg = argv[++i]; continue; }
                 if (strcmp(argv[i], "--add-label")    == 0 && i+1 < argc) {
                     if (add_label_count < MAIL_RULE_MAX_LABELS)
                         add_labels[add_label_count++] = argv[++i];
@@ -2617,8 +2753,22 @@ int main(int argc, char *argv[]) {
                     }
                     have = 1;
                 }
+                if (when_arg) {
+                    char why[512];
+                    if (have || match_all) {
+                        fprintf(stderr, "Error: --when cannot be combined with --if-* or --match-all.\n");
+                        result = -1;
+                        goto rules_done;
+                    }
+                    if (!when_check(when_arg, why, sizeof(why))) {
+                        fprintf(stderr, "Error: --when '%s': %s.\n", when_arg, why);
+                        result = -1;
+                        goto rules_done;
+                    }
+                    have = 1;
+                }
                 if (!have && !match_all) {
-                    fprintf(stderr, "Error: 'rules add' needs a condition (--if-from, --if-subject, "
+                    fprintf(stderr, "Error: 'rules add' needs a condition (--when, --if-from, --if-subject, "
                             "--if-to or --if-label), or --match-all for a rule that matches every message.\n");
                     result = -1;
                     goto rules_done;
@@ -2695,10 +2845,12 @@ int main(int argc, char *argv[]) {
                 nr->if_subject = if_subject ? strdup(if_subject) : NULL;
                 nr->if_to      = if_to      ? strdup(if_to)      : NULL;
                 nr->if_label   = if_label   ? strdup(if_label)   : NULL;
-                nr->when = match_all ? strdup("all")
+                nr->when = when_arg ? strdup(when_arg)
+                         : match_all ? strdup("all")
                          : when_from_flat(if_from, if_subject, if_to, if_label,
                                           NULL, NULL, NULL, NULL, 0, 0);
                 nr->then_move_folder = move_folder ? strdup(move_folder) : NULL;
+                nr->then_forward_to = fwd_arg && fwd_arg[0] ? strdup(fwd_arg) : NULL;
                 for (int j = 0; j < add_label_count; j++)
                     nr->then_add_label[nr->then_add_count++] = strdup(add_labels[j]);
                 for (int j = 0; j < rm_label_count; j++)
@@ -2811,6 +2963,8 @@ int main(int argc, char *argv[]) {
             const char *rm_labels[MAIL_RULE_MAX_LABELS];
             int add_label_count = 0, rm_label_count = 0;
             int set_cond = 0, set_add = 0, set_rm = 0, set_folder = 0;
+            const char *when_arg = NULL, *fwd_arg = NULL;
+            int set_fwd = 0, set_enabled = 0, new_disabled = 0;
 
             for (int i = subcmd_idx + 1; i < argc; i++) {
                 if (strcmp(argv[i], "--help")    == 0 ||
@@ -2825,6 +2979,10 @@ int main(int argc, char *argv[]) {
                 if (strcmp(argv[i], "--if-to")        == 0 && i+1 < argc) { if_to      = argv[++i]; set_cond = 1; continue; }
                 if (strcmp(argv[i], "--if-label")     == 0 && i+1 < argc) { if_label   = argv[++i]; set_cond = 1; continue; }
                 if (strcmp(argv[i], "--move-folder")  == 0 && i+1 < argc) { move_folder = argv[++i]; set_folder = 1; continue; }
+                if (strcmp(argv[i], "--when")         == 0 && i+1 < argc) { when_arg = argv[++i]; set_cond = 1; continue; }
+                if (strcmp(argv[i], "--forward-to")   == 0 && i+1 < argc) { fwd_arg = argv[++i]; set_fwd = 1; continue; }
+                if (strcmp(argv[i], "--enable")       == 0) { set_enabled = 1; new_disabled = 0; continue; }
+                if (strcmp(argv[i], "--disable")      == 0) { set_enabled = 1; new_disabled = 1; continue; }
                 if (strcmp(argv[i], "--add-label")    == 0 && i+1 < argc) {
                     set_add = 1;
                     if (add_label_count < MAIL_RULE_MAX_LABELS) add_labels[add_label_count++] = argv[++i];
@@ -2849,7 +3007,21 @@ int main(int argc, char *argv[]) {
                 result = -1;
                 goto rules_done;
             }
-            if (!new_name && !set_cond && !set_add && !set_rm && !set_folder) {
+            if (when_arg) {
+                char why[512];
+                if (if_from || if_subject || if_to || if_label) {
+                    fprintf(stderr, "Error: --when cannot be combined with --if-*.\n");
+                    result = -1;
+                    goto rules_done;
+                }
+                if (!when_check(when_arg, why, sizeof(why))) {
+                    fprintf(stderr, "Error: --when '%s': %s.\n", when_arg, why);
+                    result = -1;
+                    goto rules_done;
+                }
+            }
+            if (!new_name && !set_cond && !set_add && !set_rm && !set_folder && !set_fwd &&
+                !set_enabled) {
                 fprintf(stderr, "Error: nothing to change for 'rules edit'.\n");
                 fprintf(stderr, "Run 'email-cli help rules edit' for usage.\n");
                 result = -1;
@@ -2921,9 +3093,15 @@ int main(int argc, char *argv[]) {
                     er->if_subject = if_subject ? strdup(if_subject) : NULL;
                     er->if_to      = if_to      ? strdup(if_to)      : NULL;
                     er->if_label   = if_label   ? strdup(if_label)   : NULL;
-                    er->when = when_from_flat(if_from, if_subject, if_to, if_label,
+                    er->when = when_arg ? strdup(when_arg)
+                             : when_from_flat(if_from, if_subject, if_to, if_label,
                                               NULL, NULL, NULL, NULL, 0, 0);
                 }
+                if (set_fwd) {
+                    free(er->then_forward_to);
+                    er->then_forward_to = fwd_arg[0] ? strdup(fwd_arg) : NULL;
+                }
+                if (set_enabled) er->disabled = new_disabled;
                 if (set_add) {
                     for (int j = 0; j < er->then_add_count; j++) { free(er->then_add_label[j]); er->then_add_label[j] = NULL; }
                     er->then_add_count = 0;
@@ -2950,9 +3128,99 @@ int main(int argc, char *argv[]) {
                 mail_rules_free(rules);
             }
 
+        } else if (strcmp(subcmd, "copy") == 0 || strcmp(subcmd, "move") == 0) {
+            /* rules copy --name N [--new-name X] | rules move --name N --to POS (EMAIL-312) */
+            int is_copy = strcmp(subcmd, "copy") == 0;
+            const char *rule_name = NULL, *new_name = NULL;
+            int rule_action = 1, to_pos = 0;
+            for (int i = subcmd_idx + 1; i < argc; i++) {
+                if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+                    if (is_copy) help_rules_copy(); else help_rules_move();
+                    return EXIT_SUCCESS;
+                }
+                if (strcmp(argv[i], "--batch") == 0) continue;
+                if (strcmp(argv[i], "--account") == 0) { i++; continue; }
+                if (strcmp(argv[i], "--action") == 0 && i+1 < argc) { rule_action = atoi(argv[++i]); continue; }
+                if (strcmp(argv[i], "--name") == 0 && i+1 < argc) { rule_name = argv[++i]; continue; }
+                if (is_copy && strcmp(argv[i], "--new-name") == 0 && i+1 < argc) { new_name = argv[++i]; continue; }
+                if (!is_copy && strcmp(argv[i], "--to") == 0 && i+1 < argc) { to_pos = atoi(argv[++i]); continue; }
+                fprintf(stderr, "Unknown option '%s' for 'rules %s'.\n", argv[i], subcmd);
+                fprintf(stderr, "Run 'email-cli help rules %s' for usage.\n", subcmd);
+                result = -1;
+                goto rules_done;
+            }
+            if (!rule_name || !rule_name[0] || (!is_copy && to_pos < 1)) {
+                fprintf(stderr, is_copy ? "Error: --name is required for 'rules copy'.\n"
+                                        : "Error: --name and --to (a place from 1) are required for 'rules move'.\n");
+                result = -1;
+                goto rules_done;
+            }
+            char mv_acct[256] = {0};
+            if (rules_resolve_account(account_arg, mv_acct, sizeof(mv_acct)) != 0) {
+                result = -1;
+                goto rules_done;
+            }
+            MailRules *rules = mail_rules_load(mv_acct);
+            int found = rules ? mail_rules_find(rules, rule_name, rule_action) : -1;
+            if (found < 0) {
+                fprintf(stderr, "Error: No rule named \"%s\" with action %d found.\n", rule_name,
+                        rule_action < 1 ? 1 : rule_action);
+                mail_rules_free(rules);
+                result = -1;
+                goto rules_done;
+            }
+            if (is_copy) {
+                if (new_name && !new_name[0]) {
+                    fprintf(stderr, "Error: --new-name must not be empty.\n");
+                    mail_rules_free(rules);
+                    result = -1;
+                    goto rules_done;
+                }
+                if (new_name && mail_rules_find(rules, new_name, rule_action) >= 0) {
+                    fprintf(stderr, "Error: A rule named \"%s\" already exists.\n", new_name);
+                    mail_rules_free(rules);
+                    result = -1;
+                    goto rules_done;
+                }
+                MailRule *cp = mail_rules_append(rules);
+                if (!cp) { mail_rules_free(rules); result = -1; goto rules_done; }
+                mail_rule_clone(&rules->rules[found], cp);
+                free(cp->name);
+                cp->name = NULL;
+                cp->name = new_name ? strdup(new_name) : mail_rules_copy_name(rules, rule_name);
+                int at = rules->count - 1;
+                while (at > found + 1) { mail_rules_move(rules, at, -1); at--; }
+                if (mail_rules_save(mv_acct, rules) == 0) {
+                    printf("Rule copied: \"%s\" as \"%s\" (place %d)\n", rule_name,
+                           rules->rules[found + 1].name, found + 2);
+                    result = 0;
+                } else {
+                    fprintf(stderr, "Error: failed to save rules.\n");
+                    result = -1;
+                }
+            } else {
+                if (to_pos > rules->count) {
+                    fprintf(stderr, "Error: --to %d is past the last rule (there are %d).\n", to_pos, rules->count);
+                    mail_rules_free(rules);
+                    result = -1;
+                    goto rules_done;
+                }
+                int at = found;
+                while (at < to_pos - 1) { mail_rules_move(rules, at, 1); at++; }
+                while (at > to_pos - 1) { mail_rules_move(rules, at, -1); at--; }
+                if (mail_rules_save(mv_acct, rules) == 0) {
+                    printf("Rule moved: \"%s\" is now rule %d\n", rule_name, to_pos);
+                    result = 0;
+                } else {
+                    fprintf(stderr, "Error: failed to save rules.\n");
+                    result = -1;
+                }
+            }
+            mail_rules_free(rules);
+
         } else {
             fprintf(stderr, "Unknown 'rules' subcommand '%s'.\n", subcmd);
-            fprintf(stderr, "Available: rules list, rules apply, rules add, rules edit, rules remove\n");
+            fprintf(stderr, "Available: rules list, rules apply, rules test, rules add, rules edit, rules copy, rules move, rules remove\n");
             result = -1;
         }
         rules_done: ;

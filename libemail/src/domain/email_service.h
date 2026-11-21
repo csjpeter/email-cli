@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include "config.h"
 #include "op_history.h"
+#include "mail_rules.h"
 
 /**
  * @file email_service.h
@@ -326,6 +327,67 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
  * @return 0 when every message was restored, -1 otherwise (also: nothing to revert).
  */
 int email_service_rules_revert(FILE *out, const char *only_account);
+
+/** @brief Like email_service_rules_revert(), the refusals go to @p err (the TUI shows them). */
+int email_service_rules_revert_to(FILE *out, FILE *err, const char *only_account);
+
+/* ── The rules overview, preview and test (EMAIL-312) ────────────────── */
+
+/** One cached message as the rules see it. */
+typedef struct {
+    const char *uid;      /**< the cache key (16 characters) */
+    const char *folder;   /**< IMAP folder; "" on Gmail */
+    const char *from;     /**< decoded From (never NULL) */
+    const char *subject;  /**< decoded Subject (never NULL) */
+    const char *labels;   /**< comma-separated custom labels (may be NULL) */
+} RuleScanMsg;
+
+/** Called once per cached message; a non-zero return stops the scan. */
+typedef int (*RuleScanFn)(const RuleScanMsg *m, void *ctx);
+
+/**
+ * @brief Walks the locally cached messages of the account, as `rules apply` does.
+ * @return The number of messages seen, or -1 when the account is not configured.
+ */
+int email_service_rules_scan(const char *account, RuleScanFn fn, void *ctx);
+
+/** What the overview shows of one rule besides its definition. */
+typedef struct {
+    int  matches;        /**< cached messages the rule matches now */
+    char last[20];       /**< "YYYY-MM-DD HH:MM" of the last apply that changed something by it; "" = never */
+} RuleStat;
+
+/**
+ * @brief The cached-message count and the last change of every rule.
+ * @param stats  An array of @p rules->count entries.
+ * @return 0, or -1 when the account is not configured.
+ */
+int email_service_rules_stats(const char *account, const MailRules *rules, RuleStat *stats);
+
+/** The first messages a condition matches (the live preview of the rule form). */
+typedef struct { char uid[40]; char from[96]; char subject[96]; } RulePreviewMsg;
+
+/**
+ * @brief Counts the cached messages a condition matches and returns the first few.
+ * @param total  Receives the number of cached messages looked at.
+ * @param count  Receives the number that match.
+ * @param first  Receives up to @p max_first of them, in cache order.
+ * @return 0, or -1 when the condition is invalid or the account unknown.
+ */
+int email_service_rules_preview(const char *account, const char *when, int *total, int *count,
+                                RulePreviewMsg *first, int max_first);
+
+/**
+ * @brief Tells which rules match one cached message and what each would do,
+ *        and which rule gave the labels an earlier apply set ("why this label").
+ * @param key  The message's cache key (a UID, with or without leading zeros)
+ *             or its Message-ID.
+ * @return 0, or -1 when the message is not in the cache.
+ */
+int email_service_rules_test(FILE *out, const char *account, const char *key);
+
+/** @brief The labels the account's cached messages carry and the rules use; heap array of heap strings. */
+char **email_service_rules_known_labels(const char *account, int *count);
 
 /**
  * @brief Reverts one "ruleapply" history step.  Used by history_revert().

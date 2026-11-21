@@ -24,7 +24,7 @@ typedef enum {
 typedef struct {
     TokType type;
     char    field[32];
-    char    pat[1024];
+    char    pat[4096];
 } Tok;
 
 typedef struct {
@@ -80,7 +80,8 @@ static Tok lex_read(Lex *l) {
         while (*l->p && *l->p != '"') {
             if (*l->p == '\\' && (l->p[1] == '"' || l->p[1] == '\\'))
                 l->p++;
-            if (plen < sizeof(t.pat) - 1) t.pat[plen++] = *l->p;
+            if (plen >= sizeof(t.pat) - 1) { t.type = T_ERR; return t; }   /* too long: refused, never cut */
+            t.pat[plen++] = *l->p;
             l->p++;
         }
         if (*l->p != '"') { t.type = T_ERR; return t; }   /* unterminated */
@@ -91,7 +92,7 @@ static Tok lex_read(Lex *l) {
                *l->p != ')' && *l->p != '(')
             l->p++;
         plen = (size_t)(l->p - ps);
-        if (plen >= sizeof(t.pat)) plen = sizeof(t.pat) - 1;
+        if (plen >= sizeof(t.pat)) { t.type = T_ERR; return t; }   /* too long: refused, never cut */
         memcpy(t.pat, ps, plen);
     }
     t.pat[plen] = '\0';
@@ -422,4 +423,265 @@ char *when_from_conds(const WhenCond *conds, int nconds, int is_or) {
     }
 
     return buf[0] ? strdup(buf) : NULL;
+}
+
+/* ── The form model (EMAIL-312) ────────────────────────────────────── */
+
+void when_clauses_free(WhenClause *c, int n) {
+    for (int i = 0; c && i < n; i++) free(c[i].value);
+}
+
+/** Heap copy of @p pattern, quoted when a bare word could not carry it. */
+static char *quote_pattern(const char *pattern) {
+    size_t n = strlen(pattern);
+    char *out = malloc(n * 2 + 3);
+    if (!out) return NULL;
+    int quote = pattern[0] == '"';
+    for (const char *q = pattern; *q && !quote; q++)
+        if (*q == ' ' || *q == '\t' || *q == '(' || *q == ')') quote = 1;
+    if (!quote) { memcpy(out, pattern, n + 1); return out; }
+    char *o = out;
+    *o++ = '"';
+    for (const char *q = pattern; *q; q++) {
+        if (*q == '"' || *q == '\\') *o++ = '\\';
+        *o++ = *q;
+    }
+    *o++ = '"';
+    *o = '\0';
+    return out;
+}
+
+static int field_is_age(const char *f) {
+    return strcmp(f, "age-gt") == 0 || strcmp(f, "age-lt") == 0;
+}
+
+/** The glob pattern of a clause (heap). */
+static char *clause_pattern(const WhenClause *c) {
+    const char *v = c->value ? c->value : "";
+    if (c->op == WOP_CONTAINS && !field_is_age(c->field)) {
+        size_t n = strlen(v);
+        char *p = malloc(n + 3);
+        if (!p) return NULL;
+        p[0] = '*'; memcpy(p + 1, v, n); p[n + 1] = '*'; p[n + 2] = '\0';
+        return p;
+    }
+    return strdup(v);
+}
+
+char *when_clauses_build(const WhenClause *c, int n) {
+    size_t cap = 64;
+    for (int i = 0; i < n; i++) cap += strlen(c[i].value ? c[i].value : "") * 2 + 48;
+    char *buf = calloc(1, cap);
+    if (!buf) return NULL;
+    for (int i = 0; i < n; i++) {
+        if (i > 0) strcat(buf, c[i].join_or ? " or " : " and ");
+        if (c[i].negated) strcat(buf, "!");
+        strcat(buf, c[i].field);
+        strcat(buf, ":");
+        char *pat = clause_pattern(&c[i]);
+        char *q = pat ? quote_pattern(pat) : NULL;
+        if (q) strcat(buf, q);
+        free(q);
+        free(pat);
+    }
+    return buf;
+}
+
+static int when_equal(const WhenNode *a, const WhenNode *b) {
+    if (!a || !b) return a == b;
+    if (a->type != b->type || a->age_val != b->age_val) return 0;
+    if ((a->pattern == NULL) != (b->pattern == NULL)) return 0;
+    if (a->pattern && strcmp(a->pattern, b->pattern) != 0) return 0;
+    return when_equal(a->left, b->left) && when_equal(a->right, b->right);
+}
+
+static const char *node_field(WhenNodeType t) {
+    switch (t) {
+    case WN_FROM: return "from";       case WN_TO: return "to";
+    case WN_SUBJECT: return "subject"; case WN_LABEL: return "label";
+    case WN_BODY: return "body";       case WN_AGE_GT: return "age-gt";
+    case WN_AGE_LT: return "age-lt";   default: return NULL;
+    }
+}
+
+typedef struct { WhenClause *c; int n, cap, pending_or; } Flat;
+
+static int flat_add(Flat *f, const WhenNode *atom, int negated) {
+    const char *field = node_field(atom->type);
+    if (!field) return -1;
+    if (f->n == f->cap) {
+        int nc = f->cap ? f->cap * 2 : 8;
+        WhenClause *t = realloc(f->c, (size_t)nc * sizeof(WhenClause));
+        if (!t) return -1;
+        f->c = t; f->cap = nc;
+    }
+    WhenClause *c = &f->c[f->n];
+    memset(c, 0, sizeof(*c));
+    snprintf(c->field, sizeof(c->field), "%s", field);
+    c->join_or = f->n > 0 ? f->pending_or : 0;
+    c->negated = negated;
+    if (field_is_age(field)) {
+        char tmp[32];
+        snprintf(tmp, sizeof(tmp), "%d", atom->age_val);
+        c->op = WOP_IS;
+        c->value = strdup(tmp);
+    } else {
+        const char *p = atom->pattern ? atom->pattern : "";
+        size_t n = strlen(p);
+        int has_glob = strpbrk(p, "*?[") != NULL;
+        int inner_plain = n >= 3 && p[0] == '*' && p[n - 1] == '*';
+        for (size_t k = 1; inner_plain && k + 1 < n; k++)
+            if (p[k] == '*' || p[k] == '?' || p[k] == '[') inner_plain = 0;
+        if (inner_plain) {
+            c->op = WOP_CONTAINS;
+            c->value = strndup(p + 1, n - 2);
+        } else {
+            c->op = has_glob ? WOP_GLOB : WOP_IS;
+            c->value = strdup(p);
+        }
+    }
+    if (!c->value) return -1;
+    f->n++;
+    return 0;
+}
+
+/** Walks the tree in order; -1 when it is not a flat list of (negated) atoms. */
+static int flat_walk(Flat *f, const WhenNode *n) {
+    if (!n) return -1;
+    if (n->type == WN_OR || n->type == WN_AND) {
+        if (flat_walk(f, n->left) != 0) return -1;
+        f->pending_or = n->type == WN_OR;
+        return flat_walk(f, n->right);
+    }
+    if (n->type == WN_NOT)
+        return n->left && node_field(n->left->type) ? flat_add(f, n->left, 1) : -1;
+    return flat_add(f, n, 0);
+}
+
+int when_clauses_parse(const char *expr, WhenClause **out, int *n) {
+    *out = NULL; *n = 0;
+    WhenNode *tree = when_parse(expr);
+    if (!tree) return -1;
+    Flat f = {0};
+    int rc = flat_walk(&f, tree);
+    if (rc == 0) {
+        /* The list must mean what the text means (parentheses may differ). */
+        char *back = when_clauses_build(f.c, f.n);
+        WhenNode *again = back ? when_parse(back) : NULL;
+        if (!again || !when_equal(tree, again)) rc = -1;
+        when_node_free(again);
+        free(back);
+    }
+    when_node_free(tree);
+    if (rc != 0) { when_clauses_free(f.c, f.n); free(f.c); return -1; }
+    *out = f.c; *n = f.n;
+    return 0;
+}
+
+/* ── Plain-language description ────────────────────────────────────── */
+
+typedef struct { char *s; size_t len, cap; } Sb;
+
+static void sb_add(Sb *b, const char *t) {
+    size_t n = strlen(t);
+    if (b->len + n + 1 > b->cap) {
+        size_t nc = (b->len + n + 1) * 2;
+        char *x = realloc(b->s, nc);
+        if (!x) return;
+        b->s = x; b->cap = nc;
+    }
+    memcpy(b->s + b->len, t, n + 1);
+    b->len += n;
+}
+
+static void describe_atom(Sb *b, const WhenNode *n, int negated) {
+    const char *field = node_field(n->type);
+    char tmp[64];
+    if (n->type == WN_AGE_GT || n->type == WN_AGE_LT) {
+        const char *what = n->type == WN_AGE_GT ? (negated ? "not older than" : "older than")
+                                                : (negated ? "not newer than" : "newer than");
+        snprintf(tmp, sizeof(tmp), "%s %d days", what, n->age_val);
+        sb_add(b, tmp);
+        return;
+    }
+    const char *p = n->pattern ? n->pattern : "";
+    size_t len = strlen(p);
+    int contains = len >= 3 && p[0] == '*' && p[len - 1] == '*';
+    for (size_t k = 1; contains && k + 1 < len; k++)
+        if (p[k] == '*' || p[k] == '?' || p[k] == '[') contains = 0;
+    const char *verb;
+    char *val;
+    if (contains) { verb = negated ? "does not contain" : "contains"; val = strndup(p + 1, len - 2); }
+    else if (strpbrk(p, "*?[")) { verb = negated ? "does not match" : "matches"; val = strdup(p); }
+    else { verb = negated ? "is not" : "is"; val = strdup(p); }
+    sb_add(b, field); sb_add(b, " "); sb_add(b, verb); sb_add(b, " ");
+    sb_add(b, val ? val : "");
+    free(val);
+}
+
+static void describe_node(Sb *b, const WhenNode *n, int parent_and) {
+    switch (n->type) {
+    case WN_ALL: sb_add(b, "every message"); break;
+    case WN_OR:
+        if (parent_and) sb_add(b, "(");
+        describe_node(b, n->left, 0);
+        sb_add(b, " or ");
+        describe_node(b, n->right, 0);
+        if (parent_and) sb_add(b, ")");
+        break;
+    case WN_AND:
+        describe_node(b, n->left, 1);
+        sb_add(b, " and ");
+        describe_node(b, n->right, 1);
+        break;
+    case WN_NOT:
+        if (n->left && node_field(n->left->type)) describe_atom(b, n->left, 1);
+        else { sb_add(b, "not ("); describe_node(b, n->left, 0); sb_add(b, ")"); }
+        break;
+    default: describe_atom(b, n, 0); break;
+    }
+}
+
+char *when_describe(const char *expr) {
+    WhenNode *t = when_parse(expr);
+    if (!t) return NULL;
+    Sb b = {0};
+    describe_node(&b, t, 0);
+    when_node_free(t);
+    return b.s;
+}
+
+int when_check(const char *expr, char *reason, size_t size) {
+    if (!expr || !*expr) {
+        snprintf(reason, size, "the condition is empty (write 'all' for every message)");
+        return 0;
+    }
+    WhenNode *t = when_parse(expr);
+    if (t) { when_node_free(t); return 1; }
+    /* Say why: a pattern the parser cannot hold, or the shape. */
+    size_t run = 0, longest = 0;
+    int quoted = 0;
+    for (const char *p = expr; *p; p++) {
+        if (quoted) {
+            if (*p == '\\' && p[1]) { p++; run++; }
+            else if (*p == '"') quoted = 0;
+            else run++;
+        } else if (*p == ':') {
+            run = 0;
+            if (p[1] == '"') { quoted = 1; p++; }
+            else {
+                const char *q = p + 1;
+                while (*q && *q != ' ' && *q != '\t' && *q != '(' && *q != ')') q++;
+                run = (size_t)(q - (p + 1));
+                p = q - 1;
+            }
+        } else run = 0;
+        if (run > longest) longest = run;
+    }
+    if (longest >= 1024)
+        snprintf(reason, size, "a pattern is longer than 4095 characters (it would be cut, so it is refused)");
+    else
+        snprintf(reason, size, "not a valid condition; write field:pattern joined by and / or, "
+                 "with ! for not (fields: from, to, subject, label, body, age-gt, age-lt)");
+    return 0;
 }

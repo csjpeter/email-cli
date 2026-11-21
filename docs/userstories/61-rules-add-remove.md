@@ -68,3 +68,10 @@ A rule is identified by the pair (name, action group), not by its name alone.
 `rules edit` and `rules remove` take `--action <n>` (default 1); the TUI edit
 keeps the rule's action group; saving refuses two rules with the same
 (name, action) pair; the operation history pairs rules by that pair.
+
+## rules.ini file integrity (EMAIL-316)
+
+- Lines of any length are read whole; none is split.
+- A rule name with a double quote, or any value with a line break, is refused on save (nothing is written).
+- `then-move-folder` is stored in Modified UTF-7, so `R&D Team` survives repeated save and load.
+- A save writes `rules.ini.tmp`, fsyncs and renames it; a write error leaves the old file intact.

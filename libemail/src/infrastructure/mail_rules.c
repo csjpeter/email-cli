@@ -17,6 +17,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #define CONFIG_APP_DIR "email-cli"
 
@@ -76,13 +79,14 @@ static MailRules *rules_parse_fp(FILE *fp) {
     MailRules *r = calloc(1, sizeof(MailRules));
     if (!r) return NULL;
 
-    char line[1024];
+    char *line = NULL;          /* getline buffer: no line is ever split */
+    size_t line_cap = 0;
     MailRule *cur = NULL;
     int lineno = 0;
     int section_line = 0;
     int *section_lines = NULL;   /* line of each rule's header */
 
-    while (fgets(line, sizeof(line), fp)) {
+    while (getline(&line, &line_cap, fp) != -1) {
         lineno++;
         char *p = trim(line);
         if (!*p || *p == '#' || *p == ';') continue;
@@ -120,6 +124,8 @@ static MailRules *rules_parse_fp(FILE *fp) {
         *eq = '\0';
         char *key = trim(p);
         char *val = trim(eq + 1);
+        if (strchr(val, '\r'))
+            rule_set_error(cur, lineno, "line %d: '%s' holds a carriage return", lineno, key);
         int known = strcmp(key, "when") == 0 || strncmp(key, "if-", 3) == 0 ||
                     strncmp(key, "then-", 5) == 0;
         if (known && !*val)
@@ -161,6 +167,8 @@ static MailRules *rules_parse_fp(FILE *fp) {
             free(cur->then_move_folder);
             cur->then_move_folder = imap_utf7_decode(val);
             if (!cur->then_move_folder) cur->then_move_folder = strdup(val);
+            if (!cur->then_move_folder)
+                rule_set_error(cur, lineno, "line %d: out of memory", lineno);
         }
         else if (strcmp(key, "then-forward-to") == 0) {
             free(cur->then_forward_to);
@@ -170,6 +178,8 @@ static MailRules *rules_parse_fp(FILE *fp) {
             rule_set_error(cur, lineno, "line %d: unknown key '%s'", lineno, key);
         }
     }
+
+    free(line);
 
     /* Convert legacy flat fields → when expression for rules that have no when yet */
     for (int i = 0; i < r->count; i++) {
@@ -226,7 +236,26 @@ MailRules *mail_rules_load(const char *account_name) {
 
 /* ── Serialisation and the operation history ─────────────────────────── */
 
+/** True when @p s holds a CR or LF (or, with @p quote, a double quote). */
+static int has_bad_char(const char *s, int quote) {
+    return s && (strchr(s, '\n') || strchr(s, '\r') || (quote && strchr(s, '"')));
+}
+
+/** Why a rule cannot be written to rules.ini without changing it; NULL when fine. */
+static const char *rule_unwritable(const MailRule *r) {
+    if (has_bad_char(r->name, 1)) return "the name holds a quote or a line break";
+    if (has_bad_char(r->when, 0)) return "the when expression holds a line break";
+    for (int j = 0; j < r->then_add_count; j++)
+        if (has_bad_char(r->then_add_label[j], 0)) return "a label holds a line break";
+    for (int j = 0; j < r->then_rm_count; j++)
+        if (has_bad_char(r->then_rm_label[j], 0)) return "a label holds a line break";
+    if (has_bad_char(r->then_move_folder, 0)) return "the folder holds a line break";
+    if (has_bad_char(r->then_forward_to, 0)) return "the forward address holds a line break";
+    return NULL;
+}
+
 char *mail_rule_text(const MailRule *r) {
+    if (rule_unwritable(r)) return NULL;
     char *buf = NULL;
     size_t len = 0;
     FILE *fp = open_memstream(&buf, &len);
@@ -243,11 +272,15 @@ char *mail_rule_text(const MailRule *r) {
         fprintf(fp, "then-add-label    = %s\n", r->then_add_label[j]);
     for (int j = 0; j < r->then_rm_count; j++)
         fprintf(fp, "then-remove-label = %s\n", r->then_rm_label[j]);
-    if (r->then_move_folder)
-        fprintf(fp, "then-move-folder  = %s\n", r->then_move_folder);
+    if (r->then_move_folder) {
+        /* Stored in the form load decodes: Modified UTF-7. */
+        char *enc = imap_utf7_encode(r->then_move_folder);
+        fprintf(fp, "then-move-folder  = %s\n", enc ? enc : r->then_move_folder);
+        free(enc);
+    }
     if (r->then_forward_to)
         fprintf(fp, "then-forward-to   = %s\n", r->then_forward_to);
-    fclose(fp);
+    if (fclose(fp) != 0) { free(buf); return NULL; }
     return buf;
 }
 
@@ -404,6 +437,15 @@ int mail_rules_save(const char *account_name, const MailRules *rules) {
         }
     }
 
+    for (int i = 0; i < rules->count; i++) {
+        const char *why = rule_unwritable(&rules->rules[i]);
+        if (why) {
+            fprintf(stderr, "Error: rule \"%s\" cannot be saved: %s; the rules were not saved.\n",
+                    rules->rules[i].name ? rules->rules[i].name : "", why);
+            return -1;
+        }
+    }
+
     /* Ensure directory exists */
     {
         char *slash = strrchr(path, '/');
@@ -419,16 +461,30 @@ int mail_rules_save(const char *account_name, const MailRules *rules) {
     /* What the file held before: the history records the difference. */
     MailRules *before = mail_rules_load_path(path);
 
-    {
-        RAII_FILE FILE *fp = fopen(path, "w");
-        if (!fp) { mail_rules_free(before); return -1; }
-        for (int i = 0; i < rules->count; i++) {
+    /* Write rules.ini.tmp, fsync, rename: a crash never leaves a partial file. */
+    char *tmp = NULL;
+    if (asprintf(&tmp, "%s.tmp", path) == -1) { mail_rules_free(before); return -1; }
+    int ok = 0;
+    FILE *fp = fopen(tmp, "w");
+    if (fp) {
+        ok = 1;
+        for (int i = 0; ok && i < rules->count; i++) {
             char *t = mail_rule_text(&rules->rules[i]);
-            if (!t) { mail_rules_free(before); return -1; }
-            fprintf(fp, "%s\n", t);
+            if (!t || fprintf(fp, "%s\n", t) < 0) ok = 0;
             free(t);
         }
+        if (ok && (fflush(fp) != 0 || fsync(fileno(fp)) != 0)) ok = 0;
+        if (fclose(fp) != 0) ok = 0;
     }
+    if (ok && rename(tmp, path) != 0) ok = 0;
+    if (!ok) {
+        fprintf(stderr, "Error: cannot write %s: %s\n", path, strerror(errno));
+        unlink(tmp);
+        free(tmp);
+        mail_rules_free(before);
+        return -1;
+    }
+    free(tmp);
     rules_record_diff(account_name, before, rules);
     mail_rules_free(before);
     return 0;
@@ -528,7 +584,9 @@ static int str_array_add(char ***arr, int *count, const char *s) {
     char **tmp = realloc(*arr, (size_t)(*count + 1) * sizeof(char *));
     if (!tmp) return -1;
     *arr = tmp;
-    (*arr)[(*count)++] = strdup(s);
+    char *copy = strdup(s);
+    if (!copy) return -1;
+    (*arr)[(*count)++] = copy;
     return 0;
 }
 

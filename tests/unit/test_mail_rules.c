@@ -612,6 +612,81 @@ static void test_rules_save_load_account(void) {
     if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
 }
 
+/* EMAIL-316: rules.ini keeps long lines, refuses injection, round-trips folders, saves atomically */
+static void test_316_save_load_roundtrip(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    setenv("HOME", TP("email-cli-rules-316-test"), 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    /* a 2000-byte when expression */
+    char when[2048] = "subject:";
+    size_t n = strlen(when);
+    memset(when + n, 'a', 1992);
+    when[n + 1992] = '\0';
+
+    MailRules *r = make_rules();
+    MailRule *rule = add_rule(r, "Long");
+    rule->when = strdup(when);
+    rule->then_move_folder = strdup("R&D Team");
+    ASSERT(mail_rules_save("rt@316.test", r) == 0, "316: save");
+    ASSERT(mail_rules_save("rt@316.test", r) == 0, "316: second save");
+    mail_rules_free(r);
+
+    MailRules *l = mail_rules_load("rt@316.test");
+    ASSERT(l && l->count == 1, "316: one rule loaded");
+    if (l && l->count == 1) {
+        ASSERT(l->rules[0].when && strcmp(l->rules[0].when, when) == 0, "316: long when intact");
+        ASSERT(!l->rules[0].error, "316: no error on long line");
+        ASSERT(l->rules[0].then_move_folder &&
+               strcmp(l->rules[0].then_move_folder, "R&D Team") == 0, "316: folder round trip");
+        ASSERT(mail_rules_save("rt@316.test", l) == 0, "316: resave loaded");
+    }
+    mail_rules_free(l);
+    l = mail_rules_load("rt@316.test");
+    ASSERT(l && l->count == 1 && l->rules[0].then_move_folder &&
+           strcmp(l->rules[0].then_move_folder, "R&D Team") == 0, "316: folder unchanged after resave");
+    mail_rules_free(l);
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/.config/email-cli/accounts/rt@316.test/rules.ini.tmp", getenv("HOME"));
+    ASSERT(access(path, F_OK) != 0, "316: no temp file left");
+
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
+}
+
+static void test_316_injection_refused(void) {
+    char *old_home = getenv("HOME");
+    char *old_xdg  = getenv("XDG_CONFIG_HOME");
+    setenv("HOME", TP("email-cli-rules-316b-test"), 1);
+    unsetenv("XDG_CONFIG_HOME");
+
+    MailRules *r = make_rules();
+    MailRule *rule = add_rule(r, "a\"b");
+    rule->when = strdup("from:x");
+    ASSERT(mail_rules_save("inj@316.test", r) != 0, "316: quote in name refused");
+    mail_rules_free(r);
+
+    r = make_rules();
+    rule = add_rule(r, "Ok");
+    rule->when = strdup("from:x");
+    rule->then_add_label[rule->then_add_count++] = strdup("Foo\nthen-move-folder = Trash");
+    ASSERT(mail_rules_save("inj@316.test", r) != 0, "316: newline in label refused");
+    ASSERT(mail_rules_load("inj@316.test") == NULL, "316: nothing written on refusal");
+    mail_rules_free(r);
+
+    MailRules *p = mail_rules_parse_text("[rule \"x\"]\nwhen = from:a\r\n");
+    ASSERT(p && p->count == 1 && !p->rules[0].error, "316: trailing CR is a line end");
+    mail_rules_free(p);
+    p = mail_rules_parse_text("[rule \"x\"]\nwhen = from:a\rthen-move-folder = Trash\n");
+    ASSERT(p && p->count == 1 && p->rules[0].error, "316: inner CR is an error");
+    mail_rules_free(p);
+
+    if (old_home) setenv("HOME", old_home, 1); else unsetenv("HOME");
+    if (old_xdg)  setenv("XDG_CONFIG_HOME", old_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
+}
+
 static void test_rules_find_by_name_and_action(void) {
     MailRules *r = make_rules();
     add_rule(r, "x")->action_index = 0;
@@ -721,6 +796,8 @@ void test_mail_rules(void) {
     RUN_TEST(test_rules_space_in_glob_fires);
     RUN_TEST(test_rules_then_move_folder);
     RUN_TEST(test_rules_save_load_account);
+    RUN_TEST(test_316_save_load_roundtrip);
+    RUN_TEST(test_316_injection_refused);
     RUN_TEST(test_rules_find_by_name_and_action);
     RUN_TEST(test_rules_save_refuses_duplicates);
     RUN_TEST(test_rules_history_pairs_action_group);

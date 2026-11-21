@@ -148,6 +148,15 @@ static int wait_input_or_resize(void) {
     return result;
 }
 
+int terminal_key_pending(void) {
+    if (terminal_quit_requested()) return 1;
+    install_winch_handler();
+    if (g_winch) return 1;
+    struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN, .revents = 0 };
+    int pr = poll(&pfd, 1, 0);
+    return pr > 0;
+}
+
 /** Map a decoded key of libtuikit to the program's TermKey.  A key with a
  *  modifier that this program has no meaning for is ignored; Alt+character is
  *  the ESC it has always been (the character is consumed with it). */

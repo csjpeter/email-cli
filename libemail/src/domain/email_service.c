@@ -2436,6 +2436,51 @@ static void list_filter_rebuild(
     *fcount_out = fc;
 }
 
+/**
+ * One slice of the body search of the list filter (EMAIL-305).  The scan is
+ * driven by the event loop, not run in one go: it examines entries[*pos ..]
+ * until @p budget_ms has passed or the end is reached, appends the matches to
+ * fentries and advances *pos, so that the caller can look for a key press and
+ * redraw between slices.  A message is read from the cache at the moment it is
+ * examined, so one that was deleted meanwhile is not found and not read.
+ *
+ * @param pos        Next entry to examine; advanced.
+ * @param fentries   Matching entry indices; appended to.
+ * @param fcount     Number of matches so far; updated.
+ * @param budget_ms  Time the slice may take (at least one message is examined).
+ * @return 1 when the whole list has been examined, 0 when more is left.
+ */
+static int list_filter_body_step(const MsgEntry *entries, int show_count,
+                                 const Config *cfg, const char *folder,
+                                 const char *fbuf, int *pos,
+                                 int *fentries, int *fcount, long budget_ms)
+{
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    const char *lf = cfg->gmail_mode ? "" : folder;
+    /* Test hook: a pause per message makes the search long enough for a test
+     * to press keys during it (a cache of a few messages is read in no time). */
+    const char *dl = getenv("EMAIL_CLI_BODY_SEARCH_DELAY_MS");
+    long delay_ms = dl ? atol(dl) : 0;
+    while (*pos < show_count) {
+        int i = (*pos)++;
+        if (delay_ms > 0) {
+            struct timespec d = { delay_ms / 1000, (delay_ms % 1000) * 1000000L };
+            nanosleep(&d, NULL);
+        }
+        char *body = local_msg_load(lf, entries[i].uid);
+        if (body) {
+            if (strcasestr(body, fbuf)) fentries[(*fcount)++] = i;
+            free(body);
+        }
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        long ms = (t1.tv_sec - t0.tv_sec) * 1000L +
+                  (t1.tv_nsec - t0.tv_nsec) / 1000000L;
+        if (ms >= budget_ms) break;
+    }
+    return *pos >= show_count;
+}
+
 /* A virtual name is a view, not a mailbox: no message is stored under it. */
 static int is_virtual_folder_name(const char *f) {
     return f && f[0] == '_' && f[1] == '_';
@@ -3604,7 +3649,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
     int   filter_input  = 0;   /* typing mode (vs navigation mode) */
     int   filter_scope  = 0;   /* 0=Subject 1=From 2=To 3=Body 4=Since 5=Before */
     int   filter_dirty    = 0;   /* rebuild needed after next render */
-    int   filter_scanning = 0;   /* body scan in progress — show progress bar */
+    int   filter_scanning = 0;   /* body scan in progress (EMAIL-305): stepped by the loop */
+    int   filter_scan_pos = 0;   /* next entry the body scan examines */
     char  filter_buf[256] = "";
     int  *fentries = opts->pager
                      ? calloc((size_t)(show_count > 0 ? show_count : 1), sizeof(int))
@@ -4139,7 +4185,8 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                 else printf("%s", scope_names[_s]);
             }
             if (filter_scanning)
-                printf("]: %s  Scanning body...\033[K\n", filter_buf);
+                printf("]: %s_  Searching %d of %d, %d found  (Esc: stop)\033[K\n",
+                       filter_buf, filter_scan_pos, show_count, fcount);
             else
                 printf("]: %s%s  Showing %d of %d\033[K\n",
                        filter_buf, filter_input ? "_" : " ", fcount, show_count);
@@ -4162,25 +4209,31 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                              feedback_msg);
         }
 
-        /* After render: if rebuild is needed (new char, backspace, Tab), show
-         * "Scanning body..." first for body scope, then do the actual rebuild. */
+        /* After render: a change of the query or the scope (new char,
+         * backspace, Tab) cancels the running body search and starts a new
+         * one.  The body search is stepped by this loop (EMAIL-305): between
+         * two slices a waiting key is read first, so that the keys, the scope
+         * switch and the redraw answer at once; the list fills in as the
+         * matches arrive. */
         if (filter_dirty) {
-            filter_dirty = 0;
-            if (filter_buf[0] && filter_scope == 3) {
-                filter_scanning = 1;
-                continue;  /* re-render showing "Scanning body..." */
-            }
-            if (filter_buf[0])
-                list_filter_rebuild(entries, show_count, manifest, cfg, folder,
-                                    filter_buf, filter_scope, fentries, &fcount);
-            cursor = 0;
-            continue;
-        }
-        if (filter_scanning) {
+            filter_dirty    = 0;
             filter_scanning = 0;
+            cursor = 0;
+            if (filter_buf[0] && filter_scope == 3) {
+                filter_scan_pos = 0;
+                fcount          = 0;
+                filter_scanning = 1;
+                continue;  /* re-render showing the progress */
+            }
             list_filter_rebuild(entries, show_count, manifest, cfg, folder,
                                 filter_buf, filter_scope, fentries, &fcount);
-            cursor = 0;
+            continue;
+        }
+        if (filter_scanning && !terminal_key_pending()) {
+            if (list_filter_body_step(entries, show_count, cfg, folder,
+                                      filter_buf, &filter_scan_pos,
+                                      fentries, &fcount, 30))
+                filter_scanning = 0;
             continue;
         }
 
@@ -4240,6 +4293,11 @@ read_key_again: ;
             if (tui_table_marked_count(&ltbl) > 0) {
                 /* First Esc drops the marks; the next goes on */
                 tui_table_clear_marks(&ltbl);
+                break;
+            }
+            if (filter_scanning) {
+                /* Esc stops the running body search; what it found stays */
+                filter_scanning = 0;
                 break;
             }
             if (filter_active) {
@@ -4337,8 +4395,9 @@ read_key_again: ;
             int ch = terminal_last_printable();
 
             /* ── Filter input mode: Tab cycles scope, printable chars typed ── */
-            if (filter_input && key == TERM_KEY_TAB) {
-                filter_scope = (filter_scope + 1) % 6;
+            if (filter_input && (key == TERM_KEY_TAB || key == TERM_KEY_SHIFT_TAB)) {
+                /* Shift+Tab goes the other way round (EMAIL-305) */
+                filter_scope = (filter_scope + (key == TERM_KEY_TAB ? 1 : 5)) % 6;
                 if (filter_buf[0]) filter_dirty = 1;  /* rebuild after next render */
                 break;
             }

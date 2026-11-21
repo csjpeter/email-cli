@@ -3681,6 +3681,56 @@ static void test_lk_filter_without_match(void) {
     lk_env(0);
 }
 
+/* EMAIL-305: the body search runs a step at a time, so keys answer at once.
+ * A pause per message (the test hook) makes the 30-message search last about
+ * three seconds; during it Tab switches the scope, a new character restarts
+ * the search, Esc stops it, and the line says how far it has got. */
+static void lk_body_search_body(void) {
+    PtySession *s = lk_open();
+    ASSERT(s != NULL, "body search: opens");
+    if (!s) return;
+    pty_send_str(s, "/");
+    ASSERT_WAIT_FOR(s, "Filter", WAIT_MS);
+    pty_send_str(s, "zzzz");
+    /* Subject -> Before -> Since -> Body, the way round that skips the To
+     * scope (it reads the headers of every message). */
+    for (int i = 0; i < 3; i++) {
+        pty_send_key(s, PTY_KEY_SHIFT_TAB);
+        if (i < 2) pty_settle(s, 300);   /* no settling once Body runs: it redraws until it ends */
+    }
+    ASSERT(pty_wait_for(s, "Searching ", 1000) == 0, "body search: progress line appears");
+    ASSERT_SCREEN_CONTAINS(s, "of 30");
+    ASSERT_SCREEN_CONTAINS(s, "found");
+    ASSERT_SCREEN_CONTAINS(s, "Esc: stop");
+    /* A key during the search is answered at once: Tab leaves the Body scope
+     * and cancels the search (Since with a text that is no date: everything). */
+    pty_send_key(s, PTY_KEY_TAB);
+    ASSERT(pty_wait_for(s, "Showing 30 of 30", 1000) == 0, "body search: Tab answers during the search");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Searching ");
+    /* Back to Body (Shift+Tab from Since) and a new search. */
+    pty_send_key(s, PTY_KEY_SHIFT_TAB);
+    ASSERT(pty_wait_for(s, "Searching ", 1000) == 0, "body search: restarts on the scope change");
+    pty_send_key(s, PTY_KEY_BACK);                       /* the query changes: restart */
+    ASSERT(pty_wait_for(s, "Searching ", 1000) == 0, "body search: restarts on a changed query");
+    pty_send_key(s, PTY_KEY_ESC);                        /* Esc cancels it */
+    pty_settle(s, 300);          /* it only settles when the search has stopped */
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Searching ");
+    ASSERT_SCREEN_CONTAINS(s, "Filter [");               /* the filter itself stays */
+    pty_send_key(s, PTY_KEY_ESC);                        /* clears the filter */
+    ASSERT_WAIT_FOR(s, "of 30 message(s)", WAIT_MS);
+    pty_send_key(s, PTY_KEY_CTRL_C);
+    pty_wait_exit(s, 5000);
+    pty_close(s);
+}
+
+static void test_lk_body_search_background(void) {
+    lk_env(30);
+    setenv("EMAIL_CLI_BODY_SEARCH_DELAY_MS", "100", 1);
+    lk_body_search_body();
+    unsetenv("EMAIL_CLI_BODY_SEARCH_DELAY_MS");
+    lk_env(0);
+}
+
 /* d and the Delete key ask first, naming the message of the cursor row, and
  * No is the default; y moves it to the Trash. */
 static void lk_delete_body(void) {
@@ -8600,6 +8650,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_lk_help_overlay);
     RUN_TEST(test_lk_unbound_keys);
     RUN_TEST(test_lk_filter_without_match);
+    RUN_TEST(test_lk_body_search_background);
     RUN_TEST(test_lk_delete_asks);
     RUN_TEST(test_lk_one_message);
     RUN_TEST(test_lk_empty_folder);

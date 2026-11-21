@@ -12,6 +12,7 @@
 #include "logger.h"
 #include <ctype.h>
 #include <fnmatch.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,6 +57,18 @@ static MailRule *rules_grow(MailRules *r) {
     return rule;
 }
 
+/** Records the first error of a rule (later ones do not replace it). */
+static void rule_set_error(MailRule *r, int line, const char *fmt, ...) {
+    if (r->error) return;
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    r->error = strdup(buf);
+    r->line = line;
+}
+
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 /** Parses the rules of an open ini stream.  NULL on allocation error. */
@@ -65,15 +78,26 @@ static MailRules *rules_parse_fp(FILE *fp) {
 
     char line[1024];
     MailRule *cur = NULL;
+    int lineno = 0;
+    int section_line = 0;
+    int *section_lines = NULL;   /* line of each rule's header */
 
     while (fgets(line, sizeof(line), fp)) {
+        lineno++;
         char *p = trim(line);
         if (!*p || *p == '#' || *p == ';') continue;
 
         /* Section header: [rule "name"] or [rule "name" action N] */
         if (*p == '[') {
             cur = rules_grow(r);
-            if (!cur) { mail_rules_free(r); return NULL; }
+            if (!cur) { free(section_lines); mail_rules_free(r); return NULL; }
+            section_line = lineno;
+            int *sl = realloc(section_lines, (size_t)r->count * sizeof(int));
+            if (!sl) { free(section_lines); mail_rules_free(r); return NULL; }
+            section_lines = sl;
+            section_lines[r->count - 1] = section_line;
+            if (strncmp(p, "[rule", 5) != 0 || (p[5] != ' ' && p[5] != '\t'))
+                rule_set_error(cur, lineno, "line %d: '%s' is not a [rule \"name\"] section", lineno, p);
             char *qs = strchr(p, '"');
             char *qe = qs ? strchr(qs + 1, '"') : NULL;
             if (qs && qe)
@@ -89,10 +113,19 @@ static MailRules *rules_parse_fp(FILE *fp) {
         if (!cur) continue;   /* key-value before any section — skip */
 
         char *eq = strchr(p, '=');
-        if (!eq) continue;
+        if (!eq) {
+            rule_set_error(cur, lineno, "line %d: '%s' is not a key = value line", lineno, p);
+            continue;
+        }
         *eq = '\0';
         char *key = trim(p);
         char *val = trim(eq + 1);
+        int known = strcmp(key, "when") == 0 || strncmp(key, "if-", 3) == 0 ||
+                    strncmp(key, "then-", 5) == 0;
+        if (known && !*val)
+            rule_set_error(cur, lineno, "line %d: '%s' has an empty value "
+                           "(an empty pattern would match every message; write 'when = all' on purpose)",
+                           lineno, key);
 
         /* New boolean expression field (US-81) */
         if (strcmp(key, "when") == 0) {
@@ -113,10 +146,16 @@ static MailRules *rules_parse_fp(FILE *fp) {
         else if (strcmp(key, "then-add-label") == 0) {
             if (cur->then_add_count < MAIL_RULE_MAX_LABELS)
                 cur->then_add_label[cur->then_add_count++] = strdup(val);
+            else
+                rule_set_error(cur, lineno, "line %d: more than %d then-add-label lines",
+                               lineno, MAIL_RULE_MAX_LABELS);
         }
         else if (strcmp(key, "then-remove-label") == 0) {
             if (cur->then_rm_count < MAIL_RULE_MAX_LABELS)
                 cur->then_rm_label[cur->then_rm_count++] = strdup(val);
+            else
+                rule_set_error(cur, lineno, "line %d: more than %d then-remove-label lines",
+                               lineno, MAIL_RULE_MAX_LABELS);
         }
         else if (strcmp(key, "then-move-folder") == 0) {
             free(cur->then_move_folder);
@@ -126,6 +165,9 @@ static MailRules *rules_parse_fp(FILE *fp) {
         else if (strcmp(key, "then-forward-to") == 0) {
             free(cur->then_forward_to);
             cur->then_forward_to = strdup(val);
+        }
+        else {
+            rule_set_error(cur, lineno, "line %d: unknown key '%s'", lineno, key);
         }
     }
 
@@ -138,7 +180,22 @@ static MailRules *rules_parse_fp(FILE *fp) {
                 rule->if_not_from, rule->if_not_subject, rule->if_not_to,
                 rule->if_body, rule->if_age_gt, rule->if_age_lt);
         }
+        /* EMAIL-314: a rule needs a valid condition; "when = all" is the explicit match-all. */
+        int hl = section_lines ? section_lines[i] : 0;
+        if (!rule->error) {
+            if (!rule->when || !rule->when[0]) {
+                rule_set_error(rule, hl, "line %d: the rule has no condition "
+                               "(a rule that matches every message needs 'when = all')", hl);
+            } else {
+                WhenNode *tree = when_parse(rule->when);
+                if (!tree)
+                    rule_set_error(rule, hl, "line %d: invalid when expression '%s'",
+                                   hl, rule->when);
+                when_node_free(tree);
+            }
+        }
     }
+    free(section_lines);
 
     return r;
 }
@@ -354,6 +411,7 @@ static void rule_free_members(MailRule *r) {
     for (int j = 0; j < r->then_rm_count;  j++) free(r->then_rm_label[j]);
     free(r->then_move_folder);
     free(r->then_forward_to);
+    free(r->error);
 }
 
 void mail_rules_free(MailRules *rules) {
@@ -374,9 +432,29 @@ void mail_rules_free(MailRules *rules) {
         for (int j = 0; j < r->then_rm_count;  j++) free(r->then_rm_label[j]);
         free(r->then_move_folder);
         free(r->then_forward_to);
+        free(r->error);
     }
     free(rules->rules);
     free(rules);
+}
+
+int mail_rules_error_count(const MailRules *rules) {
+    int n = 0;
+    for (int i = 0; rules && i < rules->count; i++)
+        if (rules->rules[i].error) n++;
+    return n;
+}
+
+int mail_rules_report_errors(FILE *out, const char *account, const MailRules *rules) {
+    int n = 0;
+    for (int i = 0; rules && i < rules->count; i++) {
+        const MailRule *r = &rules->rules[i];
+        if (!r->error) continue;
+        fprintf(out, "[warn] rules of %s: rule \"%s\" is ignored: %s\n",
+                account ? account : "?", r->name ? r->name : "(unnamed)", r->error);
+        n++;
+    }
+    return n;
 }
 
 /* Check if val matches glob pattern (case-insensitive, NULL pattern = always match) */
@@ -421,6 +499,7 @@ int mail_rule_matches(const MailRule *rule,
                       const char *body, time_t message_date)
 {
     if (!rule) return 0;
+    if (rule->error) return 0;   /* EMAIL-314: a rule with an error touches no mail */
 
     /* US-81: evaluate boolean when expression when present */
     if (rule->when && rule->when[0]) {

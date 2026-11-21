@@ -131,6 +131,10 @@ static void help_rules(void) {
         "  rules add --name <name>     Add a new sorting rule\n"
         "  rules edit --name <name>    Change a sorting rule in place\n"
         "  rules remove --name <name>  Remove a sorting rule by name\n"
+        "  rules check                 List every problem of the rules files, with line numbers\n"
+        "\n"
+        "A rule with an error (unknown key, empty pattern, no condition, invalid when)\n"
+        "never fires; a rule that matches every message needs 'when = all'.\n"
         "\n"
         "Rules are stored in:\n"
         "  ~/.config/email-cli/accounts/<account>/rules.ini\n"
@@ -146,6 +150,19 @@ static void help_rules(void) {
         "  email-cli rules remove --name \"GitHub\"\n"
         "\n"
         "Run 'email-cli help rules <subcommand>' for details on each subcommand.\n"
+    );
+}
+
+static void help_rules_check(void) {
+    printf(
+        "Usage: email-cli [<account>] rules check\n"
+        "\n"
+        "Check the rules file of the account (or of every account) and list every\n"
+        "problem with its line number: an unknown key, an empty pattern or value,\n"
+        "a rule without a condition, an invalid when expression, too many labels.\n"
+        "A rule with a problem is ignored by apply and sync; a rule that matches\n"
+        "every message needs 'when = all'.  Exit status 1 when a problem is found.\n"
+        "Comments and unknown keys of a rules file are not kept when rules are saved.\n"
     );
 }
 
@@ -205,15 +222,16 @@ static void help_rules_add(void) {
         "         [--if-from <glob>] [--if-subject <glob>]\n"
         "         [--if-to <glob>] [--if-label <glob>]\n"
         "         [--add-label <label>]... [--remove-label <label>]...\n"
-        "         [--move-folder <folder>]\n"
+        "         [--move-folder <folder>] [--match-all]\n"
         "\n"
         "Add a new mail sorting rule for the account.\n"
         "\n"
-        "Conditions (all omitted conditions match everything):\n"
+        "Conditions (at least one, or --match-all; an empty pattern is refused):\n"
         "  --if-from <glob>      Match sender address (glob pattern)\n"
         "  --if-subject <glob>   Match message subject (glob pattern)\n"
         "  --if-to <glob>        Match recipient address (glob pattern)\n"
         "  --if-label <glob>     Match an existing label (glob pattern)\n"
+        "  --match-all           The rule matches every message (written as 'when = all')\n"
         "\n"
         "Actions:\n"
         "  --add-label <label>      Add this label to matching messages\n"
@@ -1288,6 +1306,7 @@ int main(int argc, char *argv[]) {
                 if (strcmp(topic2, "edit")   == 0) { help_rules_edit();   return EXIT_SUCCESS; }
                 if (strcmp(topic2, "remove") == 0) { help_rules_remove(); return EXIT_SUCCESS; }
                 if (strcmp(topic2, "list")   == 0) { help_rules_list();   return EXIT_SUCCESS; }
+                if (strcmp(topic2, "check")  == 0) { help_rules_check();  return EXIT_SUCCESS; }
             }
             if (strcmp(topic, "list")            == 0) { help_list();            return EXIT_SUCCESS; }
             if (strcmp(topic, "show")            == 0) { help_show();            return EXIT_SUCCESS; }
@@ -2435,6 +2454,8 @@ int main(int argc, char *argv[]) {
                      * so a rule with any condition has one. */
                     if (rule->when && rule->when[0])
                         printf("       when         = %s\n", rule->when);
+                    if (rule->error)
+                        printf("       ERROR        : %s (the rule is ignored)\n", rule->error);
 
                     for (int j = 0; j < rule->then_add_count; j++)
                         printf("       then-add-label    = %s\n", rule->then_add_label[j]);
@@ -2476,6 +2497,31 @@ int main(int argc, char *argv[]) {
             int rc = email_service_apply_rules(account_arg, dry_run, verbose);
             result = rc >= 0 ? 0 : -1;
 
+        } else if (strcmp(subcmd, "check") == 0) {
+            /* rules check: every problem of the rules files, with its line number (EMAIL-314) */
+            int acc_count = 0, bad = 0, seen = 0;
+            AccountEntry *accounts = config_list_accounts(&acc_count);
+            for (int i = 0; i < acc_count; i++) {
+                if (account_arg && account_arg[0] &&
+                    strcmp(accounts[i].name, account_arg) != 0)
+                    continue;
+                seen++;
+                MailRules *rules = mail_rules_load(accounts[i].name);
+                int n = mail_rules_report_errors(stdout, accounts[i].name, rules);
+                if (n == 0)
+                    printf("%s: %d rule(s), no problem found.\n", accounts[i].name,
+                           rules ? rules->count : 0);
+                bad += n;
+                mail_rules_free(rules);
+            }
+            config_free_account_list(accounts, acc_count);
+            if (!seen) {
+                fprintf(stderr, "Error: Account '%s' not found.\n", account_arg ? account_arg : "");
+                result = -1;
+            } else {
+                result = bad ? -1 : 0;
+            }
+
         } else if (strcmp(subcmd, "add") == 0) {
             /* rules add --name <name> [conditions] [actions] */
             const char *rule_name  = NULL;
@@ -2488,10 +2534,12 @@ int main(int argc, char *argv[]) {
             int   add_label_count = 0;
             const char *rm_labels[MAIL_RULE_MAX_LABELS];
             int   rm_label_count = 0;
+            int   match_all = 0;
 
             for (int i = subcmd_idx + 1; i < argc; i++) {
                 if (strcmp(argv[i], "--help")    == 0 ||
                     strcmp(argv[i], "-h")         == 0) { help_rules_add(); return EXIT_SUCCESS; }
+                if (strcmp(argv[i], "--match-all") == 0) { match_all = 1; continue; }
                 if (strcmp(argv[i], "--batch")   == 0) continue;
                 if (strcmp(argv[i], "--account") == 0) { i++; continue; }
                 if (strcmp(argv[i], "--name")         == 0 && i+1 < argc) { rule_name  = argv[++i]; continue; }
@@ -2523,6 +2571,34 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Run 'email-cli help rules add' for usage.\n");
                 result = -1;
                 goto rules_done;
+            }
+
+            /* EMAIL-314: an empty pattern, or no condition at all, would match every message */
+            {
+                const char *cv[4] = { if_from, if_subject, if_to, if_label };
+                const char *cn[4] = { "--if-from", "--if-subject", "--if-to", "--if-label" };
+                int have = 0;
+                for (int j = 0; j < 4; j++) {
+                    if (!cv[j]) continue;
+                    if (!cv[j][0]) {
+                        fprintf(stderr, "Error: %s needs a non-empty pattern "
+                                "(an empty one would match every message; use --match-all on purpose).\n", cn[j]);
+                        result = -1;
+                        goto rules_done;
+                    }
+                    have = 1;
+                }
+                if (!have && !match_all) {
+                    fprintf(stderr, "Error: 'rules add' needs a condition (--if-from, --if-subject, "
+                            "--if-to or --if-label), or --match-all for a rule that matches every message.\n");
+                    result = -1;
+                    goto rules_done;
+                }
+                if (have && match_all) {
+                    fprintf(stderr, "Error: --match-all cannot be combined with a condition.\n");
+                    result = -1;
+                    goto rules_done;
+                }
             }
 
             /* Resolve target account name into a local copy */
@@ -2590,7 +2666,8 @@ int main(int argc, char *argv[]) {
                 nr->if_subject = if_subject ? strdup(if_subject) : NULL;
                 nr->if_to      = if_to      ? strdup(if_to)      : NULL;
                 nr->if_label   = if_label   ? strdup(if_label)   : NULL;
-                nr->when = when_from_flat(if_from, if_subject, if_to, if_label,
+                nr->when = match_all ? strdup("all")
+                         : when_from_flat(if_from, if_subject, if_to, if_label,
                                           NULL, NULL, NULL, NULL, 0, 0);
                 nr->then_move_folder = move_folder ? strdup(move_folder) : NULL;
                 for (int j = 0; j < add_label_count; j++)

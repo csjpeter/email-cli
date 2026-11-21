@@ -533,6 +533,7 @@ int gmail_sync_fetch_pending(GmailClient *gc) {
     fprintf(stderr, "  Downloading %d message(s)...\n", count);
 
     MailRules *rules = mail_rules_load(local_store_account_name());
+    mail_rules_report_errors(stderr, local_store_account_name(), rules);   /* EMAIL-314 */
     int fetched = 0;
 #define PROGRESS_STEP 50
     for (int i = 0; i < count; i++) {

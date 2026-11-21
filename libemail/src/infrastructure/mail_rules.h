@@ -5,6 +5,7 @@
 #ifndef MAIL_RULES_H
 #define MAIL_RULES_H
 
+#include <stdio.h>
 #include <time.h>
 #include "when_expr.h"
 #include "op_history.h"
@@ -34,6 +35,14 @@
 
 #define MAIL_RULE_MAX_LABELS 32
 
+/*
+ * EMAIL-314: a rule file is checked at load.  A rule with an unknown key, an
+ * empty pattern or value, no condition (a rule that matches everything needs
+ * an explicit "when = all"), an invalid "when" expression or more than
+ * MAIL_RULE_MAX_LABELS labels keeps its `error` (with the line number) and
+ * never fires.  Comments and unknown keys are not kept when the rules are saved.
+ */
+
 typedef struct {
     char  *name;                              /**< Display name from [rule "..."] header */
     int    action_index;                      /**< US-82: action group number (0=default/1) */
@@ -54,6 +63,8 @@ typedef struct {
     int    then_rm_count;
     char  *then_move_folder;                  /**< Destination folder (IMAP only; may be NULL) */
     char  *then_forward_to;                   /**< Forward target address (stored; not yet executed) */
+    char  *error;                             /**< EMAIL-314: why the rule is unusable (NULL = valid); such a rule never fires */
+    int    line;                              /**< EMAIL-314: line of the rules file the error belongs to (0 = unknown) */
 } MailRule;
 
 typedef struct {
@@ -110,6 +121,20 @@ char *mail_rule_text(const MailRule *rule);
  * @return 0 when reverted (a new step is recorded), -1 when refused.
  */
 int mail_rules_revert_step(const OpStep *step, char *refusal, size_t size);
+
+/**
+ * @brief Number of rules that carry an error.
+ */
+int mail_rules_error_count(const MailRules *rules);
+
+/**
+ * @brief Prints one line per rule error ("<file>:<line>: rule "<name>": <error>").
+ * @param out      Stream to print to.
+ * @param account  Account name (for the file label; may be NULL).
+ * @param rules    Loaded rules (may be NULL).
+ * @return Number of errors printed.
+ */
+int mail_rules_report_errors(FILE *out, const char *account, const MailRules *rules);
 
 /**
  * @brief Free all memory owned by a MailRules struct.

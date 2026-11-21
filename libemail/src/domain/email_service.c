@@ -6846,6 +6846,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
     }
 
     MailRules *imap_rules = mail_rules_load(local_store_account_name());
+    mail_rules_report_errors(stderr, local_store_account_name(), imap_rules);   /* EMAIL-314 */
 
     for (int fi = 0; fi < folder_count; fi++) {
         const char *folder = folders[fi];
@@ -7414,6 +7415,7 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
         local_store_init(accounts[i].cfg->host, accounts[i].cfg->user);
 
         MailRules *rules = mail_rules_load(accounts[i].name);
+        mail_rules_report_errors(out, accounts[i].name, rules);   /* EMAIL-314 */
         if (!rules || rules->count == 0) {
             fprintf(out, "  No rules found for %s.\n", accounts[i].name);
             mail_rules_free(rules);
@@ -8972,6 +8974,7 @@ static const CliCol rule_cols[] = {
     { "then_add_label",     "THEN_ADD_LABEL",     NULL, CLI_COL_TEXT, NULL },
     { "then_remove_label",  "THEN_REMOVE_LABEL",  NULL, CLI_COL_TEXT, NULL },
     { "then_move_folder",   "THEN_MOVE_FOLDER",   NULL, CLI_COL_TEXT, NULL },
+    { "error",              "ERROR",              NULL, CLI_COL_TEXT, NULL },
 };
 
 typedef struct { const char *account; int nr; const MailRule *rule; } RuleRow;
@@ -8993,14 +8996,15 @@ static void rule_cell(void *ctx, int row, int col, char *buf, size_t n) {
     case 3: snprintf(buf, n, "%s", m->when ? m->when : ""); break;
     case 4: join_labels(buf, n, (char *const *)m->then_add_label, m->then_add_count); break;
     case 5: join_labels(buf, n, (char *const *)m->then_rm_label, m->then_rm_count); break;
-    default: snprintf(buf, n, "%s", m->then_move_folder ? m->then_move_folder : ""); break;
+    case 6: snprintf(buf, n, "%s", m->then_move_folder ? m->then_move_folder : ""); break;
+    default: snprintf(buf, n, "%s", m->error ? m->error : ""); break;
     }
 }
 
 int email_service_rules_table(const char *only_account, int json) {
     CliColumns sel;
     CliSort srt;
-    if (cli_out_resolve(rule_cols, 7, &sel, &srt) != 0) return -1;
+    if (cli_out_resolve(rule_cols, 8, &sel, &srt) != 0) return -1;
     int count = 0;
     AccountEntry *accs = config_list_accounts(&count);
     MailRules **loaded = calloc((size_t)(count > 0 ? count : 1), sizeof *loaded);

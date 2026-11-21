@@ -2211,6 +2211,8 @@ static void tui_rules_detail(const char *account, int idx)
             printf("\033[2J\033[H");
             tui_frame_print_bar(1, hdr, terminal_cols());
             printf("\033[2;1HAccount: %s\n\n", account ? account : "?");
+            if (r->error)
+                printf("  \033[31mERROR: %s (the rule is ignored)\033[0m\n\n", r->error);
         }
 
         int row = 4;

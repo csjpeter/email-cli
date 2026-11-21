@@ -32,6 +32,81 @@ static MailRule *add_rule(MailRules *r, const char *name) {
 
 /* ── Tests ───────────────────────────────────────────────────────── */
 
+/* ── EMAIL-314: rule validation ───────────────────────────────────── */
+
+static MailRules *parse_one(const char *body) {
+    char text[2048];
+    snprintf(text, sizeof(text), "[rule \"R\"]\n%s\nthen-remove-label = INBOX\n", body);
+    return mail_rules_parse_text(text);
+}
+
+static int never_fires(const MailRules *r) {
+    char **a = NULL, **d = NULL;
+    int ac = 0, dc = 0;
+    int n = mail_rules_apply(r, "x@y.org", "s", "me@z.org", "INBOX", "b", 0, &a, &ac, &d, &dc);
+    for (int i = 0; i < ac; i++) free(a[i]);
+    for (int i = 0; i < dc; i++) free(d[i]);
+    free(a); free(d);
+    return n == 0 && dc == 0;
+}
+
+static void test_314_bad_rules_have_errors_and_never_fire(void) {
+    static const char *const bad[] = {
+        "if-from =", "when =", "when = from:", "when = from:\"\"",
+        "if-form = x@y", "when = from:*x* andd", "when = ((from:*x*",
+        "then-add-label =", "", "bogus line",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        MailRules *r = parse_one(bad[i]);
+        ASSERT(r && r->count == 1, "314.1 the rule is parsed");
+        ASSERT(r->rules[0].error != NULL, bad[i]);
+        ASSERT(never_fires(r), "314.2 a rule with an error touches no mail");
+        mail_rules_free(r);
+    }
+}
+
+static void test_314_error_names_the_line(void) {
+    MailRules *r = mail_rules_parse_text("[rule \"R\"]\nwhen = from:*x*\nif-form = x@y\n");
+    ASSERT(r && r->rules[0].error && r->rules[0].line == 3, "314.3 the line of the unknown key");
+    ASSERT(strstr(r->rules[0].error, "if-form") != NULL, "314.4 the error names the key");
+    ASSERT(mail_rules_error_count(r) == 1, "314.5 one error counted");
+    char *buf = NULL; size_t len = 0;
+    FILE *fp = open_memstream(&buf, &len);
+    ASSERT(mail_rules_report_errors(fp, "acc", r) == 1, "314.6 one error reported");
+    fclose(fp);
+    ASSERT(buf && strstr(buf, "line 3") && strstr(buf, "acc"), "314.7 the report names account and line");
+    free(buf);
+    mail_rules_free(r);
+}
+
+static void test_314_when_all_is_explicit_match_all(void) {
+    MailRules *r = parse_one("when = all");
+    ASSERT(r && r->rules[0].error == NULL, "314.8 'when = all' is valid");
+    char **a = NULL, **d = NULL;
+    int ac = 0, dc = 0;
+    ASSERT(mail_rules_apply(r, "x@y.org", "s", "t", "", "b", 0, &a, &ac, &d, &dc) == 1,
+           "314.9 'when = all' fires");
+    for (int i = 0; i < dc; i++) free(d[i]);
+    free(a); free(d);
+    mail_rules_free(r);
+    r = parse_one("");
+    ASSERT(r && r->rules[0].error && strstr(r->rules[0].error, "when = all"),
+           "314.10 no condition: the error says how to match everything");
+    mail_rules_free(r);
+}
+
+static void test_314_valid_rules_and_label_limit(void) {
+    MailRules *r = parse_one("if-from = *@github.com");
+    ASSERT(r && r->rules[0].error == NULL, "314.11 a legacy flat condition is valid");
+    mail_rules_free(r);
+    char body[2048] = "when = from:*x*\n";
+    for (int i = 0; i < 33; i++) strcat(body, "then-add-label = L\n");
+    r = parse_one(body);
+    ASSERT(r && r->rules[0].error && strstr(r->rules[0].error, "more than"),
+           "314.12 more than 32 labels is an error");
+    mail_rules_free(r);
+}
+
 static void test_glob_match_basic(void) {
     MailRules *r = make_rules();
     MailRule  *rule = add_rule(r, "GitHub");
@@ -548,6 +623,10 @@ void test_mail_rules(void) {
     RUN_TEST(test_multiple_rules_chained);
     RUN_TEST(test_no_rules);
     RUN_TEST(test_no_condition_matches_all);
+    RUN_TEST(test_314_bad_rules_have_errors_and_never_fire);
+    RUN_TEST(test_314_error_names_the_line);
+    RUN_TEST(test_314_when_all_is_explicit_match_all);
+    RUN_TEST(test_314_valid_rules_and_label_limit);
     RUN_TEST(test_body_condition);
     RUN_TEST(test_age_condition);
     RUN_TEST(test_age_lt_condition);

@@ -7057,27 +7057,6 @@ static void test_tui_rules_editor_q_closes(void) {
     pty_close(s);
 }
 
-/* ── US-78: rules list navigation ───────────────────────────────────── */
-
-/* ── US-79: rule detail view ─────────────────────────────────────────── */
-
-/* ── US-80: rule edit form with inline editing ───────────────────────── */
-
-
-/* ── EMAIL-115: the rule form, all the way to the saved file ─────────── */
-
-/** 1 when rules.ini of the test account contains @p text. */
-static int rules_ini_contains(const char *text) {
-    char path[512], buf[8192];
-    snprintf(path, sizeof(path), "%s/.config/email-cli/accounts/testuser/rules.ini", g_test_home);
-    FILE *fp = fopen(path, "r");
-    if (!fp) return 0;
-    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
-    fclose(fp);
-    buf[n] = '\0';
-    return strstr(buf, text) != NULL;
-}
-
 /* EMAIL-2 / EMAIL-3: function keys and modified cursor keys are no keys at
  * all.  F1 (ESC O P) used to act as Esc ("go back") and leave a typed 'P'. */
 static void test_tui_function_and_modified_keys_do_nothing(void) {

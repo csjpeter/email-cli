@@ -256,8 +256,10 @@ needs `dovecot-imapd`, `openssl`, `nc`, `gcc` and a password-less `sudo`) with:
 ```
 
 `tests/integration/dovecot_env.sh` is the one Dovecot setup both scripts source.
-Every file of a run (configuration, certificate, mail, log, pid) is under
-`build/tests/integration/work-<pid>`, the port is picked by the kernel, and the
+Every file of a run (configuration, certificate, mail, log) is under
+`build/tests/integration/work-<pid>`; the runtime directory (sockets, pid files)
+is a private `mktemp -d` directory outside the checkout, so a default ACL of the
+work tree cannot reach it (EMAIL-320, `tests/functional/run_dovecot_env.sh`).  The port is picked by the kernel, and the
 exit trap stops that one process and removes only that directory, so agents
 running the suite side by side share nothing.  A killed run leaves its directory
 for `./manage.sh clean`.  Both Dovecot 2.3 and 2.4 configuration syntax are

@@ -25,17 +25,22 @@ dovecot_env_init() {
     ENV_PASS="$2"
     WORK_BASE="$PROJECT_ROOT/build/tests/integration"
     WORK_DIR="$WORK_BASE/work-$$"
-    DOVE_BASE="$WORK_DIR/run"       # Dovecot runtime (pids, sockets)
+    # The runtime (pids, sockets, the login directory) is private and outside
+    # the checkout: a default ACL or group of the work tree cannot touch it
+    # (EMAIL-320).  The mail and the fixtures stay in the work tree.
+    DOVE_BASE="$(mktemp -d -t email-cli-dovecot.XXXXXXXX)" || return 1
+    DOVE_BASE_MADE="$DOVE_BASE"
     MAIL_HOME="$WORK_DIR/mail"      # Maildir root of the test user
     CERTS_DIR="$WORK_DIR/certs"
     DOVECOT_CONF="$WORK_DIR/dovecot.conf"
     IMAP_PORT=""
-    mkdir -p "$WORK_DIR" "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR"
+    mkdir -p "$WORK_DIR" "$MAIL_HOME" "$CERTS_DIR"
     # A clone below a shared-group tree is setgid and carries default ACLs; the
     # directories made here would inherit both, and Dovecot's own users (the
     # login process runs as dovenull) would then be refused its sockets.  The
     # runtime directory is plain: owner, mode, no ACL, no set-group-id.
     chmod g-s "$WORK_DIR" "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR"
+    chmod 755 "$DOVE_BASE"
     if command -v setfacl >/dev/null; then
         setfacl -b -k "$WORK_DIR" "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR"
     fi
@@ -203,4 +208,11 @@ dovecot_env_cleanup() {
     esac
     # sudo: dovecot created files here as another user.
     sudo rm -rf "$PROJECT_ROOT/build/tests/integration/work-${WORK_DIR##*/work-}"
+    # The runtime directory made by mktemp: only that very path, by its name.
+    case "$DOVE_BASE" in
+        */email-cli-dovecot.*) ;;
+        *) echo "ERROR: refusing unsafe path '$DOVE_BASE'" >&2; return 1 ;;
+    esac
+    [ "$DOVE_BASE" = "${DOVE_BASE_MADE:-}" ] || { echo "ERROR: '$DOVE_BASE' is not the made directory" >&2; return 1; }
+    sudo rm -rf "$(dirname "$DOVE_BASE")/email-cli-dovecot.${DOVE_BASE##*/email-cli-dovecot.}"
 }

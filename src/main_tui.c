@@ -2132,13 +2132,10 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
 
     MailRule *mr = NULL;
     if (prefill && prefill->name) {
-        for (int r = 0; r < rules->count; r++) {
-            if (rules->rules[r].name &&
-                strcmp(rules->rules[r].name, prefill->name) == 0) {
-                mr = &rules->rules[r]; break;
-            }
-        }
+        int at = mail_rules_find(rules, prefill->name, prefill->action_index);
+        if (at >= 0) mr = &rules->rules[at];
     }
+    int keep_action = prefill ? prefill->action_index : 0;
     if (!mr) {
         if (rules->count >= rules->cap) {
             int nc = rules->cap ? rules->cap * 2 : 8;
@@ -2163,6 +2160,7 @@ static void tui_rules_add_form(const char *account, const MailRule *prefill)
         memset(mr, 0, sizeof(*mr));
     }
 
+    mr->action_index     = keep_action;
     mr->name             = strdup(name_buf);
     mr->when             = when_buf[0] ? strdup(when_buf) : NULL;
     mr->then_move_folder = folder_buf[0] ? strdup(folder_buf) : NULL;

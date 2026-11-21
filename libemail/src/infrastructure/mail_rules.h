@@ -102,6 +102,12 @@ MailRules *mail_rules_load(const char *account_name);
 int mail_rules_save(const char *account_name, const MailRules *rules);
 
 /**
+ * @brief Index of the rule with this name and action group (action < 1 means 1).
+ * @return The index, or -1 when there is none.
+ */
+int mail_rules_find(const MailRules *rules, const char *name, int action);
+
+/**
  * @brief Parse rules from ini text (one or more [rule "..."] sections).
  * @return Heap-allocated MailRules (free with mail_rules_free()), or NULL.
  */

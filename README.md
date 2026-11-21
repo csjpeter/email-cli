@@ -214,7 +214,7 @@ the next compose offers again), then a review screen where `s` sends and `q` dis
   Review: Message
   To:      alice@example.com
   Subject: Re: Meeting
-  s send  e edit headers  b edit body  a add attachment  d remove last  q discard   (the status line)
+  s send  e edit headers  b edit body  a add attachment (opens the file browser)  d remove last  q discard   (the status line)
 ```
 
 The other binaries (`email-cli`, `email-cli-ro`, `email-sync`) are batch-only.

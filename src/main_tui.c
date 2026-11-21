@@ -1020,127 +1020,45 @@ static void pcr_render(const char *from, const char *to, const char *cc,
     screen_bar(h, 6, NULL, NULL);
 }
 
-/* Inline single-field attachment picker used by [a] key in review.
- * Assumes terminal is already in raw mode.
- * Returns 1 if a file was added, 0 if cancelled. */
+/* [a] in the review: the file chooser opens at once (EMAIL-309); its typing
+ * field is the path editor (cursor, ~ expansion, Tab).  It starts in the
+ * directory of the last attachment, or the current directory.
+ * Returns 1 if a file was added, 0 if cancelled; a refusal is put in err. */
 static int pcr_pick_attach_raw(char attach_paths[CD_MAX_ATTACH][CD_ATTACH_PATH_SZ],
-                                int *attach_count)
+                                int *attach_count, char *err, size_t errsz)
 {
-    char input[CD_FIELD_BUFSZ] = "";
-    int cursor = 0;
-    char file_matches[CD_MAX_FILE_MATCH][CD_ATTACH_PATH_SZ];
-    int file_match_count = 0;
-    char error[256] = "";
-
-    for (;;) {
-        file_match_count = 0;
-        if (input[0])
-            file_match_count = cd_files_match(input, file_matches, CD_MAX_FILE_MATCH);
-
-        int tcols = terminal_cols();
-        if (tcols < 20) tcols = 80;
-
-        printf("\033[2J\033[H");
-        printf("\033[7m  Add Attachment\033[0m\n\n");
-        printf("  \033[1mPath:\033[0m  %s\n", input);
-
-        int row = 4;
-        int dd_row = row;
-        for (int m = 0; m < file_match_count; m++)
-            printf("\033[%d;1H\033[K", row++);          /* the table overlay fills them */
-        if (error[0]) {
-            printf("\033[%d;1H\033[K  \033[31m%s\033[0m", row++, error);
-        }
-        printf("\033[%d;1H\033[K", row);
-        (void)tcols;
-        fflush(stdout);
-        {
-            static const tui_statusline_hint h[] = {
-                { "Tab", "complete", SL_PRIO_HIGH },
-                { "^O", "browse", SL_PRIO_HIGH },
-                { "Enter", "add", SL_PRIO_KEEP },
-                { "Esc", "cancel", SL_PRIO_KEEP },
-            };
-            screen_bar(h, 4, NULL, NULL);
-        }
-        if (file_match_count > 0) {
-            CDDropdown dd = { NULL, NULL, file_matches };
-            cd_draw_dropdown(&dd, file_match_count, 0, dd_row, 3, tcols);
-        }
-        printf("\033[3;%dH", 9 + cursor);   /* position cursor on input field */
-        fflush(stdout);
-
-        TermKey key = terminal_read_key();
-
-        if (key == TERM_KEY_ESC || key == TERM_KEY_QUIT) return 0;
-
-        if (key == TERM_KEY_ENTER) {
-            if (!input[0]) return 0;
-            struct stat st;
-            if (stat(input, &st) != 0) {
-                snprintf(error, sizeof(error), "File not found: %.200s", input);
-                continue;
-            }
-            if (!S_ISREG(st.st_mode)) {
-                snprintf(error, sizeof(error), "Not a file: %.220s", input);
-                continue;
-            }
-            if (*attach_count >= CD_MAX_ATTACH) {
-                snprintf(error, sizeof(error), "Max attachments (%d) reached", CD_MAX_ATTACH);
-                continue;
-            }
-            strncpy(attach_paths[*attach_count], input, CD_ATTACH_PATH_SZ - 1);
-            attach_paths[*attach_count][CD_ATTACH_PATH_SZ - 1] = '\0';
-            (*attach_count)++;
-            return 1;
-        }
-
-        if (key == TERM_KEY_BROWSE) {
-            char chosen[CD_FIELD_BUFSZ], from[CD_FIELD_BUFSZ];
-            cd_browse_start(input, from, sizeof(from));
-            if (tui_frame_run_filechooser("Attach file", TUI_FC_OPEN,
-                                          from[0] ? from : NULL, NULL,
-                                          chosen, sizeof(chosen)) == 0) {
-                snprintf(input, sizeof(input), "%s", chosen);
-                cursor = (int)strlen(input);
-                error[0] = '\0';
-            }
-            continue;
-        }
-
-        if (key == TERM_KEY_TAB && file_match_count > 0) {
-            strncpy(input, file_matches[0], CD_FIELD_BUFSZ - 1);
-            input[CD_FIELD_BUFSZ - 1] = '\0';
-            cursor = (int)strlen(input);
-            error[0] = '\0';
-            continue;
-        }
-
-        if (key == TERM_KEY_BACK && cursor > 0) {
-            int i = cursor - 1;
-            while (i > 0 && ((unsigned char)input[i] & 0xC0) == 0x80) i--;
-            int rest = (int)strlen(input) - cursor;
-            memmove(input + i, input + cursor, (size_t)(rest + 1));
-            cursor = i;
-            error[0] = '\0';
-            continue;
-        }
-
-        if (key == TERM_KEY_IGNORE) {
-            const char *seq = terminal_last_utf8();
-            if (seq && seq[0]) {
-                int slen = (int)strlen(seq);
-                int cur_len = (int)strlen(input);
-                if (cur_len + slen < CD_FIELD_BUFSZ - 1) {
-                    memmove(input + cursor + slen, input + cursor,
-                            (size_t)(cur_len - cursor + 1));
-                    memcpy(input + cursor, seq, (size_t)slen);
-                    cursor += slen;
-                    error[0] = '\0';
-                }
-            }
-        }
+    char chosen[CD_FIELD_BUFSZ], from[CD_FIELD_BUFSZ] = "";
+    if (*attach_count > 0)
+        cd_browse_start(attach_paths[*attach_count - 1], from, sizeof(from));
+    if (!from[0]) {                     /* the current directory, else the home */
+        char cwd[CD_FIELD_BUFSZ - 2];
+        const char *home = getenv("HOME");
+        if (getcwd(cwd, sizeof(cwd)))
+            snprintf(from, sizeof(from), "%s/", cwd);
+        else if (home && home[0])
+            snprintf(from, sizeof(from), "%s/", home);
     }
+    if (tui_frame_run_filechooser("Add Attachment", TUI_FC_OPEN,
+                                  from[0] ? from : NULL, NULL,
+                                  chosen, sizeof(chosen)) != 0)
+        return 0;
+    if (!chosen[0]) return 0;
+    struct stat st;
+    if (stat(chosen, &st) != 0) {
+        snprintf(err, errsz, "File not found: %.200s", chosen);
+        return 0;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        snprintf(err, errsz, "Not a file: %.220s", chosen);
+        return 0;
+    }
+    if (*attach_count >= CD_MAX_ATTACH) {
+        snprintf(err, errsz, "Max attachments (%d) reached", CD_MAX_ATTACH);
+        return 0;
+    }
+    snprintf(attach_paths[*attach_count], CD_ATTACH_PATH_SZ, "%s", chosen);
+    (*attach_count)++;
+    return 1;
 }
 
 /* Ask which attachment to remove: the numbers on the screen, 1..count.
@@ -1222,7 +1140,8 @@ static int post_compose_review(const char *from, const char *to,
         if (ch == 'b') return PCR_EDIT_BODY;
 
         if (ch == 'a') {
-            pcr_pick_attach_raw(attach_paths, attach_count);
+            pcr_pick_attach_raw(attach_paths, attach_count,
+                                status_msg, sizeof(status_msg));
             continue;
         }
 

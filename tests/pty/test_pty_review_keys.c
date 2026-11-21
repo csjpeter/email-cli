@@ -401,33 +401,39 @@ static void test_rv_b_edit_body(void) {
     pty_close(s);
 }
 
+/* The chooser's field starts with the directory it shows, the current one
+ * (EMAIL-309): type the path relative to it. */
+static void type_rel_to_cwd(PtySession *s, const char *abs) {
+    char cwd[700];
+    if (getcwd(cwd, sizeof(cwd))) {
+        size_t n = strlen(cwd);
+        if (strncmp(abs, cwd, n) == 0 && abs[n] == '/') {
+            pty_send_str(s, abs + n + 1);
+            return;
+        }
+    }
+    pty_send_str(s, abs);
+}
+
 static void test_rv_a_attach_prompt(void) {
     fresh();
     PtySession *s = review("Attach", "x");
     ASSERT(s != NULL, "rv a: reached");
     pty_send_str(s, "a");
-    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
-    ASSERT_WAIT_FOR(s, "Enter add", WAIT_MS);       /* the status line is drawn after the title */
-    ASSERT_ROW_CONTAINS(s, ROWS - 1, "Enter add");
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);      /* the file chooser, at once */
+    ASSERT_WAIT_FOR(s, "Enter choose", WAIT_MS);        /* the status line is drawn after the title */
     ASSERT_ROW_CONTAINS(s, ROWS - 1, "Esc cancel");
-    pty_send_key(s, PTY_KEY_ENTER);             /* empty path: cancels */
-    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
-    pty_send_str(s, "a");
-    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
-    pty_send_str(s, "/no/such/file");
-    pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "File not found", WAIT_MS);
-    pty_send_key(s, PTY_KEY_BACK);              /* editing clears the error */
-    pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "File not found");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Path:");             /* no old prompt (EMAIL-309) */
     pty_send_key(s, PTY_KEY_ESC);               /* Esc cancels */
     ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "(none)");
     pty_send_str(s, "a");
     ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
-    pty_send_str(s, g_attach);
+    pty_settle(s, SETTLE_MS);
+    type_rel_to_cwd(s, g_attach);
+    pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ENTER);
-    ASSERT_WAIT_FOR(s, "notes.txt", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Attach:  notes.txt", WAIT_MS);
     ASSERT_SCREEN_NOT_CONTAINS(s, "(none)");
     discard(s);
     pty_close(s);
@@ -441,7 +447,8 @@ static void test_rv_a_tab_completes(void) {
     ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
     char dir[700];
     snprintf(dir, sizeof(dir), "%s/attachments/not", g_home);
-    pty_send_str(s, dir);
+    pty_settle(s, SETTLE_MS);
+    type_rel_to_cwd(s, dir);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_TAB);
     pty_settle(s, SETTLE_MS);

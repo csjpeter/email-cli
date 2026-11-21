@@ -1057,6 +1057,24 @@ static void test_screen_att_save_all(void) {
     ASSERT_SCREEN_CONTAINS(s, "./");                 /* directory mode: the directory itself */
     pty_close(s);
 }
+/* [a] in the review opens the libtuikit file chooser at once (EMAIL-309), whose
+ * entries differ per machine: checked by text, not cell for cell. */
+static void test_screen_review_attach_ask(void) {
+    restart_mock();
+    use_home("review_attach_ask");
+    PtySession *s = at_list();
+    ASSERT(s != NULL, "review_attach_ask: the view opens");
+    to_review_full(s, "ann@example.org");
+    pty_send_str(s, "a");
+    ASSERT_WAIT_FOR(s, "Add Attachment", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Path:");           /* no old prompt */
+    ASSERT_SCREEN_CONTAINS(s, "../");                 /* the directory list */
+    ASSERT_SCREEN_CONTAINS(s, "Enter");               /* the hint on the status line */
+    ASSERT_SCREEN_CONTAINS(s, "Esc");
+    pty_close(s);
+}
+
 VIEW(reader_menu,       at_reader(),
      (pty_send_str(s, "-"), pty_wait_for(s, "Actions", WAIT_MS), pty_settle(s, SETTLE_MS)))
 
@@ -1064,9 +1082,6 @@ VIEW(review_full,       at_list(), (to_review_full(s, "ann@example.org"), (void)
 VIEW(review_long_to,    at_list(),
      (to_review_full(s, "annabelle.longname@example.org; bartholomew.longname@example.org; "
                         "cornelia.longname@example.org; dominic.longname@example.org"), (void)0))
-VIEW(review_attach_ask, at_list(),
-     (to_review_full(s, "ann@example.org"), pty_send_str(s, "a"),
-      pty_wait_for(s, "Add Attachment", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(review_attach_removed, at_list(),
      (to_review_full(s, "ann@example.org"), menu_row(s, 2), pty_settle(s, SETTLE_MS)))
 VIEW(review_send_failed, at_list(),

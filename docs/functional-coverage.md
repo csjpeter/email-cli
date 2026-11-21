@@ -132,7 +132,7 @@ recorded weakness, not coverage of the promise.
 | `email-tui reply` | F:114.7 | refusal without a UID; the reply itself P:test_review_reply_uses_review_screen |
 | `email-tui` rules editor | P:test_tui_rules_add_form_saves_new_rule P:test_screen_rules_deleted P:test_tui_rules_preview_and_apply P:test_screen_rules_preview | |
 | `email-tui` Gmail labels and flags | P:test_feedback_t_label_added P:test_feedback_f_star | |
-| TUI file chooser: attach (`Ctrl-O`) and save (`a`, `A`) | | P:test_attach_file_chooser_browse P:test_attach_file_chooser_typing P:test_attach_file_chooser_cancel P:test_show_save_chooser_browse; no CLI form (the CLI takes a path), EMAIL-291 |
+| TUI file chooser: attach (`Ctrl-O` in the dialog; `a` in the review opens it at once, EMAIL-309) and save (`a`, `A`) | | P:test_attach_file_chooser_browse P:test_attach_file_chooser_typing P:test_attach_file_chooser_cancel P:test_show_save_chooser_browse; no CLI form (the CLI takes a path), EMAIL-291 |
 | TUI mark junk (`j`) | | gap: no PTY test; also listed in `docs/interface-parity.md`; ticket to be opened by the owner |
 | TUI delete label (`d` in the label browser) | | gap: no PTY test, and it deletes by name not id; ticket to be opened by the owner |
 | libemail-client IMAP, Gmail, SMTP over verified TLS | S:run_static_binaries.sh | the static binaries run against the mock servers with certificate checking in an empty root; protocol detail in the unit tests |

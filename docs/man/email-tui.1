@@ -300,6 +300,16 @@ With \fB\-\-json\fP one line
 is written to the standard output when the view is left.
 Example, from a todo page:
 .B "email\-tui embed show 4711 \-\-account me@example.org \-\-json"
+.TP
+.BI "embed reply " uid " [\-\-all] \-\-account " address " [\-\-folder " name "] [\-\-json]"
+Start in the reply editor of one message, as
+.B reply
+does (\fB\-\-all\fP: reply to all), and end with the send (exit status 0).
+Esc, or discarding in the review screen, cancels (2) and sends nothing; a send
+error is shown, the draft is kept, and the exit status is 1.
+With \fB\-\-json\fP one line
+.B {"sent":true,"uid":"..","folder":"..","id":"<message\-id>","cancelled":false}
+is written to the standard output.
 .SH FILES
 The protocol traffic log (credentials masked) is written only with \fB\-\-debug\fP.
 As in

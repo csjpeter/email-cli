@@ -104,6 +104,23 @@ browser, no list.  Leaving the view ends the program.
 | unknown account, missing `--account` | error on stderr, exit 1 | `test_embed_show_bad_account_and_args` |
 | `--help` | usage, exit 0 | `test_embed_help` |
 
+## Embedded reply, `email-tui embed reply` (EMAIL-307)
+
+`email-tui embed reply UID [--all] --account ADDRESS [--folder NAME] [--json]`
+opens the reply dialog, the body editor and the review screen of `email-tui
+reply` (`--all`: reply-all) and ends the program with the send.  No account
+selector, no list.
+
+| Key / case | Result | Test |
+|---|---|---|
+| (start) | the Reply dialog at once | `test_embed_reply_send` |
+| send from the review | program ends, exit 0; `--json`: `{"sent":true,"uid":..,"folder":..,"id":"<Message-ID>","cancelled":false}` | `test_embed_reply_send` |
+| `--all` | the Reply All dialog | `test_embed_reply_all_opens` |
+| `Esc` in the dialog | exit 2, nothing sent; `--json`: `"sent":false,"cancelled":true` | `test_embed_reply_esc_cancels` |
+| discard in the review (`q`, `y`) | exit 2, nothing sent | `test_embed_reply_review_discard_cancels` |
+| send error | shown, the draft is kept, exit 1 | `test_embed_reply_send_error` |
+| unknown account, missing `--account`, `--all` with `show` | error on stderr, exit 1 | `test_embed_reply_bad_arguments` |
+
 ## Message list, IMAP account (EMAIL-143)
 
 The list opens with `Enter` on a folder of the folder browser.  The table has

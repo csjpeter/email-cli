@@ -1279,6 +1279,12 @@ static void send_screen_say(SendScreen *ss, const char *text) {
  * @param init_cd   Optional initial CDResult for attachments (may be NULL).
  * Returns 0 on successful send, -1 on abort or SMTP error.
  */
+/* What the last compose did, for the embedded reply (EMAIL-307): the editor
+ * was entered, a send was tried and failed, and the Message-ID of a sent one. */
+static int  g_compose_entered;
+static int  g_compose_send_failed;
+static char g_compose_sent_id[512];
+
 static int cmd_compose_interactive(Config *cfg,
                                    const char *prefill_to,
                                    const char *prefill_cc,
@@ -1288,6 +1294,7 @@ static int cmd_compose_interactive(Config *cfg,
                                    const char *prefill_body,
                                    const CDResult *init_cd) {
     ensure_smtp_configured(cfg);
+    g_compose_entered = 1;
 
     /* Mutable header state */
     char from_buf[512]  = "";
@@ -1432,6 +1439,13 @@ static int cmd_compose_interactive(Config *cfg,
                 }
             }
             logger_set_stderr(1);
+            if (send_rc == 0) {
+                char *sid = mime_get_header(msg, "Message-ID");
+                snprintf(g_compose_sent_id, sizeof(g_compose_sent_id), "%s", sid ? sid : "");
+                free(sid);
+            } else {
+                g_compose_send_failed = 1;
+            }
             free(msg);
             break;
         }
@@ -2492,18 +2506,24 @@ static void help_reply(void) {
 static void help_embed(void) {
     printf(
         "Usage: email-tui embed show <uid> --account <address> [--folder <name>] [--json]\n"
+        "       email-tui embed reply <uid> [--all] --account <address> [--folder <name>] [--json]\n"
         "\n"
         "For use inside another program: starts in one view and ends with it.\n"
         "\n"
         "  show   The message view of <uid>; the account selector and the lists are\n"
         "         skipped.  Backspace and q leave the view and the program (exit 0),\n"
         "         Esc cancels (exit 2).  No other view is entered.\n"
+        "  reply  The reply editor of <uid>, as 'email-tui reply' (--all: reply to all);\n"
+        "         the program ends after the send (exit 0).  Esc cancels (exit 2) and\n"
+        "         sends nothing; a send error is shown, the draft is kept, exit 1.\n"
         "\n"
         "Options:\n"
         "  --account <address>  The account (required)\n"
         "  --folder <name>      The folder; default: the one holding the uid, else INBOX\n"
         "  --json               One JSON line on stdout when the view is left:\n"
         "                       {\"viewed\":true,\"uid\":\"..\",\"folder\":\"..\",\"cancelled\":false}\n"
+        "                       reply: {\"sent\":true,\"uid\":\"..\",\"folder\":\"..\",\"id\":\"<message-id>\",\"cancelled\":false}\n"
+        "  --all                reply only: reply to all\n"
         "  --help, -h           Show this help message\n"
         "\n"
         "Exit codes: 0 done, 2 cancelled (Esc), 1 error (message on stderr, nothing\n"
@@ -2518,12 +2538,13 @@ static void help_embed(void) {
  *  [--json]`.  Returns the exit code: 0 done, 2 cancelled, 1 error. */
 static int run_embed(int argc, char **argv, int sub_i) {
     const char *view = NULL, *uid = NULL, *account = NULL, *folder = NULL;
-    int json = 0;
+    int json = 0, all = 0;
     for (int i = sub_i + 1; i < argc; i++) {
         int has_val = i + 1 < argc;
         if (strcmp(argv[i], "--account") == 0 && has_val) account = argv[++i];
         else if (strcmp(argv[i], "--folder") == 0 && has_val) folder = argv[++i];
         else if (strcmp(argv[i], "--json") == 0) json = 1;
+        else if (strcmp(argv[i], "--all") == 0) all = 1;
         else if (strcmp(argv[i], "--account") == 0 || strcmp(argv[i], "--folder") == 0) {
             fprintf(stderr, "Error: %s needs a value.\n", argv[i]);
             return EXIT_FAILURE;
@@ -2538,14 +2559,20 @@ static int run_embed(int argc, char **argv, int sub_i) {
             return EXIT_FAILURE;
         }
     }
-    if (!view || strcmp(view, "show") != 0) {
-        fprintf(stderr, "Error: embed needs a view: 'show'.\n"
+    int is_reply = view && strcmp(view, "reply") == 0;
+    if (!view || (strcmp(view, "show") != 0 && !is_reply)) {
+        fprintf(stderr, "Error: embed needs a view: 'show' or 'reply'.\n"
+                        "Run 'email-tui embed --help' for usage.\n");
+        return EXIT_FAILURE;
+    }
+    if (all && !is_reply) {
+        fprintf(stderr, "Error: --all belongs to 'embed reply'.\n"
                         "Run 'email-tui embed --help' for usage.\n");
         return EXIT_FAILURE;
     }
     if (!uid || !account) {
-        fprintf(stderr, "Error: embed show needs a <uid> and --account <address>.\n"
-                        "Run 'email-tui embed --help' for usage.\n");
+        fprintf(stderr, "Error: embed %s needs a <uid> and --account <address>.\n"
+                        "Run 'email-tui embed --help' for usage.\n", view);
         return EXIT_FAILURE;
     }
     Config *cfg = config_load_account(account);
@@ -2560,6 +2587,38 @@ static int run_embed(int argc, char **argv, int sub_i) {
                 cfg->user ? cfg->user : cfg->host, local_store_last_error());
         config_free(cfg);
         return EXIT_FAILURE;
+    }
+    if (is_reply) {
+        const char *rf = folder ? folder : (cfg->folder ? cfg->folder : "INBOX");
+        g_compose_entered = g_compose_send_failed = 0;
+        g_compose_sent_id[0] = '\0';
+        TermRawState *rs = terminal_raw_enter();
+        int rr = all ? cmd_reply_all(cfg, uid, rf) : cmd_reply(cfg, uid, rf);
+        terminal_raw_exit(&rs);
+        if (isatty(STDOUT_FILENO)) {
+            printf("\033[?25h\033[2J\033[H");
+            fflush(stdout);
+        }
+        /* 0 sent; the dialog or the editor left without a send: cancelled;
+         * a message that could not be loaded or a failed send: error. */
+        int cancelled = rr == CMD_DIALOG_CANCELLED ||
+                        (rr != 0 && g_compose_entered && !g_compose_send_failed);
+        int rcode = rr == 0 ? EXIT_SUCCESS : (cancelled ? 2 : EXIT_FAILURE);
+        if (rr != 0 && !cancelled)
+            fprintf(stderr, "Error: the reply to UID %s in folder %s was not sent.\n",
+                    uid, rf);
+        if (json && (rr == 0 || cancelled)) {
+            printf("{\"sent\":%s,\"uid\":", rr == 0 ? "true" : "false");
+            email_service_print_json_string(uid);
+            printf(",\"folder\":");
+            email_service_print_json_string(rf);
+            printf(",\"id\":");
+            email_service_print_json_string(rr == 0 ? g_compose_sent_id : "");
+            printf(",\"cancelled\":%s}\n", cancelled ? "true" : "false");
+            fflush(stdout);
+        }
+        config_free(cfg);
+        return rcode;
     }
     int esc = 0;
     char *used = NULL;

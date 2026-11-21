@@ -2614,7 +2614,7 @@ static void test_embed_help(void) {
     const char *a[] = {"--help", NULL};
     PtySession *s = embed_open(a);
     ASSERT(s != NULL, "embed help: opens");
-    ASSERT_WAIT_FOR(s, "Usage: email-tui embed show", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "embed show 4711 --account me@example.org --json", WAIT_MS);
     ASSERT(pty_wait_exit(s, 5000) == 0, "embed help: exits with 0");
     pty_close(s);
 }

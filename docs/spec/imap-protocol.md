@@ -87,6 +87,14 @@ Response: one `* LIST (flags) sep mailbox` line per folder.
 
 ---
 
+## Moving and removing one message (EMAIL-318)
+
+- **Move**: `UID MOVE` (RFC 6851) when the server lists `MOVE`; otherwise `UID COPY`, `UID STORE +FLAGS \Deleted`, then `UID EXPUNGE` (RFC 4315, `UIDPLUS`).
+- **Delete**: `\Deleted` and `UID EXPUNGE` of that one UID.
+- **Last resort**: a bare `EXPUNGE` only when the server lists neither; it removes every `\Deleted` mail of the folder.
+- **Queued moves**: a move the server refuses stays in the pending queue and is reported on stderr with the server's words; the next sync retries it.
+- **Rules**: a second `rules apply` queues nothing for a move already queued; an add and a remove of one label by different rules resolve in rule order (the later wins).
+
 ## `\Seen` flag invariant
 
 > **Viewing a message with `show` must never permanently change its `\Seen` flag.**

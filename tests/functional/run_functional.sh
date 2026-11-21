@@ -2650,6 +2650,33 @@ RA_REV2=$( (export HOME="$H_RA"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_H
     "$BIN_DIR/email-cli" rules revert 2>&1 || true) )
 check "36.21 rules revert again: nothing to revert" "No rules apply to revert" "$RA_REV2"
 
+# EMAIL-318: a move rule is queued once, a second apply changes nothing, and a
+# move the server refuses stays queued and is reported with the server's words
+H_RM="./build/tests/functional/work-$$/homes/rm-$$"
+RM_ACCT="rm@test.local"
+make_home "$H_RM" "$RM_ACCT" $IMAP1_PORT
+cat > "$H_RM/.config/email-cli/accounts/$RM_ACCT/rules.ini" <<'RMINI'
+[rule "Park"]
+if-from = *@example.com*
+then-move-folder = FailMove
+RMINI
+(export HOME="$H_RM"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) > /dev/null
+RM_1=$( (export HOME="$H_RM"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules apply 2>&1 || true) )
+check_not "36.30 move rule: first apply modifies mail" "Rules applied: 0 message" "$RM_1"
+RM_2=$( (export HOME="$H_RM"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules apply 2>&1 || true) )
+check "36.31 move rule: second apply changes nothing" "Rules applied: 0 message" "$RM_2"
+RM_SYNC=$( (export HOME="$H_RM"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) )
+check "36.32 refused move is reported with the server's words" "Mock refuses the copy to FailMove" "$RM_SYNC"
+check "36.33 refused move stays queued" "stays queued" "$RM_SYNC"
+RM_SYNC2=$( (export HOME="$H_RM"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-sync" 2>&1 || true) )
+check "36.34 refused move is retried on the next sync" "stays queued" "$RM_SYNC2"
+rm -rf "./build/tests/functional/work-$$/homes/rm-$$"
+
 # help page
 RA_HELP=$( "$BIN_DIR/email-cli" help rules 2>&1 || true )
 check "36.8 help rules: apply mentioned" "apply" "$RA_HELP"

@@ -18,6 +18,10 @@ bad() { echo "  [FAIL] $1"; FAILED=$((FAILED + 1)); }
 
 mkdir -p "$WORK/stubs" "$WORK/tree/build" || exit 1
 cp "$ROOT/manage.sh" "$WORK/tree/manage.sh" || { bad "0.1 manage.sh copy"; exit 1; }
+# The scratch tree is a repository of its own with no mainline: `check` then
+# finds no base and runs every gate, whatever paths the checkout under test
+# changed (a docs-only branch would make it skip the suites and show no FAIL).
+git init -q "$WORK/tree" || { bad "0.2 git init"; exit 1; }
 # A cmake that "succeeds" and builds nothing: the build directory stays empty.
 printf '#!/bin/sh\nexit 0\n' > "$WORK/stubs/cmake"
 chmod 755 "$WORK/stubs/cmake"

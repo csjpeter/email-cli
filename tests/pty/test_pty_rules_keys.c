@@ -909,7 +909,7 @@ static void test_rk_reader_rules_and_why(void) {
     pty_send_key(s, PTY_KEY_ENTER);                     /* read the first message */
     pty_wait_for(s, "Message ", WAIT_MS); pty_settle(s, SETTLE_MS);
     press(s, "?");
-    CHECK(s, pty_wait_for(s, "which rules match this message", WAIT_MS) == 0, "the reader's help names R");
+    CHECK(s, pty_wait_for(s, "which rules match, and why", WAIT_MS) == 0, "the reader's help names R");
     press(s, "Esc");
     press(s, "R");
     CHECK(s, pty_wait_for(s, "Rules for this message", WAIT_MS) == 0 && pty_screen_contains(s, "1 rule match")

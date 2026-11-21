@@ -365,7 +365,21 @@ static void test_from_conds_quotes_space_and_roundtrips(void) {
     free(w);
 }
 
+static void test_314_empty_pattern_and_all(void) {
+    ASSERT(when_parse("from:") == NULL, "314 when: empty pattern is a syntax error");
+    ASSERT(when_parse("from:\"\"") == NULL, "314 when: empty quoted pattern is a syntax error");
+    ASSERT(when_parse("from:*a* and to:") == NULL, "314 when: empty pattern in an and is an error");
+    WhenNode *n = when_parse("all");
+    ASSERT(n != NULL && n->type == WN_ALL, "314 when: 'all' parses");
+    ASSERT(when_eval(n, "a", "b", "c", "", NULL, 0) == 1, "314 when: 'all' matches");
+    when_node_free(n);
+    n = when_parse("!all");
+    ASSERT(n != NULL && when_eval(n, "a", "b", "c", "", NULL, 0) == 0, "314 when: '!all' matches nothing");
+    when_node_free(n);
+}
+
 void test_when_expr(void) {
+    RUN_TEST(test_314_empty_pattern_and_all);
     RUN_TEST(test_parse_null_empty);
     RUN_TEST(test_parse_single_atom);
     RUN_TEST(test_parse_all_fields);

@@ -2508,6 +2508,38 @@ check "34.12 help rules: usage line"   "rules list" "$RL_HELP"
 RL_HELP2=$( "$BIN_DIR/email-cli" rules --help 2>&1 || true )
 check "34.13 rules --help: usage line" "rules list" "$RL_HELP2"
 
+# EMAIL-314: a rule with an error is shown, checked and never fires
+H_BAD="./build/tests/functional/work-$$/homes/rlbad-$$"
+make_home "$H_BAD" "$RL_ACCT" $IMAP1_PORT
+cat > "$H_BAD/.config/email-cli/accounts/$RL_ACCT/rules.ini" <<'RINI'
+[rule "Typo"]
+if-form = x@y
+then-remove-label = INBOX
+
+[rule "Empty"]
+when =
+then-remove-label = INBOX
+
+[rule "Everything"]
+when = all
+then-add-label = X
+RINI
+BAD_LIST=$( (export HOME="$H_BAD"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules list 2>&1 || true) )
+check "34.20 rules list: unknown key is an ERROR" "ERROR.*unknown key 'if-form'" "$BAD_LIST"
+check "34.21 rules list: empty when is an ERROR"  "ERROR.*empty value" "$BAD_LIST"
+BAD_CHECK=$( (export HOME="$H_BAD"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules check 2>&1; echo "exit=$?") )
+check "34.22 rules check: names the line"   "line 2: unknown key" "$BAD_CHECK"
+check "34.23 rules check: second problem"   "line 6: 'when' has an empty value" "$BAD_CHECK"
+check "34.24 rules check: exit status 1"    "exit=1" "$BAD_CHECK"
+BAD_ADD=$( (export HOME="$H_BAD"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules add --name Z --if-from "" --remove-label INBOX 2>&1; echo "exit=$?") )
+check "34.25 rules add: an empty pattern is refused" "non-empty pattern" "$BAD_ADD"
+BAD_ADD2=$( (export HOME="$H_BAD"; unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
+    "$BIN_DIR/email-cli" rules add --name Z --remove-label INBOX 2>&1; echo "exit=$?") )
+check "34.26 rules add: no condition is refused" "match-all" "$BAD_ADD2"
+rm -rf "./build/tests/functional/work-$$/homes/rlbad-$$"
 rm -rf "./build/tests/functional/work-$$/homes/rl-$$"
 rm -rf "./build/tests/functional/work-$$/homes/rl-empty-$$"
 

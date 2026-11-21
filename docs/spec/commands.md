@@ -1226,7 +1226,7 @@ command runs, so they may stand anywhere on the line, as `--columns A,B`,
 | `list-attachments` | `filename`, `size` |
 | `list-accounts` | `account`, `type`, `server` |
 | `history` | `id`, `when`, `who`, `op`, `object`, `what`, `state` |
-| `rules list` | `account`, `nr`, `name`, `when`, `then_add_label`, `then_remove_label`, `then_move_folder` |
+| `rules list` | `account`, `nr`, `name`, `when`, `then_add_label`, `then_remove_label`, `then_move_folder`, `error` |
 
 * `--columns A,B,C` prints exactly these columns in this order, in every format:
   the table has only these columns and `--json` has only these fields.  Names
@@ -1253,3 +1253,23 @@ command runs, so they may stand anywhere on the line, as `--columns A,B`,
 * `history --json` prints the steps as an array of the chosen fields.
 * Given to a command that prints no table, either option is a usage error:
   `Error: --columns is only for the commands that print a table; 'X' prints none.`
+
+## Rule validation (EMAIL-314)
+
+A rules file is checked when it is loaded; a rule with a problem keeps its
+error (with the line number) and **never fires**, so no mail is touched by it.
+
+* Errors: an unknown key (a typo such as `if-form`), a line without `=`, a
+  section that is not `[rule "name"]`, an empty value (`when =`, `if-from =`),
+  an empty pattern inside `when` (`from:`, `from:""`), an invalid `when`
+  expression, more than 32 `then-add-label` / `then-remove-label` lines, and a
+  rule with **no condition**.
+* A rule that matches every message needs the explicit `when = all`
+  (`rules add --match-all`); `rules add` refuses an empty `--if-*` pattern and
+  a missing condition.
+* The error is shown by `rules list` (an `ERROR` line, the `error` column and
+  JSON field), `rules apply` and the Gmail and IMAP sync (a `[warn]` line on
+  stderr) and the TUI rule detail (red line).
+* `rules check [--account A]` lists every problem with its line number; exit
+  status 1 when there is one.
+* Not kept when rules are saved: comments and unknown keys of the file.

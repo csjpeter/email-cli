@@ -10,8 +10,8 @@
  *   expr     ::= and_expr ('or' and_expr)*
  *   and_expr ::= not_expr ('and' not_expr)*
  *   not_expr ::= '!' not_expr | primary
- *   primary  ::= atom | '(' expr ')'
- *   atom     ::= field ':' pattern
+ *   primary  ::= atom | 'all' | '(' expr ')'
+ *   atom     ::= field ':' pattern   (the pattern must not be empty)
  *   field    ::= 'from' | 'to' | 'subject' | 'label' | 'body' | 'age-gt' | 'age-lt'
  *
  * Example expressions:
@@ -37,6 +37,7 @@ typedef enum {
     WN_BODY,
     WN_AGE_GT,
     WN_AGE_LT,
+    WN_ALL,   /**< the explicit "all": matches every message */
 } WhenNodeType;
 
 typedef struct WhenNode WhenNode;

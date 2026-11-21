@@ -18,7 +18,7 @@
 /* ── Internal types ────────────────────────────────────────────────── */
 
 typedef enum {
-    T_EOF, T_AND, T_OR, T_NOT, T_LPAREN, T_RPAREN, T_ATOM, T_ERR
+    T_EOF, T_AND, T_OR, T_NOT, T_LPAREN, T_RPAREN, T_ATOM, T_ALL, T_ERR
 } TokType;
 
 typedef struct {
@@ -59,6 +59,11 @@ static Tok lex_read(Lex *l) {
     if (wlen == 3 && strncasecmp(ws, "and", 3) == 0) { t.type = T_AND; return t; }
     if (wlen == 2 && strncasecmp(ws, "or",  2) == 0) { t.type = T_OR;  return t; }
 
+    if (wlen == 3 && strncasecmp(ws, "all", 3) == 0 && *l->p != ':') {
+        t.type = T_ALL;   /* the explicit "matches everything" condition */
+        return t;
+    }
+
     if (*l->p != ':') { t.type = T_ERR; return t; }
     l->p++; /* skip ':' */
 
@@ -90,6 +95,9 @@ static Tok lex_read(Lex *l) {
         memcpy(t.pat, ps, plen);
     }
     t.pat[plen] = '\0';
+
+    /* An empty pattern would match every message: a mistake, not a condition. */
+    if (plen == 0) { t.type = T_ERR; return t; }
 
     t.type = T_ATOM;
     return t;
@@ -172,6 +180,12 @@ static WhenNode *parse_primary(Lex *l) {
         lex_advance(l);
         return inner;
     }
+    if (l->cur.type == T_ALL) {
+        WhenNode *n = node_new(WN_ALL);
+        if (!n) return NULL;
+        lex_advance(l);
+        return n;
+    }
     if (l->cur.type == T_ATOM) {
         WhenNodeType nt;
         if      (strcmp(l->cur.field, "from")    == 0) nt = WN_FROM;
@@ -245,6 +259,8 @@ int when_eval(const WhenNode *n,
 {
     if (!n) return 1;
     switch (n->type) {
+    case WN_ALL:
+        return 1;
     case WN_OR:
         return when_eval(n->left,  from, subject, to, labels_csv, body, message_date) ||
                when_eval(n->right, from, subject, to, labels_csv, body, message_date);

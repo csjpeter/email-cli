@@ -7989,7 +7989,7 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
         else {
             fprintf(out, "  Rules applied: %d message(s) modified.\n", fired_total);
             if (fired_total > 0)
-                fprintf(out, "  Undo with: email-cli rules revert (apply %s)\n", apply_id);
+                fprintf(out, "  Undo with: email-cli rules revert\n");
         }
         total_fired += fired_total;
         done++;

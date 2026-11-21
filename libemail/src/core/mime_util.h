@@ -6,6 +6,7 @@
 #define MIME_UTIL_H
 
 #include <stddef.h>
+#include <time.h>
 
 /**
  * @file mime_util.h
@@ -76,6 +77,12 @@ char *mime_get_text_body_ex(const char *msg, MimeTextInfo *info);
  * @return Heap-allocated formatted string, or NULL if date is NULL. Caller must free.
  */
 char *mime_format_date(const char *date);
+
+/**
+ * @brief Parses an RFC 5322 Date header value to a Unix timestamp (UTC).
+ * @return The timestamp, or 0 when the text is not a recognised date.
+ */
+time_t mime_parse_date(const char *date);
 
 /**
  * @brief Decodes RFC 2047 encoded words in a header field value.

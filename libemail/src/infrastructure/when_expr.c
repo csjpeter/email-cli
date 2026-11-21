@@ -235,6 +235,41 @@ static int when_glob(const char *pattern, const char *val) {
     return fnmatch(pattern, val, FNM_CASEFOLD) == 0;
 }
 
+int when_addr_glob(const char *pattern, const char *val) {
+    if (!pattern || !pattern[0]) return 1;
+    if (!val || !val[0]) return 0;
+    if (fnmatch(pattern, val, FNM_CASEFOLD) == 0) return 1;
+
+    /* EMAIL-313: a header with display names ("GitHub <noreply@github.com>,
+     * Bob <b@x.org>"): each bare address counts as well as the whole text. */
+    char *copy = strdup(val);
+    if (!copy) return 0;
+    int found = 0;
+    char *p = copy;
+    while (*p && !found) {
+        char *lt = strchr(p, '<');
+        char *start, *end;
+        if (lt) {
+            end = strchr(lt, '>');
+            if (!end) break;
+            start = lt + 1;
+            *end = '\0';
+            p = end + 1;
+        } else {
+            /* no angle brackets left: comma-separated bare addresses */
+            start = p;
+            end = strchr(p, ',');
+            if (end) { *end = '\0'; p = end + 1; } else p += strlen(p);
+        }
+        while (*start == ' ' || *start == '\t' || *start == ',') start++;
+        size_t n = strlen(start);
+        while (n > 0 && (start[n-1] == ' ' || start[n-1] == '\t')) start[--n] = '\0';
+        if (n > 0 && fnmatch(pattern, start, FNM_CASEFOLD) == 0) found = 1;
+    }
+    free(copy);
+    return found;
+}
+
 static int when_label_match(const char *pattern, const char *csv) {
     if (!pattern || !pattern[0]) return 1;
     if (!csv || !csv[0]) return 0;
@@ -269,8 +304,8 @@ int when_eval(const WhenNode *n,
                when_eval(n->right, from, subject, to, labels_csv, body, message_date);
     case WN_NOT:
         return !when_eval(n->left, from, subject, to, labels_csv, body, message_date);
-    case WN_FROM:    return when_glob(n->pattern, from);
-    case WN_TO:      return when_glob(n->pattern, to);
+    case WN_FROM:    return when_addr_glob(n->pattern, from);
+    case WN_TO:      return when_addr_glob(n->pattern, to);
     case WN_SUBJECT: return when_glob(n->pattern, subject);
     case WN_LABEL:   return when_label_match(n->pattern, labels_csv);
     case WN_BODY:

@@ -487,8 +487,8 @@ char *mime_decode_words(const char *value) {
 
 /* ── Date formatting ────────────────────────────────────────────────── */
 
-char *mime_format_date(const char *date) {
-    if (!date || !*date) return NULL;
+time_t mime_parse_date(const char *date) {
+    if (!date || !*date) return 0;
 
     static const char * const fmts[] = {
         "%a, %d %b %Y %T %z",  /* "Tue, 10 Mar 2026 15:07:40 +0000"     */
@@ -504,14 +504,21 @@ char *mime_format_date(const char *date) {
         memset(&tm, 0, sizeof(tm));
         if (strptime(date, fmts[i], &tm)) { parsed = 1; break; }
     }
-    if (!parsed) return strdup(date);
+    if (!parsed) return 0;
 
     /* Save tm_gmtoff before calling timegm(): timegm() normalises the struct
      * and resets tm_gmtoff to 0.  timegm() treats the fields as UTC, so
      * subtracting the original offset converts to true UTC. */
     long gmtoff = tm.tm_gmtoff;
     time_t utc = timegm(&tm) - gmtoff;
-    if (utc == (time_t)-1) return strdup(date);
+    if (utc == (time_t)-1) return 0;
+    return utc;
+}
+
+char *mime_format_date(const char *date) {
+    if (!date || !*date) return NULL;
+    time_t utc = mime_parse_date(date);
+    if (utc == 0) return strdup(date);
 
     struct tm local;
     localtime_r(&utc, &local);

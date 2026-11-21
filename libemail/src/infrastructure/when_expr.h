@@ -82,6 +82,15 @@ int when_eval(const WhenNode *n,
               const char *body, time_t message_date);
 
 /**
+ * @brief Glob match of an address header (From/To), case-insensitive.
+ *
+ * Matches when the pattern fits the whole header text or any one bare address
+ * in it ("GitHub <noreply@github.com>" matches "*@github.com").  An empty
+ * pattern matches everything; an empty value matches nothing.
+ */
+int when_addr_glob(const char *pattern, const char *val);
+
+/**
  * @brief Build a when-expression string from old flat if_* fields (AND chain).
  *
  * Converts the legacy per-field conditions into a single `when` expression.

@@ -394,6 +394,10 @@ static void put_news(const char *folder, const char *uid, const char *from, int 
     manifest_upsert(m, uid, strdup(from), strdup("Weekly"), strdup("2026-10-22 10:00"), flags);
     manifest_save(folder, m);
     manifest_free(m);
+    /* EMAIL-313: rules apply reads the stored message, so it must say the same */
+    char raw[512];
+    snprintf(raw, sizeof(raw), "From: %s\r\nSubject: Weekly\r\n\r\nbody\r\n", from);
+    local_msg_save(folder, uid, raw, strlen(raw));
 }
 
 static int labels_file_has(const char *uid, const char *label) {

@@ -123,12 +123,8 @@ static void apply_rules_to_new_message(const MailRules *rules, const char *uid,
 {
     if (!rules || rules->count == 0) return;
 
-    RAII_STRING char *from_raw = mime_get_header(raw_msg, "From");
-    RAII_STRING char *subj_raw = mime_get_header(raw_msg, "Subject");
-    RAII_STRING char *to_raw   = mime_get_header(raw_msg, "To");
-    RAII_STRING char *from_dec = from_raw ? mime_decode_words(from_raw) : NULL;
-    RAII_STRING char *subj_dec = subj_raw ? mime_decode_words(subj_raw) : NULL;
-    RAII_STRING char *to_dec   = to_raw   ? mime_decode_words(to_raw)   : NULL;
+    MailMsgCtx mctx;   /* EMAIL-313: the same context as rules apply */
+    mail_msg_ctx_from_raw(&mctx, raw_msg);
 
     /* Build labels_csv using friendly names where available */
     size_t lcsz = 1;
@@ -138,7 +134,7 @@ static void apply_rules_to_new_message(const MailRules *rules, const char *uid,
         free(name);
     }
     char *lcsv = calloc(lcsz, 1);
-    if (!lcsv) return;
+    if (!lcsv) { mail_msg_ctx_free(&mctx); return; }
     for (int i = 0; i < label_count; i++) {
         char *name = local_gmail_label_name_lookup(labels[i]);
         const char *display = name ? name : labels[i];
@@ -149,12 +145,11 @@ static void apply_rules_to_new_message(const MailRules *rules, const char *uid,
 
     char **add_out = NULL; int add_count = 0;
     char **rm_out  = NULL; int rm_count  = 0;
-    int fired = mail_rules_apply(rules,
-                                  from_dec, subj_dec, to_dec, lcsv,
-                                  NULL, (time_t)0,   /* body/date unavailable during Gmail sync */
-                                  &add_out, &add_count,
-                                  &rm_out,  &rm_count);
+    int fired = mail_rules_apply_ctx(rules, &mctx, lcsv,
+                                     &add_out, &add_count,
+                                     &rm_out,  &rm_count, NULL);
     free(lcsv);
+    mail_msg_ctx_free(&mctx);
     if (fired <= 0) return;
 
 

@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
@@ -800,6 +801,83 @@ static void test_318_add_remove_resolved_in_rule_order(void) {
     mail_rules_free(r);
 }
 
+/* ── EMAIL-313: display names, body, age, chained labels, context ─── */
+
+static int fire_ctx(MailRules *r, const MailMsgCtx *c, const char *labels,
+                    char ***a, int *ac, char ***d, int *dc) {
+    return mail_rules_apply_ctx(r, c, labels, a, ac, d, dc, NULL);
+}
+
+static void free_lists(char **a, int ac, char **d, int dc) {
+    for (int i = 0; i < ac; i++) free(a[i]);
+    for (int i = 0; i < dc; i++) free(d[i]);
+    free(a); free(d);
+}
+
+static void test_313_display_name_from_and_to(void) {
+    MailRules *r = mail_rules_parse_text(
+        "[rule \"G\"]\nif-from = *@github.com\nif-to = *@me.org\nthen-add-label = GH\n"
+        "[rule \"W\"]\nwhen = from:*@github.com and !to:*@other.org\nthen-add-label = W\n");
+    ASSERT(r && r->count == 2, "313: rules parsed");
+    char **a = NULL, **d = NULL; int ac = 0, dc = 0;
+    int n = mail_rules_apply(r, "GitHub <noreply@github.com>", "s",
+                             "Me <x@me.org>, Bob <b@z.org>", "", NULL, 0, &a, &ac, &d, &dc);
+    ASSERT(n == 2 && ac == 2, "313: a display-name From/To matches the address pattern (flat and when)");
+    free_lists(a, ac, d, dc);
+    n = mail_rules_apply(r, "Mallory <m@evil.org>", "s", "x@me.org", "", NULL, 0, &a, &ac, &d, &dc);
+    ASSERT(n == 0, "313: another sender does not match");
+    free_lists(a, ac, d, dc);
+    n = mail_rules_apply(r, "noreply@github.com", "s", "b@z.org", "", NULL, 0, &a, &ac, &d, &dc);
+    ASSERT(n == 1 && ac == 1, "313: a bare address still matches; to is checked on its own");
+    free_lists(a, ac, d, dc);
+    mail_rules_free(r);
+}
+
+static void test_313_body_and_age_from_raw_message(void) {
+    MailRules *r = mail_rules_parse_text(
+        "[rule \"B\"]\nwhen = body:*invoice*\nthen-add-label = INV\n"
+        "[rule \"O\"]\nwhen = age-gt:30\nthen-add-label = OLD\n"
+        "[rule \"N\"]\nwhen = age-lt:30\nthen-add-label = NEW\n");
+    ASSERT(r && r->count == 3, "313: rules parsed");
+    const char *old_msg =
+        "From: Shop <s@shop.org>\r\nTo: me@x.org\r\nSubject: Hi\r\n"
+        "Date: Tue, 10 Mar 2020 15:07:40 +0000\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n\r\nYour invoice is attached.\r\n";
+    MailMsgCtx c;
+    mail_msg_ctx_from_raw(&c, old_msg);
+    ASSERT(c.date > 0 && c.body && strstr(c.body, "invoice"), "313: the context has the body and the date");
+    ASSERT(c.from && strstr(c.from, "Shop"), "313: the context has the From header");
+    char **a = NULL, **d = NULL; int ac = 0, dc = 0;
+    int n = fire_ctx(r, &c, "", &a, &ac, &d, &dc);
+    ASSERT(n == 2 && ac == 2, "313: body and age-gt fire on an old invoice, age-lt does not");
+    int inv = 0, old = 0;
+    for (int i = 0; i < ac; i++) { inv |= !strcmp(a[i], "INV"); old |= !strcmp(a[i], "OLD"); }
+    ASSERT(inv && old, "313: the labels are INV and OLD");
+    free_lists(a, ac, d, dc);
+    mail_msg_ctx_free(&c);
+    mail_rules_free(r);
+}
+
+static void test_313_chained_labels_in_rule_order(void) {
+    MailRules *r = mail_rules_parse_text(
+        "[rule \"A\"]\nwhen = from:*\nthen-add-label = Work\nthen-remove-label = Inbox\n"
+        "[rule \"B\"]\nwhen = label:work\nthen-add-label = Seen\n"
+        "[rule \"C\"]\nwhen = label:inbox\nthen-add-label = StillInbox\n"
+        "[rule \"D\"]\nwhen = from:*\nthen-remove-label = Work\n");
+    ASSERT(r && r->count == 4, "313: rules parsed");
+    char **a = NULL, **d = NULL; int ac = 0, dc = 0;
+    int n = mail_rules_apply(r, "x@y.org", "s", "me@z.org", "INBOX", NULL, 0, &a, &ac, &d, &dc);
+    ASSERT(n == 3, "313: B sees A's add (case-insensitive), C no longer sees the removed Inbox");
+    int has_work = 0, has_seen = 0;
+    for (int i = 0; i < ac; i++) { has_work |= !strcmp(a[i], "Work"); has_seen |= !strcmp(a[i], "Seen"); }
+    ASSERT(!has_work && has_seen, "313: a label a later rule removes is no longer in the net add list");
+    int rm_work = 0, rm_inbox = 0;
+    for (int i = 0; i < dc; i++) { rm_work |= !strcmp(d[i], "Work"); rm_inbox |= !strcasecmp(d[i], "inbox"); }
+    ASSERT(rm_work && rm_inbox, "313: the removals are listed");
+    free_lists(a, ac, d, dc);
+    mail_rules_free(r);
+}
+
 /* ── Registration ────────────────────────────────────────────────── */
 
 void test_mail_rules(void) {
@@ -833,4 +911,7 @@ void test_mail_rules(void) {
     RUN_TEST(test_rules_save_refuses_duplicates);
     RUN_TEST(test_rules_history_pairs_action_group);
     RUN_TEST(test_318_add_remove_resolved_in_rule_order);
+    RUN_TEST(test_313_display_name_from_and_to);
+    RUN_TEST(test_313_body_and_age_from_raw_message);
+    RUN_TEST(test_313_chained_labels_in_rule_order);
 }

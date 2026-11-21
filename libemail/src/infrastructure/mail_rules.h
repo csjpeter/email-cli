@@ -23,7 +23,8 @@
  *   then-add-label    = GitHub
  *   then-remove-label = INBOX
  *
- * Conditions: if-from, if-subject, if-to, if-label (glob patterns).
+ * Conditions: if-from, if-subject, if-to, if-label (glob patterns); from and to
+ * match the whole header or any bare address in it (EMAIL-313).
  *             if-not-from, if-not-subject, if-not-to (negated glob patterns).
  * Actions:    then-add-label, then-remove-label, then-move-folder (IMAP only),
  *             then-forward-to (stored; forwarding execution is future work).
@@ -202,5 +203,42 @@ int mail_rule_matches(const MailRule *rule,
                       const char *from, const char *subject,
                       const char *to, const char *labels_csv,
                       const char *body, time_t message_date);
+
+/**
+ * @brief What the rules see of one message (EMAIL-313): the decoded headers,
+ *        the plain-text body and the parsed date.  One builder serves sync and
+ *        apply, so both give the rules the same input.
+ */
+typedef struct {
+    char   *from;     /**< Decoded From header (display name and address) */
+    char   *subject;  /**< Decoded Subject */
+    char   *to;       /**< Decoded To header */
+    char   *body;     /**< Plain-text body (NULL when unavailable) */
+    time_t  date;     /**< Unix time of the Date header (0 = unknown) */
+} MailMsgCtx;
+
+/**
+ * @brief Fills a context from a raw RFC 5322 message.
+ * @param raw  Raw message (NULL gives an empty context).
+ */
+void mail_msg_ctx_from_raw(MailMsgCtx *ctx, const char *raw);
+
+/** @brief Releases the strings of a context. */
+void mail_msg_ctx_free(MailMsgCtx *ctx);
+
+/**
+ * @brief mail_rules_apply_ex() on a message context.
+ */
+int mail_rules_apply_ctx(const MailRules *rules, const MailMsgCtx *ctx,
+                         const char *labels_csv,
+                         char ***add_out, int *add_count,
+                         char ***rm_out,  int *rm_count,
+                         char **move_folder_out);
+
+/**
+ * @brief mail_rule_matches() on a message context.
+ */
+int mail_rule_matches_ctx(const MailRule *rule, const MailMsgCtx *ctx,
+                          const char *labels_csv);
 
 #endif /* MAIL_RULES_H */

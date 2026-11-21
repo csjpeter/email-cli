@@ -1284,3 +1284,19 @@ error (with the line number) and **never fires**, so no mail is touched by it.
 * `rules check [--account A]` lists every problem with its line number; exit
   status 1 when there is one.
 * Not kept when rules are saved: comments and unknown keys of the file.
+
+## What a rule sees of a message (EMAIL-313)
+
+One builder (`MailMsgCtx`, `mail_msg_ctx_from_raw()`) gives the rules the same
+input on the IMAP sync, the Gmail sync and `rules apply`:
+
+* `from:` and `to:` match the whole decoded header **or any one bare address in
+  it**: `*@github.com` matches `GitHub <noreply@github.com>`.
+* `body:` matches the plain-text body and `age-gt:` / `age-lt:` use the parsed
+  `Date` header; `rules apply` reads them from the stored message (when the
+  message is not stored, only from and subject are known).
+* `label:` sees label **names** on both paths (Gmail `rules apply` translates
+  the ids), compared case-insensitively.
+* Each fired rule's adds and removes go onto the working labels in rule order,
+  so a later rule's `label:` sees the net state; a label a later rule removes is
+  not in the net add list.

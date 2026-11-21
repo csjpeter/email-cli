@@ -930,6 +930,7 @@ int main(void) {
     if (pass_env && pass_env[0]) g_password = pass_env;
     const char *to_env = getenv("MOCK_IMAP_TO");
     const char *cc_env = getenv("MOCK_IMAP_CC");
+    const char *bcc_env = getenv("MOCK_IMAP_BCC");
     const char *mid_env = getenv("MOCK_IMAP_MSGID");
     if (to_env && to_env[0])
         snprintf(g_rcpt_hdr + strlen(g_rcpt_hdr), sizeof(g_rcpt_hdr) - strlen(g_rcpt_hdr),
@@ -940,6 +941,9 @@ int main(void) {
     if (cc_env && cc_env[0])
         snprintf(g_rcpt_hdr + strlen(g_rcpt_hdr), sizeof(g_rcpt_hdr) - strlen(g_rcpt_hdr),
                  "Cc: %s\r\n", cc_env);
+    if (bcc_env && bcc_env[0])
+        snprintf(g_rcpt_hdr + strlen(g_rcpt_hdr), sizeof(g_rcpt_hdr) - strlen(g_rcpt_hdr),
+                 "Bcc: %s\r\n", bcc_env);
 
     /* CONDSTORE / QRESYNC */
     const char *caps_env = getenv("MOCK_IMAP_CAPS");

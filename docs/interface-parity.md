@@ -34,6 +34,7 @@ existing references and every `no` has a reason.
 | Search cached mail | yes (`--folder __search__:scope:text`) | F:59.1 | yes (`/`) | P:test_screen_list_search | |
 | Virtual folders (unread, flagged, junk, answered, forwarded) | yes | F:58.1 | yes | P:test_virtual_junk_list_shows_messages | |
 | Read a message | yes (`show`) | F:1.10 | yes | P:test_screen_reader | |
+| Cc and Bcc lines when reading (only when present) | yes (`show`) | F:162.1 F:162.4 | yes | P:test_reader_shows_cc_bcc | |
 | Raw message source | yes (`show --raw`) | F:122.21 | yes (`v`) | P:test_interactive_show_source_toggle | |
 | List IMAP folders (counts, tree) | yes | F:25.13 | yes | P:test_screen_folders | |
 | List Gmail labels | yes | F:26.11 | yes | P:test_screen_gmail_labels | |

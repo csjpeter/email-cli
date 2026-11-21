@@ -374,8 +374,13 @@ the message is emitted by the domain layer.
    c. If the message was **not** `\Seen` before step (b): immediately issue
       `UID STORE uid -FLAGS (\Seen)` to restore the unread state.
    d. Save fetched content to the local message store.
-4. Parse MIME headers (`From`, `Subject`, `Date`) and extract plain-text body.
-5. Print headers + separator + body.
+4. Parse MIME headers (`From`, `To`, `Cc`, `Bcc`, `Subject`, `Date`; folded lines
+   joined, encoded display names decoded) and extract plain-text body.
+5. Print headers + separator + body.  The `To:`, `Cc:` and `Bcc:` lines are printed only
+   when the header is present and not empty (EMAIL-310); a received message normally has
+   no `Bcc`, a sent copy or a draft does.  `--json` carries `to`, `cc` and `bcc`.
+   The headers are read from the stored raw message, so nothing extra is stored.
+   `email-tui` reader and the embedded read command show the same lines.
 6. Paginate the body according to [pagination.md](pagination.md).
 
 ### Read-status policy

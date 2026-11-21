@@ -8270,6 +8270,48 @@ check "161.2 inventory check: all rows pass" "Passed: 10 / 10" "$OUT161"
 
 fi
 
+if phase_wanted 162; then
+# ════════════════════════════════════════════════════════════════════════════
+# Phase 162 — Cc and Bcc lines when reading a message (EMAIL-310)
+# ════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "--- Phase 162: show prints Cc and Bcc only when present (EMAIL-310) ---"
+
+run162() {   # run162 NAME CC BCC  → output of `show 1`
+    local name="$1" cc="$2" bcc="$3" port
+    alloc_port port
+    (cd "$PROJECT_ROOT/build" && MOCK_IMAP_PORT=$port MOCK_IMAP_COUNT=1 \
+        MOCK_IMAP_TO="to162@example.org" MOCK_IMAP_CC="$cc" MOCK_IMAP_BCC="$bcc" \
+        "$MOCK_SERVER_BIN") >/dev/null 2>&1 &
+    local pid=$!
+    wait_listen port
+    local h="./build/tests/functional/work-$$/homes/f162-$name"
+    make_home "$h" "u162@example.org" "$port"
+    local out
+    out=$(HOME="$h" "$BIN_DIR/email-cli" show 1 2>&1 || true)
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null || true
+    wait_closed port
+    printf '%s\n' "$out"
+}
+
+OUT162A=$(run162 a "cc162@example.org" "")
+check "162.1 Cc only: Cc line shown" "Cc:      cc162@example.org" "$OUT162A"
+case "$OUT162A" in *"Bcc:"*) check "162.2 Cc only: no Bcc line" "no-bcc" "bcc" ;;
+                   *)        check "162.2 Cc only: no Bcc line" "no-bcc" "no-bcc" ;; esac
+
+OUT162B=$(run162 b "cc162@example.org" "bcc162@example.org")
+check "162.3 both: Cc line shown"  "Cc:      cc162@example.org"   "$OUT162B"
+check "162.4 both: Bcc line shown" "Bcc:     bcc162@example.org"  "$OUT162B"
+
+OUT162C=$(run162 c "" "")
+case "$OUT162C" in *"Cc:"*|*"Bcc:"*) check "162.5 neither: no Cc/Bcc line" "none" "some" ;;
+                   *)                check "162.5 neither: no Cc/Bcc line" "none" "none" ;; esac
+
+OUT162D=$(run162 d "$(printf '=?UTF-8?Q?Zs=C3=B3fia?= <zs162@example.org>,\r\n other162@example.org')" "")
+check "162.6 folded + encoded Cc decoded" "Cc:      Zsófia <zs162@example.org>, other162@example.org" "$OUT162D"
+
+fi
+
 # ════════════════════════════════════════════════════════════════════════════
 # Results
 # ════════════════════════════════════════════════════════════════════════════

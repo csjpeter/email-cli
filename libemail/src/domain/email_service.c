@@ -707,7 +707,17 @@ static void print_clean(const char *s, const char *fallback, int max_cols) {
     }
 }
 
+/** Decoded display text of an optional address header (Cc, Bcc); NULL when absent or empty. */
+static char *show_addr_header(const char *raw, const char *name) {
+    char *h = mime_get_header(raw, name);
+    char *d = h ? mime_decode_words(h) : NULL;
+    free(h);
+    if (d && !d[0]) { free(d); d = NULL; }
+    return d;
+}
+
 static void print_show_headers(const char *from, const char *to,
+                                const char *cc, const char *bcc,
                                 const char *subject,
                                 const char *date, const char *uid,
                                 const char *labels,
@@ -718,6 +728,12 @@ static void print_show_headers(const char *from, const char *to,
     printf("From:    "); print_clean(from,    "(none)", SHOW_WIDTH - 9); putchar('\n');
     if (to && to[0]) {
         printf("To:      "); print_clean(to, "", SHOW_WIDTH - 9); putchar('\n');
+    }
+    if (cc && cc[0]) {
+        printf("Cc:      "); print_clean(cc, "", SHOW_WIDTH - 9); putchar('\n');
+    }
+    if (bcc && bcc[0]) {
+        printf("Bcc:     "); print_clean(bcc, "", SHOW_WIDTH - 9); putchar('\n');
     }
     printf("Subject: "); print_clean(subject, "(none)", SHOW_WIDTH - 9); putchar('\n');
     printf("Date:    "); print_clean(date,    "(none)", SHOW_WIDTH - 9); putchar('\n');
@@ -1004,6 +1020,8 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
     char *to_raw  = mime_get_header(raw, "To");
     char *show_to = to_raw ? mime_decode_words(to_raw) : NULL;
     free(to_raw);
+    char *show_cc  = show_addr_header(raw, "Cc");
+    char *show_bcc = show_addr_header(raw, "Bcc");
     /* Local .eml file path and DMARC description for the reader header */
     char *show_path = local_msg_path(folder, uid);
     char *ar_hdr    = mime_get_header(raw, "Authentication-Results");
@@ -1079,6 +1097,8 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
 #define SHOW_HDR_LINES_INT 8  /* kept for #undef below */
     int hdr_rows = 5;  /* From + Subject + Date + UID + separator */
     if (show_to    && show_to[0])    hdr_rows++;
+    if (show_cc)                     hdr_rows++;
+    if (show_bcc)                    hdr_rows++;
     if (show_labels && show_labels[0]) hdr_rows++;
     if (show_path  && show_path[0])  hdr_rows++;
     if (show_dmarc && show_dmarc[0]) hdr_rows++;
@@ -1139,7 +1159,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
         if (total_pages < 1) total_pages = 1;
 
         printf("\033[0m\033[H\033[2J");     /* reset attrs + clear screen */
-        print_show_headers(from, show_to, subject, date, uid, show_labels, show_path, show_dmarc, attach_buf);
+        print_show_headers(from, show_to, show_cc, show_bcc, subject, date, uid, show_labels, show_path, show_dmarc, attach_buf);
         print_body_page(body_text, cur_line, rows_avail, term_cols);
         printf("\033[0m");                  /* close any open ANSI from body */
         fflush(stdout);
@@ -1650,7 +1670,7 @@ static int show_uid_interactive(const Config *cfg, emc_client *mc,
 show_int_done:
 #undef SHOW_HDR_LINES_INT
     mime_free_attachments(atts, att_count);
-    free(show_path); free(show_dmarc); free(show_to);
+    free(show_path); free(show_dmarc); free(show_to); free(show_cc); free(show_bcc);
     free(body); free(body_wrapped); free(raw_safe); free(from); free(subject); free(date); free(show_labels); free(raw);
     if (flags_out) *flags_out = reader_flags;
     return result;
@@ -6560,6 +6580,8 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
     char *ro_to_raw  = mime_get_header(raw, "To");
     char *ro_to      = ro_to_raw ? mime_decode_words(ro_to_raw) : NULL;
     free(ro_to_raw);
+    char *ro_cc  = show_addr_header(raw, "Cc");
+    char *ro_bcc = show_addr_header(raw, "Bcc");
     /* Build attachment summary */
     int ro_att_count = 0;
     MimeAttachment *ro_atts = mime_list_attachments(raw, &ro_att_count);
@@ -6584,7 +6606,7 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
     mime_free_attachments(ro_atts, ro_att_count);
 
     if (!g_json_out)
-        print_show_headers(from, ro_to, subject, date, uid, ro_labels, ro_path, ro_dmarc, ro_attach_buf);
+        print_show_headers(from, ro_to, ro_cc, ro_bcc, subject, date, uid, ro_labels, ro_path, ro_dmarc, ro_attach_buf);
 
     int term_cols_show = pager ? terminal_cols() : SHOW_WIDTH;
     int wrap_cols = term_cols_show > SHOW_WIDTH ? SHOW_WIDTH : term_cols_show;
@@ -6613,6 +6635,8 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
         printf(",\n \"folder\": "); print_json_string(folder);
         printf(",\n \"from\": ");   print_json_string(from);
         printf(",\n \"to\": ");     print_json_string(ro_to);
+        printf(",\n \"cc\": ");     print_json_string(ro_cc);
+        printf(",\n \"bcc\": ");    print_json_string(ro_bcc);
         printf(",\n \"subject\": "); print_json_string(subject);
         printf(",\n \"date\": ");   print_json_string(date);
         printf(",\n \"labels\": "); print_json_string(ro_labels);
@@ -6628,7 +6652,7 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
         printf("],\n \"body\": ");
         print_json_string(body ? body : "");
         printf("}\n");
-        free(ro_path); free(ro_dmarc); free(ro_to);
+        free(ro_path); free(ro_dmarc); free(ro_to); free(ro_cc); free(ro_bcc);
         free(body); free(from); free(subject); free(date); free(ro_labels); free(raw);
         return 0;
     }
@@ -6649,7 +6673,7 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
         for (int cur_line = 0, show_displayed = 0; ; ) {
             if (show_displayed) {
                 printf("\033[0m\033[H\033[2J");   /* reset attrs + clear screen */
-                print_show_headers(from, ro_to, subject, date, uid, ro_labels, ro_path, ro_dmarc, ro_attach_buf);
+                print_show_headers(from, ro_to, ro_cc, ro_bcc, subject, date, uid, ro_labels, ro_path, ro_dmarc, ro_attach_buf);
             }
             show_displayed = 1;
             print_body_page(body_text, cur_line, rows_avail, term_cols_show);
@@ -6669,7 +6693,7 @@ int email_service_read(const Config *cfg, const char *folder, const char *uid, i
     }
 #undef SHOW_HDR_LINES
 
-    free(ro_path); free(ro_dmarc); free(ro_to);
+    free(ro_path); free(ro_dmarc); free(ro_to); free(ro_cc); free(ro_bcc);
     free(body); free(from); free(subject); free(date); free(ro_labels); free(raw);
     return 0;
 }

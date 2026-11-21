@@ -1515,6 +1515,43 @@ static void test_reply_all_collects_recipients(void) {
     fresh_home_end();
 }
 
+/* EMAIL-310: the reader shows the Cc and Bcc lines of a message that has
+ * them (folded, encoded display names decoded), and no empty line otherwise. */
+static void test_reader_shows_cc_bcc(void) {
+    fresh_home_begin("home-reader-cc");
+    setenv("MOCK_IMAP_TO", "dave@example.org", 1);
+    setenv("MOCK_IMAP_CC", "=?UTF-8?Q?Zs=C3=B3fia?= <zs@example.net>,\r\n erin@example.net", 1);
+    setenv("MOCK_IMAP_BCC", "hidden@example.net", 1);
+    restart_imap();
+    unsetenv("MOCK_IMAP_TO");
+    unsetenv("MOCK_IMAP_CC");
+    unsetenv("MOCK_IMAP_BCC");
+    PtySession *s = tui_open_to_inbox();
+    ASSERT(s != NULL, "reader cc/bcc: reached inbox");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Subject:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_CONTAINS(s, "To:      dave@example.org");
+    ASSERT_SCREEN_CONTAINS(s, "Cc:      Zs\xc3\xb3""fia <zs@example.net>, erin@example.net");
+    ASSERT_SCREEN_CONTAINS(s, "Bcc:     hidden@example.net");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    fresh_home_end();
+
+    fresh_home_begin("home-reader-nocc");   /* the first home keeps the stored message */
+    restart_imap();
+    s = tui_open_to_inbox();
+    ASSERT(s != NULL, "reader no cc/bcc: reached inbox");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, "Subject:", WAIT_MS);
+    pty_settle(s, SETTLE_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Cc:");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Bcc:");
+    pty_send_key(s, PTY_KEY_ESC);
+    pty_close(s);
+    fresh_home_end();
+}
+
 /* EMAIL-115: an account without an SMTP server is offered the SMTP wizard
  * when a message is composed; the answer never blocks the composing. */
 static PtySession *compose_without_smtp(void) {
@@ -2419,6 +2456,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_reply_all_title);
     RUN_TEST(test_reply_all_own_address_excluded_from_cc);
     RUN_TEST(test_reply_all_collects_recipients);
+    RUN_TEST(test_reader_shows_cc_bcc);
     RUN_TEST(test_smtp_prompt_declined);
     RUN_TEST(test_smtp_prompt_wizard_abandoned);
     RUN_TEST(test_smtp_prompt_wizard_saves);

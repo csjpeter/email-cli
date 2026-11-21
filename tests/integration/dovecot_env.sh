@@ -58,6 +58,13 @@ dovecot_env_require() {
 dovecot_env_check_searchable() {
     local walk="$WORK_DIR" perms
     chmod 755 "$WORK_DIR" "$DOVE_BASE" "$MAIL_HOME" "$CERTS_DIR"
+    # The checkout's own directories above the work dir (build/tests/...) may
+    # have been made without the other-search bit (a group-only umask or ACL).
+    local up="$WORK_BASE"
+    while [ "$up" != "$PROJECT_ROOT" ] && [ "$up" != "/" ]; do
+        chmod o+rx "$up"
+        up="$(dirname "$up")"
+    done
     while [ "$walk" != "/" ]; do
         perms="$(stat -c %A "$walk")"
         if [ "${perms:9:1}" != "x" ] && [ "${perms:9:1}" != "t" ]; then

@@ -7,6 +7,7 @@
 #include "when_expr.h"
 #include "fs_util.h"
 #include "imap_util.h"
+#include "mime_util.h"
 #include "platform/path.h"
 #include "raii.h"
 #include "logger.h"
@@ -16,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -608,13 +610,13 @@ int mail_rule_matches(const MailRule *rule,
     }
 
     /* Fallback: legacy flat-field AND chain (for in-memory-only rules) */
-    if (!glob_match(rule->if_from,    from))    return 0;
+    if (rule->if_from && !when_addr_glob(rule->if_from, from)) return 0;
     if (!glob_match(rule->if_subject, subject)) return 0;
-    if (!glob_match(rule->if_to,      to))      return 0;
+    if (rule->if_to && !when_addr_glob(rule->if_to, to)) return 0;
     if (rule->if_label && !csv_label_match(rule->if_label, labels_csv)) return 0;
-    if (rule->if_not_from    && glob_match(rule->if_not_from,    from))    return 0;
+    if (rule->if_not_from    && when_addr_glob(rule->if_not_from, from))       return 0;
     if (rule->if_not_subject && glob_match(rule->if_not_subject, subject)) return 0;
-    if (rule->if_not_to      && glob_match(rule->if_not_to,      to))      return 0;
+    if (rule->if_not_to      && when_addr_glob(rule->if_not_to, to))           return 0;
     if (rule->if_body) {
         if (!body) return 0;
         if (!glob_match(rule->if_body, body)) return 0;
@@ -627,14 +629,61 @@ int mail_rule_matches(const MailRule *rule,
     return 1;
 }
 
-/** Drops every entry equal to @p label from the array (EMAIL-318). */
-static void str_array_drop(char ***arr, int *count, const char *label) {
-    int w = 0;
-    for (int i = 0; i < *count; i++) {
-        if (strcmp((*arr)[i], label) == 0) { free((*arr)[i]); continue; }
-        (*arr)[w++] = (*arr)[i];
+/* Removes (case-insensitive) every entry equal to s from a string array. */
+static void str_array_del_ci(char ***arr, int *count, const char *s) {
+    for (int i = 0; i < *count; ) {
+        if (strcasecmp((*arr)[i], s) == 0) {
+            free((*arr)[i]);
+            memmove(&(*arr)[i], &(*arr)[i + 1], (size_t)(*count - i - 1) * sizeof(char *));
+            (*count)--;
+        } else i++;
     }
-    *count = w;
+}
+
+/* Whether the comma list holds the label (case-insensitive). */
+static int csv_has_ci(const char *csv, const char *label) {
+    if (!csv) return 0;
+    size_t ll = strlen(label);
+    const char *p = csv;
+    while (*p) {
+        const char *e = strchr(p, ',');
+        size_t n = e ? (size_t)(e - p) : strlen(p);
+        if (n == ll && strncasecmp(p, label, n) == 0) return 1;
+        if (!e) break;
+        p = e + 1;
+    }
+    return 0;
+}
+
+/* Adds the label to a heap comma list unless it is there. */
+static void csv_add_ci(char **csv, const char *label) {
+    if (csv_has_ci(*csv, label)) return;
+    size_t cl = *csv ? strlen(*csv) : 0;
+    char *nb = realloc(*csv, cl + strlen(label) + 2);
+    if (!nb) return;
+    if (cl) nb[cl++] = ',';
+    strcpy(nb + cl, label);
+    *csv = nb;
+}
+
+/* Removes the label from a comma list in place. */
+static void csv_del_ci(char *csv, const char *label) {
+    if (!csv) return;
+    size_t ll = strlen(label);
+    char *out = csv;
+    const char *p = csv;
+    while (*p) {
+        const char *e = strchr(p, ',');
+        size_t n = e ? (size_t)(e - p) : strlen(p);
+        if (!(n == ll && strncasecmp(p, label, n) == 0)) {
+            if (out != csv) *out++ = ',';
+            memmove(out, p, n);
+            out += n;
+        }
+        if (!e) break;
+        p = e + 1;
+    }
+    *out = '\0';
 }
 
 int mail_rules_apply_ex(const MailRules *rules,
@@ -668,54 +717,21 @@ int mail_rules_apply_ex(const MailRules *rules,
         if (move_folder_out && !*move_folder_out && r->then_move_folder)
             *move_folder_out = strdup(r->then_move_folder);
 
-        /* Accumulate add/remove actions */
-        /* A later rule overrides an earlier one on the same label: the add and
-         * the remove of one label never both reach the stores (EMAIL-318). */
-        for (int j = 0; j < r->then_add_count; j++) {
-            str_array_drop(rm_out, rm_count, r->then_add_label[j]);
-            str_array_drop(add_out, add_count, r->then_add_label[j]);
+        for (int j = 0; j < r->then_add_count; j++)
             str_array_add(add_out, add_count, r->then_add_label[j]);
+        for (int j = 0; j < r->then_rm_count; j++)
+            str_array_add(rm_out, rm_count, r->then_rm_label[j]);
+
+        /* EMAIL-313: each rule's add and remove go onto the working labels in
+         * rule order (case-insensitive), so a later rule sees the net state and
+         * the result lists hold the net change. */
+        for (int j = 0; j < r->then_add_count; j++) {
+            str_array_del_ci(rm_out, rm_count, r->then_add_label[j]);
+            csv_add_ci(&working_labels, r->then_add_label[j]);
         }
         for (int j = 0; j < r->then_rm_count; j++) {
-            str_array_drop(add_out, add_count, r->then_rm_label[j]);
-            str_array_drop(rm_out, rm_count, r->then_rm_label[j]);
-            str_array_add(rm_out, rm_count, r->then_rm_label[j]);
-        }
-
-        /* Update working labels so subsequent if-label checks see the new state */
-        if (r->then_add_count > 0 || r->then_rm_count > 0) {
-            /* Rebuild working_labels from current add/rm state */
-            size_t need = strlen(labels_csv ? labels_csv : "") + 1;
-            for (int j = 0; j < *add_count; j++) need += strlen((*add_out)[j]) + 2;
-            char *nb = malloc(need);
-            if (nb) {
-                nb[0] = '\0';
-                /* Start from original + all added so far */
-                if (labels_csv && labels_csv[0]) strcpy(nb, labels_csv);
-                for (int j = 0; j < *add_count; j++) {
-                    if (nb[0]) strcat(nb, ",");
-                    strcat(nb, (*add_out)[j]);
-                }
-                /* Remove entries in rm_out */
-                for (int j = 0; j < *rm_count; j++) {
-                    char *copy2 = strdup(nb);
-                    if (!copy2) continue;
-                    nb[0] = '\0';
-                    char *tok2 = copy2, *s2;
-                    while (tok2 && *tok2) {
-                        s2 = strchr(tok2, ',');
-                        if (s2) *s2 = '\0';
-                        if (strcmp(tok2, (*rm_out)[j]) != 0) {
-                            if (nb[0]) strcat(nb, ",");
-                            strcat(nb, tok2);
-                        }
-                        tok2 = s2 ? s2 + 1 : NULL;
-                    }
-                    free(copy2);
-                }
-                free(working_labels);
-                working_labels = nb;
-            }
+            str_array_del_ci(add_out, add_count, r->then_rm_label[j]);
+            csv_del_ci(working_labels, r->then_rm_label[j]);
         }
     }
 
@@ -733,4 +749,45 @@ int mail_rules_apply(const MailRules *rules,
     return mail_rules_apply_ex(rules, from, subject, to, labels_csv, body,
                                message_date, add_out, add_count, rm_out, rm_count,
                                NULL);
+}
+
+void mail_msg_ctx_from_raw(MailMsgCtx *ctx, const char *raw) {
+    memset(ctx, 0, sizeof(*ctx));
+    if (!raw) return;
+    char *from_r = mime_get_header(raw, "From");
+    char *subj_r = mime_get_header(raw, "Subject");
+    char *to_r   = mime_get_header(raw, "To");
+    char *date_r = mime_get_header(raw, "Date");
+    ctx->from    = from_r ? mime_decode_words(from_r) : NULL;
+    ctx->subject = subj_r ? mime_decode_words(subj_r) : NULL;
+    ctx->to      = to_r   ? mime_decode_words(to_r)   : NULL;
+    ctx->date    = mime_parse_date(date_r);
+    ctx->body    = mime_get_text_body(raw);
+    free(from_r); free(subj_r); free(to_r); free(date_r);
+}
+
+void mail_msg_ctx_free(MailMsgCtx *ctx) {
+    free(ctx->from); free(ctx->subject); free(ctx->to); free(ctx->body);
+    memset(ctx, 0, sizeof(*ctx));
+}
+
+int mail_rules_apply_ctx(const MailRules *rules, const MailMsgCtx *ctx,
+                         const char *labels_csv,
+                         char ***add_out, int *add_count,
+                         char ***rm_out,  int *rm_count,
+                         char **move_folder_out) {
+    return mail_rules_apply_ex(rules, ctx->from ? ctx->from : "",
+                               ctx->subject ? ctx->subject : "",
+                               ctx->to ? ctx->to : "", labels_csv,
+                               ctx->body, ctx->date,
+                               add_out, add_count, rm_out, rm_count,
+                               move_folder_out);
+}
+
+int mail_rule_matches_ctx(const MailRule *rule, const MailMsgCtx *ctx,
+                          const char *labels_csv) {
+    return mail_rule_matches(rule, ctx->from ? ctx->from : "",
+                             ctx->subject ? ctx->subject : "",
+                             ctx->to ? ctx->to : "", labels_csv,
+                             ctx->body, ctx->date);
 }

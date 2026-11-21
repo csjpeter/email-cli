@@ -7153,30 +7153,19 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
                     }
                     /* Apply sorting rules to new message */
                     if (imap_rules && imap_rules->count > 0) {
-                        char *from_r = mime_get_header(raw, "From");
-                        char *subj_r = mime_get_header(raw, "Subject");
-                        char *to_r   = mime_get_header(raw, "To");
-                        char *fr_dec = from_r ? mime_decode_words(from_r) : NULL;
-                        char *su_dec = subj_r ? mime_decode_words(subj_r) : NULL;
+                        MailMsgCtx mctx;
+                        mail_msg_ctx_from_raw(&mctx, raw);   /* EMAIL-313 */
                         char **add_labels = NULL; int add_count = 0;
                         char **rm_labels  = NULL; int rm_count  = 0;
-                        int fired_count = mail_rules_apply(imap_rules,
-                                             fr_dec ? fr_dec : "",
-                                             su_dec ? su_dec : "",
-                                             to_r   ? to_r   : "",
-                                             NULL,  /* no label-based rules during sync */
-                                             NULL, (time_t)0, /* body/date unavailable */
+                        int fired_count = mail_rules_apply_ctx(imap_rules, &mctx,
+                                             NULL,  /* a new message has no custom labels yet */
                                              &add_labels, &add_count,
-                                             &rm_labels,  &rm_count);
+                                             &rm_labels,  &rm_count, NULL);
                         if (fired_count > 0) {
                             if (g_verbose) {
                                 for (int ri = 0; ri < imap_rules->count; ri++) {
                                     const MailRule *mr = &imap_rules->rules[ri];
-                                    if (mail_rule_matches(mr,
-                                                          fr_dec ? fr_dec : "",
-                                                          su_dec ? su_dec : "",
-                                                          to_r   ? to_r   : "",
-                                                          NULL, NULL, (time_t)0)) {
+                                    if (mail_rule_matches_ctx(mr, &mctx, NULL)) {
                                         printf("  [rule] \"%s\" \xe2\x86\x92 uid:%s",
                                                mr->name ? mr->name : "?", uid);
                                         for (int j = 0; j < mr->then_add_count; j++)
@@ -7207,8 +7196,7 @@ int email_service_sync(const Config *cfg, int force_reconcile) {
                             for (int ri = 0; ri < rm_count; ri++) free(rm_labels[ri]);
                             free(add_labels); free(rm_labels);
                         }
-                        free(from_r); free(subj_r); free(to_r);
-                        free(fr_dec); free(su_dec);
+                        mail_msg_ctx_free(&mctx);
                     }
                     free(raw);
                     fetched++;
@@ -7788,21 +7776,63 @@ int email_service_rules_revert(FILE *out, const char *only_account) {
 }
 
 /* ── apply_rules: print rule match lines ─────────────────────────────── */
-static void count_rule_matches(const MailRules *rules, int *counts, const char *from,
-                               const char *subject, const char *to, const char *labels) {
+static void count_rule_matches(const MailRules *rules, int *counts,
+                               const MailMsgCtx *ctx, const char *labels) {
     if (!counts) return;
     for (int r = 0; r < rules->count; r++)
-        if (mail_rule_matches(&rules->rules[r], from, subject, to, labels, NULL, (time_t)0))
+        if (mail_rule_matches_ctx(&rules->rules[r], ctx, labels))
             counts[r]++;
 }
 
+/* EMAIL-313: the context of a stored message for rules apply: the raw message
+ * when the local store has it (body and date included), else the cached
+ * decoded From and Subject. */
+static void apply_ctx_for(MailMsgCtx *ctx, const char *folder, const char *uid,
+                          const char *from, const char *subject) {
+    char *raw = local_msg_load(folder, uid);
+    if (raw) {
+        mail_msg_ctx_from_raw(ctx, raw);
+        free(raw);
+        return;
+    }
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->from    = from    ? strdup(from)    : NULL;
+    ctx->subject = subject ? strdup(subject) : NULL;
+}
+
+/* Gmail .hdr holds label ids; the rules see label names (as on sync). */
+static char *gmail_label_names_csv(const char *ids_csv) {
+    size_t cap = (ids_csv ? strlen(ids_csv) : 0) + 1;
+    char *out = calloc(cap + 1, 1);
+    if (!out || !ids_csv) return out;
+    char *copy = strdup(ids_csv);
+    if (!copy) return out;
+    char *tok = copy, *sep;
+    while (tok && *tok) {
+        sep = strchr(tok, ',');
+        if (sep) *sep = '\0';
+        char *name = local_gmail_label_name_lookup(tok);
+        const char *use = name ? name : tok;
+        size_t need = strlen(out) + strlen(use) + 2;
+        if (need > cap) {
+            char *nb = realloc(out, need + 1);
+            if (!nb) { free(name); break; }
+            out = nb; cap = need;
+        }
+        if (out[0]) strcat(out, ",");
+        strcat(out, use);
+        free(name);
+        tok = sep ? sep + 1 : NULL;
+    }
+    free(copy);
+    return out;
+}
+
 static void print_rule_matches(FILE *out, const MailRules *rules,
-                                const char *from, const char *subject,
-                                const char *to, const char *labels,
+                                const MailMsgCtx *ctx, const char *labels,
                                 const char *uid, int dry_run) {
     for (int r = 0; r < rules->count; r++) {
-        if (!mail_rule_matches(&rules->rules[r], from, subject, to, labels,
-                               NULL, (time_t)0))
+        if (!mail_rule_matches_ctx(&rules->rules[r], ctx, labels))
             continue;
         const MailRule *mr = &rules->rules[r];
         fprintf(out, "  %s \"%s\" \xe2\x86\x92 uid:%s",
@@ -7882,11 +7912,12 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
 
                 char **add_out = NULL; int add_count = 0;
                 char **rm_out  = NULL; int rm_count  = 0;
-                int fired = mail_rules_apply(rules,
-                                              fields[0], fields[1], NULL, fields[3],
-                                              NULL, (time_t)0,
-                                              &add_out, &add_count,
-                                              &rm_out,  &rm_count);
+                MailMsgCtx mctx;
+                apply_ctx_for(&mctx, "", uid, fields[0], fields[1]);
+                char *lnames = gmail_label_names_csv(fields[3]);
+                int fired = mail_rules_apply_ctx(rules, &mctx, lnames,
+                                                 &add_out, &add_count,
+                                                 &rm_out,  &rm_count, NULL);
                 if (fired > 0) {
                     /* Idempotency: skip if all changes already applied */
                     int has_new = 0;
@@ -7897,11 +7928,9 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
 
                     if (has_new) {
                         if (verbose || dry_run)
-                            print_rule_matches(out, rules, fields[0], fields[1],
-                                               NULL, fields[3], uid, dry_run);
+                            print_rule_matches(out, rules, &mctx, lnames, uid, dry_run);
                         fired_total++;
-                        count_rule_matches(rules, rule_counts, fields[0], fields[1],
-                                           NULL, fields[3]);
+                        count_rule_matches(rules, rule_counts, &mctx, lnames);
                         if (!dry_run) {
                             char old_lbl[4096];
                             snprintf(old_lbl, sizeof(old_lbl), "%s", fields[3] ? fields[3] : "");
@@ -7926,6 +7955,8 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
                     for (int j = 0; j < rm_count;  j++) free(rm_out[j]);
                     free(add_out); free(rm_out);
                 }
+                free(lnames);
+                mail_msg_ctx_free(&mctx);
                 free(hdr);
             }
             free(uids);
@@ -7996,14 +8027,12 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
 
                 char **add_out = NULL; int add_count = 0;
                 char **rm_out  = NULL; int rm_count  = 0;
-                int fired = mail_rules_apply_ex(rules,
-                                                e->from    ? e->from    : "",
-                                                e->subject ? e->subject : "",
-                                                NULL, existing,
-                                                NULL, (time_t)0,
-                                                &add_out, &add_count,
-                                                &rm_out,  &rm_count,
-                                                &move_folder);
+                MailMsgCtx mctx;
+                apply_ctx_for(&mctx, imap_folder, e->uid, e->from, e->subject);
+                int fired = mail_rules_apply_ctx(rules, &mctx, existing,
+                                                 &add_out, &add_count,
+                                                 &rm_out,  &rm_count,
+                                                 &move_folder);
                 if (fired > 0) {
                     /* Check if any new custom labels would be added/removed */
                     int has_new = 0;
@@ -8032,13 +8061,9 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
 
                     if (has_new) {
                         if (verbose || dry_run)
-                            print_rule_matches(out, rules,
-                                               e->from    ? e->from    : "",
-                                               e->subject ? e->subject : "",
-                                               NULL, existing, e->uid, dry_run);
+                            print_rule_matches(out, rules, &mctx, existing, e->uid, dry_run);
                         fired_total++;
-                        count_rule_matches(rules, rule_counts, e->from ? e->from : "",
-                                           e->subject ? e->subject : "", NULL, existing);
+                        count_rule_matches(rules, rule_counts, &mctx, existing);
                         if (!dry_run) {
                             int old_flags = e->flags;
                             /* Persist custom labels */
@@ -8085,6 +8110,7 @@ int email_service_apply_rules_to(FILE *out, const char *only_account,
                     for (int j = 0; j < rm_count;  j++) free(rm_out[j]);
                     free(add_out); free(rm_out);
                 }
+                mail_msg_ctx_free(&mctx);
                 free(move_folder); move_folder = NULL;
             }
 

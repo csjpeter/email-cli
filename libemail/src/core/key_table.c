@@ -109,7 +109,7 @@
     H(V, 'N', "Previous match", "n: next match"),                                   \
     H(V, 'a', "Save attachment", NULL),                                             \
     H(V, 'H', "History", "of this message, with Revert"),                           \
-    H(V, 'R', "Rules", "which rules match this message, and why its labels"),       \
+    H(V, 'R', "Rules", "which rules match, and why its labels"),       \
     R(V, '*', TUI_VERB_STAR, "Star", "toggle the star (flag)", EA_STAR),            \
     R(V, '+', TUI_VERB_READ, "Read / unread", "toggle read and unread", EA_READ),   \
     R(V, '!', TUI_VERB_JUNK, "Junk", "toggle junk", EA_JUNK),                       \

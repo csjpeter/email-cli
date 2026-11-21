@@ -83,10 +83,11 @@ email-cli archive 42 [--folder F]  # IMAP: to Archive folder; Gmail: removes lab
 email-cli create-folder NAME | delete-folder NAME          # IMAP
 email-cli create-label NAME | delete-label ID | add-label 42 LABEL | remove-label 42 LABEL   # Gmail
 email-cli rules list | rules apply [--dry-run] [--verbose] | rules remove --name N [--action K] | rules check   # check lists every problem of the rules files
+email-cli rules test KEY | rules copy --name N [--new-name M] | rules move --name N --to PLACE   # test: which rules match one cached message, and why its labels
 email-cli rules edit --name N [--action K] [--new-name M] [--if-from G] [--if-subject G] [--if-to G] [--if-label G] \
-    [--add-label L] [--remove-label L] [--move-folder F]   # changes only what is given
+    [--add-label L] [--remove-label L] [--move-folder F] [--when EXPR] [--forward-to ADDRESS] [--enable] [--disable]   # changes only what is given
 email-cli rules add --name N [--if-from G] [--if-subject G] [--if-to G] [--if-label G] [--match-all] \
-    [--add-label L] [--remove-label L] [--move-folder F]   # a condition or --match-all is required
+    [--add-label L] [--remove-label L] [--move-folder F] [--when EXPR] [--forward-to ADDRESS]   # a condition (--if-*, --when) or --match-all is required; --when is not mixed with --if-*
 email-cli remove-account ADDRESS     # deletes the account's configuration; local mail is kept
 email-cli history [OBJECT]           # recorded operations: who, when, old and new value, revertable or not
 email-cli revert ID [-q]             # takes a step back; asks first unless -q

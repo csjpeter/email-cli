@@ -134,7 +134,7 @@ recorded weakness, not coverage of the promise.
 | `email-tui` compose, reply, forward | P:test_review_s_sends_message P:test_reply_all_send P:test_forward_fill_to_opens_editor | |
 | `email-tui send` | F:114.3 | |
 | `email-tui reply` | F:114.7 | refusal without a UID; the reply itself P:test_review_reply_uses_review_screen |
-| `email-tui` rules editor | P:test_tui_rules_add_form_saves_new_rule P:test_screen_rules_deleted P:test_tui_rules_preview_and_apply P:test_screen_rules_preview | |
+| `email-tui` rules editor | P:test_rk_form_new_rule P:test_screen_rules_deleted P:test_rk_preview_apply_undo P:test_screen_rules_preview | |
 | `email-tui` Gmail labels and flags | P:test_feedback_t_label_added P:test_feedback_f_star | |
 | TUI file chooser: attach (`Ctrl-O` in the dialog; `a` in the review opens it at once, EMAIL-309) and save (`a`, `A`) | | P:test_attach_file_chooser_browse P:test_attach_file_chooser_typing P:test_attach_file_chooser_cancel P:test_show_save_chooser_browse; no CLI form (the CLI takes a path), EMAIL-291 |
 | TUI mark junk (`j`) | | gap: no PTY test; also listed in `docs/interface-parity.md`; ticket to be opened by the owner |

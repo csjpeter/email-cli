@@ -96,6 +96,17 @@ static inline void terminal_raw_exit_ptr(TermRawState **p) {
 TermKey terminal_read_key(void);
 
 /**
+ * Whether a key (or any input byte) is waiting on standard input, without
+ * blocking (EMAIL-305).  A long job driven by the event loop (the body
+ * search) asks this between its steps, so that a key press is answered at
+ * once instead of after the job.  Also true when the terminal was resized
+ * since the last key was read, so that the redraw is not held back.
+ *
+ * @return 1 when a key is waiting, 0 when none is.
+ */
+int terminal_key_pending(void);
+
+/**
  * Ask the program to quit at once (EMAIL-219): ctrl-c pressed in a modal
  * (a menu, a picker, a prompt) closes it, and the next terminal_read_key()
  * of the view underneath returns TERM_KEY_QUIT, as if ctrl-c had been

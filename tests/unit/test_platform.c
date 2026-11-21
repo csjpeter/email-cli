@@ -423,4 +423,25 @@ void test_platform(void) {
         ASSERT(strstr(got, "\033[1mbold") != NULL && strstr(got, "\033[K") != NULL,
                "TERM=xterm-256color: the escape sequences are written as they are");
     }
+
+    /* ── terminal_key_pending (EMAIL-305): asked between the steps of the
+     * body search, it must not block and must see a waiting key ─────── */
+    {
+        int pfd[2];
+        ASSERT(pipe(pfd) == 0, "key pending: pipe");
+        int saved = dup(STDIN_FILENO);
+        dup2(pfd[0], STDIN_FILENO);
+        ASSERT(terminal_key_pending() == 0, "key pending: an empty input has no key");
+        ssize_t w = write(pfd[1], "x", 1); (void)w;
+        ASSERT(terminal_key_pending() == 1, "key pending: a waiting key is seen");
+        ASSERT(terminal_key_pending() == 1, "key pending: it does not consume the key");
+        TermKey k = terminal_read_key();
+        ASSERT(k == TERM_KEY_IGNORE && terminal_last_printable() == 'x',
+               "key pending: the key is still read after the question");
+        ASSERT(terminal_key_pending() == 0, "key pending: none left after the read");
+        dup2(saved, STDIN_FILENO);
+        close(saved);
+        close(pfd[0]);
+        close(pfd[1]);
+    }
 }

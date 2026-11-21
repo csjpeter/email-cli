@@ -1030,6 +1030,123 @@ static void test_review_reply_uses_review_screen(void)
     pty_close(s);
 }
 
+/* ── EMAIL-307: email-tui embed reply ────────────────────────────────── */
+
+static PtySession *embed_reply_open(const char **extra)
+{
+    const char *args[16];
+    int n = 0;
+    args[n++] = g_tui_bin;
+    args[n++] = "embed";
+    for (int i = 0; extra[i] && n < 15; i++) args[n++] = extra[i];
+    args[n] = NULL;
+    PtySession *s = pty_open(COLS, ROWS);
+    if (!s) return NULL;
+    if (pty_run(s, args) != 0) { pty_close(s); return NULL; }
+    return s;
+}
+
+static void test_embed_reply_send(void)
+{
+    restart_servers();
+    const char *a[] = {"reply", "1", "--account", "testuser", "--json", NULL};
+    PtySession *s = embed_reply_open(a);
+    ASSERT(s != NULL, "embed reply: opens");
+    ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Email Account");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT(pty_editor_type_and_leave(s, "Embedded body") == 0, "embed reply: editor opens");
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
+    REVIEW_SEND(s);
+    ASSERT(pty_wait_exit(s, 8000) == 0, "embed reply: the send ends the program with 0");
+    ASSERT_WAIT_FOR(s, "{\"sent\":true,\"uid\":\"1\",\"folder\":\"INBOX\",\"id\":\"<", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "\"cancelled\":false}");
+    pty_close(s);
+}
+
+static void test_embed_reply_all_opens(void)
+{
+    restart_servers();
+    const char *a[] = {"reply", "1", "--all", "--account", "testuser", NULL};
+    PtySession *s = embed_reply_open(a);
+    ASSERT(s != NULL, "embed reply --all: opens");
+    ASSERT_WAIT_FOR(s, "Reply All", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT(pty_wait_exit(s, 5000) == 2, "embed reply --all: Esc exits with 2");
+    pty_close(s);
+}
+
+static void test_embed_reply_esc_cancels(void)
+{
+    restart_servers();
+    const char *a[] = {"reply", "1", "--account", "testuser", "--json", NULL};
+    PtySession *s = embed_reply_open(a);
+    ASSERT(s != NULL, "embed reply esc: opens");
+    ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT_WAIT_FOR(s, "Discard what was typed?", WAIT_MS);
+    pty_send_str(s, "y");
+    ASSERT(pty_wait_exit(s, 5000) == 2, "embed reply: Esc exits with 2");
+    ASSERT_WAIT_FOR(s, "{\"sent\":false,\"uid\":\"1\",\"folder\":\"INBOX\",\"id\":\"\",\"cancelled\":true}", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_embed_reply_review_discard_cancels(void)
+{
+    restart_servers();
+    const char *a[] = {"reply", "1", "--account", "testuser", NULL};
+    PtySession *s = embed_reply_open(a);
+    ASSERT(s != NULL, "embed reply discard: opens");
+    ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT(pty_editor_type_and_leave(s, "x") == 0, "embed reply discard: editor opens");
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
+    pty_send_str(s, "q");
+    pty_send_str(s, "y");
+    ASSERT(pty_wait_exit(s, 5000) == 2, "embed reply: discarding in the review exits with 2");
+    pty_close(s);
+}
+
+static void test_embed_reply_send_error(void)
+{
+    restart_servers();
+    const char *a[] = {"reply", "1", "--account", "testuser", "--json", NULL};
+    PtySession *s = embed_reply_open(a);
+    ASSERT(s != NULL, "embed reply send error: opens");
+    ASSERT_WAIT_FOR(s, "Reply", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT(pty_editor_type_and_leave(s, "x") == 0, "embed reply send error: editor opens");
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
+    stop_server(&g_smtp_pid);                 /* the send cannot succeed */
+    REVIEW_SEND(s);
+    ASSERT(pty_wait_exit(s, 15000) == 1, "embed reply: a send error exits with 1");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "\"sent\":true");
+    pty_close(s);
+}
+
+static void test_embed_reply_bad_arguments(void)
+{
+    restart_servers();
+    const char *a[] = {"reply", "1", "--account", "nobody", NULL};
+    PtySession *s = embed_reply_open(a);
+    ASSERT(s != NULL, "embed reply bad account: opens");
+    ASSERT_WAIT_FOR(s, "Account 'nobody' not found", WAIT_MS);
+    ASSERT(pty_wait_exit(s, 5000) == 1, "embed reply: an unknown account exits with 1");
+    pty_close(s);
+    const char *b[] = {"reply", "1", NULL};
+    s = embed_reply_open(b);
+    ASSERT(s != NULL, "embed reply no account: opens");
+    ASSERT(pty_wait_exit(s, 5000) == 1, "embed reply: no --account exits with 1");
+    pty_close(s);
+    const char *c[] = {"show", "1", "--all", "--account", "testuser", NULL};
+    s = embed_reply_open(c);
+    ASSERT(s != NULL, "embed show --all: opens");
+    ASSERT(pty_wait_exit(s, 5000) == 1, "embed show: --all exits with 1");
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  * main
  * ══════════════════════════════════════════════════════════════════════ */
@@ -1107,6 +1224,12 @@ int main(int argc, char *argv[])
     RUN_TEST(test_review_esc_asks_discard_confirm);
     RUN_TEST(test_review_empty_to_disables_send);
     RUN_TEST(test_review_reply_uses_review_screen);
+    RUN_TEST(test_embed_reply_send);
+    RUN_TEST(test_embed_reply_all_opens);
+    RUN_TEST(test_embed_reply_esc_cancels);
+    RUN_TEST(test_embed_reply_review_discard_cancels);
+    RUN_TEST(test_embed_reply_send_error);
+    RUN_TEST(test_embed_reply_bad_arguments);
 
     /* ── Cleanup ─────────────────────────────────────────────────────── */
     stop_server(&g_imap_pid);

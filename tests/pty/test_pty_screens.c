@@ -819,7 +819,7 @@ static PtySession *at_list_help(void) {
     PtySession *s = at_list();
     if (s) {
         pty_send_str(s, "?");
-        pty_wait_for(s, "shortcuts", WAIT_MS);
+        pty_wait_for(s, "Press d", WAIT_MS);
         pty_settle(s, SETTLE_MS);
     }
     return s;
@@ -887,13 +887,13 @@ VIEW(rules_list,       (write_rules(), at_rules()), (void)0)
 VIEW(compose_dialog,   at_list(),
      (pty_send_str(s, "c"), pty_wait_for(s, "New Message", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(accounts_help,    at_accounts(),
-     (pty_send_str(s, "?"), pty_wait_for(s, "shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
+     (pty_send_str(s, "?"), pty_wait_for(s, "Press d", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(folders_help,     at_folders(),
-     (pty_send_str(s, "?"), pty_wait_for(s, "shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
+     (pty_send_str(s, "?"), pty_wait_for(s, "Press d", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(list_help,        at_list(),
-     (pty_send_str(s, "?"), pty_wait_for(s, "shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
+     (pty_send_str(s, "?"), pty_wait_for(s, "Press d", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(reader_help,      at_reader(),
-     (pty_send_str(s, "?"), pty_wait_for(s, "shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
+     (pty_send_str(s, "?"), pty_wait_for(s, "Press d", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(list_search,      at_list(),
      (pty_send_str(s, "/"), pty_settle(s, SETTLE_MS)))
 VIEW(wizard_type,      at_accounts(),
@@ -1098,7 +1098,7 @@ VIEW(wiz_bad_type,    at_accounts(),
       pty_send_str(s, "9"), pty_send_key(s, PTY_KEY_ENTER), pty_settle(s, SETTLE_MS)))
 
 VIEW(rules_help,        (write_rules(), at_rules()),
-     (pty_send_str(s, "?"), pty_wait_for(s, "Rules shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
+     (pty_send_str(s, "?"), pty_wait_for(s, "Rules help", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(rules_delete_ask,  (write_rules(), at_rules()),
      (pty_send_str(s, "d"), pty_wait_for(s, "Delete the rule", WAIT_MS), pty_settle(s, SETTLE_MS)))
 VIEW(rules_deleted,     (write_rules(), at_rules()),
@@ -1129,7 +1129,7 @@ VIEW(rule_condition_form, (remove_rules(), at_rules()),
       pty_wait_for(s, "Add a condition", WAIT_MS), pty_send_str(s, "news"), pty_settle(s, SETTLE_MS)))
 VIEW(rule_form_help,    (write_rules(), at_rules()),
      (pty_send_key(s, PTY_KEY_ENTER), pty_wait_for(s, "Edit rule for", WAIT_MS),
-      pty_send_str(s, "?"), pty_wait_for(s, "Rule form shortcuts", WAIT_MS), pty_settle(s, SETTLE_MS)))
+      pty_send_str(s, "?"), pty_wait_for(s, "Rule form help", WAIT_MS), pty_settle(s, SETTLE_MS)))
 
 VIEW(w80_accounts, at_cols(80, at_accounts), (void)0)
 VIEW(w80_folders, at_cols(80, at_folders), (void)0)

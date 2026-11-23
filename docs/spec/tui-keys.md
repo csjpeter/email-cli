@@ -648,22 +648,29 @@ screen are covered by their own sections (EMAIL-147, EMAIL-151).
 
 | Key | Label | Behaviour | Test |
 |---|---|---|---|
-| `?` | `? help` (status line) | opens `<View> shortcuts` over the view; the view stays visible behind it | `test_hk_accounts`, `_folders`, `_list`, `_reader`, `_rules_list` (0 and 1 rules), `_rule_detail`, `_conditions` |
+| `?` | `? help` (status line) | opens `<View> help` over the view; the view stays visible behind it | `test_hk_accounts`, `_folders`, `_list`, `_reader`, `_rules_list` (0 and 1 rules), `_rule_detail`, `_conditions` |
 | `Esc`, `q`, `Backspace` | help: close | closes the overlay; the view is as it was (cursor, page, state) | the same |
 | `PgDn` `PgUp` `Home` `End` `Down` `Up` `j` `k` | | scroll the overlay when it is longer than the screen (the message list help is 20 rows plus rows below the 80x24 frame: `End` shows the last, `Home` the first); never close it | the same; `test_hk_list` for the long one |
 | `x` `h` `Enter` `Tab` `F1` `?` `Left` `Right` `Del` | | change nothing: the overlay stays, the view behind does not move | the same |
 | `h` outside the overlay | | is "back" in a list, never help | `test_hk_h_is_not_help` |
 
-Description of the view (EMAIL-181): every help overlay opens, under its
-title, with a one- to three-line description of the view (what it shows, what
-the cursor is on, the usual next step), then the keys.  The text is a
-description row (`DESC()`, no key, no action) of the view in the key table,
-`libemail/src/core/key_table.c`, so libtuikit draws it; the views whose key rows
-are a literal list in their code (accounts, rules, rule, conditions, body
-editor) take theirs from the same table through `ekeys_help_rows()`.  A test
-(`test_key_table`) fails for a view without one; the pty tests of each overlay
-look for the text; the same sentences are in the KEYS section of
-`docs/man/email-tui.1`.
+Description of the view (EMAIL-181, EMAIL-323): the page opens, under its
+title `<View> help`, with a first line that reminds of `d`, then the keys of the
+view.  `d` opens the description in a dialog of its own, titled `<View> view`:
+what the view is for and, for a table, one line for each column (`Date`, `Sts`,
+`Subject`, `From` of the message list, and so on); `Esc`, `q` or `Backspace`
+closes the description and the page with it.  The page is libtuikit's
+`tui_viewdoc` (v2.0.0.228, TUI-147), run by `tui_frame_run_viewdoc()`.  Every
+view has one: the message lists, the reader, the label and folder browsers, the
+review, the attachment picker, the accounts, rules, rule, conditions and the
+body editor (`libemail/src/core/view_doc.c`).  The statement is the view's
+`DESC()` row of the key table followed by what its parts mean; the columns are
+the arrays `EVD_*_COLS` that the tables are built from, so the title a column
+shows and the title its description names are written once.  Tests:
+`test_view_doc` (the column titles of every table against its description,
+`tui_viewdoc_check()`) and `test_hk_describe_columns` (`?`, `d`, `Esc`).
+The history screen (libtuikit's `tui_histview`) keeps libtuikit's own help
+page, which has no `d` yet.
 
 Findings: none; every view behaves the same.  Not changed (known from
 EMAIL-146): the overlays do not list `Backspace`, `Left`, `h`.

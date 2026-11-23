@@ -62,6 +62,7 @@ void test_html_render_flat_siblings_linear(void);
 void test_input_line(void);
 void test_tui_frame(void);
 void test_key_table(void);
+void test_view_doc(void);
 void test_key_table_menu_quick_keys(void);
 void test_compose_draft(void);
 void test_path_complete(void);
@@ -185,6 +186,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_input_line);
     RUN_TEST(test_tui_frame);
     RUN_TEST(test_key_table);
+    RUN_TEST(test_view_doc);
     RUN_TEST(test_key_table_menu_quick_keys);
     RUN_TEST(test_compose_draft);
     RUN_TEST(test_path_complete);

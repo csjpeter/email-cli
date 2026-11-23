@@ -1871,15 +1871,15 @@ static void test_picker_help(void) {
     PtySession *s = open_picker_n(2);
     ASSERT(s != NULL, "picker help: opens");
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Attachment picker shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Attachment picker help", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "The attachments of the message.");     /* EMAIL-181 */
+    ASSERT_SCREEN_CONTAINS(s, "Press d");     /* EMAIL-323: the description is behind d */
     ASSERT_SCREEN_CONTAINS(s, "Choose");
     ASSERT_SCREEN_CONTAINS(s, "Back");
     ASSERT_SCREEN_CONTAINS(s, "Page down");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Attachment picker shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Attachment picker help");
     ASSERT_SCREEN_CONTAINS(s, "Attachments (2)");
     pty_close(s);
 }
@@ -2973,7 +2973,7 @@ static void test_folder_help_lists_menu(void) {
     PtySession *s = open_folder_browser("folder help: opens");
     if (!s) return;
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Folder browser help", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Actions");
     pty_send_key(s, PTY_KEY_ESC);
     pty_close(s);
@@ -3587,9 +3587,9 @@ static void lk_help_body(void) {
     if (!s) return;
     pty_send_str(s, "z");                             /* no help key but ? */
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list help");
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message list help", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Down - move the cursor down");
     pty_send_str(s, "j");
@@ -3599,7 +3599,7 @@ static void lk_help_body(void) {
     ASSERT_SCREEN_CONTAINS(s, "Quit");               /* the last entry is reachable */
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list help");
     ASSERT_SCREEN_CONTAINS(s, "message(s) in");
     ASSERT_SCREEN_CONTAINS(s, "[1/30]");              /* the list did not move */
     pty_send_key(s, PTY_KEY_CTRL_C);
@@ -3792,7 +3792,7 @@ static void test_lk_one_message(void) {
     pty_send_key(s, PTY_KEY_BACK);
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message list help", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "[1/1]");
@@ -3821,10 +3821,10 @@ static void test_lk_empty_folder(void) {
     pty_row_text(s, 4, r4, sizeof r4);
     ASSERT(strstr(r4, "\xe2\x95\x90") == NULL, "list empty: the header rule does not wrap into the next row");
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message list help", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list help");
     ASSERT_SCREEN_CONTAINS(s, "0 of 0 message(s)");
     const char *dead[] = { "j", "k", " ", "x", "d", "r", "A", "F", "*", "+", "-", "!", "/", "n", "s", "g", "G", NULL };
     for (int i = 0; dead[i]; i++) pty_send_str(s, dead[i]);
@@ -4138,19 +4138,19 @@ static void test_rk_state_keys(void) {
     ASSERT_SCREEN_NOT_CONTAINS(s, "Actions");
     ASSERT_SCREEN_CONTAINS(s, "From:");
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Message reader shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message reader help", WAIT_MS);
     pty_send_str(s, "x");
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Message reader shortcuts");
+    ASSERT_SCREEN_CONTAINS(s, "Message reader help");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Message reader shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message reader help");
     ASSERT_SCREEN_CONTAINS(s, "From:");
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Message reader shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message reader help", WAIT_MS);
     pty_send_str(s, "q");
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Message reader shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message reader help");
     ASSERT_SCREEN_CONTAINS(s, "From:");
     rk_end(s);
 }
@@ -4466,7 +4466,7 @@ static void test_fk_tree_open_close(void) {
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Folder browser help", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Open branch");
     ASSERT_SCREEN_CONTAINS(s, "Close - tree: close");
     pty_send_key(s, PTY_KEY_ESC);
@@ -4772,7 +4772,7 @@ static void test_fk_help(void) {
     ASSERT(s != NULL, "folders help: opens");
     if (!s) return;
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Folder browser help", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "also g");
     ASSERT_SCREEN_CONTAINS(s, "also G");
     ASSERT_SCREEN_CONTAINS(s, "tree: open; flat view: as Enter");
@@ -4790,20 +4790,20 @@ static void test_fk_help(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "xtn");
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Folder browser shortcuts");
+    ASSERT_SCREEN_CONTAINS(s, "Folder browser help");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser help");
     ASSERT_ROW_CONTAINS(s, 23, "t flat");                /* t did not toggle */
     const struct { PtyKey key; const char *str; } close[] = {
         { 0, "q" }, { PTY_KEY_BACK, NULL },
     };
     for (int i = 0; i < 2; i++) {
         pty_send_str(s, "?");
-        ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+        ASSERT_WAIT_FOR(s, "Folder browser help", WAIT_MS);
         if (close[i].str) pty_send_str(s, close[i].str); else pty_send_key(s, close[i].key);
         pty_settle(s, SETTLE_MS);
-        ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser shortcuts");
+        ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser help");
         ASSERT_SCREEN_CONTAINS(s, "Folders \xe2\x80\x94");
     }
     fk_end(s);
@@ -4987,7 +4987,7 @@ static void test_menu_keys_help(void) {
     ASSERT(s != NULL, "menu keys help: opens");
     if (!s) { lk_env(0); return; }
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message list help", WAIT_MS);
     pty_send_key(s, PTY_KEY_END);                      /* the help scrolls: the tail */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "*, :s");
@@ -5469,19 +5469,19 @@ static void test_tui_accounts_help_panel(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "h");                    /* h is not a help key */
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Accounts shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Accounts help");
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Accounts shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Accounts help", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Open selected account");
     /* a key that is not a closing key changes nothing; Esc closes it
      * (policies/tui-interface-model.md, "The help screen") */
     pty_send_key(s, PTY_KEY_ENTER);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Accounts shortcuts");
+    ASSERT_SCREEN_CONTAINS(s, "Accounts help");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Accounts shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Accounts help");
     /* should be back on accounts screen */
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts");
     pty_send_key(s, PTY_KEY_ESC);
@@ -5498,19 +5498,19 @@ static void test_tui_list_help_panel(void) {
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "z");                    /* ? is the only help key */
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list help");
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message list help", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Compose");
     ASSERT_SCREEN_CONTAINS(s, "Delete");
     ASSERT_SCREEN_CONTAINS(s, "Actions");
     pty_send_key(s, PTY_KEY_ENTER);          /* not a closing key */
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "Message list shortcuts");
+    ASSERT_SCREEN_CONTAINS(s, "Message list help");
     pty_send_str(s, "q");                    /* q closes it */
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message list help");
     /* still in list view */
     ASSERT_SCREEN_CONTAINS(s, "message(s) in");
     pty_send_key(s, PTY_KEY_ESC);
@@ -5528,12 +5528,12 @@ static void test_tui_show_help_panel(void) {
     ASSERT_WAIT_FOR(s, "From:", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Message reader shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message reader help", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Reply");
     pty_send_key(s, PTY_KEY_BACK);           /* Backspace closes it */
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Message reader shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Message reader help");
     /* back in reader */
     ASSERT_SCREEN_CONTAINS(s, "r reply");
     pty_send_key(s, PTY_KEY_ESC);
@@ -5552,14 +5552,14 @@ static void test_tui_folders_help_panel(void) {
     ASSERT_WAIT_FOR(s, "Folders", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Folder browser shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Folder browser help", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_END);        /* EMAIL-225: the menu rows push it below the fold */
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Tree / flat");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Folder browser help");
     /* back in folder browser */
     ASSERT_SCREEN_CONTAINS(s, "Folders");
     pty_send_key(s, PTY_KEY_ESC);
@@ -5574,7 +5574,7 @@ static void test_tui_help_panel_question_mark(void) {
     ASSERT_WAIT_FOR(s, "message(s) in", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Message list shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Message list help", WAIT_MS);
     pty_settle(s, SETTLE_MS);
     pty_send_key(s, PTY_KEY_ESC);   /* Esc dismisses */
     pty_settle(s, SETTLE_MS);
@@ -7273,12 +7273,12 @@ static void test_accounts_keys_one_account(void) {
     ASSERT_SCREEN_CONTAINS(s, "[1/1]");
 
     pty_send_str(s, "?");                                /* help at 80x24 */
-    ASSERT_WAIT_FOR(s, "Accounts shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Accounts help", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Edit SMTP for account");
     ASSERT_SCREEN_NOT_CONTAINS(s, "Actions of a Gmail account");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Accounts shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Accounts help");
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts (1)");
 
     pty_send_str(s, "i");                                /* keep every field */
@@ -7353,7 +7353,7 @@ static void test_accounts_keys_no_account(void) {
     ASSERT_SCREEN_CONTAINS(s, "No accounts configured.");
 
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Accounts shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Accounts help", WAIT_MS);
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
     ASSERT_SCREEN_CONTAINS(s, "Email Accounts (0)");
@@ -7598,7 +7598,7 @@ static void test_bk_prompt_keys(void) {
     ASSERT_WAIT_FOR(s, "[3/30]", WAIT_MS);
     pty_send_str(s, "d");
     ASSERT_WAIT_FOR(s, "Move 2 marked messages to Trash?", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[ Yes ]  [ No ]");
+    ASSERT_SCREEN_CONTAINS(s, "[ Yes ]  [ No  ]");
     ASSERT_ROW_CONTAINS(s, 23, "y yes  n no  Esc/q/BS cancel");
     const char *ignored[] = { " ", "m", "r", "u", "f", "F", "l", "L", "D", "j", "x", "d", NULL };
     for (int i = 0; ignored[i]; i++) pty_send_str(s, ignored[i]);

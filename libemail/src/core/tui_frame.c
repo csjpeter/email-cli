@@ -172,6 +172,38 @@ tui_dialog_state tui_frame_run_dialog(tui_dialog *d) {
     return d->state;
 }
 
+static void draw_viewdoc(tui_canvas c, void *ctx) {
+    tui_viewdoc_render((tui_viewdoc_page *)ctx, c);
+}
+
+tui_dialog_state tui_frame_run_viewdoc(tui_viewdoc_page *p) {
+    tui_decoder dec;
+    tui_decoder_init(&dec);
+    KeyEvents winch;
+    key_events_begin(&winch);
+    while (p->state == TUI_DIALOG_OPEN) {
+        int rows = terminal_rows(), cols = terminal_cols();
+        if (rows <= 0) rows = 24;
+        if (cols <= 0) cols = 80;
+        tui_frame_overlay(draw_viewdoc, p, rows, cols);
+        tui_event ev;
+        int r = key_events_next(STDIN_FILENO, &dec, &ev, -1);
+        if (r <= 0 || ev.type == TUI_EV_HANGUP) {
+            p->state = TUI_DIALOG_CANCELLED;
+            break;
+        }
+        if (ev.type == TUI_EV_RESIZE) continue;
+        if (TUI_EV_IS_CTRL(&ev, 'c')) {   /* back, and the program quits */
+            terminal_request_quit();
+            ev.key = TUI_KEY_ESC; ev.mods = 0; ev.cp = 0; ev.utf8[0] = '\0';
+        }
+        tui_viewdoc_handle(p, &ev);
+    }
+    key_events_end(&winch);
+    tui_decoder_free(&dec);
+    return p->state;
+}
+
 typedef struct { tui_table *table; int row, col, h, w; } RowsOverlay;
 
 static void draw_rows(tui_canvas c, void *ctx) {

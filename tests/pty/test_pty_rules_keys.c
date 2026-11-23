@@ -397,12 +397,12 @@ static void test_rk_list_help_and_status(void) {
     const char *closers[] = { "Esc", "q", "BS", NULL };
     for (int i = 0; closers[i]; i++) {
         press(s, "?");
-        CHECK(s, pty_wait_for(s, "Rules shortcuts", WAIT_MS) == 0, "? opens the help");
+        CHECK(s, pty_wait_for(s, "Rules help", WAIT_MS) == 0, "? opens the help");
         CHECK(s, pty_screen_contains(s, "Add a rule") && pty_screen_contains(s, "Copy the rule")
                  && pty_screen_contains(s, "Undo the last apply") && pty_screen_contains(s, "(2 rules)"),
               "the help lists the keys and the list stays behind it");
         press(s, closers[i]);
-        CHECK(s, !pty_screen_contains(s, "Rules shortcuts") && pty_screen_contains(s, "(2 rules)"),
+        CHECK(s, !pty_screen_contains(s, "Rules help") && pty_screen_contains(s, "(2 rules)"),
               "%s closes the help and stays in the list", closers[i]);
     }
     pty_close(s);
@@ -831,10 +831,10 @@ static void test_rk_form_help_and_clash(void) {
     press(s, "Enter");
     pty_wait_for(s, "Edit rule for testuser", WAIT_MS);
     press(s, "?");
-    CHECK(s, pty_wait_for(s, "Rule form shortcuts", WAIT_MS) == 0 && pty_screen_contains(s, "Save the rule"),
+    CHECK(s, pty_wait_for(s, "Rule form help", WAIT_MS) == 0 && pty_screen_contains(s, "Save the rule"),
           "? opens the help of the form");
     press(s, "Esc");
-    CHECK(s, !pty_screen_contains(s, "Rule form shortcuts") && pty_screen_contains(s, "Edit rule for testuser"),
+    CHECK(s, !pty_screen_contains(s, "Rule form help") && pty_screen_contains(s, "Edit rule for testuser"),
           "Esc closes the help and stays in the form");
     press(s, "Enter");                     /* Name row */
     pty_wait_for(s, "Rule name", WAIT_MS);

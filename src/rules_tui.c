@@ -21,6 +21,7 @@
 #include "email_service.h"
 #include "key_events.h"
 #include "key_table.h"
+#include "view_doc.h"
 #include "mail_rules.h"
 #include "platform/terminal.h"
 #include "raii.h"
@@ -928,18 +929,10 @@ void rules_tui_editor(const Config *cfg) {
     const char *account = cfg->user;
     RAII_TERM_RAW TermRawState *_raw = terminal_raw_enter();
 
-    static const tui_table_col cols[] = {
-        { "#",           3, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
-        { "Rule",        8, 1, TUI_ALIGN_LEFT,  0, 0, 0 },
-        { "What it does", 20, 5, TUI_ALIGN_LEFT, 0, 0, 0 },
-        { "On",          3, 0, TUI_ALIGN_LEFT,  0, 0, 0 },
-        { "Matches",     7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
-        { "Last change", 16, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
-    };
     Overview ov = {0};
     tui_table_model model = { ov_row_cb, ov_cell_cb, &ov };
     tui_table t;
-    tui_table_init(&t, cols, 6, &model);
+    tui_table_init(&t, EVD_RULES_COLS, 6, &model);
     t.flags |= TUI_TABLE_RULER;
 
     RtIn in;

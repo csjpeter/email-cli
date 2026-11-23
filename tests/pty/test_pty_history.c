@@ -253,7 +253,7 @@ static void test_hist_tui_confirm_default_no(void) {
     CHECK(s, r >= 0, "the confirmation names the step");
     CHECK(s, find_row(s, "starred of mail INBOX/0000000000000001") >= 0 || find_row(s, "starred") >= 0,
           "it names the thing");
-    CHECK(s, find_row(s, "[ Yes ]") >= 0 && find_row(s, "[ No ]") >= 0, "it offers Yes and No");
+    CHECK(s, find_row(s, "[ Yes ]") >= 0 && find_row(s, "[ No  ]") >= 0, "it offers Yes and No");
     pty_send_key(s, PTY_KEY_ENTER);   /* the default answer */
     pty_settle(s, 400);
     CHECK(s, find_row(s, "[ Yes ]") < 0, "Enter (the default, No) closes the dialog");

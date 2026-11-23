@@ -1873,7 +1873,7 @@ static void test_picker_help(void) {
     pty_send_str(s, "?");
     ASSERT_WAIT_FOR(s, "Attachment picker help", WAIT_MS);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_CONTAINS(s, "The attachments of the message.");     /* EMAIL-181 */
+    ASSERT_SCREEN_CONTAINS(s, "Press d");     /* EMAIL-323: the description is behind d */
     ASSERT_SCREEN_CONTAINS(s, "Choose");
     ASSERT_SCREEN_CONTAINS(s, "Back");
     ASSERT_SCREEN_CONTAINS(s, "Page down");
@@ -7598,7 +7598,7 @@ static void test_bk_prompt_keys(void) {
     ASSERT_WAIT_FOR(s, "[3/30]", WAIT_MS);
     pty_send_str(s, "d");
     ASSERT_WAIT_FOR(s, "Move 2 marked messages to Trash?", WAIT_MS);
-    ASSERT_SCREEN_CONTAINS(s, "[ Yes ]  [ No ]");
+    ASSERT_SCREEN_CONTAINS(s, "[ Yes ]  [ No  ]");
     ASSERT_ROW_CONTAINS(s, 23, "y yes  n no  Esc/q/BS cancel");
     const char *ignored[] = { " ", "m", "r", "u", "f", "F", "l", "L", "D", "j", "x", "d", NULL };
     for (int i = 0; ignored[i]; i++) pty_send_str(s, ignored[i]);

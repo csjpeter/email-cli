@@ -11,6 +11,7 @@
 #include <tuikit/filechooser.h>
 #include <stddef.h>
 #include <tuikit/table.h>
+#include <tuikit/viewdoc.h>
 
 /**
  * @file tui_frame.h
@@ -85,6 +86,12 @@ int tui_frame_overlay(void (*draw)(tui_canvas c, void *ctx), void *ctx,
  * @return TUI_DIALOG_OK or TUI_DIALOG_CANCELLED (also when the input ends).
  */
 tui_dialog_state tui_frame_run_dialog(tui_dialog *d);
+
+/**
+ * @brief Runs the help page @p p (tui_viewdoc, EMAIL-323) as tui_frame_run_dialog()
+ *        runs a dialog: ? page, d for the description, Esc closes.
+ */
+tui_dialog_state tui_frame_run_viewdoc(tui_viewdoc_page *p);
 
 /**
  * @brief The keys every modal has that libtuikit's dialogs do not know

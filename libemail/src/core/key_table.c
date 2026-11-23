@@ -5,6 +5,7 @@
 #include "key_table.h"
 #include "key_events.h"
 #include "tui_frame.h"
+#include "view_doc.h"
 
 #include <tuikit/actions.h>
 #include <tuikit/dialog.h>
@@ -438,44 +439,14 @@ const char *ekeys_view_desc(const char *view) {
     return NULL;
 }
 
-#define DESC_WIDTH 64
-#define DESC_LINES 3
-
 void ekeys_help_rows(const char *view, const char *title, const char *const rows[][2], int n) {
     if (n < 0 || n > 64) return;
-    const char *pairs[2 * (64 + DESC_LINES + 1)];
-    char lines[DESC_LINES][DESC_WIDTH + 1];
-    int np = 0;
-    const char *desc = ekeys_view_desc(view);
-    if (desc) {
-        /* the description, wrapped at words to the width libtuikit uses */
-        int nl = 0;
-        const char *p = desc;
-        while (*p && nl < DESC_LINES) {
-            while (*p == ' ') p++;
-            size_t len = strlen(p);
-            size_t take = len <= DESC_WIDTH ? len : DESC_WIDTH;
-            if (take < len) {
-                size_t k = take;
-                while (k > 0 && p[k] != ' ') k--;
-                if (k > 0) take = k;
-            }
-            memcpy(lines[nl], p, take);
-            lines[nl][take] = '\0';
-            pairs[np++] = "";
-            pairs[np++] = lines[nl];
-            nl++;
-            p += take;
-        }
-        pairs[np++] = "";
-        pairs[np++] = "";
+    if (evdoc_get(view)) {      /* ? page, d for the description (EMAIL-323) */
+        evdoc_help(view, title, n > 0 ? &rows[0][0] : NULL, n);
+        return;
     }
-    for (int i = 0; i < n; i++) {
-        pairs[np++] = rows[i][0];
-        pairs[np++] = rows[i][1];
-    }
-    tui_dialog d;
-    if (tui_dialog_help(&d, title, pairs, np / 2) != 0) return;
+    tui_dialog d;               /* no such view: the keys only */
+    if (tui_dialog_help(&d, title, n > 0 ? &rows[0][0] : NULL, n) != 0) return;
     tui_frame_run_dialog(&d);
     tui_dialog_free(&d);
 }
@@ -515,7 +486,7 @@ void ekeys_help(const char *view, const char *title) {
             k++;
         }
     }
-    tui_frame_run_dialog(&h.dialog);
+    evdoc_help(view, title, (const char *const *)h.dialog.items, h.dialog.nitems);
     tui_keyhelp_free(&h);
 }
 

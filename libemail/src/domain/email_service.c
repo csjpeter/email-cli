@@ -10,6 +10,7 @@
 #include "input_line.h"
 #include "tui_frame.h"
 #include "key_table.h"
+#include "view_doc.h"
 #include "status_line.h"
 #include <tuikit/text.h>
 #include <tuikit/tree.h>
@@ -813,14 +814,9 @@ static int show_attachment_picker(const MimeAttachment *atts, int count,
     int cursor = 0;
     for (;;) {
         AttachModel am = { atts };
-        static const tui_table_col acols[] = {
-            { "Name", 20, 3, TUI_ALIGN_LEFT,  0, 0, 0 },
-            { "Type", 12, 2, TUI_ALIGN_LEFT,  0, 0, 0 },
-            { "Size",  8, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
-        };
         tui_table_model amod = { NULL, attach_cell, &am };
         tui_table atbl;
-        tui_table_init(&atbl, acols, 3, &amod);
+        tui_table_init(&atbl, EVD_ATTACH_COLS, 3, &amod);
         atbl.flags |= TUI_TABLE_NO_HEADER;
         tui_table_set_count(&atbl, count);
         tui_table_select(&atbl, cursor);
@@ -3682,17 +3678,11 @@ int email_service_list(const Config *cfg, EmailListOpts *opts) {
                                           : NULL;
 
     /* The TUI's table: columns, model and the marks of Space (EMAIL-86). */
-    static const tui_table_col list_cols[] = {
-        { "Date",    16, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
-        { "Sts",      6, 0, TUI_ALIGN_LEFT, 0, 0, 0 },
-        { "Subject", 10, 3, TUI_ALIGN_LEFT, 0, 0, 0 },
-        { "From",    10, 2, TUI_ALIGN_LEFT, 0, 0, 0 },
-    };
     MsgListModel lmodel = { entries, NULL, manifest, pending_remove, pending_label,
                             pending_restore, 0 };
     tui_table_model ltmodel = { msglist_row, msglist_cell, &lmodel };
     tui_table ltbl;
-    tui_table_init(&ltbl, list_cols, 4, &ltmodel);
+    tui_table_init(&ltbl, EVD_LIST_COLS, 4, &ltmodel);
     ltbl.flags |= TUI_TABLE_RULER | TUI_TABLE_MARKS;
     tui_table_set_row_id(&ltbl, msglist_row_id, &lmodel);
 
@@ -4977,15 +4967,9 @@ char *email_service_list_folders_interactive(const Config *cfg,
                                  vf_answered, vf_forwarded, 0 }, cursor,
                                tree_mode ? NULL : current_prefix,
                                tree_mode ? &ftree : NULL, trows };
-        static const tui_table_col fcols[] = {
-            { "Unread",  6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
-            { "Flagged", 7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
-            { "Folder", 20, 1, TUI_ALIGN_LEFT,  0, 0, 0 },
-            { "Total",   7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
-        };
         tui_table_model tmodel = { folders_row, folders_cell, &fmodel };
         tui_table tbl;
-        tui_table_init(&tbl, fcols, 4, &tmodel);
+        tui_table_init(&tbl, EVD_FOLDERS_COLS, 4, &tmodel);
         tbl.flags |= TUI_TABLE_RULER;
         tui_table_set_count(&tbl, display_count);
         tui_table_select(&tbl, cursor);
@@ -5867,13 +5851,9 @@ char *email_service_list_labels_interactive(const Config *cfg,
             vrow[nvrow++] = i;
         }
         LabelModel lmod = { lbl_ids, lbl_names, lbl_hdr, vrow };
-        static const tui_table_col lcols[] = {
-            { "Count",  6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
-            { "Label", 20, 1, TUI_ALIGN_LEFT,  0, 0, 0 },
-        };
         tui_table_model lt = { labels_row, labels_cell, &lmod };
         tui_table ltb;
-        tui_table_init(&ltb, lcols, 2, &lt);
+        tui_table_init(&ltb, EVD_LABELS_COLS, 2, &lt);
         ltb.flags |= TUI_TABLE_RULER;
         tui_table_set_count(&ltb, nvrow);
         tui_table_select(&ltb, cursor_vrow);
@@ -6259,19 +6239,10 @@ int email_service_account_interactive(Config **cfg_out, int *cursor_inout,
         for (int i = 0; i < count; i++)
             get_account_totals(accounts[i].cfg, &acc_unseen[i], &acc_flagged[i]);
 
-        static const tui_table_col acc_cols[] = {
-            { "Unread",   6, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
-            { "Flagged",  7, 0, TUI_ALIGN_RIGHT, 0, 0, 0 },
-            { "Account", 32, 0, TUI_ALIGN_LEFT,  0, 0, 0 },
-            { "Type",     5, 0, TUI_ALIGN_LEFT,  0, 0, 0 },
-            /* host:port is cut at the start, so the port stays visible */
-            { "Server",  10, 1, TUI_ALIGN_LEFT,  0, 0, TUI_COL_CUT_START },
-            { "Send via", 8, 1, TUI_ALIGN_LEFT,  0, 0, TUI_COL_CUT_START },
-        };
         AccountsModel am = { accounts, acc_unseen, acc_flagged };
         tui_table_model model = { NULL, accounts_cell, &am };
         tui_table tbl;
-        tui_table_init(&tbl, acc_cols, 6, &model);
+        tui_table_init(&tbl, EVD_ACCOUNTS_COLS, 6, &model);
         tbl.flags |= TUI_TABLE_RULER;
         tui_table_set_count(&tbl, count);
         tui_table_select(&tbl, cursor);

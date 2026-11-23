@@ -244,16 +244,19 @@ static PtySession *at_reader(void) {
  * Enter, Tab, F1, `?` again, Left, Right) change nothing: the overlay stays and
  * the view behind it does not move.
  */
+static void help_describe(PtySession *s, const char *title, const char *behind,
+                          const char *desc, const char *col_title, const char *col_text);
+
 static void help_cycle(PtySession *s, const char *title, const char *row,
                        const char *behind, const char *desc) {
     const char *closers[] = { "Esc", "q", "BS", NULL };
+    help_describe(s, title, behind, desc, NULL, NULL);
     const char *inert[]   = { "x", "h", "Enter", "Tab", "F1", "?", "Left", "Right", "Del", NULL };
     for (int i = 0; closers[i]; i++) {
         press(s, "?");
         CHECK(s, pty_wait_for(s, title, WAIT_MS) == 0, "%s: ? opens '%s'", closers[i], title);
         CHECK(s, pty_screen_contains(s, row), "%s: the help lists '%s'", title, row);
-        CHECK(s, pty_screen_contains(s, desc), "%s: the help opens with the description '%s'",
-              title, desc);
+        CHECK(s, pty_screen_contains(s, "Press d"), "%s: the first line reminds of d", title);
         CHECK(s, pty_screen_contains(s, behind), "%s: the view stays behind", title);
         for (int k = 0; inert[k]; k++) {
             press(s, inert[k]);
@@ -264,6 +267,28 @@ static void help_cycle(PtySession *s, const char *title, const char *row,
         CHECK(s, !pty_screen_contains(s, title) && pty_screen_contains(s, behind),
               "%s: %s closes the help, the view is as before", title, closers[i]);
     }
+}
+
+/* EMAIL-323: ? then d shows the description of the view (its statement and a
+ * line for each column of its table: @p col_title and @p col_text, or NULL for a
+ * view without a table); Esc closes the description and the page with it. */
+static void help_describe(PtySession *s, const char *title, const char *behind,
+                          const char *desc, const char *col_title, const char *col_text) {
+    press(s, "?");
+    CHECK(s, pty_wait_for(s, title, WAIT_MS) == 0, "%s: ? opens the page for d", title);
+    CHECK(s, pty_screen_contains(s, "Press d"), "%s: the first line reminds of d", title);
+    CHECK(s, !pty_screen_contains(s, desc), "%s: the page itself carries no description", title);
+    press(s, "d");
+    CHECK(s, pty_wait_for(s, desc, WAIT_MS) == 0, "%s: d shows the description '%s'", title, desc);
+    CHECK(s, pty_screen_contains(s, " view"), "%s: the description dialog is titled '... view'", title);
+    if (col_title) {
+        CHECK(s, pty_screen_contains(s, col_title) && pty_screen_contains(s, col_text),
+              "%s: the description has a line for column '%s'", title, col_title);
+    }
+    press(s, "Esc");
+    CHECK(s, !pty_screen_contains(s, desc) && !pty_screen_contains(s, title) &&
+             pty_screen_contains(s, behind),
+          "%s: Esc closes the description and the page, the view is as before", title);
 }
 
 /* PgDn End Down Up Home PgUp j k on an open overlay: no crash, no close. */
@@ -297,10 +322,10 @@ static void test_hk_accounts(void) {
     PtySession *s = at_accounts();
     ASSERT(s != NULL, "accounts help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Accounts shortcuts", "Add new account", "Email Accounts",
+    help_cycle(s, "Accounts help", "Add new account", "Email Accounts",
                "The accounts of the program.");
-    help_scroll(s, "Accounts shortcuts");
-    help_lists_backspace(s, "Accounts shortcuts");
+    help_scroll(s, "Accounts help");
+    help_lists_backspace(s, "Accounts help");
     pty_close(s);
 }
 
@@ -308,10 +333,10 @@ static void test_hk_folders(void) {
     PtySession *s = at_folders();
     ASSERT(s != NULL, "folders help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Folder browser shortcuts", "Actions", "Folders",
+    help_cycle(s, "Folder browser help", "Actions", "Folders",
                "The folders of the IMAP account");
-    help_scroll(s, "Folder browser shortcuts");
-    help_lists_backspace(s, "Folder browser shortcuts");
+    help_scroll(s, "Folder browser help");
+    help_lists_backspace(s, "Folder browser help");
     pty_close(s);
 }
 
@@ -319,14 +344,14 @@ static void test_hk_list(void) {
     PtySession *s = at_list();
     ASSERT(s != NULL, "list help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Message list shortcuts", "Compose", "message(s) in",
+    help_cycle(s, "Message list help", "Compose", "message(s) in",
                "The messages of one folder");
-    help_scroll(s, "Message list shortcuts");
-    help_lists_backspace(s, "Message list shortcuts");
+    help_scroll(s, "Message list help");
+    help_lists_backspace(s, "Message list help");
     /* The list help is longer than the 80x24 screen: End shows its last rows,
      * Home the first ones again. */
     press(s, "?");
-    CHECK(s, pty_wait_for(s, "Message list shortcuts", WAIT_MS) == 0, "long help opens");
+    CHECK(s, pty_wait_for(s, "Message list help", WAIT_MS) == 0, "long help opens");
     press(s, "End");
     CHECK(s, pty_screen_contains(s, "Help") && !pty_screen_contains(s, "move the cursor down"),
           "End scrolls the long help to its last rows");
@@ -340,10 +365,10 @@ static void test_hk_reader(void) {
     PtySession *s = at_reader();
     ASSERT(s != NULL, "reader help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Message reader shortcuts", "Down", "From:",
+    help_cycle(s, "Message reader help", "Down", "From:",
                "One message, rendered as text.");
-    help_scroll(s, "Message reader shortcuts");
-    help_lists_backspace(s, "Message reader shortcuts");
+    help_scroll(s, "Message reader help");
+    help_lists_backspace(s, "Message reader help");
     pty_close(s);
 }
 
@@ -352,9 +377,9 @@ static void test_hk_rules_list(void) {
         PtySession *s = at_rules(n);
         ASSERT(s != NULL, "rules help: opens");
         CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-        help_cycle(s, "Rules shortcuts", "Add a rule", "Rules for",
+        help_cycle(s, "Rules help", "Add a rule", "Rules for",
                "The mail rules that sort");
-        help_scroll(s, "Rules shortcuts");
+        help_scroll(s, "Rules help");
         pty_close(s);
     }
 }
@@ -363,18 +388,41 @@ static void test_hk_rule_form(void) {
     PtySession *s = at_form(1);
     ASSERT(s != NULL, "form help: opens");
     CHECK(s, pty_row_contains(s, STATUS_ROW, "? help"), "status line names ?");
-    help_cycle(s, "Rule form shortcuts", "Save the rule", "Edit rule for testuser",
+    help_cycle(s, "Rule form help", "Save the rule", "Edit rule for testuser",
                "One mail rule as a form");
-    help_scroll(s, "Rule form shortcuts");
+    help_scroll(s, "Rule form help");
     pty_close(s);
 }
 
 /* The keys that close a view are not help keys: h is "back" in a list. */
+/* EMAIL-323: d describes every column of the table of the view. */
+static void test_hk_describe_columns(void) {
+    PtySession *s = at_accounts();
+    ASSERT(s != NULL, "accounts describe: opens");
+    help_describe(s, "Accounts help", "Email Accounts", "The accounts of the program.",
+                  "Send via", "the server that sends the mail");
+    pty_close(s);
+    s = at_folders();
+    ASSERT(s != NULL, "folders describe: opens");
+    help_describe(s, "Folder browser help", "Folders", "The folders of the IMAP account",
+                  "Flagged", "the starred messages");
+    pty_close(s);
+    s = at_list();
+    ASSERT(s != NULL, "list describe: opens");
+    help_describe(s, "Message list help", "message(s) in", "The messages of one folder",
+                  "Subject", "the subject of the message");
+    pty_close(s);
+    s = at_reader();
+    ASSERT(s != NULL, "reader describe: opens");
+    help_describe(s, "Message reader help", "From:", "Not a table", NULL, NULL);
+    pty_close(s);
+}
+
 static void test_hk_h_is_not_help(void) {
     PtySession *s = at_list();
     ASSERT(s != NULL, "h: list opens");
     press(s, "h");
-    CHECK(s, !pty_screen_contains(s, "shortcuts") && pty_screen_contains(s, "Folders"),
+    CHECK(s, !pty_screen_contains(s, "Press d") && pty_screen_contains(s, "Folders"),
           "h in the list goes back, it shows no help");
     pty_close(s);
 }
@@ -404,6 +452,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_hk_reader);
     RUN_TEST(test_hk_rules_list);
     RUN_TEST(test_hk_rule_form);
+    RUN_TEST(test_hk_describe_columns);
     RUN_TEST(test_hk_h_is_not_help);
 
     if (g_mock_pid > 0) { kill(g_mock_pid, SIGKILL); waitpid(g_mock_pid, NULL, 0); }

@@ -915,7 +915,7 @@ static void test_review_help_and_pick_attachment(void)
     PtySession *s = compose_to_review("alice@example.com", "Pick attach test");
     ASSERT(s != NULL, "EMAIL-168: review reached");
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Review shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Review help", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Edit headers");
     ASSERT_SCREEN_CONTAINS(s, "Discard");
     pty_send_key(s, PTY_KEY_ESC);

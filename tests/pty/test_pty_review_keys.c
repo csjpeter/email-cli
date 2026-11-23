@@ -196,20 +196,20 @@ static void test_ed_help_overlay(void) {
     ASSERT(s != NULL, "ed help: opens");
     pty_send_str(s, "abc");
     pty_send_key(s, PTY_KEY_F1);
-    ASSERT_WAIT_FOR(s, "Body editor shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Body editor help", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "Save and stay");
     ASSERT_SCREEN_CONTAINS(s, "The body of the message being composed");   /* EMAIL-181 */
     ASSERT_SCREEN_CONTAINS(s, "Esc, then q in the review");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, 200);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Body editor shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Body editor help");
     ASSERT_ROW_CONTAINS(s, 1, "abc");
     pty_send_str(s, "\x07");                    /* Ctrl-G */
-    ASSERT_WAIT_FOR(s, "Body editor shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Body editor help", WAIT_MS);
     pty_send_str(s, "h");                       /* any other key changes nothing */
     pty_send_str(s, "q");
     pty_settle(s, 200);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Body editor shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Body editor help");
     ASSERT_ROW_CONTAINS(s, 1, "abc");
     pty_send_key(s, PTY_KEY_ESC);
     ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
@@ -565,7 +565,7 @@ static void test_rv_help(void) {
     PtySession *s = review("Help", "x");
     ASSERT(s != NULL, "rv help: reached");
     pty_send_str(s, "?");
-    ASSERT_WAIT_FOR(s, "Review shortcuts", WAIT_MS);
+    ASSERT_WAIT_FOR(s, "Review help", WAIT_MS);
     ASSERT_SCREEN_CONTAINS(s, "The composed message, ready to send");      /* EMAIL-181 */
     ASSERT_SCREEN_CONTAINS(s, "Edit headers");
     ASSERT_SCREEN_CONTAINS(s, "Edit body");
@@ -573,7 +573,7 @@ static void test_rv_help(void) {
     ASSERT_SCREEN_CONTAINS(s, "Discard");
     pty_send_key(s, PTY_KEY_ESC);
     pty_settle(s, SETTLE_MS);
-    ASSERT_SCREEN_NOT_CONTAINS(s, "Review shortcuts");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Review help");
     ASSERT_ROW_CONTAINS(s, 0, "Review: Message");
     discard(s);
     pty_close(s);

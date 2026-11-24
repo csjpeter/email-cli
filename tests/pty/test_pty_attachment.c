@@ -1147,6 +1147,98 @@ static void test_embed_reply_bad_arguments(void)
     pty_close(s);
 }
 
+/* ── EMAIL-308: email-tui embed compose ──────────────────────────────── */
+
+static void embed_compose_body_file(char *path, size_t n)
+{
+    snprintf(path, n, "%s/embed-body.txt", g_test_home);
+    FILE *f = fopen(path, "w");
+    if (f) { fputs("Body from a file\n", f); fclose(f); }
+}
+
+static void test_embed_compose_send(void)
+{
+    restart_servers();
+    char bf[700];
+    embed_compose_body_file(bf, sizeof(bf));
+    const char *a[] = {"compose", "--account", "testuser", "--to", "bob@example.org",
+                       "--subject", "Embedded subject", "--body-file", bf, "--json", NULL};
+    PtySession *s = embed_reply_open(a);
+    ASSERT(s != NULL, "embed compose: opens");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    ASSERT_SCREEN_NOT_CONTAINS(s, "Email Account");
+    ASSERT_SCREEN_CONTAINS(s, "bob@example.org");
+    ASSERT_SCREEN_CONTAINS(s, "Embedded subject");
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT_WAIT_FOR(s, PTY_EDITOR_MARK, WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "Body from a file");
+    ASSERT(pty_editor_type_and_leave(s, NULL) == 0, "embed compose: editor opens");
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
+    REVIEW_SEND(s);
+    ASSERT(pty_wait_exit(s, 8000) == 0, "embed compose: the send ends the program with 0");
+    ASSERT_WAIT_FOR(s, "{\"sent\":true,\"id\":\"<", WAIT_MS);
+    ASSERT_SCREEN_CONTAINS(s, "\"cancelled\":false}");
+    pty_close(s);
+}
+
+static void test_embed_compose_esc_cancels(void)
+{
+    restart_servers();
+    const char *a[] = {"compose", "--account", "testuser", "--json", NULL};
+    PtySession *s = embed_reply_open(a);
+    ASSERT(s != NULL, "embed compose esc: opens");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ESC);
+    ASSERT(pty_wait_exit(s, 5000) == 2, "embed compose: Esc exits with 2");
+    ASSERT_WAIT_FOR(s, "{\"sent\":false,\"id\":\"\",\"cancelled\":true}", WAIT_MS);
+    pty_close(s);
+}
+
+static void test_embed_compose_send_error(void)
+{
+    restart_servers();
+    const char *a[] = {"compose", "--account", "testuser", "--to", "bob@example.org",
+                       "--subject", "S", "--json", NULL};
+    PtySession *s = embed_reply_open(a);
+    ASSERT(s != NULL, "embed compose send error: opens");
+    ASSERT_WAIT_FOR(s, "New Message", WAIT_MS);
+    pty_send_key(s, PTY_KEY_ENTER);
+    ASSERT(pty_editor_type_and_leave(s, "x") == 0, "embed compose send error: editor opens");
+    ASSERT_WAIT_FOR(s, "actions (send)", WAIT_MS);
+    stop_server(&g_smtp_pid);
+    REVIEW_SEND(s);
+    ASSERT(pty_wait_exit(s, 15000) == 1, "embed compose: a send error exits with 1");
+    ASSERT_SCREEN_NOT_CONTAINS(s, "\"sent\":true");
+    pty_close(s);
+}
+
+static void test_embed_compose_bad_arguments(void)
+{
+    restart_servers();
+    const char *a[] = {"compose", "--account", "nobody", NULL};
+    PtySession *s = embed_reply_open(a);
+    ASSERT(s != NULL, "embed compose bad account: opens");
+    ASSERT_WAIT_FOR(s, "Account 'nobody' not found", WAIT_MS);
+    ASSERT(pty_wait_exit(s, 5000) == 1, "embed compose: an unknown account exits with 1");
+    pty_close(s);
+    const char *b[] = {"compose", NULL};
+    s = embed_reply_open(b);
+    ASSERT(s != NULL, "embed compose no account: opens");
+    ASSERT(pty_wait_exit(s, 5000) == 1, "embed compose: no --account exits with 1");
+    pty_close(s);
+    const char *c[] = {"compose", "--account", "testuser", "--body-file", "/nonexistent/none", NULL};
+    s = embed_reply_open(c);
+    ASSERT(s != NULL, "embed compose bad body file: opens");
+    ASSERT_WAIT_FOR(s, "cannot read --body-file", WAIT_MS);
+    ASSERT(pty_wait_exit(s, 5000) == 1, "embed compose: an unreadable body file exits with 1");
+    pty_close(s);
+    const char *d[] = {"show", "1", "--to", "x@example.org", "--account", "testuser", NULL};
+    s = embed_reply_open(d);
+    ASSERT(s != NULL, "embed show --to: opens");
+    ASSERT(pty_wait_exit(s, 5000) == 1, "embed show: --to exits with 1");
+    pty_close(s);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  * main
  * ══════════════════════════════════════════════════════════════════════ */
@@ -1230,6 +1322,10 @@ int main(int argc, char *argv[])
     RUN_TEST(test_embed_reply_review_discard_cancels);
     RUN_TEST(test_embed_reply_send_error);
     RUN_TEST(test_embed_reply_bad_arguments);
+    RUN_TEST(test_embed_compose_send);
+    RUN_TEST(test_embed_compose_esc_cancels);
+    RUN_TEST(test_embed_compose_send_error);
+    RUN_TEST(test_embed_compose_bad_arguments);
 
     /* ── Cleanup ─────────────────────────────────────────────────────── */
     stop_server(&g_imap_pid);

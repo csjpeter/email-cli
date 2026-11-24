@@ -121,6 +121,21 @@ selector, no list.
 | send error | shown, the draft is kept, exit 1 | `test_embed_reply_send_error` |
 | unknown account, missing `--account`, `--all` with `show` | error on stderr, exit 1 | `test_embed_reply_bad_arguments` |
 
+## Embedded compose, `email-tui embed compose` (EMAIL-308)
+
+`email-tui embed compose --account ADDRESS [--to A] [--subject S] [--body-file F]
+[--json]` opens the New Message dialog with To and Subject filled, then the body
+editor (starting with the text of the file) and the review screen; the program
+ends with the send.  No account selector, no list.
+
+| Key / case | Result | Test |
+|---|---|---|
+| (start) | the New Message dialog at once, To and Subject filled; the editor holds the file | `test_embed_compose_send` |
+| send from the review | program ends, exit 0; `--json`: `{"sent":true,"id":"<Message-ID>","cancelled":false}` | `test_embed_compose_send` |
+| `Esc` in the dialog | exit 2, nothing sent; `--json`: `"sent":false,"cancelled":true` | `test_embed_compose_esc_cancels` |
+| send error | shown, the draft is kept, exit 1 | `test_embed_compose_send_error` |
+| unknown account, missing `--account`, unreadable `--body-file`, `--to` with `show` | error on stderr, exit 1 | `test_embed_compose_bad_arguments` |
+
 ## Message list, IMAP account (EMAIL-143)
 
 The list opens with `Enter` on a folder of the folder browser.  The table has

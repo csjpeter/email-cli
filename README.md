@@ -197,6 +197,8 @@ email-tui embed show <uid> --account <address> [--folder <name>] [--json]
                                       # For use inside another program: the message view only
 email-tui embed reply <uid> [--all] --account <address> [--folder <name>] [--json]
                                       # The same, the reply editor; ends with the send
+email-tui embed compose --account <address> [--to <addr>] [--subject <text>] [--body-file <file>] [--json]
+                                      # The same, a new message
 ```
 
 **Embedding** (`embed`): another program (for example a todo page that lists mail with
@@ -208,7 +210,9 @@ With `--json` one line `{"viewed":true,"uid":"4711","folder":"INBOX","cancelled"
 written to stdout when the view is left.  `embed reply 4711 [--all] --account ...` opens the reply editor as `reply` does and ends
 after the send (exit 0, with `--json`: `{"sent":true,"uid":"4711","folder":"INBOX","id":"<message-id>","cancelled":false}`);
 Esc cancels (exit 2, nothing sent); a send error is shown, the draft is kept, exit 1.
-The `compose` view follows in EMAIL-308.
+`embed compose --account ... [--to A] [--subject S] [--body-file F]` opens the new-message
+editor with those fields filled and ends after the send the same way (`--json`:
+`{"sent":true,"id":"<message-id>","cancelled":false}`; Esc cancels with exit 2).
 
 When composing or replying, `email-tui` shows a form for the headers, then its own
 body editor (Esc saves and continues, Ctrl-S saves; the text is autosaved as a draft that

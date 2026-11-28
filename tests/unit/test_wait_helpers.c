@@ -9,6 +9,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -128,7 +129,36 @@ static void test_wh_sleeping(void) {
     ASSERT(test_wait_sleeping(999999999, 50) == -1, "wait_sleeping: -1 for no such process");
 }
 
+/* A reaped child counts as exited even when a SIGCHLD handler took it. */
+static int wh_reaped;
+static void wh_reaper(int sig) {
+    (void)sig;
+    int st;
+    while (waitpid(-1, &st, WNOHANG) > 0) wh_reaped++;
+}
+
+static void test_wait_child_reaped_by_handler(void) {
+    struct sigaction sa, old;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = wh_reaper;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGCHLD, &sa, &old);
+    wh_reaped = 0;
+    pid_t pid = fork();
+    if (pid == 0) _exit(0);
+    ASSERT(test_wait_child(pid, NULL, 5000) == 0,
+           "wait_child: 0 for a child a SIGCHLD handler reaped");
+    sigaction(SIGCHLD, &old, NULL);
+}
+
 void test_wait_helpers(void) {
+    /* Earlier suites leave a reaping SIGCHLD handler behind (email_service):
+     * the status tests need the default, the handler case is tested below. */
+    struct sigaction dfl, old;
+    memset(&dfl, 0, sizeof(dfl));
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    sigaction(SIGCHLD, &dfl, &old);
     RUN_TEST(test_wait_until_ends_when_it_holds);
     RUN_TEST(test_wait_until_times_out);
     RUN_TEST(test_wait_child_exited);
@@ -136,4 +166,6 @@ void test_wait_helpers(void) {
     RUN_TEST(test_wh_port);
     RUN_TEST(test_wh_file);
     RUN_TEST(test_wh_sleeping);
+    RUN_TEST(test_wait_child_reaped_by_handler);
+    sigaction(SIGCHLD, &old, NULL);
 }

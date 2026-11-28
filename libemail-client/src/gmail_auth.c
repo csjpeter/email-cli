@@ -253,9 +253,18 @@ static char *wait_for_auth_code(int listen_fd, const char *state, GmailAuthUi *u
         struct timeval rtv = {5, 0};
         setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof(rtv));
 
+        /* Read the whole request head (up to the blank line): a close() with
+         * unread input sends a reset, and the browser would then lose the
+         * answer written just before it (EMAIL-324). */
         char req[4096] = {0};
-        ssize_t n = read(conn, req, sizeof(req) - 1);
-        if (n <= 0) { close(conn); continue; }
+        size_t got = 0;
+        while (got < sizeof(req) - 1 && !strstr(req, "\r\n\r\n")) {
+            ssize_t n = read(conn, req + got, sizeof(req) - 1 - got);
+            if (n <= 0) break;
+            got += (size_t)n;
+            req[got] = '\0';
+        }
+        if (got == 0) { close(conn); continue; }
         /* Only the request line matters; the rest is headers. */
         char *eol = strpbrk(req, "\r\n");
         if (eol) *eol = '\0';

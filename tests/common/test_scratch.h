@@ -108,9 +108,11 @@ int test_wait_until(int (*cond)(void *arg), void *arg, int ms);
  *
  * A child still alive at the limit is killed (SIGKILL) and reaped, so a test
  * that failed before it talked to its mock does not hang the suite.
+ * A child that a SIGCHLD handler of the code under test reaped already
+ * (waitpid() says ECHILD) counts as exited; @p status is then left as it was.
  * @param status receives the wait status (may be NULL).
  * @return 0 when the child exited by itself, 1 when it had to be killed,
- *         -1 when @p pid is not a child of ours (or <= 0).
+ *         -1 when @p pid <= 0.
  */
 int test_wait_child(pid_t pid, int *status, int ms);
 

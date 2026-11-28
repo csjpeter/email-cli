@@ -293,7 +293,7 @@ int test_wait_until(int (*cond)(void *arg), void *arg, int ms)
     }
 }
 
-struct child_want { pid_t pid; int *status; int gone; };
+struct child_want { pid_t pid; int *status; };
 
 static int child_exited(void *arg)
 {
@@ -302,15 +302,16 @@ static int child_exited(void *arg)
     pid_t r = waitpid(c->pid, &st, WNOHANG);
     if (r == 0) return 0;
     if (r == c->pid && c->status) *c->status = st;
-    if (r < 0) c->gone = 1;
     return 1;
 }
 
 int test_wait_child(pid_t pid, int *status, int ms)
 {
     if (pid <= 0) return -1;
-    struct child_want c = { pid, status, 0 };
-    if (test_wait_until(child_exited, &c, ms) == 0) return c.gone ? -1 : 0;
+    struct child_want c = { pid, status };
+    /* ECHILD: a SIGCHLD handler of the code under test (bg_sync_sigchld)
+     * reaped it already, so it has exited; its status is unknown then. */
+    if (test_wait_until(child_exited, &c, ms) == 0) return 0;
     fprintf(stderr, "test_wait_child: pid %d still runs after %d ms: killed\n",
             (int)pid, ms);
     kill(pid, SIGKILL);

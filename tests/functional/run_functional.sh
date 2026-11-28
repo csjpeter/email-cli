@@ -38,6 +38,8 @@ while [ $# -gt 0 ]; do
 done
 
 PROJECT_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+# shellcheck source=../common/wait.sh
+. "$PROJECT_ROOT/tests/common/wait.sh"
 cd "$PROJECT_ROOT"
 
 if [ "$LIST_ONLY" = 1 ]; then
@@ -136,14 +138,10 @@ alloc_port() {
 # up at once, steady when the machine is loaded.  A timeout is reported on
 # stderr with the port; the checks that follow then fail on their own.
 wait_listen() {
-    local v p i
+    local v
     for v in "$@"; do
-        p="${!v}"
-        for i in $(seq 1 100); do
-            ss -ltn "sport = :$p" | grep -q LISTEN && continue 2
-            sleep 0.1   # poll interval of the wait itself
-        done
-        echo "wait_listen: nothing listens on port $p ($v) after 10 s" >&2
+        wait_for 10 port_listens "${!v}" ||
+            echo "wait_listen: nothing listens on port ${!v} ($v) after 10 s" >&2
     done
     return 0
 }
@@ -152,14 +150,10 @@ wait_listen() {
 # on the port named by each variable, e.g. after a mock was killed and before
 # another one takes its port (EMAIL-321).
 wait_closed() {
-    local v p i
+    local v
     for v in "$@"; do
-        p="${!v}"
-        for i in $(seq 1 100); do
-            ss -ltn "sport = :$p" | grep -q LISTEN || continue 2
-            sleep 0.1   # poll interval of the wait itself
-        done
-        echo "wait_closed: port $p ($v) still listens after 10 s" >&2
+        wait_for 10 port_closed "${!v}" ||
+            echo "wait_closed: port ${!v} ($v) still listens after 10 s" >&2
     done
     return 0
 }
@@ -6455,9 +6449,8 @@ for c in $CLIENTS94; do
     # Status 124 (timeout) is the expected end of such a client.
     wait "$c" && W94=0 || W94=$?
 done
-# kept: a fixed grace period; the check below is that the mock is still alive
-# some time after the cut-off clients ended, and no event marks "nothing happened"
-sleep 1
+# No grace period (EMAIL-324): the mock is alive now, and the greeting below is
+# the later positive signal that it went on serving after the cut-off clients.
 kill -0 "$PID94" && ALIVE94=yes || ALIVE94=no
 check "94.2 the mock is still running" "^yes$" "$ALIVE94"
 # s_client may be ended by the timeout (status 124); the greeting is what counts.
@@ -6726,10 +6719,8 @@ for kind100 in imap gmail smtp; do
     (cd "$PROJECT_ROOT/build" && env -u ${PFX100}_PORT "${PFX100}_PORT_FILE=$PF100B" \
         "$BIN100") >"$WORK_DIR/mock100-$kind100-b.log" 2>&1 &
     PID100B=$!
-    for _ in $(seq 1 50); do
-        [ -s "$PF100A" ] && [ -s "$PF100B" ] && break
-        sleep 0.1
-    done
+    wait_for 5 test -s "$PF100A" && wait_for 5 test -s "$PF100B" ||
+        echo "  [100] a $kind100 mock published no port in 5 s" >&2
     check "100.1 $kind100 mock publishes its port" "^[0-9][0-9]*$" "$(cat "$PF100A" 2>&1)"
     PORT100A=$(cat "$PF100A"); PORT100B=$(cat "$PF100B")
     check_not "100.2 $kind100 mock port is not the old fixed one" "^\(9993\|9025\|9997\)$" "$PORT100A"
@@ -6891,7 +6882,8 @@ F113_OUT="$H_F113/loopback.out"
  export GMAIL_API_BASE_URL="http://localhost:$GMAIL113_PORT/gmail/v1/users/me"
  "$BIN_DIR/email-cli" config reauth --no-browser </dev/null >"$F113_OUT" 2>&1) &
 F113_PID=$!
-for _ in $(seq 1 50); do grep -q "Waiting for authorization" "$F113_OUT" && break; sleep 0.2; done
+wait_for 10 grep -q "Waiting for authorization" "$F113_OUT" ||
+    echo "  [113] no prompt in 10 s; the program printed: $(cat "$F113_OUT")" >&2
 F113_FWD_PORT=$(sed -n 's/.*ssh -L \([0-9]*\):localhost.*/\1/p' "$F113_OUT" | head -1)
 F113_STATE=$(sed -n 's/.*[?&]state=\([A-Za-z0-9_-]*\).*/\1/p' "$F113_OUT" | head -1)
 # EMAIL-302: a stray request (no state, then a wrong one, carrying an injected
@@ -6910,7 +6902,7 @@ f113_request() {
                  IFS= read -r -t 10 line <&7
                  printf '%s' "$line" ) || reply=""
         if [ -n "$reply" ]; then F113_REPLY_LINE="$reply"; return 0; fi
-        sleep 0.3
+        sleep 0.3   # back-off of a bounded retry (5 requests), not a wait: each try is a new request
     done
     return 1
 }
@@ -6921,13 +6913,9 @@ f113_request_shown() {
 }
 # Wait until the program listens (event) before the first request.
 f113_listening() {
-    local hex try
+    local hex
     hex=$(printf '%04X' "${F113_FWD_PORT:-0}")
-    for try in $(seq 1 50); do
-        grep -q -E "^ *[0-9]+: 0100007F:$hex 00000000:0000 0A " /proc/net/tcp && return 0
-        sleep 0.1
-    done
-    return 1
+    wait_for 5 grep -q -E "^ *[0-9]+: 0100007F:$hex 00000000:0000 0A " /proc/net/tcp
 }
 f113_listening || echo "  [113] nothing listens on 127.0.0.1:${F113_FWD_PORT:-?}; the program printed: $(cat "$F113_OUT")"
 f113_request_shown "/callback?code=evil";                  F113_STRAY1="$F113_REPLY_LINE"
@@ -6958,7 +6946,8 @@ F113_OUT="$H_F113/browser.out"
  export GMAIL_API_BASE_URL="http://localhost:$GMAIL113_PORT/gmail/v1/users/me"
  "$BIN_DIR/email-cli" config reauth </dev/null >"$F113_OUT" 2>&1) &
 F113_PID=$!
-for _ in $(seq 1 50); do [ -e "$H_F113/bin/browser-started" ] && break; sleep 0.2; done
+wait_for 10 test -e "$H_F113/bin/browser-started" ||
+    echo "  [113] the browser was not started in 10 s; the program printed: $(cat "$F113_OUT")" >&2
 F113_FWD_PORT=$(sed -n 's/.*ssh -L \([0-9]*\):localhost.*/\1/p' "$F113_OUT" | head -1)
 F113_STATE=$(sed -n 's/.*[?&]state=\([A-Za-z0-9_-]*\).*/\1/p' "$H_F113/bin/browser-started" | head -1)
 exec 7<>"/dev/tcp/127.0.0.1/${F113_FWD_PORT:-0}"

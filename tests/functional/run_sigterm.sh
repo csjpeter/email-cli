@@ -15,6 +15,8 @@
 set -u
 cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
+# shellcheck source=../common/wait.sh
+. "$ROOT/tests/common/wait.sh"
 BIN="${EMAIL_TEST_BIN_DIR:-$ROOT/bin}"
 PASSED=0; FAILED=0
 ok()  { echo "  [PASS] $1"; PASSED=$((PASSED + 1)); }
@@ -44,13 +46,15 @@ PID=$!
 # Wait until the handler is installed: /proc/PID/status lists the signals the
 # process catches (SigCgt, a hex mask); SIGTERM is bit 14 (0x4000).  The wrapper
 # of memcheck execs Valgrind first, so this can take a while.
-caught=0
-for _ in $(seq 1 600); do
-    [ -d "/proc/$PID" ] || break
+# Also ends when the process is gone.
+catches_term() {
+    local mask
+    [ -d "/proc/$PID" ] || return 0
     mask=$(awk '/^SigCgt:/ { print $2 }' "/proc/$PID/status")
-    if [ -n "$mask" ] && [ $(( 0x$mask & 0x4000 )) -ne 0 ]; then caught=1; break; fi
-    sleep 0.1
-done
+    [ -n "$mask" ] && [ $(( 0x$mask & 0x4000 )) -ne 0 ] && caught=1
+}
+caught=0
+wait_for 60 catches_term || echo "sigterm: no SIGTERM handler after 60 s" >&2
 if [ "$caught" -eq 1 ] && [ -d "/proc/$PID" ]; then ok "1.1 email-tui is running and catches SIGTERM"
 else bad "1.1 email-tui does not catch SIGTERM: $(cat "$WORK/err")"; fi
 

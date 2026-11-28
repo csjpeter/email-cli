@@ -152,8 +152,8 @@ static void test_term_resize_returns_ignored(void) {
     pid_t parent = getpid();
     pid_t kid = fork();
     if (kid == 0) {
-        struct timespec ts = { 0, 300 * 1000000L };
-        nanosleep(&ts, NULL);
+        /* the parent is blocked in terminal_read_key() (EMAIL-324) */
+        (void)test_wait_sleeping(parent, 5000);
         kill(parent, SIGWINCH);
         _exit(0);
     }

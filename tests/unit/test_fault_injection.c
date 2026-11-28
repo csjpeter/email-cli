@@ -100,7 +100,7 @@ static pid_t peer_start(int lfd, int tls, PeerMode mode)
     if (mode == PEER_GARBAGE) {
         const char *g = "this is not TLS\r\n";
         ssize_t w = write(c, g, strlen(g)); (void)w;
-        fi_sleep_ms(200);
+        fi_sleep_ms(200);                   /* stand: the peer holds the line open, it does not wait for anything */
         close(c);
         _exit(0);
     }
@@ -114,19 +114,19 @@ static pid_t peer_start(int lfd, int tls, PeerMode mode)
         if (SSL_accept(ssl) != 1) _exit(2);
     }
     if (mode == PEER_RESET) {
-        fi_sleep_ms(100);                   /* the client is past its handshake */
+        fi_sleep_ms(100);                   /* stand: the client is past its handshake (TLS 1.3 tickets) */
         peer_reset_close(c);
         _exit(0);
     }
     if (mode == PEER_SLOW) {
-        fi_sleep_ms(400);
+        fi_sleep_ms(400);                   /* stand: the slowness is the behaviour under test */
         if (ssl) SSL_write(ssl, "late", 4);
         else { ssize_t w = write(c, "late", 4); (void)w; }
-        fi_sleep_ms(300);
+        fi_sleep_ms(300);                   /* stand: the line stays open after the answer */
         close(c);
         _exit(0);
     }
-    fi_sleep_ms(5000);                      /* PEER_SILENT */
+    fi_sleep_ms(5000);                      /* PEER_SILENT: the silence is the behaviour under test */
     close(c);
     _exit(0);
 }
@@ -216,7 +216,9 @@ static void test_net_tls_write_after_reset(void)
     close(l);
     NetConn *c = peer_connect(port, 1, 5, NULL, 0);
     ASSERT(c != NULL, "connected to the resetting peer");
-    fi_sleep_ms(400);                       /* the RST has arrived */
+    /* the peer exits right after its close() sent the RST */
+    ASSERT(test_wait_child(p, NULL, 5000) == 0, "the resetting peer has reset and exited");
+    p = -1;
     static unsigned char big[4 << 20];
     memset(big, 'x', sizeof(big));
     ASSERT(net_conn_write_all(c, big, sizeof(big)) != 0,
@@ -239,7 +241,8 @@ static void test_net_plain_write_after_reset(void)
     close(l);
     NetConn *c = peer_connect(port, 0, 5, NULL, 0);
     ASSERT(c != NULL, "plain connection made");
-    fi_sleep_ms(400);
+    ASSERT(test_wait_child(p, NULL, 5000) == 0, "the resetting peer has reset and exited");
+    p = -1;
     static unsigned char big[4 << 20];
     memset(big, 'y', sizeof(big));
     ASSERT(net_conn_write_all(c, big, sizeof(big)) != 0, "plain write to a reset peer fails");

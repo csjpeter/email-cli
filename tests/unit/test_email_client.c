@@ -160,6 +160,8 @@ static void ec_imap_child(int lfd, SSL_CTX *ctx, int report_fd)
     SSL *ssl = SSL_new(ctx);
     SSL_set_fd(ssl, cfd);
     if (SSL_accept(ssl) <= 0) { GCOV_FLUSH(); _exit(1); }
+    /* A deliberate stand, not a wait (EMAIL-324): the mock stays silent so
+     * that the client is blocked in its read while SIGALRM interrupts it. */
     if (g_greeting_delay_ms > 0) usleep((useconds_t)g_greeting_delay_ms * 1000);
     ec_say(ssl, "* OK mock ready\r\n");
     static const char msg[] = "From: a@example.org\r\nSubject: Hi\r\n\r\nHello.\r\n";
@@ -305,6 +307,16 @@ static void ec_collect(pid_t pid, int rd, char *out, size_t cap)
         kill(pid, SIGKILL);
         waitpid(pid, &st, 0);
     }
+}
+
+/* End the Gmail mock once the client is closed (EMAIL-324).  The mock serves
+ * up to four connections and would otherwise sit in accept() until its
+ * alarm, two minutes, before ec_collect() sees the end of its report.  Every
+ * request the client made was answered, and the mock writes its report
+ * before it answers, so the report is complete in the pipe by now. */
+static void ec_gmail_done(pid_t pid)
+{
+    if (pid > 0) kill(pid, SIGKILL);
 }
 
 static void ec_account(emc_account *a, int imap_port, int smtp_port)
@@ -617,6 +629,7 @@ static void test_ec_gmail_send(void)
     unsetenv("GMAIL_API_BASE_URL");
 
     char got[16384];
+    ec_gmail_done(pid);
     ec_collect(pid, rd, got, sizeof(got));
     ASSERT(st == EMC_OK, "gmail: send succeeds");
     ASSERT(strstr(got, "POST") != NULL && strstr(got, "/messages/send") != NULL,
@@ -989,6 +1002,7 @@ static void test_ec_gmail_send_wire(void)
     unsetenv("GMAIL_TEST_TOKEN");
     unsetenv("GMAIL_API_BASE_URL");
     char got[16384];
+    ec_gmail_done(pid);
     ec_collect(pid, rd, got, sizeof(got));
     ASSERT(st == EMC_OK && r.status == EMC_OK, "gmail wire: sent");
     ASSERT(strstr(got, "/messages/send") != NULL, "gmail wire: through the API");

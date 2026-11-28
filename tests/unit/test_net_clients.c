@@ -88,6 +88,15 @@ static void sendall(int c, const char *s, size_t n)
     }
 }
 
+/* Say nothing until the client gives up and closes the connection (its own
+ * timeout is what the test checks): no guess at how long that takes
+ * (EMAIL-324).  The mock's alarm() is the ceiling. */
+static void silent_until_hangup(int fd)
+{
+    char b[512];
+    while (read(fd, b, sizeof(b)) > 0) { /* drain until EOF or reset */ }
+}
+
 static pid_t http_mock(int lfd, int rounds)
 {
     pid_t pid = fork();
@@ -134,7 +143,7 @@ static pid_t http_mock(int lfd, int rounds)
             sendall(c, body, 65536);
             free(body);
         } else if (strcmp(path, "/slow") == 0) {
-            sleep(5);
+            silent_until_hangup(c);
         } else if (strcmp(path, "/garbage") == 0) {
             const char *r = "this is not http\r\n\r\n";
             sendall(c, r, strlen(r));
@@ -382,7 +391,7 @@ static void smtp_session(Link *l, SmtpMode mode, int starttls, SSL_CTX *tctx, in
         } else if (strncasecmp(line, "MAIL", 4) == 0 && mode == SM_HANGUP_MAIL) {
             return;
         } else if (strncasecmp(line, "MAIL", 4) == 0 && mode == SM_SILENT_MAIL) {
-            sleep(5);
+            silent_until_hangup(l->fd);
             return;
         } else if (strncasecmp(line, "EHLO", 4) == 0) {
             const char *auth = mode == SM_LOGIN_ONLY ? "250-AUTH LOGIN\r\n" : "250-AUTH PLAIN LOGIN\r\n";

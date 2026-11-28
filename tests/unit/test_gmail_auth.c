@@ -23,15 +23,8 @@
 
 /* Wait for child with 5-second timeout, then SIGKILL. */
 static void wait_child(pid_t pid) {
-    if (pid <= 0) return;
-    for (int i = 0; i < 50; i++) {
-        int st;
-        if (waitpid(pid, &st, WNOHANG) != 0) return;
-        struct timespec ts = {0, 100000000L};
-        nanosleep(&ts, NULL);
-    }
-    kill(pid, SIGKILL);
-    int st; waitpid(pid, &st, 0);
+    /* Reap the mock; killed after 5 s so a test that never connected cannot hang. */
+    (void)test_wait_child(pid, NULL, 5000);
 }
 
 static void run_mock_token_server_expect(int port, const char *response,
@@ -66,36 +59,42 @@ static int g_mock_report_fd = -1;
  *
  * Runs in the forked child and never returns.
  */
-static int redirect_deliver(const char *request, int deadline_ms) {
-    for (int waited = 0; waited <= deadline_ms; waited += 50) {
-        for (int port = REDIRECT_PORT_FIRST; port <= REDIRECT_PORT_LAST; port++) {
-            int fd = socket(AF_INET, SOCK_STREAM, 0);
-            if (fd < 0) continue;
-            struct timeval tv = {1, 0};
-            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+/* The file exists and is not empty (a stub has written its line). */
+static int file_has_data(void *arg) {
+    struct stat st;
+    return stat((const char *)arg, &st) == 0 && st.st_size > 0;
+}
 
-            struct sockaddr_in ca = {0};
-            ca.sin_family      = AF_INET;
-            ca.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-            ca.sin_port        = htons((uint16_t)port);
+/* One scan of the redirect range: 1 when a listener took and answered the request. */
+static int redirect_scan(void *arg) {
+    const char *request = arg;
+    for (int port = REDIRECT_PORT_FIRST; port <= REDIRECT_PORT_LAST; port++) {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0) continue;
+        struct timeval tv = {1, 0};
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-            if (connect(fd, (struct sockaddr *)&ca, sizeof(ca)) == 0) {
-                ssize_t w = write(fd, request, strlen(request));
-                if (w == (ssize_t)strlen(request)) {
-                    char buf[512];
-                    ssize_t r = read(fd, buf, sizeof(buf));
-                    if (r > 0) { close(fd); return 0; }   /* answered: this was it */
-                }
-                close(fd);
-                continue;                                  /* wrong peer — keep looking */
+        struct sockaddr_in ca = {0};
+        ca.sin_family      = AF_INET;
+        ca.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        ca.sin_port        = htons((uint16_t)port);
+
+        if (connect(fd, (struct sockaddr *)&ca, sizeof(ca)) == 0) {
+            ssize_t w = write(fd, request, strlen(request));
+            if (w == (ssize_t)strlen(request)) {
+                char buf[512];
+                ssize_t r = read(fd, buf, sizeof(buf));
+                if (r > 0) { close(fd); return 1; }   /* answered: this was it */
             }
-            close(fd);
         }
-        struct timespec ts = {0, 50000000L};   /* 50 ms */
-        nanosleep(&ts, NULL);
+        close(fd);                                     /* refused or wrong peer */
     }
-    return 1;
+    return 0;
+}
+
+static int redirect_deliver(const char *request, int deadline_ms) {
+    return test_wait_until(redirect_scan, (void *)request, deadline_ms) == 0 ? 0 : 1;
 }
 
 static void redirect_child(const char *request, int deadline_ms) {
@@ -856,7 +855,7 @@ static void test_open_browser_runs_no_shell(void) {
     char url[512];
     snprintf(url, sizeof(url), "http://x/?a=x';touch %s/pwned;'", dir);
     gmail_login_open_browser(url);
-    for (int i = 0; i < 50 && access(rec, F_OK) != 0; i++) usleep(100000);
+    (void)test_wait_until(file_has_data, (void *)rec, 5000);   /* the stub wrote the URL */
     setenv("PATH", oldpath, 1);
     free(oldpath);
     free(cwd);

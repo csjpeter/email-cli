@@ -323,18 +323,8 @@ static pid_t mc_start_server(int *port_out, int count) {
 }
 
 static void mc_wait(pid_t pid) {
-    if (pid <= 0) return;
-    /* Poll with timeout: if server child doesn't exit within 5s, kill it.
-     * This prevents infinite hangs when a test fails before connecting. */
-    for (int i = 0; i < 50; i++) {
-        int st;
-        pid_t r = waitpid(pid, &st, WNOHANG);
-        if (r != 0) return;
-        struct timespec ts = {0, 100000000L}; /* 100ms */
-        nanosleep(&ts, NULL);
-    }
-    kill(pid, SIGKILL);
-    int st; waitpid(pid, &st, 0);
+    /* Reap the mock; killed after 5 s so a test that never connected cannot hang. */
+    (void)test_wait_child(pid, NULL, 5000);
 }
 
 /* Build a connected Gmail MailClient pointing to our mock server */
@@ -392,8 +382,6 @@ static void test_mc_gmail_list(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_list: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_list: client connected");
 
@@ -416,8 +404,6 @@ static void test_mc_gmail_list_null_sep(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_list_nullsep: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_list_nullsep: client connected");
 
@@ -437,8 +423,6 @@ static void test_mc_gmail_search_all(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_search_all: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_search_all: client connected");
     mail_client_select(mc, "INBOX");
@@ -456,8 +440,6 @@ static void test_mc_gmail_search_unread(void) {
     int port = 0;
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_search_unread: could not start server"); return; }
-
-    usleep(20000);
 
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_search_unread: client connected");
@@ -477,8 +459,6 @@ static void test_mc_gmail_search_flagged(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_search_flagged: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_search_flagged: client connected");
 
@@ -495,8 +475,6 @@ static void test_mc_gmail_search_done(void) {
     int port = 0;
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_search_done: could not start server"); return; }
-
-    usleep(20000);
 
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_search_done: client connected");
@@ -515,8 +493,6 @@ static void test_mc_gmail_fetch_headers(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_fetch_hdrs: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_fetch_hdrs: client connected");
 
@@ -533,8 +509,6 @@ static void test_mc_gmail_fetch_body(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_fetch_body: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_fetch_body: client connected");
 
@@ -550,8 +524,6 @@ static void test_mc_gmail_fetch_flags(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_fetch_flags: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_fetch_flags: client connected");
 
@@ -566,8 +538,6 @@ static void test_mc_gmail_set_flag_seen(void) {
     int port = 0;
     pid_t pid = mc_start_server(&port, 2); /* modify called twice */
     if (pid < 0) { ASSERT(0, "gmail_set_flag_seen: could not start server"); return; }
-
-    usleep(20000);
 
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_set_flag_seen: client connected");
@@ -588,8 +558,6 @@ static void test_mc_gmail_set_flag_flagged(void) {
     int port = 0;
     pid_t pid = mc_start_server(&port, 2);
     if (pid < 0) { ASSERT(0, "gmail_set_flag_flagged: could not start server"); return; }
-
-    usleep(20000);
 
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_set_flag_flagged: client connected");
@@ -627,8 +595,6 @@ static void test_mc_gmail_trash(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_trash: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_trash: client connected");
 
@@ -660,8 +626,6 @@ static void test_mc_gmail_mark_junk(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_junk: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_junk: client connected");
 
@@ -677,8 +641,6 @@ static void test_mc_gmail_mark_notjunk(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_notjunk: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_notjunk: client connected");
 
@@ -693,8 +655,6 @@ static void test_mc_gmail_create_label(void) {
     int port = 0;
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_create_label: could not start server"); return; }
-
-    usleep(20000);
 
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_create_label: client connected");
@@ -712,8 +672,6 @@ static void test_mc_gmail_delete_label(void) {
     int port = 0;
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_delete_label: could not start server"); return; }
-
-    usleep(20000);
 
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_delete_label: client connected");
@@ -775,8 +733,6 @@ static void test_mc_gmail_modify_label_add(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_modify_label_add: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_modify_label_add: client connected");
 
@@ -791,8 +747,6 @@ static void test_mc_gmail_modify_label_remove(void) {
     int port = 0;
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_modify_label_rm: could not start server"); return; }
-
-    usleep(20000);
 
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_modify_label_rm: client connected");
@@ -809,8 +763,6 @@ static void test_mc_gmail_append(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_append: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_append: client connected");
 
@@ -826,8 +778,6 @@ static void test_mc_gmail_list_with_ids(void) {
     int port = 0;
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_list_with_ids: could not start server"); return; }
-
-    usleep(20000);
 
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_list_with_ids: client connected");
@@ -1013,8 +963,6 @@ static void test_mc_gmail_fetch_headers_lf_boundary(void) {
     pid_t pid = mc_start_lf_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_fetch_hdrs_lf: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_fetch_hdrs_lf: client connected");
 
@@ -1198,7 +1146,6 @@ static void test_mc_imap_uses_labels(void) {
     pid_t pid = mc_start_imap_server(&port);
     if (pid < 0) { ASSERT(0, "imap_uses_labels: start server failed"); return; }
 
-    usleep(20000);
     MailClient *mc = mc_make_imap_client(port);
     ASSERT(mc != NULL, "imap_uses_labels: client connected");
     ASSERT(mail_client_uses_labels(mc) == 0, "imap_uses_labels: returns 0");
@@ -1212,7 +1159,6 @@ static void test_mc_imap_list_with_ids(void) {
     pid_t pid = mc_start_imap_server(&port);
     if (pid < 0) { ASSERT(0, "imap_list_with_ids: start server failed"); return; }
 
-    usleep(20000);
     MailClient *mc = mc_make_imap_client(port);
     ASSERT(mc != NULL, "imap_list_with_ids: client connected");
 
@@ -1237,7 +1183,6 @@ static void test_mc_imap_fetch_flags(void) {
     pid_t pid = mc_start_imap_server(&port);
     if (pid < 0) { ASSERT(0, "imap_fetch_flags: start server failed"); return; }
 
-    usleep(20000);
     MailClient *mc = mc_make_imap_client(port);
     ASSERT(mc != NULL, "imap_fetch_flags: client connected");
 
@@ -1255,7 +1200,6 @@ static void test_mc_imap_trash(void) {
     pid_t pid = mc_start_imap_server(&port);
     if (pid < 0) { ASSERT(0, "imap_trash: start server failed"); return; }
 
-    usleep(20000);
     MailClient *mc = mc_make_imap_client(port);
     ASSERT(mc != NULL, "imap_trash: client connected");
 
@@ -1273,7 +1217,6 @@ static void test_mc_imap_move_to_folder(void) {
     pid_t pid = mc_start_imap_server(&port);
     if (pid < 0) { ASSERT(0, "imap_move: start server failed"); return; }
 
-    usleep(20000);
     MailClient *mc = mc_make_imap_client(port);
     ASSERT(mc != NULL, "imap_move: client connected");
 
@@ -1290,7 +1233,6 @@ static void test_mc_imap_delete(void) {
     pid_t pid = mc_start_imap_server(&port);
     if (pid < 0) { ASSERT(0, "imap_delete: start server failed"); return; }
 
-    usleep(20000);
     MailClient *mc = mc_make_imap_client(port);
     ASSERT(mc != NULL, "imap_delete: client connected");
 
@@ -1307,8 +1249,6 @@ static void test_mc_gmail_delete(void) {
     pid_t pid = mc_start_server(&port, 1);
     if (pid < 0) { ASSERT(0, "gmail_delete: could not start server"); return; }
 
-    usleep(20000);
-
     MailClient *mc = mc_make_gmail_client(port);
     ASSERT(mc != NULL, "gmail_delete: client connected");
 
@@ -1324,7 +1264,6 @@ static void test_mc_imap_create_label_fails_connected(void) {
     pid_t pid = mc_start_imap_server(&port);
     if (pid < 0) { ASSERT(0, "imap_create_label_conn: start server failed"); return; }
 
-    usleep(20000);
     MailClient *mc = mc_make_imap_client(port);
     ASSERT(mc != NULL, "imap_create_label_conn: client connected");
 
@@ -1343,7 +1282,6 @@ static void test_mc_imap_delete_label_fails_connected(void) {
     pid_t pid = mc_start_imap_server(&port);
     if (pid < 0) { ASSERT(0, "imap_delete_label_conn: start server failed"); return; }
 
-    usleep(20000);
     MailClient *mc = mc_make_imap_client(port);
     ASSERT(mc != NULL, "imap_delete_label_conn: client connected");
 

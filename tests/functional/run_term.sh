@@ -12,6 +12,8 @@
 set -u
 cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
+# shellcheck source=../common/wait.sh
+. "$ROOT/tests/common/wait.sh"
 BIN="$ROOT/bin"
 PASSED=0; FAILED=0
 ok()  { echo "  [PASS] $1"; PASSED=$((PASSED + 1)); }
@@ -47,7 +49,7 @@ gcc "$ROOT/tests/functional/free_port.c"        -o "$WORK/mocks/free_port" || ex
 PORT=$("$WORK/mocks/free_port") || exit 1
 ( cd "$ROOT/build" && MOCK_IMAP_PORT=$PORT "$WORK/mocks/imap" ) >"$WORK/ports/imap.log" 2>&1 &
 PIDS="$PIDS $!"
-for _i in $(seq 1 100); do ss -ltn "sport = :$PORT" | grep -q LISTEN && break; sleep 0.1; done  # wait for the mock to listen (EMAIL-321)
+wait_for 10 port_listens "$PORT" || echo "term: nothing listens on port $PORT after 10 s" >&2  # EMAIL-321
 cat > "$WORK/home/.config/email-cli/accounts/testuser/config.ini" <<INI
 EMAIL_HOST=imaps://localhost:$PORT
 EMAIL_USER=testuser@example.com

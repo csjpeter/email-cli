@@ -15,6 +15,8 @@
 set -u
 cd "$(dirname "$(readlink -f "$0")")/../.." || exit 1
 ROOT="$PWD"
+# shellcheck source=../common/wait.sh
+. "$ROOT/tests/common/wait.sh"
 BIN="$ROOT/bin"
 PASSED=0; FAILED=0
 ok()  { echo "  [PASS] $1"; PASSED=$((PASSED + 1)); }
@@ -79,7 +81,9 @@ SMTP_PORT=$("$WORK/mocks/free_port") || exit 1
 PIDS="$PIDS $!"
 ( cd "$ROOT/build" && MOCK_SMTP_PORT=$SMTP_PORT "$WORK/mocks/smtp" ) >"$WORK/ports/smtp.log" 2>&1 &
 PIDS="$PIDS $!"
-sleep 1
+for p in "$IMAP_PORT" "$SMTP_PORT"; do
+    wait_for 10 port_listens "$p" || echo "static: nothing listens on port $p after 10 s" >&2
+done
 
 cat > "$WORK/root/home/u/.config/email-cli/accounts/testuser/config.ini" <<INI
 EMAIL_HOST=imaps://localhost:$IMAP_PORT

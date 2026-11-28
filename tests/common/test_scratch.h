@@ -85,6 +85,59 @@ int test_log_count(const char *path, const char *needle);
  */
 int test_log_wait(const char *path, const char *needle, int want, int ms);
 
+/**
+ * @brief The poll interval of every wait of the C tests, in milliseconds.
+ *
+ * A wait checks its condition this often and ends the moment it holds; its
+ * limit is only a generous ceiling (policies/testing-model.md, "Wait for a
+ * condition, not for a clock"; EMAIL-324).
+ */
+#define TEST_POLL_MS 10
+
+/**
+ * @brief Waits until @p cond(@p arg) returns non-zero, at most @p ms.
+ *
+ * The one poll loop of the C tests: the condition is checked at once and then
+ * every TEST_POLL_MS milliseconds.
+ * @return 0 when the condition holds, -1 when @p ms passed without it.
+ */
+int test_wait_until(int (*cond)(void *arg), void *arg, int ms);
+
+/**
+ * @brief Waits for the child @p pid to exit, at most @p ms, and reaps it.
+ *
+ * A child still alive at the limit is killed (SIGKILL) and reaped, so a test
+ * that failed before it talked to its mock does not hang the suite.
+ * A child that a SIGCHLD handler of the code under test reaped already
+ * (waitpid() says ECHILD) counts as exited; @p status is then left as it was.
+ * @param status receives the wait status (may be NULL).
+ * @return 0 when the child exited by itself, 1 when it had to be killed,
+ *         -1 when @p pid <= 0.
+ */
+int test_wait_child(pid_t pid, int *status, int ms);
+
+/**
+ * @brief Waits until something accepts a TCP connection on 127.0.0.1:@p port.
+ * @return 0 when a connect succeeds, -1 when @p ms passed without it.
+ */
+int test_wait_port(int port, int ms);
+
+/**
+ * @brief Waits until the file @p path exists, at most @p ms.
+ * @return 0 when it exists, -1 on timeout.
+ */
+int test_wait_file(const char *path, int ms);
+
+/**
+ * @brief Waits until the main thread of @p pid sleeps (state S in /proc).
+ *
+ * A child that must act only once its parent waits for input (types keys,
+ * sends SIGWINCH) uses it instead of guessing how long the parent takes to
+ * get there: a process blocked in read() or poll() sleeps.
+ * @return 0 when it sleeps, -1 on timeout or when /proc cannot be read.
+ */
+int test_wait_sleeping(pid_t pid, int ms);
+
 /** @brief A loopback port nobody listens on at this moment. */
 int test_unused_port(void);
 

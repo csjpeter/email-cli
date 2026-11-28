@@ -21,13 +21,15 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "test_scratch.h"
+
 /**
  * @file pty_stdio.h
  * @brief stdin and stdout of the process are put on the slave side of a
  *        pseudo-terminal of a given size while a unit under test runs.  A
- *        feeder process types @p input after a short delay (so that a
- *        function that switches the terminal mode and flushes pending input
- *        sees it), and what the unit wrote is returned by pty_stdio_end().
+ *        feeder process types @p input once the unit waits for it (the
+ *        process sleeps, test_wait_sleeping()), and what the unit wrote is
+ *        returned by pty_stdio_end().
  */
 
 typedef struct {
@@ -88,10 +90,13 @@ static inline int pty_stdio_begin(PtyStdio *p, int rows, int cols, const char *i
     if (input && *input) {
         p->feeder = fork();
         if (p->feeder == 0) {
-            struct timespec ts = { 0, 150 * 1000000L };
-            nanosleep(&ts, NULL);
+            /* Type once the unit waits for input (EMAIL-324): no guess at
+             * how long it takes to get there. */
+            (void)test_wait_sleeping(getppid(), 5000);
             /* A '|' in the input is a pause, so that an Esc is not taken
-             * for the start of an Alt+key. */
+             * for the start of an Alt+key.  A stand, not a wait: the pause
+             * must outlast the key decoder's Esc timeout, a duration by
+             * definition. */
             for (const char *s = input; *s;) {
                 if (*s == '|') {
                     struct timespec gap = { 0, 250 * 1000000L };
@@ -104,7 +109,8 @@ static inline int pty_stdio_begin(PtyStdio *p, int rows, int cols, const char *i
                 s += len;
             }
             /* A unit still waiting for a key after this is stuck: Ctrl-C frees it,
-             * and its assertions then fail instead of the run hanging. */
+             * and its assertions then fail instead of the run hanging.  A
+             * ceiling, not a wait: a unit that is done kills the feeder first. */
             struct timespec stuck = { 5, 0 };
             nanosleep(&stuck, NULL);
             if (write(p->master, "\003", 1) < 0) { /* the unit is gone */ }

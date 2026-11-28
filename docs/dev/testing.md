@@ -53,6 +53,28 @@ No test uses `/tmp` and no test has a fixed port.
   kernel-picked loopback port.
 - Every suite sets `HOME` to a fixture and unsets the three `XDG_*` variables.
 
+### Waiting: on a condition, never on a duration (EMAIL-324)
+
+A test waits for the thing it needs (a port that listens, a file that
+exists, a child that exited, a process that blocks for input), polls it
+often and stops the moment it holds; the limit is only a generous ceiling
+(`policies/testing-model.md`, "Wait for a condition, not for a clock").
+There is one helper per language:
+
+| language | helper | conditions |
+|---|---|---|
+| C | `test_wait_until(cond, arg, ms)` in `tests/common/test_scratch.c` (polls every `TEST_POLL_MS`, 10 ms) | `test_wait_child` (reaps; kills at the limit), `test_wait_port`, `test_wait_file`, `test_wait_sleeping` (a process blocks in `read`/`poll`), `test_log_wait`, `test_spawn_mock` |
+| shell | `wait_for SECONDS CMD...` in `tests/common/wait.sh` (polls every 0.05 s) | `port_listens`, `port_closed` (by `ss`, so a mock that counts connections sees none); `wait_listen`/`wait_closed` of `run_functional.sh` are built on it |
+
+A mock forked by a unit test binds and listens **before** the fork, so the
+client can connect at once: no sleep after the fork.  Absence is shown by a
+later positive signal (a mock still answers), never by waiting a while.  A
+sleep that must stay is a *stand*, not a wait (a mock that is slow or silent
+on purpose, an Esc pause that must outlast the key decoder's timeout, the
+work time of a queue test item, a watchdog ceiling), and its comment says so.
+The integration scripts poll a container (`lxc-attach`) or a sudo-started
+server at 0.1 to 2 s, the cost of one check there.
+
 ## Unit Tests (`tests/unit/`)
 
 Each source module has a corresponding test file:

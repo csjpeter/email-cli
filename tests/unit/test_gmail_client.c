@@ -380,17 +380,8 @@ static GmailClient *make_test_client(int port) {
 }
 
 static void wait_child(pid_t pid) {
-    if (pid <= 0) return;
-    /* Poll with timeout: kill child if it doesn't exit within 5s. */
-    for (int i = 0; i < 50; i++) {
-        int st;
-        pid_t r = waitpid(pid, &st, WNOHANG);
-        if (r != 0) return;
-        struct timespec ts = {0, 100000000L}; /* 100ms */
-        nanosleep(&ts, NULL);
-    }
-    kill(pid, SIGKILL);
-    int st; waitpid(pid, &st, 0);
+    /* Reap the mock; killed after 5 s so a test that never connected cannot hang. */
+    (void)test_wait_child(pid, NULL, 5000);
 }
 
 /* ── Tests using the mock HTTP server ─────────────────────────────── */
@@ -438,8 +429,6 @@ static void test_list_labels(void) {
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "list_labels: could not start mock server"); return; }
 
-    usleep(20000); /* let child bind */
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "list_labels: client connected");
 
@@ -468,7 +457,6 @@ static void test_traffic_log_masks_bearer(void) {
     int port = 0;
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "traffic: could not start mock server"); logger_close(); return; }
-    usleep(20000);
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "traffic: client connected");
     char **names = NULL, **ids = NULL;
@@ -497,8 +485,6 @@ static void test_list_messages(void) {
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "list_messages: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "list_messages: client connected");
 
@@ -517,8 +503,6 @@ static void test_list_messages_with_query(void) {
     int port = 0;
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "list_messages_query: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "list_messages_query: client connected");
@@ -539,8 +523,6 @@ static void test_fetch_message(void) {
     int port = 0;
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "fetch_message: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "fetch_message: client connected");
@@ -564,8 +546,6 @@ static void test_fetch_message_no_labels(void) {
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "fetch_msg_nolabels: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "fetch_msg_nolabels: client connected");
 
@@ -582,8 +562,6 @@ static void test_modify_labels(void) {
     int port = 0;
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "modify_labels: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "modify_labels: client connected");
@@ -602,8 +580,6 @@ static void test_modify_labels_add_only(void) {
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "modify_labels_add: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "modify_labels_add: client connected");
 
@@ -619,8 +595,6 @@ static void test_modify_labels_remove_only(void) {
     int port = 0;
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "modify_labels_rm: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "modify_labels_rm: client connected");
@@ -638,8 +612,6 @@ static void test_trash(void) {
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "trash: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "trash: client connected");
 
@@ -655,8 +627,6 @@ static void test_untrash(void) {
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "untrash: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "untrash: client connected");
 
@@ -671,8 +641,6 @@ static void test_send(void) {
     int port = 0;
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "send: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "send: client connected");
@@ -695,8 +663,6 @@ static void test_get_history_id(void) {
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "get_history_id: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "get_history_id: client connected");
 
@@ -714,8 +680,6 @@ static void test_get_history(void) {
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "get_history: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "get_history: client connected");
 
@@ -731,8 +695,6 @@ static void test_create_label(void) {
     int port = 0;
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "create_label: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "create_label: client connected");
@@ -752,8 +714,6 @@ static void test_create_label_no_id_out(void) {
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "create_label_noid: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "create_label_noid: client connected");
 
@@ -769,8 +729,6 @@ static void test_delete_label(void) {
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "delete_label: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "delete_label: client connected");
 
@@ -785,8 +743,6 @@ static void test_list_messages_with_history_id(void) {
     int port = 0;
     pid_t pid = start_mock_server(&port, 1);
     if (pid < 0) { ASSERT(0, "list_msg_histid: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "list_msg_histid: client connected");
@@ -842,8 +798,6 @@ static void test_fetch_message_404(void) {
     pid_t pid = start_404_server(&port, 1);
     if (pid < 0) { ASSERT(0, "fetch_404: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "fetch_404: client connected");
 
@@ -858,8 +812,6 @@ static void test_list_labels_error(void) {
     int port = 0;
     pid_t pid = start_404_server(&port, 1);
     if (pid < 0) { ASSERT(0, "list_labels_err: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "list_labels_err: client connected");
@@ -878,8 +830,6 @@ static void test_create_label_error(void) {
     pid_t pid = start_404_server(&port, 1);
     if (pid < 0) { ASSERT(0, "create_label_err: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "create_label_err: client connected");
 
@@ -897,8 +847,6 @@ static void test_trash_error(void) {
     pid_t pid = start_404_server(&port, 1);
     if (pid < 0) { ASSERT(0, "trash_err: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "trash_err: client connected");
 
@@ -913,8 +861,6 @@ static void test_modify_labels_error(void) {
     int port = 0;
     pid_t pid = start_404_server(&port, 1);
     if (pid < 0) { ASSERT(0, "modify_err: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "modify_err: client connected");
@@ -931,8 +877,6 @@ static void test_get_history_id_error(void) {
     int port = 0;
     pid_t pid = start_404_server(&port, 1);
     if (pid < 0) { ASSERT(0, "histid_err: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "histid_err: client connected");
@@ -978,8 +922,6 @@ static void test_list_messages_error(void) {
     int port = 0;
     pid_t pid = start_500_server(&port, 1);
     if (pid < 0) { ASSERT(0, "list_msg_err: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "list_msg_err: client connected");
@@ -1031,8 +973,6 @@ static void test_fetch_message_no_raw_field(void) {
     pid_t pid = start_noraw_server(&port, 1);
     if (pid < 0) { ASSERT(0, "fetch_noraw: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "fetch_noraw: client connected");
 
@@ -1077,8 +1017,6 @@ static void test_get_history_expired(void) {
     int port = 0;
     pid_t pid = start_history_expired_server(&port, 1);
     if (pid < 0) { ASSERT(0, "history_expired: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "history_expired: client connected");
@@ -1132,8 +1070,6 @@ static void test_get_history_503(void) {
     pid_t pid = start_history_503_server(&port, 1);
     if (pid < 0) { ASSERT(0, "history_503: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "history_503: client connected");
 
@@ -1151,8 +1087,6 @@ static void test_untrash_error(void) {
     pid_t pid = start_404_server(&port, 1);
     if (pid < 0) { ASSERT(0, "untrash_err: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "untrash_err: client connected");
 
@@ -1169,8 +1103,6 @@ static void test_send_error(void) {
     int port = 0;
     pid_t pid = start_404_server(&port, 1);
     if (pid < 0) { ASSERT(0, "send_err: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "send_err: client connected");
@@ -1217,8 +1149,6 @@ static void test_delete_label_error(void) {
     int port = 0;
     pid_t pid = start_delete_500_server(&port, 1);
     if (pid < 0) { ASSERT(0, "delete_label_err: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "delete_label_err: client connected");
@@ -1403,7 +1333,6 @@ static void check_refusal(const char *name, const char *status, const char *body
     int port = 0;
     pid_t pid = start_canned_server(&port, status, body);
     if (pid < 0) { ASSERT(0, "refusal: could not start mock server"); return; }
-    usleep(20000);
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "refusal: client connected");
     if (!c) { wait_child(pid); return; }
@@ -1480,7 +1409,6 @@ static void test_error_401_cannot_refresh(void) {
         "{\"error\":{\"code\":401,\"message\":\"Invalid Credentials\","
         "\"status\":\"UNAUTHENTICATED\"}}");
     if (pid < 0) { ASSERT(0, "401: could not start mock server"); return; }
-    usleep(20000);
     char api_base[128];
     snprintf(api_base, sizeof(api_base), "http://127.0.0.1:%d/gmail/v1/users/me", port);
     setenv("GMAIL_TEST_TOKEN", "test_access_token_12345", 1);
@@ -1507,7 +1435,6 @@ static void test_error_refused_list_page_is_an_error(void) {
         "403 Forbidden",
         "{\"error\":{\"message\":\"Quota exceeded\",\"status\":\"DENIED\"}}");
     if (pid < 0) { ASSERT(0, "list: could not start mock server"); return; }
-    usleep(20000);
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "list: client connected");
     if (!c) { wait_child(pid); return; }
@@ -1527,7 +1454,6 @@ static void test_error_empty_after_success(void) {
     pid_t pid = start_canned_server(&port,
         "200 OK", "{}");
     if (pid < 0) { ASSERT(0, "ok: could not start mock server"); return; }
-    usleep(20000);
     GmailClient *c = make_test_client(port);
     ASSERT(c != NULL, "ok: client connected");
     if (!c) { wait_child(pid); return; }

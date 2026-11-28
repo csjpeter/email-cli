@@ -29,7 +29,7 @@ QUEUE_WEIGHTS="$WORK/weights"
 cat > "$WORK/item.sh" <<'EOS'
 #!/bin/bash
 tag="$1"; res="${2:-0}"
-for i in 1 2 3 4 5; do echo "$tag line $i"; sleep 0.1; done
+for i in 1 2 3 4 5; do echo "$tag line $i"; sleep 0.1; done   # stand: the item's work (EMAIL-324)
 printf 'Tests Run: 5\nTests Failed: %s\n' "$res"
 [ "$res" -eq 0 ]
 EOS
@@ -73,7 +73,7 @@ cat > "$WORK/res.sh" <<'EOS'
 #!/bin/bash
 d="$1"
 mkdir "$d/in" || { echo "OVERLAP"; exit 1; }
-sleep 0.3
+sleep 0.3   # stand: the item holds its resource for a while, so an overlap would show
 rmdir "$d/in"
 printf 'Tests Run: 1\nTests Failed: 0\n'
 EOS

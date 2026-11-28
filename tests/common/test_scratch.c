@@ -170,6 +170,20 @@ static int read_file(const char *path, char *buf, size_t n)
 static struct { pid_t pid; char path[PATH_MAX]; } g_mock_logs[MAX_MOCK_LOGS];
 static int g_nmock_logs;
 
+/* The mock has written its port, or it has exited before that. */
+struct mock_up { const char *portfile; pid_t pid; int port; int exited; };
+
+static int mock_published(void *arg)
+{
+    struct mock_up *m = arg;
+    char buf[32];
+    if (read_file(m->portfile, buf, sizeof(buf)) == 0 && (m->port = atoi(buf)) > 0)
+        return 1;
+    int st;
+    if (waitpid(m->pid, &st, WNOHANG) == m->pid) { m->exited = 1; return 1; }
+    return 0;
+}
+
 pid_t test_spawn_mock(const char *bin, const char *prefix, int want_port,
                       int *port_out)
 {
@@ -206,29 +220,21 @@ pid_t test_spawn_mock(const char *bin, const char *prefix, int want_port,
         _exit(127);
     }
 
-    for (int i = 0; i < 200; i++) {                  /* up to 10 s */
-        char buf[32];
-        if (read_file(portfile, buf, sizeof(buf)) == 0) {
-            int p = atoi(buf);
-            if (p > 0) {
-                if (port_out) *port_out = p;
-                int slot = g_nmock_logs % MAX_MOCK_LOGS;
-                g_mock_logs[slot].pid = pid;
-                snprintf(g_mock_logs[slot].path, PATH_MAX, "%s", logfile);
-                g_nmock_logs++;
-                return pid;
-            }
-        }
-        int st;
-        if (waitpid(pid, &st, WNOHANG) == pid) {
+    struct mock_up m = { portfile, pid, 0, 0 };
+    if (test_wait_until(mock_published, &m, 10000) == 0) {
+        if (m.exited) {
             char log[2048] = "";
             (void)read_file(logfile, log, sizeof(log));
             fprintf(stderr, "test_spawn_mock: %s exited before it listened:\n%s\n",
                     bin, log);
             return -1;
         }
-        struct timespec ts = {0, 50 * 1000 * 1000};
-        nanosleep(&ts, NULL);
+        if (port_out) *port_out = m.port;
+        int slot = g_nmock_logs % MAX_MOCK_LOGS;
+        g_mock_logs[slot].pid = pid;
+        snprintf(g_mock_logs[slot].path, PATH_MAX, "%s", logfile);
+        g_nmock_logs++;
+        return pid;
     }
     fprintf(stderr, "test_spawn_mock: %s did not publish a port in 10 s\n", bin);
     kill(pid, SIGKILL);
@@ -255,14 +261,105 @@ int test_log_count(const char *path, const char *needle)
     return n;
 }
 
+struct log_want { const char *path, *needle; int want; };
+
+static int log_reached(void *arg)
+{
+    const struct log_want *w = arg;
+    return test_log_count(w->path, w->needle) >= w->want;
+}
+
 int test_log_wait(const char *path, const char *needle, int want, int ms)
 {
-    for (int waited = 0; ; waited += 50) {
-        if (test_log_count(path, needle) >= want) return 0;
-        if (waited >= ms) return -1;
-        struct timespec ts = {0, 50 * 1000 * 1000};
-        nanosleep(&ts, NULL);
+    struct log_want w = { path, needle, want };
+    return test_wait_until(log_reached, &w, ms);
+}
+
+static long long now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+int test_wait_until(int (*cond)(void *arg), void *arg, int ms)
+{
+    long long end = now_ms() + ms;
+    for (;;) {
+        if (cond(arg)) return 0;
+        if (now_ms() >= end) return -1;
+        struct timespec ts = {0, TEST_POLL_MS * 1000L * 1000L};
+        nanosleep(&ts, NULL);   /* the poll interval, not a guess at a duration */
     }
+}
+
+struct child_want { pid_t pid; int *status; int gone; };
+
+static int child_exited(void *arg)
+{
+    struct child_want *c = arg;
+    int st = 0;
+    pid_t r = waitpid(c->pid, &st, WNOHANG);
+    if (r == 0) return 0;
+    if (r == c->pid && c->status) *c->status = st;
+    if (r < 0) c->gone = 1;
+    return 1;
+}
+
+int test_wait_child(pid_t pid, int *status, int ms)
+{
+    if (pid <= 0) return -1;
+    struct child_want c = { pid, status, 0 };
+    if (test_wait_until(child_exited, &c, ms) == 0) return c.gone ? -1 : 0;
+    fprintf(stderr, "test_wait_child: pid %d still runs after %d ms: killed\n",
+            (int)pid, ms);
+    kill(pid, SIGKILL);
+    int st = 0;
+    if (waitpid(pid, &st, 0) == pid && status) *status = st;
+    return 1;
+}
+
+static int port_accepts(void *arg)
+{
+    int port = *(const int *)arg;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return 0;
+    struct sockaddr_in a = {0};
+    a.sin_family      = AF_INET;
+    a.sin_port        = htons((unsigned short)port);
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    int ok = connect(fd, (struct sockaddr *)&a, sizeof(a)) == 0;
+    close(fd);
+    return ok;
+}
+
+int test_wait_port(int port, int ms)
+{
+    return test_wait_until(port_accepts, &port, ms);
+}
+
+static int file_exists(void *arg)
+{
+    return access((const char *)arg, F_OK) == 0;
+}
+
+int test_wait_file(const char *path, int ms)
+{
+    return test_wait_until(file_exists, (void *)path, ms);
+}
+
+static int proc_sleeps(void *arg)
+{
+    char path[64], buf[512];
+    snprintf(path, sizeof(path), "/proc/%d/stat", (int)*(const pid_t *)arg);
+    if (read_file(path, buf, sizeof(buf)) != 0) return 0;
+    const char *rp = strrchr(buf, ')');          /* the name may hold spaces */
+    return rp && rp[1] == ' ' && rp[2] == 'S';
+}
+
+int test_wait_sleeping(pid_t pid, int ms)
+{
+    return test_wait_until(proc_sleeps, &pid, ms);
 }
 
 int test_unused_port(void)

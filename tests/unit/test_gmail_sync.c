@@ -116,7 +116,8 @@ static GmailClient *gs_make_client(int port) {
 }
 
 static void gs_wait_child(pid_t pid) {
-    if (pid > 0) { int st; waitpid(pid, &st, 0); }
+    /* Reap the mock; killed after 10 s so a test that never connected cannot hang. */
+    (void)test_wait_child(pid, NULL, 10000);
 }
 
 /* ── is_filtered_label ───────────────────────────────────────────────── */
@@ -777,8 +778,6 @@ static void test_reconcile_success(void) {
     pid_t pid = start_reconcile_server(&port, 2);
     if (pid < 0) { ASSERT(0, "reconcile: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "reconcile: client connected"); return; }
 
@@ -820,8 +819,6 @@ static void test_reconcile_with_cached_messages(void) {
     /* 2 connections: list_messages + list_labels */
     pid_t pid = start_reconcile_server(&port, 2);
     if (pid < 0) { ASSERT(0, "reconcile_cached: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "reconcile_cached: client connected"); return; }
@@ -931,8 +928,6 @@ static void test_fetch_pending_nolabel_message(void) {
     pid_t pid = start_nolabel_msg_server(&port, 1);
     if (pid < 0) { ASSERT(0, "fetch_nolabel: no server"); return; }
 
-    usleep(20000);
-
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "fetch_nolabel: client connected"); return; }
 
@@ -992,8 +987,6 @@ static void test_fetch_pending_with_rules(void) {
     /* 1 connection: gmail_fetch_message */
     pid_t pid = start_reconcile_server(&port, 1);
     if (pid < 0) { ASSERT(0, "fetch_rules: no server"); return; }
-
-    usleep(20000);
 
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "fetch_rules: client connected"); return; }
@@ -1087,8 +1080,6 @@ static void test_reconcile_server_error(void) {
         _exit(0);
     }
     close(lfd);
-    usleep(20000);
-
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "reconcile_server_err: client connected"); return; }
 
@@ -1114,8 +1105,6 @@ static void test_fetch_pending_success(void) {
     /* 1 connection: gmail_fetch_message for the 1 pending UID */
     pid_t pid = start_reconcile_server(&port, 1);
     if (pid < 0) { ASSERT(0, "fetch_pending: no server"); return; }
-
-    usleep(20000);
 
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "fetch_pending: client connected"); return; }
@@ -1190,8 +1179,6 @@ static void test_fetch_pending_server_error(void) {
         _exit(0);
     }
     close(lfd);
-    usleep(20000);
-
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "fetch_err: client connected"); return; }
 
@@ -1313,8 +1300,6 @@ static void test_incremental_with_history(void) {
     pid_t pid = start_incremental_server(&port, 5);
     if (pid < 0) { ASSERT(0, "incremental: could not start mock server"); return; }
 
-    usleep(20000);
-
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "incremental: client connected"); return; }
 
@@ -1373,8 +1358,6 @@ static void test_incremental_history_expired(void) {
         _exit(0);
     }
     close(lfd);
-    usleep(20000);
-
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "incr_expired: client connected"); return; }
 
@@ -1396,8 +1379,6 @@ static void test_sync_full_success(void) {
      * Total = 4 */
     pid_t pid = start_reconcile_server(&port, 4);
     if (pid < 0) { ASSERT(0, "sync_full: could not start mock server"); return; }
-
-    usleep(20000);
 
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "sync_full: client connected"); return; }
@@ -1459,8 +1440,6 @@ static void test_reconcile_no_history_id_in_list(void) {
         _exit(0);
     }
     close(lfd);
-    usleep(20000);
-
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "reconcile_nohid: client connected"); return; }
 
@@ -1589,7 +1568,6 @@ static void test_flush_pending_labels_pushes_merged_changes(void) {
     int port = 0;
     pid_t pid = start_recording_server(&port, 3, logpath, 0);
     if (pid < 0) { ASSERT(0, "flush: could not start mock server"); return; }
-    usleep(20000);
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "flush: client connected"); return; }
     int rc = gmail_sync_flush_pending_labels(gc);
@@ -1623,7 +1601,6 @@ static void test_flush_pending_labels_keeps_failed_changes(void) {
     int port = 0;
     pid_t pid = start_recording_server(&port, 2, logpath, GS_MODIFY_FAILS);
     if (pid < 0) { ASSERT(0, "flush_fail: could not start mock server"); return; }
-    usleep(20000);
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "flush_fail: client connected"); return; }
     int rc = gmail_sync_flush_pending_labels(gc);
@@ -1657,7 +1634,6 @@ static void test_incremental_recovers_unread_labels(void) {
     int port = 0;
     pid_t pid = start_recording_server(&port, 12, logpath, 0);
     if (pid < 0) { ASSERT(0, "recover: could not start mock server"); return; }
-    usleep(20000);
     GmailClient *gc = gs_make_client(port);
     if (!gc) { gs_wait_child(pid); ASSERT(0, "recover: client connected"); return; }
     int rc = gmail_sync_incremental(gc);

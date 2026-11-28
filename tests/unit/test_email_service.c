@@ -19,6 +19,18 @@
  */
 #include "../../libemail/src/domain/email_service.c"
 
+#include <errno.h>
+#include <sys/wait.h>
+
+/* No child of this process is left: every background child has exited and
+ * been reaped (by the test or by bg_sync_sigchld). */
+static int no_child_left(void *arg) {
+    (void)arg;
+    int st;
+    pid_t r = waitpid(-1, &st, WNOHANG);
+    return r < 0 && errno == ECHILD;
+}
+
 void test_email_service(void) {
 
     setlocale(LC_ALL, "");
@@ -2263,11 +2275,11 @@ void test_email_service(void) {
         /* May return 1 (forked) or -1 (fork error). Either is acceptable. */
         ASSERT(sbr == 1 || sbr == -1 || sbr == 0,
                "sync_start_background: returns expected value");
-        /* Let the child finish (it will exec fail and exit almost immediately) */
-        if (sbr == 1) {
-            struct timespec ts = {0, 50000000}; /* 50ms */
-            nanosleep(&ts, NULL);
-        }
+        /* The child fails exec and exits; wait until it is reaped (by us or
+         * by bg_sync_sigchld), so it cannot interrupt a later test. */
+        if (sbr == 1)
+            ASSERT(test_wait_until(no_child_left, NULL, 5000) == 0,
+                   "sync_start_background: the child has exited");
     }
 
     /* ── flag_push_background (spawns child that fails connect) ─────── */
@@ -2279,9 +2291,9 @@ void test_email_service(void) {
         /* fork child that will try to connect and exit immediately */
         flag_push_background(&fpbcfg, "0000000000001111", "\\Seen", 1);
         ASSERT(1, "flag_push_background: no crash");
-        /* Short wait for child reaping */
-        struct timespec ts2 = {0, 50000000};
-        nanosleep(&ts2, NULL);
+        /* The child fails to connect and exits; wait until it is reaped. */
+        ASSERT(test_wait_until(no_child_left, NULL, 10000) == 0,
+               "flag_push_background: the child has exited");
     }
 
     /* ── pager_prompt: Down arrow → returns 1 ────────────────────────── */

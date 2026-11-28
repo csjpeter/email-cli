@@ -27,15 +27,8 @@ extern void __gcov_dump(void);
 
 /* Poll with WNOHANG for up to 10 s, then SIGKILL — prevents Valgrind hang. */
 static void wait_child(pid_t pid) {
-    for (int i = 0; i < 100; i++) {
-        int st;
-        pid_t r = waitpid(pid, &st, WNOHANG);
-        if (r > 0 || r < 0) return;
-        struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000000L}; /* 100 ms */
-        nanosleep(&ts, NULL);
-    }
-    kill(pid, SIGKILL);
-    int st; waitpid(pid, &st, 0);
+    /* Reap the mock; killed after 10 s (Valgrind is slow) so the suite cannot hang. */
+    (void)test_wait_child(pid, NULL, 10000);
 }
 
 /*
